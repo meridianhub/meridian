@@ -23,3 +23,8 @@ node_modules/
 
 # OS specific
 .DS_Store
+
+# Task Master (managed at parent directory level)
+.taskmaster/
+CLAUDE.md
+.mcp.json
