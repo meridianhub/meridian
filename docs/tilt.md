@@ -1,0 +1,341 @@
+# Tilt Development Guide
+
+This guide covers using Tilt for fast Kubernetes development with Meridian.
+
+## Prerequisites
+
+1. **Kubernetes Cluster** (one of):
+   - Docker Desktop with Kubernetes enabled
+   - kind (Kubernetes in Docker): `kind create cluster`
+   - Minikube: `minikube start`
+   - Colima: `colima start --kubernetes`
+
+2. **Tilt**: Install from https://tilt.dev/
+   ```bash
+   # macOS
+   brew install tilt-dev/tap/tilt
+
+   # Linux
+   curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
+   ```
+
+3. **kubectl**: Kubernetes CLI
+   ```bash
+   brew install kubectl
+   ```
+
+4. **Helm**: Package manager for Kubernetes
+   ```bash
+   brew install helm
+   ```
+
+## Quick Start
+
+### 1. Start Tilt
+
+```bash
+# From repository root
+tilt up
+```
+
+Tilt will:
+- Deploy CockroachDB, Redis, Kafka, and Zookeeper
+- Build and deploy the Meridian service
+- Set up port forwarding for all services
+- Enable live reload for Go code changes
+
+### 2. Access Services
+
+Once all resources are green in the Tilt UI:
+
+- **Tilt UI**: http://localhost:10350
+- **Meridian HTTP API**: http://localhost:8080
+- **Meridian gRPC API**: localhost:9090
+- **CockroachDB SQL**: localhost:26257
+- **Redis**: localhost:6379
+- **Kafka**: localhost:9092
+- **Zookeeper**: localhost:2181
+
+### 3. Development Workflow
+
+Edit any Go file in `cmd/`, `internal/`, or `pkg/`:
+
+```bash
+# Make changes to Go code
+vim internal/server/server.go
+
+# Tilt automatically:
+# 1. Syncs files to container
+# 2. Rebuilds binary (typically < 3 seconds)
+# 3. Restarts the service
+# 4. Shows logs in real-time
+```
+
+### 4. Run Tests
+
+Tests run automatically on file changes:
+
+```bash
+# Manually trigger tests in Tilt UI or:
+tilt trigger test
+```
+
+### 5. Run Linters
+
+Linters are available but don't run automatically:
+
+```bash
+# Trigger linting manually
+tilt trigger lint
+```
+
+## Resource Labels
+
+Resources are organized with labels in the Tilt UI:
+
+- **app**: Main application (Meridian)
+- **database**: CockroachDB
+- **cache**: Redis
+- **messaging**: Kafka and Zookeeper
+- **tests**: Test runner
+- **quality**: Linter
+
+## Service Details
+
+### CockroachDB
+
+Single-node insecure cluster for local development:
+
+```bash
+# Connect with SQL client
+cockroach sql --insecure --host=localhost:26257
+
+# Or via kubectl
+kubectl exec -it cockroachdb-0 -- cockroach sql --insecure
+```
+
+**Features**:
+- 10Gi persistent volume for data
+- Admin UI available at http://localhost:8080 (when port-forwarded)
+- No authentication required (insecure mode)
+
+### Redis
+
+Standard Redis 7 with append-only file persistence:
+
+```bash
+# Connect with redis-cli
+redis-cli -h localhost -p 6379
+
+# Or via kubectl
+kubectl exec -it deployment/redis -- redis-cli
+```
+
+**Features**:
+- AOF persistence enabled
+- No authentication required
+- Default configuration
+
+### Kafka + Zookeeper
+
+Single-node Kafka cluster for event streaming:
+
+```bash
+# List topics
+kafka-topics.sh --bootstrap-server localhost:9092 --list
+
+# Create topic
+kafka-topics.sh --bootstrap-server localhost:9092 \
+  --create --topic test --partitions 3 --replication-factor 1
+
+# Consume messages
+kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic test --from-beginning
+```
+
+**Features**:
+- Auto-create topics enabled
+- 3 partitions per topic by default
+- 1-hour log retention
+- No authentication required
+
+## Tilt Commands
+
+### Start Development
+
+```bash
+# Start with UI (recommended)
+tilt up
+
+# Start without opening browser
+tilt up --stream
+
+# Start specific resources only
+tilt up meridian redis
+```
+
+### Manage Resources
+
+```bash
+# Rebuild specific resource
+tilt trigger meridian
+
+# Disable resource temporarily
+tilt disable kafka
+
+# Enable resource
+tilt enable kafka
+
+# Restart resource
+tilt restart meridian
+```
+
+### View Logs
+
+```bash
+# Follow logs for a resource
+tilt logs meridian
+
+# View logs in UI (recommended)
+# Navigate to http://localhost:10350
+```
+
+### Stop Development
+
+```bash
+# Stop Tilt and clean up resources
+tilt down
+
+# Keep resources running
+# Just press Ctrl+C to exit Tilt
+```
+
+## Troubleshooting
+
+### Resources Not Starting
+
+Check Kubernetes cluster is running:
+```bash
+kubectl cluster-info
+kubectl get nodes
+```
+
+### Slow Builds
+
+Clear Tilt build cache:
+```bash
+tilt down
+tilt up --clear-build-cache
+```
+
+### Port Already in Use
+
+Check for conflicting services:
+```bash
+# macOS/Linux
+lsof -i :8080
+lsof -i :9090
+
+# Kill process using port
+kill -9 <PID>
+```
+
+### Database Connection Issues
+
+Verify CockroachDB is ready:
+```bash
+kubectl get pods -l app=cockroachdb
+kubectl logs statefulset/cockroachdb
+```
+
+### Kafka Not Connecting
+
+Check Zookeeper is running first:
+```bash
+kubectl get pods -l app=zookeeper
+kubectl logs deployment/zookeeper
+```
+
+Kafka depends on Zookeeper being healthy.
+
+## Performance Optimization
+
+### Fast Rebuilds
+
+Tilt uses live_update to achieve ~3 second rebuilds:
+
+1. **File Sync**: Changes sync directly to container
+2. **Incremental Build**: Only changed packages rebuild
+3. **Hot Restart**: Service restarts without container rebuild
+
+### Resource Limits
+
+Adjust resource limits in values files if your machine is constrained:
+
+- `deployments/tilt/zookeeper-values.yaml`
+- `deployments/tilt/kafka-values.yaml`
+
+### Parallel Updates
+
+Tilt builds up to 3 resources in parallel by default. Adjust in `Tiltfile`:
+
+```python
+update_settings(max_parallel_updates=5)
+```
+
+## Advanced Usage
+
+### Custom Docker Registry
+
+Set environment variable before running Tilt:
+
+```bash
+export DOCKER_REGISTRY=my-registry.com/myorg
+tilt up
+```
+
+### Multiple Kubernetes Contexts
+
+Add your context to allowed list in `Tiltfile`:
+
+```python
+allow_k8s_contexts(['my-context'])
+```
+
+### Debug Mode
+
+Add debug port forwarding in `Tiltfile`:
+
+```python
+k8s_resource(
+  'meridian',
+  port_forwards=[
+    '8080:8080',
+    '9090:9090',
+    '2345:2345',  # Delve debugger
+  ],
+)
+```
+
+Then attach your debugger to `localhost:2345`.
+
+## CI/CD Integration
+
+While Tilt is primarily for local development, you can run it in CI:
+
+```bash
+# Run in CI mode (non-interactive)
+tilt ci
+
+# Run specific resources only
+tilt ci meridian
+```
+
+This is useful for integration testing in CI pipelines.
+
+## Further Reading
+
+- [Tilt Documentation](https://docs.tilt.dev/)
+- [Tilt Best Practices](https://docs.tilt.dev/best_practices.html)
+- [Live Update Reference](https://docs.tilt.dev/live_update_reference.html)
+- [Tiltfile API Reference](https://docs.tilt.dev/api.html)
