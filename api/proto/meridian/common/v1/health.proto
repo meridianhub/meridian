@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package meridian.common.v1;
+
+option go_package = "github.com/bjcoombs/meridian/api/proto/meridian/common/v1;commonv1";
+
+// HealthService provides health check endpoints for all Meridian services.
+service HealthService {
+  // Check performs a health check of the service.
+  rpc Check(CheckRequest) returns (CheckResponse);
+}
+
+// CheckRequest is the request for a health check.
+message CheckRequest {
+  // service is the name of the service to check (optional).
+  string service = 1;
+}
+
+// CheckResponse is the response for a health check.
+message CheckResponse {
+  // ServingStatus describes the health status of a service.
+  enum ServingStatus {
+    // SERVING_STATUS_UNSPECIFIED means the status is unknown.
+    SERVING_STATUS_UNSPECIFIED = 0;
+    // SERVING_STATUS_SERVING means the service is healthy and serving requests.
+    SERVING_STATUS_SERVING = 1;
+    // SERVING_STATUS_NOT_SERVING means the service is not serving requests.
+    SERVING_STATUS_NOT_SERVING = 2;
+    // SERVING_STATUS_UNKNOWN means the service health status cannot be determined.
+    SERVING_STATUS_UNKNOWN = 3;
+  }
+
+  // status is the health status of the service.
+  ServingStatus status = 1;
+}

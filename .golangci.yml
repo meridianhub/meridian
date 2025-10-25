@@ -149,6 +149,11 @@ issues:
       linters:
         - all
 
+    # Exclude typecheck for tools.go (imports main packages for tool dependency tracking)
+    - path: tools\.go$
+      linters:
+        - typecheck
+
     # Exclude some linters for mock files
     - path: mock_.*\.go
       linters:

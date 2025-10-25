@@ -1,0 +1,14 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: api/proto
+    opt:
+      - paths=source_relative
+  - remote: buf.build/grpc/go
+    out: api/proto
+    opt:
+      - paths=source_relative
+  - remote: buf.build/bufbuild/validate-go
+    out: api/proto
+    opt:
+      - paths=source_relative
