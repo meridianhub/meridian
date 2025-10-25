@@ -56,41 +56,82 @@ Reference specifications: BIAN Service Landscape 13.0.0
 - **Local Development**: Tilt for local Kubernetes workflows
 - **Observability**: OpenTelemetry, Prometheus, Grafana
 
+## Quick Start
+
+### Automated Setup
+
+Verify your development environment:
+
+```bash
+./scripts/setup-check.sh
+```
+
+Install missing tools automatically (macOS/Linux):
+
+```bash
+./scripts/install-tools.sh
+```
+
+### Getting Started in < 5 Minutes
+
+1. **Clone and setup**:
+   ```bash
+   git clone git@github.com:bjcoombs/meridian.git
+   cd meridian
+   go mod download
+   .githooks/install.sh  # Install pre-commit hooks
+   ```
+
+2. **Start local environment** (requires Kubernetes cluster):
+   ```bash
+   tilt up
+   ```
+
+3. **Access services**:
+   - Tilt UI: http://localhost:10350
+   - Meridian API: http://localhost:8080
+   - Meridian gRPC: localhost:9090
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
+
 ## Development Workflow
 
 ### Prerequisites
 
-- Go 1.23 or later
-- buf CLI for protobuf development
-- Docker and Kubernetes (kind/minikube for local development)
-- Make
+Required tools (see [CONTRIBUTING.md](CONTRIBUTING.md#development-environment-setup) for installation):
 
-### Getting Started
+- **Go 1.23+**: Core language
+- **buf CLI**: Protocol buffer tooling
+- **Docker**: Container runtime
+- **Kubernetes**: Local cluster (kind/minikube/Docker Desktop)
+- **kubectl**: Kubernetes CLI
+- **Helm**: Package manager
+- **Tilt**: Local development orchestration
+- **golangci-lint**: Code linting
+- **Make**: Build automation
 
-1. **Clone the repository**:
-   ```bash
-   git clone git@github.com:bjcoombs/meridian.git
-   cd meridian
-   ```
+### Manual Development Workflow
 
-2. **Install dependencies**:
-   ```bash
-   go mod download
-   ```
+If not using Tilt:
 
-3. **Generate protobuf code**:
+1. **Generate protobuf code**:
    ```bash
    make proto
    ```
 
-4. **Build the project**:
+2. **Build the project**:
    ```bash
    make build
    ```
 
-5. **Run tests**:
+3. **Run tests**:
    ```bash
    make test
+   ```
+
+4. **Run linters**:
+   ```bash
+   make lint
    ```
 
 ### Working with Protocol Buffers
@@ -154,24 +195,86 @@ Errors are categorized for different domains:
 - **2000-2999**: Financial errors (INSUFFICIENT_FUNDS, POSTING_FAILED, etc.)
 - **3000-3999**: BIAN-specific errors (CONTROL_RECORD_NOT_FOUND, etc.)
 
+## Troubleshooting
+
+### Setup Issues
+
+**"command not found" errors**:
+```bash
+# Verify tool installation
+./scripts/setup-check.sh
+
+# Install missing tools
+./scripts/install-tools.sh
+```
+
+**Kubernetes cluster not accessible**:
+```bash
+# Check cluster status
+kubectl cluster-info
+
+# Start a local cluster (choose one):
+kind create cluster              # kind
+minikube start                   # minikube
+# Or enable Kubernetes in Docker Desktop settings
+```
+
+**Protocol buffer generation fails**:
+```bash
+# Ensure buf is installed
+buf --version
+
+# Clean and regenerate
+make clean
+make proto
+```
+
+**Tests failing**:
+```bash
+# Run with verbose output
+go test -v ./...
+
+# Run specific test
+go test -v -run TestName ./path/to/package
+```
+
+**Tilt not starting**:
+```bash
+# Check Tilt logs
+tilt up --stream
+
+# Verify Kubernetes context
+kubectl config current-context
+kubectl get nodes
+```
+
+See [docs/docker.md](docs/docker.md) and [docs/tilt.md](docs/tilt.md) for detailed troubleshooting.
+
 ## Contributing
 
-Contributions are welcome! This is a learning project, so:
+Contributions are welcome! This is a learning project, so questions and mistakes are opportunities for growth.
 
-1. **Fork the repository**
-2. **Create a feature branch** (`git checkout -b feature/my-feature`)
-3. **Make your changes** following existing patterns
-4. **Run tests** (`make test`)
-5. **Lint your code** (`make lint`)
-6. **Create a Pull Request**
+**Quick Start**:
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Make your changes following code standards
+4. Run tests (`make test`) and linters (`make lint`)
+5. Create a Pull Request
+
+**Detailed Guide**: See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+- Development environment setup
+- Code standards and testing guidelines
+- Pull request process
+- Architecture decision records
 
 ### Code Standards
 
 - Follow Go conventions and idioms
-- Add tests for new functionality
+- Write table-driven tests
 - Update ADRs for architectural changes
 - Keep protobuf definitions backward-compatible
 - Document BIAN compliance in comments
+- Use conventional commit messages
 
 ## Learning Resources
 
