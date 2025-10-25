@@ -1,14 +1,16 @@
 # 3. Database Schema Migrations with Atlas
 
-Date: 2025-10-25
+Date: 2025-10-25 (Revised: 2025-10-25)
 
 ## Status
 
-Accepted (Revised)
+Accepted
+
+Supersedes aspects of initial unified schema approach. See [ADR-0005](0005-adapter-pattern-layer-translation.md) for layer separation details.
 
 ## Context
 
-Each BIAN service domain requires database schema management with versioned migrations. The domain model in the persistence layer must evolve safely across deployments without manual SQL execution or schema drift between environments.
+Each BIAN service domain requires database schema management with versioned migrations. The persistence layer must evolve safely across deployments without manual SQL execution or schema drift between environments.
 
 Financial services require:
 * Immutable migration history (once applied, migrations cannot be modified)
@@ -16,18 +18,20 @@ Financial services require:
 * Schema validation and safety checks
 * Clear audit trail of schema changes
 * Support for CockroachDB/YugabyteDB (PostgreSQL-compatible)
-* **Integration with Go structs** (single source of truth)
+* **Database entities optimized for persistence concerns** (audit fields, indexes, constraints)
+* **Separation from domain models** to allow independent evolution
 
 ## Decision Drivers
 
 * Team has Java/Flyway background and values migration immutability
 * Go-native tooling preferred for build pipeline simplicity
-* **Desire to reduce manual SQL writing** (auto-generate from Go structs)
+* **Desire to reduce manual SQL writing** (auto-generate from database entity structs)
 * Must support transactional DDL (PostgreSQL/CockroachDB feature)
 * Need CLI tool for local development and CI/CD integration
-* **Type safety between Go code and database schema**
+* **Type safety between persistence layer and database schema**
 * Version control migrations alongside service code
 * **Schema linting and safety checks** before deployment
+* **Database entities separate from domain models** for flexibility (audit fields, denormalization, optimization)
 
 ## Considered Options
 
@@ -39,18 +43,18 @@ Financial services require:
 
 Chosen option: **"Atlas"**, because:
 
-* **Automatic migration generation from Go structs** (GORM/Ent integration)
+* **Automatic migration generation from database entity structs** (GORM/Ent integration)
 * Go-native with no JVM dependency (simplifies Docker images and CI/CD)
 * **Schema linting catches dangerous changes** before they reach production
 * **Migration testing** validates changes work correctly
 * Excellent PostgreSQL/CockroachDB support with transactional DDL
 * **Declarative and versioned workflows** (best of both worlds)
-* **Type safety** - Go structs are source of truth for database schema
+* **Type safety** - Database entity structs are source of truth for database schema
 * More powerful than golang-migrate while maintaining immutability
 
 ### Positive Consequences
 
-* **Single source of truth**: Go structs define both application and database schema
+* **Database entities as source of truth**: Persistence layer structs define database schema
 * **Automatic migration generation**: No manual SQL writing for most changes
 * **Safety checks**: Linting catches destructive changes (data loss, breaking changes)
 * **Testing**: Validate migrations on test database before production
@@ -60,6 +64,7 @@ Chosen option: **"Atlas"**, because:
 * CLI tool integrates with Go build pipeline
 * **Can still write manual migrations** when needed (hybrid approach)
 * **Schema diffing**: Compare environments to detect drift
+* **Separation of concerns**: Database entities can include audit fields, indexes, and optimizations without polluting domain models
 
 ### Negative Consequences
 
@@ -116,18 +121,64 @@ https://flywaydb.org/
 
 ```
 services/financial-accounting-service/
-├── atlas.hcl                    # Atlas configuration
+├── atlas.hcl                           # Atlas configuration
 ├── internal/
-│   └── domain/
-│       └── models.go            # Go structs (source of truth)
-└── migrations/                  # Generated migrations
+│   ├── domain/
+│   │   └── booking_log.go              # Pure domain models (no persistence tags)
+│   └── adapters/
+│       └── persistence/
+│           ├── booking_log_entity.go   # Database entities (GORM tags, source of truth for DB)
+│           └── booking_log_repository.go
+└── migrations/                         # Generated migrations from entities
     ├── 20250125120000_initial.sql
-    └── atlas.sum                # Migration checksums
+    └── atlas.sum                       # Migration checksums
 ```
 
-### Go Struct as Source of Truth
+### Database Entity as Source of Truth for Persistence
 
-**internal/domain/models.go:**
+**internal/adapters/persistence/booking_log_entity.go:**
+```go
+package persistence
+
+import (
+    "time"
+    "github.com/google/uuid"
+)
+
+// BookingLogEntity represents the database persistence model
+// Optimized for database concerns: audit fields, indexes, constraints
+type BookingLogEntity struct {
+    // Primary key
+    ID              uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+
+    // Business fields
+    ControlRecordID string     `gorm:"uniqueIndex;not null;size:255"`
+    BookingPurpose  string     `gorm:"not null;size:500"`
+    AmountCents     int64      `gorm:"not null"`
+    Currency        string     `gorm:"not null;size:3;index"`
+    ValueDate       time.Time  `gorm:"not null;index"`
+    Status          string     `gorm:"not null;size:50;index"`
+
+    // Audit fields (NOT in domain model)
+    CreatedAt       time.Time  `gorm:"not null;default:now()"`
+    UpdatedAt       time.Time  `gorm:"not null;default:now()"`
+    CreatedBy       string     `gorm:"size:255"`
+    UpdatedBy       string     `gorm:"size:255"`
+
+    // Optimistic locking
+    Version         int        `gorm:"not null;default:1"`
+
+    // Soft delete
+    DeletedAt       *time.Time `gorm:"index"`
+}
+
+// TableName overrides the default table name
+func (BookingLogEntity) TableName() string {
+    return "financial_booking_logs"
+}
+```
+
+**Corresponding domain model (internal/domain/booking_log.go) - NO persistence tags:**
 ```go
 package domain
 
@@ -136,23 +187,37 @@ import (
     "github.com/google/uuid"
 )
 
-// FinancialBookingLog represents a financial booking entry
+// FinancialBookingLog - Pure domain model with business logic
+// No persistence concerns, no GORM tags
 type FinancialBookingLog struct {
-    ID              uuid.UUID  `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-    ControlRecordID string     `gorm:"uniqueIndex;not null;size:255"`
-    BookingPurpose  string     `gorm:"not null;size:500"`
-    AmountBlock     AmountData `gorm:"type:jsonb;not null"`
-    ValueDate       time.Time  `gorm:"not null;index"`
-    BookingCurrency string     `gorm:"not null;size:3"`
-    BaseCurrency    string     `gorm:"not null;size:3"`
-    CreatedAt       time.Time  `gorm:"not null;default:now()"`
-    UpdatedAt       time.Time  `gorm:"not null;default:now()"`
-    Version         int        `gorm:"not null;default:1"`
+    ID              uuid.UUID
+    ControlRecordID string
+    BookingPurpose  string
+    Amount          Money  // Rich domain type
+    ValueDate       time.Time
+    Status          BookingStatus  // Domain enum
 }
 
-type AmountData struct {
-    Amount   float64 `json:"amount"`
-    Currency string  `json:"currency"`
+type Money struct {
+    AmountCents int64
+    Currency    Currency
+}
+
+type BookingStatus string
+
+const (
+    BookingStatusPending BookingStatus = "pending"
+    BookingStatusPosted  BookingStatus = "posted"
+    BookingStatusFailed  BookingStatus = "failed"
+)
+
+// Domain behavior methods
+func (b *FinancialBookingLog) Post() error {
+    if b.Status != BookingStatusPending {
+        return ErrInvalidStatusTransition
+    }
+    b.Status = BookingStatusPosted
+    return nil
 }
 ```
 
@@ -161,7 +226,7 @@ type AmountData struct {
 **atlas.hcl:**
 ```hcl
 env "local" {
-  src = "file://internal/domain"
+  src = "file://internal/adapters/persistence"  # Database entities, not domain models
   dev = "docker://postgres/15/dev"
   url = "postgres://user:pass@localhost:5432/financial_accounting?sslmode=disable"
 
@@ -177,7 +242,7 @@ env "local" {
 }
 
 env "gorm" {
-  src = "gorm://internal/domain"
+  src = "gorm://internal/adapters/persistence"  # Scan persistence layer
   dev = "docker://postgres/15/dev"
   url = getenv("DATABASE_URL")
 
@@ -189,33 +254,31 @@ env "gorm" {
 
 ### Workflow
 
-**1. Modify Go Struct:**
+**1. Modify Database Entity:**
 ```go
-// Add new field
-type FinancialBookingLog struct {
+// Add new field to persistence model
+type BookingLogEntity struct {
     // ... existing fields
-    Status string `gorm:"not null;default:'pending';index"`
+    NarrativeText string `gorm:"type:text"` // New field for audit trail
 }
 ```
 
 **2. Generate Migration:**
 ```bash
-# Atlas inspects Go structs and generates migration
-atlas migrate diff add_status \
+# Atlas inspects database entities and generates migration
+atlas migrate diff add_narrative \
   --env gorm \
-  --to "gorm://internal/domain"
+  --to "gorm://internal/adapters/persistence"
 ```
 
-**Generated migration (migrations/20250125120000_add_status.sql):**
+**Generated migration (migrations/20250125120000_add_narrative.sql):**
 ```sql
--- Add column "status" to table: "financial_booking_logs"
+-- Add column "narrative_text" to table: "financial_booking_logs"
 ALTER TABLE "financial_booking_logs"
-  ADD COLUMN "status" text NOT NULL DEFAULT 'pending';
-
--- Create index "idx_financial_booking_logs_status"
-CREATE INDEX "idx_financial_booking_logs_status"
-  ON "financial_booking_logs" ("status");
+  ADD COLUMN "narrative_text" text;
 ```
+
+**Note:** Domain model does NOT need to change if this is purely an audit/persistence concern. See [ADR-0005](0005-adapter-pattern-layer-translation.md) for adapter patterns.
 
 **3. Lint Migration:**
 ```bash
@@ -250,7 +313,7 @@ name: Database Migrations
 on:
   pull_request:
     paths:
-      - 'internal/domain/**'
+      - 'internal/adapters/persistence/**'
       - 'migrations/**'
 
 jobs:
@@ -312,7 +375,8 @@ Edit the generated file with custom SQL, then Atlas manages it like any other mi
 * [Atlas GORM Integration](https://atlasgo.io/guides/orms/gorm)
 * [CockroachDB with Atlas](https://atlasgo.io/guides/databases/cockroachdb)
 * [GitHub Issue #3: Platform Services](https://github.com/bjcoombs/meridian/issues/3)
-* [ADR-0004: Unified Schema Management](./0004-unified-schema-management.md)
+* [ADR-0004: Separated Schema Management](./0004-separated-schema-management.md)
+* [ADR-0005: Adapter Pattern for Layer Translation](./0005-adapter-pattern-layer-translation.md)
 
 ## Notes
 

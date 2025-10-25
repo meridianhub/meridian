@@ -34,8 +34,9 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 |-----|-------|--------|------|
 | [ADR-0001](0001-record-architecture-decisions.md) | Record Architecture Decisions | Accepted | 2025-10-24 |
 | [ADR-0002](0002-microservices-per-bian-domain.md) | Microservices Architecture with One Service per BIAN Domain | Accepted | 2025-10-25 |
-| [ADR-0003](0003-database-schema-migrations.md) | Database Schema Migrations with golang-migrate | Accepted | 2025-10-25 |
-| [ADR-0004](0004-kafka-schema-registry-protobuf.md) | Kafka Schema Registry with Protobuf for Strongly-Typed Events | Accepted | 2025-10-25 |
+| [ADR-0003](0003-database-schema-migrations.md) | Database Schema Migrations with Atlas | Accepted | 2025-10-25 (Revised) |
+| [ADR-0004](0004-separated-schema-management.md) | Separated Schema Management with Adapters | Accepted | 2025-10-25 (Revised) |
+| [ADR-0005](0005-adapter-pattern-layer-translation.md) | Adapter Pattern for Layer Translation | Accepted | 2025-10-25 |
 
 ## Categories
 
@@ -43,9 +44,23 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 - [ADR-0001](0001-record-architecture-decisions.md) - Record Architecture Decisions
 - [ADR-0002](0002-microservices-per-bian-domain.md) - Microservices Architecture
 
-### Data Management
-- [ADR-0003](0003-database-schema-migrations.md) - Database Schema Migrations
-- [ADR-0004](0004-kafka-schema-registry-protobuf.md) - Kafka Schema Registry
+### Data Management & Architecture Patterns
+- [ADR-0003](0003-database-schema-migrations.md) - Database Schema Migrations with Atlas
+- [ADR-0004](0004-separated-schema-management.md) - Separated Schema Management with Adapters
+- [ADR-0005](0005-adapter-pattern-layer-translation.md) - Adapter Pattern for Layer Translation
+
+## Key Architectural Changes
+
+**2025-10-25 Revision:** Moved from unified schema management to separated concerns:
+- **Previous approach:** Go structs with tags as single source of truth for database, events, and APIs
+- **New approach:** Separate domain models, persistence entities, and event schemas with explicit adapters
+- **Rationale:** Real-world experience showed unified approach was too rigid. Separated concerns allow:
+  - Database audit fields without polluting domain
+  - Event metadata without cluttering business logic
+  - Independent versioning of database, events, and APIs
+  - Follows industry best practices (Google, LinkedIn, Netflix, AWS)
+
+See [ADR-0004](0004-separated-schema-management.md) and [ADR-0005](0005-adapter-pattern-layer-translation.md) for details.
 
 ## Future ADRs to Consider
 
@@ -53,11 +68,12 @@ Based on the Meridian project requirements, these ADRs may be created as impleme
 
 - **Database Choice: CockroachDB vs YugabyteDB** - Distributed SQL database selection
 - **Tilt for Local Development** - Why Tilt over docker-compose
-- **Multi-Currency Decimal Precision** - How we handle money types across currencies (google.type.Money)
+- **Multi-Currency Decimal Precision** - How we handle money types across currencies
 - **Idempotency Implementation** - Redis-based idempotency strategy
 - **Test Strategy for Financial Systems** - TDD approach for zero-tolerance systems
 - **Service Mesh vs API Gateway** - Cross-cutting concerns for microservices
 - **gRPC Load Balancing Strategy** - Client-side vs server-side load balancing
+- **Event Versioning Strategy** - How to handle breaking changes in Kafka events
 
 ## References
 
