@@ -18,7 +18,7 @@ COVERAGE_DIR=./coverage
 
 # Tools
 GOLANGCI_LINT=golangci-lint
-PROTOC=protoc
+BUF=$(shell go env GOPATH)/bin/buf
 TILT=tilt
 
 # Go parameters
@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto docker deploy-local fmt tidy deps coverage install
+.PHONY: all help build test lint clean proto proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install
 
 # Default target
 all: help
@@ -40,18 +40,20 @@ help:
 	@echo "Meridian - Production-Grade Open Banking Ledger"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make build         - Compile all Go services"
-	@echo "  make test          - Run tests with coverage"
-	@echo "  make lint          - Run golangci-lint"
-	@echo "  make fmt           - Format Go code"
-	@echo "  make clean         - Remove build artifacts"
-	@echo "  make proto         - Generate code from protobuf definitions"
-	@echo "  make docker        - Build Docker images"
-	@echo "  make deploy-local  - Deploy to local Kubernetes using Tilt"
-	@echo "  make coverage      - Generate and open HTML coverage report"
-	@echo "  make tidy          - Tidy and verify Go modules"
-	@echo "  make deps          - Download dependencies"
-	@echo "  make install       - Install development tools"
+	@echo "  make build          - Compile all Go services"
+	@echo "  make test           - Run tests with coverage"
+	@echo "  make lint           - Run golangci-lint"
+	@echo "  make fmt            - Format Go code"
+	@echo "  make clean          - Remove build artifacts"
+	@echo "  make proto          - Generate code from protobuf definitions"
+	@echo "  make proto-lint     - Lint protobuf files with buf"
+	@echo "  make proto-breaking - Check for breaking proto changes"
+	@echo "  make docker         - Build Docker images"
+	@echo "  make deploy-local   - Deploy to local Kubernetes using Tilt"
+	@echo "  make coverage       - Generate and open HTML coverage report"
+	@echo "  make tidy           - Tidy and verify Go modules"
+	@echo "  make deps           - Download dependencies"
+	@echo "  make install        - Install development tools"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -104,10 +106,24 @@ clean:
 
 ## proto: Generate code from protobuf definitions
 proto:
-	@echo "Generating code from protobuf definitions..."
-	@which $(PROTOC) > /dev/null || (echo "protoc not installed. Please install protobuf compiler"; exit 1)
-	@find $(API_DIR) -name "*.proto" -exec $(PROTOC) --go_out=. --go-grpc_out=. {} + 2>/dev/null || echo "No .proto files found (this is OK for now)"
+	@echo "Generating code from protobuf definitions with buf..."
+	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
+	@$(BUF) generate
 	@echo "Protobuf generation complete"
+
+## proto-lint: Lint protobuf files with buf
+proto-lint:
+	@echo "Linting protobuf files..."
+	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
+	@$(BUF) lint
+	@echo "Protobuf lint complete"
+
+## proto-breaking: Check for breaking proto changes
+proto-breaking:
+	@echo "Checking for breaking protobuf changes..."
+	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
+	@$(BUF) breaking --against '.git#branch=develop'
+	@echo "No breaking changes detected"
 
 ## docker: Build Docker images
 docker:
@@ -137,8 +153,11 @@ install:
 	@echo "Installing development tools..."
 	@echo "Installing golangci-lint..."
 	@which $(GOLANGCI_LINT) > /dev/null || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin
+	@echo "Installing buf and protobuf tools..."
+	@go install github.com/bufbuild/buf/cmd/buf@latest
+	@go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	@echo "All tools installed successfully"
 	@echo ""
 	@echo "Optional tools to install manually:"
 	@echo "  - Tilt: brew install tilt-dev/tap/tilt"
-	@echo "  - Protobuf compiler: brew install protobuf"

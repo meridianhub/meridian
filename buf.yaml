@@ -1,0 +1,20 @@
+version: v2
+modules:
+  - path: api/proto
+lint:
+  use:
+    - STANDARD
+    - COMMENTS
+  except:
+    - PACKAGE_VERSION_SUFFIX  # Allow packages without version suffix during initial development
+  enum_zero_value_suffix: _UNSPECIFIED
+  rpc_allow_same_request_response: false
+  rpc_allow_google_protobuf_empty_requests: true
+  rpc_allow_google_protobuf_empty_responses: true
+  service_suffix: Service
+breaking:
+  use:
+    - FILE
+  except:
+    - EXTENSION_MESSAGE_NO_DELETE  # Allow during initial development
+  ignore_unstable_packages: true
