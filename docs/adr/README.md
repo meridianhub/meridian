@@ -33,24 +33,31 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
 | [ADR-0001](0001-record-architecture-decisions.md) | Record Architecture Decisions | Accepted | 2025-10-24 |
+| [ADR-0002](0002-microservices-per-bian-domain.md) | Microservices Architecture with One Service per BIAN Domain | Accepted | 2025-10-25 |
+| [ADR-0003](0003-database-schema-migrations.md) | Database Schema Migrations with golang-migrate | Accepted | 2025-10-25 |
+| [ADR-0004](0004-kafka-schema-registry-protobuf.md) | Kafka Schema Registry with Protobuf for Strongly-Typed Events | Accepted | 2025-10-25 |
 
 ## Categories
 
 ### Project Structure
 - [ADR-0001](0001-record-architecture-decisions.md) - Record Architecture Decisions
+- [ADR-0002](0002-microservices-per-bian-domain.md) - Microservices Architecture
+
+### Data Management
+- [ADR-0003](0003-database-schema-migrations.md) - Database Schema Migrations
+- [ADR-0004](0004-kafka-schema-registry-protobuf.md) - Kafka Schema Registry
 
 ## Future ADRs to Consider
 
-Based on the Meridian project requirements, these ADRs should be created:
+Based on the Meridian project requirements, these ADRs may be created as implementation progresses:
 
-- **BIAN API Implementation Strategy** - How we map BIAN specifications to gRPC/protobuf
 - **Database Choice: CockroachDB vs YugabyteDB** - Distributed SQL database selection
 - **Tilt for Local Development** - Why Tilt over docker-compose
-- **Event-Driven Architecture with Kafka** - Kafka vs NATS vs other message brokers
-- **Multi-Currency Decimal Precision** - How we handle money types across currencies
+- **Multi-Currency Decimal Precision** - How we handle money types across currencies (google.type.Money)
 - **Idempotency Implementation** - Redis-based idempotency strategy
 - **Test Strategy for Financial Systems** - TDD approach for zero-tolerance systems
-- **Worktree-Based Development Workflow** - Git worktree pattern for parallel development
+- **Service Mesh vs API Gateway** - Cross-cutting concerns for microservices
+- **gRPC Load Balancing Strategy** - Client-side vs server-side load balancing
 
 ## References
 
