@@ -50,7 +50,7 @@ Reference specifications: BIAN Service Landscape 13.0.0
 - **API Protocol**: Protocol Buffers 3 + gRPC
 - **API Tooling**: buf CLI for linting and code generation
 - **Database**: CockroachDB or YugabyteDB (distributed SQL)
-- **Event Streaming**: Apache Kafka 3.x with Schema Registry
+- **Event Streaming**: Apache Kafka 3.x
 - **Cache**: Redis 7.x
 - **Container Orchestration**: Kubernetes 1.28+
 - **Local Development**: Tilt for local Kubernetes workflows
@@ -172,8 +172,10 @@ All architectural decisions are documented in `docs/adr/`:
 
 - **ADR-0001**: Record Architecture Decisions (MADR format)
 - **ADR-0002**: Microservices Per BIAN Domain
-- **ADR-0003**: Database Schema Migrations (golang-migrate)
-- **ADR-0004**: Kafka Schema Registry with Protobuf
+- **ADR-0003**: Database Schema Migrations with Atlas
+- **ADR-0004**: Event Schema Evolution Strategy (Protobuf Native)
+- **ADR-0005**: Adapter Pattern for Layer Translation
+- **ADR-0006**: Tilt for Local Development
 
 See [docs/adr/README.md](docs/adr/README.md) for the complete list.
 
