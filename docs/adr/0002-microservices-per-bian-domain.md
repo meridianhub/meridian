@@ -132,7 +132,7 @@ Common platform services (database, Kafka, auth, observability) will be in:
 ```
 platform/
 ├── database/        # Connection pooling, transaction management
-├── kafka/           # Producer/consumer utilities, schema registry client
+├── kafka/           # Producer/consumer utilities with protobuf serialization
 ├── auth/            # JWT validation, authorization
 ├── observability/   # OpenTelemetry, logging, metrics
 └── idempotency/     # Redis-based idempotency keys
@@ -141,7 +141,7 @@ platform/
 ### Inter-Service Communication
 
 * Synchronous: gRPC with Protobuf (leveraging existing API contracts)
-* Asynchronous: Kafka events with Schema Registry validation
+* Asynchronous: Kafka events with protobuf serialization (validated via `buf breaking` in CI)
 * Service discovery: Kubernetes DNS
 * Load balancing: Kubernetes Service resources + gRPC client-side load balancing
 
