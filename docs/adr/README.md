@@ -37,6 +37,7 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 | [ADR-0003](0003-database-schema-migrations.md) | Database Schema Migrations with Atlas | Accepted | 2025-10-25 (Revised) |
 | [ADR-0004](0004-separated-schema-management.md) | Separated Schema Management with Adapters | Accepted | 2025-10-25 (Revised) |
 | [ADR-0005](0005-adapter-pattern-layer-translation.md) | Adapter Pattern for Layer Translation | Accepted | 2025-10-25 |
+| [ADR-0006](0006-tilt-local-development.md) | Tilt for Local Kubernetes Development | Accepted | 2025-10-25 |
 
 ## Categories
 
@@ -48,6 +49,9 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 - [ADR-0003](0003-database-schema-migrations.md) - Database Schema Migrations with Atlas
 - [ADR-0004](0004-separated-schema-management.md) - Separated Schema Management with Adapters
 - [ADR-0005](0005-adapter-pattern-layer-translation.md) - Adapter Pattern for Layer Translation
+
+### Development Environment
+- [ADR-0006](0006-tilt-local-development.md) - Tilt for Local Kubernetes Development
 
 ## Key Architectural Changes
 
@@ -67,7 +71,6 @@ See [ADR-0004](0004-separated-schema-management.md) and [ADR-0005](0005-adapter-
 Based on the Meridian project requirements, these ADRs may be created as implementation progresses:
 
 - **Database Choice: CockroachDB vs YugabyteDB** - Distributed SQL database selection
-- **Tilt for Local Development** - Why Tilt over docker-compose
 - **Multi-Currency Decimal Precision** - How we handle money types across currencies
 - **Idempotency Implementation** - Redis-based idempotency strategy
 - **Test Strategy for Financial Systems** - TDD approach for zero-tolerance systems
