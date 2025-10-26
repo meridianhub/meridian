@@ -126,19 +126,21 @@ make proto-breaking
 
 This prevents accidental API breakages before merging to develop.
 
-## Integration with Kafka Schema Registry
+## Event Schema Evolution
 
-Event schemas in `api/proto/meridian/events/` will be registered with Confluent Schema Registry (per ADR-0004):
+Event schemas in `api/proto/meridian/events/` use protobuf's native versioning (per ADR-0004):
 
-- Protobuf schemas are validated on publish/consume
-- Schema evolution enforced by registry
-- Same protobuf definitions used for both gRPC and Kafka
+- Schema compatibility validated via `buf breaking` in CI/CD
+- No runtime schema registry needed (Kafka is internal-only)
+- Same protobuf definitions used for both gRPC and Kafka events
+- New BIAN behavior qualifiers → new event types (new topics)
+- Backward-compatible changes → add optional fields
 
-See [ADR-0004: Kafka Schema Registry](../../docs/adr/0004-kafka-schema-registry-protobuf.md) for details.
+See [ADR-0004: Event Schema Evolution Strategy](../../docs/adr/0004-event-schema-evolution.md) for details.
 
 ## References
 
 - [buf Documentation](https://buf.build/docs)
 - [Protocol Buffers Guide](https://protobuf.dev/programming-guides/proto3/)
 - [gRPC Go Quick Start](https://grpc.io/docs/languages/go/quickstart/)
-- [ADR-0004: Kafka Schema Registry with Protobuf](../../docs/adr/0004-kafka-schema-registry-protobuf.md)
+- [ADR-0004: Event Schema Evolution Strategy](../../docs/adr/0004-event-schema-evolution.md)
