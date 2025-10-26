@@ -16,6 +16,8 @@ resources:
 - configmap.yaml
 - deployment.yaml
 - service.yaml
+- role.yaml
+- rolebinding.yaml
 
 images:
 - name: meridian

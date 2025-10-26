@@ -1,0 +1,85 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: meridian
+  namespace: production
+  labels:
+    app: meridian
+    component: ledger
+    environment: production
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: meridian
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow HTTP traffic from within the cluster
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080  # HTTP API
+    - protocol: TCP
+      port: 9090  # gRPC
+
+  # Allow traffic from monitoring/observability systems
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8080  # Metrics endpoint
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow database connections (CockroachDB)
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257  # CockroachDB SQL port
+
+  # Allow Kafka connections
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092  # Kafka broker
+
+  # Allow Redis connections
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis
+
+  # Allow HTTPS outbound (for external APIs)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+  # Block all other traffic by default

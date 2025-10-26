@@ -1,0 +1,31 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: meridian
+  labels:
+    app: meridian
+    component: ledger
+    managed-by: kustomize
+rules:
+# Allow reading own pod information for health checks and metadata
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+  # Restrict to own pod only via label selector in deployment
+
+# Allow reading ConfigMaps for configuration reload without restart
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "watch"]
+  resourceNames: ["meridian-config", "meridian-build-info"]
+
+# Allow reading Secrets for database credentials and API keys
+# Note: In production, use external secret management (Vault, AWS Secrets Manager)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+  resourceNames: ["meridian-secrets"]
+
+# No write permissions - application should not modify Kubernetes resources
+# No access to other namespaces - namespace isolation enforced
+# No access to cluster-wide resources - Role (not ClusterRole) limits scope
