@@ -321,6 +321,162 @@ func (s *BookingLogServiceServer) toResponse(d *domain.FinancialBookingLog) *pb.
 }
 ```
 
+## BIAN Evolution Support
+
+The adapter pattern provides critical flexibility for adopting new BIAN releases without coordinated infrastructure changes.
+
+### Scenario: BIAN Adds New Behavior Qualifier
+
+**BIAN 13.0 → 14.0 adds "Suspend" to Current Account**
+
+**Step 1: Update domain model (business logic)**
+```go
+// internal/domain/current_account.go
+
+// Updated for BIAN 14.0
+type CurrentAccount struct {
+    ID              uuid.UUID
+    ControlRecordID string
+    AccountStatus   AccountStatus
+
+    // New in BIAN 14.0
+    SuspensionReason string
+    SuspendedUntil   time.Time
+    SuspendedBy      string
+}
+
+type AccountStatus string
+
+const (
+    AccountStatusActive    AccountStatus = "active"
+    AccountStatusClosed    AccountStatus = "closed"
+    AccountStatusSuspended AccountStatus = "suspended"  // New
+)
+
+// New BIAN 14.0 behavior qualifier
+func (a *CurrentAccount) Suspend(reason string, until time.Time, by string) error {
+    if a.AccountStatus != AccountStatusActive {
+        return ErrInvalidStatusTransition
+    }
+
+    a.AccountStatus = AccountStatusSuspended
+    a.SuspensionReason = reason
+    a.SuspendedUntil = until
+    a.SuspendedBy = by
+    return nil
+}
+```
+
+**Step 2: Update persistence adapter (database mapping)**
+```go
+// internal/adapters/persistence/current_account_repository.go
+
+// Add new fields to entity
+type CurrentAccountEntity struct {
+    // ... existing fields
+    AccountStatus    string     `gorm:"not null;size:50;index"`
+
+    // BIAN 14.0 fields (nullable for backward compatibility)
+    SuspensionReason *string    `gorm:"size:500"`
+    SuspendedUntil   *time.Time `gorm:"index"`
+    SuspendedBy      *string    `gorm:"size:255"`
+}
+
+// Update adapter: Domain → Entity
+func (r *CurrentAccountRepository) toEntity(d *domain.CurrentAccount) *CurrentAccountEntity {
+    entity := &CurrentAccountEntity{
+        // ... existing mappings
+        AccountStatus: string(d.AccountStatus),
+    }
+
+    // Map BIAN 14.0 fields (conditional based on status)
+    if d.AccountStatus == domain.AccountStatusSuspended {
+        entity.SuspensionReason = &d.SuspensionReason
+        entity.SuspendedUntil = &d.SuspendedUntil
+        entity.SuspendedBy = &d.SuspendedBy
+    }
+
+    return entity
+}
+
+// Update adapter: Entity → Domain
+func (r *CurrentAccountRepository) toDomain(e *CurrentAccountEntity) *domain.CurrentAccount {
+    account := &domain.CurrentAccount{
+        // ... existing mappings
+        AccountStatus: domain.AccountStatus(e.AccountStatus),
+    }
+
+    // Map BIAN 14.0 fields if present
+    if e.SuspensionReason != nil {
+        account.SuspensionReason = *e.SuspensionReason
+    }
+    if e.SuspendedUntil != nil {
+        account.SuspendedUntil = *e.SuspendedUntil
+    }
+    if e.SuspendedBy != nil {
+        account.SuspendedBy = *e.SuspendedBy
+    }
+
+    return account
+}
+```
+
+**Step 3: Update event adapter (new event type per ADR-0004)**
+```go
+// internal/adapters/events/current_account_publisher.go
+
+// New method for BIAN 14.0 behavior qualifier
+func (p *CurrentAccountPublisher) PublishSuspended(
+    ctx context.Context,
+    account *domain.CurrentAccount,
+) error {
+    event := &eventspb.AccountSuspended{
+        EventId:          uuid.New().String(),
+        OccurredAt:       timestamppb.Now(),
+        CorrelationId:    getCorrelationID(ctx),
+        AccountId:        account.ID.String(),
+        SuspensionReason: account.SuspensionReason,
+        SuspendedUntil:   timestamppb.New(account.SuspendedUntil),
+        SuspendedBy:      account.SuspendedBy,
+    }
+
+    return p.producer.Publish(ctx, "account-suspended", event)
+}
+```
+
+**Key Insight:** Domain model changes once, adapters translate to infrastructure needs. Each layer evolves at its own pace.
+
+### Benefits for BIAN Adoption
+
+**1. Independent layer evolution**
+```
+Domain:      BIAN 14.0 (updated immediately)
+             ↓
+Persistence: BIAN 13.0 schema + new nullable columns (gradual migration)
+             ↓
+Events:      New event type with BIAN 14.0 semantics (backward compatible)
+```
+
+**2. Backward compatibility**
+
+Old consumers (BIAN 13.0) continue working:
+- Database: Nullable columns don't break existing queries
+- Events: New event type on new topic (old consumers unaffected)
+- Domain: New behavior qualifiers only used by v14 clients
+
+**3. Gradual rollout**
+
+```
+Week 1: Update CurrentAccount domain (BIAN 14.0)
+Week 2: Deploy database migration (add suspension columns)
+Week 3: Deploy new event type (account-suspended topic)
+Week 4+: Consuming services adopt BIAN 14.0 independently
+```
+
+**Without adapters:** Single BIAN upgrade would require coordinated deployment across all services, risking production disruption.
+
+**With adapters:** Each layer upgrades independently, minimizing risk and enabling continuous delivery.
+
 ## Testing Strategy
 
 ### 1. Round-Trip Tests (No Data Loss)
@@ -526,7 +682,7 @@ func (b *BookingLog) Save() error {
 ## Links
 
 * [ADR-0003: Database Schema Migrations](./0003-database-schema-migrations.md)
-* [ADR-0004: Separated Schema Management](./0004-separated-schema-management.md)
+* [ADR-0004: Event Schema Evolution Strategy](./0004-event-schema-evolution.md)
 * [Hexagonal Architecture (Alistair Cockburn)](https://alistair.cockburn.us/hexagonal-architecture/)
 * [Implementing Domain-Driven Design (Vaughn Vernon)](https://www.amazon.com/Implementing-Domain-Driven-Design-Vaughn-Vernon/dp/0321834577)
 * [Clean Architecture (Robert C. Martin)](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
