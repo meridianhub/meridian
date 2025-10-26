@@ -619,7 +619,6 @@ Potential additions to Tiltfile:
 * **Delve debugger** integration (port 2345)
 * **Prometheus + Grafana** for local observability
 * **Jaeger** for distributed tracing
-* **Schema Registry** for Kafka (when implementing events)
 * **Istio/Linkerd** service mesh (when testing mesh features)
 
 ### Maintenance Considerations
