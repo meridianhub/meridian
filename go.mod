@@ -4,6 +4,9 @@ go 1.25.3
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20250912141014-52f32327d4b0.1
+	github.com/google/uuid v1.6.0
+	github.com/lib/pq v1.10.9
+	github.com/shopspring/decimal v1.4.0
 	google.golang.org/genproto v0.0.0-20251022142026-3a174f9686a8
 	google.golang.org/grpc v1.75.1
 	google.golang.org/protobuf v1.36.10
