@@ -1,0 +1,89 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: meridian-dev
+
+namespace: dev
+
+labels:
+- pairs:
+    app: meridian
+    environment: dev
+    managed-by: kustomize
+
+resources:
+- ../../base
+
+# ConfigMap for dev environment
+configMapGenerator:
+- name: meridian-config
+  behavior: merge
+  literals:
+  - log_level=debug
+  - log_format=json
+  - metrics_enabled=true
+
+# Patches for dev environment
+patches:
+# Reduce replicas for local/dev
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+
+# Relaxed resource limits for dev
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+# Faster health check intervals for dev
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/livenessProbe/initialDelaySeconds
+      value: 5
+    - op: replace
+      path: /spec/template/spec/containers/0/livenessProbe/periodSeconds
+      value: 5
+    - op: replace
+      path: /spec/template/spec/containers/0/readinessProbe/initialDelaySeconds
+      value: 2
+    - op: replace
+      path: /spec/template/spec/containers/0/readinessProbe/periodSeconds
+      value: 3
+
+# Add dev-specific env vars
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: ENVIRONMENT
+        value: development
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: DEBUG_MODE
+        value: "true"
+
+images:
+- name: meridian
+  newTag: dev-latest
