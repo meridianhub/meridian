@@ -16,7 +16,7 @@ const (
 func (t TransactionStatus) IsValid() bool {
 	switch t {
 	case TransactionStatusPending, TransactionStatusPosted, TransactionStatusFailed,
-	     TransactionStatusCancelled, TransactionStatusReversed:
+		TransactionStatusCancelled, TransactionStatusReversed:
 		return true
 	}
 	return false
@@ -29,8 +29,8 @@ func (t TransactionStatus) String() string {
 
 // IsFinal checks if the status is a final state (no further transitions possible).
 func (t TransactionStatus) IsFinal() bool {
-	return t == TransactionStatusPosted || 
-	       t == TransactionStatusFailed || 
-	       t == TransactionStatusCancelled || 
-	       t == TransactionStatusReversed
+	return t == TransactionStatusPosted ||
+		t == TransactionStatusFailed ||
+		t == TransactionStatusCancelled ||
+		t == TransactionStatusReversed
 }
