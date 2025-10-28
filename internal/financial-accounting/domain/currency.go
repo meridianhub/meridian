@@ -1,6 +1,12 @@
 package domain
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrInvalidCurrency is returned when a currency code is not recognized.
+var ErrInvalidCurrency = errors.New("invalid currency code")
 
 // Currency represents ISO 4217 currency codes supported by the system.
 type Currency string
@@ -19,8 +25,8 @@ const (
 // IsValid checks if the currency code is supported.
 func (c Currency) IsValid() bool {
 	switch c {
-	case CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyJPY, 
-	     CurrencyCHF, CurrencyCAD, CurrencyAUD:
+	case CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyJPY,
+		CurrencyCHF, CurrencyCAD, CurrencyAUD:
 		return true
 	}
 	return false
@@ -35,7 +41,7 @@ func (c Currency) String() string {
 func ParseCurrency(s string) (Currency, error) {
 	c := Currency(s)
 	if !c.IsValid() {
-		return "", fmt.Errorf("invalid currency code: %s", s)
+		return "", fmt.Errorf("%w: %s", ErrInvalidCurrency, s)
 	}
 	return c, nil
 }
