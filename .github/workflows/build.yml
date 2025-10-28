@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   packages: write
+  security-events: write  # Required for SARIF upload to Security tab
 
 env:
   REGISTRY: ghcr.io
@@ -77,7 +78,7 @@ jobs:
 
       - name: Run Trivy vulnerability scanner on image
         if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'sarif'
