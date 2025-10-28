@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate
 
 # Default target
 all: help
@@ -45,7 +45,10 @@ help:
 	@echo "  make lint           - Run golangci-lint"
 	@echo "  make fmt            - Format Go code"
 	@echo "  make clean          - Remove build artifacts"
-	@echo "  make proto          - Generate code from protobuf definitions"
+	@echo "  make proto          - Generate code from all protobuf versions"
+	@echo "  make proto-v1       - Generate code from v1 protobuf definitions"
+	@echo "  make proto-v2       - Generate code from v2 protobuf definitions (future)"
+	@echo "  make proto-validate - Validate protobuf directory structure"
 	@echo "  make proto-lint     - Lint protobuf files with buf"
 	@echo "  make proto-breaking - Check for breaking proto changes"
 	@echo "  make docker         - Build Docker images"
@@ -107,12 +110,35 @@ clean:
 	@rm -f coverage.out
 	@echo "Clean complete"
 
-## proto: Generate code from protobuf definitions
-proto:
-	@echo "Generating code from protobuf definitions with buf..."
+## proto: Generate code from all protobuf versions
+proto: proto-v1
+	@echo "All protobuf versions generated successfully"
+
+## proto-v1: Generate code from v1 protobuf definitions
+proto-v1: proto-validate
+	@echo "Generating code from v1 protobuf definitions..."
 	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
 	@$(BUF) generate
-	@echo "Protobuf generation complete"
+	@echo "v1 protobuf generation complete"
+	@echo "Generated files in: api/proto/meridian/*/v1/"
+
+## proto-v2: Generate code from v2 protobuf definitions (placeholder for future use)
+proto-v2:
+	@echo "v2 protobuf definitions not yet available"
+	@echo "When adding v2 support:"
+	@echo "  1. Create api/proto/meridian/*/v2/ directories"
+	@echo "  2. Update buf.gen.yaml for v2 generation paths"
+	@echo "  3. Implement v2-specific generation logic here"
+
+## proto-validate: Validate protobuf directory structure and versions
+proto-validate:
+	@echo "Validating protobuf directory structure..."
+	@test -d api/proto/meridian || (echo "Error: api/proto/meridian directory not found"; exit 1)
+	@echo "✓ Proto directory structure valid"
+	@echo "Checking for v1 proto files..."
+	@find api/proto/meridian -name "*.proto" -path "*/v1/*" | head -n 3 | while read f; do echo "  ✓ Found: $$f"; done
+	@test -n "$$(find api/proto/meridian -name '*.proto' -path '*/v1/*')" || (echo "Error: No v1 proto files found"; exit 1)
+	@echo "✓ v1 proto files validated"
 
 ## proto-lint: Lint protobuf files with buf
 proto-lint:
