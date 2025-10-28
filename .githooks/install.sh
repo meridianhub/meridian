@@ -1,20 +1,26 @@
 #!/bin/bash
-# Install Git hooks for Meridian development
+# Install git hooks for Meridian
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GIT_DIR="$(git rev-parse --git-dir)"
+HOOKS_DIR=".githooks"
+GIT_HOOKS_DIR=".git/hooks"
 
-echo "📦 Installing Git hooks..."
+echo "Installing git hooks..."
 
-# Configure Git to use .githooks directory
-git config core.hooksPath .githooks
+# Create .git/hooks directory if it doesn't exist
+mkdir -p "$GIT_HOOKS_DIR"
 
-echo "✅ Git hooks installed successfully!"
+# Install pre-commit hook
+if [ -f "$HOOKS_DIR/pre-commit" ]; then
+    cp "$HOOKS_DIR/pre-commit" "$GIT_HOOKS_DIR/pre-commit"
+    chmod +x "$GIT_HOOKS_DIR/pre-commit"
+    echo "✓ Installed pre-commit hook"
+else
+    echo "✗ pre-commit hook not found in $HOOKS_DIR"
+    exit 1
+fi
+
+echo "✓ Git hooks installed successfully"
 echo ""
-echo "The following hooks are now active:"
-ls -1 "$SCRIPT_DIR" | grep -v install.sh | sed 's/^/  - /'
-echo ""
-echo "To disable hooks temporarily, use:"
-echo "  git commit --no-verify"
+echo "To verify, run: ls -la .git/hooks/"
