@@ -111,7 +111,7 @@ Reference specifications: `../bian/bian-public-main/release13.0.0/`
 
 ## Technology Stack
 
-- **Language**: Go 1.23+
+- **Language**: Go 1.25.3+
 - **API**: Protocol Buffers 3 + gRPC
 - **Database**: CockroachDB or YugabyteDB
 - **Messaging**: Apache Kafka 3.x
