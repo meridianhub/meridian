@@ -46,7 +46,7 @@ Reference specifications: BIAN Service Landscape 13.0.0
 
 ## Technology Stack
 
-- **Language**: Go 1.23+
+- **Language**: Go 1.25.3+
 - **API Protocol**: Protocol Buffers 3 + gRPC
 - **API Tooling**: buf CLI for linting and code generation
 - **Database**: CockroachDB or YugabyteDB (distributed SQL)
@@ -100,7 +100,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
 
 Required tools (see [CONTRIBUTING.md](CONTRIBUTING.md#development-environment-setup) for installation):
 
-- **Go 1.23+**: Core language
+- **Go 1.25.3+**: Core language
 - **buf CLI**: Protocol buffer tooling
 - **Docker**: Container runtime
 - **Kubernetes**: Local cluster (kind/minikube/Docker Desktop)

@@ -1,3 +1,4 @@
+// Package main is the entry point for the Meridian open banking ledger service.
 package main
 
 import "fmt"
