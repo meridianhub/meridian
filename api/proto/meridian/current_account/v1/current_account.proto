@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package meridian.current_account.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+
+option go_package = "github.com/bjcoombs/meridian/api/proto/meridian/current_account/v1;currentaccountv1";
+
+// AccountStatus defines the lifecycle state of a current account facility
+enum AccountStatus {
+  // ACCOUNT_STATUS_UNSPECIFIED means the status is unknown
+  ACCOUNT_STATUS_UNSPECIFIED = 0;
+  // ACCOUNT_STATUS_ACTIVE means the account is operational and can process transactions
+  ACCOUNT_STATUS_ACTIVE = 1;
+  // ACCOUNT_STATUS_FROZEN means the account is temporarily suspended
+  ACCOUNT_STATUS_FROZEN = 2;
+  // ACCOUNT_STATUS_CLOSED means the account is permanently closed
+  ACCOUNT_STATUS_CLOSED = 3;
+}
+
+// CurrentAccountFacility represents a BIAN-compliant current account facility
+// Task 5.1: Define CurrentAccountFacility message with account identification and status management
+message CurrentAccountFacility {
+  // account_id is the unique identifier for this account facility
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // account_identification is the IBAN or other standard account identifier
+  string account_identification = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 34  // IBAN max length
+  }];
+
+  // account_status is the current lifecycle state of the account
+  AccountStatus account_status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]  // Prevent UNSPECIFIED in requests
+  }];
+
+  // base_currency is the primary currency for this account
+  meridian.common.v1.Currency base_currency = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]  // Prevent UNSPECIFIED currency
+  }];
+
+  // created_at is when the account facility was created
+  google.protobuf.Timestamp created_at = 5;
+
+  // updated_at is when the account facility was last modified
+  google.protobuf.Timestamp updated_at = 6;
+
+  // version is for optimistic locking
+  int32 version = 7 [(buf.validate.field).int32 = {gte: 0}];
+}
