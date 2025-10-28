@@ -6,8 +6,8 @@ import (
 
 	commonv1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/bjcoombs/meridian/api/proto/meridian/position_keeping/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/genproto/googleapis/type/money"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // TestTransactionLogEntry_BasicConstruction tests basic message construction
@@ -105,11 +105,11 @@ func TestAuditTrailEntry_BasicConstruction(t *testing.T) {
 // TestStatusTracking_BasicConstruction tests status tracking message construction
 func TestStatusTracking_BasicConstruction(t *testing.T) {
 	status := &positionkeepingv1.StatusTracking{
-		CurrentStatus:     commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
-		PreviousStatus:    commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
-		StatusUpdatedAt:   timestamppb.New(time.Now()),
-		StatusReason:      "Transaction posted successfully",
-		FailureReason:     "",
+		CurrentStatus:   commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		PreviousStatus:  commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		StatusUpdatedAt: timestamppb.New(time.Now()),
+		StatusReason:    "Transaction posted successfully",
+		FailureReason:   "",
 	}
 
 	if status.GetCurrentStatus() != commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED {
