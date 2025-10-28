@@ -8,10 +8,11 @@ metadata:
     managed-by: kustomize
 rules:
 # Allow reading own pod information for health checks and metadata
+# Note: Use downward API in deployment to inject pod name/namespace as env vars
+# instead of listing all pods (reduces information exposure risk)
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list"]
-  # Restrict to own pod only via label selector in deployment
+  verbs: ["get"]
 
 # Allow reading ConfigMaps for configuration reload without restart
 - apiGroups: [""]

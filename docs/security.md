@@ -2,6 +2,14 @@
 
 This document outlines the security measures implemented in Meridian to ensure production-grade security and compliance.
 
+> **⚠️ Note for Learning Environment**: This is a comprehensive security architecture guide for the Meridian learning project. When deploying to production, you should customize the following with your organization's specific details:
+> - Contact information and escalation procedures
+> - Monitoring and alerting integrations
+> - Backup locations and credentials
+> - DNS and certificate management
+> - External secret management systems
+> - Compliance requirements specific to your industry
+
 ## Table of Contents
 
 - [Security Principles](#security-principles)
@@ -279,13 +287,15 @@ data:
 
 ### Contact Information
 
-- **Security Team**: security@meridian.example.com
-- **On-Call**: PagerDuty rotation
-- **Escalation**: CTO for critical incidents
+> **⚠️ Production Setup Required**: Configure with your organization's actual contact details
+
+- **Security Team**: `security@your-domain.com`
+- **On-Call**: [PagerDuty rotation or on-call schedule]
+- **Escalation**: [CTO/CISO contact for critical incidents]
 
 ### Runbook Locations
 
-- Incident response playbooks: `docs/runbooks/security/`
+- Incident response: `docs/runbooks/incident-response.md`
 - Disaster recovery: `docs/runbooks/disaster-recovery.md`
 
 ## Compliance and Auditing
