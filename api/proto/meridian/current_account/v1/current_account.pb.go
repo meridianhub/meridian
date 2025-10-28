@@ -104,8 +104,11 @@ type CurrentAccountFacility struct {
 	CurrentBalance *AccountBalance `protobuf:"bytes,8,opt,name=current_balance,json=currentBalance,proto3" json:"current_balance,omitempty"`
 	// overdraft_limit configures the overdraft facility for this account
 	OverdraftLimit *OverdraftConfiguration `protobuf:"bytes,9,opt,name=overdraft_limit,json=overdraftLimit,proto3" json:"overdraft_limit,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// transaction_history tracks recent transactions for this account
+	// Task 5.4: Add transaction history and account status management features
+	TransactionHistory *TransactionHistory `protobuf:"bytes,10,opt,name=transaction_history,json=transactionHistory,proto3" json:"transaction_history,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CurrentAccountFacility) Reset() {
@@ -197,6 +200,13 @@ func (x *CurrentAccountFacility) GetCurrentBalance() *AccountBalance {
 func (x *CurrentAccountFacility) GetOverdraftLimit() *OverdraftConfiguration {
 	if x != nil {
 		return x.OverdraftLimit
+	}
+	return nil
+}
+
+func (x *CurrentAccountFacility) GetTransactionHistory() *TransactionHistory {
+	if x != nil {
+		return x.TransactionHistory
 	}
 	return nil
 }
@@ -340,11 +350,195 @@ func (x *OverdraftConfiguration) GetLastUpdated() *timestamppb.Timestamp {
 	return nil
 }
 
+// AccountTransaction represents a debit or credit transaction on an account
+// Task 5.3: Create debit/credit transaction operations
+type AccountTransaction struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// transaction_id is the unique identifier for this transaction
+	TransactionId string `protobuf:"bytes,1,opt,name=transaction_id,json=transactionId,proto3" json:"transaction_id,omitempty"`
+	// account_id is the account this transaction belongs to
+	AccountId string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	// direction is whether this is a debit or credit
+	Direction v1.PostingDirection `protobuf:"varint,3,opt,name=direction,proto3,enum=meridian.common.v1.PostingDirection" json:"direction,omitempty"`
+	// amount is the transaction amount
+	Amount *v1.MoneyAmount `protobuf:"bytes,4,opt,name=amount,proto3" json:"amount,omitempty"`
+	// status is the current transaction status
+	Status v1.TransactionStatus `protobuf:"varint,5,opt,name=status,proto3,enum=meridian.common.v1.TransactionStatus" json:"status,omitempty"`
+	// description is a human-readable transaction description
+	Description string `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
+	// reference is an external reference or payment reference
+	Reference string `protobuf:"bytes,7,opt,name=reference,proto3" json:"reference,omitempty"`
+	// timestamp is when the transaction occurred
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountTransaction) Reset() {
+	*x = AccountTransaction{}
+	mi := &file_meridian_current_account_v1_current_account_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountTransaction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountTransaction) ProtoMessage() {}
+
+func (x *AccountTransaction) ProtoReflect() protoreflect.Message {
+	mi := &file_meridian_current_account_v1_current_account_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountTransaction.ProtoReflect.Descriptor instead.
+func (*AccountTransaction) Descriptor() ([]byte, []int) {
+	return file_meridian_current_account_v1_current_account_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AccountTransaction) GetTransactionId() string {
+	if x != nil {
+		return x.TransactionId
+	}
+	return ""
+}
+
+func (x *AccountTransaction) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *AccountTransaction) GetDirection() v1.PostingDirection {
+	if x != nil {
+		return x.Direction
+	}
+	return v1.PostingDirection(0)
+}
+
+func (x *AccountTransaction) GetAmount() *v1.MoneyAmount {
+	if x != nil {
+		return x.Amount
+	}
+	return nil
+}
+
+func (x *AccountTransaction) GetStatus() v1.TransactionStatus {
+	if x != nil {
+		return x.Status
+	}
+	return v1.TransactionStatus(0)
+}
+
+func (x *AccountTransaction) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *AccountTransaction) GetReference() string {
+	if x != nil {
+		return x.Reference
+	}
+	return ""
+}
+
+func (x *AccountTransaction) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+// TransactionHistory represents the transaction history for an account
+// Task 5.4: Add transaction history and account status management features
+type TransactionHistory struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// account_id is the account this history belongs to
+	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	// transactions is the list of transactions (most recent first)
+	Transactions []*AccountTransaction `protobuf:"bytes,2,rep,name=transactions,proto3" json:"transactions,omitempty"`
+	// total_count is the total number of transactions (for pagination)
+	TotalCount int64 `protobuf:"varint,3,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`
+	// last_updated is when the history was last updated
+	LastUpdated   *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_updated,json=lastUpdated,proto3" json:"last_updated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactionHistory) Reset() {
+	*x = TransactionHistory{}
+	mi := &file_meridian_current_account_v1_current_account_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactionHistory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactionHistory) ProtoMessage() {}
+
+func (x *TransactionHistory) ProtoReflect() protoreflect.Message {
+	mi := &file_meridian_current_account_v1_current_account_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactionHistory.ProtoReflect.Descriptor instead.
+func (*TransactionHistory) Descriptor() ([]byte, []int) {
+	return file_meridian_current_account_v1_current_account_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *TransactionHistory) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *TransactionHistory) GetTransactions() []*AccountTransaction {
+	if x != nil {
+		return x.Transactions
+	}
+	return nil
+}
+
+func (x *TransactionHistory) GetTotalCount() int64 {
+	if x != nil {
+		return x.TotalCount
+	}
+	return 0
+}
+
+func (x *TransactionHistory) GetLastUpdated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastUpdated
+	}
+	return nil
+}
+
 var File_meridian_current_account_v1_current_account_proto protoreflect.FileDescriptor
 
 const file_meridian_current_account_v1_current_account_proto_rawDesc = "" +
 	"\n" +
-	"1meridian/current_account/v1/current_account.proto\x12\x1bmeridian.current_account.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xff\x04\n" +
+	"1meridian/current_account/v1/current_account.proto\x12\x1bmeridian.current_account.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xe1\x05\n" +
 	"\x16CurrentAccountFacility\x12(\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\taccountId\x12@\n" +
@@ -359,7 +553,9 @@ const file_meridian_current_account_v1_current_account_proto_rawDesc = "" +
 	"updated_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12!\n" +
 	"\aversion\x18\a \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\aversion\x12T\n" +
 	"\x0fcurrent_balance\x18\b \x01(\v2+.meridian.current_account.v1.AccountBalanceR\x0ecurrentBalance\x12\\\n" +
-	"\x0foverdraft_limit\x18\t \x01(\v23.meridian.current_account.v1.OverdraftConfigurationR\x0eoverdraftLimit\"\xff\x01\n" +
+	"\x0foverdraft_limit\x18\t \x01(\v23.meridian.current_account.v1.OverdraftConfigurationR\x0eoverdraftLimit\x12`\n" +
+	"\x13transaction_history\x18\n" +
+	" \x01(\v2/.meridian.current_account.v1.TransactionHistoryR\x12transactionHistory\"\xff\x01\n" +
 	"\x0eAccountBalance\x12P\n" +
 	"\x0fcurrent_balance\x18\x01 \x01(\v2\x1f.meridian.common.v1.MoneyAmountB\x06\xbaH\x03\xc8\x01\x01R\x0ecurrentBalance\x12T\n" +
 	"\x11available_balance\x18\x02 \x01(\v2\x1f.meridian.common.v1.MoneyAmountB\x06\xbaH\x03\xc8\x01\x01R\x10availableBalance\x12E\n" +
@@ -369,6 +565,25 @@ const file_meridian_current_account_v1_current_account_proto_rawDesc = "" +
 	"\rinterest_rate\x18\x02 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00Y@)\x00\x00\x00\x00\x00\x00\x00\x00R\finterestRate\x12\x1d\n" +
 	"\n" +
 	"is_enabled\x18\x03 \x01(\bR\tisEnabled\x12=\n" +
+	"\flast_updated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\"\xe1\x03\n" +
+	"\x12AccountTransaction\x120\n" +
+	"\x0etransaction_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\rtransactionId\x12(\n" +
+	"\n" +
+	"account_id\x18\x02 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\taccountId\x12N\n" +
+	"\tdirection\x18\x03 \x01(\x0e2$.meridian.common.v1.PostingDirectionB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12?\n" +
+	"\x06amount\x18\x04 \x01(\v2\x1f.meridian.common.v1.MoneyAmountB\x06\xbaH\x03\xc8\x01\x01R\x06amount\x12I\n" +
+	"\x06status\x18\x05 \x01(\x0e2%.meridian.common.v1.TransactionStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12*\n" +
+	"\vdescription\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\xf4\x03R\vdescription\x12%\n" +
+	"\treference\x18\a \x01(\tB\a\xbaH\x04r\x02\x18dR\treference\x12@\n" +
+	"\ttimestamp\x18\b \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\ttimestamp\"\xfc\x01\n" +
+	"\x12TransactionHistory\x12(\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\taccountId\x12S\n" +
+	"\ftransactions\x18\x02 \x03(\v2/.meridian.current_account.v1.AccountTransactionR\ftransactions\x12(\n" +
+	"\vtotal_count\x18\x03 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\n" +
+	"totalCount\x12=\n" +
 	"\flast_updated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated*\x80\x01\n" +
 	"\rAccountStatus\x12\x1e\n" +
 	"\x1aACCOUNT_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
@@ -389,33 +604,44 @@ func file_meridian_current_account_v1_current_account_proto_rawDescGZIP() []byte
 }
 
 var file_meridian_current_account_v1_current_account_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_meridian_current_account_v1_current_account_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_meridian_current_account_v1_current_account_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_meridian_current_account_v1_current_account_proto_goTypes = []any{
 	(AccountStatus)(0),             // 0: meridian.current_account.v1.AccountStatus
 	(*CurrentAccountFacility)(nil), // 1: meridian.current_account.v1.CurrentAccountFacility
 	(*AccountBalance)(nil),         // 2: meridian.current_account.v1.AccountBalance
 	(*OverdraftConfiguration)(nil), // 3: meridian.current_account.v1.OverdraftConfiguration
-	(v1.Currency)(0),               // 4: meridian.common.v1.Currency
-	(*timestamppb.Timestamp)(nil),  // 5: google.protobuf.Timestamp
-	(*v1.MoneyAmount)(nil),         // 6: meridian.common.v1.MoneyAmount
+	(*AccountTransaction)(nil),     // 4: meridian.current_account.v1.AccountTransaction
+	(*TransactionHistory)(nil),     // 5: meridian.current_account.v1.TransactionHistory
+	(v1.Currency)(0),               // 6: meridian.common.v1.Currency
+	(*timestamppb.Timestamp)(nil),  // 7: google.protobuf.Timestamp
+	(*v1.MoneyAmount)(nil),         // 8: meridian.common.v1.MoneyAmount
+	(v1.PostingDirection)(0),       // 9: meridian.common.v1.PostingDirection
+	(v1.TransactionStatus)(0),      // 10: meridian.common.v1.TransactionStatus
 }
 var file_meridian_current_account_v1_current_account_proto_depIdxs = []int32{
 	0,  // 0: meridian.current_account.v1.CurrentAccountFacility.account_status:type_name -> meridian.current_account.v1.AccountStatus
-	4,  // 1: meridian.current_account.v1.CurrentAccountFacility.base_currency:type_name -> meridian.common.v1.Currency
-	5,  // 2: meridian.current_account.v1.CurrentAccountFacility.created_at:type_name -> google.protobuf.Timestamp
-	5,  // 3: meridian.current_account.v1.CurrentAccountFacility.updated_at:type_name -> google.protobuf.Timestamp
+	6,  // 1: meridian.current_account.v1.CurrentAccountFacility.base_currency:type_name -> meridian.common.v1.Currency
+	7,  // 2: meridian.current_account.v1.CurrentAccountFacility.created_at:type_name -> google.protobuf.Timestamp
+	7,  // 3: meridian.current_account.v1.CurrentAccountFacility.updated_at:type_name -> google.protobuf.Timestamp
 	2,  // 4: meridian.current_account.v1.CurrentAccountFacility.current_balance:type_name -> meridian.current_account.v1.AccountBalance
 	3,  // 5: meridian.current_account.v1.CurrentAccountFacility.overdraft_limit:type_name -> meridian.current_account.v1.OverdraftConfiguration
-	6,  // 6: meridian.current_account.v1.AccountBalance.current_balance:type_name -> meridian.common.v1.MoneyAmount
-	6,  // 7: meridian.current_account.v1.AccountBalance.available_balance:type_name -> meridian.common.v1.MoneyAmount
-	5,  // 8: meridian.current_account.v1.AccountBalance.last_updated:type_name -> google.protobuf.Timestamp
-	6,  // 9: meridian.current_account.v1.OverdraftConfiguration.overdraft_limit:type_name -> meridian.common.v1.MoneyAmount
-	5,  // 10: meridian.current_account.v1.OverdraftConfiguration.last_updated:type_name -> google.protobuf.Timestamp
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	5,  // 6: meridian.current_account.v1.CurrentAccountFacility.transaction_history:type_name -> meridian.current_account.v1.TransactionHistory
+	8,  // 7: meridian.current_account.v1.AccountBalance.current_balance:type_name -> meridian.common.v1.MoneyAmount
+	8,  // 8: meridian.current_account.v1.AccountBalance.available_balance:type_name -> meridian.common.v1.MoneyAmount
+	7,  // 9: meridian.current_account.v1.AccountBalance.last_updated:type_name -> google.protobuf.Timestamp
+	8,  // 10: meridian.current_account.v1.OverdraftConfiguration.overdraft_limit:type_name -> meridian.common.v1.MoneyAmount
+	7,  // 11: meridian.current_account.v1.OverdraftConfiguration.last_updated:type_name -> google.protobuf.Timestamp
+	9,  // 12: meridian.current_account.v1.AccountTransaction.direction:type_name -> meridian.common.v1.PostingDirection
+	8,  // 13: meridian.current_account.v1.AccountTransaction.amount:type_name -> meridian.common.v1.MoneyAmount
+	10, // 14: meridian.current_account.v1.AccountTransaction.status:type_name -> meridian.common.v1.TransactionStatus
+	7,  // 15: meridian.current_account.v1.AccountTransaction.timestamp:type_name -> google.protobuf.Timestamp
+	4,  // 16: meridian.current_account.v1.TransactionHistory.transactions:type_name -> meridian.current_account.v1.AccountTransaction
+	7,  // 17: meridian.current_account.v1.TransactionHistory.last_updated:type_name -> google.protobuf.Timestamp
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_meridian_current_account_v1_current_account_proto_init() }
@@ -429,7 +655,7 @@ func file_meridian_current_account_v1_current_account_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_meridian_current_account_v1_current_account_proto_rawDesc), len(file_meridian_current_account_v1_current_account_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
