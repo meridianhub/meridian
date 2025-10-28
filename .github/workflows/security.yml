@@ -153,6 +153,15 @@ jobs:
         format: spdx-json
         output-file: sbom.spdx.json
 
+    - name: Verify SBOM was created
+      run: |
+        if [ ! -f sbom.spdx.json ]; then
+          echo "ERROR: SBOM file not created"
+          exit 1
+        fi
+        echo "✅ SBOM file created successfully"
+        echo "File size: $(du -h sbom.spdx.json | cut -f1)"
+
     - name: Upload SBOM artifact
       uses: actions/upload-artifact@v4
       with:
