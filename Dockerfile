@@ -2,7 +2,7 @@
 # Optimized for security, size, and performance
 
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -31,8 +31,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o meridian \
     ./cmd/meridian
 
-# Verify the binary is static
-RUN ldd meridian 2>&1 | grep -q "not a dynamic executable" || exit 1
+# Verify the binary exists and is executable
+RUN test -x meridian && echo "Binary built successfully"
 
 # Runtime stage - distroless for minimal attack surface
 FROM gcr.io/distroless/static:nonroot

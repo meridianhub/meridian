@@ -1,0 +1,18 @@
+# CodeRabbit Configuration
+# Enable auto-reviews for PRs targeting the develop branch
+
+reviews:
+  # Enable reviews for PRs targeting develop branch (in addition to default branch)
+  base_branches:
+    - develop
+    - main
+
+  # Optional: Show review status in PR comments
+  review_status: true
+
+  # Optional: Request changes for high severity issues
+  request_changes_workflow: false
+
+  # Optional: Auto-approve PRs that pass all checks
+  auto_review:
+    enabled: true
