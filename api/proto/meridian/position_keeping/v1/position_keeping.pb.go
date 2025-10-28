@@ -237,8 +237,8 @@ type AuditTrailEntry struct {
 	Action string `protobuf:"bytes,4,opt,name=action,proto3" json:"action,omitempty"`
 	// details provides additional context about the action.
 	Details string `protobuf:"bytes,5,opt,name=details,proto3" json:"details,omitempty"`
-	// ip_address is the IP address from which the action was performed.
-	IpAddress string `protobuf:"bytes,6,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"` // IPv6 max length
+	// ip_address is the IP address from which the action was performed (IPv4 or IPv6).
+	IpAddress string `protobuf:"bytes,6,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
 	// system_context provides additional system-level context (e.g., service name, version).
 	SystemContext map[string]string `protobuf:"bytes,7,rep,name=system_context,json=systemContext,proto3" json:"system_context,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
@@ -600,7 +600,7 @@ func (x *InitiateFinancialPositionLogRequest) GetIdempotencyKey() *v1.Idempotenc
 // InitiateFinancialPositionLogResponse returns the created log.
 type InitiateFinancialPositionLogResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// log is the created financial position log.
+	// log is the created financial position log (always present on success).
 	Log           *FinancialPositionLog `protobuf:"bytes,1,opt,name=log,proto3" json:"log,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -737,7 +737,7 @@ func (x *UpdateFinancialPositionLogRequest) GetIdempotencyKey() *v1.IdempotencyK
 // UpdateFinancialPositionLogResponse returns the updated log.
 type UpdateFinancialPositionLogResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// log is the updated financial position log.
+	// log is the updated financial position log (always present on success).
 	Log           *FinancialPositionLog `protobuf:"bytes,1,opt,name=log,proto3" json:"log,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -829,7 +829,7 @@ func (x *RetrieveFinancialPositionLogRequest) GetLogId() string {
 // RetrieveFinancialPositionLogResponse returns the requested log.
 type RetrieveFinancialPositionLogResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// log is the requested financial position log.
+	// log is the requested financial position log (always present on success).
 	Log           *FinancialPositionLog `protobuf:"bytes,1,opt,name=log,proto3" json:"log,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -948,7 +948,7 @@ func (x *BulkImportTransactionsRequest) GetVersion() int64 {
 // BulkImportTransactionsResponse returns the result of the bulk import.
 type BulkImportTransactionsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// log is the updated financial position log after import.
+	// log is the updated financial position log after import (always present on success).
 	Log *FinancialPositionLog `protobuf:"bytes,1,opt,name=log,proto3" json:"log,omitempty"`
 	// imported_count is the number of transactions successfully imported.
 	ImportedCount int32 `protobuf:"varint,2,opt,name=imported_count,json=importedCount,proto3" json:"imported_count,omitempty"`
@@ -1162,27 +1162,27 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12@\n" +
 	"\ttimestamp\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\ttimestamp\x12*\n" +
 	"\vdescription\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\xf4\x03R\vdescription\x12&\n" +
-	"\treference\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\treference\"\xfc\x02\n" +
+	"\treference\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\treference\"\x86\x03\n" +
 	"\x12TransactionLineage\x12/\n" +
-	"\x0etransaction_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\rtransactionId\x122\n" +
-	"\x15parent_transaction_id\x18\x02 \x01(\tR\x13parentTransactionId\x12A\n" +
+	"\x0etransaction_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\rtransactionId\x12<\n" +
+	"\x15parent_transaction_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x13parentTransactionId\x12A\n" +
 	"\x15child_transaction_ids\x18\x03 \x03(\tB\r\xbaH\n" +
 	"\x92\x01\a\"\x05r\x03\xb0\x01\x01R\x13childTransactionIds\x12E\n" +
 	"\x17related_transaction_ids\x18\x04 \x03(\tB\r\xbaH\n" +
 	"\x92\x01\a\"\x05r\x03\xb0\x01\x01R\x15relatedTransactionIds\x124\n" +
 	"\x10transaction_type\x18\x05 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\x0ftransactionType\x12A\n" +
 	"\n" +
-	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tcreatedAt\"\xb7\x03\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tcreatedAt\"\xc3\x03\n" +
 	"\x0fAuditTrailEntry\x12#\n" +
 	"\baudit_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\aauditId\x12@\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\ttimestamp\x12#\n" +
 	"\auser_id\x18\x03 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\x06userId\x12!\n" +
 	"\x06action\x18\x04 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\x06action\x12\"\n" +
-	"\adetails\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\adetails\x12&\n" +
+	"\adetails\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\adetails\x12(\n" +
 	"\n" +
-	"ip_address\x18\x06 \x01(\tB\a\xbaH\x04r\x02\x18-R\tipAddress\x12g\n" +
-	"\x0esystem_context\x18\a \x03(\v2@.meridian.position_keeping.v1.AuditTrailEntry.SystemContextEntryR\rsystemContext\x1a@\n" +
+	"ip_address\x18\x06 \x01(\tB\t\xbaH\x06r\x04\x18-p\x01R\tipAddress\x12q\n" +
+	"\x0esystem_context\x18\a \x03(\v2@.meridian.position_keeping.v1.AuditTrailEntry.SystemContextEntryB\b\xbaH\x05\x9a\x01\x02\x102R\rsystemContext\x1a@\n" +
 	"\x12SystemContextEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xea\x02\n" +
@@ -1192,15 +1192,15 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\x0fprevious_status\x18\x02 \x01(\x0e2%.meridian.common.v1.TransactionStatusR\x0epreviousStatus\x12N\n" +
 	"\x11status_updated_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x0fstatusUpdatedAt\x12-\n" +
 	"\rstatus_reason\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\xf4\x03R\fstatusReason\x12/\n" +
-	"\x0efailure_reason\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\rfailureReason\"\x88\x05\n" +
+	"\x0efailure_reason\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\rfailureReason\"\x9e\x05\n" +
 	"\x14FinancialPositionLog\x12\x1f\n" +
 	"\x06log_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x05logId\x12)\n" +
 	"\n" +
 	"account_id\x18\x02 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\taccountId\x12i\n" +
-	"\x17transaction_log_entries\x18\x03 \x03(\v21.meridian.position_keeping.v1.TransactionLogEntryR\x15transactionLogEntries\x12a\n" +
-	"\x13transaction_lineage\x18\x04 \x01(\v20.meridian.position_keeping.v1.TransactionLineageR\x12transactionLineage\x12N\n" +
-	"\vaudit_trail\x18\x05 \x03(\v2-.meridian.position_keeping.v1.AuditTrailEntryR\n" +
+	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\taccountId\x12t\n" +
+	"\x17transaction_log_entries\x18\x03 \x03(\v21.meridian.position_keeping.v1.TransactionLogEntryB\t\xbaH\x06\x92\x01\x03\x10\x90NR\x15transactionLogEntries\x12a\n" +
+	"\x13transaction_lineage\x18\x04 \x01(\v20.meridian.position_keeping.v1.TransactionLineageR\x12transactionLineage\x12Y\n" +
+	"\vaudit_trail\x18\x05 \x03(\v2-.meridian.position_keeping.v1.AuditTrailEntryB\t\xbaH\x06\x92\x01\x03\x10\x90NR\n" +
 	"auditTrail\x12]\n" +
 	"\x0fstatus_tracking\x18\x06 \x01(\v2,.meridian.position_keeping.v1.StatusTrackingB\x06\xbaH\x03\xc8\x01\x01R\x0estatusTracking\x12A\n" +
 	"\n" +
@@ -1214,9 +1214,9 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\xc8\x01\x01r\x05\x10\x01\x18\xff\x01R\taccountId\x12V\n" +
 	"\rinitial_entry\x18\x02 \x01(\v21.meridian.position_keeping.v1.TransactionLogEntryR\finitialEntry\x12a\n" +
 	"\x13transaction_lineage\x18\x03 \x01(\v20.meridian.position_keeping.v1.TransactionLineageR\x12transactionLineage\x12K\n" +
-	"\x0fidempotency_key\x18\x04 \x01(\v2\".meridian.common.v1.IdempotencyKeyR\x0eidempotencyKey\"l\n" +
-	"$InitiateFinancialPositionLogResponse\x12D\n" +
-	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"\xaa\x03\n" +
+	"\x0fidempotency_key\x18\x04 \x01(\v2\".meridian.common.v1.IdempotencyKeyR\x0eidempotencyKey\"t\n" +
+	"$InitiateFinancialPositionLogResponse\x12L\n" +
+	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogB\x06\xbaH\x03\xc8\x01\x01R\x03log\"\xaa\x03\n" +
 	"!UpdateFinancialPositionLogRequest\x12\"\n" +
 	"\x06log_id\x18\x01 \x01(\tB\v\xbaH\b\xc8\x01\x01r\x03\xb0\x01\x01R\x05logId\x12N\n" +
 	"\tnew_entry\x18\x02 \x01(\v21.meridian.position_keeping.v1.TransactionLogEntryR\bnewEntry\x12Q\n" +
@@ -1224,21 +1224,21 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\vaudit_entry\x18\x04 \x01(\v2-.meridian.position_keeping.v1.AuditTrailEntryR\n" +
 	"auditEntry\x12!\n" +
 	"\aversion\x18\x05 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\aversion\x12K\n" +
-	"\x0fidempotency_key\x18\x06 \x01(\v2\".meridian.common.v1.IdempotencyKeyR\x0eidempotencyKey\"j\n" +
-	"\"UpdateFinancialPositionLogResponse\x12D\n" +
-	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"I\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\v2\".meridian.common.v1.IdempotencyKeyR\x0eidempotencyKey\"r\n" +
+	"\"UpdateFinancialPositionLogResponse\x12L\n" +
+	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogB\x06\xbaH\x03\xc8\x01\x01R\x03log\"I\n" +
 	"#RetrieveFinancialPositionLogRequest\x12\"\n" +
-	"\x06log_id\x18\x01 \x01(\tB\v\xbaH\b\xc8\x01\x01r\x03\xb0\x01\x01R\x05logId\"l\n" +
-	"$RetrieveFinancialPositionLogResponse\x12D\n" +
-	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"\x98\x02\n" +
+	"\x06log_id\x18\x01 \x01(\tB\v\xbaH\b\xc8\x01\x01r\x03\xb0\x01\x01R\x05logId\"t\n" +
+	"$RetrieveFinancialPositionLogResponse\x12L\n" +
+	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogB\x06\xbaH\x03\xc8\x01\x01R\x03log\"\x98\x02\n" +
 	"\x1dBulkImportTransactionsRequest\x12\"\n" +
 	"\x06log_id\x18\x01 \x01(\tB\v\xbaH\b\xc8\x01\x01r\x03\xb0\x01\x01R\x05logId\x12X\n" +
 	"\aentries\x18\x02 \x03(\v21.meridian.position_keeping.v1.TransactionLogEntryB\v\xbaH\b\x92\x01\x05\b\x01\x10\xe8\aR\aentries\x12V\n" +
 	"\vaudit_entry\x18\x03 \x01(\v2-.meridian.position_keeping.v1.AuditTrailEntryB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"auditEntry\x12!\n" +
-	"\aversion\x18\x04 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\aversion\"\xd9\x01\n" +
-	"\x1eBulkImportTransactionsResponse\x12D\n" +
-	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\x12%\n" +
+	"\aversion\x18\x04 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\aversion\"\xe1\x01\n" +
+	"\x1eBulkImportTransactionsResponse\x12L\n" +
+	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogB\x06\xbaH\x03\xc8\x01\x01R\x03log\x12%\n" +
 	"\x0eimported_count\x18\x02 \x01(\x05R\rimportedCount\x12!\n" +
 	"\ffailed_count\x18\x03 \x01(\x05R\vfailedCount\x12'\n" +
 	"\x0ffailure_details\x18\x04 \x03(\tR\x0efailureDetails\"\x88\x02\n" +
