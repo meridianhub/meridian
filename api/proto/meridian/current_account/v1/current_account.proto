@@ -62,6 +62,10 @@ message CurrentAccountFacility {
 
   // overdraft_limit configures the overdraft facility for this account
   OverdraftConfiguration overdraft_limit = 9;
+
+  // transaction_history tracks recent transactions for this account
+  // Task 5.4: Add transaction history and account status management features
+  TransactionHistory transaction_history = 10;
 }
 
 // AccountBalance represents the current balance state of an account
@@ -93,5 +97,68 @@ message OverdraftConfiguration {
   bool is_enabled = 3;
 
   // last_updated is when the overdraft configuration was last modified
+  google.protobuf.Timestamp last_updated = 4;
+}
+
+// AccountTransaction represents a debit or credit transaction on an account
+// Task 5.3: Create debit/credit transaction operations
+message AccountTransaction {
+  // transaction_id is the unique identifier for this transaction
+  string transaction_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // account_id is the account this transaction belongs to
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // direction is whether this is a debit or credit
+  meridian.common.v1.PostingDirection direction = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]  // Prevent UNSPECIFIED
+  }];
+
+  // amount is the transaction amount
+  meridian.common.v1.MoneyAmount amount = 4 [(buf.validate.field).required = true];
+
+  // status is the current transaction status
+  meridian.common.v1.TransactionStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]  // Prevent UNSPECIFIED
+  }];
+
+  // description is a human-readable transaction description
+  string description = 6 [(buf.validate.field).string = {
+    max_len: 500
+  }];
+
+  // reference is an external reference or payment reference
+  string reference = 7 [(buf.validate.field).string = {
+    max_len: 100
+  }];
+
+  // timestamp is when the transaction occurred
+  google.protobuf.Timestamp timestamp = 8 [(buf.validate.field).required = true];
+}
+
+// TransactionHistory represents the transaction history for an account
+// Task 5.4: Add transaction history and account status management features
+message TransactionHistory {
+  // account_id is the account this history belongs to
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // transactions is the list of transactions (most recent first)
+  repeated AccountTransaction transactions = 2;
+
+  // total_count is the total number of transactions (for pagination)
+  int64 total_count = 3 [(buf.validate.field).int64 = {gte: 0}];
+
+  // last_updated is when the history was last updated
   google.protobuf.Timestamp last_updated = 4;
 }

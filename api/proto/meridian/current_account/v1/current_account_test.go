@@ -232,3 +232,183 @@ func TestCurrentAccountFacility_BalanceWithOverdraft(t *testing.T) {
 			expectedAvailable, currentBal, overdraftLim, availableBal)
 	}
 }
+
+// TestDebitTransaction_BasicConstruction tests debit transaction message
+// for subtask 5.3: Create debit/credit transaction operations
+func TestDebitTransaction_BasicConstruction(t *testing.T) {
+	now := timestamppb.New(time.Now())
+
+	debit := &currentaccountv1.AccountTransaction{
+		TransactionId:  "TXN-12345",
+		AccountId:      "ACC-12345",
+		Direction:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		Amount: &commonv1.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        100,
+				Nanos:        0,
+			},
+		},
+		Status:      commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		Description: "Debit transaction test",
+		Reference:   "REF-12345",
+		Timestamp:   now,
+	}
+
+	if debit.GetTransactionId() == "" {
+		t.Error("TransactionId should not be empty")
+	}
+	if debit.GetDirection() != commonv1.PostingDirection_POSTING_DIRECTION_DEBIT {
+		t.Error("Direction should be DEBIT")
+	}
+	if debit.GetAmount().GetAmount().GetUnits() != 100 {
+		t.Errorf("Expected amount 100, got %d", debit.GetAmount().GetAmount().GetUnits())
+	}
+	if debit.GetStatus() != commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED {
+		t.Error("Status should be POSTED")
+	}
+}
+
+// TestCreditTransaction_BasicConstruction tests credit transaction message
+func TestCreditTransaction_BasicConstruction(t *testing.T) {
+	now := timestamppb.New(time.Now())
+
+	credit := &currentaccountv1.AccountTransaction{
+		TransactionId:  "TXN-67890",
+		AccountId:      "ACC-12345",
+		Direction:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+		Amount: &commonv1.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        250,
+				Nanos:        0,
+			},
+		},
+		Status:      commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		Description: "Credit transaction test",
+		Reference:   "REF-67890",
+		Timestamp:   now,
+	}
+
+	if credit.GetTransactionId() == "" {
+		t.Error("TransactionId should not be empty")
+	}
+	if credit.GetDirection() != commonv1.PostingDirection_POSTING_DIRECTION_CREDIT {
+		t.Error("Direction should be CREDIT")
+	}
+	if credit.GetAmount().GetAmount().GetUnits() != 250 {
+		t.Errorf("Expected amount 250, got %d", credit.GetAmount().GetAmount().GetUnits())
+	}
+}
+
+// TestTransactionHistory_BasicConstruction tests transaction history
+// for subtask 5.4: Add transaction history and account status management features
+func TestTransactionHistory_BasicConstruction(t *testing.T) {
+	now := timestamppb.New(time.Now())
+
+	history := &currentaccountv1.TransactionHistory{
+		AccountId: "ACC-12345",
+		Transactions: []*currentaccountv1.AccountTransaction{
+			{
+				TransactionId: "TXN-1",
+				AccountId:     "ACC-12345",
+				Direction:     commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+				Amount: &commonv1.MoneyAmount{
+					Amount: &money.Money{CurrencyCode: "GBP", Units: 100},
+				},
+				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				Timestamp: now,
+			},
+			{
+				TransactionId: "TXN-2",
+				AccountId:     "ACC-12345",
+				Direction:     commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+				Amount: &commonv1.MoneyAmount{
+					Amount: &money.Money{CurrencyCode: "GBP", Units: 50},
+				},
+				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				Timestamp: now,
+			},
+		},
+		TotalCount:  2,
+		LastUpdated: now,
+	}
+
+	if history.GetAccountId() == "" {
+		t.Error("AccountId should not be empty")
+	}
+	if len(history.GetTransactions()) != 2 {
+		t.Errorf("Expected 2 transactions, got %d", len(history.GetTransactions()))
+	}
+	if history.GetTotalCount() != 2 {
+		t.Errorf("Expected total count 2, got %d", history.GetTotalCount())
+	}
+}
+
+// TestCurrentAccountFacility_WithTransactionHistory tests account with history
+func TestCurrentAccountFacility_WithTransactionHistory(t *testing.T) {
+	now := timestamppb.New(time.Now())
+
+	facility := &currentaccountv1.CurrentAccountFacility{
+		AccountId:            "ACC-12345",
+		AccountIdentification: "GB29NWBK60161331926819",
+		AccountStatus:        currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		BaseCurrency:         commonv1.Currency_CURRENCY_GBP,
+		CurrentBalance: &currentaccountv1.AccountBalance{
+			CurrentBalance: &commonv1.MoneyAmount{
+				Amount: &money.Money{CurrencyCode: "GBP", Units: 500},
+			},
+			AvailableBalance: &commonv1.MoneyAmount{
+				Amount: &money.Money{CurrencyCode: "GBP", Units: 500},
+			},
+			LastUpdated: now,
+		},
+		TransactionHistory: &currentaccountv1.TransactionHistory{
+			AccountId: "ACC-12345",
+			Transactions: []*currentaccountv1.AccountTransaction{
+				{
+					TransactionId: "TXN-1",
+					AccountId:     "ACC-12345",
+					Direction:     commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+					Amount: &commonv1.MoneyAmount{
+						Amount: &money.Money{CurrencyCode: "GBP", Units: 1000},
+					},
+					Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+					Timestamp: now,
+				},
+				{
+					TransactionId: "TXN-2",
+					AccountId:     "ACC-12345",
+					Direction:     commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+					Amount: &commonv1.MoneyAmount{
+						Amount: &money.Money{CurrencyCode: "GBP", Units: 500},
+					},
+					Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+					Timestamp: now,
+				},
+			},
+			TotalCount:  2,
+			LastUpdated: now,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	if facility.GetTransactionHistory() == nil {
+		t.Error("TransactionHistory should not be nil")
+	}
+	if len(facility.GetTransactionHistory().GetTransactions()) != 2 {
+		t.Errorf("Expected 2 transactions in history, got %d",
+			len(facility.GetTransactionHistory().GetTransactions()))
+	}
+
+	// Verify transaction types
+	txns := facility.GetTransactionHistory().GetTransactions()
+	if txns[0].GetDirection() != commonv1.PostingDirection_POSTING_DIRECTION_CREDIT {
+		t.Error("First transaction should be CREDIT")
+	}
+	if txns[1].GetDirection() != commonv1.PostingDirection_POSTING_DIRECTION_DEBIT {
+		t.Error("Second transaction should be DEBIT")
+	}
+}
