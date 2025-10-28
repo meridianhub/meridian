@@ -13,4 +13,5 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: meridian
-  namespace: default  # Will be overridden by Kustomize overlays (dev/staging/production)
+  # namespace field omitted - subject must be in same namespace as RoleBinding
+  # Kustomize will apply namespace to both RoleBinding and ServiceAccount
