@@ -60,6 +60,9 @@ message FinancialBookingLog {
   google.protobuf.Timestamp updated_at = 9 [(buf.validate.field).required = true];
 
   // postings contains all ledger postings associated with this log.
+  // NOTE: This array may grow large for booking logs with many transactions.
+  // Consider fetching postings separately via RetrieveLedgerPosting for pagination.
+  // Double-entry balance validation occurs at the service layer when transitioning to POSTED status.
   repeated LedgerPosting postings = 10;
 }
 
@@ -152,6 +155,12 @@ message InitiateFinancialBookingLogResponse {
 }
 
 // UpdateFinancialBookingLogRequest updates an existing booking log.
+//
+// Update Semantics:
+// - Only status and chart_of_accounts_rules can be modified after creation
+// - Other fields (account_type, currency, business_unit) are immutable
+// - Empty chart_of_accounts_rules preserves existing value (use IGNORE_IF_UNPOPULATED)
+// - Status transitions are validated at service layer (e.g., POSTED is terminal)
 message UpdateFinancialBookingLogRequest {
   // id is the booking log to update.
   string id = 1 [(buf.validate.field).string = {
@@ -166,6 +175,8 @@ message UpdateFinancialBookingLogRequest {
   }];
 
   // chart_of_accounts_rules can be updated if needed.
+  // If empty, the existing rules are preserved (optional update).
+  // Validation: Min length is enforced only if the field is provided (service layer).
   string chart_of_accounts_rules = 3;
 }
 
@@ -191,6 +202,12 @@ message RetrieveFinancialBookingLogResponse {
 }
 
 // CaptureLedgerPostingRequest creates a new ledger posting.
+//
+// Double-Entry Bookkeeping:
+// - Individual postings are created separately (not balanced pairs)
+// - Balance validation (debits = credits) occurs at service layer
+// - Booking log can only transition to POSTED status when balanced
+// - Consider using batch operations for balanced posting pairs
 message CaptureLedgerPostingRequest {
   // financial_booking_log_id references the parent booking log.
   string financial_booking_log_id = 1 [(buf.validate.field).string = {
@@ -242,8 +259,12 @@ message RetrieveLedgerPostingResponse {
 }
 
 // ListFinancialBookingLogsRequest lists booking logs with pagination.
+//
+// Pagination: If pagination is not provided, the service will apply
+// default limits (typically 50 items) to prevent unbounded queries.
 message ListFinancialBookingLogsRequest {
   // pagination controls page size and position.
+  // If not provided, service applies default page_size=50, max=1000.
   meridian.common.v1.Pagination pagination = 1;
 
   // status filters by transaction status.

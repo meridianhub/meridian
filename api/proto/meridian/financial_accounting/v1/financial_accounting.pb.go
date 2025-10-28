@@ -48,6 +48,9 @@ type FinancialBookingLog struct {
 	// updated_at is when this booking log was last updated.
 	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	// postings contains all ledger postings associated with this log.
+	// NOTE: This array may grow large for booking logs with many transactions.
+	// Consider fetching postings separately via RetrieveLedgerPosting for pagination.
+	// Double-entry balance validation occurs at the service layer when transitioning to POSTED status.
 	Postings      []*LedgerPosting `protobuf:"bytes,10,rep,name=postings,proto3" json:"postings,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -409,6 +412,12 @@ func (x *InitiateFinancialBookingLogResponse) GetFinancialBookingLog() *Financia
 }
 
 // UpdateFinancialBookingLogRequest updates an existing booking log.
+//
+// Update Semantics:
+// - Only status and chart_of_accounts_rules can be modified after creation
+// - Other fields (account_type, currency, business_unit) are immutable
+// - Empty chart_of_accounts_rules preserves existing value (use IGNORE_IF_UNPOPULATED)
+// - Status transitions are validated at service layer (e.g., POSTED is terminal)
 type UpdateFinancialBookingLogRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// id is the booking log to update.
@@ -416,6 +425,8 @@ type UpdateFinancialBookingLogRequest struct {
 	// status is the new status to set.
 	Status v1.TransactionStatus `protobuf:"varint,2,opt,name=status,proto3,enum=meridian.common.v1.TransactionStatus" json:"status,omitempty"`
 	// chart_of_accounts_rules can be updated if needed.
+	// If empty, the existing rules are preserved (optional update).
+	// Validation: Min length is enforced only if the field is provided (service layer).
 	ChartOfAccountsRules string `protobuf:"bytes,3,opt,name=chart_of_accounts_rules,json=chartOfAccountsRules,proto3" json:"chart_of_accounts_rules,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
@@ -611,6 +622,12 @@ func (x *RetrieveFinancialBookingLogResponse) GetFinancialBookingLog() *Financia
 }
 
 // CaptureLedgerPostingRequest creates a new ledger posting.
+//
+// Double-Entry Bookkeeping:
+// - Individual postings are created separately (not balanced pairs)
+// - Balance validation (debits = credits) occurs at service layer
+// - Booking log can only transition to POSTED status when balanced
+// - Consider using batch operations for balanced posting pairs
 type CaptureLedgerPostingRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// financial_booking_log_id references the parent booking log.
@@ -840,9 +857,13 @@ func (x *RetrieveLedgerPostingResponse) GetLedgerPosting() *LedgerPosting {
 }
 
 // ListFinancialBookingLogsRequest lists booking logs with pagination.
+//
+// Pagination: If pagination is not provided, the service will apply
+// default limits (typically 50 items) to prevent unbounded queries.
 type ListFinancialBookingLogsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// pagination controls page size and position.
+	// If not provided, service applies default page_size=50, max=1000.
 	Pagination *v1.Pagination `protobuf:"bytes,1,opt,name=pagination,proto3" json:"pagination,omitempty"`
 	// status filters by transaction status.
 	Status v1.TransactionStatus `protobuf:"varint,2,opt,name=status,proto3,enum=meridian.common.v1.TransactionStatus" json:"status,omitempty"`
