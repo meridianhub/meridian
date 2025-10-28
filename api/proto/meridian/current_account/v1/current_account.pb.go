@@ -98,9 +98,14 @@ type CurrentAccountFacility struct {
 	// updated_at is when the account facility was last modified
 	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	// version is for optimistic locking
-	Version       int32 `protobuf:"varint,7,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Version int32 `protobuf:"varint,7,opt,name=version,proto3" json:"version,omitempty"`
+	// current_balance tracks the current account balance
+	// Task 5.2: Implement account balance tracking and overdraft limits
+	CurrentBalance *AccountBalance `protobuf:"bytes,8,opt,name=current_balance,json=currentBalance,proto3" json:"current_balance,omitempty"`
+	// overdraft_limit configures the overdraft facility for this account
+	OverdraftLimit *OverdraftConfiguration `protobuf:"bytes,9,opt,name=overdraft_limit,json=overdraftLimit,proto3" json:"overdraft_limit,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CurrentAccountFacility) Reset() {
@@ -182,11 +187,164 @@ func (x *CurrentAccountFacility) GetVersion() int32 {
 	return 0
 }
 
+func (x *CurrentAccountFacility) GetCurrentBalance() *AccountBalance {
+	if x != nil {
+		return x.CurrentBalance
+	}
+	return nil
+}
+
+func (x *CurrentAccountFacility) GetOverdraftLimit() *OverdraftConfiguration {
+	if x != nil {
+		return x.OverdraftLimit
+	}
+	return nil
+}
+
+// AccountBalance represents the current balance state of an account
+// Task 5.2: Account balance tracking
+type AccountBalance struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// current_balance is the actual account balance (can be negative if overdrawn)
+	CurrentBalance *v1.MoneyAmount `protobuf:"bytes,1,opt,name=current_balance,json=currentBalance,proto3" json:"current_balance,omitempty"`
+	// available_balance is current balance plus overdraft limit (if enabled)
+	AvailableBalance *v1.MoneyAmount `protobuf:"bytes,2,opt,name=available_balance,json=availableBalance,proto3" json:"available_balance,omitempty"`
+	// last_updated is when the balance was last calculated
+	LastUpdated   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_updated,json=lastUpdated,proto3" json:"last_updated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountBalance) Reset() {
+	*x = AccountBalance{}
+	mi := &file_meridian_current_account_v1_current_account_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountBalance) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountBalance) ProtoMessage() {}
+
+func (x *AccountBalance) ProtoReflect() protoreflect.Message {
+	mi := &file_meridian_current_account_v1_current_account_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountBalance.ProtoReflect.Descriptor instead.
+func (*AccountBalance) Descriptor() ([]byte, []int) {
+	return file_meridian_current_account_v1_current_account_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AccountBalance) GetCurrentBalance() *v1.MoneyAmount {
+	if x != nil {
+		return x.CurrentBalance
+	}
+	return nil
+}
+
+func (x *AccountBalance) GetAvailableBalance() *v1.MoneyAmount {
+	if x != nil {
+		return x.AvailableBalance
+	}
+	return nil
+}
+
+func (x *AccountBalance) GetLastUpdated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastUpdated
+	}
+	return nil
+}
+
+// OverdraftConfiguration defines the overdraft facility settings
+// Task 5.2: Overdraft limits
+type OverdraftConfiguration struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// overdraft_limit is the maximum overdraft amount allowed
+	OverdraftLimit *v1.MoneyAmount `protobuf:"bytes,1,opt,name=overdraft_limit,json=overdraftLimit,proto3" json:"overdraft_limit,omitempty"`
+	// interest_rate is the annual percentage rate for overdraft usage
+	InterestRate float64 `protobuf:"fixed64,2,opt,name=interest_rate,json=interestRate,proto3" json:"interest_rate,omitempty"`
+	// is_enabled indicates if overdraft facility is active
+	IsEnabled bool `protobuf:"varint,3,opt,name=is_enabled,json=isEnabled,proto3" json:"is_enabled,omitempty"`
+	// last_updated is when the overdraft configuration was last modified
+	LastUpdated   *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_updated,json=lastUpdated,proto3" json:"last_updated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OverdraftConfiguration) Reset() {
+	*x = OverdraftConfiguration{}
+	mi := &file_meridian_current_account_v1_current_account_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OverdraftConfiguration) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OverdraftConfiguration) ProtoMessage() {}
+
+func (x *OverdraftConfiguration) ProtoReflect() protoreflect.Message {
+	mi := &file_meridian_current_account_v1_current_account_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OverdraftConfiguration.ProtoReflect.Descriptor instead.
+func (*OverdraftConfiguration) Descriptor() ([]byte, []int) {
+	return file_meridian_current_account_v1_current_account_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *OverdraftConfiguration) GetOverdraftLimit() *v1.MoneyAmount {
+	if x != nil {
+		return x.OverdraftLimit
+	}
+	return nil
+}
+
+func (x *OverdraftConfiguration) GetInterestRate() float64 {
+	if x != nil {
+		return x.InterestRate
+	}
+	return 0
+}
+
+func (x *OverdraftConfiguration) GetIsEnabled() bool {
+	if x != nil {
+		return x.IsEnabled
+	}
+	return false
+}
+
+func (x *OverdraftConfiguration) GetLastUpdated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastUpdated
+	}
+	return nil
+}
+
 var File_meridian_current_account_v1_current_account_proto protoreflect.FileDescriptor
 
 const file_meridian_current_account_v1_current_account_proto_rawDesc = "" +
 	"\n" +
-	"1meridian/current_account/v1/current_account.proto\x12\x1bmeridian.current_account.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xcb\x03\n" +
+	"1meridian/current_account/v1/current_account.proto\x12\x1bmeridian.current_account.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xff\x04\n" +
 	"\x16CurrentAccountFacility\x12(\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\taccountId\x12@\n" +
@@ -199,7 +357,19 @@ const file_meridian_current_account_v1_current_account_proto_rawDesc = "" +
 	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12!\n" +
-	"\aversion\x18\a \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\aversion*\x80\x01\n" +
+	"\aversion\x18\a \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\aversion\x12T\n" +
+	"\x0fcurrent_balance\x18\b \x01(\v2+.meridian.current_account.v1.AccountBalanceR\x0ecurrentBalance\x12\\\n" +
+	"\x0foverdraft_limit\x18\t \x01(\v23.meridian.current_account.v1.OverdraftConfigurationR\x0eoverdraftLimit\"\xff\x01\n" +
+	"\x0eAccountBalance\x12P\n" +
+	"\x0fcurrent_balance\x18\x01 \x01(\v2\x1f.meridian.common.v1.MoneyAmountB\x06\xbaH\x03\xc8\x01\x01R\x0ecurrentBalance\x12T\n" +
+	"\x11available_balance\x18\x02 \x01(\v2\x1f.meridian.common.v1.MoneyAmountB\x06\xbaH\x03\xc8\x01\x01R\x10availableBalance\x12E\n" +
+	"\flast_updated\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\vlastUpdated\"\x86\x02\n" +
+	"\x16OverdraftConfiguration\x12P\n" +
+	"\x0foverdraft_limit\x18\x01 \x01(\v2\x1f.meridian.common.v1.MoneyAmountB\x06\xbaH\x03\xc8\x01\x01R\x0eoverdraftLimit\x12<\n" +
+	"\rinterest_rate\x18\x02 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00Y@)\x00\x00\x00\x00\x00\x00\x00\x00R\finterestRate\x12\x1d\n" +
+	"\n" +
+	"is_enabled\x18\x03 \x01(\bR\tisEnabled\x12=\n" +
+	"\flast_updated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated*\x80\x01\n" +
 	"\rAccountStatus\x12\x1e\n" +
 	"\x1aACCOUNT_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ACCOUNT_STATUS_ACTIVE\x10\x01\x12\x19\n" +
@@ -219,23 +389,33 @@ func file_meridian_current_account_v1_current_account_proto_rawDescGZIP() []byte
 }
 
 var file_meridian_current_account_v1_current_account_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_meridian_current_account_v1_current_account_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_meridian_current_account_v1_current_account_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_meridian_current_account_v1_current_account_proto_goTypes = []any{
 	(AccountStatus)(0),             // 0: meridian.current_account.v1.AccountStatus
 	(*CurrentAccountFacility)(nil), // 1: meridian.current_account.v1.CurrentAccountFacility
-	(v1.Currency)(0),               // 2: meridian.common.v1.Currency
-	(*timestamppb.Timestamp)(nil),  // 3: google.protobuf.Timestamp
+	(*AccountBalance)(nil),         // 2: meridian.current_account.v1.AccountBalance
+	(*OverdraftConfiguration)(nil), // 3: meridian.current_account.v1.OverdraftConfiguration
+	(v1.Currency)(0),               // 4: meridian.common.v1.Currency
+	(*timestamppb.Timestamp)(nil),  // 5: google.protobuf.Timestamp
+	(*v1.MoneyAmount)(nil),         // 6: meridian.common.v1.MoneyAmount
 }
 var file_meridian_current_account_v1_current_account_proto_depIdxs = []int32{
-	0, // 0: meridian.current_account.v1.CurrentAccountFacility.account_status:type_name -> meridian.current_account.v1.AccountStatus
-	2, // 1: meridian.current_account.v1.CurrentAccountFacility.base_currency:type_name -> meridian.common.v1.Currency
-	3, // 2: meridian.current_account.v1.CurrentAccountFacility.created_at:type_name -> google.protobuf.Timestamp
-	3, // 3: meridian.current_account.v1.CurrentAccountFacility.updated_at:type_name -> google.protobuf.Timestamp
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	0,  // 0: meridian.current_account.v1.CurrentAccountFacility.account_status:type_name -> meridian.current_account.v1.AccountStatus
+	4,  // 1: meridian.current_account.v1.CurrentAccountFacility.base_currency:type_name -> meridian.common.v1.Currency
+	5,  // 2: meridian.current_account.v1.CurrentAccountFacility.created_at:type_name -> google.protobuf.Timestamp
+	5,  // 3: meridian.current_account.v1.CurrentAccountFacility.updated_at:type_name -> google.protobuf.Timestamp
+	2,  // 4: meridian.current_account.v1.CurrentAccountFacility.current_balance:type_name -> meridian.current_account.v1.AccountBalance
+	3,  // 5: meridian.current_account.v1.CurrentAccountFacility.overdraft_limit:type_name -> meridian.current_account.v1.OverdraftConfiguration
+	6,  // 6: meridian.current_account.v1.AccountBalance.current_balance:type_name -> meridian.common.v1.MoneyAmount
+	6,  // 7: meridian.current_account.v1.AccountBalance.available_balance:type_name -> meridian.common.v1.MoneyAmount
+	5,  // 8: meridian.current_account.v1.AccountBalance.last_updated:type_name -> google.protobuf.Timestamp
+	6,  // 9: meridian.current_account.v1.OverdraftConfiguration.overdraft_limit:type_name -> meridian.common.v1.MoneyAmount
+	5,  // 10: meridian.current_account.v1.OverdraftConfiguration.last_updated:type_name -> google.protobuf.Timestamp
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_meridian_current_account_v1_current_account_proto_init() }
@@ -249,7 +429,7 @@ func file_meridian_current_account_v1_current_account_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_meridian_current_account_v1_current_account_proto_rawDesc), len(file_meridian_current_account_v1_current_account_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
