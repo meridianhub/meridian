@@ -1,3 +1,17 @@
+# ⚠️ WORKFLOW DISABLED
+# This workflow is currently disabled (renamed to .disabled extension)
+# Reason: No cloud hosting infrastructure set up yet (avoiding hosting costs)
+#
+# To re-enable:
+# 1. Set up Kubernetes cluster (staging and/or production)
+# 2. Configure GitHub secrets:
+#    - STAGING_KUBECONFIG (base64-encoded kubeconfig)
+#    - PRODUCTION_KUBECONFIG (base64-encoded kubeconfig)
+# 3. Rename this file back to deploy.yml:
+#    git mv .github/workflows/deploy.yml.disabled .github/workflows/deploy.yml
+#
+# See docs/deployment.md for full deployment setup instructions (to be created)
+
 name: Deploy
 
 on:

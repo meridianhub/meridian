@@ -1,0 +1,185 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  schedule:
+    # Run daily security scans at 2 AM UTC
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  govulncheck:
+    name: Go Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.3'
+        cache: true
+
+    - name: Run govulncheck
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+
+  gosec:
+    name: Security Scanner (Gosec)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.3'
+        cache: true
+
+    - name: Install Gosec
+      # Pinned version for reproducibility. v2.21.4 incompatible with Go 1.25.3
+      # (golang.org/x/tools v0.25.0 issue). Using v2.22.0+ for compatibility.
+      run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0
+
+    - name: Run Gosec Security Scanner
+      run: |
+        gosec -fmt sarif -out gosec-results.sarif -exclude-generated ./...
+
+    - name: Upload Gosec results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: gosec-results.sarif
+        category: gosec
+
+  trivy-repo:
+    name: Trivy Repository Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner (repo scan)
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-repo-results.sarif'
+        severity: 'CRITICAL,HIGH'
+        exit-code: '1'  # Fail on critical/high vulnerabilities
+
+    - name: Upload Trivy results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-repo-results.sarif'
+        category: trivy-repo
+
+  trivy-image:
+    name: Trivy Container Image Scan
+    runs-on: ubuntu-latest
+    needs: [govulncheck, gosec]  # Only scan image if code passes security checks
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build Docker image
+      run: |
+        docker build -t meridian:security-scan \
+          --build-arg VERSION=security-scan \
+          --build-arg COMMIT=${{ github.sha }} \
+          --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+          .
+
+    - name: Run Trivy vulnerability scanner (image scan)
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        image-ref: 'meridian:security-scan'
+        format: 'sarif'
+        output: 'trivy-image-results.sarif'
+        severity: 'CRITICAL,HIGH'
+        exit-code: '1'  # Fail on critical/high vulnerabilities
+
+    - name: Upload Trivy image results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-image-results.sarif'
+        category: trivy-image
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Dependency Review
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: high
+
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build Docker image
+      run: |
+        docker build -t meridian:sbom \
+          --build-arg VERSION=sbom \
+          --build-arg COMMIT=${{ github.sha }} \
+          --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+          .
+
+    - name: Generate SBOM with Syft
+      uses: anchore/sbom-action@v0
+      with:
+        image: meridian:sbom
+        format: spdx-json
+        output-file: sbom.spdx.json
+
+    - name: Verify SBOM was created
+      run: |
+        if [ ! -f sbom.spdx.json ]; then
+          echo "ERROR: SBOM file not created"
+          exit 1
+        fi
+        echo "✅ SBOM file created successfully"
+        echo "File size: $(du -h sbom.spdx.json | cut -f1)"
+
+    - name: Upload SBOM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom
+        path: sbom.spdx.json
+        retention-days: 90
+
+  secrets-scan:
+    name: Secret Scanning with Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for secret scanning
+
+    - name: Run Gitleaks
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}  # Optional: for Gitleaks Pro features
