@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info
 
 # Default target
 all: help
@@ -40,23 +40,26 @@ help:
 	@echo "Meridian - Production-Grade Open Banking Ledger"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make build          - Compile all Go services"
-	@echo "  make test           - Run tests with coverage"
-	@echo "  make lint           - Run golangci-lint"
-	@echo "  make fmt            - Format Go code"
-	@echo "  make clean          - Remove build artifacts"
-	@echo "  make proto          - Generate code from all protobuf versions"
-	@echo "  make proto-v1       - Generate code from v1 protobuf definitions"
-	@echo "  make proto-v2       - Generate code from v2 protobuf definitions (future)"
-	@echo "  make proto-validate - Validate protobuf directory structure"
-	@echo "  make proto-lint     - Lint protobuf files with buf"
-	@echo "  make proto-breaking - Check for breaking proto changes"
-	@echo "  make docker         - Build Docker images"
-	@echo "  make deploy-local   - Deploy to local Kubernetes using Tilt"
-	@echo "  make coverage       - Generate and open HTML coverage report"
-	@echo "  make tidy           - Tidy and verify Go modules"
-	@echo "  make deps           - Download dependencies"
-	@echo "  make install        - Install development tools"
+	@echo "  make build             - Compile all Go services"
+	@echo "  make test              - Run tests with coverage"
+	@echo "  make lint              - Run golangci-lint"
+	@echo "  make fmt               - Format Go code"
+	@echo "  make clean             - Remove build artifacts"
+	@echo "  make proto             - Generate code from all protobuf versions"
+	@echo "  make proto-v1          - Generate code from v1 protobuf definitions"
+	@echo "  make proto-v2          - Generate code from v2 protobuf definitions (future)"
+	@echo "  make proto-validate    - Validate protobuf directory structure"
+	@echo "  make proto-lint        - Lint protobuf files with buf"
+	@echo "  make proto-breaking    - Check for breaking proto changes"
+	@echo "  make proto-deps-update - Update buf.lock with latest dependencies"
+	@echo "  make proto-deps-graph  - Display dependency graph"
+	@echo "  make proto-plugins-info- Display current protoc plugin versions"
+	@echo "  make docker            - Build Docker images"
+	@echo "  make deploy-local      - Deploy to local Kubernetes using Tilt"
+	@echo "  make coverage          - Generate and open HTML coverage report"
+	@echo "  make tidy              - Tidy and verify Go modules"
+	@echo "  make deps              - Download dependencies"
+	@echo "  make install           - Install development tools"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -190,3 +193,25 @@ install:
 	@echo ""
 	@echo "Optional tools to install manually:"
 	@echo "  - Tilt: brew install tilt-dev/tap/tilt"
+
+## proto-deps-update: Update buf.lock with latest dependencies
+proto-deps-update:
+	@echo "Updating buf dependencies..."
+	@$(BUF) dep update
+	@echo "Dependencies updated. Commit buf.lock to version control."
+
+## proto-deps-graph: Display dependency graph
+proto-deps-graph:
+	@echo "Dependency graph:"
+	@$(BUF) dep graph
+
+## proto-plugins-info: Display current protoc plugin versions
+proto-plugins-info:
+	@echo "Current protoc plugin versions (from buf.gen.yaml):"
+	@grep -E '^\s+- remote:' buf.gen.yaml | sed 's/^[[:space:]]*- remote: /  /'
+	@echo ""
+	@echo "To update plugin versions:"
+	@echo "  1. Check latest versions at https://buf.build"
+	@echo "  2. Update versions in buf.gen.yaml"
+	@echo "  3. Run 'make proto' to test generation"
+	@echo "  4. Commit buf.gen.yaml with updated versions"
