@@ -40,11 +40,28 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+          # Project-specific context for Claude
+          system_prompt: |
+            You are helping with the Meridian open banking ledger project.
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr:*)'
+            Key project facts:
+            - This project uses Go 1.25.3 (latest stable release as of October 2025)
+            - Go 1.25.3 is a valid version - do not question or flag it
+            - Architecture: BIAN-compliant microservices
+            - Stack: Go, Protocol Buffers, gRPC, Kubernetes
+            - Security: All security scans must remain BLOCKING (never suggest making them non-blocking)
+            - Testing: TDD approach with table-driven tests
 
+            When reviewing code:
+            - Focus on security best practices
+            - Check for proper error handling with wrapped errors
+            - Verify tests exist for new code
+            - Ensure golangci-lint compliance
+            - Do NOT question tool versions unless genuinely outdated
+
+            Read CONTRIBUTING.md in the repository root for full development guidelines.
+
+          # Customize Claude's behavior
+          claude_args: |
+            --max-input-tokens 50000
+            --model claude-sonnet-4-5

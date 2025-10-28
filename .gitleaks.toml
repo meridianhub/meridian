@@ -1,0 +1,45 @@
+# Gitleaks Configuration for Meridian
+# Reduces false positives while maintaining security scanning rigor
+
+title = "Meridian Gitleaks Configuration"
+
+[extend]
+# Use default Gitleaks rules as a baseline
+useDefault = true
+
+[allowlist]
+description = "Allowlist for known false positives"
+
+# Paths to ignore - test files and documentation
+paths = [
+  '''.*_test\.go''',          # Go test files
+  '''docs/.*\.md''',          # Documentation
+  '''\.github/.*\.md''',      # GitHub documentation
+  '''examples/.*''',          # Example code
+  '''testdata/.*''',          # Test data
+]
+
+# Regexes to ignore - example placeholders and documentation patterns
+regexes = [
+  '''example\.com''',         # Example domain references
+  '''your-domain\.com''',     # Template domain references
+  '''EXAMPLE_.*''',           # Example environment variables
+  '''TODO.*''',               # TODO comments
+  '''FIXME.*''',              # FIXME comments
+  '''meridian\.example\.com''', # Our example domain
+  '''security@your-domain\.com''', # Template email
+]
+
+# Specific strings to ignore - common false positives
+stopwords = [
+  "meridian",
+  "example",
+  "template",
+  "placeholder",
+]
+
+# Commits to ignore - initial repository setup
+commits = [
+  # Add specific commit SHAs here if needed for historical commits
+  # "abc123def456...",
+]

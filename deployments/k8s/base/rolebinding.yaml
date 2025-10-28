@@ -1,0 +1,17 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: meridian
+  labels:
+    app: meridian
+    component: ledger
+    managed-by: kustomize
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: meridian
+subjects:
+- kind: ServiceAccount
+  name: meridian
+  # namespace field omitted - subject must be in same namespace as RoleBinding
+  # Kustomize will apply namespace to both RoleBinding and ServiceAccount
