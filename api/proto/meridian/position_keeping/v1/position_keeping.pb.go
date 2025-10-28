@@ -1226,13 +1226,13 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\aversion\x18\x05 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\aversion\x12K\n" +
 	"\x0fidempotency_key\x18\x06 \x01(\v2\".meridian.common.v1.IdempotencyKeyR\x0eidempotencyKey\"j\n" +
 	"\"UpdateFinancialPositionLogResponse\x12D\n" +
-	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"F\n" +
-	"#RetrieveFinancialPositionLogRequest\x12\x1f\n" +
-	"\x06log_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x05logId\"l\n" +
+	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"I\n" +
+	"#RetrieveFinancialPositionLogRequest\x12\"\n" +
+	"\x06log_id\x18\x01 \x01(\tB\v\xbaH\b\xc8\x01\x01r\x03\xb0\x01\x01R\x05logId\"l\n" +
 	"$RetrieveFinancialPositionLogResponse\x12D\n" +
-	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"\x95\x02\n" +
-	"\x1dBulkImportTransactionsRequest\x12\x1f\n" +
-	"\x06log_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x05logId\x12X\n" +
+	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"\x98\x02\n" +
+	"\x1dBulkImportTransactionsRequest\x12\"\n" +
+	"\x06log_id\x18\x01 \x01(\tB\v\xbaH\b\xc8\x01\x01r\x03\xb0\x01\x01R\x05logId\x12X\n" +
 	"\aentries\x18\x02 \x03(\v21.meridian.position_keeping.v1.TransactionLogEntryB\v\xbaH\b\x92\x01\x05\b\x01\x10\xe8\aR\aentries\x12V\n" +
 	"\vaudit_entry\x18\x03 \x01(\v2-.meridian.position_keeping.v1.AuditTrailEntryB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"auditEntry\x12!\n" +
