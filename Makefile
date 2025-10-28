@@ -72,8 +72,11 @@ test:
 	@echo "Running tests with coverage..."
 	@mkdir -p $(COVERAGE_DIR)
 	$(GOTEST) -v -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
-	@$(GOCMD) tool cover -func=$(COVERAGE_DIR)/coverage.out | tail -n 1
-	@echo "Coverage report: $(COVERAGE_DIR)/coverage.out"
+	@echo "Filtering generated proto files from coverage..."
+	@grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' $(COVERAGE_DIR)/coverage.out > $(COVERAGE_DIR)/coverage-filtered.out || true
+	@$(GOCMD) tool cover -func=$(COVERAGE_DIR)/coverage-filtered.out | tail -n 1
+	@echo "Coverage report (excluding generated files): $(COVERAGE_DIR)/coverage-filtered.out"
+	@echo "Full coverage report: $(COVERAGE_DIR)/coverage.out"
 
 ## coverage: Generate and open HTML coverage report
 coverage: test
