@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	financialaccountingv1 "github.com/bjcoombs/meridian/api/proto/meridian/financial_accounting/v1"
 	commonv1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	financialaccountingv1 "github.com/bjcoombs/meridian/api/proto/meridian/financial_accounting/v1"
 	"google.golang.org/genproto/googleapis/type/money"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // TestFinancialBookingLogCreation tests creation of FinancialBookingLog messages
@@ -15,16 +15,16 @@ func TestFinancialBookingLogCreation(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	log := &financialaccountingv1.FinancialBookingLog{
-		Id:                     "log-123",
-		FinancialAccountType:   commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		Id:                      "log-123",
+		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
 		ProductServiceReference: "prod-456",
-		BusinessUnitReference:  "bu-789",
-		ChartOfAccountsRules:   "rules-001",
-		BaseCurrency:           commonv1.Currency_CURRENCY_GBP,
-		Status:                 commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
-		CreatedAt:              now,
-		UpdatedAt:              now,
-		Postings:               []*financialaccountingv1.LedgerPosting{},
+		BusinessUnitReference:   "bu-789",
+		ChartOfAccountsRules:    "rules-001",
+		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		CreatedAt:               now,
+		UpdatedAt:               now,
+		Postings:                []*financialaccountingv1.LedgerPosting{},
 	}
 
 	if log.Id != "log-123" {
@@ -43,19 +43,19 @@ func TestLedgerPostingCreation(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	posting := &financialaccountingv1.LedgerPosting{
-		Id:                     "posting-123",
-		FinancialBookingLogId:  "log-456",
-		PostingDirection:       commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		Id:                    "posting-123",
+		FinancialBookingLogId: "log-456",
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
 		PostingAmount: &money.Money{
 			CurrencyCode: "GBP",
 			Units:        100,
 			Nanos:        50,
 		},
-		AccountId:      "acc-789",
-		ValueDate:      now,
-		PostingResult:  "SUCCESS",
-		CreatedAt:      now,
-		Status:         commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		AccountId:     "acc-789",
+		ValueDate:     now,
+		PostingResult: "SUCCESS",
+		CreatedAt:     now,
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 	}
 
 	if posting.Id != "posting-123" {
@@ -100,22 +100,22 @@ func TestInitiateFinancialBookingLogRequest(t *testing.T) {
 // TestUpdateFinancialBookingLogRequest tests update request message
 func TestUpdateFinancialBookingLogRequest(t *testing.T) {
 	tests := []struct {
-		name  string
-		req   *financialaccountingv1.UpdateFinancialBookingLogRequest
+		name string
+		req  *financialaccountingv1.UpdateFinancialBookingLogRequest
 	}{
 		{
 			name: "update with new status and rules",
 			req: &financialaccountingv1.UpdateFinancialBookingLogRequest{
-				Id:                    "log-123",
-				Status:                commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				Id:                   "log-123",
+				Status:               commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 				ChartOfAccountsRules: "new-rules",
 			},
 		},
 		{
 			name: "update with status only",
 			req: &financialaccountingv1.UpdateFinancialBookingLogRequest{
-				Id:                    "log-456",
-				Status:                commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
+				Id:                   "log-456",
+				Status:               commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
 				ChartOfAccountsRules: "",
 			},
 		},
@@ -177,14 +177,14 @@ func TestListFinancialBookingLogsRequest(t *testing.T) {
 					PageSize:  50,
 					PageToken: "",
 				},
-				Status:                 commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+				Status:                commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 				BusinessUnitReference: "bu-123",
 			},
 		},
 		{
 			name: "list without pagination",
 			req: &financialaccountingv1.ListFinancialBookingLogsRequest{
-				Status:                 commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				Status:                commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 				BusinessUnitReference: "bu-456",
 			},
 		},
@@ -197,11 +197,9 @@ func TestListFinancialBookingLogsRequest(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Verify request structure is correct
-			if tt.req.BusinessUnitReference == "" && tt.req.Status == commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED {
-				// OK - listing all logs
-			}
+		t.Run(tt.name, func(_ *testing.T) {
+			// Verify request structure is valid by successful creation
+			_ = tt.req
 		})
 	}
 }
@@ -234,15 +232,15 @@ func TestResponseMessages(t *testing.T) {
 	t.Run("initiate response", func(t *testing.T) {
 		resp := &financialaccountingv1.InitiateFinancialBookingLogResponse{
 			FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
-				Id:                     "log-123",
-				FinancialAccountType:   commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+				Id:                      "log-123",
+				FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
 				ProductServiceReference: "prod-456",
-				BusinessUnitReference:  "bu-789",
-				ChartOfAccountsRules:   "rules-001",
-				BaseCurrency:           commonv1.Currency_CURRENCY_GBP,
-				Status:                 commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
-				CreatedAt:              now,
-				UpdatedAt:              now,
+				BusinessUnitReference:   "bu-789",
+				ChartOfAccountsRules:    "rules-001",
+				BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+				Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+				CreatedAt:               now,
+				UpdatedAt:               now,
 			},
 		}
 		if resp.FinancialBookingLog == nil {
@@ -253,15 +251,15 @@ func TestResponseMessages(t *testing.T) {
 	t.Run("update response", func(t *testing.T) {
 		resp := &financialaccountingv1.UpdateFinancialBookingLogResponse{
 			FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
-				Id:                     "log-123",
-				FinancialAccountType:   commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+				Id:                      "log-123",
+				FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
 				ProductServiceReference: "prod-456",
-				BusinessUnitReference:  "bu-789",
-				ChartOfAccountsRules:   "updated-rules",
-				BaseCurrency:           commonv1.Currency_CURRENCY_GBP,
-				Status:                 commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
-				CreatedAt:              now,
-				UpdatedAt:              now,
+				BusinessUnitReference:   "bu-789",
+				ChartOfAccountsRules:    "updated-rules",
+				BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+				Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				CreatedAt:               now,
+				UpdatedAt:               now,
 			},
 		}
 		if resp.FinancialBookingLog.ChartOfAccountsRules != "updated-rules" {
@@ -273,15 +271,15 @@ func TestResponseMessages(t *testing.T) {
 		resp := &financialaccountingv1.ListFinancialBookingLogsResponse{
 			FinancialBookingLogs: []*financialaccountingv1.FinancialBookingLog{
 				{
-					Id:                     "log-1",
-					FinancialAccountType:   commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+					Id:                      "log-1",
+					FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
 					ProductServiceReference: "prod-1",
-					BusinessUnitReference:  "bu-1",
-					ChartOfAccountsRules:   "rules-1",
-					BaseCurrency:           commonv1.Currency_CURRENCY_GBP,
-					Status:                 commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
-					CreatedAt:              now,
-					UpdatedAt:              now,
+					BusinessUnitReference:   "bu-1",
+					ChartOfAccountsRules:    "rules-1",
+					BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+					Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+					CreatedAt:               now,
+					UpdatedAt:               now,
 				},
 			},
 			Pagination: &commonv1.PaginationResponse{
