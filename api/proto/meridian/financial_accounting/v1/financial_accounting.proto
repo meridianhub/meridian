@@ -1,0 +1,307 @@
+syntax = "proto3";
+
+package meridian.financial_accounting.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "google/type/money.proto";
+import "meridian/common/v1/types.proto";
+
+option go_package = "github.com/bjcoombs/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
+
+// FinancialBookingLog represents the BIAN Financial Booking Log entity.
+// It maintains records of financial transactions and their processing status.
+message FinancialBookingLog {
+  // id is the unique identifier for this financial booking log.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // financial_account_type defines the type of account being used.
+  meridian.common.v1.AccountType financial_account_type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // product_service_reference identifies the financial product or service.
+  string product_service_reference = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // business_unit_reference identifies the business unit responsible.
+  string business_unit_reference = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // chart_of_accounts_rules defines the accounting rules to apply.
+  string chart_of_accounts_rules = 5 [(buf.validate.field).string = {
+    min_len: 1
+  }];
+
+  // base_currency is the currency for this booking log.
+  meridian.common.v1.Currency base_currency = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // status represents the current lifecycle state.
+  meridian.common.v1.TransactionStatus status = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // created_at is when this booking log was created.
+  google.protobuf.Timestamp created_at = 8 [(buf.validate.field).required = true];
+
+  // updated_at is when this booking log was last updated.
+  google.protobuf.Timestamp updated_at = 9 [(buf.validate.field).required = true];
+
+  // postings contains all ledger postings associated with this log.
+  // NOTE: This array may grow large for booking logs with many transactions.
+  // Consider fetching postings separately via RetrieveLedgerPosting for pagination.
+  // Double-entry balance validation occurs at the service layer when transitioning to POSTED status.
+  repeated LedgerPosting postings = 10;
+}
+
+// LedgerPosting represents a single posting operation in double-entry bookkeeping.
+message LedgerPosting {
+  // id is the unique identifier for this posting.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // financial_booking_log_id references the parent booking log.
+  string financial_booking_log_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // posting_direction indicates debit or credit.
+  meridian.common.v1.PostingDirection posting_direction = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // posting_amount is the monetary amount being posted.
+  google.type.Money posting_amount = 4 [(buf.validate.field).required = true];
+
+  // account_id identifies the account being posted to.
+  string account_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // value_date is the effective date for this posting.
+  google.protobuf.Timestamp value_date = 6 [(buf.validate.field).required = true];
+
+  // posting_result describes the outcome of the posting operation.
+  string posting_result = 7 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+
+  // created_at is when this posting was created.
+  google.protobuf.Timestamp created_at = 8 [(buf.validate.field).required = true];
+
+  // status represents the current state of this posting.
+  meridian.common.v1.TransactionStatus status = 9 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// InitiateFinancialBookingLogRequest creates a new financial booking log.
+message InitiateFinancialBookingLogRequest {
+  // financial_account_type defines the type of account.
+  meridian.common.v1.AccountType financial_account_type = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // product_service_reference identifies the financial product.
+  string product_service_reference = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // business_unit_reference identifies the business unit.
+  string business_unit_reference = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // chart_of_accounts_rules defines accounting rules.
+  string chart_of_accounts_rules = 4 [(buf.validate.field).string = {
+    min_len: 1
+  }];
+
+  // base_currency is the currency for transactions.
+  meridian.common.v1.Currency base_currency = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 6 [(buf.validate.field).required = true];
+}
+
+// InitiateFinancialBookingLogResponse returns the created booking log.
+message InitiateFinancialBookingLogResponse {
+  // financial_booking_log is the newly created booking log.
+  FinancialBookingLog financial_booking_log = 1 [(buf.validate.field).required = true];
+}
+
+// UpdateFinancialBookingLogRequest updates an existing booking log.
+//
+// Update Semantics:
+// - Only status and chart_of_accounts_rules can be modified after creation
+// - Other fields (account_type, currency, business_unit) are immutable
+// - Empty chart_of_accounts_rules preserves existing value (use IGNORE_IF_UNPOPULATED)
+// - Status transitions are validated at service layer (e.g., POSTED is terminal)
+message UpdateFinancialBookingLogRequest {
+  // id is the booking log to update.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // status is the new status to set.
+  meridian.common.v1.TransactionStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // chart_of_accounts_rules can be updated if needed.
+  // If empty, the existing rules are preserved (optional update).
+  // Validation: Min length is enforced only if the field is provided (service layer).
+  string chart_of_accounts_rules = 3;
+}
+
+// UpdateFinancialBookingLogResponse returns the updated booking log.
+message UpdateFinancialBookingLogResponse {
+  // financial_booking_log is the updated booking log.
+  FinancialBookingLog financial_booking_log = 1 [(buf.validate.field).required = true];
+}
+
+// RetrieveFinancialBookingLogRequest retrieves a specific booking log.
+message RetrieveFinancialBookingLogRequest {
+  // id is the booking log to retrieve.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// RetrieveFinancialBookingLogResponse returns the requested booking log.
+message RetrieveFinancialBookingLogResponse {
+  // financial_booking_log is the retrieved booking log.
+  FinancialBookingLog financial_booking_log = 1 [(buf.validate.field).required = true];
+}
+
+// CaptureLedgerPostingRequest creates a new ledger posting.
+//
+// Double-Entry Bookkeeping:
+// - Individual postings are created separately (not balanced pairs)
+// - Balance validation (debits = credits) occurs at service layer
+// - Booking log can only transition to POSTED status when balanced
+// - Consider using batch operations for balanced posting pairs
+message CaptureLedgerPostingRequest {
+  // financial_booking_log_id references the parent booking log.
+  string financial_booking_log_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // posting_direction indicates debit or credit.
+  meridian.common.v1.PostingDirection posting_direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // posting_amount is the amount to post.
+  google.type.Money posting_amount = 3 [(buf.validate.field).required = true];
+
+  // account_id identifies the target account.
+  string account_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // value_date is the effective date.
+  google.protobuf.Timestamp value_date = 5 [(buf.validate.field).required = true];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 6 [(buf.validate.field).required = true];
+}
+
+// CaptureLedgerPostingResponse returns the created posting.
+message CaptureLedgerPostingResponse {
+  // ledger_posting is the newly created posting.
+  LedgerPosting ledger_posting = 1 [(buf.validate.field).required = true];
+}
+
+// RetrieveLedgerPostingRequest retrieves a specific posting.
+message RetrieveLedgerPostingRequest {
+  // id is the posting to retrieve.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// RetrieveLedgerPostingResponse returns the requested posting.
+message RetrieveLedgerPostingResponse {
+  // ledger_posting is the retrieved posting.
+  LedgerPosting ledger_posting = 1 [(buf.validate.field).required = true];
+}
+
+// ListFinancialBookingLogsRequest lists booking logs with pagination.
+//
+// Pagination: If pagination is not provided, the service will apply
+// default limits (typically 50 items) to prevent unbounded queries.
+message ListFinancialBookingLogsRequest {
+  // pagination controls page size and position.
+  // If not provided, service applies default page_size=50, max=1000.
+  meridian.common.v1.Pagination pagination = 1;
+
+  // status filters by transaction status.
+  meridian.common.v1.TransactionStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+  }];
+
+  // business_unit_reference filters by business unit.
+  string business_unit_reference = 3;
+}
+
+// ListFinancialBookingLogsResponse returns a page of booking logs.
+message ListFinancialBookingLogsResponse {
+  // financial_booking_logs is the list of booking logs.
+  repeated FinancialBookingLog financial_booking_logs = 1;
+
+  // pagination contains pagination metadata.
+  meridian.common.v1.PaginationResponse pagination = 2;
+}
+
+// FinancialAccountingService provides the BIAN Financial Accounting service interface.
+service FinancialAccountingService {
+  // InitiateFinancialBookingLog creates a new financial booking log.
+  rpc InitiateFinancialBookingLog(InitiateFinancialBookingLogRequest) returns (InitiateFinancialBookingLogResponse);
+
+  // UpdateFinancialBookingLog updates an existing booking log.
+  rpc UpdateFinancialBookingLog(UpdateFinancialBookingLogRequest) returns (UpdateFinancialBookingLogResponse);
+
+  // RetrieveFinancialBookingLog retrieves a specific booking log.
+  rpc RetrieveFinancialBookingLog(RetrieveFinancialBookingLogRequest) returns (RetrieveFinancialBookingLogResponse);
+
+  // ListFinancialBookingLogs lists booking logs with optional filtering.
+  rpc ListFinancialBookingLogs(ListFinancialBookingLogsRequest) returns (ListFinancialBookingLogsResponse);
+
+  // CaptureLedgerPosting creates a new ledger posting.
+  rpc CaptureLedgerPosting(CaptureLedgerPostingRequest) returns (CaptureLedgerPostingResponse);
+
+  // RetrieveLedgerPosting retrieves a specific posting.
+  rpc RetrieveLedgerPosting(RetrieveLedgerPostingRequest) returns (RetrieveLedgerPostingResponse);
+}
