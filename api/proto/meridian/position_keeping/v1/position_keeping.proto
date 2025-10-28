@@ -13,11 +13,8 @@ message TransactionLogEntry {
   // entry_id is the unique identifier for this log entry.
   string entry_id = 1 [(buf.validate.field).string.uuid = true];
 
-  // transaction_id is the identifier of the related transaction.
-  string transaction_id = 2 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
+  // transaction_id is the identifier of the related transaction (UUID format).
+  string transaction_id = 2 [(buf.validate.field).string.uuid = true];
 
   // account_id is the account involved in this transaction.
   string account_id = 3 [(buf.validate.field).string = {
@@ -46,20 +43,17 @@ message TransactionLogEntry {
 
 // TransactionLineage captures the relationship between transactions.
 message TransactionLineage {
-  // transaction_id is the current transaction identifier.
-  string transaction_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
+  // transaction_id is the current transaction identifier (UUID format).
+  string transaction_id = 1 [(buf.validate.field).string.uuid = true];
 
-  // parent_transaction_id is the identifier of the parent transaction (if any).
-  string parent_transaction_id = 2 [(buf.validate.field).string.max_len = 255];
+  // parent_transaction_id is the identifier of the parent transaction (optional, UUID format when present).
+  string parent_transaction_id = 2;
 
-  // child_transaction_ids are identifiers of any child transactions.
-  repeated string child_transaction_ids = 3;
+  // child_transaction_ids are identifiers of any child transactions (UUID format).
+  repeated string child_transaction_ids = 3 [(buf.validate.field).repeated.items.string.uuid = true];
 
-  // related_transaction_ids are identifiers of related transactions (e.g., reversals, adjustments).
-  repeated string related_transaction_ids = 4;
+  // related_transaction_ids are identifiers of related transactions (UUID format, e.g., reversals, adjustments).
+  repeated string related_transaction_ids = 4 [(buf.validate.field).repeated.items.string.uuid = true];
 
   // transaction_type describes the type of transaction (e.g., "payment", "reversal", "adjustment").
   string transaction_type = 5 [(buf.validate.field).string = {
@@ -158,10 +152,13 @@ message FinancialPositionLog {
 // InitiateFinancialPositionLogRequest initiates a new financial position log.
 message InitiateFinancialPositionLogRequest {
   // account_id is the account for which to create the log.
-  string account_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
 
   // initial_entry is the first transaction entry (optional).
   TransactionLogEntry initial_entry = 2;
@@ -182,7 +179,10 @@ message InitiateFinancialPositionLogResponse {
 // UpdateFinancialPositionLogRequest updates an existing financial position log.
 message UpdateFinancialPositionLogRequest {
   // log_id is the identifier of the log to update.
-  string log_id = 1 [(buf.validate.field).string.uuid = true];
+  string log_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
 
   // new_entry is a new transaction entry to add (optional).
   TransactionLogEntry new_entry = 2;
@@ -229,8 +229,8 @@ message BulkImportTransactionsRequest {
     max_items: 1000  // Limit bulk imports
   }];
 
-  // audit_entry is an audit trail entry for this bulk import.
-  AuditTrailEntry audit_entry = 3;
+  // audit_entry is an audit trail entry for this bulk import (required for compliance).
+  AuditTrailEntry audit_entry = 3 [(buf.validate.field).required = true];
 
   // version is used for optimistic concurrency control.
   int64 version = 4 [(buf.validate.field).int64.gte = 0];
