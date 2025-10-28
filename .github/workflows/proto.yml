@@ -1,0 +1,70 @@
+name: Proto
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  proto-lint:
+    name: Proto Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run buf lint
+        run: buf lint
+
+  proto-breaking:
+    name: Proto Breaking Change Detection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for breaking proto changes
+        run: buf breaking --against '.git#branch=develop'
+
+      - name: Comment on PR if breaking changes detected
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ **Breaking Proto Changes Detected**\n\nThis PR contains breaking changes to protobuf definitions. Please review the changes carefully and consider:\n- Incrementing to v2 if this is a major breaking change\n- Using field deprecation instead of removal\n- Adding new fields with new field numbers\n\nRun `make proto-breaking` locally for details.'
+            })
+
+  proto-validate:
+    name: Proto Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate proto directory structure
+        run: make proto-validate
