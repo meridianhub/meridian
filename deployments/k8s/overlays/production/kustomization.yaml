@@ -1,0 +1,119 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: meridian-production
+
+namespace: production
+
+labels:
+- pairs:
+    app: meridian
+    environment: production
+    managed-by: kustomize
+
+resources:
+- ../../base
+
+# ConfigMap for production environment
+configMapGenerator:
+- name: meridian-config
+  behavior: merge
+  literals:
+  - log_level=warn
+  - log_format=json
+  - metrics_enabled=true
+
+# Patches for production environment
+patches:
+# High availability with 3 replicas minimum
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 3
+
+# Production resource limits (same as base, keeping strict)
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+# Stricter rolling update strategy
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/strategy/rollingUpdate/maxUnavailable
+      value: 0
+    - op: replace
+      path: /spec/strategy/rollingUpdate/maxSurge
+      value: 1
+
+# Production health check settings
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/livenessProbe/failureThreshold
+      value: 3
+    - op: replace
+      path: /spec/template/spec/containers/0/readinessProbe/failureThreshold
+      value: 3
+    - op: replace
+      path: /spec/template/spec/containers/0/startupProbe/failureThreshold
+      value: 30
+
+# Add production-specific env vars
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: ENVIRONMENT
+        value: production
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: DEBUG_MODE
+        value: "false"
+
+# Add monitoring and tracing annotations
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: add
+      path: /spec/template/metadata/annotations/datadog.io~1logs
+      value: "true"
+    - op: add
+      path: /spec/template/metadata/annotations/datadog.io~1tags
+      value: "env:production,service:meridian,criticality:high"
+
+# Increase termination grace period for production
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/terminationGracePeriodSeconds
+      value: 60
+
+images:
+- name: meridian
+  newTag: stable

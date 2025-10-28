@@ -1,0 +1,83 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: meridian-staging
+
+namespace: staging
+
+labels:
+- pairs:
+    app: meridian
+    environment: staging
+    managed-by: kustomize
+
+resources:
+- ../../base
+
+# ConfigMap for staging environment
+configMapGenerator:
+- name: meridian-config
+  behavior: merge
+  literals:
+  - log_level=info
+  - log_format=json
+  - metrics_enabled=true
+
+# Patches for staging environment
+patches:
+# Production-like replicas (2 for staging)
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 2
+
+# Production-like resource limits
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+# Add staging-specific env vars
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: ENVIRONMENT
+        value: staging
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: DEBUG_MODE
+        value: "false"
+
+# Add monitoring annotations
+- target:
+    kind: Deployment
+    name: meridian
+  patch: |-
+    - op: add
+      path: /spec/template/metadata/annotations/datadog.io~1logs
+      value: "true"
+    - op: add
+      path: /spec/template/metadata/annotations/datadog.io~1tags
+      value: "env:staging,service:meridian"
+
+images:
+- name: meridian
+  newTag: staging-latest
