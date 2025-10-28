@@ -85,9 +85,10 @@ func (AccountStatus) EnumDescriptor() ([]byte, []int) {
 // Task 5.1: Define CurrentAccountFacility message with account identification and status management
 type CurrentAccountFacility struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// account_id is the unique identifier for this account facility
+	// account_id is the unique identifier for this account facility (alphanumeric with hyphens/underscores).
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// account_identification is the IBAN or other standard account identifier
+	// account_identification is the IBAN or other standard account identifier.
+	// IBAN format: 2 letter country code + 2 check digits + up to 30 alphanumeric characters.
 	AccountIdentification string `protobuf:"bytes,2,opt,name=account_identification,json=accountIdentification,proto3" json:"account_identification,omitempty"`
 	// account_status is the current lifecycle state of the account
 	AccountStatus AccountStatus `protobuf:"varint,3,opt,name=account_status,json=accountStatus,proto3,enum=meridian.current_account.v1.AccountStatus" json:"account_status,omitempty"`
@@ -354,9 +355,9 @@ func (x *OverdraftConfiguration) GetLastUpdated() *timestamppb.Timestamp {
 // Task 5.3: Create debit/credit transaction operations
 type AccountTransaction struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// transaction_id is the unique identifier for this transaction
+	// transaction_id is the unique identifier for this transaction (alphanumeric with hyphens/underscores).
 	TransactionId string `protobuf:"bytes,1,opt,name=transaction_id,json=transactionId,proto3" json:"transaction_id,omitempty"`
-	// account_id is the account this transaction belongs to
+	// account_id is the account this transaction belongs to (alphanumeric with hyphens/underscores).
 	AccountId string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	// direction is whether this is a debit or credit
 	Direction v1.PostingDirection `protobuf:"varint,3,opt,name=direction,proto3,enum=meridian.common.v1.PostingDirection" json:"direction,omitempty"`
@@ -366,7 +367,7 @@ type AccountTransaction struct {
 	Status v1.TransactionStatus `protobuf:"varint,5,opt,name=status,proto3,enum=meridian.common.v1.TransactionStatus" json:"status,omitempty"`
 	// description is a human-readable transaction description
 	Description string `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
-	// reference is an external reference or payment reference
+	// reference is an external reference or payment reference (alphanumeric with hyphens, underscores, slashes).
 	Reference string `protobuf:"bytes,7,opt,name=reference,proto3" json:"reference,omitempty"`
 	// timestamp is when the transaction occurred
 	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
@@ -538,11 +539,11 @@ var File_meridian_current_account_v1_current_account_proto protoreflect.FileDesc
 
 const file_meridian_current_account_v1_current_account_proto_rawDesc = "" +
 	"\n" +
-	"1meridian/current_account/v1/current_account.proto\x12\x1bmeridian.current_account.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xe1\x05\n" +
-	"\x16CurrentAccountFacility\x12(\n" +
+	"1meridian/current_account/v1/current_account.proto\x12\x1bmeridian.current_account.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\x95\x06\n" +
+	"\x16CurrentAccountFacility\x12:\n" +
 	"\n" +
-	"account_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\taccountId\x12@\n" +
-	"\x16account_identification\x18\x02 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18\"R\x15accountIdentification\x12]\n" +
+	"account_id\x18\x01 \x01(\tB\x1b\xbaH\x18r\x16\x10\x01\x18d2\x10^[a-zA-Z0-9_-]+$R\taccountId\x12b\n" +
+	"\x16account_identification\x18\x02 \x01(\tB+\xbaH(r&\x10\x01\x18\"2 ^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$R\x15accountIdentification\x12]\n" +
 	"\x0eaccount_status\x18\x03 \x01(\x0e2*.meridian.current_account.v1.AccountStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\raccountStatus\x12M\n" +
 	"\rbase_currency\x18\x04 \x01(\x0e2\x1c.meridian.common.v1.CurrencyB\n" +
@@ -565,18 +566,18 @@ const file_meridian_current_account_v1_current_account_proto_rawDesc = "" +
 	"\rinterest_rate\x18\x02 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00Y@)\x00\x00\x00\x00\x00\x00\x00\x00R\finterestRate\x12\x1d\n" +
 	"\n" +
 	"is_enabled\x18\x03 \x01(\bR\tisEnabled\x12=\n" +
-	"\flast_updated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\"\xe1\x03\n" +
-	"\x12AccountTransaction\x120\n" +
-	"\x0etransaction_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\rtransactionId\x12(\n" +
+	"\flast_updated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\"\x98\x04\n" +
+	"\x12AccountTransaction\x12B\n" +
+	"\x0etransaction_id\x18\x01 \x01(\tB\x1b\xbaH\x18r\x16\x10\x01\x18d2\x10^[a-zA-Z0-9_-]+$R\rtransactionId\x12:\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\taccountId\x12N\n" +
+	"account_id\x18\x02 \x01(\tB\x1b\xbaH\x18r\x16\x10\x01\x18d2\x10^[a-zA-Z0-9_-]+$R\taccountId\x12N\n" +
 	"\tdirection\x18\x03 \x01(\x0e2$.meridian.common.v1.PostingDirectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12?\n" +
 	"\x06amount\x18\x04 \x01(\v2\x1f.meridian.common.v1.MoneyAmountB\x06\xbaH\x03\xc8\x01\x01R\x06amount\x12I\n" +
 	"\x06status\x18\x05 \x01(\x0e2%.meridian.common.v1.TransactionStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12*\n" +
-	"\vdescription\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\xf4\x03R\vdescription\x12%\n" +
-	"\treference\x18\a \x01(\tB\a\xbaH\x04r\x02\x18dR\treference\x12@\n" +
+	"\vdescription\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\xf4\x03R\vdescription\x128\n" +
+	"\treference\x18\a \x01(\tB\x1a\xbaH\x17r\x15\x18d2\x11^[a-zA-Z0-9_/-]*$R\treference\x12@\n" +
 	"\ttimestamp\x18\b \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\ttimestamp\"\xfc\x01\n" +
 	"\x12TransactionHistory\x12(\n" +
 	"\n" +

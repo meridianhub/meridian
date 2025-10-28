@@ -31,7 +31,7 @@ type TransactionLogEntry struct {
 	EntryId string `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
 	// transaction_id is the identifier of the related transaction (UUID format).
 	TransactionId string `protobuf:"bytes,2,opt,name=transaction_id,json=transactionId,proto3" json:"transaction_id,omitempty"`
-	// account_id is the account involved in this transaction.
+	// account_id is the account involved in this transaction (alphanumeric with hyphens/underscores).
 	AccountId string `protobuf:"bytes,3,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	// amount is the monetary amount of this transaction.
 	Amount *v1.MoneyAmount `protobuf:"bytes,4,opt,name=amount,proto3" json:"amount,omitempty"`
@@ -42,6 +42,7 @@ type TransactionLogEntry struct {
 	// description provides additional context for this entry.
 	Description string `protobuf:"bytes,7,opt,name=description,proto3" json:"description,omitempty"`
 	// reference is an external reference number (e.g., invoice number, payment reference).
+	// Alphanumeric with hyphens, underscores, slashes for payment references.
 	Reference     string `protobuf:"bytes,8,opt,name=reference,proto3" json:"reference,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1150,19 +1151,18 @@ var File_meridian_position_keeping_v1_position_keeping_proto protoreflect.FileDe
 
 const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\n" +
-	"3meridian/position_keeping/v1/position_keeping.proto\x12\x1cmeridian.position_keeping.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xbd\x03\n" +
+	"3meridian/position_keeping/v1/position_keeping.proto\x12\x1cmeridian.position_keeping.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xe2\x03\n" +
 	"\x13TransactionLogEntry\x12#\n" +
 	"\bentry_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\aentryId\x12/\n" +
-	"\x0etransaction_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\rtransactionId\x12)\n" +
+	"\x0etransaction_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\rtransactionId\x12;\n" +
 	"\n" +
-	"account_id\x18\x03 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\taccountId\x12?\n" +
+	"account_id\x18\x03 \x01(\tB\x1c\xbaH\x19r\x17\x10\x01\x18\xff\x012\x10^[a-zA-Z0-9_-]+$R\taccountId\x12?\n" +
 	"\x06amount\x18\x04 \x01(\v2\x1f.meridian.common.v1.MoneyAmountB\x06\xbaH\x03\xc8\x01\x01R\x06amount\x12N\n" +
 	"\tdirection\x18\x05 \x01(\x0e2$.meridian.common.v1.PostingDirectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12@\n" +
 	"\ttimestamp\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\ttimestamp\x12*\n" +
-	"\vdescription\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\xf4\x03R\vdescription\x12&\n" +
-	"\treference\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\treference\"\x86\x03\n" +
+	"\vdescription\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\xf4\x03R\vdescription\x129\n" +
+	"\treference\x18\b \x01(\tB\x1b\xbaH\x18r\x16\x18\xff\x012\x11^[a-zA-Z0-9_/-]*$R\treference\"\x86\x03\n" +
 	"\x12TransactionLineage\x12/\n" +
 	"\x0etransaction_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\rtransactionId\x12<\n" +
 	"\x15parent_transaction_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x13parentTransactionId\x12A\n" +
