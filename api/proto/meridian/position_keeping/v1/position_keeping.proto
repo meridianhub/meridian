@@ -1,0 +1,303 @@
+syntax = "proto3";
+
+package meridian.position_keeping.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+
+option go_package = "github.com/bjcoombs/meridian/api/proto/meridian/position_keeping/v1;positionkeepingv1";
+
+// TransactionLogEntry represents a single entry in the financial position log.
+message TransactionLogEntry {
+  // entry_id is the unique identifier for this log entry.
+  string entry_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // transaction_id is the identifier of the related transaction (UUID format).
+  string transaction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // account_id is the account involved in this transaction.
+  string account_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // amount is the monetary amount of this transaction.
+  meridian.common.v1.MoneyAmount amount = 4 [(buf.validate.field).required = true];
+
+  // direction indicates whether this is a debit or credit posting.
+  meridian.common.v1.PostingDirection direction = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]  // Disallow UNSPECIFIED
+  }];
+
+  // timestamp is when this transaction occurred.
+  google.protobuf.Timestamp timestamp = 6 [(buf.validate.field).required = true];
+
+  // description provides additional context for this entry.
+  string description = 7 [(buf.validate.field).string.max_len = 500];
+
+  // reference is an external reference number (e.g., invoice number, payment reference).
+  string reference = 8 [(buf.validate.field).string.max_len = 255];
+}
+
+// TransactionLineage captures the relationship between transactions.
+message TransactionLineage {
+  // transaction_id is the current transaction identifier (UUID format).
+  string transaction_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // parent_transaction_id is the identifier of the parent transaction (optional, UUID format when present).
+  string parent_transaction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // child_transaction_ids are identifiers of any child transactions (UUID format).
+  repeated string child_transaction_ids = 3 [(buf.validate.field).repeated.items.string.uuid = true];
+
+  // related_transaction_ids are identifiers of related transactions (UUID format, e.g., reversals, adjustments).
+  repeated string related_transaction_ids = 4 [(buf.validate.field).repeated.items.string.uuid = true];
+
+  // transaction_type describes the type of transaction (e.g., "payment", "reversal", "adjustment").
+  string transaction_type = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // created_at is when this lineage record was created.
+  google.protobuf.Timestamp created_at = 6 [(buf.validate.field).required = true];
+}
+
+// AuditTrailEntry captures audit information for compliance.
+message AuditTrailEntry {
+  // audit_id is the unique identifier for this audit entry.
+  string audit_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // timestamp is when this audit event occurred.
+  google.protobuf.Timestamp timestamp = 2 [(buf.validate.field).required = true];
+
+  // user_id is the identifier of the user who performed the action.
+  string user_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // action describes what action was performed (e.g., "created", "updated", "approved").
+  string action = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // details provides additional context about the action.
+  string details = 5 [(buf.validate.field).string.max_len = 1000];
+
+  // ip_address is the IP address from which the action was performed (IPv4 or IPv6).
+  string ip_address = 6 [(buf.validate.field).string = {
+    max_len: 45  // IPv6 max: 45 chars
+    ip: true
+  }];
+
+  // system_context provides additional system-level context (e.g., service name, version).
+  map<string, string> system_context = 7 [(buf.validate.field).map.max_pairs = 50];
+}
+
+// StatusTracking captures the lifecycle status of the financial position log.
+message StatusTracking {
+  // current_status is the current status of the transaction.
+  meridian.common.v1.TransactionStatus current_status = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]  // Disallow UNSPECIFIED
+  }];
+
+  // previous_status is the previous status before the current one.
+  meridian.common.v1.TransactionStatus previous_status = 2;
+
+  // status_updated_at is when the status was last updated.
+  google.protobuf.Timestamp status_updated_at = 3 [(buf.validate.field).required = true];
+
+  // status_reason provides context for status changes.
+  string status_reason = 4 [(buf.validate.field).string.max_len = 500];
+
+  // failure_reason provides details if the transaction failed.
+  string failure_reason = 5 [(buf.validate.field).string.max_len = 1000];
+}
+
+// FinancialPositionLog represents a comprehensive log of financial position for an account or transaction set.
+message FinancialPositionLog {
+  // log_id is the unique identifier for this financial position log.
+  string log_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // account_id is the account this log pertains to.
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // transaction_log_entries contains all transaction entries for this position.
+  repeated TransactionLogEntry transaction_log_entries = 3 [(buf.validate.field).repeated.max_items = 10000];
+
+  // transaction_lineage captures the relationship between transactions.
+  TransactionLineage transaction_lineage = 4;
+
+  // audit_trail contains the complete audit history.
+  repeated AuditTrailEntry audit_trail = 5 [(buf.validate.field).repeated.max_items = 10000];
+
+  // status_tracking contains the current and historical status information.
+  StatusTracking status_tracking = 6 [(buf.validate.field).required = true];
+
+  // created_at is when this log was created.
+  google.protobuf.Timestamp created_at = 7 [(buf.validate.field).required = true];
+
+  // updated_at is when this log was last updated.
+  google.protobuf.Timestamp updated_at = 8 [(buf.validate.field).required = true];
+
+  // version is used for optimistic concurrency control.
+  int64 version = 9 [(buf.validate.field).int64.gte = 0];
+}
+
+// InitiateFinancialPositionLogRequest initiates a new financial position log.
+message InitiateFinancialPositionLogRequest {
+  // account_id is the account for which to create the log.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+
+  // initial_entry is the first transaction entry (optional).
+  TransactionLogEntry initial_entry = 2;
+
+  // transaction_lineage captures initial lineage information.
+  TransactionLineage transaction_lineage = 3;
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4;
+}
+
+// InitiateFinancialPositionLogResponse returns the created log.
+message InitiateFinancialPositionLogResponse {
+  // log is the created financial position log (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
+}
+
+// UpdateFinancialPositionLogRequest updates an existing financial position log.
+message UpdateFinancialPositionLogRequest {
+  // log_id is the identifier of the log to update.
+  string log_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // new_entry is a new transaction entry to add (optional).
+  TransactionLogEntry new_entry = 2;
+
+  // status_update is a status change to apply (optional).
+  StatusTracking status_update = 3;
+
+  // audit_entry is an audit trail entry to add.
+  AuditTrailEntry audit_entry = 4;
+
+  // version is used for optimistic concurrency control.
+  int64 version = 5 [(buf.validate.field).int64.gte = 0];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 6;
+}
+
+// UpdateFinancialPositionLogResponse returns the updated log.
+message UpdateFinancialPositionLogResponse {
+  // log is the updated financial position log (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
+}
+
+// RetrieveFinancialPositionLogRequest retrieves a financial position log.
+message RetrieveFinancialPositionLogRequest {
+  // log_id is the identifier of the log to retrieve.
+  string log_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+// RetrieveFinancialPositionLogResponse returns the requested log.
+message RetrieveFinancialPositionLogResponse {
+  // log is the requested financial position log (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
+}
+
+// BulkImportTransactionsRequest imports multiple transactions at once.
+message BulkImportTransactionsRequest {
+  // log_id is the identifier of the log to import transactions into.
+  string log_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // entries are the transaction entries to import.
+  repeated TransactionLogEntry entries = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 1000  // Limit bulk imports
+  }];
+
+  // audit_entry is an audit trail entry for this bulk import (required for compliance).
+  AuditTrailEntry audit_entry = 3 [(buf.validate.field).required = true];
+
+  // version is used for optimistic concurrency control.
+  int64 version = 4 [(buf.validate.field).int64.gte = 0];
+}
+
+// BulkImportTransactionsResponse returns the result of the bulk import.
+message BulkImportTransactionsResponse {
+  // log is the updated financial position log after import (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
+
+  // imported_count is the number of transactions successfully imported.
+  int32 imported_count = 2;
+
+  // failed_count is the number of transactions that failed to import.
+  int32 failed_count = 3;
+
+  // failure_details provides details about any failures.
+  repeated string failure_details = 4;
+}
+
+// ListFinancialPositionLogsRequest lists financial position logs with filtering.
+message ListFinancialPositionLogsRequest {
+  // account_id filters logs by account (optional).
+  string account_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // status filters logs by current status (optional).
+  meridian.common.v1.TransactionStatus status = 2;
+
+  // date_range filters logs by creation date (optional).
+  meridian.common.v1.DateRange date_range = 3;
+
+  // pagination controls the page size and offset.
+  meridian.common.v1.Pagination pagination = 4;
+}
+
+// ListFinancialPositionLogsResponse returns a list of logs.
+message ListFinancialPositionLogsResponse {
+  // logs are the matching financial position logs.
+  repeated FinancialPositionLog logs = 1;
+
+  // pagination provides pagination metadata.
+  meridian.common.v1.PaginationResponse pagination = 2;
+}
+
+// PositionKeepingService provides operations for managing financial position logs.
+service PositionKeepingService {
+  // InitiateFinancialPositionLog creates a new financial position log.
+  rpc InitiateFinancialPositionLog(InitiateFinancialPositionLogRequest) returns (InitiateFinancialPositionLogResponse);
+
+  // UpdateFinancialPositionLog updates an existing financial position log.
+  rpc UpdateFinancialPositionLog(UpdateFinancialPositionLogRequest) returns (UpdateFinancialPositionLogResponse);
+
+  // RetrieveFinancialPositionLog retrieves a specific financial position log.
+  rpc RetrieveFinancialPositionLog(RetrieveFinancialPositionLogRequest) returns (RetrieveFinancialPositionLogResponse);
+
+  // BulkImportTransactions imports multiple transactions into a log at once.
+  rpc BulkImportTransactions(BulkImportTransactionsRequest) returns (BulkImportTransactionsResponse);
+
+  // ListFinancialPositionLogs lists financial position logs with filtering.
+  rpc ListFinancialPositionLogs(ListFinancialPositionLogsRequest) returns (ListFinancialPositionLogsResponse);
+}
