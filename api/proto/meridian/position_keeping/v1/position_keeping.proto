@@ -47,7 +47,7 @@ message TransactionLineage {
   string transaction_id = 1 [(buf.validate.field).string.uuid = true];
 
   // parent_transaction_id is the identifier of the parent transaction (optional, UUID format when present).
-  string parent_transaction_id = 2;
+  string parent_transaction_id = 2 [(buf.validate.field).string.uuid = true];
 
   // child_transaction_ids are identifiers of any child transactions (UUID format).
   repeated string child_transaction_ids = 3 [(buf.validate.field).repeated.items.string.uuid = true];
@@ -88,11 +88,14 @@ message AuditTrailEntry {
   // details provides additional context about the action.
   string details = 5 [(buf.validate.field).string.max_len = 1000];
 
-  // ip_address is the IP address from which the action was performed.
-  string ip_address = 6 [(buf.validate.field).string.max_len = 45];  // IPv6 max length
+  // ip_address is the IP address from which the action was performed (IPv4 or IPv6).
+  string ip_address = 6 [(buf.validate.field).string = {
+    max_len: 45  // IPv6 max: 45 chars
+    ip: true
+  }];
 
   // system_context provides additional system-level context (e.g., service name, version).
-  map<string, string> system_context = 7;
+  map<string, string> system_context = 7 [(buf.validate.field).map.max_pairs = 50];
 }
 
 // StatusTracking captures the lifecycle status of the financial position log.
@@ -128,13 +131,13 @@ message FinancialPositionLog {
   }];
 
   // transaction_log_entries contains all transaction entries for this position.
-  repeated TransactionLogEntry transaction_log_entries = 3;
+  repeated TransactionLogEntry transaction_log_entries = 3 [(buf.validate.field).repeated.max_items = 10000];
 
   // transaction_lineage captures the relationship between transactions.
   TransactionLineage transaction_lineage = 4;
 
   // audit_trail contains the complete audit history.
-  repeated AuditTrailEntry audit_trail = 5;
+  repeated AuditTrailEntry audit_trail = 5 [(buf.validate.field).repeated.max_items = 10000];
 
   // status_tracking contains the current and historical status information.
   StatusTracking status_tracking = 6 [(buf.validate.field).required = true];
@@ -172,8 +175,8 @@ message InitiateFinancialPositionLogRequest {
 
 // InitiateFinancialPositionLogResponse returns the created log.
 message InitiateFinancialPositionLogResponse {
-  // log is the created financial position log.
-  FinancialPositionLog log = 1;
+  // log is the created financial position log (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
 }
 
 // UpdateFinancialPositionLogRequest updates an existing financial position log.
@@ -202,8 +205,8 @@ message UpdateFinancialPositionLogRequest {
 
 // UpdateFinancialPositionLogResponse returns the updated log.
 message UpdateFinancialPositionLogResponse {
-  // log is the updated financial position log.
-  FinancialPositionLog log = 1;
+  // log is the updated financial position log (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
 }
 
 // RetrieveFinancialPositionLogRequest retrieves a financial position log.
@@ -217,8 +220,8 @@ message RetrieveFinancialPositionLogRequest {
 
 // RetrieveFinancialPositionLogResponse returns the requested log.
 message RetrieveFinancialPositionLogResponse {
-  // log is the requested financial position log.
-  FinancialPositionLog log = 1;
+  // log is the requested financial position log (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
 }
 
 // BulkImportTransactionsRequest imports multiple transactions at once.
@@ -244,8 +247,8 @@ message BulkImportTransactionsRequest {
 
 // BulkImportTransactionsResponse returns the result of the bulk import.
 message BulkImportTransactionsResponse {
-  // log is the updated financial position log after import.
-  FinancialPositionLog log = 1;
+  // log is the updated financial position log after import (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
 
   // imported_count is the number of transactions successfully imported.
   int32 imported_count = 2;
