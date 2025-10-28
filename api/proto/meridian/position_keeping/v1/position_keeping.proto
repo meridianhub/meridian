@@ -209,7 +209,10 @@ message UpdateFinancialPositionLogResponse {
 // RetrieveFinancialPositionLogRequest retrieves a financial position log.
 message RetrieveFinancialPositionLogRequest {
   // log_id is the identifier of the log to retrieve.
-  string log_id = 1 [(buf.validate.field).string.uuid = true];
+  string log_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
 }
 
 // RetrieveFinancialPositionLogResponse returns the requested log.
@@ -221,7 +224,10 @@ message RetrieveFinancialPositionLogResponse {
 // BulkImportTransactionsRequest imports multiple transactions at once.
 message BulkImportTransactionsRequest {
   // log_id is the identifier of the log to import transactions into.
-  string log_id = 1 [(buf.validate.field).string.uuid = true];
+  string log_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
 
   // entries are the transaction entries to import.
   repeated TransactionLogEntry entries = 2 [(buf.validate.field).repeated = {
