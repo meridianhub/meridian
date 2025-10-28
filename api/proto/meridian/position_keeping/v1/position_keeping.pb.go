@@ -29,7 +29,7 @@ type TransactionLogEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// entry_id is the unique identifier for this log entry.
 	EntryId string `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
-	// transaction_id is the identifier of the related transaction.
+	// transaction_id is the identifier of the related transaction (UUID format).
 	TransactionId string `protobuf:"bytes,2,opt,name=transaction_id,json=transactionId,proto3" json:"transaction_id,omitempty"`
 	// account_id is the account involved in this transaction.
 	AccountId string `protobuf:"bytes,3,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
@@ -136,13 +136,13 @@ func (x *TransactionLogEntry) GetReference() string {
 // TransactionLineage captures the relationship between transactions.
 type TransactionLineage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// transaction_id is the current transaction identifier.
+	// transaction_id is the current transaction identifier (UUID format).
 	TransactionId string `protobuf:"bytes,1,opt,name=transaction_id,json=transactionId,proto3" json:"transaction_id,omitempty"`
-	// parent_transaction_id is the identifier of the parent transaction (if any).
+	// parent_transaction_id is the identifier of the parent transaction (optional, UUID format when present).
 	ParentTransactionId string `protobuf:"bytes,2,opt,name=parent_transaction_id,json=parentTransactionId,proto3" json:"parent_transaction_id,omitempty"`
-	// child_transaction_ids are identifiers of any child transactions.
+	// child_transaction_ids are identifiers of any child transactions (UUID format).
 	ChildTransactionIds []string `protobuf:"bytes,3,rep,name=child_transaction_ids,json=childTransactionIds,proto3" json:"child_transaction_ids,omitempty"`
-	// related_transaction_ids are identifiers of related transactions (e.g., reversals, adjustments).
+	// related_transaction_ids are identifiers of related transactions (UUID format, e.g., reversals, adjustments).
 	RelatedTransactionIds []string `protobuf:"bytes,4,rep,name=related_transaction_ids,json=relatedTransactionIds,proto3" json:"related_transaction_ids,omitempty"`
 	// transaction_type describes the type of transaction (e.g., "payment", "reversal", "adjustment").
 	TransactionType string `protobuf:"bytes,5,opt,name=transaction_type,json=transactionType,proto3" json:"transaction_type,omitempty"`
@@ -879,7 +879,7 @@ type BulkImportTransactionsRequest struct {
 	LogId string `protobuf:"bytes,1,opt,name=log_id,json=logId,proto3" json:"log_id,omitempty"`
 	// entries are the transaction entries to import.
 	Entries []*TransactionLogEntry `protobuf:"bytes,2,rep,name=entries,proto3" json:"entries,omitempty"`
-	// audit_entry is an audit trail entry for this bulk import.
+	// audit_entry is an audit trail entry for this bulk import (required for compliance).
 	AuditEntry *AuditTrailEntry `protobuf:"bytes,3,opt,name=audit_entry,json=auditEntry,proto3" json:"audit_entry,omitempty"`
 	// version is used for optimistic concurrency control.
 	Version       int64 `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
@@ -1150,11 +1150,10 @@ var File_meridian_position_keeping_v1_position_keeping_proto protoreflect.FileDe
 
 const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\n" +
-	"3meridian/position_keeping/v1/position_keeping.proto\x12\x1cmeridian.position_keeping.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xbf\x03\n" +
+	"3meridian/position_keeping/v1/position_keeping.proto\x12\x1cmeridian.position_keeping.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1emeridian/common/v1/types.proto\"\xbd\x03\n" +
 	"\x13TransactionLogEntry\x12#\n" +
-	"\bentry_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\aentryId\x121\n" +
-	"\x0etransaction_id\x18\x02 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\rtransactionId\x12)\n" +
+	"\bentry_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\aentryId\x12/\n" +
+	"\x0etransaction_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\rtransactionId\x12)\n" +
 	"\n" +
 	"account_id\x18\x03 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\taccountId\x12?\n" +
@@ -1163,13 +1162,14 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12@\n" +
 	"\ttimestamp\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\ttimestamp\x12*\n" +
 	"\vdescription\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\xf4\x03R\vdescription\x12&\n" +
-	"\treference\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\treference\"\xea\x02\n" +
-	"\x12TransactionLineage\x121\n" +
-	"\x0etransaction_id\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\rtransactionId\x12<\n" +
-	"\x15parent_transaction_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\x13parentTransactionId\x122\n" +
-	"\x15child_transaction_ids\x18\x03 \x03(\tR\x13childTransactionIds\x126\n" +
-	"\x17related_transaction_ids\x18\x04 \x03(\tR\x15relatedTransactionIds\x124\n" +
+	"\treference\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\treference\"\xfc\x02\n" +
+	"\x12TransactionLineage\x12/\n" +
+	"\x0etransaction_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\rtransactionId\x122\n" +
+	"\x15parent_transaction_id\x18\x02 \x01(\tR\x13parentTransactionId\x12A\n" +
+	"\x15child_transaction_ids\x18\x03 \x03(\tB\r\xbaH\n" +
+	"\x92\x01\a\"\x05r\x03\xb0\x01\x01R\x13childTransactionIds\x12E\n" +
+	"\x17related_transaction_ids\x18\x04 \x03(\tB\r\xbaH\n" +
+	"\x92\x01\a\"\x05r\x03\xb0\x01\x01R\x15relatedTransactionIds\x124\n" +
 	"\x10transaction_type\x18\x05 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18dR\x0ftransactionType\x12A\n" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tcreatedAt\"\xb7\x03\n" +
@@ -1207,18 +1207,18 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tcreatedAt\x12A\n" +
 	"\n" +
 	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tupdatedAt\x12!\n" +
-	"\aversion\x18\t \x01(\x03B\a\xbaH\x04\"\x02(\x00R\aversion\"\xd8\x02\n" +
-	"#InitiateFinancialPositionLogRequest\x12)\n" +
+	"\aversion\x18\t \x01(\x03B\a\xbaH\x04\"\x02(\x00R\aversion\"\xdb\x02\n" +
+	"#InitiateFinancialPositionLogRequest\x12,\n" +
 	"\n" +
-	"account_id\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\taccountId\x12V\n" +
+	"account_id\x18\x01 \x01(\tB\r\xbaH\n" +
+	"\xc8\x01\x01r\x05\x10\x01\x18\xff\x01R\taccountId\x12V\n" +
 	"\rinitial_entry\x18\x02 \x01(\v21.meridian.position_keeping.v1.TransactionLogEntryR\finitialEntry\x12a\n" +
 	"\x13transaction_lineage\x18\x03 \x01(\v20.meridian.position_keeping.v1.TransactionLineageR\x12transactionLineage\x12K\n" +
 	"\x0fidempotency_key\x18\x04 \x01(\v2\".meridian.common.v1.IdempotencyKeyR\x0eidempotencyKey\"l\n" +
 	"$InitiateFinancialPositionLogResponse\x12D\n" +
-	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"\xa7\x03\n" +
-	"!UpdateFinancialPositionLogRequest\x12\x1f\n" +
-	"\x06log_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x05logId\x12N\n" +
+	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"\xaa\x03\n" +
+	"!UpdateFinancialPositionLogRequest\x12\"\n" +
+	"\x06log_id\x18\x01 \x01(\tB\v\xbaH\b\xc8\x01\x01r\x03\xb0\x01\x01R\x05logId\x12N\n" +
 	"\tnew_entry\x18\x02 \x01(\v21.meridian.position_keeping.v1.TransactionLogEntryR\bnewEntry\x12Q\n" +
 	"\rstatus_update\x18\x03 \x01(\v2,.meridian.position_keeping.v1.StatusTrackingR\fstatusUpdate\x12N\n" +
 	"\vaudit_entry\x18\x04 \x01(\v2-.meridian.position_keeping.v1.AuditTrailEntryR\n" +
@@ -1230,11 +1230,11 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"#RetrieveFinancialPositionLogRequest\x12\x1f\n" +
 	"\x06log_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x05logId\"l\n" +
 	"$RetrieveFinancialPositionLogResponse\x12D\n" +
-	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"\x8d\x02\n" +
+	"\x03log\x18\x01 \x01(\v22.meridian.position_keeping.v1.FinancialPositionLogR\x03log\"\x95\x02\n" +
 	"\x1dBulkImportTransactionsRequest\x12\x1f\n" +
 	"\x06log_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x05logId\x12X\n" +
-	"\aentries\x18\x02 \x03(\v21.meridian.position_keeping.v1.TransactionLogEntryB\v\xbaH\b\x92\x01\x05\b\x01\x10\xe8\aR\aentries\x12N\n" +
-	"\vaudit_entry\x18\x03 \x01(\v2-.meridian.position_keeping.v1.AuditTrailEntryR\n" +
+	"\aentries\x18\x02 \x03(\v21.meridian.position_keeping.v1.TransactionLogEntryB\v\xbaH\b\x92\x01\x05\b\x01\x10\xe8\aR\aentries\x12V\n" +
+	"\vaudit_entry\x18\x03 \x01(\v2-.meridian.position_keeping.v1.AuditTrailEntryB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"auditEntry\x12!\n" +
 	"\aversion\x18\x04 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\aversion\"\xd9\x01\n" +
 	"\x1eBulkImportTransactionsResponse\x12D\n" +
