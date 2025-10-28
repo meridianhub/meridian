@@ -16,13 +16,13 @@ func TestCurrentAccountFacility_BasicConstruction(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:            "ACC-12345",
+		AccountId:             "ACC-12345",
 		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:        currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:         commonv1.Currency_CURRENCY_GBP,
-		CreatedAt:            now,
-		UpdatedAt:            now,
-		Version:              1,
+		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		Version:               1,
 	}
 
 	if facility.GetAccountId() == "" {
@@ -68,12 +68,12 @@ func TestCurrentAccountFacility_StatusTransitions(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:            "ACC-12345",
+		AccountId:             "ACC-12345",
 		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:        currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:         commonv1.Currency_CURRENCY_GBP,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 
 	// Test transition to frozen
@@ -95,10 +95,10 @@ func TestCurrentAccountFacility_BalanceTracking(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:            "ACC-12345",
+		AccountId:             "ACC-12345",
 		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:        currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:         commonv1.Currency_CURRENCY_GBP,
+		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
 		CurrentBalance: &currentaccountv1.AccountBalance{
 			AvailableBalance: &commonv1.MoneyAmount{
 				Amount: &money.Money{
@@ -140,10 +140,10 @@ func TestCurrentAccountFacility_OverdraftLimit(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:            "ACC-12345",
+		AccountId:             "ACC-12345",
 		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:        currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:         commonv1.Currency_CURRENCY_GBP,
+		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
 		OverdraftLimit: &currentaccountv1.OverdraftConfiguration{
 			OverdraftLimit: &commonv1.MoneyAmount{
 				Amount: &money.Money{
@@ -152,9 +152,9 @@ func TestCurrentAccountFacility_OverdraftLimit(t *testing.T) {
 					Nanos:        0,
 				},
 			},
-			InterestRate:  12.5,
-			IsEnabled:     true,
-			LastUpdated:   now,
+			InterestRate: 12.5,
+			IsEnabled:    true,
+			LastUpdated:  now,
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -183,10 +183,10 @@ func TestCurrentAccountFacility_BalanceWithOverdraft(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:            "ACC-12345",
+		AccountId:             "ACC-12345",
 		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:        currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:         commonv1.Currency_CURRENCY_GBP,
+		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
 		CurrentBalance: &currentaccountv1.AccountBalance{
 			CurrentBalance: &commonv1.MoneyAmount{
 				Amount: &money.Money{
@@ -212,9 +212,9 @@ func TestCurrentAccountFacility_BalanceWithOverdraft(t *testing.T) {
 					Nanos:        0,
 				},
 			},
-			InterestRate:  10.0,
-			IsEnabled:     true,
-			LastUpdated:   now,
+			InterestRate: 10.0,
+			IsEnabled:    true,
+			LastUpdated:  now,
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -239,9 +239,9 @@ func TestDebitTransaction_BasicConstruction(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	debit := &currentaccountv1.AccountTransaction{
-		TransactionId:  "TXN-12345",
-		AccountId:      "ACC-12345",
-		Direction:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		TransactionId: "TXN-12345",
+		AccountId:     "ACC-12345",
+		Direction:     commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
 		Amount: &commonv1.MoneyAmount{
 			Amount: &money.Money{
 				CurrencyCode: "GBP",
@@ -274,9 +274,9 @@ func TestCreditTransaction_BasicConstruction(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	credit := &currentaccountv1.AccountTransaction{
-		TransactionId:  "TXN-67890",
-		AccountId:      "ACC-12345",
-		Direction:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+		TransactionId: "TXN-67890",
+		AccountId:     "ACC-12345",
+		Direction:     commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
 		Amount: &commonv1.MoneyAmount{
 			Amount: &money.Money{
 				CurrencyCode: "GBP",
@@ -350,10 +350,10 @@ func TestCurrentAccountFacility_WithTransactionHistory(t *testing.T) {
 	now := timestamppb.New(time.Now())
 
 	facility := &currentaccountv1.CurrentAccountFacility{
-		AccountId:            "ACC-12345",
+		AccountId:             "ACC-12345",
 		AccountIdentification: "GB29NWBK60161331926819",
-		AccountStatus:        currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
-		BaseCurrency:         commonv1.Currency_CURRENCY_GBP,
+		AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
 		CurrentBalance: &currentaccountv1.AccountBalance{
 			CurrentBalance: &commonv1.MoneyAmount{
 				Amount: &money.Money{CurrencyCode: "GBP", Units: 500},
