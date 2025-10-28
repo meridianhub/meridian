@@ -32,6 +32,8 @@ jobs:
         run: |
           mkdir -p coverage
           go test -v -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
+          echo "Filtering generated proto files from coverage..."
+          grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true
 
       - name: Generate coverage report
         run: go tool cover -html=coverage/coverage.out -o coverage/coverage.html
@@ -55,13 +57,13 @@ jobs:
 
       - name: Check test coverage threshold
         run: |
-          coverage=$(go tool cover -func=coverage/coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Total coverage: ${coverage}%"
-          # Temporarily lowered to 1% for proto-only changes (auto-generated code has no testable logic)
-          # TODO: Increase back to 3% after task 3 (FinancialAccounting protos) merged
+          # Use filtered coverage (excludes generated .pb.go files)
+          coverage=$(go tool cover -func=coverage/coverage-filtered.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Coverage (excluding generated proto files): ${coverage}%"
+          # Threshold for actual code (not including generated proto files)
           # TODO: Increase to 50% as service implementation and domain logic is added
-          if (( $(echo "$coverage < 1.0" | bc -l) )); then
-            echo "❌ Coverage ${coverage}% is below 1% threshold"
+          if (( $(echo "$coverage < 3.0" | bc -l) )); then
+            echo "❌ Coverage ${coverage}% is below 3% threshold"
             exit 1
           fi
           echo "✅ Coverage ${coverage}% meets threshold"
