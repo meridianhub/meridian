@@ -47,7 +47,7 @@ jobs:
         cache: true
 
     - name: Install Gosec
-      run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      run: go install github.com/securego/gosec/v2/cmd/gosec@v2.21.4
 
     - name: Run Gosec Security Scanner
       run: |

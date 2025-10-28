@@ -75,9 +75,17 @@ spec:
     - protocol: TCP
       port: 6379  # Redis
 
-  # Allow HTTPS outbound (for external APIs)
+  # Allow HTTPS outbound (for external APIs only, not cluster-internal)
   - to:
-    - namespaceSelector: {}
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        # Exclude private IP ranges to prevent data exfiltration to compromised pods
+        - 10.0.0.0/8        # Private Class A
+        - 172.16.0.0/12     # Private Class B
+        - 192.168.0.0/16    # Private Class C
+        - 169.254.0.0/16    # Link-local
+        - 127.0.0.0/8       # Loopback
     ports:
     - protocol: TCP
       port: 443
