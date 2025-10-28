@@ -129,6 +129,64 @@ func (m *CurrentAccountFacility) validate(all bool) error {
 
 	// no validation rules for Version
 
+	if all {
+		switch v := interface{}(m.GetCurrentBalance()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, CurrentAccountFacilityValidationError{
+					field:  "CurrentBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, CurrentAccountFacilityValidationError{
+					field:  "CurrentBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetCurrentBalance()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return CurrentAccountFacilityValidationError{
+				field:  "CurrentBalance",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if all {
+		switch v := interface{}(m.GetOverdraftLimit()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, CurrentAccountFacilityValidationError{
+					field:  "OverdraftLimit",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, CurrentAccountFacilityValidationError{
+					field:  "OverdraftLimit",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetOverdraftLimit()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return CurrentAccountFacilityValidationError{
+				field:  "OverdraftLimit",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
 	if len(errors) > 0 {
 		return CurrentAccountFacilityMultiError(errors)
 	}
@@ -208,3 +266,354 @@ var _ interface {
 	Cause() error
 	ErrorName() string
 } = CurrentAccountFacilityValidationError{}
+
+// Validate checks the field values on AccountBalance with the rules defined in
+// the proto definition for this message. If any rules are violated, the first
+// error encountered is returned, or nil if there are no violations.
+func (m *AccountBalance) Validate() error {
+	return m.validate(false)
+}
+
+// ValidateAll checks the field values on AccountBalance with the rules defined
+// in the proto definition for this message. If any rules are violated, the
+// result is a list of violation errors wrapped in AccountBalanceMultiError,
+// or nil if none found.
+func (m *AccountBalance) ValidateAll() error {
+	return m.validate(true)
+}
+
+func (m *AccountBalance) validate(all bool) error {
+	if m == nil {
+		return nil
+	}
+
+	var errors []error
+
+	if all {
+		switch v := interface{}(m.GetCurrentBalance()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, AccountBalanceValidationError{
+					field:  "CurrentBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, AccountBalanceValidationError{
+					field:  "CurrentBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetCurrentBalance()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return AccountBalanceValidationError{
+				field:  "CurrentBalance",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if all {
+		switch v := interface{}(m.GetAvailableBalance()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, AccountBalanceValidationError{
+					field:  "AvailableBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, AccountBalanceValidationError{
+					field:  "AvailableBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetAvailableBalance()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return AccountBalanceValidationError{
+				field:  "AvailableBalance",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if all {
+		switch v := interface{}(m.GetLastUpdated()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, AccountBalanceValidationError{
+					field:  "LastUpdated",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, AccountBalanceValidationError{
+					field:  "LastUpdated",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetLastUpdated()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return AccountBalanceValidationError{
+				field:  "LastUpdated",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return AccountBalanceMultiError(errors)
+	}
+
+	return nil
+}
+
+// AccountBalanceMultiError is an error wrapping multiple validation errors
+// returned by AccountBalance.ValidateAll() if the designated constraints
+// aren't met.
+type AccountBalanceMultiError []error
+
+// Error returns a concatenation of all the error messages it wraps.
+func (m AccountBalanceMultiError) Error() string {
+	msgs := make([]string, 0, len(m))
+	for _, err := range m {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// AllErrors returns a list of validation violation errors.
+func (m AccountBalanceMultiError) AllErrors() []error { return m }
+
+// AccountBalanceValidationError is the validation error returned by
+// AccountBalance.Validate if the designated constraints aren't met.
+type AccountBalanceValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e AccountBalanceValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e AccountBalanceValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e AccountBalanceValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e AccountBalanceValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e AccountBalanceValidationError) ErrorName() string { return "AccountBalanceValidationError" }
+
+// Error satisfies the builtin error interface
+func (e AccountBalanceValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sAccountBalance.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = AccountBalanceValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = AccountBalanceValidationError{}
+
+// Validate checks the field values on OverdraftConfiguration with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, the first error encountered is returned, or nil if there are no violations.
+func (m *OverdraftConfiguration) Validate() error {
+	return m.validate(false)
+}
+
+// ValidateAll checks the field values on OverdraftConfiguration with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, the result is a list of violation errors wrapped in
+// OverdraftConfigurationMultiError, or nil if none found.
+func (m *OverdraftConfiguration) ValidateAll() error {
+	return m.validate(true)
+}
+
+func (m *OverdraftConfiguration) validate(all bool) error {
+	if m == nil {
+		return nil
+	}
+
+	var errors []error
+
+	if all {
+		switch v := interface{}(m.GetOverdraftLimit()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, OverdraftConfigurationValidationError{
+					field:  "OverdraftLimit",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, OverdraftConfigurationValidationError{
+					field:  "OverdraftLimit",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetOverdraftLimit()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return OverdraftConfigurationValidationError{
+				field:  "OverdraftLimit",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	// no validation rules for InterestRate
+
+	// no validation rules for IsEnabled
+
+	if all {
+		switch v := interface{}(m.GetLastUpdated()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, OverdraftConfigurationValidationError{
+					field:  "LastUpdated",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, OverdraftConfigurationValidationError{
+					field:  "LastUpdated",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetLastUpdated()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return OverdraftConfigurationValidationError{
+				field:  "LastUpdated",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return OverdraftConfigurationMultiError(errors)
+	}
+
+	return nil
+}
+
+// OverdraftConfigurationMultiError is an error wrapping multiple validation
+// errors returned by OverdraftConfiguration.ValidateAll() if the designated
+// constraints aren't met.
+type OverdraftConfigurationMultiError []error
+
+// Error returns a concatenation of all the error messages it wraps.
+func (m OverdraftConfigurationMultiError) Error() string {
+	msgs := make([]string, 0, len(m))
+	for _, err := range m {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// AllErrors returns a list of validation violation errors.
+func (m OverdraftConfigurationMultiError) AllErrors() []error { return m }
+
+// OverdraftConfigurationValidationError is the validation error returned by
+// OverdraftConfiguration.Validate if the designated constraints aren't met.
+type OverdraftConfigurationValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e OverdraftConfigurationValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e OverdraftConfigurationValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e OverdraftConfigurationValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e OverdraftConfigurationValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e OverdraftConfigurationValidationError) ErrorName() string {
+	return "OverdraftConfigurationValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e OverdraftConfigurationValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sOverdraftConfiguration.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = OverdraftConfigurationValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = OverdraftConfigurationValidationError{}

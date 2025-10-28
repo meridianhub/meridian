@@ -55,4 +55,43 @@ message CurrentAccountFacility {
 
   // version is for optimistic locking
   int32 version = 7 [(buf.validate.field).int32 = {gte: 0}];
+
+  // current_balance tracks the current account balance
+  // Task 5.2: Implement account balance tracking and overdraft limits
+  AccountBalance current_balance = 8;
+
+  // overdraft_limit configures the overdraft facility for this account
+  OverdraftConfiguration overdraft_limit = 9;
+}
+
+// AccountBalance represents the current balance state of an account
+// Task 5.2: Account balance tracking
+message AccountBalance {
+  // current_balance is the actual account balance (can be negative if overdrawn)
+  meridian.common.v1.MoneyAmount current_balance = 1 [(buf.validate.field).required = true];
+
+  // available_balance is current balance plus overdraft limit (if enabled)
+  meridian.common.v1.MoneyAmount available_balance = 2 [(buf.validate.field).required = true];
+
+  // last_updated is when the balance was last calculated
+  google.protobuf.Timestamp last_updated = 3 [(buf.validate.field).required = true];
+}
+
+// OverdraftConfiguration defines the overdraft facility settings
+// Task 5.2: Overdraft limits
+message OverdraftConfiguration {
+  // overdraft_limit is the maximum overdraft amount allowed
+  meridian.common.v1.MoneyAmount overdraft_limit = 1 [(buf.validate.field).required = true];
+
+  // interest_rate is the annual percentage rate for overdraft usage
+  double interest_rate = 2 [(buf.validate.field).double = {
+    gte: 0
+    lte: 100
+  }];
+
+  // is_enabled indicates if overdraft facility is active
+  bool is_enabled = 3;
+
+  // last_updated is when the overdraft configuration was last modified
+  google.protobuf.Timestamp last_updated = 4;
 }
