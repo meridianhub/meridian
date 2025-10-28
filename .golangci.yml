@@ -132,6 +132,7 @@ issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  uniq-by-line: true
 
   exclude-rules:
     # Exclude some linters for test files
@@ -172,8 +173,8 @@ issues:
         - gocognit
 
 output:
-  format: colored-line-number
+  formats:
+    - format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
-  uniq-by-line: true
   sort-results: true
