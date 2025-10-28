@@ -59,7 +59,7 @@ jobs:
             - Ensure golangci-lint compliance
             - Do NOT question tool versions unless genuinely outdated
 
-            Read CLAUDE.md in the repository root for full development guidelines.
+            Read CONTRIBUTING.md in the repository root for full development guidelines.
 
           # Customize Claude's behavior
           claude_args: |

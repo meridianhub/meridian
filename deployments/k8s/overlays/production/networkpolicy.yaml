@@ -36,10 +36,12 @@ spec:
       port: 8080  # Metrics endpoint
 
   egress:
-  # Allow DNS resolution (CoreDNS typically runs in kube-system)
-  # Note: Using empty selector as kube-system doesn't have standard labels
+  # Allow DNS resolution (CoreDNS runs in kube-system namespace)
+  # Using kubernetes.io/metadata.name label (standard in K8s 1.21+)
   - to:
-    - namespaceSelector: {}
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
     ports:
     - protocol: UDP
       port: 53

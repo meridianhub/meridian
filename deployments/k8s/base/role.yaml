@@ -7,12 +7,8 @@ metadata:
     component: ledger
     managed-by: kustomize
 rules:
-# Allow reading own pod information for health checks and metadata
-# Note: Use downward API in deployment to inject pod name/namespace as env vars
-# instead of listing all pods (reduces information exposure risk)
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get"]
+# Pod metadata (POD_NAME, POD_NAMESPACE, POD_IP) is injected via downward API
+# in deployment.yaml (see env vars using fieldRef). No RBAC permission needed.
 
 # Allow reading ConfigMaps for configuration reload without restart
 - apiGroups: [""]
