@@ -17,7 +17,7 @@ ALL_CHECKS_PASSED=true
 
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║                                                          ║"
-echo "║  Meridian Development Environment Setup Verification    ║"
+echo "║  Meridian Development Environment Setup Verification     ║"
 echo "║                                                          ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
@@ -87,11 +87,12 @@ check_k8s_cluster() {
     local current_context
     current_context=$(kubectl config current-context 2>/dev/null || echo "none")
 
-    # Try to connect to cluster with timeout
+    # Try to connect to cluster with timeout (single invocation)
     local cluster_error
-    cluster_error=$(timeout 5 kubectl cluster-info 2>&1 >/dev/null || echo "timeout")
+    local exit_code=0
+    cluster_error=$(timeout 5 kubectl cluster-info 2>&1) || exit_code=$?
 
-    if timeout 5 kubectl cluster-info &> /dev/null; then
+    if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}✓${NC} Kubernetes cluster accessible"
         echo -e "  Context: $current_context"
 
@@ -104,7 +105,8 @@ check_k8s_cluster() {
         echo -e "  Current context: $current_context"
 
         # Provide specific diagnosis based on error
-        if echo "$cluster_error" | grep -q "AWS SSO\|aws sso login"; then
+        # Check for AWS/EKS context or AWS authentication errors
+        if echo "$current_context" | grep -q "arn:aws:eks\|\.eks\."; then
             echo -e ""
             echo -e "  ${YELLOW}Diagnosis:${NC} kubectl is configured for AWS EKS cluster requiring SSO login"
             echo -e ""
@@ -113,7 +115,7 @@ check_k8s_cluster() {
 
             # Check for available local contexts
             local local_contexts
-            local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "docker-desktop|rancher-desktop|minikube|kind|colima" || echo "")
+            local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "kind-|docker-desktop|rancher-desktop|minikube|colima")
 
             if [ -n "$local_contexts" ]; then
                 echo -e "  ${GREEN}Available local contexts:${NC}"
