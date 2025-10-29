@@ -152,36 +152,26 @@ spec:
             memory: 512Mi
 ''')
 
-# Kafka + Zookeeper using bitnami charts
-# Zookeeper (required for Kafka)
-k8s_yaml(helm_remote(
-  'zookeeper',
-  repo_name='bitnami',
-  repo_url='https://charts.bitnami.com/bitnami',
+# Kafka + Zookeeper using Confluent helm charts
+# Uses publicly available Confluent images
+helm_remote(
+  'cp-helm-charts',
+  repo_name='confluentinc',
+  repo_url='https://confluentinc.github.io/cp-helm-charts/',
   namespace=k8s_namespace,
   values=[
-    'deployments/tilt/zookeeper-values.yaml',
+    'deployments/tilt/confluent-values.yaml',
   ],
-))
-
-# Kafka
-k8s_yaml(helm_remote(
-  'kafka',
-  repo_name='bitnami',
-  repo_url='https://charts.bitnami.com/bitnami',
-  namespace=k8s_namespace,
-  values=[
-    'deployments/tilt/kafka-values.yaml',
-  ],
-))
+)
 
 # =============================================================================
 # Main Application
 # =============================================================================
 
 # Build Docker image with live reload
+# Use simple 'meridian' name to match deployment spec
 docker_build(
-  full_image,
+  'meridian',
   context='.',
   dockerfile='Dockerfile',
   build_args={
@@ -203,8 +193,8 @@ docker_build(
       trigger=['./cmd', './internal', './pkg'],
     ),
 
-    # Restart the service
-    restart_container(),
+    # Restart the service using HUP signal
+    run('kill -HUP 1', trigger=['./cmd', './internal', './pkg']),
   ],
 )
 
@@ -247,19 +237,20 @@ k8s_resource(
   resource_deps=[],
 )
 
-# Zookeeper resource
+# Confluent Platform resources (managed by helm chart)
 k8s_resource(
-  'zookeeper',
+  'cp-helm-charts-cp-zookeeper',
+  new_name='zookeeper',
   port_forwards='2181:2181',
-  labels=['messaging'],
+  labels=['infrastructure', 'messaging'],
   resource_deps=[],
 )
 
-# Kafka resource
 k8s_resource(
-  'kafka',
+  'cp-helm-charts-cp-kafka',
+  new_name='kafka',
   port_forwards='9092:9092',
-  labels=['messaging'],
+  labels=['infrastructure', 'messaging'],
   resource_deps=['zookeeper'],
 )
 
