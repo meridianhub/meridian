@@ -11,7 +11,7 @@ allow_k8s_contexts(['kind-kind', 'minikube', 'docker-desktop', 'colima'])
 # =============================================================================
 
 # Docker image configuration
-docker_registry = os.getenv('DOCKER_REGISTRY', 'ghcr.io/bjcoombs')
+docker_registry = os.getenv('DOCKER_REGISTRY', 'ghcr.io/meridianhub')
 image_name = 'meridian'
 full_image = '{}/{}'.format(docker_registry, image_name)
 

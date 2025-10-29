@@ -59,22 +59,19 @@ curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 ```
 
-**Kubernetes Cluster** (choose one):
+**Kubernetes Cluster**:
 ```bash
-# Option 1: Docker Desktop
-# Enable Kubernetes in Docker Desktop settings
-
-# Option 2: kind (Kubernetes in Docker)
+# Option 1: Kind with ctlptl (Recommended)
 brew install kind
-kind create cluster
+brew install tilt-dev/tap/ctlptl
+ctlptl create cluster kind --name=meridian-local
+
+# Option 2: Docker Desktop
+# Enable Kubernetes in Docker Desktop settings
 
 # Option 3: minikube
 brew install minikube
 minikube start
-
-# Option 4: colima (macOS)
-brew install colima
-colima start --kubernetes
 ```
 
 **kubectl and Helm**
@@ -110,7 +107,7 @@ brew install golangci-lint
 
 ```bash
 # Clone repository
-git clone git@github.com:bjcoombs/meridian.git
+git clone git@github.com:meridianhub/meridian.git
 cd meridian
 
 # Install Go dependencies
@@ -464,8 +461,8 @@ Place ADRs in `docs/adr/` with numbering:
 ## Getting Help
 
 - **Documentation**: Check `docs/` directory
-- **Issues**: Browse existing [GitHub issues](https://github.com/bjcoombs/meridian/issues)
-- **Discussions**: Use [GitHub Discussions](https://github.com/bjcoombs/meridian/discussions)
+- **Issues**: Browse existing [GitHub issues](https://github.com/meridianhub/meridian/issues)
+- **Discussions**: Use [GitHub Discussions](https://github.com/meridianhub/meridian/discussions)
 - **Questions**: Ask in PR comments or create an issue
 
 ## Code of Conduct

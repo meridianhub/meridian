@@ -1,4 +1,4 @@
-module github.com/bjcoombs/meridian
+module github.com/meridianhub/meridian
 
 go 1.25.3
 

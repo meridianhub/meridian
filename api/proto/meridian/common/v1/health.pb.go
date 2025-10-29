@@ -185,7 +185,7 @@ const file_meridian_common_v1_health_proto_rawDesc = "" +
 	"\x1aSERVING_STATUS_NOT_SERVING\x10\x02\x12\x1a\n" +
 	"\x16SERVING_STATUS_UNKNOWN\x10\x032]\n" +
 	"\rHealthService\x12L\n" +
-	"\x05Check\x12 .meridian.common.v1.CheckRequest\x1a!.meridian.common.v1.CheckResponseBDZBgithub.com/bjcoombs/meridian/api/proto/meridian/common/v1;commonv1b\x06proto3"
+	"\x05Check\x12 .meridian.common.v1.CheckRequest\x1a!.meridian.common.v1.CheckResponseBDZBgithub.com/meridianhub/meridian/api/proto/meridian/common/v1;commonv1b\x06proto3"
 
 var (
 	file_meridian_common_v1_health_proto_rawDescOnce sync.Once

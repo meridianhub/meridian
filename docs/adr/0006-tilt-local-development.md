@@ -157,7 +157,7 @@ meridian/
 
 ```python
 docker_build(
-  'ghcr.io/bjcoombs/meridian',
+  'ghcr.io/meridianhub/meridian',
   context='.',
   dockerfile='Dockerfile',
   live_update=[

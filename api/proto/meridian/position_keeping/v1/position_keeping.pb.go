@@ -8,7 +8,7 @@ package positionkeepingv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
+	v1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -1261,7 +1261,7 @@ const file_meridian_position_keeping_v1_position_keeping_proto_rawDesc = "" +
 	"\x1aUpdateFinancialPositionLog\x12?.meridian.position_keeping.v1.UpdateFinancialPositionLogRequest\x1a@.meridian.position_keeping.v1.UpdateFinancialPositionLogResponse\x12\xa5\x01\n" +
 	"\x1cRetrieveFinancialPositionLog\x12A.meridian.position_keeping.v1.RetrieveFinancialPositionLogRequest\x1aB.meridian.position_keeping.v1.RetrieveFinancialPositionLogResponse\x12\x93\x01\n" +
 	"\x16BulkImportTransactions\x12;.meridian.position_keeping.v1.BulkImportTransactionsRequest\x1a<.meridian.position_keeping.v1.BulkImportTransactionsResponse\x12\x9c\x01\n" +
-	"\x19ListFinancialPositionLogs\x12>.meridian.position_keeping.v1.ListFinancialPositionLogsRequest\x1a?.meridian.position_keeping.v1.ListFinancialPositionLogsResponseBWZUgithub.com/bjcoombs/meridian/api/proto/meridian/position_keeping/v1;positionkeepingv1b\x06proto3"
+	"\x19ListFinancialPositionLogs\x12>.meridian.position_keeping.v1.ListFinancialPositionLogsRequest\x1a?.meridian.position_keeping.v1.ListFinancialPositionLogsResponseBWZUgithub.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1;positionkeepingv1b\x06proto3"
 
 var (
 	file_meridian_position_keeping_v1_position_keeping_proto_rawDescOnce sync.Once

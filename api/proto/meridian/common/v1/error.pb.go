@@ -423,7 +423,7 @@ const file_meridian_common_v1_error_proto_rawDesc = "" +
 	" ERROR_CODE_DUPLICATE_TRANSACTION\x10\xd9\x0f\x12(\n" +
 	"#ERROR_CODE_CONTROL_RECORD_NOT_FOUND\x10\xb8\x17\x12*\n" +
 	"%ERROR_CODE_BEHAVIOR_QUALIFIER_INVALID\x10\xb9\x17\x12*\n" +
-	"%ERROR_CODE_SERVICE_DOMAIN_UNAVAILABLE\x10\xba\x17BDZBgithub.com/bjcoombs/meridian/api/proto/meridian/common/v1;commonv1b\x06proto3"
+	"%ERROR_CODE_SERVICE_DOMAIN_UNAVAILABLE\x10\xba\x17BDZBgithub.com/meridianhub/meridian/api/proto/meridian/common/v1;commonv1b\x06proto3"
 
 var (
 	file_meridian_common_v1_error_proto_rawDescOnce sync.Once

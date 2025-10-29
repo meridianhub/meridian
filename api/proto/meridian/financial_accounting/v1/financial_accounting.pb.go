@@ -8,7 +8,7 @@ package financialaccountingv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
+	v1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	money "google.golang.org/genproto/googleapis/type/money"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -1084,7 +1084,7 @@ const file_meridian_financial_accounting_v1_financial_accounting_proto_rawDesc =
 	"\x1bRetrieveFinancialBookingLog\x12D.meridian.financial_accounting.v1.RetrieveFinancialBookingLogRequest\x1aE.meridian.financial_accounting.v1.RetrieveFinancialBookingLogResponse\x12\xa1\x01\n" +
 	"\x18ListFinancialBookingLogs\x12A.meridian.financial_accounting.v1.ListFinancialBookingLogsRequest\x1aB.meridian.financial_accounting.v1.ListFinancialBookingLogsResponse\x12\x95\x01\n" +
 	"\x14CaptureLedgerPosting\x12=.meridian.financial_accounting.v1.CaptureLedgerPostingRequest\x1a>.meridian.financial_accounting.v1.CaptureLedgerPostingResponse\x12\x98\x01\n" +
-	"\x15RetrieveLedgerPosting\x12>.meridian.financial_accounting.v1.RetrieveLedgerPostingRequest\x1a?.meridian.financial_accounting.v1.RetrieveLedgerPostingResponseB_Z]github.com/bjcoombs/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1b\x06proto3"
+	"\x15RetrieveLedgerPosting\x12>.meridian.financial_accounting.v1.RetrieveLedgerPostingRequest\x1a?.meridian.financial_accounting.v1.RetrieveLedgerPostingResponseB_Z]github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1b\x06proto3"
 
 var (
 	file_meridian_financial_accounting_v1_financial_accounting_proto_rawDescOnce sync.Once

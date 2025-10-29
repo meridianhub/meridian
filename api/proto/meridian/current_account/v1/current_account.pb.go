@@ -8,7 +8,7 @@ package currentaccountv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
+	v1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -589,7 +589,7 @@ const file_meridian_current_account_v1_current_account_proto_rawDesc = "" +
 	"\x1aACCOUNT_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ACCOUNT_STATUS_ACTIVE\x10\x01\x12\x19\n" +
 	"\x15ACCOUNT_STATUS_FROZEN\x10\x02\x12\x19\n" +
-	"\x15ACCOUNT_STATUS_CLOSED\x10\x03BUZSgithub.com/bjcoombs/meridian/api/proto/meridian/current_account/v1;currentaccountv1b\x06proto3"
+	"\x15ACCOUNT_STATUS_CLOSED\x10\x03BUZSgithub.com/meridianhub/meridian/api/proto/meridian/current_account/v1;currentaccountv1b\x06proto3"
 
 var (
 	file_meridian_current_account_v1_current_account_proto_rawDescOnce sync.Once

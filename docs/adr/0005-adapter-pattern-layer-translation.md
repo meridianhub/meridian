@@ -107,7 +107,7 @@ package persistence
 
 import (
     "context"
-    "github.com/bjcoombs/meridian/internal/domain"
+    "github.com/meridianhub/meridian/internal/domain"
     "github.com/google/uuid"
     "gorm.io/gorm"
 )
@@ -200,8 +200,8 @@ package events
 
 import (
     "context"
-    "github.com/bjcoombs/meridian/internal/domain"
-    eventspb "github.com/bjcoombs/meridian/api/proto/events/financial_accounting/v1"
+    "github.com/meridianhub/meridian/internal/domain"
+    eventspb "github.com/meridianhub/meridian/api/proto/events/financial_accounting/v1"
     "github.com/google/uuid"
     "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -264,8 +264,8 @@ package grpc
 
 import (
     "context"
-    "github.com/bjcoombs/meridian/internal/domain"
-    pb "github.com/bjcoombs/meridian/api/proto/financial_accounting/v1"
+    "github.com/meridianhub/meridian/internal/domain"
+    pb "github.com/meridianhub/meridian/api/proto/financial_accounting/v1"
     "google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -492,8 +492,8 @@ import (
     "testing"
     "time"
 
-    "github.com/bjcoombs/meridian/internal/adapters/persistence"
-    "github.com/bjcoombs/meridian/internal/domain"
+    "github.com/meridianhub/meridian/internal/adapters/persistence"
+    "github.com/meridianhub/meridian/internal/domain"
     "github.com/google/uuid"
     "github.com/stretchr/testify/assert"
 )
@@ -686,7 +686,7 @@ func (b *BookingLog) Save() error {
 * [Hexagonal Architecture (Alistair Cockburn)](https://alistair.cockburn.us/hexagonal-architecture/)
 * [Implementing Domain-Driven Design (Vaughn Vernon)](https://www.amazon.com/Implementing-Domain-Driven-Design-Vaughn-Vernon/dp/0321834577)
 * [Clean Architecture (Robert C. Martin)](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
-* [GitHub Issue #3: Platform Services](https://github.com/bjcoombs/meridian/issues/3)
+* [GitHub Issue #3: Platform Services](https://github.com/meridianhub/meridian/issues/3)
 
 ## Notes
 

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package meridian.common.v1;
 
-option go_package = "github.com/bjcoombs/meridian/api/proto/meridian/common/v1;commonv1";
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/common/v1;commonv1";
 
 // HealthService provides health check endpoints for all Meridian services.
 service HealthService {

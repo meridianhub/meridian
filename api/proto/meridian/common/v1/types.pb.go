@@ -602,7 +602,7 @@ const file_meridian_common_v1_types_proto_rawDesc = "" +
 	"\fCURRENCY_JPY\x10\x04\x12\x10\n" +
 	"\fCURRENCY_CHF\x10\x05\x12\x10\n" +
 	"\fCURRENCY_CAD\x10\x06\x12\x10\n" +
-	"\fCURRENCY_AUD\x10\aBDZBgithub.com/bjcoombs/meridian/api/proto/meridian/common/v1;commonv1b\x06proto3"
+	"\fCURRENCY_AUD\x10\aBDZBgithub.com/meridianhub/meridian/api/proto/meridian/common/v1;commonv1b\x06proto3"
 
 var (
 	file_meridian_common_v1_types_proto_rawDescOnce sync.Once

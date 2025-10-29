@@ -7,7 +7,7 @@ import "google/protobuf/timestamp.proto";
 import "google/type/money.proto";
 import "meridian/common/v1/types.proto";
 
-option go_package = "github.com/bjcoombs/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
 
 // FinancialBookingLog represents the BIAN Financial Booking Log entity.
 // It maintains records of financial transactions and their processing status.
