@@ -50,10 +50,10 @@ check_command() {
                 version=$(kind version 2>/dev/null | awk '{print $2}' | head -1)
                 ;;
             ctlptl)
-                version=$(ctlptl version 2>/dev/null | grep 'Version:' | awk '{print $2}')
+                version=$(ctlptl version 2>/dev/null | awk '{print $1}' | sed 's/,//')
                 ;;
             golangci-lint)
-                version=$(golangci-lint version --format short 2>/dev/null | head -1)
+                version=$(golangci-lint version --short 2>/dev/null | head -1)
                 ;;
             buf)
                 version=$(buf --version 2>/dev/null)
