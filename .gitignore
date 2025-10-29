@@ -26,7 +26,7 @@ node_modules/
 
 # Task Master (managed at parent directory level)
 .taskmaster/
-# CLAUDE.md is now part of project documentation (removed from gitignore)
+CLAUDE.md
 .mcp.json
 
 # Go specific
