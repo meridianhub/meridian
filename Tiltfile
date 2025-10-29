@@ -3,8 +3,12 @@
 # Tiltfile for Meridian local development
 # Fast Kubernetes development with live reload
 
+# Load Tilt extensions
+load('ext://helm_remote', 'helm_remote')
+load('ext://restart_process', 'docker_build_with_restart')
+
 # Allow Tilt to connect to local Kubernetes cluster
-allow_k8s_contexts(['kind-kind', 'minikube', 'docker-desktop', 'colima'])
+allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desktop', 'colima', 'rancher-desktop'])
 
 # =============================================================================
 # Configuration
@@ -149,12 +153,11 @@ spec:
 ''')
 
 # Kafka + Zookeeper using bitnami charts
-helm_repo('bitnami', 'https://charts.bitnami.com/bitnami')
-
 # Zookeeper (required for Kafka)
-k8s_yaml(helm(
-  'bitnami/zookeeper',
-  name='zookeeper',
+k8s_yaml(helm_remote(
+  'zookeeper',
+  repo_name='bitnami',
+  repo_url='https://charts.bitnami.com/bitnami',
   namespace=k8s_namespace,
   values=[
     'deployments/tilt/zookeeper-values.yaml',
@@ -162,9 +165,10 @@ k8s_yaml(helm(
 ))
 
 # Kafka
-k8s_yaml(helm(
-  'bitnami/kafka',
-  name='kafka',
+k8s_yaml(helm_remote(
+  'kafka',
+  repo_name='bitnami',
+  repo_url='https://charts.bitnami.com/bitnami',
   namespace=k8s_namespace,
   values=[
     'deployments/tilt/kafka-values.yaml',
@@ -288,9 +292,6 @@ local_resource(
 
 # Tilt UI settings
 update_settings(max_parallel_updates=3, k8s_upsert_timeout_secs=60)
-
-# Enable Tilt extensions
-load('ext://restart_process', 'docker_build_with_restart')
 
 print("""
 ╔══════════════════════════════════════════════════════════════╗
