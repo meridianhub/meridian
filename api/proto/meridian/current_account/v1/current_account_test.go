@@ -413,6 +413,7 @@ func TestCurrentAccountFacility_WithTransactionHistory(t *testing.T) {
 		t.Error("Second transaction should be DEBIT")
 	}
 }
+
 // TestValidation_IBANFormat tests IBAN format validation
 func TestValidation_IBANFormat(t *testing.T) {
 	validator, err := protovalidate.New()
