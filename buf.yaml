@@ -20,4 +20,5 @@ breaking:
     - FILE
   except:
     - EXTENSION_MESSAGE_NO_DELETE  # Allow during initial development
+    - FILE_OPTION_GO_PACKAGE_SAME  # Allow for organizational rename (bjcoombs -> meridianhub)
   ignore_unstable_packages: true
