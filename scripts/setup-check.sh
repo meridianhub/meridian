@@ -147,6 +147,30 @@ check_k8s_cluster() {
             echo -e ""
             echo -e "  ${YELLOW}Diagnosis:${NC} Cluster not running or unreachable"
             echo -e ""
+
+            # Offer to create cluster automatically if ctlptl and kind are available
+            if command -v ctlptl &> /dev/null && command -v kind &> /dev/null && docker info &> /dev/null; then
+                echo -e "  ${GREEN}I can create a Kind cluster for you!${NC}"
+                echo -e ""
+                read -p "  Create Kind cluster 'meridian-local' now? (y/n): " -n 1 -r
+                echo ""
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    echo -e ""
+                    echo -e "  ${BLUE}Creating Kind cluster 'meridian-local'...${NC}"
+                    if ctlptl create cluster kind --name=meridian-local; then
+                        echo -e ""
+                        echo -e "  ${GREEN}✓${NC} Kind cluster created successfully!"
+                        echo -e "  Run this script again to verify, or start developing with: ${BLUE}tilt up${NC}"
+                        echo ""
+                        exit 0
+                    else
+                        echo -e ""
+                        echo -e "  ${RED}✗${NC} Failed to create cluster"
+                    fi
+                fi
+                echo -e ""
+            fi
+
             echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Start a local Kubernetes cluster"
             echo -e ""
             echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
