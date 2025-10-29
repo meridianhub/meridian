@@ -53,7 +53,7 @@ help:
 	@echo "  make proto-breaking    - Check for breaking proto changes"
 	@echo "  make proto-deps-update - Update buf.lock with latest dependencies"
 	@echo "  make proto-deps-graph  - Display dependency graph"
-	@echo "  make proto-plugins-info- Display current protoc plugin versions"
+	@echo "  make proto-plugins-info - Display current protoc plugin versions"
 	@echo "  make docker            - Build Docker images"
 	@echo "  make deploy-local      - Deploy to local Kubernetes using Tilt"
 	@echo "  make coverage          - Generate and open HTML coverage report"
