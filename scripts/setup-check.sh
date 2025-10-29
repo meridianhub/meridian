@@ -46,6 +46,12 @@ check_command() {
             tilt)
                 version=$(tilt version | head -1 | awk '{print $2}' | sed 's/,//')
                 ;;
+            kind)
+                version=$(kind version 2>/dev/null | awk '{print $2}' | head -1)
+                ;;
+            ctlptl)
+                version=$(ctlptl version 2>/dev/null | grep 'Version:' | awk '{print $2}')
+                ;;
             golangci-lint)
                 version=$(golangci-lint version --format short 2>/dev/null | head -1)
                 ;;
@@ -125,23 +131,33 @@ check_k8s_cluster() {
                 echo -e ""
                 echo -e "  ${YELLOW}Run one of the above commands to switch to local development.${NC}"
             else
-                echo -e "  ${YELLOW}No local cluster contexts found. Start a local cluster:${NC}"
-                echo -e "    - Docker Desktop: Enable Kubernetes in Docker Desktop settings"
-                echo -e "    - Rancher Desktop: Enable Kubernetes in Rancher Desktop preferences"
-                echo -e "    - kind: kind create cluster"
+                echo -e "  ${YELLOW}No local cluster contexts found. Create a local cluster:${NC}"
+                echo -e ""
+                echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
+                echo -e "    1. Ensure Docker Desktop is running"
+                echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=meridian-local${NC}"
+                echo -e "    3. Verify: kubectl config use-context kind-meridian-local"
+                echo -e ""
+                echo -e "  ${YELLOW}Alternative options:${NC}"
+                echo -e "    - Docker Desktop: Enable Kubernetes in settings (Preferences → Kubernetes)"
+                echo -e "    - Rancher Desktop: Enable Kubernetes in preferences"
                 echo -e "    - minikube: minikube start"
-                echo -e "    - colima: colima start --kubernetes"
             fi
         elif echo "$cluster_error" | grep -q "connection refused\|no such host"; then
             echo -e ""
             echo -e "  ${YELLOW}Diagnosis:${NC} Cluster not running or unreachable"
             echo -e ""
-            echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Start a local Kubernetes cluster:"
-            echo -e "    - Docker Desktop: Enable Kubernetes in settings (Preferences → Kubernetes → Enable)"
+            echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Start a local Kubernetes cluster"
+            echo -e ""
+            echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
+            echo -e "    1. Ensure Docker Desktop is running"
+            echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=meridian-local${NC}"
+            echo -e "    3. Verify: kubectl get nodes"
+            echo -e ""
+            echo -e "  ${YELLOW}Alternative options:${NC}"
+            echo -e "    - Docker Desktop: Enable Kubernetes (Preferences → Kubernetes → Enable)"
             echo -e "    - Rancher Desktop: Enable Kubernetes in preferences"
-            echo -e "    - kind: kind create cluster"
             echo -e "    - minikube: minikube start"
-            echo -e "    - colima: colima start --kubernetes"
         else
             echo -e ""
             echo -e "  ${YELLOW}Error details:${NC}"
@@ -177,6 +193,8 @@ echo ""
 check_command "docker" "20.x+" "brew install --cask docker"
 check_command "kubectl" "1.28+" "brew install kubectl"
 check_command "helm" "3.x+" "brew install helm"
+check_command "kind" "" "brew install kind"
+check_command "ctlptl" "" "brew install tilt-dev/tap/ctlptl"
 check_command "tilt" "0.30+" "brew install tilt-dev/tap/tilt"
 
 # Check Kubernetes cluster

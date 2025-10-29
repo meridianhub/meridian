@@ -90,6 +90,8 @@ if [[ "$OS" == "macos" ]]; then
     install_tool "docker" "brew install --cask docker"
     install_tool "kubectl" "brew install kubectl"
     install_tool "helm" "brew install helm"
+    install_tool "kind" "brew install kind"
+    install_tool "ctlptl" "brew install tilt-dev/tap/ctlptl"
     install_tool "tilt" "brew install tilt-dev/tap/tilt"
 
     # API tools
@@ -172,10 +174,13 @@ echo ""
 
 echo "Next steps:"
 echo "  1. Verify installation: ./scripts/setup-check.sh"
-echo "  2. Set up Kubernetes cluster (Docker Desktop, kind, or minikube)"
-echo "  3. Clone the repository and run: go mod download"
-echo "  4. Install git hooks: .githooks/install.sh"
-echo "  5. Start developing: tilt up"
+echo "  2. Start Docker Desktop (required for Kind cluster)"
+echo "  3. Create Kind cluster: ctlptl create cluster kind --name=meridian-local"
+echo "  4. Clone the repository and run: go mod download"
+echo "  5. Install git hooks: .githooks/install.sh"
+echo "  6. Start developing: tilt up"
+echo ""
+echo -e "${BLUE}Tip:${NC} Kind + ctlptl provides a fast local Kubernetes cluster optimized for Tilt development"
 echo ""
 
 if [[ "$OS" == "linux" ]] && groups "$USER" | grep -q docker; then
