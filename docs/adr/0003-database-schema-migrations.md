@@ -1,3 +1,17 @@
+---
+name: adr-003-database-schema-migrations
+description: Use Atlas for database schema migrations with versioned, declarative migrations per service
+triggers:
+  - Setting up database migrations
+  - Managing schema evolution
+  - Deploying database changes
+  - Handling schema drift
+instructions: |
+  Use Atlas for declarative schema migrations. Each service has own migrations directory.
+  Migrations run automatically on service startup. Atlas generates SQL from desired state,
+  ensuring safe schema evolution without manual SQL.
+---
+
 # 3. Database Schema Migrations with Atlas
 
 Date: 2025-10-25 (Revised: 2025-10-25)
