@@ -27,7 +27,7 @@ k8s_namespace = 'default'
 # =============================================================================
 
 # CockroachDB - Single-node for local development
-k8s_yaml('''
+k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
 metadata:
@@ -100,10 +100,10 @@ spec:
       - name: datadir
         persistentVolumeClaim:
           claimName: cockroachdb-pvc
-''')
+'''))
 
 # Redis - Default configuration
-k8s_yaml('''
+k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
 metadata:
@@ -150,7 +150,7 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
-''')
+'''))
 
 # Kafka + Zookeeper using Confluent helm charts
 # Uses publicly available Confluent images
