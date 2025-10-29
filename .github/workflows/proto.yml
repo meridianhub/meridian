@@ -38,6 +38,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch develop branch
+        run: git fetch origin develop:develop
+
       - name: Set up buf
         uses: bufbuild/buf-setup-action@v1
         with:
