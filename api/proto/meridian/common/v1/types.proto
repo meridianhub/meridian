@@ -72,6 +72,9 @@ enum Currency {
 }
 
 // MoneyAmount wraps google.type.Money with validation for financial services.
+// This allows negative amounts for balances and adjustments.
+// For strictly positive amounts (transactions, fees, limits), the value must be > 0
+// which is enforced at the service layer for business logic.
 message MoneyAmount {
   // amount is the monetary amount.
   google.type.Money amount = 1 [(buf.validate.field).required = true];
@@ -92,10 +95,11 @@ message DateRange {
 
 // IdempotencyKey ensures exactly-once processing of requests.
 message IdempotencyKey {
-  // key is a unique identifier for this request (UUID recommended).
+  // key is a unique identifier for this request (UUID v4 recommended, alphanumeric with hyphens/underscores).
   string key = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
+    pattern: "^[a-zA-Z0-9_-]+$"  // Alphanumeric, hyphens, underscores only for safe key storage
   }];
 
   // ttl_seconds is how long the key should be valid (optional).

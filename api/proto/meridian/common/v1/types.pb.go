@@ -284,6 +284,9 @@ func (Currency) EnumDescriptor() ([]byte, []int) {
 }
 
 // MoneyAmount wraps google.type.Money with validation for financial services.
+// This allows negative amounts for balances and adjustments.
+// For strictly positive amounts (transactions, fees, limits), the value must be > 0
+// which is enforced at the service layer for business logic.
 type MoneyAmount struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// amount is the monetary amount.
@@ -387,7 +390,7 @@ func (x *DateRange) GetEndDate() string {
 // IdempotencyKey ensures exactly-once processing of requests.
 type IdempotencyKey struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// key is a unique identifier for this request (UUID recommended).
+	// key is a unique identifier for this request (UUID v4 recommended, alphanumeric with hyphens/underscores).
 	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	// ttl_seconds is how long the key should be valid (optional).
 	TtlSeconds    int32 `protobuf:"varint,2,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
@@ -559,10 +562,9 @@ const file_meridian_common_v1_types_proto_rawDesc = "" +
 	"\tDateRange\x129\n" +
 	"\n" +
 	"start_date\x18\x01 \x01(\tB\x1a\xbaH\x17r\x152\x13^\\d{4}-\\d{2}-\\d{2}$R\tstartDate\x125\n" +
-	"\bend_date\x18\x02 \x01(\tB\x1a\xbaH\x17r\x152\x13^\\d{4}-\\d{2}-\\d{2}$R\aendDate\"\\\n" +
-	"\x0eIdempotencyKey\x12\x1c\n" +
-	"\x03key\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\x03key\x12,\n" +
+	"\bend_date\x18\x02 \x01(\tB\x1a\xbaH\x17r\x152\x13^\\d{4}-\\d{2}-\\d{2}$R\aendDate\"n\n" +
+	"\x0eIdempotencyKey\x12.\n" +
+	"\x03key\x18\x01 \x01(\tB\x1c\xbaH\x19r\x17\x10\x01\x18\xff\x012\x10^[a-zA-Z0-9_-]+$R\x03key\x12,\n" +
 	"\vttl_seconds\x18\x02 \x01(\x05B\v\xbaH\b\x1a\x06\x18\x80\xa3\x05(\x00R\n" +
 	"ttlSeconds\"T\n" +
 	"\n" +
