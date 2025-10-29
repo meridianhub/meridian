@@ -1,3 +1,18 @@
+---
+name: incident-response-runbook
+description: Step-by-step procedures for responding to security incidents, service degradation, and production outages
+triggers:
+  - Handling active security incidents
+  - Responding to production outages
+  - Managing service degradation
+  - Executing emergency rollbacks
+  - Investigating production errors
+instructions: |
+  Follow severity-based response times (P0: immediate, P1: <15min, P2: <1hr).
+  Use containment procedures for security incidents. Execute rollback procedures
+  for failed deployments. Document timeline and evidence for post-incident review.
+---
+
 # Incident Response Runbook
 
 **When to use this runbook**: Active security incident, service degradation, or production outage.

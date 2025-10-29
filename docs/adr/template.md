@@ -1,3 +1,14 @@
+---
+name: adr-[number]-[brief-slug]
+description: [Brief one-line description of the architectural decision]
+triggers:
+  - [Scenario when this ADR should be referenced]
+  - [Another scenario]
+  - [Third scenario]
+instructions: |
+  [Key decision outcome and guidance for applying this ADR]
+---
+
 # [number]. [title]
 
 Date: [YYYY-MM-DD]
