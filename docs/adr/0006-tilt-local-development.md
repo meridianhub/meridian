@@ -65,13 +65,15 @@ Chosen option: **"Tilt"**, because:
 ### Negative Consequences
 
 * ❌ **Learning curve**: Developers must understand Kubernetes basics
-* ❌ **Local K8s required**: Need kind/minikube/Docker Desktop with K8s enabled
+* ❌ **Local K8s required**: Need local Kubernetes cluster
 * ❌ **Resource usage**: K8s overhead (~1-2GB RAM) vs plain Docker
 * ❌ **Complexity for simple projects**: Overkill if not using K8s in production
 
 **Mitigation:**
+- Use **Kind + ctlptl** for fast, reproducible local clusters
 - Provide comprehensive onboarding docs ([docs/tilt.md](../tilt.md))
 - Include setup automation scripts (`scripts/setup-check.sh`, `scripts/install-tools.sh`)
+- Single command cluster creation: `ctlptl create cluster kind --name=meridian-local`
 - Tiltfile comments explain each section
 - Startup banner shows all service URLs
 
@@ -315,9 +317,11 @@ k8s_resource('kafka', port_forwards='9092:9092')
 # 2. Install missing tools (if needed)
 ./scripts/install-tools.sh
 
-# 3. Ensure local K8s cluster is running
+# 3. Create local Kubernetes cluster (recommended: Kind with ctlptl)
+ctlptl create cluster kind --name=meridian-local
+
+# Verify cluster is ready
 kubectl cluster-info
-# If not: kind create cluster  (or minikube start, or enable in Docker Desktop)
 ```
 
 #### Daily Development
@@ -476,21 +480,77 @@ Provided scripts make onboarding easy:
 # Check if environment is ready
 ./scripts/setup-check.sh
 # Output:
-# ✓ Go 1.23.3 installed
+# ✓ Go 1.25.3 installed
 # ✓ Docker running
-# ✓ Kubernetes cluster accessible
+# ✓ kubectl installed
+# ✓ kind installed
+# ✓ ctlptl installed
 # ✓ Tilt v0.33.1 installed
-# ✗ golangci-lint not found
+# ✗ Kubernetes cluster not accessible
 #
-# Your environment is mostly ready!
-# Run ./scripts/install-tools.sh to install missing tools.
+# ACTION REQUIRED: Create a local cluster
+# ctlptl create cluster kind --name=meridian-local
 
 # Install missing tools
 ./scripts/install-tools.sh
 
+# Create Kind cluster
+ctlptl create cluster kind --name=meridian-local
+
 # Start development
 tilt up
 ```
+
+## Local Kubernetes with Kind + ctlptl
+
+### Why Kind + ctlptl?
+
+We use **Kind (Kubernetes in Docker)** with **ctlptl (Cattle Patrol)** for local cluster management because:
+
+* ✅ **Fast cluster creation** - Clusters spin up in ~30 seconds
+* ✅ **Reproducible** - Same cluster config across all developers
+* ✅ **Registry integration** - Built-in local registry support
+* ✅ **Tilt optimized** - ctlptl configures clusters specifically for Tilt
+* ✅ **Lightweight** - Runs entirely in Docker containers
+* ✅ **Easy cleanup** - `ctlptl delete cluster kind-meridian-local` removes everything
+
+### Cluster Creation
+
+```bash
+# Create cluster optimized for Tilt
+ctlptl create cluster kind --name=meridian-local
+
+# This automatically:
+# - Creates a Kind cluster
+# - Sets up local registry (for faster image pushes)
+# - Configures port mappings
+# - Optimizes for development workflows
+```
+
+### Cluster Management
+
+```bash
+# List clusters
+ctlptl get clusters
+
+# Delete cluster
+ctlptl delete cluster kind-meridian-local
+
+# Verify cluster is working
+kubectl config use-context kind-meridian-local
+kubectl get nodes
+```
+
+### Why Not Docker Desktop Kubernetes?
+
+Docker Desktop Kubernetes works but:
+- Slower to start/restart
+- Less reproducible across team
+- No registry integration
+- Harder to reset to clean state
+- Kind + ctlptl is more predictable
+
+**Recommendation**: Use Kind + ctlptl for local development, Docker Desktop K8s as fallback option.
 
 ## When to Use Tilt vs Other Tools
 
