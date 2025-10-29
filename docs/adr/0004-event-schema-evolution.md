@@ -1,3 +1,17 @@
+---
+name: adr-004-event-schema-evolution
+description: Use buf breaking change detection for protobuf event schema evolution without external schema registry
+triggers:
+  - Evolving Kafka event schemas
+  - Managing BIAN specification updates
+  - Ensuring backward compatibility
+  - Coordinating between services via events
+instructions: |
+  Use protobuf for all Kafka events. Run `buf breaking` in CI to prevent breaking changes.
+  Follow BIAN versioning (13.0 → 14.0). No external schema registry needed - buf provides
+  compile-time validation. Events are append-only with version numbers.
+---
+
 # 4. Event Schema Evolution Strategy
 
 Date: 2025-10-26 (Revised from original Schema Registry decision)

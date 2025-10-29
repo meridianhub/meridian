@@ -1,3 +1,16 @@
+---
+name: adr-001-record-architecture-decisions
+description: Use Architecture Decision Records (ADRs) to document all architectural choices in the project
+triggers:
+  - Starting documentation for a new project
+  - Establishing architectural documentation standards
+  - Understanding why ADRs exist in this project
+instructions: |
+  Use ADRs for all significant architectural decisions. Store in docs/adr/ with
+  sequential numbering. Include context, decision, and consequences. Keep ADRs
+  immutable once accepted - supersede with new ADRs rather than editing.
+---
+
 # 1. Record architecture decisions
 
 Date: 2025-10-24

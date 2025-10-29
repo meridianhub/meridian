@@ -1,3 +1,18 @@
+---
+name: disaster-recovery-runbook
+description: Procedures for recovering from complete infrastructure failures, data corruption, regional outages, or catastrophic events
+triggers:
+  - Complete infrastructure failure
+  - Data corruption requiring restore
+  - Regional cloud outage
+  - Catastrophic system failures
+  - Full system recovery operations
+instructions: |
+  Follow RTO/RPO objectives. Execute database restoration from backups.
+  Rebuild infrastructure in alternate region if needed. Verify data integrity
+  post-recovery. Document recovery actions and update DR procedures.
+---
+
 # Disaster Recovery Runbook
 
 **When to use this runbook**: Complete infrastructure failure, data corruption, regional outage, or catastrophic events requiring full system recovery.
