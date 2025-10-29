@@ -17,7 +17,7 @@ ALL_CHECKS_PASSED=true
 
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║                                                          ║"
-echo "║  Meridian Development Environment Setup Verification    ║"
+echo "║  Meridian Development Environment Setup Verification     ║"
 echo "║                                                          ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
@@ -46,8 +46,14 @@ check_command() {
             tilt)
                 version=$(tilt version | head -1 | awk '{print $2}' | sed 's/,//')
                 ;;
+            kind)
+                version=$(kind version 2>/dev/null | awk '{print $2}' | head -1)
+                ;;
+            ctlptl)
+                version=$(ctlptl version 2>/dev/null | awk '{print $1}' | sed 's/,//')
+                ;;
             golangci-lint)
-                version=$(golangci-lint version --format short 2>/dev/null | head -1)
+                version=$(golangci-lint version --short 2>/dev/null | head -1)
                 ;;
             buf)
                 version=$(buf --version 2>/dev/null)
@@ -83,11 +89,18 @@ check_command() {
 check_k8s_cluster() {
     echo "Checking Kubernetes cluster connectivity..."
 
-    if kubectl cluster-info &> /dev/null; then
-        local context
-        context=$(kubectl config current-context 2>/dev/null || echo "unknown")
+    # Get current context
+    local current_context
+    current_context=$(kubectl config current-context 2>/dev/null || echo "none")
+
+    # Try to connect to cluster with timeout (single invocation)
+    local cluster_error
+    local exit_code=0
+    cluster_error=$(timeout 5 kubectl cluster-info 2>&1) || exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}✓${NC} Kubernetes cluster accessible"
-        echo -e "  Context: $context"
+        echo -e "  Context: $current_context"
 
         # Check nodes
         local nodes
@@ -95,11 +108,91 @@ check_k8s_cluster() {
         echo -e "  Nodes: $nodes"
     else
         echo -e "${RED}✗${NC} Cannot connect to Kubernetes cluster"
-        echo -e "  ${YELLOW}Setup:${NC} Start a local cluster with:"
-        echo -e "    - Docker Desktop: Enable Kubernetes in settings"
-        echo -e "    - kind: kind create cluster"
-        echo -e "    - minikube: minikube start"
-        echo -e "    - colima: colima start --kubernetes"
+        echo -e "  Current context: $current_context"
+
+        # Provide specific diagnosis based on error
+        # Check for AWS/EKS context or AWS authentication errors
+        if echo "$current_context" | grep -q "arn:aws:eks\|\.eks\."; then
+            echo -e ""
+            echo -e "  ${YELLOW}Diagnosis:${NC} kubectl is configured for AWS EKS cluster requiring SSO login"
+            echo -e ""
+            echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Switch to a local cluster context:"
+            echo -e ""
+
+            # Check for available local contexts
+            local local_contexts
+            local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "kind-|docker-desktop|rancher-desktop|minikube|colima")
+
+            if [ -n "$local_contexts" ]; then
+                echo -e "  ${GREEN}Available local contexts:${NC}"
+                while IFS= read -r ctx; do
+                    echo -e "    kubectl config use-context $ctx"
+                done <<< "$local_contexts"
+                echo -e ""
+                echo -e "  ${YELLOW}Run one of the above commands to switch to local development.${NC}"
+            else
+                echo -e "  ${YELLOW}No local cluster contexts found. Create a local cluster:${NC}"
+                echo -e ""
+                echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
+                echo -e "    1. Ensure Docker Desktop is running"
+                echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
+                echo -e "    3. Verify: kubectl config use-context kind-meridian-local"
+                echo -e ""
+                echo -e "  ${YELLOW}Alternative options:${NC}"
+                echo -e "    - Docker Desktop: Enable Kubernetes in settings (Preferences → Kubernetes)"
+                echo -e "    - Rancher Desktop: Enable Kubernetes in preferences"
+                echo -e "    - minikube: minikube start"
+            fi
+        elif echo "$cluster_error" | grep -q "connection refused\|no such host"; then
+            echo -e ""
+            echo -e "  ${YELLOW}Diagnosis:${NC} Cluster not running or unreachable"
+            echo -e ""
+
+            # Offer to create cluster automatically if ctlptl and kind are available
+            if command -v ctlptl &> /dev/null && command -v kind &> /dev/null && docker info &> /dev/null; then
+                echo -e "  ${GREEN}I can create a Kind cluster for you!${NC}"
+                echo -e ""
+                read -p "  Create Kind cluster 'kind-meridian-local' now? (y/n): " -n 1 -r
+                echo ""
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    echo -e ""
+                    echo -e "  ${BLUE}Creating Kind cluster 'kind-meridian-local'...${NC}"
+                    if ctlptl create cluster kind --name=kind-meridian-local; then
+                        echo -e ""
+                        echo -e "  ${GREEN}✓${NC} Kind cluster created successfully!"
+                        echo -e "  Run this script again to verify, or start developing with: ${BLUE}tilt up${NC}"
+                        echo ""
+                        exit 0
+                    else
+                        echo -e ""
+                        echo -e "  ${RED}✗${NC} Failed to create cluster"
+                    fi
+                fi
+                echo -e ""
+            fi
+
+            echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Start a local Kubernetes cluster"
+            echo -e ""
+            echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
+            echo -e "    1. Ensure Docker Desktop is running"
+            echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
+            echo -e "    3. Verify: kubectl get nodes"
+            echo -e ""
+            echo -e "  ${YELLOW}Alternative options:${NC}"
+            echo -e "    - Docker Desktop: Enable Kubernetes (Preferences → Kubernetes → Enable)"
+            echo -e "    - Rancher Desktop: Enable Kubernetes in preferences"
+            echo -e "    - minikube: minikube start"
+        else
+            echo -e ""
+            echo -e "  ${YELLOW}Error details:${NC}"
+            echo "$cluster_error" | head -3 | sed 's/^/    /'
+            echo -e ""
+            echo -e "  ${YELLOW}Troubleshooting:${NC}"
+            echo -e "    1. Check available contexts: kubectl config get-contexts"
+            echo -e "    2. Switch context: kubectl config use-context <context-name>"
+            echo -e "    3. Start a local cluster (see options above)"
+        fi
+
         ALL_CHECKS_PASSED=false
     fi
     echo ""
@@ -124,6 +217,8 @@ echo ""
 check_command "docker" "20.x+" "brew install --cask docker"
 check_command "kubectl" "1.28+" "brew install kubectl"
 check_command "helm" "3.x+" "brew install helm"
+check_command "kind" "" "brew install kind"
+check_command "ctlptl" "" "brew install tilt-dev/tap/ctlptl"
 check_command "tilt" "0.30+" "brew install tilt-dev/tap/tilt"
 
 # Check Kubernetes cluster
@@ -191,12 +286,29 @@ echo ""
 if [ "$ALL_CHECKS_PASSED" = true ]; then
     echo -e "${GREEN}✓ All checks passed!${NC}"
     echo ""
-    echo "You're ready to start developing. Try:"
-    echo "  1. go mod download          # Install Go dependencies"
-    echo "  2. make proto               # Generate protobuf code"
-    echo "  3. make build               # Build the application"
-    echo "  4. make test                # Run tests"
-    echo "  5. tilt up                  # Start local development environment"
+    echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║                                                                ║${NC}"
+    echo -e "${GREEN}║  🚀 You're all set! Ready to start developing.                ║${NC}"
+    echo -e "${GREEN}║                                                                ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${BLUE}Quick Start:${NC}"
+    echo ""
+    echo "  1. Install dependencies:"
+    echo -e "     ${BLUE}go mod download${NC}"
+    echo ""
+    echo "  2. Generate protobuf code:"
+    echo -e "     ${BLUE}make proto${NC}"
+    echo ""
+    echo "  3. Start local development environment:"
+    echo -e "     ${BLUE}tilt up${NC}"
+    echo ""
+    echo "  Once Tilt starts, access:"
+    echo "    • Tilt UI:        http://localhost:10350"
+    echo "    • Meridian API:   http://localhost:8080"
+    echo "    • Meridian gRPC:  localhost:9090"
+    echo ""
+    echo -e "${YELLOW}Tip:${NC} Run ${BLUE}make test${NC} and ${BLUE}make build${NC} to verify everything works"
     echo ""
     exit 0
 else

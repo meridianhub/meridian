@@ -90,6 +90,8 @@ if [[ "$OS" == "macos" ]]; then
     install_tool "docker" "brew install --cask docker"
     install_tool "kubectl" "brew install kubectl"
     install_tool "helm" "brew install helm"
+    install_tool "kind" "brew install kind"
+    install_tool "ctlptl" "brew install tilt-dev/tap/ctlptl"
     install_tool "tilt" "brew install tilt-dev/tap/tilt"
 
     # API tools
@@ -170,12 +172,43 @@ echo " Installation Complete"
 echo "═══════════════════════════════════════"
 echo ""
 
+# Create Kind cluster if ctlptl and kind are installed and Docker is running
+if command -v ctlptl &> /dev/null && command -v kind &> /dev/null; then
+    echo -e "${YELLOW}Setting up local Kubernetes cluster...${NC}"
+    echo ""
+
+    # Check if Docker is running
+    if docker info &> /dev/null; then
+        # Check if cluster already exists
+        if kubectl config get-contexts kind-meridian-local &> /dev/null; then
+            echo -e "${GREEN}✓${NC} Kind cluster 'kind-meridian-local' already exists"
+            echo "  To recreate: ctlptl delete cluster kind-meridian-local && ctlptl create cluster kind --name=kind-meridian-local"
+        else
+            echo -e "${BLUE}Creating Kind cluster 'kind-meridian-local'...${NC}"
+            if ctlptl create cluster kind --name=kind-meridian-local; then
+                echo -e "${GREEN}✓${NC} Kind cluster created successfully!"
+                echo "  Context: kind-meridian-local"
+            else
+                echo -e "${RED}✗${NC} Failed to create Kind cluster"
+                echo "  You can create it manually later:"
+                echo "    ctlptl create cluster kind --name=kind-meridian-local"
+            fi
+        fi
+    else
+        echo -e "${YELLOW}⚠${NC}  Docker is not running"
+        echo "  Start Docker Desktop, then create the cluster:"
+        echo "    ctlptl create cluster kind --name=kind-meridian-local"
+    fi
+    echo ""
+fi
+
 echo "Next steps:"
 echo "  1. Verify installation: ./scripts/setup-check.sh"
-echo "  2. Set up Kubernetes cluster (Docker Desktop, kind, or minikube)"
-echo "  3. Clone the repository and run: go mod download"
-echo "  4. Install git hooks: .githooks/install.sh"
-echo "  5. Start developing: tilt up"
+echo "  2. Clone the repository and run: go mod download"
+echo "  3. Install git hooks: .githooks/install.sh"
+echo "  4. Start developing: tilt up"
+echo ""
+echo -e "${BLUE}Tip:${NC} Your local cluster is ready! Just run ${BLUE}tilt up${NC} to start developing"
 echo ""
 
 if [[ "$OS" == "linux" ]] && groups "$USER" | grep -q docker; then

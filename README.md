@@ -53,7 +53,7 @@ Reference specifications: BIAN Service Landscape 13.0.0
 - **Event Streaming**: Apache Kafka 3.x
 - **Cache**: Redis 7.x
 - **Container Orchestration**: Kubernetes 1.28+
-- **Local Development**: Tilt for local Kubernetes workflows
+- **Local Development**: Kind + ctlptl + Tilt for fast local Kubernetes workflows
 - **Observability**: OpenTelemetry, Prometheus, Grafana
 
 ## Quick Start
@@ -76,18 +76,24 @@ Install missing tools automatically (macOS/Linux):
 
 1. **Clone and setup**:
    ```bash
-   git clone git@github.com:bjcoombs/meridian.git
+   git clone git@github.com:meridianhub/meridian.git
    cd meridian
    go mod download
    .githooks/install.sh  # Install pre-commit hooks
    ```
 
-2. **Start local environment** (requires Kubernetes cluster):
+2. **Create local Kubernetes cluster**:
+   ```bash
+   # Ensure Docker Desktop is running
+   ctlptl create cluster kind --name=kind-meridian-local
+   ```
+
+3. **Start local environment**:
    ```bash
    tilt up
    ```
 
-3. **Access services**:
+4. **Access services**:
    - Tilt UI: http://localhost:10350
    - Meridian API: http://localhost:8080
    - Meridian gRPC: localhost:9090
@@ -103,7 +109,8 @@ Required tools (see [CONTRIBUTING.md](CONTRIBUTING.md#development-environment-se
 - **Go 1.25.3+**: Core language
 - **buf CLI**: Protocol buffer tooling
 - **Docker**: Container runtime
-- **Kubernetes**: Local cluster (kind/minikube/Docker Desktop)
+- **Kind**: Local Kubernetes cluster
+- **ctlptl**: Cluster lifecycle management
 - **kubectl**: Kubernetes CLI
 - **Helm**: Package manager
 - **Tilt**: Local development orchestration
@@ -215,8 +222,10 @@ Errors are categorized for different domains:
 # Check cluster status
 kubectl cluster-info
 
-# Start a local cluster (choose one):
-kind create cluster              # kind
+# Create a Kind cluster (recommended):
+ctlptl create cluster kind --name=kind-meridian-local
+
+# Or use alternatives:
 minikube start                   # minikube
 # Or enable Kubernetes in Docker Desktop settings
 ```

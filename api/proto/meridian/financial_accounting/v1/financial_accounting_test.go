@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"buf.build/go/protovalidate"
-	commonv1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
-	financialaccountingv1 "github.com/bjcoombs/meridian/api/proto/meridian/financial_accounting/v1"
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -3,15 +3,19 @@
 # Tiltfile for Meridian local development
 # Fast Kubernetes development with live reload
 
+# Load Tilt extensions
+load('ext://helm_remote', 'helm_remote')
+load('ext://restart_process', 'docker_build_with_restart')
+
 # Allow Tilt to connect to local Kubernetes cluster
-allow_k8s_contexts(['kind-kind', 'minikube', 'docker-desktop', 'colima'])
+allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desktop', 'colima', 'rancher-desktop'])
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
 # Docker image configuration
-docker_registry = os.getenv('DOCKER_REGISTRY', 'ghcr.io/bjcoombs')
+docker_registry = os.getenv('DOCKER_REGISTRY', 'ghcr.io/meridianhub')
 image_name = 'meridian'
 full_image = '{}/{}'.format(docker_registry, image_name)
 
@@ -23,7 +27,7 @@ k8s_namespace = 'default'
 # =============================================================================
 
 # CockroachDB - Single-node for local development
-k8s_yaml('''
+k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
 metadata:
@@ -96,10 +100,10 @@ spec:
       - name: datadir
         persistentVolumeClaim:
           claimName: cockroachdb-pvc
-''')
+'''))
 
 # Redis - Default configuration
-k8s_yaml('''
+k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
 metadata:
@@ -146,38 +150,28 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
-''')
+'''))
 
-# Kafka + Zookeeper using bitnami charts
-helm_repo('bitnami', 'https://charts.bitnami.com/bitnami')
-
-# Zookeeper (required for Kafka)
-k8s_yaml(helm(
-  'bitnami/zookeeper',
-  name='zookeeper',
+# Kafka + Zookeeper using Confluent helm charts
+# Uses publicly available Confluent images
+helm_remote(
+  'cp-helm-charts',
+  repo_name='confluentinc',
+  repo_url='https://confluentinc.github.io/cp-helm-charts/',
   namespace=k8s_namespace,
   values=[
-    'deployments/tilt/zookeeper-values.yaml',
+    'deployments/tilt/confluent-values.yaml',
   ],
-))
-
-# Kafka
-k8s_yaml(helm(
-  'bitnami/kafka',
-  name='kafka',
-  namespace=k8s_namespace,
-  values=[
-    'deployments/tilt/kafka-values.yaml',
-  ],
-))
+)
 
 # =============================================================================
 # Main Application
 # =============================================================================
 
 # Build Docker image with live reload
+# Use simple 'meridian' name to match deployment spec
 docker_build(
-  full_image,
+  'meridian',
   context='.',
   dockerfile='Dockerfile',
   build_args={
@@ -199,8 +193,8 @@ docker_build(
       trigger=['./cmd', './internal', './pkg'],
     ),
 
-    # Restart the service
-    restart_container(),
+    # Restart the service using HUP signal
+    run('kill -HUP 1', trigger=['./cmd', './internal', './pkg']),
   ],
 )
 
@@ -243,19 +237,20 @@ k8s_resource(
   resource_deps=[],
 )
 
-# Zookeeper resource
+# Confluent Platform resources (managed by helm chart)
 k8s_resource(
-  'zookeeper',
+  'cp-helm-charts-cp-zookeeper',
+  new_name='zookeeper',
   port_forwards='2181:2181',
-  labels=['messaging'],
+  labels=['infrastructure', 'messaging'],
   resource_deps=[],
 )
 
-# Kafka resource
 k8s_resource(
-  'kafka',
+  'cp-helm-charts-cp-kafka',
+  new_name='kafka',
   port_forwards='9092:9092',
-  labels=['messaging'],
+  labels=['infrastructure', 'messaging'],
   resource_deps=['zookeeper'],
 )
 
@@ -288,9 +283,6 @@ local_resource(
 
 # Tilt UI settings
 update_settings(max_parallel_updates=3, k8s_upsert_timeout_secs=60)
-
-# Enable Tilt extensions
-load('ext://restart_process', 'docker_build_with_restart')
 
 print("""
 ╔══════════════════════════════════════════════════════════════╗
