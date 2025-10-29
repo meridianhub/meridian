@@ -165,9 +165,9 @@ type LedgerPosting struct {
 	FinancialBookingLogId string `protobuf:"bytes,2,opt,name=financial_booking_log_id,json=financialBookingLogId,proto3" json:"financial_booking_log_id,omitempty"`
 	// posting_direction indicates debit or credit.
 	PostingDirection v1.PostingDirection `protobuf:"varint,3,opt,name=posting_direction,json=postingDirection,proto3,enum=meridian.common.v1.PostingDirection" json:"posting_direction,omitempty"`
-	// posting_amount is the monetary amount being posted.
+	// posting_amount is the monetary amount being posted (must be positive for accounting entries).
 	PostingAmount *money.Money `protobuf:"bytes,4,opt,name=posting_amount,json=postingAmount,proto3" json:"posting_amount,omitempty"`
-	// account_id identifies the account being posted to.
+	// account_id identifies the account being posted to (alphanumeric with hyphens/underscores).
 	AccountId string `protobuf:"bytes,5,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	// value_date is the effective date for this posting.
 	ValueDate *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=value_date,json=valueDate,proto3" json:"value_date,omitempty"`
@@ -634,9 +634,9 @@ type CaptureLedgerPostingRequest struct {
 	FinancialBookingLogId string `protobuf:"bytes,1,opt,name=financial_booking_log_id,json=financialBookingLogId,proto3" json:"financial_booking_log_id,omitempty"`
 	// posting_direction indicates debit or credit.
 	PostingDirection v1.PostingDirection `protobuf:"varint,2,opt,name=posting_direction,json=postingDirection,proto3,enum=meridian.common.v1.PostingDirection" json:"posting_direction,omitempty"`
-	// posting_amount is the amount to post.
+	// posting_amount is the amount to post (must be positive).
 	PostingAmount *money.Money `protobuf:"bytes,3,opt,name=posting_amount,json=postingAmount,proto3" json:"posting_amount,omitempty"`
-	// account_id identifies the target account.
+	// account_id identifies the target account (alphanumeric with hyphens/underscores).
 	AccountId string `protobuf:"bytes,4,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	// value_date is the effective date.
 	ValueDate *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=value_date,json=valueDate,proto3" json:"value_date,omitempty"`
@@ -1003,18 +1003,18 @@ const file_meridian_financial_accounting_v1_financial_accounting_proto_rawDesc =
 	"\n" +
 	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tupdatedAt\x12K\n" +
 	"\bpostings\x18\n" +
-	" \x03(\v2/.meridian.financial_accounting.v1.LedgerPostingR\bpostings\"\xbf\x04\n" +
+	" \x03(\v2/.meridian.financial_accounting.v1.LedgerPostingR\bpostings\"\xd1\x05\n" +
 	"\rLedgerPosting\x12\x1a\n" +
 	"\x02id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\x02id\x12C\n" +
 	"\x18financial_booking_log_id\x18\x02 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\x15financialBookingLogId\x12]\n" +
 	"\x11posting_direction\x18\x03 \x01(\x0e2$.meridian.common.v1.PostingDirectionB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x10postingDirection\x12A\n" +
-	"\x0eposting_amount\x18\x04 \x01(\v2\x12.google.type.MoneyB\x06\xbaH\x03\xc8\x01\x01R\rpostingAmount\x12)\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x10postingDirection\x12\xc0\x01\n" +
+	"\x0eposting_amount\x18\x04 \x01(\v2\x12.google.type.MoneyB\x84\x01\xbaH\x80\x01\xba\x01z\n" +
+	"\x17positive_posting_amount\x12(posting amount must be greater than zero\x1a5this.units > 0 || (this.units == 0 && this.nanos > 0)\xc8\x01\x01R\rpostingAmount\x12;\n" +
 	"\n" +
-	"account_id\x18\x05 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\taccountId\x12A\n" +
+	"account_id\x18\x05 \x01(\tB\x1c\xbaH\x19r\x17\x10\x01\x18\xff\x012\x10^[a-zA-Z0-9_-]+$R\taccountId\x12A\n" +
 	"\n" +
 	"value_date\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tvalueDate\x12/\n" +
 	"\x0eposting_result\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\rpostingResult\x12A\n" +
@@ -1047,16 +1047,16 @@ const file_meridian_financial_accounting_v1_financial_accounting_proto_rawDesc =
 	"\x02id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\x02id\"\x98\x01\n" +
 	"#RetrieveFinancialBookingLogResponse\x12q\n" +
-	"\x15financial_booking_log\x18\x01 \x01(\v25.meridian.financial_accounting.v1.FinancialBookingLogB\x06\xbaH\x03\xc8\x01\x01R\x13financialBookingLog\"\xc7\x03\n" +
+	"\x15financial_booking_log\x18\x01 \x01(\v25.meridian.financial_accounting.v1.FinancialBookingLogB\x06\xbaH\x03\xc8\x01\x01R\x13financialBookingLog\"\xe2\x04\n" +
 	"\x1bCaptureLedgerPostingRequest\x12C\n" +
 	"\x18financial_booking_log_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\x15financialBookingLogId\x12]\n" +
 	"\x11posting_direction\x18\x02 \x01(\x0e2$.meridian.common.v1.PostingDirectionB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x10postingDirection\x12A\n" +
-	"\x0eposting_amount\x18\x03 \x01(\v2\x12.google.type.MoneyB\x06\xbaH\x03\xc8\x01\x01R\rpostingAmount\x12)\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x10postingDirection\x12\xc9\x01\n" +
+	"\x0eposting_amount\x18\x03 \x01(\v2\x12.google.type.MoneyB\x8d\x01\xbaH\x89\x01\xba\x01\x82\x01\n" +
+	"\x1fpositive_posting_amount_request\x12(posting amount must be greater than zero\x1a5this.units > 0 || (this.units == 0 && this.nanos > 0)\xc8\x01\x01R\rpostingAmount\x12;\n" +
 	"\n" +
-	"account_id\x18\x04 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\taccountId\x12A\n" +
+	"account_id\x18\x04 \x01(\tB\x1c\xbaH\x19r\x17\x10\x01\x18\xff\x012\x10^[a-zA-Z0-9_-]+$R\taccountId\x12A\n" +
 	"\n" +
 	"value_date\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tvalueDate\x12S\n" +
 	"\x0fidempotency_key\x18\x06 \x01(\v2\".meridian.common.v1.IdempotencyKeyB\x06\xbaH\x03\xc8\x01\x01R\x0eidempotencyKey\"~\n" +
