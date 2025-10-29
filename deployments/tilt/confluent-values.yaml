@@ -8,6 +8,8 @@ cp-zookeeper:
   heapOptions: "-Xms256M -Xmx256M"
   persistence:
     enabled: false  # Disable persistence for faster startup
+  podDisruptionBudget:
+    enabled: false  # Not needed for local dev
   resources:
     requests:
       cpu: 100m
@@ -23,6 +25,8 @@ cp-kafka:
   heapOptions: "-Xms512M -Xmx512M"
   persistence:
     enabled: false  # Disable persistence for faster startup
+  podDisruptionBudget:
+    enabled: false  # Not needed for local dev
   resources:
     requests:
       cpu: 250m
