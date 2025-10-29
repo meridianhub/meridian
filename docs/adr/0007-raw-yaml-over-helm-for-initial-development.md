@@ -1,0 +1,193 @@
+---
+name: adr-007-raw-yaml-over-helm-for-initial-development
+description: Use raw Kubernetes YAML instead of Helm charts during initial development phase
+triggers:
+  - Setting up local infrastructure services
+  - Creating Kubernetes manifests for backing services
+  - Evaluating Helm adoption timeline
+instructions: |
+  Use raw Kubernetes YAML for infrastructure services (CockroachDB, Redis) in Tiltfile.
+  Use Helm only for complex third-party services (Confluent Platform). Defer full Helm
+  migration until service topology stabilizes.
+---
+
+# 7. Raw YAML Over Helm for Initial Development
+
+Date: 2025-10-29
+
+## Status
+
+Accepted
+
+## Context
+
+Meridian uses Kubernetes for deployment and Tilt for local development. The project needs to define backing services (CockroachDB, Redis, Kafka, Zookeeper) for local development.
+
+**The question:** Should we use Helm charts or raw Kubernetes YAML for defining these services in the Tiltfile?
+
+### Helm's Value Proposition
+
+Helm is primarily a templating engine that allows:
+```
+Same Helm Chart + Different Values Files = Different Environments
+```
+
+The benefits are:
+- **Environment parity**: Same chart for local/staging/prod with different values
+- **Dependency management**: Charts can depend on other charts
+- **Versioning**: Chart versions track configuration changes
+- **Community**: Large ecosystem of pre-built charts
+
+### The Complexity Tax
+
+Using Helm introduces additional abstraction layers:
+1. Application code
+2. Container (Docker)
+3. Kubernetes primitives (Pods, Services, Deployments)
+4. **Helm templates** (Go templating over Kubernetes YAML)
+5. **Helm values** (configuration inputs to templates)
+6. Tilt (orchestrating everything)
+
+When debugging a failing pod, you must reason through all six layers:
+- Is my code wrong?
+- Is the Dockerfile wrong?
+- Is the Kubernetes YAML wrong?
+- Did the Helm template render correctly?
+- Are my values correct?
+- Is Tilt configured properly?
+
+This is particularly challenging when:
+- Learning Kubernetes fundamentals
+- Debugging service connectivity issues
+- Rapidly iterating on infrastructure setup
+- Understanding what's actually running in the cluster
+
+## Decision
+
+**For initial development, use raw Kubernetes YAML instead of Helm charts, with two exceptions:**
+
+1. **Use raw YAML for simple services**: CockroachDB and Redis are defined as inline YAML in the Tiltfile
+2. **Use Helm for complex third-party services**: Confluent Platform (Kafka + Zookeeper) uses Helm due to its configuration complexity
+3. **Defer full Helm migration**: Plan to migrate to Helm charts once service topology stabilizes
+
+This is a **conscious architectural decision**, not an oversight. We are explicitly choosing transparency and learning velocity over environment abstraction during the initial development phase.
+
+## Decision Drivers
+
+- **Learning curve**: Team is learning Kubernetes primitives; raw YAML provides direct visibility
+- **Iteration speed**: Faster debugging when you can see exactly what's deployed
+- **Cognitive load**: Reduce abstraction layers during high-uncertainty development phase
+- **Service stability**: Service topology is still evolving; premature abstraction would churn
+- **Immediate value**: Helm's multi-environment value doesn't apply yet (only local dev exists)
+- **Pragmatic complexity**: Use Helm only where it provides clear immediate value (Confluent Platform)
+
+## Consequences
+
+### Positive
+
+- **Transparent**: What you see in the Tiltfile is what runs in Kubernetes
+- **Fast iteration**: Direct YAML editing, no template rendering to debug
+- **Lower cognitive overhead**: Fewer abstraction layers when troubleshooting
+- **Better learning**: Direct exposure to Kubernetes primitives builds stronger mental models
+- **Simpler debugging**: Fewer places for configuration to go wrong
+
+### Negative
+
+- **Environment-specific configuration**: Will require separate YAML files for staging/prod
+- **No dependency management**: Service startup order handled by Tilt, not Helm
+- **Manual version management**: No chart versioning for infrastructure configuration
+- **Duplication**: Some YAML patterns may be repeated across services
+
+### Migration Path
+
+When service topology stabilizes, migrate to Helm:
+
+1. **Identify parameterization points**: What differs between environments?
+   - Resource limits (CPU, memory)
+   - Storage (local vs cloud)
+   - Networking (NodePort vs LoadBalancer)
+   - Secrets (dev vs prod credentials)
+
+2. **Create Helm charts**: Package stable service definitions
+   - `charts/meridian/` - Main application chart
+   - `charts/backing-services/` - Infrastructure services chart
+
+3. **Multi-environment values**:
+   - `values-local.yaml` - Minimal resources, NodePort
+   - `values-stage.yaml` - Moderate resources, cloud storage
+   - `values-prod.yaml` - HA, multiple replicas, production secrets
+
+4. **Update Tiltfile**: Replace raw YAML with `helm_remote()` calls
+
+5. **Production deployment**: Use Helm for staging and production environments
+
+## Examples
+
+### Current Approach (Raw YAML)
+
+```python
+# Tiltfile
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  ports:
+  - port: 6379
+  selector:
+    app: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        resources:
+          limits:
+            memory: 512Mi
+'''))
+```
+
+**Benefits**: Direct visibility, easy to modify, clear what's deployed
+
+### Future Helm Approach
+
+```python
+# Tiltfile
+helm_remote(
+  'redis',
+  repo_name='bitnami',
+  repo_url='https://charts.bitnami.com/bitnami',
+  values=['deployments/helm/redis-values-local.yaml']
+)
+```
+
+```yaml
+# deployments/helm/redis-values-local.yaml
+replica:
+  replicaCount: 1
+resources:
+  limits:
+    memory: 512Mi
+```
+
+**Benefits**: Environment abstraction, versioning, community support
+**Costs**: Additional file, template indirection, chart maintenance
+
+## Related Decisions
+
+- ADR-0006: Tilt for Local Kubernetes Development
+- Future ADR: Multi-environment deployment strategy
+
+## References
+
+- [Helm Documentation](https://helm.sh/docs/)
+- [Tilt Helm Integration](https://docs.tilt.dev/helm.html)
+- [Kubernetes Documentation](https://kubernetes.io/docs/concepts/)
