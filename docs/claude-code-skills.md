@@ -61,14 +61,16 @@ When you're working with Claude Code on the Meridian project:
 
 When creating a new ADR from `docs/adr/template.md`:
 
-1. Copy the template (which includes YAML frontmatter placeholders)
+1. Copy the template (which includes YAML frontmatter placeholders with inline examples)
 2. Fill in the frontmatter fields:
-   - `name`: Unique identifier like `adr-007-brief-slug`
-   - `description`: One-line summary of the architectural decision
-   - `triggers`: List of scenarios when this ADR should be referenced
-   - `instructions`: Concise guidance for applying this decision
+   - `name`: Unique identifier using format `adr-NNN-brief-slug` where NNN is zero-padded (e.g., `adr-007-event-sourcing-pattern`)
+   - `description`: One-line summary (~50-80 chars) of the architectural decision
+   - `triggers`: List of specific scenarios when this ADR should be referenced
+   - `instructions`: 2-3 sentences of actionable guidance focusing on "what" and "why"
 
 3. Write the ADR content as normal
+
+**Naming Convention**: Use zero-padded numbers (001, 002, ... 010, 011) for consistency and proper sorting.
 
 ### For Runbooks
 
@@ -103,3 +105,71 @@ When creating a new runbook:
 This is an adaptive use of Claude Code's skills system. While typically skills are standalone tool integrations, we're using the same metadata pattern to make our documentation "skillable" - loadable on demand when contextually relevant.
 
 The key insight: **good documentation with structured metadata becomes intelligent, context-aware documentation**.
+
+## Troubleshooting
+
+### YAML Frontmatter Not Rendering Invisibly
+
+**Problem**: Frontmatter appears as text in markdown viewers instead of being hidden.
+
+**Solution**:
+- Ensure triple-dash delimiters (`---`) are on their own lines
+- First `---` must be the very first line of the file (no blank lines before)
+- Second `---` must have no trailing spaces
+- Check for tab characters - use spaces for indentation in YAML
+
+**Valid Example**:
+```yaml
+---
+name: adr-007-example
+description: Example description
+---
+
+# ADR Title
+```
+
+### YAML Syntax Errors
+
+**Problem**: Metadata doesn't parse correctly.
+
+**Solution**:
+- Validate YAML syntax using an online validator (yamllint.com) or `yq` command
+- Common issues:
+  - Missing colons after field names
+  - Incorrect indentation (must use spaces, not tabs)
+  - Unescaped special characters in strings (use quotes if needed)
+  - Missing pipe (`|`) for multi-line `instructions` field
+
+**Valid Multi-line Example**:
+```yaml
+instructions: |
+  Line one of instructions.
+  Line two continues here.
+  Line three wraps up.
+```
+
+### Required Fields Missing
+
+**Problem**: Skill doesn't load or behaves unexpectedly.
+
+**Solution**: Ensure all four required fields are present:
+- `name`: Must be unique across all skills
+- `description`: Must be non-empty
+- `triggers`: Must have at least one trigger scenario
+- `instructions`: Must provide actionable guidance
+
+### Skills Not Loading in Claude Code
+
+**Problem**: Claude Code doesn't seem to reference the skills.
+
+**Possible Causes**:
+- Triggers may not match conversation context - review and refine trigger scenarios
+- File paths in CLAUDE.md may be incorrect - verify paths are relative to repo root
+- YAML syntax errors preventing parsing - validate frontmatter
+- Claude Code may need explicit prompting to check specific skills
+
+**Troubleshooting Steps**:
+1. Verify YAML frontmatter syntax is valid
+2. Check that `CLAUDE.md` lists the skill files with correct paths
+3. Ensure trigger scenarios are specific and match likely conversation topics
+4. Try explicitly mentioning the ADR/runbook topic in conversation
