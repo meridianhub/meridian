@@ -23,16 +23,19 @@ enum AccountStatus {
 // CurrentAccountFacility represents a BIAN-compliant current account facility
 // Task 5.1: Define CurrentAccountFacility message with account identification and status management
 message CurrentAccountFacility {
-  // account_id is the unique identifier for this account facility
+  // account_id is the unique identifier for this account facility (alphanumeric with hyphens/underscores).
   string account_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // account_identification is the IBAN or other standard account identifier
+  // account_identification is the IBAN or other standard account identifier.
+  // IBAN format: 2 letter country code + 2 check digits + up to 30 alphanumeric characters.
   string account_identification = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 34  // IBAN max length
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"  // IBAN format validation
   }];
 
   // account_status is the current lifecycle state of the account
@@ -103,16 +106,18 @@ message OverdraftConfiguration {
 // AccountTransaction represents a debit or credit transaction on an account
 // Task 5.3: Create debit/credit transaction operations
 message AccountTransaction {
-  // transaction_id is the unique identifier for this transaction
+  // transaction_id is the unique identifier for this transaction (alphanumeric with hyphens/underscores).
   string transaction_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // account_id is the account this transaction belongs to
+  // account_id is the account this transaction belongs to (alphanumeric with hyphens/underscores).
   string account_id = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
   // direction is whether this is a debit or credit
@@ -135,9 +140,10 @@ message AccountTransaction {
     max_len: 500
   }];
 
-  // reference is an external reference or payment reference
+  // reference is an external reference or payment reference (alphanumeric with hyphens, underscores, slashes).
   string reference = 7 [(buf.validate.field).string = {
     max_len: 100
+    pattern: "^[a-zA-Z0-9_/-]*$"
   }];
 
   // timestamp is when the transaction occurred

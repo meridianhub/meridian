@@ -1,3 +1,17 @@
+---
+name: adr-006-tilt-local-development
+description: Use Tilt for fast local Kubernetes development with live reload and dependency management
+triggers:
+  - Setting up local development environment
+  - Debugging microservices locally
+  - Rapid iteration on code changes
+  - Managing local service dependencies
+instructions: |
+  Use Tilt for local dev. Tiltfile defines all services and dependencies. Tilt provides
+  live reload (<5s feedback), logs aggregation, and status UI. Matches production K8s
+  patterns. Handles CockroachDB, Redis, Kafka automatically.
+---
+
 # 6. Tilt for Local Kubernetes Development
 
 Date: 2025-10-25

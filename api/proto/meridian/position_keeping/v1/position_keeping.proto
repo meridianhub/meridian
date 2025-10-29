@@ -16,10 +16,11 @@ message TransactionLogEntry {
   // transaction_id is the identifier of the related transaction (UUID format).
   string transaction_id = 2 [(buf.validate.field).string.uuid = true];
 
-  // account_id is the account involved in this transaction.
+  // account_id is the account involved in this transaction (alphanumeric with hyphens/underscores).
   string account_id = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
+    pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
   // amount is the monetary amount of this transaction.
@@ -38,7 +39,11 @@ message TransactionLogEntry {
   string description = 7 [(buf.validate.field).string.max_len = 500];
 
   // reference is an external reference number (e.g., invoice number, payment reference).
-  string reference = 8 [(buf.validate.field).string.max_len = 255];
+  // Alphanumeric with hyphens, underscores, slashes for payment references.
+  string reference = 8 [(buf.validate.field).string = {
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_/-]*$"
+  }];
 }
 
 // TransactionLineage captures the relationship between transactions.

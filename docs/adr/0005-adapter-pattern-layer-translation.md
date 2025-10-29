@@ -1,3 +1,17 @@
+---
+name: adr-005-adapter-pattern-layer-translation
+description: Use adapter pattern to translate between domain, persistence, and event representations
+triggers:
+  - Translating between domain and database models
+  - Converting domain objects to Kafka events
+  - Mapping gRPC requests to domain models
+  - Handling layer separation
+instructions: |
+  Create dedicated adapter layers for translation: domain ↔ persistence, domain ↔ events,
+  domain ↔ API. Keep business logic in domain layer only. Adapters are pure translation
+  with no business rules. Use explicit mapping to prevent data loss.
+---
+
 # 5. Adapter Pattern for Layer Translation
 
 Date: 2025-10-25

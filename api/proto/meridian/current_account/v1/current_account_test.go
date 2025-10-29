@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"buf.build/go/protovalidate"
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -410,5 +411,331 @@ func TestCurrentAccountFacility_WithTransactionHistory(t *testing.T) {
 	}
 	if txns[1].GetDirection() != commonv1.PostingDirection_POSTING_DIRECTION_DEBIT {
 		t.Error("Second transaction should be DEBIT")
+	}
+}
+
+// TestValidation_IBANFormat tests IBAN format validation
+func TestValidation_IBANFormat(t *testing.T) {
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	now := timestamppb.New(time.Now())
+
+	tests := []struct {
+		name      string
+		iban      string
+		wantError bool
+	}{
+		{
+			name:      "valid UK IBAN",
+			iban:      "GB29NWBK60161331926819",
+			wantError: false,
+		},
+		{
+			name:      "valid German IBAN",
+			iban:      "DE89370400440532013000",
+			wantError: false,
+		},
+		{
+			name:      "valid French IBAN",
+			iban:      "FR1420041010050500013M02606",
+			wantError: false,
+		},
+		{
+			name:      "invalid no country code",
+			iban:      "29NWBK60161331926819",
+			wantError: true,
+		},
+		{
+			name:      "invalid lowercase country code",
+			iban:      "gb29NWBK60161331926819",
+			wantError: true,
+		},
+		{
+			name:      "invalid missing check digits",
+			iban:      "GBNWBK60161331926819",
+			wantError: true,
+		},
+		{
+			name:      "invalid with spaces",
+			iban:      "GB29 NWBK 6016 1331 9268 19",
+			wantError: true,
+		},
+		{
+			name:      "invalid with special characters",
+			iban:      "GB29-NWBK-60161331926819",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			facility := &currentaccountv1.CurrentAccountFacility{
+				AccountId:             "acc-123",
+				AccountIdentification: tt.iban,
+				AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+				BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
+				CreatedAt:             now,
+				UpdatedAt:             now,
+				Version:               1,
+			}
+
+			err := validator.Validate(facility)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected validation error for IBAN %q but got none", tt.iban)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error for IBAN %q: %v", tt.iban, err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidation_AccountIDPattern_CurrentAccount tests account ID pattern validation
+func TestValidation_AccountIDPattern_CurrentAccount(t *testing.T) {
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	now := timestamppb.New(time.Now())
+
+	tests := []struct {
+		name      string
+		accountID string
+		wantError bool
+	}{
+		{
+			name:      "valid alphanumeric",
+			accountID: "ACC123",
+			wantError: false,
+		},
+		{
+			name:      "valid with hyphens",
+			accountID: "ACC-123-XYZ",
+			wantError: false,
+		},
+		{
+			name:      "valid with underscores",
+			accountID: "ACC_123_XYZ",
+			wantError: false,
+		},
+		{
+			name:      "valid mixed",
+			accountID: "ACC-123_XYZ-789",
+			wantError: false,
+		},
+		{
+			name:      "invalid with spaces",
+			accountID: "ACC 123",
+			wantError: true,
+		},
+		{
+			name:      "invalid with special chars",
+			accountID: "ACC@123",
+			wantError: true,
+		},
+		{
+			name:      "invalid with slashes",
+			accountID: "ACC/123",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			facility := &currentaccountv1.CurrentAccountFacility{
+				AccountId:             tt.accountID,
+				AccountIdentification: "GB29NWBK60161331926819",
+				AccountStatus:         currentaccountv1.AccountStatus_ACCOUNT_STATUS_ACTIVE,
+				BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
+				CreatedAt:             now,
+				UpdatedAt:             now,
+				Version:               1,
+			}
+
+			err := validator.Validate(facility)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected validation error for account ID %q but got none", tt.accountID)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error for account ID %q: %v", tt.accountID, err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidation_ReferencePattern tests reference format validation
+func TestValidation_ReferencePattern(t *testing.T) {
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	now := timestamppb.New(time.Now())
+
+	tests := []struct {
+		name      string
+		reference string
+		wantError bool
+	}{
+		{
+			name:      "valid alphanumeric",
+			reference: "REF123456",
+			wantError: false,
+		},
+		{
+			name:      "valid with hyphens",
+			reference: "REF-123-456",
+			wantError: false,
+		},
+		{
+			name:      "valid with underscores",
+			reference: "REF_123_456",
+			wantError: false,
+		},
+		{
+			name:      "valid with slashes",
+			reference: "INV/2024/001",
+			wantError: false,
+		},
+		{
+			name:      "valid mixed",
+			reference: "PAY-2024_01/001",
+			wantError: false,
+		},
+		{
+			name:      "valid empty (optional field)",
+			reference: "",
+			wantError: false,
+		},
+		{
+			name:      "invalid with spaces",
+			reference: "REF 123",
+			wantError: true,
+		},
+		{
+			name:      "invalid with special chars",
+			reference: "REF@123",
+			wantError: true,
+		},
+		{
+			name:      "invalid with dots",
+			reference: "REF.123",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transaction := &currentaccountv1.AccountTransaction{
+				TransactionId: "txn-123",
+				AccountId:     "acc-456",
+				Amount: &commonv1.MoneyAmount{
+					Amount: &money.Money{
+						CurrencyCode: "GBP",
+						Units:        100,
+						Nanos:        0,
+					},
+				},
+				Direction:   commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+				Reference:   tt.reference,
+				Timestamp:   now,
+				Status:      commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				Description: "Test transaction",
+			}
+
+			err := validator.Validate(transaction)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected validation error for reference %q but got none", tt.reference)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error for reference %q: %v", tt.reference, err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidation_TransactionIDPattern tests transaction ID pattern validation
+func TestValidation_TransactionIDPattern(t *testing.T) {
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	now := timestamppb.New(time.Now())
+
+	tests := []struct {
+		name    string
+		txnID   string
+		wantErr bool
+	}{
+		{
+			name:    "valid alphanumeric",
+			txnID:   "TXN123",
+			wantErr: false,
+		},
+		{
+			name:    "valid with hyphens",
+			txnID:   "TXN-123-ABC",
+			wantErr: false,
+		},
+		{
+			name:    "valid with underscores",
+			txnID:   "TXN_123_ABC",
+			wantErr: false,
+		},
+		{
+			name:    "invalid with spaces",
+			txnID:   "TXN 123",
+			wantErr: true,
+		},
+		{
+			name:    "invalid with special chars",
+			txnID:   "TXN@123",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transaction := &currentaccountv1.AccountTransaction{
+				TransactionId: tt.txnID,
+				AccountId:     "acc-123",
+				Amount: &commonv1.MoneyAmount{
+					Amount: &money.Money{
+						CurrencyCode: "GBP",
+						Units:        100,
+						Nanos:        0,
+					},
+				},
+				Direction:   commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+				Timestamp:   now,
+				Status:      commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				Description: "Test transaction",
+			}
+
+			err := validator.Validate(transaction)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected validation error for transaction ID %q but got none", tt.txnID)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error for transaction ID %q: %v", tt.txnID, err)
+				}
+			}
+		})
 	}
 }

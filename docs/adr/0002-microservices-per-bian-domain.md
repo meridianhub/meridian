@@ -1,3 +1,17 @@
+---
+name: adr-002-microservices-per-bian-domain
+description: One microservice per BIAN domain for independent scaling, deployment, and failure isolation
+triggers:
+  - Designing service boundaries
+  - Deciding between microservices vs monolith
+  - Planning service deployment architecture
+  - Discussing BIAN domain implementation
+instructions: |
+  Create one service per BIAN domain (FinancialAccounting, PositionKeeping, CurrentAccount).
+  Each service independently deployable with own database. Use gRPC for sync communication,
+  Kafka for async events. Services are "lego blocks" for composability.
+---
+
 # 2. Microservices Architecture with One Service per BIAN Domain
 
 Date: 2025-10-25
