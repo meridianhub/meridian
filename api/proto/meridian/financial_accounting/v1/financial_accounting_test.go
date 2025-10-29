@@ -1,6 +1,7 @@
 package financialaccountingv1_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -606,5 +607,8 @@ func containsError(err error, expectedMsg string) bool {
 	if err == nil {
 		return false
 	}
-	return len(expectedMsg) > 0 && len(err.Error()) > 0
+	if expectedMsg == "" {
+		return true
+	}
+	return strings.Contains(err.Error(), expectedMsg)
 }
