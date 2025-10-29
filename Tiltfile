@@ -188,11 +188,39 @@ spec:
         ports:
         - containerPort: 2181
           name: client
+        - containerPort: 2888
+          name: server
+        - containerPort: 3888
+          name: leader-election
         env:
         - name: ZOO_MY_ID
           value: "1"
         - name: ZOO_SERVERS
-          value: "server.1=localhost:2888:3888;2181"
+          value: "server.1=0.0.0.0:2888:3888;2181"
+        - name: ZOO_STANDALONE_ENABLED
+          value: "true"
+        - name: ZOO_ADMINSERVER_ENABLED
+          value: "false"
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "echo ruok | nc localhost 2181 | grep imok"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "echo ruok | nc localhost 2181 | grep imok"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
         resources:
           requests:
             cpu: 100m
@@ -244,18 +272,44 @@ spec:
           value: "1"
         - name: KAFKA_ZOOKEEPER_CONNECT
           value: "zookeeper:2181"
+        - name: KAFKA_LISTENERS
+          value: "PLAINTEXT://0.0.0.0:9092"
         - name: KAFKA_ADVERTISED_LISTENERS
           value: "PLAINTEXT://kafka:9092"
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "PLAINTEXT:PLAINTEXT"
+        - name: KAFKA_INTER_BROKER_LISTENER_NAME
+          value: "PLAINTEXT"
         - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
           value: "1"
         - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
           value: "1"
         - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
           value: "1"
+        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_MIN_INSYNC_REPLICAS
+          value: "1"
         - name: KAFKA_LOG_RETENTION_HOURS
           value: "1"
         - name: KAFKA_LOG_SEGMENT_BYTES
           value: "1073741824"
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms512M -Xmx512M"
+        readinessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
         resources:
           requests:
             cpu: 250m
