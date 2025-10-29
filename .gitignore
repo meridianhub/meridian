@@ -40,3 +40,7 @@ coverage.out
 *.dylib
 *.out
 __debug_bin
+
+# Generated protobuf files (regenerate with buf or make proto)
+*.pb.go
+*_grpc.pb.go

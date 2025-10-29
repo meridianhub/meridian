@@ -66,7 +66,7 @@ syntax = "proto3";
 
 package meridian.financial_accounting.v1;
 
-option go_package = "github.com/bjcoombs/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
 ```
 
 ### Directory Structure

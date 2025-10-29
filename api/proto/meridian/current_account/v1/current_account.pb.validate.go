@@ -18,7 +18,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/anypb"
 
-	commonv1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 )
 
 // ensure the imports are used

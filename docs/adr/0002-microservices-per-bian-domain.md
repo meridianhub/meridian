@@ -112,8 +112,8 @@ Core domains (FinancialAccounting, PositionKeeping) in monolith, customer-facing
 
 * [BIAN Service Landscape](https://bian.org/servicelandscape/)
 * [BIAN Semantic APIs](../../../bian/bian-public-main/release13.0.0/semantic-apis/)
-* [GitHub Issue #1: Infrastructure](https://github.com/bjcoombs/meridian/issues/1)
-* [GitHub Issue #3: Platform Services](https://github.com/bjcoombs/meridian/issues/3)
+* [GitHub Issue #1: Infrastructure](https://github.com/meridianhub/meridian/issues/1)
+* [GitHub Issue #3: Platform Services](https://github.com/meridianhub/meridian/issues/3)
 
 ## Notes
 
