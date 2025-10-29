@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"buf.build/go/protovalidate"
-	commonv1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 )
 
 // TestValidation_IdempotencyKeyPattern tests idempotency key pattern validation
