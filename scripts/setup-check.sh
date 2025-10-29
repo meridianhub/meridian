@@ -83,11 +83,17 @@ check_command() {
 check_k8s_cluster() {
     echo "Checking Kubernetes cluster connectivity..."
 
-    if kubectl cluster-info &> /dev/null; then
-        local context
-        context=$(kubectl config current-context 2>/dev/null || echo "unknown")
+    # Get current context
+    local current_context
+    current_context=$(kubectl config current-context 2>/dev/null || echo "none")
+
+    # Try to connect to cluster with timeout
+    local cluster_error
+    cluster_error=$(timeout 5 kubectl cluster-info 2>&1 >/dev/null || echo "timeout")
+
+    if timeout 5 kubectl cluster-info &> /dev/null; then
         echo -e "${GREEN}✓${NC} Kubernetes cluster accessible"
-        echo -e "  Context: $context"
+        echo -e "  Context: $current_context"
 
         # Check nodes
         local nodes
@@ -95,11 +101,56 @@ check_k8s_cluster() {
         echo -e "  Nodes: $nodes"
     else
         echo -e "${RED}✗${NC} Cannot connect to Kubernetes cluster"
-        echo -e "  ${YELLOW}Setup:${NC} Start a local cluster with:"
-        echo -e "    - Docker Desktop: Enable Kubernetes in settings"
-        echo -e "    - kind: kind create cluster"
-        echo -e "    - minikube: minikube start"
-        echo -e "    - colima: colima start --kubernetes"
+        echo -e "  Current context: $current_context"
+
+        # Provide specific diagnosis based on error
+        if echo "$cluster_error" | grep -q "AWS SSO\|aws sso login"; then
+            echo -e ""
+            echo -e "  ${YELLOW}Diagnosis:${NC} kubectl is configured for AWS EKS cluster requiring SSO login"
+            echo -e ""
+            echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Switch to a local cluster context:"
+            echo -e ""
+
+            # Check for available local contexts
+            local local_contexts
+            local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "docker-desktop|rancher-desktop|minikube|kind|colima" || echo "")
+
+            if [ -n "$local_contexts" ]; then
+                echo -e "  ${GREEN}Available local contexts:${NC}"
+                while IFS= read -r ctx; do
+                    echo -e "    kubectl config use-context $ctx"
+                done <<< "$local_contexts"
+                echo -e ""
+                echo -e "  ${YELLOW}Run one of the above commands to switch to local development.${NC}"
+            else
+                echo -e "  ${YELLOW}No local cluster contexts found. Start a local cluster:${NC}"
+                echo -e "    - Docker Desktop: Enable Kubernetes in Docker Desktop settings"
+                echo -e "    - Rancher Desktop: Enable Kubernetes in Rancher Desktop preferences"
+                echo -e "    - kind: kind create cluster"
+                echo -e "    - minikube: minikube start"
+                echo -e "    - colima: colima start --kubernetes"
+            fi
+        elif echo "$cluster_error" | grep -q "connection refused\|no such host"; then
+            echo -e ""
+            echo -e "  ${YELLOW}Diagnosis:${NC} Cluster not running or unreachable"
+            echo -e ""
+            echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Start a local Kubernetes cluster:"
+            echo -e "    - Docker Desktop: Enable Kubernetes in settings (Preferences → Kubernetes → Enable)"
+            echo -e "    - Rancher Desktop: Enable Kubernetes in preferences"
+            echo -e "    - kind: kind create cluster"
+            echo -e "    - minikube: minikube start"
+            echo -e "    - colima: colima start --kubernetes"
+        else
+            echo -e ""
+            echo -e "  ${YELLOW}Error details:${NC}"
+            echo "$cluster_error" | head -3 | sed 's/^/    /'
+            echo -e ""
+            echo -e "  ${YELLOW}Troubleshooting:${NC}"
+            echo -e "    1. Check available contexts: kubectl config get-contexts"
+            echo -e "    2. Switch context: kubectl config use-context <context-name>"
+            echo -e "    3. Start a local cluster (see options above)"
+        fi
+
         ALL_CHECKS_PASSED=false
     fi
     echo ""
