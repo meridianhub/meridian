@@ -25,6 +25,14 @@ jobs:
           go-version: '1.25.3'
           cache: true
 
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
       - name: Download dependencies
         run: go mod download
 
