@@ -181,23 +181,23 @@ if command -v ctlptl &> /dev/null && command -v kind &> /dev/null; then
     if docker info &> /dev/null; then
         # Check if cluster already exists
         if kubectl config get-contexts kind-meridian-local &> /dev/null; then
-            echo -e "${GREEN}✓${NC} Kind cluster 'meridian-local' already exists"
-            echo "  To recreate: ctlptl delete cluster kind-meridian-local && ctlptl create cluster kind --name=meridian-local"
+            echo -e "${GREEN}✓${NC} Kind cluster 'kind-meridian-local' already exists"
+            echo "  To recreate: ctlptl delete cluster kind-meridian-local && ctlptl create cluster kind --name=kind-meridian-local"
         else
-            echo -e "${BLUE}Creating Kind cluster 'meridian-local'...${NC}"
-            if ctlptl create cluster kind --name=meridian-local; then
+            echo -e "${BLUE}Creating Kind cluster 'kind-meridian-local'...${NC}"
+            if ctlptl create cluster kind --name=kind-meridian-local; then
                 echo -e "${GREEN}✓${NC} Kind cluster created successfully!"
                 echo "  Context: kind-meridian-local"
             else
                 echo -e "${RED}✗${NC} Failed to create Kind cluster"
                 echo "  You can create it manually later:"
-                echo "    ctlptl create cluster kind --name=meridian-local"
+                echo "    ctlptl create cluster kind --name=kind-meridian-local"
             fi
         fi
     else
         echo -e "${YELLOW}⚠${NC}  Docker is not running"
         echo "  Start Docker Desktop, then create the cluster:"
-        echo "    ctlptl create cluster kind --name=meridian-local"
+        echo "    ctlptl create cluster kind --name=kind-meridian-local"
     fi
     echo ""
 fi

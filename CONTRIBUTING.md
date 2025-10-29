@@ -64,7 +64,7 @@ sudo sh get-docker.sh
 # Option 1: Kind with ctlptl (Recommended)
 brew install kind
 brew install tilt-dev/tap/ctlptl
-ctlptl create cluster kind --name=meridian-local
+ctlptl create cluster kind --name=kind-meridian-local
 
 # Option 2: Docker Desktop
 # Enable Kubernetes in Docker Desktop settings

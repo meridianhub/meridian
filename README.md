@@ -85,7 +85,7 @@ Install missing tools automatically (macOS/Linux):
 2. **Create local Kubernetes cluster**:
    ```bash
    # Ensure Docker Desktop is running
-   ctlptl create cluster kind --name=meridian-local
+   ctlptl create cluster kind --name=kind-meridian-local
    ```
 
 3. **Start local environment**:
@@ -223,7 +223,7 @@ Errors are categorized for different domains:
 kubectl cluster-info
 
 # Create a Kind cluster (recommended):
-ctlptl create cluster kind --name=meridian-local
+ctlptl create cluster kind --name=kind-meridian-local
 
 # Or use alternatives:
 minikube start                   # minikube

@@ -135,7 +135,7 @@ check_k8s_cluster() {
                 echo -e ""
                 echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
                 echo -e "    1. Ensure Docker Desktop is running"
-                echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=meridian-local${NC}"
+                echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
                 echo -e "    3. Verify: kubectl config use-context kind-meridian-local"
                 echo -e ""
                 echo -e "  ${YELLOW}Alternative options:${NC}"
@@ -152,12 +152,12 @@ check_k8s_cluster() {
             if command -v ctlptl &> /dev/null && command -v kind &> /dev/null && docker info &> /dev/null; then
                 echo -e "  ${GREEN}I can create a Kind cluster for you!${NC}"
                 echo -e ""
-                read -p "  Create Kind cluster 'meridian-local' now? (y/n): " -n 1 -r
+                read -p "  Create Kind cluster 'kind-meridian-local' now? (y/n): " -n 1 -r
                 echo ""
                 if [[ $REPLY =~ ^[Yy]$ ]]; then
                     echo -e ""
-                    echo -e "  ${BLUE}Creating Kind cluster 'meridian-local'...${NC}"
-                    if ctlptl create cluster kind --name=meridian-local; then
+                    echo -e "  ${BLUE}Creating Kind cluster 'kind-meridian-local'...${NC}"
+                    if ctlptl create cluster kind --name=kind-meridian-local; then
                         echo -e ""
                         echo -e "  ${GREEN}✓${NC} Kind cluster created successfully!"
                         echo -e "  Run this script again to verify, or start developing with: ${BLUE}tilt up${NC}"
@@ -175,7 +175,7 @@ check_k8s_cluster() {
             echo -e ""
             echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
             echo -e "    1. Ensure Docker Desktop is running"
-            echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=meridian-local${NC}"
+            echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
             echo -e "    3. Verify: kubectl get nodes"
             echo -e ""
             echo -e "  ${YELLOW}Alternative options:${NC}"
