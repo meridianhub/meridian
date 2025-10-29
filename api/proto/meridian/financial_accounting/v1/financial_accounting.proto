@@ -86,13 +86,21 @@ message LedgerPosting {
     not_in: [0]
   }];
 
-  // posting_amount is the monetary amount being posted.
-  google.type.Money posting_amount = 4 [(buf.validate.field).required = true];
+  // posting_amount is the monetary amount being posted (must be positive for accounting entries).
+  google.type.Money posting_amount = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "positive_posting_amount"
+      message: "posting amount must be greater than zero"
+      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+    }
+  ];
 
-  // account_id identifies the account being posted to.
+  // account_id identifies the account being posted to (alphanumeric with hyphens/underscores).
   string account_id = 5 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
+    pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
   // value_date is the effective date for this posting.
@@ -221,13 +229,21 @@ message CaptureLedgerPostingRequest {
     not_in: [0]
   }];
 
-  // posting_amount is the amount to post.
-  google.type.Money posting_amount = 3 [(buf.validate.field).required = true];
+  // posting_amount is the amount to post (must be positive).
+  google.type.Money posting_amount = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "positive_posting_amount_request"
+      message: "posting amount must be greater than zero"
+      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+    }
+  ];
 
-  // account_id identifies the target account.
+  // account_id identifies the target account (alphanumeric with hyphens/underscores).
   string account_id = 4 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
+    pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
   // value_date is the effective date.

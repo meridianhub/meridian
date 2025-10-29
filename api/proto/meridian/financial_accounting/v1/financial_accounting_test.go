@@ -1,9 +1,11 @@
 package financialaccountingv1_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"buf.build/go/protovalidate"
 	commonv1 "github.com/bjcoombs/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/bjcoombs/meridian/api/proto/meridian/financial_accounting/v1"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -322,4 +324,291 @@ func TestPostingDirections(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidation_PositivePostingAmount tests positive amount validation for LedgerPosting
+func TestValidation_PositivePostingAmount(t *testing.T) {
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	now := timestamppb.New(time.Now())
+
+	tests := []struct {
+		name      string
+		posting   *financialaccountingv1.LedgerPosting
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name: "valid positive amount with units",
+			posting: &financialaccountingv1.LedgerPosting{
+				Id:                    "posting-1",
+				FinancialBookingLogId: "log-1",
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        100,
+					Nanos:        0,
+				},
+				AccountId: "acc-123",
+				ValueDate: now,
+				CreatedAt: now,
+				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+			},
+			wantError: false,
+		},
+		{
+			name: "valid positive amount with nanos only",
+			posting: &financialaccountingv1.LedgerPosting{
+				Id:                    "posting-2",
+				FinancialBookingLogId: "log-2",
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "USD",
+					Units:        0,
+					Nanos:        50000000, // 0.05 USD
+				},
+				AccountId: "acc-456",
+				ValueDate: now,
+				CreatedAt: now,
+				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+			},
+			wantError: false,
+		},
+		{
+			name: "invalid zero amount",
+			posting: &financialaccountingv1.LedgerPosting{
+				Id:                    "posting-3",
+				FinancialBookingLogId: "log-3",
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        0,
+					Nanos:        0,
+				},
+				AccountId: "acc-789",
+				ValueDate: now,
+				CreatedAt: now,
+				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+			},
+			wantError: true,
+			errorMsg:  "posting amount must be greater than zero",
+		},
+		{
+			name: "invalid negative amount",
+			posting: &financialaccountingv1.LedgerPosting{
+				Id:                    "posting-4",
+				FinancialBookingLogId: "log-4",
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "EUR",
+					Units:        -50,
+					Nanos:        0,
+				},
+				AccountId: "acc-999",
+				ValueDate: now,
+				CreatedAt: now,
+				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+			},
+			wantError: true,
+			errorMsg:  "posting amount must be greater than zero",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.Validate(tt.posting)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected validation error but got none")
+				} else if tt.errorMsg != "" && !containsError(err, tt.errorMsg) {
+					t.Errorf("Expected error containing %q, got: %v", tt.errorMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidation_AccountIDPattern tests account ID pattern validation
+func TestValidation_AccountIDPattern(t *testing.T) {
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	now := timestamppb.New(time.Now())
+
+	tests := []struct {
+		name      string
+		accountID string
+		wantError bool
+	}{
+		{
+			name:      "valid alphanumeric",
+			accountID: "acc123",
+			wantError: false,
+		},
+		{
+			name:      "valid with hyphens",
+			accountID: "acc-123-xyz",
+			wantError: false,
+		},
+		{
+			name:      "valid with underscores",
+			accountID: "acc_123_xyz",
+			wantError: false,
+		},
+		{
+			name:      "valid mixed",
+			accountID: "acc-123_xyz-789",
+			wantError: false,
+		},
+		{
+			name:      "invalid with spaces",
+			accountID: "acc 123",
+			wantError: true,
+		},
+		{
+			name:      "invalid with special chars",
+			accountID: "acc@123",
+			wantError: true,
+		},
+		{
+			name:      "invalid with slashes",
+			accountID: "acc/123",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			posting := &financialaccountingv1.LedgerPosting{
+				Id:                    "posting-1",
+				FinancialBookingLogId: "log-1",
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        100,
+					Nanos:        0,
+				},
+				AccountId: tt.accountID,
+				ValueDate: now,
+				CreatedAt: now,
+				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+			}
+
+			err := validator.Validate(posting)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected validation error for account ID %q but got none", tt.accountID)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error for account ID %q: %v", tt.accountID, err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidation_CaptureLedgerPostingRequest tests request validation
+func TestValidation_CaptureLedgerPostingRequest(t *testing.T) {
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	now := timestamppb.New(time.Now())
+
+	tests := []struct {
+		name      string
+		req       *financialaccountingv1.CaptureLedgerPostingRequest
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name: "valid request",
+			req: &financialaccountingv1.CaptureLedgerPostingRequest{
+				FinancialBookingLogId: "log-123",
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        100,
+					Nanos:        50,
+				},
+				AccountId: "acc-valid-123",
+				ValueDate: now,
+				IdempotencyKey: &commonv1.IdempotencyKey{
+					Key:        "idem-key-123",
+					TtlSeconds: 3600,
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "invalid zero posting amount",
+			req: &financialaccountingv1.CaptureLedgerPostingRequest{
+				FinancialBookingLogId: "log-123",
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        0,
+					Nanos:        0,
+				},
+				AccountId: "acc-123",
+				ValueDate: now,
+			},
+			wantError: true,
+			errorMsg:  "posting amount must be greater than zero",
+		},
+		{
+			name: "invalid account ID with special chars",
+			req: &financialaccountingv1.CaptureLedgerPostingRequest{
+				FinancialBookingLogId: "log-123",
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        100,
+					Nanos:        0,
+				},
+				AccountId: "acc@invalid#123",
+				ValueDate: now,
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.Validate(tt.req)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected validation error but got none")
+				} else if tt.errorMsg != "" && !containsError(err, tt.errorMsg) {
+					t.Errorf("Expected error containing %q, got: %v", tt.errorMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// containsError checks if error message contains the expected text
+func containsError(err error, expectedMsg string) bool {
+	if err == nil {
+		return false
+	}
+	if expectedMsg == "" {
+		return true
+	}
+	return strings.Contains(err.Error(), expectedMsg)
 }
