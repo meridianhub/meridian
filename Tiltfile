@@ -328,7 +328,8 @@ k8s_resource(
     'meridian:role',
     'meridian:rolebinding',
     'meridian-config:configmap',
-    'meridian-version-cht8ckhb6g:configmap',  # Kustomize generated ConfigMap with hash
+    # Note: meridian-version ConfigMap omitted (Kustomize hash suffix changes with content)
+    # Tilt will still deploy it via kustomize, just not explicitly tracked here
   ],
 )
 
