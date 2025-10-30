@@ -4,6 +4,10 @@
 set -e
 
 KAFKA_POD=$(kubectl get pods -l app=kafka -o jsonpath='{.items[0].metadata.name}')
+if [ -z "$KAFKA_POD" ]; then
+  echo "Error: Kafka pod not found. Ensure Kafka is running and accessible."
+  exit 1
+fi
 
 echo "Watching Kafka topics (Ctrl+C to stop)..."
 echo ""

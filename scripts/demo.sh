@@ -60,6 +60,10 @@ echo -e "${YELLOW}Watching Kafka topics for 3 seconds...${NC}"
 
 # Get Kafka pod
 KAFKA_POD=$(kubectl get pods -l app=kafka -o jsonpath='{.items[0].metadata.name}')
+if [ -z "$KAFKA_POD" ]; then
+  echo "Error: Kafka pod not found. Ensure Kafka is running."
+  exit 1
+fi
 
 # Show events from current-account.deposits topic
 echo -e "\n${YELLOW}Topic: current-account.deposits${NC}"
