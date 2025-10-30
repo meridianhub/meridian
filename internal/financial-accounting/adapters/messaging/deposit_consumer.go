@@ -3,6 +3,7 @@ package messaging
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -10,6 +11,15 @@ import (
 	"github.com/meridianhub/meridian/internal/financial-accounting/service"
 	"github.com/meridianhub/meridian/internal/platform/kafka"
 	"google.golang.org/protobuf/proto"
+)
+
+var (
+	// ErrMissingValueDate is returned when a deposit event has no value date
+	ErrMissingValueDate = errors.New("deposit event: value_date is required")
+	// ErrMissingTimestamp is returned when a deposit event has no timestamp
+	ErrMissingTimestamp = errors.New("deposit event: timestamp is required")
+	// ErrInvalidCurrency is returned when a deposit event has an unknown or unspecified currency
+	ErrInvalidCurrency = errors.New("deposit event: unknown or unspecified currency")
 )
 
 // DepositConsumer consumes DepositEvent messages from Kafka and processes them
@@ -62,10 +72,10 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 
 	// Validate required fields to prevent nil pointer panics
 	if event.ValueDate == nil {
-		return fmt.Errorf("invalid deposit event: value_date is required")
+		return ErrMissingValueDate
 	}
 	if event.Timestamp == nil {
-		return fmt.Errorf("invalid deposit event: timestamp is required")
+		return ErrMissingTimestamp
 	}
 
 	// Convert proto timestamp to time.Time
@@ -74,7 +84,7 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 	// Convert proto currency enum to ISO code (e.g., CURRENCY_GBP -> GBP)
 	currencyCode := convertCurrencyToISO(event.Currency)
 	if currencyCode == "" {
-		return fmt.Errorf("invalid deposit event: unknown or unspecified currency: %v", event.Currency)
+		return fmt.Errorf("%w: %v", ErrInvalidCurrency, event.Currency)
 	}
 
 	// Create service event
