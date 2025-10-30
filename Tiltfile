@@ -4,7 +4,6 @@
 # Fast Kubernetes development with live reload
 
 # Load Tilt extensions
-load('ext://helm_remote', 'helm_remote')
 load('ext://restart_process', 'docker_build_with_restart')
 
 # Allow Tilt to connect to local Kubernetes cluster
@@ -25,6 +24,13 @@ k8s_namespace = 'default'
 # =============================================================================
 # Backing Services
 # =============================================================================
+# NOTE: These configurations are optimized for LOCAL DEVELOPMENT ONLY.
+# Production deployments require:
+# - TLS/SSL encryption
+# - Authentication and authorization
+# - Persistent volumes and StatefulSets
+# - Multi-node clusters with replication
+# - Resource limits appropriate for production workloads
 
 # CockroachDB - Single-node for local development
 k8s_yaml(blob('''
@@ -152,17 +158,173 @@ spec:
             memory: 512Mi
 '''))
 
-# Kafka + Zookeeper using Confluent helm charts
-# Uses publicly available Confluent images
-helm_remote(
-  'cp-helm-charts',
-  repo_name='confluentinc',
-  repo_url='https://confluentinc.github.io/cp-helm-charts/',
-  namespace=k8s_namespace,
-  values=[
-    'deployments/tilt/confluent-values.yaml',
-  ],
-)
+# Zookeeper - Single node for local development
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  labels:
+    app: zookeeper
+spec:
+  type: ClusterIP
+  ports:
+  - name: client
+    port: 2181
+    targetPort: 2181
+  selector:
+    app: zookeeper
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zookeeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+      - name: zookeeper
+        image: zookeeper:3.9.3
+        ports:
+        - containerPort: 2181
+          name: client
+        - containerPort: 2888
+          name: server
+        - containerPort: 3888
+          name: leader-election
+        env:
+        - name: ZOO_MY_ID
+          value: "1"
+        - name: ZOO_SERVERS
+          value: "server.1=0.0.0.0:2888:3888;2181"
+        - name: ZOO_STANDALONE_ENABLED
+          value: "true"
+        - name: ZOO_ADMINSERVER_ENABLED
+          value: "false"
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "echo ruok | nc localhost 2181 | grep imok"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "echo ruok | nc localhost 2181 | grep imok"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+'''))
+
+# Kafka - Single broker for local development
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+spec:
+  type: ClusterIP
+  ports:
+  - name: broker
+    port: 9092
+    targetPort: 9092
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:7.8.0
+        ports:
+        - containerPort: 9092
+          name: broker
+        env:
+        - name: KAFKA_BROKER_ID
+          value: "1"
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: "zookeeper:2181"
+        - name: KAFKA_LISTENERS
+          value: "PLAINTEXT://0.0.0.0:9092"
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: "PLAINTEXT://kafka:9092"
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "PLAINTEXT:PLAINTEXT"
+        - name: KAFKA_INTER_BROKER_LISTENER_NAME
+          value: "PLAINTEXT"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+          value: "1"
+        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_MIN_INSYNC_REPLICAS
+          value: "1"
+        - name: KAFKA_LOG_RETENTION_HOURS
+          value: "1"  # Aggressive retention for local dev to save disk space
+        - name: KAFKA_LOG_SEGMENT_BYTES
+          value: "268435456"  # 256MB segments for faster log rolling in local dev
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms512M -Xmx512M"  # Conservative heap for local development
+        readinessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+'''))
 
 # =============================================================================
 # Main Application
@@ -237,18 +399,16 @@ k8s_resource(
   resource_deps=[],
 )
 
-# Confluent Platform resources (managed by helm chart)
+# Messaging infrastructure
 k8s_resource(
-  'cp-helm-charts-cp-zookeeper',
-  new_name='zookeeper',
+  'zookeeper',
   port_forwards='2181:2181',
   labels=['infrastructure', 'messaging'],
   resource_deps=[],
 )
 
 k8s_resource(
-  'cp-helm-charts-cp-kafka',
-  new_name='kafka',
+  'kafka',
   port_forwards='9092:9092',
   labels=['infrastructure', 'messaging'],
   resource_deps=['zookeeper'],

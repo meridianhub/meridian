@@ -6,9 +6,9 @@ triggers:
   - Creating Kubernetes manifests for backing services
   - Evaluating Helm adoption timeline
 instructions: |
-  Use raw Kubernetes YAML for infrastructure services (CockroachDB, Redis) in Tiltfile.
-  Use Helm only for complex third-party services (Confluent Platform). Defer full Helm
-  migration until service topology stabilizes.
+  Use raw Kubernetes YAML for all infrastructure services in Tiltfile (CockroachDB, Redis,
+  Kafka, Zookeeper). Defer Helm adoption until service topology stabilizes and
+  multi-environment deployment becomes necessary.
 ---
 
 # 7. Raw YAML Over Helm for Initial Development
@@ -64,11 +64,11 @@ This is particularly challenging when:
 
 ## Decision
 
-**For initial development, use raw Kubernetes YAML instead of Helm charts, with two exceptions:**
+**For initial development, use raw Kubernetes YAML instead of Helm charts:**
 
-1. **Use raw YAML for simple services**: CockroachDB and Redis are defined as inline YAML in the Tiltfile
-2. **Use Helm for complex third-party services**: Confluent Platform (Kafka + Zookeeper) uses Helm due to its configuration complexity
-3. **Defer full Helm migration**: Plan to migrate to Helm charts once service topology stabilizes
+1. **Use raw YAML for all backing services**: CockroachDB, Redis, Kafka, and Zookeeper are all defined as inline YAML in the Tiltfile
+2. **Keep configurations simple**: Single-node deployments with minimal but complete configuration
+3. **Defer Helm migration**: Plan to migrate to Helm charts once service topology stabilizes and multi-environment deployment becomes necessary
 
 This is a **conscious architectural decision**, not an oversight. We are explicitly choosing transparency and learning velocity over environment abstraction during the initial development phase.
 
@@ -79,7 +79,7 @@ This is a **conscious architectural decision**, not an oversight. We are explici
 - **Cognitive load**: Reduce abstraction layers during high-uncertainty development phase
 - **Service stability**: Service topology is still evolving; premature abstraction would churn
 - **Immediate value**: Helm's multi-environment value doesn't apply yet (only local dev exists)
-- **Pragmatic complexity**: Use Helm only where it provides clear immediate value (Confluent Platform)
+- **Complete but minimal**: Even complex services like Kafka can be configured simply for local development
 
 ## Consequences
 
