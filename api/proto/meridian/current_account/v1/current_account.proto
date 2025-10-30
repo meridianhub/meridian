@@ -22,10 +22,15 @@ enum AccountStatus {
 
 // Transaction status for deposit/withdrawal operations
 enum TransactionStatus {
+  // TRANSACTION_STATUS_UNSPECIFIED is the default value and should not be used in requests
   TRANSACTION_STATUS_UNSPECIFIED = 0;
+  // TRANSACTION_STATUS_PENDING indicates the transaction is awaiting processing
   TRANSACTION_STATUS_PENDING = 1;
+  // TRANSACTION_STATUS_COMPLETED indicates the transaction has been successfully processed
   TRANSACTION_STATUS_COMPLETED = 2;
+  // TRANSACTION_STATUS_FAILED indicates the transaction processing failed
   TRANSACTION_STATUS_FAILED = 3;
+  // TRANSACTION_STATUS_REVERSED indicates the transaction has been reversed or cancelled
   TRANSACTION_STATUS_REVERSED = 4;
 }
 
