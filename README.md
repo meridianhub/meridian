@@ -261,7 +261,7 @@ kubectl config current-context
 kubectl get nodes
 ```
 
-See [docs/docker.md](docs/docker.md) and [docs/tilt.md](docs/tilt.md) for detailed troubleshooting.
+See [docs/skills/docker.md](docs/skills/docker.md) and [docs/skills/tilt.md](docs/skills/tilt.md) for detailed troubleshooting.
 
 ## Contributing
 

@@ -85,7 +85,7 @@ Chosen option: **"Tilt"**, because:
 
 **Mitigation:**
 - Use **Kind + ctlptl** for fast, reproducible local clusters
-- Provide comprehensive onboarding docs ([docs/tilt.md](../tilt.md))
+- Provide comprehensive onboarding docs ([docs/skills/tilt.md](../skills/tilt.md))
 - Include setup automation scripts (`scripts/setup-check.sh`, `scripts/install-tools.sh`)
 - Single command cluster creation with local registry: `ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local`
 - Tiltfile comments explain each section
@@ -409,7 +409,7 @@ Only rebuild when relevant directories change.
 
 ### Troubleshooting
 
-See comprehensive troubleshooting guide in [docs/tilt.md](../tilt.md):
+See comprehensive troubleshooting guide in [docs/skills/tilt.md](../skills/tilt.md):
 
 * Resources not starting → Check K8s cluster
 * Slow builds → Clear Tilt cache
@@ -463,7 +463,7 @@ Useful for pre-merge integration tests in GitHub Actions.
 **Learning path:**
 1. Read [CONTRIBUTING.md](../../CONTRIBUTING.md) - Prerequisites section
 2. Run `./scripts/setup-check.sh` - Verify environment
-3. Follow [docs/tilt.md](../tilt.md) - Quick start guide
+3. Follow [docs/skills/tilt.md](../skills/tilt.md) - Quick start guide
 4. Watch Tilt UI to understand resource dependencies
 5. Learn basic kubectl commands (`get pods`, `logs`, `describe`)
 

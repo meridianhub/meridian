@@ -1,3 +1,16 @@
+---
+name: skill-docker-configuration
+description: Docker setup and multi-stage build configuration for production deployments
+triggers:
+  - Building Docker images
+  - Optimizing Dockerfile
+  - Debugging container issues
+  - Understanding image layers
+instructions: |
+  Multi-stage Dockerfile for Go applications with minimal runtime image.
+  Uses distroless base for security. Build with docker build -t meridian .
+---
+
 # Docker Configuration
 
 This document describes the Docker setup for Meridian, optimized for production deployments.

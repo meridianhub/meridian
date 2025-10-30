@@ -1,3 +1,17 @@
+---
+name: skill-tilt-development
+description: Fast Kubernetes development workflow using Tilt with live reload
+triggers:
+  - Starting local development environment
+  - Setting up Tilt for the first time
+  - Debugging Tilt issues
+  - Configuring local registry for faster builds
+instructions: |
+  Use Tilt for local Kubernetes development with fast rebuilds and live reload.
+  Create Kind cluster with local registry using ctlptl for optimal performance.
+  Access Tilt UI at http://localhost:10350 to monitor all services.
+---
+
 # Tilt Development Guide
 
 This guide covers using Tilt for fast Kubernetes development with Meridian.
