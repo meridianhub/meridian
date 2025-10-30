@@ -13,6 +13,25 @@ allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desk
 # Configuration
 # =============================================================================
 
+# Detect and use local registry if available (created by ctlptl)
+# This speeds up image builds by avoiding remote registry pushes
+if k8s_context() == 'kind-meridian-local':
+    # Allow registry name to be configured via environment variable
+    # Default: ctlptl-registry (matches ctlptl's default behavior)
+    registry_name = os.getenv('TILT_REGISTRY_NAME', 'ctlptl-registry')
+
+    # Validate that registry container exists
+    registry_check = local('docker ps --filter name=%s --format "{{.Names}}" 2>/dev/null || true' % registry_name, quiet=True)
+
+    if registry_check.strip() == registry_name:
+        default_registry(registry_name)
+        print('✓ Using local registry: %s' % registry_name)
+    else:
+        print('⚠️  Warning: Local registry "%s" not found' % registry_name)
+        print('   Images will be loaded via "kind load" (slower)')
+        print('   To create cluster with registry:')
+        print('   ctlptl create cluster kind --registry=%s --name=kind-meridian-local' % registry_name)
+
 # Docker image configuration
 docker_registry = os.getenv('DOCKER_REGISTRY', 'ghcr.io/meridianhub')
 image_name = 'meridian'

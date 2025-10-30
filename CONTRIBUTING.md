@@ -61,10 +61,10 @@ sudo sh get-docker.sh
 
 **Kubernetes Cluster**:
 ```bash
-# Option 1: Kind with ctlptl (Recommended)
+# Option 1: Kind with ctlptl and local registry (Recommended)
 brew install kind
 brew install tilt-dev/tap/ctlptl
-ctlptl create cluster kind --name=kind-meridian-local
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Option 2: Docker Desktop
 # Enable Kubernetes in Docker Desktop settings
@@ -167,7 +167,7 @@ tilt up
 tilt down
 ```
 
-See [docs/tilt.md](docs/tilt.md) for detailed Tilt usage.
+See [docs/skills/tilt.md](docs/skills/tilt.md) for detailed Tilt usage.
 
 ### Working with Protocol Buffers
 

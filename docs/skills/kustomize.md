@@ -1,3 +1,16 @@
+---
+name: skill-kustomize-deployments
+description: Kustomize configuration for environment-specific Kubernetes deployments
+triggers:
+  - Deploying to different environments
+  - Managing environment-specific configs
+  - Understanding Kustomize overlays
+instructions: |
+  Use Kustomize for environment-specific Kubernetes manifests.
+  Base configurations in deployments/k8s/base/, overlays in deployments/k8s/overlays/.
+  Deploy with: kubectl apply -k deployments/k8s/overlays/dev
+---
+
 # Kustomize Overlays for Environment-Specific Configuration
 
 This document explains how to use Kustomize overlays to manage environment-specific Kubernetes configurations for Meridian.

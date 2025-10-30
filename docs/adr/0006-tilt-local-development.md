@@ -85,9 +85,9 @@ Chosen option: **"Tilt"**, because:
 
 **Mitigation:**
 - Use **Kind + ctlptl** for fast, reproducible local clusters
-- Provide comprehensive onboarding docs ([docs/tilt.md](../tilt.md))
+- Provide comprehensive onboarding docs ([docs/skills/tilt.md](../skills/tilt.md))
 - Include setup automation scripts (`scripts/setup-check.sh`, `scripts/install-tools.sh`)
-- Single command cluster creation: `ctlptl create cluster kind --name=kind-meridian-local`
+- Single command cluster creation with local registry: `ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local`
 - Tiltfile comments explain each section
 - Startup banner shows all service URLs
 
@@ -331,8 +331,8 @@ k8s_resource('kafka', port_forwards='9092:9092')
 # 2. Install missing tools (if needed)
 ./scripts/install-tools.sh
 
-# 3. Create local Kubernetes cluster (recommended: Kind with ctlptl)
-ctlptl create cluster kind --name=kind-meridian-local
+# 3. Create local Kubernetes cluster with local registry (recommended: Kind with ctlptl)
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Verify cluster is ready
 kubectl cluster-info
@@ -409,7 +409,7 @@ Only rebuild when relevant directories change.
 
 ### Troubleshooting
 
-See comprehensive troubleshooting guide in [docs/tilt.md](../tilt.md):
+See comprehensive troubleshooting guide in [docs/skills/tilt.md](../skills/tilt.md):
 
 * Resources not starting → Check K8s cluster
 * Slow builds → Clear Tilt cache
@@ -463,7 +463,7 @@ Useful for pre-merge integration tests in GitHub Actions.
 **Learning path:**
 1. Read [CONTRIBUTING.md](../../CONTRIBUTING.md) - Prerequisites section
 2. Run `./scripts/setup-check.sh` - Verify environment
-3. Follow [docs/tilt.md](../tilt.md) - Quick start guide
+3. Follow [docs/skills/tilt.md](../skills/tilt.md) - Quick start guide
 4. Watch Tilt UI to understand resource dependencies
 5. Learn basic kubectl commands (`get pods`, `logs`, `describe`)
 
@@ -503,13 +503,13 @@ Provided scripts make onboarding easy:
 # ✗ Kubernetes cluster not accessible
 #
 # ACTION REQUIRED: Create a local cluster
-# ctlptl create cluster kind --name=kind-meridian-local
+# ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Install missing tools
 ./scripts/install-tools.sh
 
-# Create Kind cluster
-ctlptl create cluster kind --name=kind-meridian-local
+# Create Kind cluster with local registry
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Start development
 tilt up
@@ -531,8 +531,8 @@ We use **Kind (Kubernetes in Docker)** with **ctlptl (Cattle Patrol)** for local
 ### Cluster Creation
 
 ```bash
-# Create cluster optimized for Tilt
-ctlptl create cluster kind --name=kind-meridian-local
+# Create cluster optimized for Tilt with local registry
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # This automatically:
 # - Creates a Kind cluster
