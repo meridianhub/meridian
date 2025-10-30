@@ -34,16 +34,16 @@ while IFS= read -r call; do
     # Extract the argument (variable name or literal value)
     arg=$(echo "$call" | sed -E "s/default_registry\(([^)]+)\)/\1/" | tr -d "\"'" | xargs)
 
-    # Check if it looks like a variable reference
-    if [[ ! "$arg" =~ : ]]; then
+    # Check if it looks like a variable reference (doesn't match host:port pattern)
+    if [[ ! "$arg" =~ ^[a-zA-Z0-9\.\-]+:[0-9]+$ ]]; then
         # Try to find the variable assignment
         if grep -q "${arg}.*=.*os\.getenv" "$TILTFILE"; then
             # Extract default value from os.getenv('VAR', 'default')
             default_value=$(grep "${arg}.*=.*os\.getenv" "$TILTFILE" | sed -E "s/.*os\.getenv\([^,]+, *['\"]([^'\"]+)['\"].*/\1/")
             echo "Found variable $arg = os.getenv(..., '$default_value')"
 
-            # Check if default value contains host:port
-            if [[ "$default_value" =~ : ]] || [[ "$default_value" =~ localhost ]]; then
+            # Check if default value is in host:port format
+            if [[ "$default_value" =~ ^[a-zA-Z0-9\.\-]+:[0-9]+$ ]]; then
                 echo "✓ Registry configuration valid: $arg -> $default_value"
             else
                 echo "✗ Invalid registry format: $arg = '$default_value' (must be host:port)" >&2
@@ -54,7 +54,8 @@ while IFS= read -r call; do
             value=$(grep "${arg}.*=" "$TILTFILE" | head -1 | sed -E "s/.*= *['\"]([^'\"]+)['\"].*/\1/")
             echo "Found variable $arg = '$value'"
 
-            if [[ "$value" =~ : ]] || [[ "$value" =~ localhost ]]; then
+            # Check if value is in host:port format
+            if [[ "$value" =~ ^[a-zA-Z0-9\.\-]+:[0-9]+$ ]]; then
                 echo "✓ Registry configuration valid: $arg -> $value"
             else
                 echo "✗ Invalid registry format: $arg = '$value' (must be host:port)" >&2
@@ -66,12 +67,7 @@ while IFS= read -r call; do
         fi
     else
         # It's a literal value, validate directly
-        if [[ "$arg" =~ ^[a-zA-Z0-9\.\-]+:[0-9]+$ ]]; then
-            echo "✓ Registry configuration valid: $arg"
-        else
-            echo "✗ Invalid registry format: '$arg' (expected host:port)" >&2
-            errors=$((errors + 1))
-        fi
+        echo "✓ Registry configuration valid: $arg"
     fi
 done <<< "$registry_calls"
 
