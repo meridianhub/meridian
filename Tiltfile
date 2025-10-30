@@ -295,7 +295,7 @@ spec:
     spec:
       containers:
       - name: kafka
-        image: bitnami/kafka:3.6
+        image: bitnami/kafka:3.6.1
         ports:
         - containerPort: 9092
           name: broker
@@ -408,6 +408,7 @@ k8s_resource(
     'meridian:role',
     'meridian:rolebinding',
     'meridian-config:configmap',
+    'meridian-version:configmap',  # Kustomize generated ConfigMap with hash suffix
   ],
 )
 
@@ -421,6 +422,7 @@ k8s_resource(
   port_forwards='26257:26257',  # SQL port
   labels=['database'],
   resource_deps=[],
+  objects=['cockroachdb-pvc:persistentvolumeclaim'],
 )
 
 # Redis resource
