@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -76,7 +77,7 @@ func TestDepositWhenFrozen(t *testing.T) {
 
 	err := account.Deposit(Money{AmountCents: 1000, Currency: "GBP"})
 
-	if err != ErrAccountFrozen {
+	if !errors.Is(err, ErrAccountFrozen) {
 		t.Errorf("Expected ErrAccountFrozen, got %v", err)
 	}
 }
@@ -87,7 +88,7 @@ func TestDepositWhenClosed(t *testing.T) {
 
 	err := account.Deposit(Money{AmountCents: 1000, Currency: "GBP"})
 
-	if err != ErrAccountClosed {
+	if !errors.Is(err, ErrAccountClosed) {
 		t.Errorf("Expected ErrAccountClosed, got %v", err)
 	}
 }
@@ -137,7 +138,7 @@ func TestWithdraw(t *testing.T) {
 				t.Errorf("Withdraw() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			if tt.expectedError != nil && err != tt.expectedError {
+			if tt.expectedError != nil && !errors.Is(err, tt.expectedError) {
 				t.Errorf("Expected error %v, got %v", tt.expectedError, err)
 			}
 
@@ -198,7 +199,7 @@ func TestStatusTransitions(t *testing.T) {
 
 	// Closed -> Active (should fail)
 	err = account.Activate()
-	if err != ErrInvalidStatusTransition {
+	if !errors.Is(err, ErrInvalidStatusTransition) {
 		t.Errorf("Expected ErrInvalidStatusTransition, got %v", err)
 	}
 }

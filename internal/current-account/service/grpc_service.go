@@ -1,7 +1,9 @@
+// Package service implements gRPC services for the current account domain
 package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -30,7 +32,7 @@ func NewService(repo *persistence.Repository) *Service {
 }
 
 // InitiateCurrentAccount creates a new current account facility
-func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCurrentAccountRequest) (*pb.InitiateCurrentAccountResponse, error) {
+func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurrentAccountRequest) (*pb.InitiateCurrentAccountResponse, error) {
 	// Generate account ID
 	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
 
@@ -58,11 +60,11 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 }
 
 // ExecuteDeposit processes a deposit transaction
-func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
+func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
 	// Retrieve account
 	account, err := s.repo.FindByID(req.AccountId)
 	if err != nil {
-		if err == persistence.ErrAccountNotFound {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
 			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
@@ -98,10 +100,10 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 }
 
 // RetrieveCurrentAccount gets current account details
-func (s *Service) RetrieveCurrentAccount(ctx context.Context, req *pb.RetrieveCurrentAccountRequest) (*pb.RetrieveCurrentAccountResponse, error) {
+func (s *Service) RetrieveCurrentAccount(_ context.Context, req *pb.RetrieveCurrentAccountRequest) (*pb.RetrieveCurrentAccountResponse, error) {
 	account, err := s.repo.FindByID(req.AccountId)
 	if err != nil {
-		if err == persistence.ErrAccountNotFound {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
 			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
@@ -162,26 +164,38 @@ func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {
 
 func mapCurrencyToProto(currency string) commonpb.Currency {
 	switch currency {
-	case "GBP":
+	case currencyGBP:
 		return commonpb.Currency_CURRENCY_GBP
-	case "USD":
+	case currencyUSD:
 		return commonpb.Currency_CURRENCY_USD
-	case "EUR":
+	case currencyEUR:
 		return commonpb.Currency_CURRENCY_EUR
 	default:
 		return commonpb.Currency_CURRENCY_UNSPECIFIED
 	}
 }
 
+const (
+	currencyGBP = "GBP"
+	currencyUSD = "USD"
+	currencyEUR = "EUR"
+)
+
 func mapCurrency(currency commonpb.Currency) string {
 	switch currency {
 	case commonpb.Currency_CURRENCY_GBP:
-		return "GBP"
+		return currencyGBP
 	case commonpb.Currency_CURRENCY_USD:
-		return "USD"
+		return currencyUSD
 	case commonpb.Currency_CURRENCY_EUR:
-		return "EUR"
+		return currencyEUR
+	case commonpb.Currency_CURRENCY_UNSPECIFIED,
+		commonpb.Currency_CURRENCY_JPY,
+		commonpb.Currency_CURRENCY_CHF,
+		commonpb.Currency_CURRENCY_CAD,
+		commonpb.Currency_CURRENCY_AUD:
+		return currencyGBP // Default to GBP for unsupported currencies
 	default:
-		return "GBP"
+		return currencyGBP
 	}
 }

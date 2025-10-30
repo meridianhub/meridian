@@ -1,3 +1,4 @@
+// Package domain contains the core business logic for current accounts
 package domain
 
 import (
@@ -7,17 +8,20 @@ import (
 	"github.com/google/uuid"
 )
 
+// Domain errors
 var (
 	ErrInsufficientFunds       = errors.New("insufficient funds")
 	ErrAccountFrozen           = errors.New("account is frozen")
 	ErrAccountClosed           = errors.New("account is closed")
 	ErrInvalidAmount           = errors.New("invalid amount")
 	ErrInvalidStatusTransition = errors.New("invalid status transition")
+	ErrCurrencyMismatch        = errors.New("currency mismatch")
 )
 
 // AccountStatus represents the lifecycle state of an account
 type AccountStatus string
 
+// Account status constants
 const (
 	AccountStatusActive AccountStatus = "ACTIVE"
 	AccountStatusFrozen AccountStatus = "FROZEN"
@@ -93,7 +97,7 @@ func (a *CurrentAccount) Deposit(amount Money) error {
 	}
 
 	if amount.Currency != a.Balance.Currency {
-		return errors.New("currency mismatch")
+		return ErrCurrencyMismatch
 	}
 
 	a.Balance.AmountCents += amount.AmountCents
@@ -119,7 +123,7 @@ func (a *CurrentAccount) Withdraw(amount Money) error {
 	}
 
 	if amount.Currency != a.Balance.Currency {
-		return errors.New("currency mismatch")
+		return ErrCurrencyMismatch
 	}
 
 	// Check if sufficient funds (including overdraft)
@@ -176,7 +180,7 @@ func (a *CurrentAccount) Close() error {
 // SetOverdraftLimit configures the overdraft facility
 func (a *CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled bool) error {
 	if limit.Currency != a.Balance.Currency {
-		return errors.New("currency mismatch")
+		return ErrCurrencyMismatch
 	}
 
 	a.OverdraftLimit = limit

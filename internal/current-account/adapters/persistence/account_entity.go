@@ -1,3 +1,4 @@
+// Package persistence provides database persistence for the current account domain
 package persistence
 
 import (
@@ -10,7 +11,7 @@ import (
 // Optimized for database concerns: audit fields, indexes, constraints
 type CurrentAccountEntity struct {
 	// Primary key
-	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	ID uuid.UUID `gorm:"primaryKey"`
 
 	// Business fields
 	AccountID             string    `gorm:"uniqueIndex;not null;size:100"`
@@ -23,11 +24,11 @@ type CurrentAccountEntity struct {
 	OverdraftLimitCents   int64     `gorm:"not null;default:0"`
 	OverdraftEnabled      bool      `gorm:"not null;default:false"`
 	OverdraftRate         float64   `gorm:"not null;default:0"`
-	BalanceUpdatedAt      time.Time `gorm:"not null;default:now()"`
+	BalanceUpdatedAt      time.Time `gorm:"not null"`
 
 	// Audit fields
-	CreatedAt time.Time  `gorm:"not null;default:now()"`
-	UpdatedAt time.Time  `gorm:"not null;default:now()"`
+	CreatedAt time.Time  `gorm:"not null"`
+	UpdatedAt time.Time  `gorm:"not null"`
 	CreatedBy string     `gorm:"size:255"`
 	UpdatedBy string     `gorm:"size:255"`
 	Version   int        `gorm:"not null;default:1"`
