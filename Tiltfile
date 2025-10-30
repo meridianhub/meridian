@@ -184,6 +184,22 @@ spec:
 # Zookeeper - Single node for local development
 k8s_yaml(blob('''
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zookeeper-log4j
+data:
+  log4j.properties: |
+    # Reduce logging verbosity for local development
+    # Only log warnings and errors to reduce noise from health check probes
+    zookeeper.root.logger=WARN, CONSOLE
+
+    # Console appender
+    log4j.appender.CONSOLE=org.apache.log4j.ConsoleAppender
+    log4j.appender.CONSOLE.Threshold=WARN
+    log4j.appender.CONSOLE.layout=org.apache.log4j.PatternLayout
+    log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} [myid:%X{myid}] - %-5p [%t:%C{1}@%L] - %m%n
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: zookeeper
@@ -235,6 +251,10 @@ spec:
           value: "ruok,srvr,stat,mntr"
         - name: ZOO_LOG4J_PROP
           value: "WARN,CONSOLE"
+        volumeMounts:
+        - name: log4j-config
+          mountPath: /conf/log4j.properties
+          subPath: log4j.properties
         readinessProbe:
           exec:
             command:
@@ -262,6 +282,10 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
+      volumes:
+      - name: log4j-config
+        configMap:
+          name: zookeeper-log4j
 '''))
 
 # Kafka - Single broker for local development
