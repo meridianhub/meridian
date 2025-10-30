@@ -231,6 +231,8 @@ spec:
           value: "true"
         - name: ZOO_ADMINSERVER_ENABLED
           value: "false"
+        - name: ZOO_4LW_COMMANDS_WHITELIST
+          value: "ruok,srvr,stat,mntr"
         readinessProbe:
           exec:
             command:
@@ -426,14 +428,14 @@ k8s_resource(
 k8s_resource(
   'zookeeper',
   port_forwards='2181:2181',
-  labels=['infrastructure', 'messaging'],
+  labels=['messaging'],
   resource_deps=[],
 )
 
 k8s_resource(
   'kafka',
   port_forwards='9092:9092',
-  labels=['infrastructure', 'messaging'],
+  labels=['messaging'],
   resource_deps=['zookeeper'],
 )
 
