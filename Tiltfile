@@ -17,6 +17,8 @@ allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desk
 # This speeds up image builds by avoiding remote registry pushes
 if k8s_context() == 'kind-meridian-local':
     # ctlptl creates a local registry and configures Kind to use it
+    # Registry name must match the --registry flag used during cluster creation:
+    #   ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
     # Tilt will automatically detect it via the Kind cluster configuration
     default_registry('ctlptl-registry')
 

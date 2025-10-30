@@ -6,7 +6,12 @@ This guide covers using Tilt for fast Kubernetes development with Meridian.
 
 1. **Kubernetes Cluster** (one of):
    - Docker Desktop with Kubernetes enabled
-   - kind (Kubernetes in Docker): `kind create cluster`
+   - kind (Kubernetes in Docker) with local registry (recommended):
+     ```bash
+     # Install ctlptl first: brew install tilt-dev/tap/ctlptl
+     ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
+     ```
+     Or without registry: `kind create cluster`
    - Minikube: `minikube start`
    - Colima: `colima start --kubernetes`
 
