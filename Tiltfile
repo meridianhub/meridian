@@ -13,6 +13,13 @@ allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desk
 # Configuration
 # =============================================================================
 
+# Detect and use local registry if available (created by ctlptl)
+# This speeds up image builds by avoiding remote registry pushes
+if k8s_context() == 'kind-meridian-local':
+    # ctlptl creates a local registry and configures Kind to use it
+    # Tilt will automatically detect it via the Kind cluster configuration
+    default_registry('ctlptl-registry')
+
 # Docker image configuration
 docker_registry = os.getenv('DOCKER_REGISTRY', 'ghcr.io/meridianhub')
 image_name = 'meridian'
