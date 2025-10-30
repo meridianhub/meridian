@@ -10,8 +10,9 @@ import (
 
 // Repository errors
 var (
-	ErrAccountNotFound = errors.New("account not found")
-	ErrAccountExists   = errors.New("account already exists")
+	ErrAccountNotFound    = errors.New("account not found")
+	ErrAccountExists      = errors.New("account already exists")
+	ErrVersionConflict    = errors.New("version conflict: account was modified by another transaction")
 )
 
 // Repository provides persistence operations for current accounts
@@ -24,7 +25,7 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// Save creates or updates an account
+// Save creates or updates an account with optimistic locking
 func (r *Repository) Save(account *domain.CurrentAccount) error {
 	entity := toEntity(account)
 
@@ -33,11 +34,46 @@ func (r *Repository) Save(account *domain.CurrentAccount) error {
 	result := r.db.Where("account_id = ?", entity.AccountID).First(&existing)
 
 	if result.Error == nil {
-		// Update existing
+		// Update existing with optimistic locking check
 		entity.ID = existing.ID
 		entity.CreatedAt = existing.CreatedAt
-		entity.Version = existing.Version + 1
-		return r.db.Save(&entity).Error
+
+		// Optimistic locking: Check version hasn't changed
+		if account.Version != existing.Version {
+			return ErrVersionConflict
+		}
+
+		// Increment version for update
+		newVersion := existing.Version + 1
+
+		// Use WHERE clause with version check for atomic update
+		updateResult := r.db.Model(&CurrentAccountEntity{}).
+			Where("account_id = ? AND version = ?", entity.AccountID, existing.Version).
+			Updates(map[string]interface{}{
+				"balance_cents":           entity.BalanceCents,
+				"available_balance_cents": entity.AvailableBalanceCents,
+				"status":                  entity.Status,
+				"overdraft_limit_cents":   entity.OverdraftLimitCents,
+				"overdraft_enabled":       entity.OverdraftEnabled,
+				"overdraft_rate":          entity.OverdraftRate,
+				"balance_updated_at":      entity.BalanceUpdatedAt,
+				"updated_at":              entity.UpdatedAt,
+				"version":                 newVersion,
+			})
+
+		if updateResult.Error != nil {
+			return updateResult.Error
+		}
+
+		// Check if any rows were updated (version conflict)
+		if updateResult.RowsAffected == 0 {
+			return ErrVersionConflict
+		}
+
+		// Update domain model version
+		account.Version = newVersion
+
+		return nil
 	}
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {

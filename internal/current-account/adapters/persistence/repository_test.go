@@ -177,3 +177,66 @@ func TestDeleteAccount(t *testing.T) {
 		t.Errorf("Expected ErrAccountNotFound after delete, got %v", err)
 	}
 }
+
+func TestOptimisticLocking(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	// Create initial account
+	account1 := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	if err := repo.Save(account1); err != nil {
+		t.Fatalf("Initial save failed: %v", err)
+	}
+
+	// Load same account in two "transactions"
+	account2, err := repo.FindByID("ACC-001")
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	account3, err := repo.FindByID("ACC-001")
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	// Both should have same version
+	if account2.Version != account3.Version {
+		t.Errorf("Expected same version, got %d and %d", account2.Version, account3.Version)
+	}
+
+	// First transaction modifies and saves successfully
+	if err := account2.Deposit(domain.Money{AmountCents: 5000, Currency: "GBP"}); err != nil {
+		t.Fatalf("Deposit failed: %v", err)
+	}
+
+	if err := repo.Save(account2); err != nil {
+		t.Fatalf("First save failed: %v", err)
+	}
+
+	// Second transaction tries to save with stale version
+	if err := account3.Deposit(domain.Money{AmountCents: 10000, Currency: "GBP"}); err != nil {
+		t.Fatalf("Deposit failed: %v", err)
+	}
+
+	err = repo.Save(account3)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Errorf("Expected ErrVersionConflict, got %v", err)
+	}
+
+	// Verify first transaction's changes persisted
+	final, err := repo.FindByID("ACC-001")
+	if err != nil {
+		t.Fatalf("Final FindByID failed: %v", err)
+	}
+
+	if final.Balance.AmountCents != 5000 {
+		t.Errorf("Expected balance 5000, got %d", final.Balance.AmountCents)
+	}
+
+	// Version should be incremented
+	if final.Version != 2 {
+		t.Errorf("Expected version 2, got %d", final.Version)
+	}
+}
