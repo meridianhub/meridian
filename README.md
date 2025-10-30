@@ -82,10 +82,10 @@ Install missing tools automatically (macOS/Linux):
    .githooks/install.sh  # Install pre-commit hooks
    ```
 
-2. **Create local Kubernetes cluster**:
+2. **Create local Kubernetes cluster with local registry**:
    ```bash
    # Ensure Docker Desktop is running
-   ctlptl create cluster kind --name=kind-meridian-local
+   ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
    ```
 
 3. **Start local environment**:
@@ -223,8 +223,8 @@ Errors are categorized for different domains:
 # Check cluster status
 kubectl cluster-info
 
-# Create a Kind cluster (recommended):
-ctlptl create cluster kind --name=kind-meridian-local
+# Create a Kind cluster with local registry (recommended):
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Or use alternatives:
 minikube start                   # minikube

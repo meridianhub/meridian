@@ -263,6 +263,39 @@ kubectl logs deployment/zookeeper
 
 Kafka depends on Zookeeper being healthy.
 
+### Local Registry Issues
+
+If you see warnings about missing local registry or slow image pushes:
+
+**Symptom**: "Running Kind without a local image registry"
+
+**Solution**: Recreate cluster with registry support:
+```bash
+# Delete existing cluster
+ctlptl delete cluster kind-meridian-local
+
+# Create new cluster with local registry
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
+
+# Restart Tilt
+tilt up
+```
+
+**Symptom**: "Error: registry 'ctlptl-registry' not found"
+
+**Diagnosis**: The Tiltfile expects a registry named `ctlptl-registry` but it doesn't exist.
+
+**Solution**: Ensure you created the cluster with the correct registry name:
+```bash
+# Verify registry container exists
+docker ps | grep ctlptl-registry
+
+# If not found, recreate cluster with correct command
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
+```
+
+**Note**: The local registry is only used when the Kubernetes context is `kind-meridian-local`. Other contexts (docker-desktop, minikube) will use the default registry.
+
 ## Performance Optimization
 
 ### Fast Rebuilds
