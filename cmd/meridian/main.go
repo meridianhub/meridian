@@ -44,26 +44,37 @@ func setupRoutes() {
 	})
 }
 
-func main() {
-	fmt.Printf("Meridian v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
-
-	// Get port from environment or use default
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	// Setup routes
-	setupRoutes()
-
-	// Create server with proper timeouts (security best practice)
-	server := &http.Server{
+// createServer creates an HTTP server with proper security timeouts
+func createServer(port string) *http.Server {
+	return &http.Server{
 		Addr:              ":" + port,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+}
+
+// getPort returns the port from environment or default value
+func getPort() string {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	return port
+}
+
+func main() {
+	fmt.Printf("Meridian v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
+
+	// Get port from environment or use default
+	port := getPort()
+
+	// Setup routes
+	setupRoutes()
+
+	// Create server with proper timeouts (security best practice)
+	server := createServer(port)
 
 	// Start server in background
 	go func() {
