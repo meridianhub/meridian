@@ -16,6 +16,7 @@ require (
 require (
 	cel.dev/expr v0.24.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
+	github.com/confluentinc/confluent-kafka-go/v2 v2.12.0 // indirect
 	github.com/google/cel-go v0.26.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
