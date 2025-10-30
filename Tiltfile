@@ -295,39 +295,39 @@ spec:
     spec:
       containers:
       - name: kafka
-        image: bitnami/kafka:latest
+        image: apache/kafka:3.8.1
         ports:
         - containerPort: 9092
           name: broker
         env:
-        - name: KAFKA_CFG_BROKER_ID
+        - name: KAFKA_NODE_ID
           value: "1"
-        - name: KAFKA_CFG_ZOOKEEPER_CONNECT
-          value: "zookeeper:2181"
-        - name: KAFKA_CFG_LISTENERS
-          value: "PLAINTEXT://:9092"
-        - name: KAFKA_CFG_ADVERTISED_LISTENERS
+        - name: KAFKA_PROCESS_ROLES
+          value: "broker,controller"
+        - name: KAFKA_LISTENERS
+          value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+        - name: KAFKA_ADVERTISED_LISTENERS
           value: "PLAINTEXT://kafka:9092"
-        - name: KAFKA_CFG_NUM_PARTITIONS
+        - name: KAFKA_CONTROLLER_LISTENER_NAMES
+          value: "CONTROLLER"
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+        - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+          value: "1@localhost:9093"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
           value: "1"
-        - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
+        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
           value: "1"
-        - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
           value: "1"
-        - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
-          value: "1"
-        - name: KAFKA_CFG_DEFAULT_REPLICATION_FACTOR
-          value: "1"
-        - name: KAFKA_CFG_MIN_INSYNC_REPLICAS
-          value: "1"
-        - name: KAFKA_CFG_LOG_RETENTION_HOURS
-          value: "1"
-        - name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE
+        - name: KAFKA_LOG_DIRS
+          value: "/tmp/kraft-combined-logs"
+        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
           value: "true"
         - name: KAFKA_HEAP_OPTS
           value: "-Xms512M -Xmx512M"
-        - name: ALLOW_PLAINTEXT_LISTENER
-          value: "yes"
+        - name: CLUSTER_ID
+          value: "MkU3OEVBNTcwNTJENDM2Qk"
         readinessProbe:
           tcpSocket:
             port: 9092
