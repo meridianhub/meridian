@@ -295,7 +295,7 @@ spec:
     spec:
       containers:
       - name: kafka
-        image: bitnami/kafka:3.6.1
+        image: bitnami/kafka:latest
         ports:
         - containerPort: 9092
           name: broker
