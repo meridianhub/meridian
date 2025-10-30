@@ -181,125 +181,8 @@ spec:
             memory: 512Mi
 '''))
 
-# Zookeeper - Single node for local development
-k8s_yaml(blob('''
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: zookeeper-logback
-data:
-  logback.xml: |
-    <configuration>
-      <property name="zookeeper.console.threshold" value="WARN" />
-      <property name="zookeeper.log.threshold" value="WARN" />
-
-      <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-          <pattern>%d{ISO8601} [myid:%X{myid}] - %-5p [%t:%C{1}@%L] - %m%n</pattern>
-        </encoder>
-        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-          <level>WARN</level>
-        </filter>
-      </appender>
-
-      <!-- Silence NIOServerCnxn which logs every health check probe -->
-      <logger name="org.apache.zookeeper.server.NIOServerCnxn" level="ERROR" />
-
-      <root level="WARN">
-        <appender-ref ref="CONSOLE" />
-      </root>
-    </configuration>
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: zookeeper
-  labels:
-    app: zookeeper
-spec:
-  type: ClusterIP
-  ports:
-  - name: client
-    port: 2181
-    targetPort: 2181
-  selector:
-    app: zookeeper
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: zookeeper
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: zookeeper
-  template:
-    metadata:
-      labels:
-        app: zookeeper
-    spec:
-      containers:
-      - name: zookeeper
-        image: zookeeper:3.9.3
-        ports:
-        - containerPort: 2181
-          name: client
-        - containerPort: 2888
-          name: server
-        - containerPort: 3888
-          name: leader-election
-        env:
-        - name: ZOO_MY_ID
-          value: "1"
-        - name: ZOO_SERVERS
-          value: "server.1=0.0.0.0:2888:3888;2181"
-        - name: ZOO_STANDALONE_ENABLED
-          value: "true"
-        - name: ZOO_ADMINSERVER_ENABLED
-          value: "false"
-        - name: ZOO_4LW_COMMANDS_WHITELIST
-          value: "ruok,srvr,stat,mntr"
-        - name: ZOO_LOG4J_PROP
-          value: "WARN,CONSOLE"
-        volumeMounts:
-        - name: logback-config
-          mountPath: /conf/logback.xml
-          subPath: logback.xml
-        readinessProbe:
-          exec:
-            command:
-            - sh
-            - -c
-            - "echo ruok | nc localhost 2181 | grep imok"
-          initialDelaySeconds: 10
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-        livenessProbe:
-          exec:
-            command:
-            - sh
-            - -c
-            - "echo ruok | nc localhost 2181 | grep imok"
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
-      volumes:
-      - name: logback-config
-        configMap:
-          name: zookeeper-logback
-'''))
-
-# Kafka - Single broker for local development
+# Kafka - Single broker with KRaft mode for local development
+# KRaft (Kafka Raft) replaces Zookeeper for metadata management
 k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
@@ -437,7 +320,6 @@ k8s_resource(
     'cockroachdb',
     'redis',
     'kafka',
-    'zookeeper',
   ],
   labels=['app'],
   # Group RBAC and config resources under the main app
@@ -471,19 +353,12 @@ k8s_resource(
   resource_deps=[],
 )
 
-# Messaging infrastructure
-k8s_resource(
-  'zookeeper',
-  port_forwards='2181:2181',
-  labels=['messaging'],
-  resource_deps=[],
-)
-
+# Kafka resource (KRaft mode - no Zookeeper dependency)
 k8s_resource(
   'kafka',
   port_forwards='9092:9092',
   labels=['messaging'],
-  resource_deps=['zookeeper'],
+  resource_deps=[],
 )
 
 # =============================================================================
@@ -526,8 +401,7 @@ Services:
   • Meridian gRPC    → localhost:9090
   • CockroachDB      → localhost:26257
   • Redis            → localhost:6379
-  • Kafka            → localhost:9092
-  • Zookeeper        → localhost:2181
+  • Kafka (KRaft)    → localhost:9092
 
 Tilt UI              → http://localhost:10350
 
