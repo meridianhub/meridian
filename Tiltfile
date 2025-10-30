@@ -21,9 +21,9 @@ if k8s_context() == 'kind-meridian-local':
     registry_name = os.getenv('TILT_REGISTRY_NAME', 'ctlptl-registry')
 
     # Validate that registry container exists
-    registry_check = local('docker ps --filter name=%s --format "{{.Names}}" 2>/dev/null || true' % registry_name, quiet=True)
+    registry_check = str(local('docker ps --filter name=%s --format "{{.Names}}" 2>/dev/null || true' % registry_name, quiet=True)).strip()
 
-    if registry_check.strip() == registry_name:
+    if registry_check == registry_name:
         default_registry(registry_name)
         print('✓ Using local registry: %s' % registry_name)
     else:
