@@ -170,20 +170,19 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 
 func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 	units := m.AmountCents / 100
-	cents := m.AmountCents % 100
+	remainder := m.AmountCents % 100
 
-	// For negative amounts, ensure cents portion is also negative
-	// Example: -£1.23 should be Units=-1, Nanos=-230000000 (not +230000000)
+	// Convert remainder to nanos (9 digits, but we only use 8 for cents precision)
+	// For negative amounts, Google's money.Money expects:
+	// - Units contains the integer part with sign
+	// - Nanos contains the fractional part as absolute value
+	// Example: -£1.23 = Units=-1, Nanos=230000000 (positive nanos)
 	var nanos int32
-	if m.AmountCents < 0 && cents != 0 {
-		// Adjust units and cents for negative amounts
-		// -123 cents = -1 unit + (-23 cents)
-		units--
-		cents = 100 + cents // cents is negative, so this gives positive remainder
+	if remainder < 0 {
+		nanos = int32(-remainder * 10000000)
+	} else {
+		nanos = int32(remainder * 10000000)
 	}
-
-	// #nosec G115 - cents is always 0-99, multiplication result fits in int32
-	nanos = int32(cents * 10000000)
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{

@@ -359,3 +359,67 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 		t.Errorf("Expected InvalidArgument code, got %v", st.Code())
 	}
 }
+
+func TestToMoneyAmount(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         domain.Money
+		expectedUnits int64
+		expectedNanos int32
+	}{
+		{
+			name:          "Positive amount",
+			input:         domain.Money{AmountCents: 12345, Currency: "GBP"}, // £123.45
+			expectedUnits: 123,
+			expectedNanos: 450000000,
+		},
+		{
+			name:          "Negative amount",
+			input:         domain.Money{AmountCents: -12345, Currency: "GBP"}, // -£123.45
+			expectedUnits: -123,
+			expectedNanos: 450000000, // Nanos should be positive (absolute value)
+		},
+		{
+			name:          "Zero amount",
+			input:         domain.Money{AmountCents: 0, Currency: "USD"},
+			expectedUnits: 0,
+			expectedNanos: 0,
+		},
+		{
+			name:          "Whole units (no fractional)",
+			input:         domain.Money{AmountCents: 10000, Currency: "EUR"}, // €100.00
+			expectedUnits: 100,
+			expectedNanos: 0,
+		},
+		{
+			name:          "Negative whole units",
+			input:         domain.Money{AmountCents: -10000, Currency: "EUR"}, // -€100.00
+			expectedUnits: -100,
+			expectedNanos: 0,
+		},
+		{
+			name:          "Small negative amount",
+			input:         domain.Money{AmountCents: -123, Currency: "GBP"}, // -£1.23
+			expectedUnits: -1,
+			expectedNanos: 230000000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := toMoneyAmount(tt.input)
+
+			if result.Amount.CurrencyCode != tt.input.Currency {
+				t.Errorf("Expected currency %s, got %s", tt.input.Currency, result.Amount.CurrencyCode)
+			}
+
+			if result.Amount.Units != tt.expectedUnits {
+				t.Errorf("Expected units %d, got %d", tt.expectedUnits, result.Amount.Units)
+			}
+
+			if result.Amount.Nanos != tt.expectedNanos {
+				t.Errorf("Expected nanos %d, got %d", tt.expectedNanos, result.Amount.Nanos)
+			}
+		})
+	}
+}
