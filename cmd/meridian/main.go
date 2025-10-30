@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// Note: fmt.Fprintf is used for HTTP responses, log.Printf for application lifecycle logging
+
 var (
 	Version   = "dev"
 	Commit    = "unknown"
@@ -65,7 +67,7 @@ func getPort() string {
 }
 
 func main() {
-	fmt.Printf("Meridian v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
+	log.Printf("Meridian v%s (commit: %s, built: %s)", Version, Commit, BuildDate)
 
 	// Get port from environment or use default
 	port := getPort()
