@@ -20,12 +20,16 @@ if k8s_context() == 'kind-meridian-local':
     # Default: ctlptl-registry (matches ctlptl's default behavior)
     registry_name = os.getenv('TILT_REGISTRY_NAME', 'ctlptl-registry')
 
+    # Registry URL that Tilt expects (host:port format)
+    # ctlptl configures the registry to be accessible at localhost:5000
+    registry_url = os.getenv('TILT_REGISTRY_URL', 'localhost:5000')
+
     # Validate that registry container exists
     registry_check = str(local('docker ps --filter name=%s --format "{{.Names}}" 2>/dev/null || true' % registry_name, quiet=True)).strip()
 
     if registry_check == registry_name:
-        default_registry(registry_name)
-        print('✓ Using local registry: %s' % registry_name)
+        default_registry(registry_url)
+        print('✓ Using local registry: %s (%s)' % (registry_name, registry_url))
     else:
         print('⚠️  Warning: Local registry "%s" not found' % registry_name)
         print('   Images will be loaded via "kind load" (slower)')
