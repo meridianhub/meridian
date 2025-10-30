@@ -1,3 +1,17 @@
+---
+name: skill-tilt-development
+description: Fast Kubernetes development workflow using Tilt with live reload
+triggers:
+  - Starting local development environment
+  - Setting up Tilt for the first time
+  - Debugging Tilt issues
+  - Configuring local registry for faster builds
+instructions: |
+  Use Tilt for local Kubernetes development with fast rebuilds and live reload.
+  Create Kind cluster with local registry using ctlptl for optimal performance.
+  Access Tilt UI at http://localhost:10350 to monitor all services.
+---
+
 # Tilt Development Guide
 
 This guide covers using Tilt for fast Kubernetes development with Meridian.
@@ -6,7 +20,12 @@ This guide covers using Tilt for fast Kubernetes development with Meridian.
 
 1. **Kubernetes Cluster** (one of):
    - Docker Desktop with Kubernetes enabled
-   - kind (Kubernetes in Docker): `kind create cluster`
+   - kind (Kubernetes in Docker) with local registry (recommended):
+     ```bash
+     # Install ctlptl first: brew install tilt-dev/tap/ctlptl
+     ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
+     ```
+     Or without registry: `kind create cluster`
    - Minikube: `minikube start`
    - Colima: `colima start --kubernetes`
 
@@ -257,6 +276,54 @@ kubectl logs deployment/zookeeper
 ```
 
 Kafka depends on Zookeeper being healthy.
+
+### Local Registry Issues
+
+If you see warnings about missing local registry or slow image pushes:
+
+**Symptom**: "Running Kind without a local image registry"
+
+**Solution**: Recreate cluster with registry support:
+```bash
+# Delete existing cluster
+ctlptl delete cluster kind-meridian-local
+
+# Create new cluster with local registry
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
+
+# Restart Tilt
+tilt up
+```
+
+**Symptom**: "Error: registry 'ctlptl-registry' not found"
+
+**Diagnosis**: The Tiltfile expects a registry named `ctlptl-registry` but it doesn't exist.
+
+**Solution**: Ensure you created the cluster with the correct registry name:
+```bash
+# Verify registry container exists
+docker ps | grep ctlptl-registry
+
+# If not found, recreate cluster with correct command
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
+```
+
+**Note**: The local registry is only used when the Kubernetes context is `kind-meridian-local`. Other contexts (docker-desktop, minikube) will use the default registry.
+
+### Custom Registry Name
+
+If you created your cluster with a different registry name, set the `TILT_REGISTRY_NAME` environment variable:
+
+```bash
+# Create cluster with custom registry name
+ctlptl create cluster kind --registry=my-custom-registry --name=kind-meridian-local
+
+# Tell Tilt to use the custom registry
+export TILT_REGISTRY_NAME=my-custom-registry
+tilt up
+```
+
+The Tiltfile will automatically validate that the registry exists and provide helpful error messages if it's not found.
 
 ## Performance Optimization
 

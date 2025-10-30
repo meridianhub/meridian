@@ -1,3 +1,17 @@
+---
+name: skill-security-practices
+description: Security scanning, vulnerability management, and security best practices
+triggers:
+  - Running security scans
+  - Fixing vulnerabilities
+  - Understanding security tools
+  - Configuring security workflows
+instructions: |
+  Use gosec for Go code scanning, Trivy for container and dependency scanning.
+  Generate SBOMs for supply chain security. Run security checks in CI/CD.
+  Fix high/critical vulnerabilities before merging.
+---
+
 # Security Architecture and Hardening
 
 This document outlines the security measures implemented in Meridian to ensure production-grade security and compliance.
