@@ -52,9 +52,8 @@ USER nonroot:nonroot
 # Expose port (adjust as needed)
 EXPOSE 8080
 
-# Health check (adjust endpoint as needed)
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/meridian", "healthcheck"]
+# Note: Health checks handled by Kubernetes probes (/health/live, /health/ready, /health/startup)
+# HEALTHCHECK not needed in distroless image (lacks curl/wget)
 
 # Run the binary
 ENTRYPOINT ["/meridian"]
