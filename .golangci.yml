@@ -145,6 +145,11 @@ issues:
         - unparam
         - wrapcheck
 
+    # Exclude all linters for integration tests (require external services)
+    - path: test/integration/
+      linters:
+        - all
+
     # Exclude some linters for generated files
     - path: \.pb\.go$
       linters:
