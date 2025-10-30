@@ -408,7 +408,7 @@ k8s_resource(
     'meridian:role',
     'meridian:rolebinding',
     'meridian-config:configmap',
-    'meridian-version:configmap',  # Kustomize generated ConfigMap with hash suffix
+    'meridian-version-cht8ckhb6g:configmap',  # Kustomize generated ConfigMap with hash
   ],
 )
 
@@ -479,21 +479,21 @@ local_resource(
 update_settings(max_parallel_updates=3, k8s_upsert_timeout_secs=60)
 
 print("""
-╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║  🚀 Meridian Development Environment                         ║
-║                                                              ║
-║  Services:                                                   ║
-║    • Meridian API     → http://localhost:8080                ║
-║    • Meridian gRPC    → localhost:9090                       ║
-║    • CockroachDB      → localhost:26257                      ║
-║    • Redis            → localhost:6379                       ║
-║    • Kafka            → localhost:9092                       ║
-║    • Zookeeper        → localhost:2181                       ║
-║                                                              ║
-║  Tilt UI              → http://localhost:10350               ║
-║                                                              ║
-║  Hot reload: Edit Go code and see changes in ~3 seconds     ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
+========================================
+🚀 Meridian Development Environment
+========================================
+
+Services:
+  • Meridian API     → http://localhost:8080
+  • Meridian gRPC    → localhost:9090
+  • CockroachDB      → localhost:26257
+  • Redis            → localhost:6379
+  • Kafka            → localhost:9092
+  • Zookeeper        → localhost:2181
+
+Tilt UI              → http://localhost:10350
+
+Hot reload: Edit Go code and see changes in ~3 seconds
+
+========================================
 """)
