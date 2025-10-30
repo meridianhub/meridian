@@ -24,6 +24,13 @@ k8s_namespace = 'default'
 # =============================================================================
 # Backing Services
 # =============================================================================
+# NOTE: These configurations are optimized for LOCAL DEVELOPMENT ONLY.
+# Production deployments require:
+# - TLS/SSL encryption
+# - Authentication and authorization
+# - Persistent volumes and StatefulSets
+# - Multi-node clusters with replication
+# - Resource limits appropriate for production workloads
 
 # CockroachDB - Single-node for local development
 k8s_yaml(blob('''
@@ -291,11 +298,11 @@ spec:
         - name: KAFKA_MIN_INSYNC_REPLICAS
           value: "1"
         - name: KAFKA_LOG_RETENTION_HOURS
-          value: "1"
+          value: "1"  # Aggressive retention for local dev to save disk space
         - name: KAFKA_LOG_SEGMENT_BYTES
-          value: "1073741824"
+          value: "268435456"  # 256MB segments for faster log rolling in local dev
         - name: KAFKA_HEAP_OPTS
-          value: "-Xms512M -Xmx512M"
+          value: "-Xms512M -Xmx512M"  # Conservative heap for local development
         readinessProbe:
           tcpSocket:
             port: 9092
