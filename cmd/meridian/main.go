@@ -20,25 +20,25 @@ var (
 )
 
 // setupRoutes configures HTTP routes for the server
-func setupRoutes() {
+func setupRoutes(mux *http.ServeMux) {
 	// Health check endpoints
-	http.HandleFunc("/health/live", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, "alive")
 	})
 
-	http.HandleFunc("/health/ready", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, "ready")
 	})
 
-	http.HandleFunc("/health/startup", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/health/startup", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, "started")
 	})
 
 	// Root endpoint
-	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "Meridian v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
 	})
@@ -70,8 +70,8 @@ func main() {
 	// Get port from environment or use default
 	port := getPort()
 
-	// Setup routes
-	setupRoutes()
+	// Setup routes on default mux
+	setupRoutes(http.DefaultServeMux)
 
 	// Create server with proper timeouts (security best practice)
 	server := createServer(port)

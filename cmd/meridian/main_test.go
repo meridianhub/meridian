@@ -8,57 +8,35 @@ import (
 	"time"
 )
 
-func TestHealthLiveEndpoint(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
-	w := httptest.NewRecorder()
-
-	http.DefaultServeMux = http.NewServeMux()
-	setupRoutes()
-
-	http.DefaultServeMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
+func TestHealthEndpoints(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		expectedBody string
+	}{
+		{"liveness probe", "/health/live", "alive\n"},
+		{"readiness probe", "/health/ready", "ready\n"},
+		{"startup probe", "/health/startup", "started\n"},
 	}
 
-	if w.Body.String() != "alive\n" {
-		t.Errorf("Expected body 'alive\\n', got %q", w.Body.String())
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Use local mux to avoid global state mutation
+			mux := http.NewServeMux()
+			setupRoutes(mux)
 
-func TestHealthReadyEndpoint(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-	w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
 
-	http.DefaultServeMux = http.NewServeMux()
-	setupRoutes()
+			mux.ServeHTTP(w, req)
 
-	http.DefaultServeMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	if w.Body.String() != "ready\n" {
-		t.Errorf("Expected body 'ready\\n', got %q", w.Body.String())
-	}
-}
-
-func TestHealthStartupEndpoint(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/health/startup", nil)
-	w := httptest.NewRecorder()
-
-	http.DefaultServeMux = http.NewServeMux()
-	setupRoutes()
-
-	http.DefaultServeMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	if w.Body.String() != "started\n" {
-		t.Errorf("Expected body 'started\\n', got %q", w.Body.String())
+			if w.Code != http.StatusOK {
+				t.Errorf("Expected status 200, got %d", w.Code)
+			}
+			if w.Body.String() != tt.expectedBody {
+				t.Errorf("Expected body %q, got %q", tt.expectedBody, w.Body.String())
+			}
+		})
 	}
 }
 
@@ -72,13 +50,14 @@ func TestRootEndpoint(t *testing.T) {
 	Commit = "test-commit"
 	BuildDate = "test-date"
 
+	// Use local mux to avoid global state mutation
+	mux := http.NewServeMux()
+	setupRoutes(mux)
+
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
-	http.DefaultServeMux = http.NewServeMux()
-	setupRoutes()
-
-	http.DefaultServeMux.ServeHTTP(w, req)
+	mux.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
