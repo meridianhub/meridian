@@ -183,8 +183,9 @@ All architectural decisions are documented in `docs/adr/`:
 - **ADR-0004**: Event Schema Evolution Strategy (Protobuf Native)
 - **ADR-0005**: Adapter Pattern for Layer Translation
 - **ADR-0006**: Tilt for Local Development
+- **ADR-0007**: Raw YAML Over Helm for Initial Development
 
-See [docs/adr/README.md](docs/adr/README.md) for the complete list.
+See [docs/adr/README.md](docs/adr/README.md) for the complete list and rationale behind each decision.
 
 ## API Documentation
 
