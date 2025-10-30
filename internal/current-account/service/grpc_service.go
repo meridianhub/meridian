@@ -207,9 +207,15 @@ func mapCurrency(currency commonpb.Currency) string {
 		return currencyUSD
 	case commonpb.Currency_CURRENCY_EUR:
 		return currencyEUR
-	default:
+	case commonpb.Currency_CURRENCY_UNSPECIFIED,
+		commonpb.Currency_CURRENCY_JPY,
+		commonpb.Currency_CURRENCY_CHF,
+		commonpb.Currency_CURRENCY_CAD,
+		commonpb.Currency_CURRENCY_AUD:
 		// Return empty string for unsupported currencies
 		// Caller should validate and return error
+		return ""
+	default:
 		return ""
 	}
 }
