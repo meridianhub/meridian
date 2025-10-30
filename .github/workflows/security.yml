@@ -69,7 +69,9 @@ jobs:
 
     - name: Run Gosec Security Scanner
       run: |
-        gosec -fmt sarif -out gosec-results.sarif -exclude-generated ./...
+        # gosec v2.22.0 exits 1 with SARIF format even when no issues found
+        # See: https://github.com/securego/gosec/issues/1279
+        gosec -fmt sarif -out gosec-results.sarif -exclude-generated ./... || true
 
     - name: Upload Gosec results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
