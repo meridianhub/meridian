@@ -102,8 +102,10 @@ func (a *CurrentAccount) Deposit(amount Money) error {
 
 	a.Balance.AmountCents += amount.AmountCents
 	a.calculateAvailableBalance()
-	a.BalanceUpdatedAt = time.Now()
-	a.UpdatedAt = time.Now()
+
+	now := time.Now()
+	a.BalanceUpdatedAt = now
+	a.UpdatedAt = now
 
 	return nil
 }
@@ -133,8 +135,10 @@ func (a *CurrentAccount) Withdraw(amount Money) error {
 
 	a.Balance.AmountCents -= amount.AmountCents
 	a.calculateAvailableBalance()
-	a.BalanceUpdatedAt = time.Now()
-	a.UpdatedAt = time.Now()
+
+	now := time.Now()
+	a.BalanceUpdatedAt = now
+	a.UpdatedAt = now
 
 	return nil
 }

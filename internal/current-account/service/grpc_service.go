@@ -81,9 +81,27 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 	}
 
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
+	// Validate overflow: Units*100 must not overflow int64
+	const maxUnits = (1<<63 - 1) / 100 // Max safe units before overflow
+	if req.Amount.Amount.Units > maxUnits || req.Amount.Amount.Units < -maxUnits {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"amount too large: units %d would overflow", req.Amount.Amount.Units)
+	}
+
+	// Convert to cents preserving precision
+	unitsCents := req.Amount.Amount.Units * 100
+	// Round nanos to nearest cent (0.5 rounds up)
+	nanosCents := (req.Amount.Amount.Nanos + 5000000) / 10000000
+
 	amount := domain.Money{
-		AmountCents: req.Amount.Amount.Units*100 + int64(req.Amount.Amount.Nanos/10000000),
+		AmountCents: unitsCents + int64(nanosCents),
 		Currency:    req.Amount.Amount.CurrencyCode,
+	}
+
+	// Validate amount is positive
+	if amount.AmountCents <= 0 {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"deposit amount must be positive, got %d cents", amount.AmountCents)
 	}
 
 	// Execute deposit
@@ -151,17 +169,26 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 }
 
 func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
+	units := m.AmountCents / 100
 	cents := m.AmountCents % 100
-	if cents < 0 {
-		cents = -cents
+
+	// For negative amounts, ensure cents portion is also negative
+	// Example: -£1.23 should be Units=-1, Nanos=-230000000 (not +230000000)
+	var nanos int32
+	if m.AmountCents < 0 && cents != 0 {
+		// Adjust units and cents for negative amounts
+		// -123 cents = -1 unit + (-23 cents)
+		units--
+		cents = 100 + cents // cents is negative, so this gives positive remainder
 	}
+
 	// #nosec G115 - cents is always 0-99, multiplication result fits in int32
-	nanos := int32(cents * 10000000)
+	nanos = int32(cents * 10000000)
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
 			CurrencyCode: m.Currency,
-			Units:        m.AmountCents / 100,
+			Units:        units,
 			Nanos:        nanos,
 		},
 	}
