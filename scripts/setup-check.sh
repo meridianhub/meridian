@@ -205,6 +205,60 @@ echo "════════════════════════�
 echo ""
 
 check_command "go" "1.23+" "brew install go"
+
+# Validate Go environment
+if command -v go &> /dev/null; then
+    echo "Validating Go environment..."
+
+    # Check GOROOT
+    GOROOT_OUTPUT=$(go env GOROOT 2>&1)
+    GOROOT_EXIT=$?
+
+    if [ $GOROOT_EXIT -ne 0 ]; then
+        echo -e "${RED}✗${NC} Go GOROOT configuration invalid"
+        echo -e "  ${YELLOW}Error:${NC} $GOROOT_OUTPUT"
+
+        # Check for specific toolchain errors
+        if echo "$GOROOT_OUTPUT" | grep -q "cannot find GOROOT directory.*toolchain"; then
+            echo -e ""
+            echo -e "  ${YELLOW}Diagnosis:${NC} Go toolchain module corruption detected"
+            echo -e "  This typically happens after Go version upgrades or incomplete installations"
+            echo -e ""
+            echo -e "  ${YELLOW}Fix (choose one):${NC}"
+            echo -e ""
+            echo -e "  ${GREEN}Option 1 - Clean reinstall (recommended):${NC}"
+            echo -e "    ${BLUE}brew uninstall go${NC}"
+            echo -e "    ${BLUE}rm -rf ~/go/pkg/mod/golang.org/toolchain*${NC}  # Remove corrupted toolchain modules"
+            echo -e "    ${BLUE}brew install go${NC}"
+            echo -e ""
+            echo -e "  ${GREEN}Option 2 - Quick fix (clear module cache):${NC}"
+            echo -e "    ${BLUE}go clean -modcache${NC}  # Warning: May take time to redownload"
+            echo -e ""
+        else
+            echo -e "  ${YELLOW}Fix:${NC} Reinstall Go: ${BLUE}brew reinstall go${NC}"
+        fi
+        ALL_CHECKS_PASSED=false
+    elif [ ! -d "$GOROOT_OUTPUT" ]; then
+        echo -e "${RED}✗${NC} GOROOT directory does not exist"
+        echo -e "  Expected: $GOROOT_OUTPUT"
+        echo -e "  ${YELLOW}Fix:${NC} Reinstall Go: ${BLUE}brew reinstall go${NC}"
+        ALL_CHECKS_PASSED=false
+    else
+        echo -e "${GREEN}✓${NC} GOROOT is valid"
+        echo -e "  Location: $GOROOT_OUTPUT"
+
+        # Test basic Go environment
+        if go env GOPATH &> /dev/null; then
+            echo -e "${GREEN}✓${NC} Go environment is properly configured"
+        else
+            echo -e "${RED}✗${NC} Go environment check failed"
+            echo -e "  ${YELLOW}Fix:${NC} Check GOPATH configuration or reinstall Go"
+            ALL_CHECKS_PASSED=false
+        fi
+    fi
+    echo ""
+fi
+
 check_command "make" "" "pre-installed on macOS/Linux"
 check_command "git" "2.x+" "brew install git"
 
