@@ -85,6 +85,7 @@ Install missing tools automatically (macOS/Linux):
 2. **Create local Kubernetes cluster with local registry**:
    ```bash
    # Ensure Docker Desktop is running
+   # The --registry flag creates a local registry for faster image builds (no remote push/pull)
    ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
    ```
 

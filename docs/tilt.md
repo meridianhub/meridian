@@ -296,6 +296,21 @@ ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 **Note**: The local registry is only used when the Kubernetes context is `kind-meridian-local`. Other contexts (docker-desktop, minikube) will use the default registry.
 
+### Custom Registry Name
+
+If you created your cluster with a different registry name, set the `TILT_REGISTRY_NAME` environment variable:
+
+```bash
+# Create cluster with custom registry name
+ctlptl create cluster kind --registry=my-custom-registry --name=kind-meridian-local
+
+# Tell Tilt to use the custom registry
+export TILT_REGISTRY_NAME=my-custom-registry
+tilt up
+```
+
+The Tiltfile will automatically validate that the registry exists and provide helpful error messages if it's not found.
+
 ## Performance Optimization
 
 ### Fast Rebuilds
