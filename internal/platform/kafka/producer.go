@@ -12,8 +12,6 @@ import (
 )
 
 var (
-	// ErrEmptyBootstrapServers is returned when bootstrap servers configuration is empty.
-	ErrEmptyBootstrapServers = errors.New("bootstrap servers cannot be empty")
 	// ErrEmptyTopic is returned when topic name is empty.
 	ErrEmptyTopic = errors.New("topic cannot be empty")
 	// ErrNilMessage is returned when message is nil.

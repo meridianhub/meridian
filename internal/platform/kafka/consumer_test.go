@@ -12,7 +12,7 @@ func TestNewProtoConsumer(t *testing.T) {
 	msgFactory := func() proto.Message {
 		return &timestamppb.Timestamp{}
 	}
-	handler := func(ctx context.Context, key []byte, msg proto.Message) error {
+	handler := func(_ context.Context, _ []byte, _ proto.Message) error {
 		return nil
 	}
 
@@ -92,7 +92,9 @@ func TestNewProtoConsumer(t *testing.T) {
 				return
 			}
 			if !tt.wantErr && consumer != nil {
-				defer consumer.Close()
+				defer func() {
+					_ = consumer.Close()
+				}()
 			}
 		})
 	}
@@ -102,7 +104,7 @@ func TestProtoConsumer_Subscribe(t *testing.T) {
 	msgFactory := func() proto.Message {
 		return &timestamppb.Timestamp{}
 	}
-	handler := func(ctx context.Context, key []byte, msg proto.Message) error {
+	handler := func(_ context.Context, _ []byte, _ proto.Message) error {
 		return nil
 	}
 
@@ -114,7 +116,9 @@ func TestProtoConsumer_Subscribe(t *testing.T) {
 	if err != nil {
 		t.Skip("Kafka not available, skipping integration test")
 	}
-	defer consumer.Close()
+	defer func() {
+		_ = consumer.Close()
+	}()
 
 	tests := []struct {
 		name    string
@@ -142,7 +146,7 @@ func TestProtoConsumer_StopAndClose(t *testing.T) {
 	msgFactory := func() proto.Message {
 		return &timestamppb.Timestamp{}
 	}
-	handler := func(ctx context.Context, key []byte, msg proto.Message) error {
+	handler := func(_ context.Context, _ []byte, _ proto.Message) error {
 		return nil
 	}
 

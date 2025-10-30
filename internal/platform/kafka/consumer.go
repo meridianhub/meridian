@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -32,20 +33,31 @@ type ConsumerConfig struct {
 	EnableAutoCommit bool
 }
 
+var (
+	// ErrEmptyGroupID is returned when group ID is empty.
+	ErrEmptyGroupID = errors.New("group ID cannot be empty")
+	// ErrNilMsgFactory is returned when message factory is nil.
+	ErrNilMsgFactory = errors.New("message factory cannot be nil")
+	// ErrNilHandler is returned when message handler is nil.
+	ErrNilHandler = errors.New("message handler cannot be nil")
+	// ErrEmptyTopics is returned when topics list is empty.
+	ErrEmptyTopics = errors.New("topics cannot be empty")
+)
+
 // NewProtoConsumer creates a new Kafka consumer for protobuf messages.
 // msgFactory is a function that creates a new instance of the proto message type to deserialize into.
 func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, handler MessageHandler) (*ProtoConsumer, error) {
 	if config.BootstrapServers == "" {
-		return nil, fmt.Errorf("bootstrap servers cannot be empty")
+		return nil, ErrEmptyBootstrapServers
 	}
 	if config.GroupID == "" {
-		return nil, fmt.Errorf("group ID cannot be empty")
+		return nil, ErrEmptyGroupID
 	}
 	if msgFactory == nil {
-		return nil, fmt.Errorf("message factory cannot be nil")
+		return nil, ErrNilMsgFactory
 	}
 	if handler == nil {
-		return nil, fmt.Errorf("message handler cannot be nil")
+		return nil, ErrNilHandler
 	}
 
 	// Set defaults
@@ -80,7 +92,7 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 // This method blocks until Stop() is called or an unrecoverable error occurs.
 func (c *ProtoConsumer) Subscribe(topics []string) error {
 	if len(topics) == 0 {
-		return fmt.Errorf("topics cannot be empty")
+		return ErrEmptyTopics
 	}
 
 	err := c.consumer.SubscribeTopics(topics, nil)
@@ -97,7 +109,8 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 			msg, err := c.consumer.ReadMessage(c.pollTimeout)
 			if err != nil {
 				// Timeout is expected, continue polling
-				if err.(kafka.Error).Code() == kafka.ErrTimedOut {
+				var kafkaErr kafka.Error
+				if errors.As(err, &kafkaErr) && kafkaErr.Code() == kafka.ErrTimedOut {
 					continue
 				}
 				return fmt.Errorf("consumer error: %w", err)
@@ -149,5 +162,8 @@ func (c *ProtoConsumer) Stop() {
 // Close closes the consumer and releases resources.
 func (c *ProtoConsumer) Close() error {
 	c.Stop()
-	return c.consumer.Close()
+	if err := c.consumer.Close(); err != nil {
+		return fmt.Errorf("failed to close consumer: %w", err)
+	}
+	return nil
 }
