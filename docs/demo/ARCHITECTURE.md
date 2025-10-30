@@ -2,7 +2,7 @@
 
 ## High-Level Overview
 
-```
+```text
                                     ┌─────────────┐
                                     │   Kafka     │
                                     │  (KRaft)    │
@@ -111,13 +111,13 @@
 ### Timeline
 
 **T0**: User initiates deposit
-```
+```text
 User → CurrentAccount gRPC
 Request: ExecuteDeposit(account_id: "ACC-123", amount: £100)
 ```
 
 **T1**: CurrentAccount processes synchronously
-```
+```text
 CurrentAccount Service:
 1. Validate request
 2. Update account balance: £0 → £100 (in DB)
@@ -127,7 +127,7 @@ CurrentAccount Service:
 ```
 
 **T2**: Kafka propagates event (~milliseconds)
-```
+```text
 Kafka Topic: current-account.deposits
 Message: ExecuteDepositRequest {
   account_id: "ACC-123"
@@ -136,7 +136,7 @@ Message: ExecuteDepositRequest {
 ```
 
 **T3**: FinancialAccounting consumes asynchronously
-```
+```text
 FinancialAccounting Service:
 1. Deserialize proto message
 2. Create double-entry postings:
@@ -147,7 +147,7 @@ FinancialAccounting Service:
 ```
 
 **T4**: CurrentAccount receives confirmation
-```
+```text
 CurrentAccount Service (consumer):
 1. Consume LedgerPosting from Kafka
 2. Update account status: "pending_posting" → "posted"
@@ -293,7 +293,7 @@ message ExecuteDepositRequest {
 ### Current
 - `kubectl logs` for debugging
 - Kafka console consumer for event inspection
-- CockroachDB admin UI (http://localhost:8080)
+- CockroachDB admin UI ([http://localhost:8080](http://localhost:8080))
 
 ---
 

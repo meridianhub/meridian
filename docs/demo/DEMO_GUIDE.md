@@ -5,7 +5,7 @@ Demonstrates event-driven microservices with Kafka for CurrentAccount and Financ
 
 ## Architecture
 
-```
+```text
 ┌─────────────────┐      Kafka Topic:           ┌─────────────────────────┐
 │                 │   current-account.deposits  │                         │
 │  CurrentAccount │─────────────────────────────▶│  FinancialAccounting   │
@@ -56,7 +56,7 @@ tilt up  # Ensure all services running
 
 ### Manual Step-by-Step
 
-**1. Create Account**
+#### 1. Create Account
 ```bash
 grpcurl -plaintext -d '{
   "customer_reference": "CUST-001",
@@ -65,7 +65,7 @@ grpcurl -plaintext -d '{
 }' localhost:9091 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
 ```
 
-**2. Execute Deposit**
+#### 2. Execute Deposit
 ```bash
 grpcurl -plaintext -d '{
   "current_account_facility_reference": "ACC-123",
@@ -73,7 +73,7 @@ grpcurl -plaintext -d '{
 }' localhost:9091 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
 ```
 
-**3. Check Ledger**
+#### 3. Check Ledger
 ```bash
 grpcurl -plaintext -d '{
   "account_reference": "ACC-123"
