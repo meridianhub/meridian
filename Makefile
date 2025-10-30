@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt
 
 # Default target
 all: help
@@ -42,7 +42,8 @@ help:
 	@echo "Available targets:"
 	@echo "  make build             - Compile all Go services"
 	@echo "  make test              - Run tests with coverage"
-	@echo "  make lint              - Run golangci-lint"
+	@echo "  make lint              - Run golangci-lint and validate Tiltfile"
+	@echo "  make validate-tilt     - Validate Tiltfile configuration"
 	@echo "  make fmt               - Format Go code"
 	@echo "  make clean             - Remove build artifacts"
 	@echo "  make proto             - Generate code from all protobuf versions"
@@ -91,11 +92,15 @@ coverage: test
 	@echo "Opening coverage report..."
 	@open $(COVERAGE_DIR)/coverage.html 2>/dev/null || xdg-open $(COVERAGE_DIR)/coverage.html 2>/dev/null || echo "Please open $(COVERAGE_DIR)/coverage.html manually"
 
-## lint: Run golangci-lint
-lint:
+## lint: Run golangci-lint and validate Tiltfile
+lint: validate-tilt
 	@echo "Running golangci-lint..."
 	@which $(GOLANGCI_LINT) > /dev/null || (echo "golangci-lint not installed. Run 'make install'"; exit 1)
 	$(GOLANGCI_LINT) run --timeout 5m ./...
+
+## validate-tilt: Validate Tiltfile configuration
+validate-tilt:
+	@./scripts/validate-tiltfile.sh Tiltfile
 
 ## fmt: Format Go code
 fmt:
