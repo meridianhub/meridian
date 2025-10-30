@@ -1,4 +1,4 @@
-# Meridian Demo Guide - Tuesday Meeting
+# Meridian Demo Guide
 
 ## Overview
 Demonstrates event-driven microservices with Kafka for CurrentAccount and FinancialAccounting BIAN domains.
@@ -95,38 +95,7 @@ Tests validate:
 - Balance updates
 - Multiple deposits
 
-## OpenCoreOS Interview Talking Points
-
-### What We've Built (3 days)
-1. **Platform utilities**: Generic Kafka producer/consumer for protobuf (52.4% test coverage)
-2. **CurrentAccount service**: BIAN-compliant with gRPC + Kafka publisher
-3. **FinancialAccounting service**: Double-entry ledger with Kafka consumer
-4. **Integration tests**: End-to-end validation
-
-### Architecture Highlights
-- **BIAN patterns**: Control Records, Behavior Qualifiers, Service Operations
-- **Proto everywhere**: gRPC APIs + Kafka messages (no JSON)
-- **Event-driven**: Services communicate via typed proto events
-- **Schema evolution**: Buf breaking change detection in CI
-
-### Questions for OpenCoreOS
-
-**Interest Engine:**
-"You list Interest Engine as a core product. How does this integrate with BIAN patterns? We implemented account features as Behavior Qualifiers per BIAN spec—is your Interest Engine similar or standalone?"
-
-**Reconciliation:**
-"Your Reconciliation Engine handles 1:1, 1:N, N:M matching. How does it consume events from multiple services? We're using proto messages in Kafka—do you use Schema Registry?"
-
-**Compliance:**
-"How does your Compliance Rules Engine integrate with event streams? Do rules evaluate events in real-time or batch?"
-
-**Scale:**
-"You mention 100M+ accounts and 300M+ daily transactions. What's your event throughput on Kafka? We're using KRaft mode—do you use Zookeeper or KRaft?"
-
-**MCP for AX:**
-"You have an MCP server for 'Agent Experience.' How does that integrate with BIAN service domains? Is it an orchestration layer?"
-
-## Technical Deep Dives (if asked)
+## Technical Deep Dives
 
 ### Why Proto in Kafka?
 - Type safety across service boundaries
@@ -166,7 +135,7 @@ kubectl port-forward service/meridian 9091:9091  # CurrentAccount
 kubectl port-forward service/meridian 9092:9092  # FinancialAccounting
 ```
 
-## Next Steps (Post-Demo)
+## Next Steps
 
 1. **Payment Stack**: PaymentInitiation → PaymentExecution → PaymentRailOperations
 2. **Regulatory Compliance**: RegulatoryCompliance rules engine
