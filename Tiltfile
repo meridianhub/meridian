@@ -181,88 +181,8 @@ spec:
             memory: 512Mi
 '''))
 
-# Zookeeper - Single node for local development
-k8s_yaml(blob('''
-apiVersion: v1
-kind: Service
-metadata:
-  name: zookeeper
-  labels:
-    app: zookeeper
-spec:
-  type: ClusterIP
-  ports:
-  - name: client
-    port: 2181
-    targetPort: 2181
-  selector:
-    app: zookeeper
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: zookeeper
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: zookeeper
-  template:
-    metadata:
-      labels:
-        app: zookeeper
-    spec:
-      containers:
-      - name: zookeeper
-        image: zookeeper:3.9.3
-        ports:
-        - containerPort: 2181
-          name: client
-        - containerPort: 2888
-          name: server
-        - containerPort: 3888
-          name: leader-election
-        env:
-        - name: ZOO_MY_ID
-          value: "1"
-        - name: ZOO_SERVERS
-          value: "server.1=0.0.0.0:2888:3888;2181"
-        - name: ZOO_STANDALONE_ENABLED
-          value: "true"
-        - name: ZOO_ADMINSERVER_ENABLED
-          value: "false"
-        - name: ZOO_4LW_COMMANDS_WHITELIST
-          value: "ruok,srvr,stat,mntr"
-        readinessProbe:
-          exec:
-            command:
-            - sh
-            - -c
-            - "echo ruok | nc localhost 2181 | grep imok"
-          initialDelaySeconds: 10
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-        livenessProbe:
-          exec:
-            command:
-            - sh
-            - -c
-            - "echo ruok | nc localhost 2181 | grep imok"
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
-'''))
-
-# Kafka - Single broker for local development
+# Kafka - Single broker with KRaft mode for local development
+# KRaft (Kafka Raft) replaces Zookeeper for metadata management
 k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
@@ -295,43 +215,39 @@ spec:
     spec:
       containers:
       - name: kafka
-        image: confluentinc/cp-kafka:7.5.0
+        image: apache/kafka:3.9.1
         ports:
         - containerPort: 9092
           name: broker
         env:
-        - name: KAFKA_BROKER_ID
+        - name: KAFKA_NODE_ID
           value: "1"
-        - name: KAFKA_ZOOKEEPER_CONNECT
-          value: "zookeeper:2181"
+        - name: KAFKA_PROCESS_ROLES
+          value: "broker,controller"
         - name: KAFKA_LISTENERS
-          value: "PLAINTEXT://0.0.0.0:9092"
+          value: "PLAINTEXT://:9092,CONTROLLER://:9093"
         - name: KAFKA_ADVERTISED_LISTENERS
           value: "PLAINTEXT://kafka:9092"
+        - name: KAFKA_CONTROLLER_LISTENER_NAMES
+          value: "CONTROLLER"
         - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
-          value: "PLAINTEXT:PLAINTEXT"
-        - name: KAFKA_INTER_BROKER_LISTENER_NAME
-          value: "PLAINTEXT"
+          value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+        - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+          value: "1@localhost:9093"
         - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
           value: "1"
         - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
           value: "1"
         - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
           value: "1"
-        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
-          value: "1"
-        - name: KAFKA_MIN_INSYNC_REPLICAS
-          value: "1"
-        - name: KAFKA_LOG_RETENTION_HOURS
-          value: "1"  # Aggressive retention for local dev to save disk space
-        - name: KAFKA_LOG_SEGMENT_BYTES
-          value: "268435456"  # 256MB segments for faster log rolling in local dev
-        - name: KAFKA_HEAP_OPTS
-          value: "-Xms512M -Xmx512M"  # Conservative heap for local development
+        - name: KAFKA_LOG_DIRS
+          value: "/tmp/kraft-combined-logs"
         - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
           value: "true"
-        - name: KAFKA_LOG_DIRS
-          value: "/var/lib/kafka/data"
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms512M -Xmx512M"
+        - name: CLUSTER_ID
+          value: "MkU3OEVBNTcwNTJENDM2Qk"
         readinessProbe:
           tcpSocket:
             port: 9092
@@ -360,11 +276,12 @@ spec:
 # =============================================================================
 
 # Build Docker image with live reload
-# Use simple 'meridian' name to match deployment spec
+# Use Dockerfile.dev for local development (has tar/rm for Tilt)
+# Use Dockerfile for production builds (distroless)
 docker_build(
   'meridian',
   context='.',
-  dockerfile='Dockerfile',
+  dockerfile='Dockerfile.dev',
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
@@ -403,7 +320,6 @@ k8s_resource(
     'cockroachdb',
     'redis',
     'kafka',
-    'zookeeper',
   ],
   labels=['app'],
   # Group RBAC and config resources under the main app
@@ -412,6 +328,8 @@ k8s_resource(
     'meridian:role',
     'meridian:rolebinding',
     'meridian-config:configmap',
+    # Note: meridian-version ConfigMap omitted (Kustomize hash suffix changes with content)
+    # Tilt will still deploy it via kustomize, just not explicitly tracked here
   ],
 )
 
@@ -425,6 +343,7 @@ k8s_resource(
   port_forwards='26257:26257',  # SQL port
   labels=['database'],
   resource_deps=[],
+  objects=['cockroachdb-pvc:persistentvolumeclaim'],
 )
 
 # Redis resource
@@ -435,19 +354,12 @@ k8s_resource(
   resource_deps=[],
 )
 
-# Messaging infrastructure
-k8s_resource(
-  'zookeeper',
-  port_forwards='2181:2181',
-  labels=['messaging'],
-  resource_deps=[],
-)
-
+# Kafka resource (KRaft mode - no Zookeeper dependency)
 k8s_resource(
   'kafka',
   port_forwards='9092:9092',
   labels=['messaging'],
-  resource_deps=['zookeeper'],
+  resource_deps=[],
 )
 
 # =============================================================================
@@ -481,21 +393,20 @@ local_resource(
 update_settings(max_parallel_updates=3, k8s_upsert_timeout_secs=60)
 
 print("""
-╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║  🚀 Meridian Development Environment                         ║
-║                                                              ║
-║  Services:                                                   ║
-║    • Meridian API     → http://localhost:8080                ║
-║    • Meridian gRPC    → localhost:9090                       ║
-║    • CockroachDB      → localhost:26257                      ║
-║    • Redis            → localhost:6379                       ║
-║    • Kafka            → localhost:9092                       ║
-║    • Zookeeper        → localhost:2181                       ║
-║                                                              ║
-║  Tilt UI              → http://localhost:10350               ║
-║                                                              ║
-║  Hot reload: Edit Go code and see changes in ~3 seconds     ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
+========================================
+🚀 Meridian Development Environment
+========================================
+
+Services:
+  • Meridian API     → http://localhost:8080
+  • Meridian gRPC    → localhost:9090
+  • CockroachDB      → localhost:26257
+  • Redis            → localhost:6379
+  • Kafka (KRaft)    → localhost:9092
+
+Tilt UI              → http://localhost:10350
+
+Hot reload: Edit Go code and see changes in ~3 seconds
+
+========================================
 """)
