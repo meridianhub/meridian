@@ -35,6 +35,8 @@ type ProtoConsumer struct {
 	handler MessageHandler
 	// pollTimeout is the duration to wait for messages before checking shutdown signal
 	pollTimeout time.Duration
+	// enableAutoCommit indicates whether Kafka handles commits automatically
+	enableAutoCommit bool
 	// ctx provides cancellation signal for graceful shutdown
 	ctx context.Context
 	// cancel triggers shutdown of the consumer loop
@@ -117,12 +119,13 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &ProtoConsumer{
-		consumer:    consumer,
-		msgFactory:  msgFactory,
-		handler:     handler,
-		pollTimeout: 100 * time.Millisecond,
-		ctx:         ctx,
-		cancel:      cancel,
+		consumer:         consumer,
+		msgFactory:       msgFactory,
+		handler:          handler,
+		pollTimeout:      100 * time.Millisecond,
+		enableAutoCommit: config.EnableAutoCommit,
+		ctx:              ctx,
+		cancel:           cancel,
 	}, nil
 }
 
@@ -177,11 +180,13 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 				continue
 			}
 
-			// Commit offset if auto-commit is disabled
-			_, err = c.consumer.CommitMessage(msg)
-			if err != nil {
-				// Log error but continue
-				continue
+			// Commit offset manually if auto-commit is disabled
+			if !c.enableAutoCommit {
+				_, err = c.consumer.CommitMessage(msg)
+				if err != nil {
+					// Log error but continue
+					continue
+				}
 			}
 		}
 	}

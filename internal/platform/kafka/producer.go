@@ -16,6 +16,8 @@ var (
 	ErrEmptyTopic = errors.New("topic cannot be empty")
 	// ErrNilMessage is returned when message is nil.
 	ErrNilMessage = errors.New("message cannot be nil")
+	// ErrUnexpectedEvent is returned when delivery channel receives unexpected event type.
+	ErrUnexpectedEvent = errors.New("unexpected event type from delivery channel")
 )
 
 // ProtoProducer handles publishing Protocol Buffer messages to Kafka topics.
@@ -134,7 +136,10 @@ func (p *ProtoProducer) Publish(ctx context.Context, topic string, key string, m
 	// Wait for delivery confirmation or context cancellation
 	select {
 	case e := <-deliveryChan:
-		m := e.(*kafka.Message)
+		m, ok := e.(*kafka.Message)
+		if !ok {
+			return fmt.Errorf("%w: %T", ErrUnexpectedEvent, e)
+		}
 		if m.TopicPartition.Error != nil {
 			return fmt.Errorf("delivery failed: %w", m.TopicPartition.Error)
 		}
