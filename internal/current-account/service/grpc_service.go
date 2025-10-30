@@ -179,8 +179,10 @@ func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 	// Example: -£1.23 = Units=-1, Nanos=230000000 (positive nanos)
 	var nanos int32
 	if remainder < 0 {
+		// #nosec G115 - remainder is always -99 to 0, abs value * 10000000 fits in int32
 		nanos = int32(-remainder * 10000000)
 	} else {
+		// #nosec G115 - remainder is always 0 to 99, multiplication result fits in int32
 		nanos = int32(remainder * 10000000)
 	}
 

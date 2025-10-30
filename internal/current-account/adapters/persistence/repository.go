@@ -10,9 +10,9 @@ import (
 
 // Repository errors
 var (
-	ErrAccountNotFound    = errors.New("account not found")
-	ErrAccountExists      = errors.New("account already exists")
-	ErrVersionConflict    = errors.New("version conflict: account was modified by another transaction")
+	ErrAccountNotFound = errors.New("account not found")
+	ErrAccountExists   = errors.New("account already exists")
+	ErrVersionConflict = errors.New("version conflict: account was modified by another transaction")
 )
 
 // Repository provides persistence operations for current accounts
