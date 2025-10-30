@@ -328,6 +328,10 @@ spec:
           value: "268435456"  # 256MB segments for faster log rolling in local dev
         - name: KAFKA_HEAP_OPTS
           value: "-Xms512M -Xmx512M"  # Conservative heap for local development
+        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+          value: "true"
+        - name: KAFKA_LOG_DIRS
+          value: "/var/lib/kafka/data"
         readinessProbe:
           tcpSocket:
             port: 9092
@@ -402,6 +406,13 @@ k8s_resource(
     'zookeeper',
   ],
   labels=['app'],
+  # Group RBAC and config resources under the main app
+  objects=[
+    'meridian:serviceaccount',
+    'meridian:role',
+    'meridian:rolebinding',
+    'meridian-config:configmap',
+  ],
 )
 
 # =============================================================================
@@ -448,7 +459,7 @@ local_resource(
   'test',
   cmd='make test',
   deps=['./cmd', './internal', './pkg', './go.mod'],
-  labels=['tests'],
+  labels=['quality'],
   allow_parallel=True,
 )
 
