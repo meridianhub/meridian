@@ -233,6 +233,8 @@ spec:
           value: "false"
         - name: ZOO_4LW_COMMANDS_WHITELIST
           value: "ruok,srvr,stat,mntr"
+        - name: ZOO_LOG4J_PROP
+          value: "WARN,CONSOLE"
         readinessProbe:
           exec:
             command:
