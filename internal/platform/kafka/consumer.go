@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"sync"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -35,8 +37,12 @@ type ProtoConsumer struct {
 	handler MessageHandler
 	// pollTimeout is the duration to wait for messages before checking shutdown signal
 	pollTimeout time.Duration
+	// handlerTimeout is the maximum duration for processing a single message
+	handlerTimeout time.Duration
 	// enableAutoCommit indicates whether Kafka handles commits automatically
 	enableAutoCommit bool
+	// wg tracks the Subscribe goroutine for graceful shutdown
+	wg sync.WaitGroup
 	// ctx provides cancellation signal for graceful shutdown
 	ctx context.Context
 	// cancel triggers shutdown of the consumer loop
@@ -58,6 +64,12 @@ type ConsumerConfig struct {
 	// EnableAutoCommit when true enables automatic offset commits, when false
 	// offsets are committed manually after successful message processing.
 	EnableAutoCommit bool
+	// PollTimeout is the duration to wait for new messages before checking shutdown signal.
+	// Default: 100ms. Lower values improve shutdown responsiveness, higher values reduce CPU.
+	PollTimeout time.Duration
+	// HandlerTimeout is the maximum duration for processing a single message.
+	// Default: 30s. Handlers exceeding this timeout will be cancelled.
+	HandlerTimeout time.Duration
 }
 
 var (
@@ -104,6 +116,12 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 	if config.AutoOffsetReset == "" {
 		config.AutoOffsetReset = "earliest"
 	}
+	if config.PollTimeout == 0 {
+		config.PollTimeout = 100 * time.Millisecond
+	}
+	if config.HandlerTimeout == 0 {
+		config.HandlerTimeout = 30 * time.Second
+	}
 
 	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
 		"bootstrap.servers":  config.BootstrapServers,
@@ -122,7 +140,8 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 		consumer:         consumer,
 		msgFactory:       msgFactory,
 		handler:          handler,
-		pollTimeout:      100 * time.Millisecond,
+		pollTimeout:      config.PollTimeout,
+		handlerTimeout:   config.HandlerTimeout,
 		enableAutoCommit: config.EnableAutoCommit,
 		ctx:              ctx,
 		cancel:           cancel,
@@ -157,6 +176,10 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 		return fmt.Errorf("failed to subscribe to topics: %w", err)
 	}
 
+	// Track this goroutine for graceful shutdown
+	c.wg.Add(1)
+	defer c.wg.Done()
+
 	// Start consuming loop
 	for {
 		select {
@@ -175,8 +198,17 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 
 			// Process message
 			if err := c.processMessage(msg); err != nil {
-				// Log error but continue consuming
-				// In production, implement dead letter queue or retry logic
+				// Log error with full context for debugging and monitoring
+				log.Printf("ERROR: Failed to process message from topic=%s partition=%d offset=%d: %v",
+					*msg.TopicPartition.Topic,
+					msg.TopicPartition.Partition,
+					msg.TopicPartition.Offset,
+					err)
+				// Continue consuming - consider implementing:
+				// - Dead letter queue for poison messages
+				// - Exponential backoff retry policy
+				// - Circuit breaker for downstream service failures
+				// - Metrics/alerting for failure rates
 				continue
 			}
 
@@ -184,7 +216,13 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 			if !c.enableAutoCommit {
 				_, err = c.consumer.CommitMessage(msg)
 				if err != nil {
-					// Log error but continue
+					// Log commit failures - may indicate broker issues
+					log.Printf("WARN: Failed to commit offset for topic=%s partition=%d offset=%d: %v",
+						*msg.TopicPartition.Topic,
+						msg.TopicPartition.Partition,
+						msg.TopicPartition.Offset,
+						err)
+					// Continue consuming - offset will be reprocessed on restart
 					continue
 				}
 			}
@@ -196,7 +234,7 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 // This is an internal method that:
 // 1. Creates a new protobuf message instance using the factory
 // 2. Deserializes the Kafka message value into the proto message
-// 3. Calls the handler with a 30-second timeout context
+// 3. Calls the handler with configured timeout context
 //
 // Returns an error if deserialization or handler execution fails.
 func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
@@ -208,8 +246,8 @@ func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 		return fmt.Errorf("failed to unmarshal protobuf message: %w", err)
 	}
 
-	// Call handler with context
-	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	// Call handler with configured timeout
+	ctx, cancel := context.WithTimeout(c.ctx, c.handlerTimeout)
 	defer cancel()
 
 	if err := c.handler(ctx, kafkaMsg.Key, protoMsg); err != nil {
@@ -220,16 +258,17 @@ func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 }
 
 // Stop stops the consumer gracefully.
-// This triggers the Subscribe() loop to exit. It does not wait for the loop to finish -
-// use a sync mechanism (e.g., WaitGroup) if needed.
+// This triggers the Subscribe() loop to exit and waits for it to finish.
+// Safe to call multiple times.
 func (c *ProtoConsumer) Stop() {
 	c.cancel()
+	c.wg.Wait()
 }
 
 // Close closes the consumer and releases resources.
-// This calls Stop() to trigger shutdown, then closes the underlying Kafka consumer.
-// Always call this when finished with the consumer to free network connections
-// and other system resources.
+// This calls Stop() to trigger graceful shutdown, waits for Subscribe() to exit,
+// then closes the underlying Kafka consumer. Always call this when finished with
+// the consumer to free network connections and other system resources.
 //
 // Returns an error if the underlying consumer close fails.
 func (c *ProtoConsumer) Close() error {
