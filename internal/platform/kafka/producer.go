@@ -19,20 +19,40 @@ var (
 )
 
 // ProtoProducer handles publishing Protocol Buffer messages to Kafka topics.
+// It provides synchronous publishing with delivery confirmation, ensuring reliable
+// message delivery to Kafka brokers. The producer uses configurable acks, retries,
+// and compression for production-grade performance and durability.
 type ProtoProducer struct {
+	// producer is the underlying confluent-kafka-go producer instance
 	producer *kafka.Producer
 }
 
 // ProducerConfig contains configuration for creating a Kafka producer.
+// Use sensible defaults or customize for specific workloads.
 type ProducerConfig struct {
+	// BootstrapServers is the comma-separated list of Kafka broker addresses (required).
 	BootstrapServers string
-	ClientID         string
-	Acks             string // "all", "1", "0"
-	Retries          int
-	Compression      string // "none", "gzip", "snappy", "lz4", "zstd"
+	// ClientID identifies the producer for logging and metrics (optional).
+	ClientID string
+	// Acks controls durability: "all" (default) waits for all replicas, "1" waits for leader,
+	// "0" sends without confirmation.
+	Acks string
+	// Retries configures how many times to retry failed sends (default: 3).
+	Retries int
+	// Compression algorithm: "snappy" (default), "gzip", "lz4", "zstd", or "none".
+	Compression string
 }
 
 // NewProtoProducer creates a new Kafka producer for protobuf messages.
+// It validates the configuration and applies sensible defaults for production use:
+// - Acks: "all" (wait for full replication)
+// - Retries: 3
+// - Compression: "snappy"
+// - Linger: 10ms (batching window)
+// - Batch size: 16KB
+//
+// Returns an error if BootstrapServers is empty or if the underlying Kafka producer
+// fails to initialize.
 func NewProtoProducer(config ProducerConfig) (*ProtoProducer, error) {
 	if config.BootstrapServers == "" {
 		return nil, ErrEmptyBootstrapServers
@@ -67,6 +87,21 @@ func NewProtoProducer(config ProducerConfig) (*ProtoProducer, error) {
 
 // Publish sends a protobuf message to the specified Kafka topic.
 // The key is used for partitioning - messages with the same key go to the same partition.
+// This method blocks until the message is confirmed by the Kafka broker or the context is cancelled.
+//
+// Parameters:
+// - ctx: Context for cancellation and timeout control
+// - topic: Target Kafka topic name (must not be empty)
+// - key: Partition key as string (empty key will be null in Kafka)
+// - msg: Protocol Buffer message to serialize and send (must not be nil)
+//
+// Returns an error if:
+// - topic is empty
+// - msg is nil
+// - protobuf marshaling fails
+// - message production fails
+// - delivery confirmation indicates failure
+// - context is cancelled before delivery confirmation
 func (p *ProtoProducer) Publish(ctx context.Context, topic string, key string, msg proto.Message) error {
 	if topic == "" {
 		return ErrEmptyTopic
@@ -110,11 +145,21 @@ func (p *ProtoProducer) Publish(ctx context.Context, topic string, key string, m
 }
 
 // Flush waits for all outstanding messages to be delivered.
+// This should be called before shutting down the producer to ensure no messages are lost.
+//
+// Parameters:
+// - timeoutMs: Maximum time to wait in milliseconds
+//
+// Returns the number of messages still in flight after the timeout.
+// A return value of 0 indicates all messages were successfully delivered.
 func (p *ProtoProducer) Flush(timeoutMs int) int {
 	return p.producer.Flush(timeoutMs)
 }
 
 // Close closes the producer and releases resources.
+// This method should be called when the producer is no longer needed to free up
+// network connections and other system resources. It does not wait for outstanding
+// messages - call Flush() first if needed.
 func (p *ProtoProducer) Close() {
 	p.producer.Close()
 }

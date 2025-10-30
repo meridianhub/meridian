@@ -12,24 +12,49 @@ import (
 
 // MessageHandler is called for each message received from Kafka.
 // The handler should return an error if the message cannot be processed.
+// Errors are logged but do not stop the consumer - implement dead letter queue
+// or retry logic in production for better error handling.
+//
+// Parameters:
+// - ctx: Context with timeout (default 30s) for processing the message
+// - key: Kafka message key as bytes (may be nil)
+// - msg: Deserialized protobuf message
+//
+// Returns an error if message processing fails.
 type MessageHandler func(ctx context.Context, key []byte, msg proto.Message) error
 
 // ProtoConsumer handles consuming Protocol Buffer messages from Kafka topics.
+// It provides automatic deserialization, error recovery, and graceful shutdown.
+// The consumer runs in a blocking loop until Stop() is called or an unrecoverable error occurs.
 type ProtoConsumer struct {
-	consumer    *kafka.Consumer
-	msgFactory  func() proto.Message
-	handler     MessageHandler
+	// consumer is the underlying confluent-kafka-go consumer instance
+	consumer *kafka.Consumer
+	// msgFactory creates new instances of the protobuf message type for deserialization
+	msgFactory func() proto.Message
+	// handler processes each consumed message
+	handler MessageHandler
+	// pollTimeout is the duration to wait for messages before checking shutdown signal
 	pollTimeout time.Duration
-	ctx         context.Context
-	cancel      context.CancelFunc
+	// ctx provides cancellation signal for graceful shutdown
+	ctx context.Context
+	// cancel triggers shutdown of the consumer loop
+	cancel context.CancelFunc
 }
 
 // ConsumerConfig contains configuration for creating a Kafka consumer.
+// All fields except EnableAutoCommit have defaults applied if empty.
 type ConsumerConfig struct {
+	// BootstrapServers is the comma-separated list of Kafka broker addresses (required).
 	BootstrapServers string
-	GroupID          string
-	ClientID         string
-	AutoOffsetReset  string // "earliest", "latest"
+	// GroupID identifies the consumer group for coordinated consumption (required).
+	GroupID string
+	// ClientID identifies the consumer for logging and metrics (optional).
+	ClientID string
+	// AutoOffsetReset determines where to start consuming if no offset exists:
+	// "earliest" (default) starts from beginning, "latest" starts from end.
+	AutoOffsetReset string
+	// EnableAutoCommit when true enables automatic offset commits, when false
+	// offsets are committed manually after successful message processing.
 	EnableAutoCommit bool
 }
 
@@ -45,7 +70,20 @@ var (
 )
 
 // NewProtoConsumer creates a new Kafka consumer for protobuf messages.
-// msgFactory is a function that creates a new instance of the proto message type to deserialize into.
+// The consumer requires a message factory to create typed protobuf instances for deserialization,
+// and a handler to process each consumed message.
+//
+// Parameters:
+// - config: Consumer configuration (BootstrapServers and GroupID are required)
+// - msgFactory: Function that creates a new instance of the proto message type to deserialize into
+// - handler: Function called for each consumed message
+//
+// Returns an error if:
+// - BootstrapServers is empty
+// - GroupID is empty
+// - msgFactory is nil
+// - handler is nil
+// - underlying Kafka consumer fails to initialize
 func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, handler MessageHandler) (*ProtoConsumer, error) {
 	if config.BootstrapServers == "" {
 		return nil, ErrEmptyBootstrapServers
@@ -90,6 +128,22 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 
 // Subscribe starts consuming from the specified topics.
 // This method blocks until Stop() is called or an unrecoverable error occurs.
+// The consumer will:
+// - Join the consumer group
+// - Poll for messages with 100ms timeout
+// - Deserialize protobuf messages using the factory
+// - Call the handler with a 30s timeout
+// - Commit offsets after successful processing (if auto-commit disabled)
+// - Continue consuming even if handler returns error (errors are logged)
+// - Exit gracefully when Stop() is called
+//
+// Parameters:
+// - topics: List of Kafka topic names to consume from (must not be empty)
+//
+// Returns an error if:
+// - topics list is empty
+// - subscription fails
+// - unrecoverable Kafka error occurs (timeouts are handled internally)
 func (c *ProtoConsumer) Subscribe(topics []string) error {
 	if len(topics) == 0 {
 		return ErrEmptyTopics
@@ -134,6 +188,12 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 }
 
 // processMessage deserializes and handles a Kafka message.
+// This is an internal method that:
+// 1. Creates a new protobuf message instance using the factory
+// 2. Deserializes the Kafka message value into the proto message
+// 3. Calls the handler with a 30-second timeout context
+//
+// Returns an error if deserialization or handler execution fails.
 func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 	// Create new proto message instance
 	protoMsg := c.msgFactory()
@@ -155,11 +215,18 @@ func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 }
 
 // Stop stops the consumer gracefully.
+// This triggers the Subscribe() loop to exit. It does not wait for the loop to finish -
+// use a sync mechanism (e.g., WaitGroup) if needed.
 func (c *ProtoConsumer) Stop() {
 	c.cancel()
 }
 
 // Close closes the consumer and releases resources.
+// This calls Stop() to trigger shutdown, then closes the underlying Kafka consumer.
+// Always call this when finished with the consumer to free network connections
+// and other system resources.
+//
+// Returns an error if the underlying consumer close fails.
 func (c *ProtoConsumer) Close() error {
 	c.Stop()
 	if err := c.consumer.Close(); err != nil {
