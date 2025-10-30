@@ -130,6 +130,30 @@ func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "nil value date",
+			event: &eventsv1.DepositEvent{
+				AccountId:     "ACC-789",
+				AmountCents:   5000,
+				Currency:      commonv1.Currency_CURRENCY_USD,
+				CorrelationId: "deposit-003",
+				ValueDate:     nil,
+				Timestamp:     timestamppb.Now(),
+			},
+			wantErr: true,
+		},
+		{
+			name: "unspecified currency",
+			event: &eventsv1.DepositEvent{
+				AccountId:     "ACC-999",
+				AmountCents:   3000,
+				Currency:      commonv1.Currency_CURRENCY_UNSPECIFIED,
+				CorrelationId: "deposit-004",
+				ValueDate:     timestamppb.Now(),
+				Timestamp:     timestamppb.Now(),
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

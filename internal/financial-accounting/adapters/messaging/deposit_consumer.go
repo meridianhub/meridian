@@ -55,11 +55,27 @@ func NewDepositConsumer(config kafka.ConsumerConfig, postingService *service.Pos
 // handleDepositEvent processes a single DepositEvent by converting it to
 // the PostingService format and creating double-entry ledger postings.
 func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *eventsv1.DepositEvent) error {
+	// Validate proto message
+	if err := event.ValidateAll(); err != nil {
+		return fmt.Errorf("invalid deposit event: %w", err)
+	}
+
+	// Validate required fields to prevent nil pointer panics
+	if event.ValueDate == nil {
+		return fmt.Errorf("invalid deposit event: value_date is required")
+	}
+	if event.Timestamp == nil {
+		return fmt.Errorf("invalid deposit event: timestamp is required")
+	}
+
 	// Convert proto timestamp to time.Time
 	valueDate := event.ValueDate.AsTime()
 
 	// Convert proto currency enum to ISO code (e.g., CURRENCY_GBP -> GBP)
 	currencyCode := convertCurrencyToISO(event.Currency)
+	if currencyCode == "" {
+		return fmt.Errorf("invalid deposit event: unknown or unspecified currency: %v", event.Currency)
+	}
 
 	// Create service event
 	depositEvent := service.DepositEvent{
