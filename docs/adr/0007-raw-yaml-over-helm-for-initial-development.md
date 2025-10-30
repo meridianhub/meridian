@@ -57,10 +57,10 @@ When debugging a failing pod, you must reason through all six layers:
 - Is Tilt configured properly?
 
 This is particularly challenging when:
-- Learning Kubernetes fundamentals
+- Bootstrapping a new project with evolving infrastructure requirements
 - Debugging service connectivity issues
 - Rapidly iterating on infrastructure setup
-- Understanding what's actually running in the cluster
+- Maintaining transparency about what's actually running in the cluster
 
 ## Decision
 
@@ -70,15 +70,15 @@ This is particularly challenging when:
 2. **Keep configurations simple**: Single-node deployments with minimal but complete configuration
 3. **Defer Helm migration**: Plan to migrate to Helm charts once service topology stabilizes and multi-environment deployment becomes necessary
 
-This is a **conscious architectural decision**, not an oversight. We are explicitly choosing transparency and learning velocity over environment abstraction during the initial development phase.
+This is a **conscious architectural decision**, not an oversight. We are explicitly choosing transparency and iteration velocity over environment abstraction during the bootstrap phase, prioritizing rapid development over premature optimization.
 
 ## Decision Drivers
 
-- **Learning curve**: Team is learning Kubernetes primitives; raw YAML provides direct visibility
-- **Iteration speed**: Faster debugging when you can see exactly what's deployed
-- **Cognitive load**: Reduce abstraction layers during high-uncertainty development phase
-- **Service stability**: Service topology is still evolving; premature abstraction would churn
-- **Immediate value**: Helm's multi-environment value doesn't apply yet (only local dev exists)
+- **Transparency**: Direct visibility into deployed resources accelerates debugging and understanding
+- **Iteration speed**: Faster feedback loops when configuration changes are immediately visible
+- **Reduced complexity**: Minimize abstraction layers during bootstrap phase when requirements are evolving
+- **Service stability**: Service topology is still evolving; premature abstraction creates unnecessary churn
+- **Deferred value**: Helm's multi-environment capabilities aren't needed until we have multiple deployment targets
 - **Complete but minimal**: Even complex services like Kafka can be configured simply for local development
 
 ## Consequences
@@ -88,7 +88,7 @@ This is a **conscious architectural decision**, not an oversight. We are explici
 - **Transparent**: What you see in the Tiltfile is what runs in Kubernetes
 - **Fast iteration**: Direct YAML editing, no template rendering to debug
 - **Lower cognitive overhead**: Fewer abstraction layers when troubleshooting
-- **Better learning**: Direct exposure to Kubernetes primitives builds stronger mental models
+- **Direct control**: Explicit configuration without indirection through templating
 - **Simpler debugging**: Fewer places for configuration to go wrong
 
 ### Negative
