@@ -356,11 +356,12 @@ spec:
 # =============================================================================
 
 # Build Docker image with live reload
-# Use simple 'meridian' name to match deployment spec
+# Use Dockerfile.dev for local development (has tar/rm for Tilt)
+# Use Dockerfile for production builds (distroless)
 docker_build(
   'meridian',
   context='.',
-  dockerfile='Dockerfile',
+  dockerfile='Dockerfile.dev',
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
