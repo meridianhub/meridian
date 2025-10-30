@@ -186,21 +186,29 @@ k8s_yaml(blob('''
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: zookeeper-log4j
+  name: zookeeper-logback
 data:
-  log4j.properties: |
-    # Reduce logging verbosity for local development
-    # Only log warnings and errors to reduce noise from health check probes
-    zookeeper.root.logger=WARN, CONSOLE
+  logback.xml: |
+    <configuration>
+      <property name="zookeeper.console.threshold" value="WARN" />
+      <property name="zookeeper.log.threshold" value="WARN" />
 
-    # Specifically silence NIOServerCnxn which logs every health check probe
-    log4j.logger.org.apache.zookeeper.server.NIOServerCnxn=ERROR
+      <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+          <pattern>%d{ISO8601} [myid:%X{myid}] - %-5p [%t:%C{1}@%L] - %m%n</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+          <level>WARN</level>
+        </filter>
+      </appender>
 
-    # Console appender
-    log4j.appender.CONSOLE=org.apache.log4j.ConsoleAppender
-    log4j.appender.CONSOLE.Threshold=WARN
-    log4j.appender.CONSOLE.layout=org.apache.log4j.PatternLayout
-    log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} [myid:%X{myid}] - %-5p [%t:%C{1}@%L] - %m%n
+      <!-- Silence NIOServerCnxn which logs every health check probe -->
+      <logger name="org.apache.zookeeper.server.NIOServerCnxn" level="ERROR" />
+
+      <root level="WARN">
+        <appender-ref ref="CONSOLE" />
+      </root>
+    </configuration>
 ---
 apiVersion: v1
 kind: Service
@@ -255,9 +263,9 @@ spec:
         - name: ZOO_LOG4J_PROP
           value: "WARN,CONSOLE"
         volumeMounts:
-        - name: log4j-config
-          mountPath: /conf/log4j.properties
-          subPath: log4j.properties
+        - name: logback-config
+          mountPath: /conf/logback.xml
+          subPath: logback.xml
         readinessProbe:
           exec:
             command:
@@ -286,9 +294,9 @@ spec:
             cpu: 500m
             memory: 512Mi
       volumes:
-      - name: log4j-config
+      - name: logback-config
         configMap:
-          name: zookeeper-log4j
+          name: zookeeper-logback
 '''))
 
 # Kafka - Single broker for local development
