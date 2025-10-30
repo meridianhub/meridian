@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/meridianhub/meridian/internal/current-account/domain"
@@ -101,7 +102,7 @@ func TestFindByIDNotFound(t *testing.T) {
 	repo := NewRepository(db)
 
 	_, err := repo.FindByID("ACC-NONEXISTENT")
-	if err != ErrAccountNotFound {
+	if !errors.Is(err, ErrAccountNotFound) {
 		t.Errorf("Expected ErrAccountNotFound, got %v", err)
 	}
 }
@@ -172,7 +173,7 @@ func TestDeleteAccount(t *testing.T) {
 
 	// Should not be found after soft delete
 	_, err := repo.FindByID("ACC-001")
-	if err != ErrAccountNotFound {
+	if !errors.Is(err, ErrAccountNotFound) {
 		t.Errorf("Expected ErrAccountNotFound after delete, got %v", err)
 	}
 }
