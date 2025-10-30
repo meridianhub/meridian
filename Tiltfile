@@ -193,6 +193,9 @@ data:
     # Only log warnings and errors to reduce noise from health check probes
     zookeeper.root.logger=WARN, CONSOLE
 
+    # Specifically silence NIOServerCnxn which logs every health check probe
+    log4j.logger.org.apache.zookeeper.server.NIOServerCnxn=ERROR
+
     # Console appender
     log4j.appender.CONSOLE=org.apache.log4j.ConsoleAppender
     log4j.appender.CONSOLE.Threshold=WARN
