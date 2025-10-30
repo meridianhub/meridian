@@ -26,25 +26,25 @@ func main() {
 	}
 
 	// Health check endpoints
-	http.HandleFunc("/health/live", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "alive")
+		_, _ = fmt.Fprintln(w, "alive")
 	})
 
-	http.HandleFunc("/health/ready", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/health/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ready")
+		_, _ = fmt.Fprintln(w, "ready")
 	})
 
-	http.HandleFunc("/health/startup", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/health/startup", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "started")
+		_, _ = fmt.Fprintln(w, "started")
 	})
 
 	// Root endpoint
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "Meridian v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
+		_, _ = fmt.Fprintf(w, "Meridian v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
 	})
 
 	// Start server in background
