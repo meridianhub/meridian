@@ -38,6 +38,9 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 
 	// Map currency enum to string
 	currency := mapCurrency(req.BaseCurrency)
+	if currency == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported currency: %v", req.BaseCurrency)
+	}
 
 	// Create domain model
 	account := domain.NewCurrentAccount(
@@ -70,10 +73,17 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
+	// Validate currency matches account currency
+	if req.Amount.Amount.CurrencyCode != account.Balance.Currency {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"currency mismatch: expected %s, got %s",
+			account.Balance.Currency, req.Amount.Amount.CurrencyCode)
+	}
+
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
 	amount := domain.Money{
 		AmountCents: req.Amount.Amount.Units*100 + int64(req.Amount.Amount.Nanos/10000000),
-		Currency:    account.Balance.Currency,
+		Currency:    req.Amount.Amount.CurrencyCode,
 	}
 
 	// Execute deposit
@@ -95,7 +105,7 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 		TransactionId:    transactionID,
 		NewBalance:       toMoneyAmount(account.Balance),
 		AvailableBalance: toMoneyAmount(account.AvailableBalance),
-		Status:           "COMPLETED",
+		Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
 	}, nil
 }
 
@@ -124,7 +134,8 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 		BaseCurrency:          mapCurrencyToProto(account.Balance.Currency),
 		CreatedAt:             timestamppb.New(account.CreatedAt),
 		UpdatedAt:             timestamppb.New(account.UpdatedAt),
-		Version:               int32(account.Version),
+		// #nosec G115 - Version is bounded by database constraints
+		Version: int32(account.Version),
 		CurrentBalance: &pb.AccountBalance{
 			CurrentBalance:   toMoneyAmount(account.Balance),
 			AvailableBalance: toMoneyAmount(account.AvailableBalance),
@@ -140,11 +151,18 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 }
 
 func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
+	cents := m.AmountCents % 100
+	if cents < 0 {
+		cents = -cents
+	}
+	// #nosec G115 - cents is always 0-99, multiplication result fits in int32
+	nanos := int32(cents * 10000000)
+
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
 			CurrencyCode: m.Currency,
 			Units:        m.AmountCents / 100,
-			Nanos:        int32((m.AmountCents % 100) * 10000000),
+			Nanos:        nanos,
 		},
 	}
 }
@@ -189,13 +207,9 @@ func mapCurrency(currency commonpb.Currency) string {
 		return currencyUSD
 	case commonpb.Currency_CURRENCY_EUR:
 		return currencyEUR
-	case commonpb.Currency_CURRENCY_UNSPECIFIED,
-		commonpb.Currency_CURRENCY_JPY,
-		commonpb.Currency_CURRENCY_CHF,
-		commonpb.Currency_CURRENCY_CAD,
-		commonpb.Currency_CURRENCY_AUD:
-		return currencyGBP // Default to GBP for unsupported currencies
 	default:
-		return currencyGBP
+		// Return empty string for unsupported currencies
+		// Caller should validate and return error
+		return ""
 	}
 }

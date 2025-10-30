@@ -20,6 +20,15 @@ enum AccountStatus {
   ACCOUNT_STATUS_CLOSED = 3;
 }
 
+// Transaction status for deposit/withdrawal operations
+enum TransactionStatus {
+  TRANSACTION_STATUS_UNSPECIFIED = 0;
+  TRANSACTION_STATUS_PENDING = 1;
+  TRANSACTION_STATUS_COMPLETED = 2;
+  TRANSACTION_STATUS_FAILED = 3;
+  TRANSACTION_STATUS_REVERSED = 4;
+}
+
 // CurrentAccountFacility represents a BIAN-compliant current account facility
 // Task 5.1: Define CurrentAccountFacility message with account identification and status management
 message CurrentAccountFacility {
@@ -237,7 +246,7 @@ message ExecuteDepositResponse {
   meridian.common.v1.MoneyAmount available_balance = 4;
 
   // status is the transaction status
-  string status = 5;
+  TransactionStatus status = 5;
 }
 
 // Request to retrieve current account details

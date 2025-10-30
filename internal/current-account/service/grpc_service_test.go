@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -114,8 +115,8 @@ func TestExecuteDeposit(t *testing.T) {
 		t.Error("Expected non-empty transaction ID")
 	}
 
-	if resp.Status != "COMPLETED" {
-		t.Errorf("Expected COMPLETED status, got %s", resp.Status)
+	if resp.Status != pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED {
+		t.Errorf("Expected COMPLETED status, got %v", resp.Status)
 	}
 
 	// Verify balance
@@ -273,8 +274,8 @@ func TestCurrencyMapping(t *testing.T) {
 		{"GBP", commonpb.Currency_CURRENCY_GBP, "GBP"},
 		{"USD", commonpb.Currency_CURRENCY_USD, "USD"},
 		{"EUR", commonpb.Currency_CURRENCY_EUR, "EUR"},
-		{"Unspecified defaults to GBP", commonpb.Currency_CURRENCY_UNSPECIFIED, "GBP"},
-		{"Unsupported JPY defaults to GBP", commonpb.Currency_CURRENCY_JPY, "GBP"},
+		{"Unspecified returns empty", commonpb.Currency_CURRENCY_UNSPECIFIED, ""},
+		{"Unsupported JPY returns empty", commonpb.Currency_CURRENCY_JPY, ""},
 	}
 
 	for _, tt := range tests {
@@ -284,5 +285,77 @@ func TestCurrencyMapping(t *testing.T) {
 				t.Errorf("Expected %s, got %s", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestExecuteDepositCurrencyMismatch(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := NewService(repo)
+
+	// Create GBP account
+	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	if err := repo.Save(account); err != nil {
+		t.Fatalf("Failed to create test account: %v", err)
+	}
+
+	// Try to deposit USD to GBP account
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "USD",
+				Units:        100,
+				Nanos:        0,
+			},
+		},
+	}
+
+	_, err := svc.ExecuteDeposit(context.Background(), req)
+	if err == nil {
+		t.Fatal("Expected error for currency mismatch")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("Expected gRPC status error, got %v", err)
+	}
+
+	if st.Code() != codes.InvalidArgument {
+		t.Errorf("Expected InvalidArgument code, got %v", st.Code())
+	}
+
+	if !strings.Contains(st.Message(), "currency mismatch") {
+		t.Errorf("Expected 'currency mismatch' in error message, got: %s", st.Message())
+	}
+}
+
+func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := NewService(repo)
+
+	req := &pb.InitiateCurrentAccountRequest{
+		AccountIdentification: "GB82WEST12345698765432",
+		CustomerId:            "CUST-001",
+		BaseCurrency:          commonpb.Currency_CURRENCY_JPY,
+	}
+
+	_, err := svc.InitiateCurrentAccount(context.Background(), req)
+	if err == nil {
+		t.Fatal("Expected error for unsupported currency")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("Expected gRPC status error, got %v", err)
+	}
+
+	if st.Code() != codes.InvalidArgument {
+		t.Errorf("Expected InvalidArgument code, got %v", st.Code())
 	}
 }
