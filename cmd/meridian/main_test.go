@@ -63,7 +63,11 @@ func TestHealthStartupEndpoint(t *testing.T) {
 }
 
 func TestRootEndpoint(t *testing.T) {
-	// Set version info for test
+	// Set version info for test and restore after
+	prevVersion, prevCommit, prevBuildDate := Version, Commit, BuildDate
+	t.Cleanup(func() {
+		Version, Commit, BuildDate = prevVersion, prevCommit, prevBuildDate
+	})
 	Version = "test-version"
 	Commit = "test-commit"
 	BuildDate = "test-date"
