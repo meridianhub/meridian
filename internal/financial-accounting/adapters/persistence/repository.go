@@ -22,6 +22,8 @@ var (
 	ErrPostingNotFound = errors.New("ledger posting not found")
 	// ErrBookingLogNotFound is returned when a booking log cannot be found
 	ErrBookingLogNotFound = errors.New("financial booking log not found")
+	// ErrFractionalCents is returned when an amount has fractional cents
+	ErrFractionalCents = errors.New("amount has fractional cents that cannot be represented")
 )
 
 // LedgerRepository provides persistence operations for ledger postings
@@ -36,8 +38,27 @@ func NewLedgerRepository(db *gorm.DB) *LedgerRepository {
 
 // SavePosting persists a ledger posting
 func (r *LedgerRepository) SavePosting(ctx context.Context, posting *domain.LedgerPosting) error {
-	entity := toPostingEntity(posting)
+	entity, err := toPostingEntity(posting)
+	if err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).Create(&entity).Error
+}
+
+// SavePostingsInTransaction persists multiple postings atomically within a transaction
+func (r *LedgerRepository) SavePostingsInTransaction(ctx context.Context, postings []*domain.LedgerPosting) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, posting := range postings {
+			entity, err := toPostingEntity(posting)
+			if err != nil {
+				return err
+			}
+			if err := tx.Create(&entity).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // GetPosting retrieves a posting by ID
@@ -74,9 +95,16 @@ func (r *LedgerRepository) GetPostingsByBookingLogID(ctx context.Context, bookin
 }
 
 // toPostingEntity converts domain model to database entity
-func toPostingEntity(posting *domain.LedgerPosting) LedgerPostingEntity {
-	// Convert decimal amount to cents (multiply by 100 and round)
-	amountCents := posting.Amount.Amount.Mul(decimalHundred).IntPart()
+func toPostingEntity(posting *domain.LedgerPosting) (LedgerPostingEntity, error) {
+	// Convert decimal amount to cents (multiply by 100)
+	scaled := posting.Amount.Amount.Mul(decimalHundred)
+
+	// Validate that the amount can be represented exactly in cents (no fractional cents)
+	if !scaled.Equal(scaled.Truncate(0)) {
+		return LedgerPostingEntity{}, ErrFractionalCents
+	}
+
+	amountCents := scaled.IntPart()
 
 	return LedgerPostingEntity{
 		ID:                    posting.ID,
@@ -90,7 +118,7 @@ func toPostingEntity(posting *domain.LedgerPosting) LedgerPostingEntity {
 		Status:                string(posting.Status),
 		CorrelationID:         posting.CorrelationID,
 		CreatedAt:             posting.CreatedAt,
-	}
+	}, nil
 }
 
 // toPostingDomain converts database entity to domain model

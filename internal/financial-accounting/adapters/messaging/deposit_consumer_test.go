@@ -18,10 +18,16 @@ import (
 func setupTestServices(t *testing.T) *service.PostingService {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("Failed to obtain sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 
 	err = db.AutoMigrate(&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
 	if err != nil {
@@ -29,7 +35,7 @@ func setupTestServices(t *testing.T) *service.PostingService {
 	}
 
 	repo := persistence.NewLedgerRepository(db)
-	return service.NewPostingService(repo)
+	return service.NewPostingService(repo, "BANK-CASH-001")
 }
 
 func TestNewDepositConsumer(t *testing.T) {

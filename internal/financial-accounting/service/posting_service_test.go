@@ -16,10 +16,16 @@ import (
 func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("Failed to obtain sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 
 	// Run migrations
 	err = db.AutoMigrate(&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
@@ -33,7 +39,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 func TestProcessDeposit(t *testing.T) {
 	db := setupTestDB(t)
 	repo := persistence.NewLedgerRepository(db)
-	service := NewPostingService(repo)
+	service := NewPostingService(repo, "BANK-CASH-001")
 
 	event := DepositEvent{
 		AccountID:     "ACC-123",
@@ -91,7 +97,7 @@ func TestProcessDeposit(t *testing.T) {
 func TestValidateDoubleEntry(t *testing.T) {
 	db := setupTestDB(t)
 	repo := persistence.NewLedgerRepository(db)
-	service := NewPostingService(repo)
+	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
 
 	// Process a deposit (creates balanced entries)
@@ -126,7 +132,7 @@ func TestValidateDoubleEntry(t *testing.T) {
 func TestProcessDeposit_InvalidAmount(t *testing.T) {
 	db := setupTestDB(t)
 	repo := persistence.NewLedgerRepository(db)
-	service := NewPostingService(repo)
+	service := NewPostingService(repo, "BANK-CASH-001")
 
 	event := DepositEvent{
 		AccountID:     "ACC-789",
@@ -146,7 +152,7 @@ func TestProcessDeposit_InvalidAmount(t *testing.T) {
 func TestGetPostingsByBookingLog(t *testing.T) {
 	db := setupTestDB(t)
 	repo := persistence.NewLedgerRepository(db)
-	service := NewPostingService(repo)
+	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
 
 	// Create some postings
@@ -196,7 +202,7 @@ func TestGetPostingsByBookingLog(t *testing.T) {
 func TestValidateDoubleEntry_Unbalanced(t *testing.T) {
 	db := setupTestDB(t)
 	repo := persistence.NewLedgerRepository(db)
-	service := NewPostingService(repo)
+	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
 
 	bookingLogID := uuid.New()

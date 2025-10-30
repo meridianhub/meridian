@@ -11,19 +11,23 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// decimalFromCents converts cents (int64) to decimal amount
-func decimalFromCents(cents int64) decimal.Decimal {
-	return decimal.NewFromInt(cents).Div(decimal.NewFromInt(100))
-}
-
 // PostingService handles ledger posting operations
 type PostingService struct {
-	repo *persistence.LedgerRepository
+	repo              *persistence.LedgerRepository
+	bankCashAccountID string
 }
 
 // NewPostingService creates a new posting service
-func NewPostingService(repo *persistence.LedgerRepository) *PostingService {
-	return &PostingService{repo: repo}
+func NewPostingService(repo *persistence.LedgerRepository, bankCashAccountID string) *PostingService {
+	return &PostingService{
+		repo:              repo,
+		bankCashAccountID: bankCashAccountID,
+	}
+}
+
+// decimalFromCents converts cents (int64) to decimal amount
+func decimalFromCents(cents int64) decimal.Decimal {
+	return decimal.NewFromInt(cents).Div(decimal.NewFromInt(100))
 }
 
 // DepositEvent represents a deposit event from CurrentAccount service
@@ -66,7 +70,7 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 		bookingLogID,
 		domain.PostingDirectionCredit,
 		money,
-		"BANK-CASH-001", // Bank's cash account
+		s.bankCashAccountID,
 		event.ValueDate,
 		event.CorrelationID,
 	)
@@ -83,13 +87,9 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 		return fmt.Errorf("failed to post credit: %w", err)
 	}
 
-	// Save to database
-	if err := s.repo.SavePosting(ctx, debitPosting); err != nil {
-		return fmt.Errorf("failed to save debit posting: %w", err)
-	}
-
-	if err := s.repo.SavePosting(ctx, creditPosting); err != nil {
-		return fmt.Errorf("failed to save credit posting: %w", err)
+	// Save both postings atomically in a transaction
+	if err := s.repo.SavePostingsInTransaction(ctx, []*domain.LedgerPosting{debitPosting, creditPosting}); err != nil {
+		return fmt.Errorf("failed to save postings: %w", err)
 	}
 
 	return nil
