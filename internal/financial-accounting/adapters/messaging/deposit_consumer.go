@@ -39,7 +39,7 @@ func NewDepositConsumer(config kafka.ConsumerConfig, postingService *service.Pos
 	}
 
 	// Handler converts Kafka messages to service commands
-	handler := func(ctx context.Context, key []byte, msg proto.Message) error {
+	handler := func(ctx context.Context, _ []byte, msg proto.Message) error {
 		return dc.handleDepositEvent(ctx, msg.(*eventsv1.DepositEvent))
 	}
 
@@ -82,6 +82,8 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 // Example: CURRENCY_GBP -> "GBP"
 func convertCurrencyToISO(currency commonv1.Currency) string {
 	switch currency {
+	case commonv1.Currency_CURRENCY_UNSPECIFIED:
+		return ""
 	case commonv1.Currency_CURRENCY_GBP:
 		return "GBP"
 	case commonv1.Currency_CURRENCY_USD:
@@ -104,7 +106,10 @@ func convertCurrencyToISO(currency commonv1.Currency) string {
 // Start begins consuming DepositEvent messages from the specified topics.
 // This method blocks until Stop() is called or an error occurs.
 func (dc *DepositConsumer) Start(topics []string) error {
-	return dc.consumer.Subscribe(topics)
+	if err := dc.consumer.Subscribe(topics); err != nil {
+		return fmt.Errorf("failed to subscribe to topics: %w", err)
+	}
+	return nil
 }
 
 // Stop gracefully stops the consumer.
@@ -114,5 +119,8 @@ func (dc *DepositConsumer) Stop() {
 
 // Close closes the consumer and releases resources.
 func (dc *DepositConsumer) Close() error {
-	return dc.consumer.Close()
+	if err := dc.consumer.Close(); err != nil {
+		return fmt.Errorf("failed to close consumer: %w", err)
+	}
+	return nil
 }

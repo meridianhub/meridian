@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/financial-accounting/domain"
@@ -47,7 +48,7 @@ func (r *LedgerRepository) SavePosting(ctx context.Context, posting *domain.Ledg
 
 // SavePostingsInTransaction persists multiple postings atomically within a transaction
 func (r *LedgerRepository) SavePostingsInTransaction(ctx context.Context, postings []*domain.LedgerPosting) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, posting := range postings {
 			entity, err := toPostingEntity(posting)
 			if err != nil {
@@ -59,6 +60,10 @@ func (r *LedgerRepository) SavePostingsInTransaction(ctx context.Context, postin
 		}
 		return nil
 	})
+	if err != nil {
+		return fmt.Errorf("transaction failed: %w", err)
+	}
+	return nil
 }
 
 // GetPosting retrieves a posting by ID
