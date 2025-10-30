@@ -987,3 +987,786 @@ var _ interface {
 	Cause() error
 	ErrorName() string
 } = TransactionHistoryValidationError{}
+
+// Validate checks the field values on InitiateCurrentAccountRequest with the
+// rules defined in the proto definition for this message. If any rules are
+// violated, the first error encountered is returned, or nil if there are no violations.
+func (m *InitiateCurrentAccountRequest) Validate() error {
+	return m.validate(false)
+}
+
+// ValidateAll checks the field values on InitiateCurrentAccountRequest with
+// the rules defined in the proto definition for this message. If any rules
+// are violated, the result is a list of violation errors wrapped in
+// InitiateCurrentAccountRequestMultiError, or nil if none found.
+func (m *InitiateCurrentAccountRequest) ValidateAll() error {
+	return m.validate(true)
+}
+
+func (m *InitiateCurrentAccountRequest) validate(all bool) error {
+	if m == nil {
+		return nil
+	}
+
+	var errors []error
+
+	// no validation rules for CustomerId
+
+	// no validation rules for AccountIdentification
+
+	// no validation rules for BaseCurrency
+
+	if len(errors) > 0 {
+		return InitiateCurrentAccountRequestMultiError(errors)
+	}
+
+	return nil
+}
+
+// InitiateCurrentAccountRequestMultiError is an error wrapping multiple
+// validation errors returned by InitiateCurrentAccountRequest.ValidateAll()
+// if the designated constraints aren't met.
+type InitiateCurrentAccountRequestMultiError []error
+
+// Error returns a concatenation of all the error messages it wraps.
+func (m InitiateCurrentAccountRequestMultiError) Error() string {
+	msgs := make([]string, 0, len(m))
+	for _, err := range m {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// AllErrors returns a list of validation violation errors.
+func (m InitiateCurrentAccountRequestMultiError) AllErrors() []error { return m }
+
+// InitiateCurrentAccountRequestValidationError is the validation error
+// returned by InitiateCurrentAccountRequest.Validate if the designated
+// constraints aren't met.
+type InitiateCurrentAccountRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e InitiateCurrentAccountRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e InitiateCurrentAccountRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e InitiateCurrentAccountRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e InitiateCurrentAccountRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e InitiateCurrentAccountRequestValidationError) ErrorName() string {
+	return "InitiateCurrentAccountRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e InitiateCurrentAccountRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sInitiateCurrentAccountRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = InitiateCurrentAccountRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = InitiateCurrentAccountRequestValidationError{}
+
+// Validate checks the field values on InitiateCurrentAccountResponse with the
+// rules defined in the proto definition for this message. If any rules are
+// violated, the first error encountered is returned, or nil if there are no violations.
+func (m *InitiateCurrentAccountResponse) Validate() error {
+	return m.validate(false)
+}
+
+// ValidateAll checks the field values on InitiateCurrentAccountResponse with
+// the rules defined in the proto definition for this message. If any rules
+// are violated, the result is a list of violation errors wrapped in
+// InitiateCurrentAccountResponseMultiError, or nil if none found.
+func (m *InitiateCurrentAccountResponse) ValidateAll() error {
+	return m.validate(true)
+}
+
+func (m *InitiateCurrentAccountResponse) validate(all bool) error {
+	if m == nil {
+		return nil
+	}
+
+	var errors []error
+
+	// no validation rules for AccountId
+
+	if all {
+		switch v := interface{}(m.GetFacility()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, InitiateCurrentAccountResponseValidationError{
+					field:  "Facility",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, InitiateCurrentAccountResponseValidationError{
+					field:  "Facility",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetFacility()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return InitiateCurrentAccountResponseValidationError{
+				field:  "Facility",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return InitiateCurrentAccountResponseMultiError(errors)
+	}
+
+	return nil
+}
+
+// InitiateCurrentAccountResponseMultiError is an error wrapping multiple
+// validation errors returned by InitiateCurrentAccountResponse.ValidateAll()
+// if the designated constraints aren't met.
+type InitiateCurrentAccountResponseMultiError []error
+
+// Error returns a concatenation of all the error messages it wraps.
+func (m InitiateCurrentAccountResponseMultiError) Error() string {
+	msgs := make([]string, 0, len(m))
+	for _, err := range m {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// AllErrors returns a list of validation violation errors.
+func (m InitiateCurrentAccountResponseMultiError) AllErrors() []error { return m }
+
+// InitiateCurrentAccountResponseValidationError is the validation error
+// returned by InitiateCurrentAccountResponse.Validate if the designated
+// constraints aren't met.
+type InitiateCurrentAccountResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e InitiateCurrentAccountResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e InitiateCurrentAccountResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e InitiateCurrentAccountResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e InitiateCurrentAccountResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e InitiateCurrentAccountResponseValidationError) ErrorName() string {
+	return "InitiateCurrentAccountResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e InitiateCurrentAccountResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sInitiateCurrentAccountResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = InitiateCurrentAccountResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = InitiateCurrentAccountResponseValidationError{}
+
+// Validate checks the field values on ExecuteDepositRequest with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, the first error encountered is returned, or nil if there are no violations.
+func (m *ExecuteDepositRequest) Validate() error {
+	return m.validate(false)
+}
+
+// ValidateAll checks the field values on ExecuteDepositRequest with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, the result is a list of violation errors wrapped in
+// ExecuteDepositRequestMultiError, or nil if none found.
+func (m *ExecuteDepositRequest) ValidateAll() error {
+	return m.validate(true)
+}
+
+func (m *ExecuteDepositRequest) validate(all bool) error {
+	if m == nil {
+		return nil
+	}
+
+	var errors []error
+
+	// no validation rules for AccountId
+
+	if all {
+		switch v := interface{}(m.GetAmount()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, ExecuteDepositRequestValidationError{
+					field:  "Amount",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, ExecuteDepositRequestValidationError{
+					field:  "Amount",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetAmount()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return ExecuteDepositRequestValidationError{
+				field:  "Amount",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	// no validation rules for Description
+
+	// no validation rules for Reference
+
+	if len(errors) > 0 {
+		return ExecuteDepositRequestMultiError(errors)
+	}
+
+	return nil
+}
+
+// ExecuteDepositRequestMultiError is an error wrapping multiple validation
+// errors returned by ExecuteDepositRequest.ValidateAll() if the designated
+// constraints aren't met.
+type ExecuteDepositRequestMultiError []error
+
+// Error returns a concatenation of all the error messages it wraps.
+func (m ExecuteDepositRequestMultiError) Error() string {
+	msgs := make([]string, 0, len(m))
+	for _, err := range m {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// AllErrors returns a list of validation violation errors.
+func (m ExecuteDepositRequestMultiError) AllErrors() []error { return m }
+
+// ExecuteDepositRequestValidationError is the validation error returned by
+// ExecuteDepositRequest.Validate if the designated constraints aren't met.
+type ExecuteDepositRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e ExecuteDepositRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e ExecuteDepositRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e ExecuteDepositRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e ExecuteDepositRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e ExecuteDepositRequestValidationError) ErrorName() string {
+	return "ExecuteDepositRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e ExecuteDepositRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sExecuteDepositRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = ExecuteDepositRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = ExecuteDepositRequestValidationError{}
+
+// Validate checks the field values on ExecuteDepositResponse with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, the first error encountered is returned, or nil if there are no violations.
+func (m *ExecuteDepositResponse) Validate() error {
+	return m.validate(false)
+}
+
+// ValidateAll checks the field values on ExecuteDepositResponse with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, the result is a list of violation errors wrapped in
+// ExecuteDepositResponseMultiError, or nil if none found.
+func (m *ExecuteDepositResponse) ValidateAll() error {
+	return m.validate(true)
+}
+
+func (m *ExecuteDepositResponse) validate(all bool) error {
+	if m == nil {
+		return nil
+	}
+
+	var errors []error
+
+	// no validation rules for AccountId
+
+	// no validation rules for TransactionId
+
+	if all {
+		switch v := interface{}(m.GetNewBalance()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, ExecuteDepositResponseValidationError{
+					field:  "NewBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, ExecuteDepositResponseValidationError{
+					field:  "NewBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetNewBalance()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return ExecuteDepositResponseValidationError{
+				field:  "NewBalance",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if all {
+		switch v := interface{}(m.GetAvailableBalance()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, ExecuteDepositResponseValidationError{
+					field:  "AvailableBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, ExecuteDepositResponseValidationError{
+					field:  "AvailableBalance",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetAvailableBalance()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return ExecuteDepositResponseValidationError{
+				field:  "AvailableBalance",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	// no validation rules for Status
+
+	if len(errors) > 0 {
+		return ExecuteDepositResponseMultiError(errors)
+	}
+
+	return nil
+}
+
+// ExecuteDepositResponseMultiError is an error wrapping multiple validation
+// errors returned by ExecuteDepositResponse.ValidateAll() if the designated
+// constraints aren't met.
+type ExecuteDepositResponseMultiError []error
+
+// Error returns a concatenation of all the error messages it wraps.
+func (m ExecuteDepositResponseMultiError) Error() string {
+	msgs := make([]string, 0, len(m))
+	for _, err := range m {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// AllErrors returns a list of validation violation errors.
+func (m ExecuteDepositResponseMultiError) AllErrors() []error { return m }
+
+// ExecuteDepositResponseValidationError is the validation error returned by
+// ExecuteDepositResponse.Validate if the designated constraints aren't met.
+type ExecuteDepositResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e ExecuteDepositResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e ExecuteDepositResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e ExecuteDepositResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e ExecuteDepositResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e ExecuteDepositResponseValidationError) ErrorName() string {
+	return "ExecuteDepositResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e ExecuteDepositResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sExecuteDepositResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = ExecuteDepositResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = ExecuteDepositResponseValidationError{}
+
+// Validate checks the field values on RetrieveCurrentAccountRequest with the
+// rules defined in the proto definition for this message. If any rules are
+// violated, the first error encountered is returned, or nil if there are no violations.
+func (m *RetrieveCurrentAccountRequest) Validate() error {
+	return m.validate(false)
+}
+
+// ValidateAll checks the field values on RetrieveCurrentAccountRequest with
+// the rules defined in the proto definition for this message. If any rules
+// are violated, the result is a list of violation errors wrapped in
+// RetrieveCurrentAccountRequestMultiError, or nil if none found.
+func (m *RetrieveCurrentAccountRequest) ValidateAll() error {
+	return m.validate(true)
+}
+
+func (m *RetrieveCurrentAccountRequest) validate(all bool) error {
+	if m == nil {
+		return nil
+	}
+
+	var errors []error
+
+	// no validation rules for AccountId
+
+	if len(errors) > 0 {
+		return RetrieveCurrentAccountRequestMultiError(errors)
+	}
+
+	return nil
+}
+
+// RetrieveCurrentAccountRequestMultiError is an error wrapping multiple
+// validation errors returned by RetrieveCurrentAccountRequest.ValidateAll()
+// if the designated constraints aren't met.
+type RetrieveCurrentAccountRequestMultiError []error
+
+// Error returns a concatenation of all the error messages it wraps.
+func (m RetrieveCurrentAccountRequestMultiError) Error() string {
+	msgs := make([]string, 0, len(m))
+	for _, err := range m {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// AllErrors returns a list of validation violation errors.
+func (m RetrieveCurrentAccountRequestMultiError) AllErrors() []error { return m }
+
+// RetrieveCurrentAccountRequestValidationError is the validation error
+// returned by RetrieveCurrentAccountRequest.Validate if the designated
+// constraints aren't met.
+type RetrieveCurrentAccountRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e RetrieveCurrentAccountRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e RetrieveCurrentAccountRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e RetrieveCurrentAccountRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e RetrieveCurrentAccountRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e RetrieveCurrentAccountRequestValidationError) ErrorName() string {
+	return "RetrieveCurrentAccountRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e RetrieveCurrentAccountRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sRetrieveCurrentAccountRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = RetrieveCurrentAccountRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = RetrieveCurrentAccountRequestValidationError{}
+
+// Validate checks the field values on RetrieveCurrentAccountResponse with the
+// rules defined in the proto definition for this message. If any rules are
+// violated, the first error encountered is returned, or nil if there are no violations.
+func (m *RetrieveCurrentAccountResponse) Validate() error {
+	return m.validate(false)
+}
+
+// ValidateAll checks the field values on RetrieveCurrentAccountResponse with
+// the rules defined in the proto definition for this message. If any rules
+// are violated, the result is a list of violation errors wrapped in
+// RetrieveCurrentAccountResponseMultiError, or nil if none found.
+func (m *RetrieveCurrentAccountResponse) ValidateAll() error {
+	return m.validate(true)
+}
+
+func (m *RetrieveCurrentAccountResponse) validate(all bool) error {
+	if m == nil {
+		return nil
+	}
+
+	var errors []error
+
+	if all {
+		switch v := interface{}(m.GetFacility()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, RetrieveCurrentAccountResponseValidationError{
+					field:  "Facility",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, RetrieveCurrentAccountResponseValidationError{
+					field:  "Facility",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetFacility()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return RetrieveCurrentAccountResponseValidationError{
+				field:  "Facility",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return RetrieveCurrentAccountResponseMultiError(errors)
+	}
+
+	return nil
+}
+
+// RetrieveCurrentAccountResponseMultiError is an error wrapping multiple
+// validation errors returned by RetrieveCurrentAccountResponse.ValidateAll()
+// if the designated constraints aren't met.
+type RetrieveCurrentAccountResponseMultiError []error
+
+// Error returns a concatenation of all the error messages it wraps.
+func (m RetrieveCurrentAccountResponseMultiError) Error() string {
+	msgs := make([]string, 0, len(m))
+	for _, err := range m {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// AllErrors returns a list of validation violation errors.
+func (m RetrieveCurrentAccountResponseMultiError) AllErrors() []error { return m }
+
+// RetrieveCurrentAccountResponseValidationError is the validation error
+// returned by RetrieveCurrentAccountResponse.Validate if the designated
+// constraints aren't met.
+type RetrieveCurrentAccountResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e RetrieveCurrentAccountResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e RetrieveCurrentAccountResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e RetrieveCurrentAccountResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e RetrieveCurrentAccountResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e RetrieveCurrentAccountResponseValidationError) ErrorName() string {
+	return "RetrieveCurrentAccountResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e RetrieveCurrentAccountResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sRetrieveCurrentAccountResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = RetrieveCurrentAccountResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = RetrieveCurrentAccountResponseValidationError{}
