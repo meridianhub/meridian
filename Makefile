@@ -78,7 +78,7 @@ build: tidy
 test:
 	@echo "Running tests with coverage..."
 	@mkdir -p $(COVERAGE_DIR)
-	$(GOTEST) -v -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
+	$(GOTEST) -v -short -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
 	@echo "Filtering generated proto files from coverage..."
 	@grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' $(COVERAGE_DIR)/coverage.out > $(COVERAGE_DIR)/coverage-filtered.out || true
 	@$(GOCMD) tool cover -func=$(COVERAGE_DIR)/coverage-filtered.out | tail -n 1

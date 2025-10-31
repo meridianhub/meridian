@@ -181,6 +181,11 @@ func TestNewDLQProducer(t *testing.T) {
 		t.Errorf("Expected ErrNilDLQProducer, got %v", err)
 	}
 
+	// Skip Kafka connection tests in short mode (CI)
+	if testing.Short() {
+		t.Skip("Skipping Kafka integration test in short mode")
+	}
+
 	// Test with valid producer (will fail to connect to Kafka, but that's ok for unit test)
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
@@ -202,6 +207,11 @@ func TestNewDLQProducer(t *testing.T) {
 }
 
 func TestDLQProducer_PublishFailedMessage_Validation(t *testing.T) {
+	// Skip Kafka connection tests in short mode (CI)
+	if testing.Short() {
+		t.Skip("Skipping Kafka integration test in short mode")
+	}
+
 	// Setup - skip if Kafka not available
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
@@ -251,6 +261,11 @@ func TestDLQProducer_PublishFailedMessage_Validation(t *testing.T) {
 }
 
 func TestDLQProducer_PublishFailedProtoMessage_Validation(t *testing.T) {
+	// Skip Kafka connection tests in short mode (CI)
+	if testing.Short() {
+		t.Skip("Skipping Kafka integration test in short mode")
+	}
+
 	// Setup - skip if Kafka not available
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
@@ -305,6 +320,11 @@ func TestDLQProducer_PublishFailedProtoMessage_Validation(t *testing.T) {
 // TestDLQProducer_PublishFailedMessage_Integration tests actual DLQ message publishing.
 // This test requires a running Kafka broker.
 func TestDLQProducer_PublishFailedMessage_Integration(t *testing.T) {
+	// Skip Kafka connection tests in short mode (CI)
+	if testing.Short() {
+		t.Skip("Skipping Kafka integration test in short mode")
+	}
+
 	// Setup - skip if Kafka not available
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
@@ -359,6 +379,11 @@ func TestDLQProducer_PublishFailedMessage_Integration(t *testing.T) {
 // TestDLQProducer_PublishFailedProtoMessage_Integration tests protobuf message publishing to DLQ.
 // This test requires a running Kafka broker.
 func TestDLQProducer_PublishFailedProtoMessage_Integration(t *testing.T) {
+	// Skip Kafka connection tests in short mode (CI)
+	if testing.Short() {
+		t.Skip("Skipping Kafka integration test in short mode")
+	}
+
 	// Setup - skip if Kafka not available
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
