@@ -402,6 +402,13 @@ This is useful for integration testing in CI pipelines.
 
 ## Further Reading
 
+### Related Skills
+- [Schema Evolution](./schema-evolution.md) - Protobuf schema evolution and buf validation
+- [Docker Configuration](./docker.md) - Multi-stage builds and container optimization
+- [Kustomize Deployments](./kustomize.md) - Environment-specific configurations
+- [Security Scanning](./security.md) - Vulnerability detection in images
+
+### Documentation
 - [Tilt Documentation](https://docs.tilt.dev/)
 - [Tilt Best Practices](https://docs.tilt.dev/best_practices.html)
 - [Live Update Reference](https://docs.tilt.dev/live_update_reference.html)

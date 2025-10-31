@@ -96,7 +96,7 @@ Install missing tools automatically (macOS/Linux):
    go mod download
 
    # Install git hooks for automated validation
-   .githooks/install.sh
+   ./setup-hooks.sh
    ```
 
 2. **Create local Kubernetes cluster with local registry**:

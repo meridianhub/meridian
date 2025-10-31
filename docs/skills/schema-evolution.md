@@ -558,11 +558,17 @@ on:
 
 ## Additional Resources
 
+### Related Skills
+- [Tilt Development](./tilt.md) - Local Kubernetes development with fast iteration
+- [Docker Configuration](./docker.md) - Container builds and multi-stage Dockerfiles
+- [Security Scanning](./security.md) - Vulnerability detection and compliance
+
+### Documentation
 - [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md)
 - [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
 - [buf CLI Documentation](https://buf.build/docs/)
 - [BIAN Service Landscape](https://bian.org/servicelandscape-13-0-0/)
-- [Git Hooks Documentation](./.githooks/README.md)
+- [Git Hooks Documentation](../../.githooks/README.md)
 
 ## Getting Help
 

@@ -28,10 +28,11 @@ echo -e "${YELLOW}Running pre-commit checks...${NC}"
 # ============================================================================
 
 if [ -n "$STAGED_PROTO_FILES" ]; then
-    # Check if buf is installed
+    # Check if buf is installed (pinned version for consistency)
+    BUF_VERSION="v1.47.2"
     if ! command -v buf &> /dev/null; then
-        echo -e "${YELLOW}⚠${NC}  buf not found, installing..."
-        go install github.com/bufbuild/buf/cmd/buf@latest
+        echo -e "${YELLOW}⚠${NC}  buf not found, installing $BUF_VERSION..."
+        go install github.com/bufbuild/buf/cmd/buf@$BUF_VERSION
     fi
 
     # Run buf lint
