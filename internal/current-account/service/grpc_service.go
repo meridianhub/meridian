@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,12 +44,15 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 	}
 
 	// Create domain model
-	account := domain.NewCurrentAccount(
+	account, err := domain.NewCurrentAccount(
 		accountID,
 		req.AccountIdentification,
 		req.CustomerId,
 		currency,
 	)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to create account: %v", err)
+	}
 
 	// Save to database
 	if err := s.repo.Save(account); err != nil {
@@ -74,16 +78,15 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 	}
 
 	// Validate currency matches account currency
-	if req.Amount.Amount.CurrencyCode != account.Balance.Currency {
+	if req.Amount.Amount.CurrencyCode != account.Balance.Currency() {
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
-			account.Balance.Currency, req.Amount.Amount.CurrencyCode)
+			account.Balance.Currency(), req.Amount.Amount.CurrencyCode)
 	}
 
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
 	// Validate overflow: Units*100 must not overflow int64
-	const maxUnits = (1<<63 - 1) / 100 // Max safe units before overflow
-	if req.Amount.Amount.Units > maxUnits || req.Amount.Amount.Units < -maxUnits {
+	if req.Amount.Amount.Units > math.MaxInt64/100 || req.Amount.Amount.Units < math.MinInt64/100 {
 		return nil, status.Errorf(codes.InvalidArgument,
 			"amount too large: units %d would overflow", req.Amount.Amount.Units)
 	}
@@ -93,15 +96,26 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 	// Round nanos to nearest cent (0.5 rounds up)
 	nanosCents := (req.Amount.Amount.Nanos + 5000000) / 10000000
 
-	amount := domain.Money{
-		AmountCents: unitsCents + int64(nanosCents),
-		Currency:    req.Amount.Amount.CurrencyCode,
+	// Use Money.Add to safely handle potential overflow from adding nanosCents
+	centsMoney, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, unitsCents)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+	}
+
+	nanosMoney, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, int64(nanosCents))
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+	}
+
+	amount, err := centsMoney.Add(nanosMoney)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
 	}
 
 	// Validate amount is positive
-	if amount.AmountCents <= 0 {
+	if amount.AmountCents() <= 0 {
 		return nil, status.Errorf(codes.InvalidArgument,
-			"deposit amount must be positive, got %d cents", amount.AmountCents)
+			"deposit amount must be positive, got %d cents", amount.AmountCents())
 	}
 
 	// Execute deposit
@@ -149,7 +163,7 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 		AccountId:             account.AccountID,
 		AccountIdentification: account.AccountIdentification,
 		AccountStatus:         mapStatusToProto(account.Status),
-		BaseCurrency:          mapCurrencyToProto(account.Balance.Currency),
+		BaseCurrency:          mapCurrencyToProto(account.Balance.Currency()),
 		CreatedAt:             timestamppb.New(account.CreatedAt),
 		UpdatedAt:             timestamppb.New(account.UpdatedAt),
 		// #nosec G115 - Version is bounded by database constraints
@@ -169,26 +183,21 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 }
 
 func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
-	units := m.AmountCents / 100
-	remainder := m.AmountCents % 100
+	amountCents := m.AmountCents()
+	units := amountCents / 100
+	remainder := amountCents % 100
 
 	// Convert remainder to nanos (9 digits, but we only use 8 for cents precision)
-	// For negative amounts, Google's money.Money expects:
-	// - Units contains the integer part with sign
-	// - Nanos contains the fractional part as absolute value
-	// Example: -£1.23 = Units=-1, Nanos=230000000 (positive nanos)
-	var nanos int32
-	if remainder < 0 {
-		// #nosec G115 - remainder is always -99 to 0, abs value * 10000000 fits in int32
-		nanos = int32(-remainder * 10000000)
-	} else {
-		// #nosec G115 - remainder is always 0 to 99, multiplication result fits in int32
-		nanos = int32(remainder * 10000000)
-	}
+	// Per google.type.Money spec: nanos MUST share the sign of units
+	// - Positive amounts: both units and nanos are positive or zero
+	// - Negative amounts: both units and nanos are negative or zero
+	// Example: -£1.23 = Units=-1, Nanos=-230000000
+	// #nosec G115 - remainder is always -99 to 99, multiplication result fits in int32
+	nanos := int32(remainder * 10000000)
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
-			CurrencyCode: m.Currency,
+			CurrencyCode: m.Currency(),
 			Units:        units,
 			Nanos:        nanos,
 		},
