@@ -22,6 +22,9 @@ var (
 
 	// ErrResultNotFound indicates no cached result found for the key
 	ErrResultNotFound = errors.New("result not found")
+
+	// ErrEmptyToken indicates lock token is empty
+	ErrEmptyToken = errors.New("lock token cannot be empty")
 )
 
 // Key represents an idempotency key with namespace and operation context
