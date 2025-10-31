@@ -9,19 +9,26 @@ option go_package = "github.com/meridianhub/meridian/api/proto/meridian/platform
 
 // OperationStatus represents the state of an idempotent operation
 enum OperationStatus {
+  // OPERATION_STATUS_UNSPECIFIED is the default zero value (invalid)
   OPERATION_STATUS_UNSPECIFIED = 0;
+  // OPERATION_STATUS_PENDING indicates operation is in progress
   OPERATION_STATUS_PENDING = 1;
+  // OPERATION_STATUS_COMPLETED indicates operation finished successfully
   OPERATION_STATUS_COMPLETED = 2;
+  // OPERATION_STATUS_FAILED indicates operation failed
   OPERATION_STATUS_FAILED = 3;
 }
 
 // IdempotencyResult is the cached result of an operation stored in Redis
 message IdempotencyResult {
-  // key components
+  // namespace groups related operations (e.g., "current-account")
   string namespace = 1 [(buf.validate.field).string = {min_len: 1}];
+  // operation identifies the type of operation (e.g., "deposit")
   string operation = 2 [(buf.validate.field).string = {min_len: 1}];
+  // entity_id is the unique identifier for the entity (e.g., account ID)
   string entity_id = 3 [(buf.validate.field).string = {min_len: 1}];
-  string request_id = 4; // optional
+  // request_id is an optional client-provided idempotency token
+  string request_id = 4;
 
   // result data
   OperationStatus status = 5 [(buf.validate.field).enum = {
