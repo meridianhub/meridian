@@ -40,9 +40,18 @@ for file in $STAGED_GO_FILES; do
 done
 echo -e "${GREEN}✓${NC} gofumpt passed"
 
-# Run golangci-lint on staged files
+# Run golangci-lint per directory
 echo -e "${YELLOW}→${NC} Running golangci-lint..."
-if echo "$STAGED_GO_FILES" | xargs golangci-lint run --config=.golangci.yml; then
+LINT_FAILED=0
+
+# Group files by directory and run golangci-lint per directory
+for dir in $(echo "$STAGED_GO_FILES" | xargs -n1 dirname | sort -u); do
+    if ! golangci-lint run --config=.golangci.yml "$dir"; then
+        LINT_FAILED=1
+    fi
+done
+
+if [ $LINT_FAILED -eq 0 ]; then
     echo -e "${GREEN}✓${NC} golangci-lint passed"
 else
     echo -e "${RED}✗${NC} golangci-lint failed"

@@ -9,6 +9,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,6 +17,15 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// mustNewMoney is a test helper that creates Money or panics
+func mustNewMoney(currency string, amountCents int64) domain.Money {
+	m, err := domain.NewMoney(currency, amountCents)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
@@ -84,7 +94,8 @@ func TestExecuteDeposit(t *testing.T) {
 	svc := NewService(repo)
 
 	// Create account first
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -171,7 +182,8 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	svc := NewService(repo)
 
 	// Create account first
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -188,7 +200,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 		},
 	}
 
-	_, err := svc.ExecuteDeposit(context.Background(), req)
+	_, err = svc.ExecuteDeposit(context.Background(), req)
 	if err == nil {
 		t.Fatal("Expected error for zero amount")
 	}
@@ -211,7 +223,8 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	svc := NewService(repo)
 
 	// Create account first
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -296,7 +309,8 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	svc := NewService(repo)
 
 	// Create GBP account
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -313,7 +327,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 		},
 	}
 
-	_, err := svc.ExecuteDeposit(context.Background(), req)
+	_, err = svc.ExecuteDeposit(context.Background(), req)
 	if err == nil {
 		t.Fatal("Expected error for currency mismatch")
 	}
@@ -369,39 +383,39 @@ func TestToMoneyAmount(t *testing.T) {
 	}{
 		{
 			name:          "Positive amount",
-			input:         domain.Money{AmountCents: 12345, Currency: "GBP"}, // £123.45
+			input:         mustNewMoney("GBP", 12345), // £123.45
 			expectedUnits: 123,
 			expectedNanos: 450000000,
 		},
 		{
 			name:          "Negative amount",
-			input:         domain.Money{AmountCents: -12345, Currency: "GBP"}, // -£123.45
+			input:         mustNewMoney("GBP", -12345), // -£123.45
 			expectedUnits: -123,
-			expectedNanos: 450000000, // Nanos should be positive (absolute value)
+			expectedNanos: -450000000, // Nanos must share sign per google.type.Money spec
 		},
 		{
 			name:          "Zero amount",
-			input:         domain.Money{AmountCents: 0, Currency: "USD"},
+			input:         mustNewMoney("USD", 0),
 			expectedUnits: 0,
 			expectedNanos: 0,
 		},
 		{
 			name:          "Whole units (no fractional)",
-			input:         domain.Money{AmountCents: 10000, Currency: "EUR"}, // €100.00
+			input:         mustNewMoney("EUR", 10000), // €100.00
 			expectedUnits: 100,
 			expectedNanos: 0,
 		},
 		{
 			name:          "Negative whole units",
-			input:         domain.Money{AmountCents: -10000, Currency: "EUR"}, // -€100.00
+			input:         mustNewMoney("EUR", -10000), // -€100.00
 			expectedUnits: -100,
 			expectedNanos: 0,
 		},
 		{
 			name:          "Small negative amount",
-			input:         domain.Money{AmountCents: -123, Currency: "GBP"}, // -£1.23
+			input:         mustNewMoney("GBP", -123), // -£1.23
 			expectedUnits: -1,
-			expectedNanos: 230000000,
+			expectedNanos: -230000000, // Nanos must share sign per google.type.Money spec
 		},
 	}
 
@@ -409,8 +423,8 @@ func TestToMoneyAmount(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := toMoneyAmount(tt.input)
 
-			if result.Amount.CurrencyCode != tt.input.Currency {
-				t.Errorf("Expected currency %s, got %s", tt.input.Currency, result.Amount.CurrencyCode)
+			if result.Amount.CurrencyCode != tt.input.Currency() {
+				t.Errorf("Expected currency %s, got %s", tt.input.Currency(), result.Amount.CurrencyCode)
 			}
 
 			if result.Amount.Units != tt.expectedUnits {
@@ -421,5 +435,110 @@ func TestToMoneyAmount(t *testing.T) {
 				t.Errorf("Expected nanos %d, got %d", tt.expectedNanos, result.Amount.Nanos)
 			}
 		})
+	}
+}
+
+// Defensive tests for overflow scenarios per ADR-008
+
+func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := NewService(repo)
+
+	// Create account
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(account))
+
+	// Test: Units value that would overflow when multiplied by 100
+	tests := []struct {
+		name      string
+		units     int64
+		wantErr   bool
+		rationale string
+	}{
+		{
+			name:      "max safe units",
+			units:     92233720368547758, // MaxInt64/100
+			wantErr:   false,
+			rationale: "Boundary value: should succeed at conversion",
+		},
+		{
+			name:      "overflow positive units",
+			units:     92233720368547759, // MaxInt64/100 + 1
+			wantErr:   true,
+			rationale: "Units * 100 would overflow int64",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &pb.ExecuteDepositRequest{
+				AccountId: "ACC-001",
+				Amount: &commonpb.MoneyAmount{
+					Amount: &money.Money{
+						CurrencyCode: "GBP",
+						Units:        tt.units,
+						Nanos:        0,
+					},
+				},
+			}
+
+			_, err := svc.ExecuteDeposit(context.Background(), req)
+
+			if tt.wantErr {
+				require.Error(t, err, tt.rationale)
+				st, ok := status.FromError(err)
+				require.True(t, ok, "Expected gRPC status error")
+				if st.Code() != codes.InvalidArgument {
+					t.Errorf("Expected InvalidArgument, got %v", st.Code())
+				}
+				if !strings.Contains(st.Message(), "overflow") {
+					t.Errorf("Error should mention overflow, got: %s", st.Message())
+				}
+			} else {
+				require.NoError(t, err, tt.rationale)
+			}
+		})
+	}
+}
+
+func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := NewService(repo)
+
+	// Create account
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(account))
+
+	// Test: Large units + nanos uses Money.Add() safely
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        92233720368547758, // MaxInt64/100
+				Nanos:        990000000,         // 99 cents when rounded
+			},
+		},
+	}
+
+	// This should fail with overflow error from Money.Add, not panic or succeed
+	_, err = svc.ExecuteDeposit(context.Background(), req)
+	require.Error(t, err, "overflow scenario should surface an error, not succeed")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	if st.Code() != codes.InvalidArgument {
+		t.Errorf("Expected InvalidArgument, got %v", st.Code())
+	}
+	if !strings.Contains(st.Message(), "overflow") {
+		t.Errorf("Error should mention overflow, got: %s", st.Message())
 	}
 }

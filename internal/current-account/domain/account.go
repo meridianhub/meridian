@@ -15,7 +15,6 @@ var (
 	ErrAccountClosed           = errors.New("account is closed")
 	ErrInvalidAmount           = errors.New("invalid amount")
 	ErrInvalidStatusTransition = errors.New("invalid status transition")
-	ErrCurrencyMismatch        = errors.New("currency mismatch")
 )
 
 // AccountStatus represents the lifecycle state of an account
@@ -28,13 +27,9 @@ const (
 	AccountStatusClosed AccountStatus = "CLOSED"
 )
 
-// Money represents a monetary amount with currency
-type Money struct {
-	AmountCents int64
-	Currency    string
-}
-
 // CurrentAccount represents a BIAN current account facility domain model
+// TODO(immutability): Phase 2 - refactor to value semantics with value receivers
+// See docs/immutability-audit.md for full refactoring plan
 type CurrentAccount struct {
 	ID                    uuid.UUID
 	AccountID             string
@@ -53,38 +48,34 @@ type CurrentAccount struct {
 }
 
 // NewCurrentAccount creates a new current account
-func NewCurrentAccount(accountID, iban, customerID, currency string) *CurrentAccount {
+func NewCurrentAccount(accountID, iban, customerID, currency string) (*CurrentAccount, error) {
 	now := time.Now()
+	zeroMoney, err := NewMoney(currency, 0)
+	if err != nil {
+		return nil, err
+	}
+
 	return &CurrentAccount{
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AccountIdentification: iban,
 		CustomerID:            customerID,
-		Balance: Money{
-			AmountCents: 0,
-			Currency:    currency,
-		},
-		AvailableBalance: Money{
-			AmountCents: 0,
-			Currency:    currency,
-		},
-		Status: AccountStatusActive,
-		OverdraftLimit: Money{
-			AmountCents: 0,
-			Currency:    currency,
-		},
-		OverdraftEnabled: false,
-		OverdraftRate:    0,
-		BalanceUpdatedAt: now,
-		Version:          1,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
+		Balance:               zeroMoney,
+		AvailableBalance:      zeroMoney,
+		Status:                AccountStatusActive,
+		OverdraftLimit:        zeroMoney,
+		OverdraftEnabled:      false,
+		OverdraftRate:         0,
+		BalanceUpdatedAt:      now,
+		Version:               1,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}, nil
 }
 
 // Deposit adds funds to the account
 func (a *CurrentAccount) Deposit(amount Money) error {
-	if amount.AmountCents <= 0 {
+	if !amount.IsPositive() {
 		return ErrInvalidAmount
 	}
 
@@ -96,11 +87,17 @@ func (a *CurrentAccount) Deposit(amount Money) error {
 		return ErrAccountClosed
 	}
 
-	if amount.Currency != a.Balance.Currency {
+	if amount.Currency() != a.Balance.Currency() {
 		return ErrCurrencyMismatch
 	}
 
-	a.Balance.AmountCents += amount.AmountCents
+	// Use immutable Add method
+	newBalance, err := a.Balance.Add(amount)
+	if err != nil {
+		return err
+	}
+
+	a.Balance = newBalance
 	a.calculateAvailableBalance()
 
 	now := time.Now()
@@ -112,7 +109,7 @@ func (a *CurrentAccount) Deposit(amount Money) error {
 
 // Withdraw removes funds from the account
 func (a *CurrentAccount) Withdraw(amount Money) error {
-	if amount.AmountCents <= 0 {
+	if !amount.IsPositive() {
 		return ErrInvalidAmount
 	}
 
@@ -124,16 +121,22 @@ func (a *CurrentAccount) Withdraw(amount Money) error {
 		return ErrAccountClosed
 	}
 
-	if amount.Currency != a.Balance.Currency {
+	if amount.Currency() != a.Balance.Currency() {
 		return ErrCurrencyMismatch
 	}
 
 	// Check if sufficient funds (including overdraft)
-	if amount.AmountCents > a.AvailableBalance.AmountCents {
+	if amount.AmountCents() > a.AvailableBalance.AmountCents() {
 		return ErrInsufficientFunds
 	}
 
-	a.Balance.AmountCents -= amount.AmountCents
+	// Use immutable Subtract method
+	newBalance, err := a.Balance.Subtract(amount)
+	if err != nil {
+		return err
+	}
+
+	a.Balance = newBalance
 	a.calculateAvailableBalance()
 
 	now := time.Now()
@@ -146,9 +149,15 @@ func (a *CurrentAccount) Withdraw(amount Money) error {
 // calculateAvailableBalance updates available balance based on overdraft settings
 func (a *CurrentAccount) calculateAvailableBalance() {
 	if a.OverdraftEnabled {
-		a.AvailableBalance.AmountCents = a.Balance.AmountCents + a.OverdraftLimit.AmountCents
+		// Use immutable Add method; should never fail if SetOverdraftLimit validated correctly
+		newAvail, err := a.Balance.Add(a.OverdraftLimit)
+		if err != nil {
+			// This indicates a bug: either currency mismatch or overflow that bypassed validation
+			panic("BUG: OverdraftLimit currency mismatch or overflow detected in calculateAvailableBalance: " + err.Error())
+		}
+		a.AvailableBalance = newAvail
 	} else {
-		a.AvailableBalance.AmountCents = a.Balance.AmountCents
+		a.AvailableBalance = a.Balance
 	}
 }
 
@@ -183,8 +192,16 @@ func (a *CurrentAccount) Close() error {
 
 // SetOverdraftLimit configures the overdraft facility
 func (a *CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled bool) error {
-	if limit.Currency != a.Balance.Currency {
+	if limit.Currency() != a.Balance.Currency() {
 		return ErrCurrencyMismatch
+	}
+
+	// Validate that Balance + OverdraftLimit won't overflow if enabled
+	if enabled {
+		_, err := a.Balance.Add(limit)
+		if err != nil {
+			return err // Return overflow error to caller
+		}
 	}
 
 	a.OverdraftLimit = limit
