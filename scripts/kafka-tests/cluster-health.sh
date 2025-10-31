@@ -21,7 +21,7 @@ fi
 
 # Function to run command in kafka-0
 kafka_exec() {
-    kubectl exec -it kafka-0 -- "$@" 2>/dev/null || return 1
+    kubectl exec kafka-0 -- "$@" 2>/dev/null || return 1
 }
 
 # 1. Check all 3 brokers are running
