@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -39,9 +40,10 @@ func TestSaveNewAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 
-	err := repo.Save(account)
+	err = repo.Save(account)
 	if err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
@@ -62,7 +64,8 @@ func TestSaveUpdateExisting(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 
 	// Save initial
 	if err := repo.Save(account); err != nil {
@@ -71,7 +74,7 @@ func TestSaveUpdateExisting(t *testing.T) {
 
 	// Modify and save again
 	depositMoney, _ := domain.NewMoney("GBP", 10000)
-	err := account.Deposit(depositMoney)
+	err = account.Deposit(depositMoney)
 	if err != nil {
 		t.Fatalf("Deposit failed: %v", err)
 	}
@@ -113,7 +116,8 @@ func TestFindByIBAN(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -136,8 +140,10 @@ func TestFindByCustomerID(t *testing.T) {
 	repo := NewRepository(db)
 
 	// Create two accounts for same customer
-	account1 := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
-	account2 := domain.NewCurrentAccount("ACC-002", "GB82WEST98765432123456", "CUST-001", "EUR")
+	account1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+	account2, err := domain.NewCurrentAccount("ACC-002", "GB82WEST98765432123456", "CUST-001", "EUR")
+	require.NoError(t, err)
 
 	if err := repo.Save(account1); err != nil {
 		t.Fatalf("Save account1 failed: %v", err)
@@ -161,7 +167,8 @@ func TestDeleteAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -173,7 +180,7 @@ func TestDeleteAccount(t *testing.T) {
 	}
 
 	// Should not be found after soft delete
-	_, err := repo.FindByID("ACC-001")
+	_, err = repo.FindByID("ACC-001")
 	if !errors.Is(err, ErrAccountNotFound) {
 		t.Errorf("Expected ErrAccountNotFound after delete, got %v", err)
 	}
@@ -186,7 +193,8 @@ func TestOptimisticLocking(t *testing.T) {
 	repo := NewRepository(db)
 
 	// Create initial account
-	account1 := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account1); err != nil {
 		t.Fatalf("Initial save failed: %v", err)
 	}

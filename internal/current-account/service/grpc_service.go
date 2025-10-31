@@ -43,12 +43,15 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 	}
 
 	// Create domain model
-	account := domain.NewCurrentAccount(
+	account, err := domain.NewCurrentAccount(
 		accountID,
 		req.AccountIdentification,
 		req.CustomerId,
 		currency,
 	)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to create account: %v", err)
+	}
 
 	// Save to database
 	if err := s.repo.Save(account); err != nil {

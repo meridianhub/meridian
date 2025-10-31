@@ -9,6 +9,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -93,7 +94,8 @@ func TestExecuteDeposit(t *testing.T) {
 	svc := NewService(repo)
 
 	// Create account first
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -180,7 +182,8 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	svc := NewService(repo)
 
 	// Create account first
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -197,7 +200,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 		},
 	}
 
-	_, err := svc.ExecuteDeposit(context.Background(), req)
+	_, err = svc.ExecuteDeposit(context.Background(), req)
 	if err == nil {
 		t.Fatal("Expected error for zero amount")
 	}
@@ -220,7 +223,8 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	svc := NewService(repo)
 
 	// Create account first
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -305,7 +309,8 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	svc := NewService(repo)
 
 	// Create GBP account
-	account := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
@@ -322,7 +327,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 		},
 	}
 
-	_, err := svc.ExecuteDeposit(context.Background(), req)
+	_, err = svc.ExecuteDeposit(context.Background(), req)
 	if err == nil {
 		t.Fatal("Expected error for currency mismatch")
 	}
