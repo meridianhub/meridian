@@ -166,3 +166,44 @@ func TestMoney_CannotConstructDirectly_FieldsUnexported(t *testing.T) {
 	newMoney, _ := money.Add(addition)
 	assert.NotEqual(t, money, newMoney, "should be different instances")
 }
+
+// Test overflow detection
+func TestMoney_Add_Overflow_ReturnsError(t *testing.T) {
+	m1, _ := NewMoney("GBP", 9223372036854775807) // math.MaxInt64
+	m2, _ := NewMoney("GBP", 1)
+
+	_, err := m1.Add(m2)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrAmountOverflow)
+}
+
+func TestMoney_Add_NearMaxInt64_Success(t *testing.T) {
+	m1, _ := NewMoney("GBP", 9223372036854775806) // MaxInt64 - 1
+	m2, _ := NewMoney("GBP", 1)
+
+	result, err := m1.Add(m2)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(9223372036854775807), result.AmountCents())
+}
+
+func TestMoney_Subtract_Underflow_ReturnsError(t *testing.T) {
+	m1, _ := NewMoney("GBP", -9223372036854775808) // math.MinInt64
+	m2, _ := NewMoney("GBP", 1)
+
+	_, err := m1.Subtract(m2)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrAmountOverflow)
+}
+
+func TestMoney_Subtract_NearMinInt64_Success(t *testing.T) {
+	m1, _ := NewMoney("GBP", -9223372036854775807) // MinInt64 + 1
+	m2, _ := NewMoney("GBP", 1)
+
+	result, err := m1.Subtract(m2)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-9223372036854775808), result.AmountCents())
+}

@@ -4,7 +4,9 @@ import "errors"
 
 // Money errors
 var (
-	ErrInvalidCurrency = errors.New("currency cannot be empty")
+	ErrInvalidCurrency  = errors.New("currency cannot be empty")
+	ErrAmountOverflow   = errors.New("amount overflow: operation would exceed int64 bounds")
+	ErrCurrencyMismatch = errors.New("currency mismatch")
 )
 
 // Money represents an immutable monetary amount with currency
@@ -39,26 +41,52 @@ func (m Money) AmountCents() int64 {
 
 // Add returns a new Money instance with the sum
 // Value receiver ensures immutability
+// Returns ErrAmountOverflow if the operation would exceed int64 bounds
 func (m Money) Add(other Money) (Money, error) {
 	if m.currency != other.currency {
 		return Money{}, ErrCurrencyMismatch
 	}
 
+	// Detect signed integer overflow for addition:
+	// Overflow occurs when:
+	// - Adding two positive numbers gives a negative result
+	// - Adding two negative numbers gives a positive result
+	// When operands have different signs, overflow is impossible
+	result := m.amountCents + other.amountCents
+
+	if (other.amountCents > 0 && result < m.amountCents) ||
+		(other.amountCents < 0 && result > m.amountCents) {
+		return Money{}, ErrAmountOverflow
+	}
+
 	return Money{
 		currency:    m.currency,
-		amountCents: m.amountCents + other.amountCents,
+		amountCents: result,
 	}, nil
 }
 
 // Subtract returns a new Money instance with the difference
+// Returns ErrAmountOverflow if the operation would exceed int64 bounds
 func (m Money) Subtract(other Money) (Money, error) {
 	if m.currency != other.currency {
 		return Money{}, ErrCurrencyMismatch
 	}
 
+	// Detect signed integer overflow for subtraction:
+	// Overflow occurs when:
+	// - Subtracting a negative from a positive gives a negative result
+	// - Subtracting a positive from a negative gives a positive result
+	// When operands have the same sign, overflow is impossible
+	result := m.amountCents - other.amountCents
+
+	if (other.amountCents > 0 && result > m.amountCents) ||
+		(other.amountCents < 0 && result < m.amountCents) {
+		return Money{}, ErrAmountOverflow
+	}
+
 	return Money{
 		currency:    m.currency,
-		amountCents: m.amountCents - other.amountCents,
+		amountCents: result,
 	}, nil
 }
 

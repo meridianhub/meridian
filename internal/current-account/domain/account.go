@@ -15,7 +15,6 @@ var (
 	ErrAccountClosed           = errors.New("account is closed")
 	ErrInvalidAmount           = errors.New("invalid amount")
 	ErrInvalidStatusTransition = errors.New("invalid status transition")
-	ErrCurrencyMismatch        = errors.New("currency mismatch")
 )
 
 // AccountStatus represents the lifecycle state of an account
@@ -47,9 +46,12 @@ type CurrentAccount struct {
 }
 
 // NewCurrentAccount creates a new current account
-func NewCurrentAccount(accountID, iban, customerID, currency string) *CurrentAccount {
+func NewCurrentAccount(accountID, iban, customerID, currency string) (*CurrentAccount, error) {
 	now := time.Now()
-	zeroMoney, _ := NewMoney(currency, 0) // Safe: currency validated by caller
+	zeroMoney, err := NewMoney(currency, 0)
+	if err != nil {
+		return nil, err
+	}
 
 	return &CurrentAccount{
 		ID:                    uuid.New(),
@@ -66,7 +68,7 @@ func NewCurrentAccount(accountID, iban, customerID, currency string) *CurrentAcc
 		Version:               1,
 		CreatedAt:             now,
 		UpdatedAt:             now,
-	}
+	}, nil
 }
 
 // Deposit adds funds to the account
