@@ -461,16 +461,12 @@ k8s_resource(
 # Kafka cluster resources (3-broker KRaft cluster - no Zookeeper dependency)
 # Port forwarding to kafka-0 for client access
 # Individual pods visible in Tilt UI for monitoring cluster health
-# Groups the StatefulSet pods with both kafka services (client + headless)
 k8s_resource(
   'kafka',
   new_name='kafka-cluster',
   port_forwards='9092:9092',
   labels=['messaging'],
   resource_deps=[],
-  objects=[
-    'kafka-headless:service',
-  ],
   pod_readiness='wait',  # Wait for all 3 pods to be ready
 )
 
