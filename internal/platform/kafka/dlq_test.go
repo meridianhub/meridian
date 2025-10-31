@@ -148,27 +148,167 @@ func TestDLQConfig_DLQTopicName(t *testing.T) {
 }
 
 func TestDLQConfig_CalculateBackoff(t *testing.T) {
-	config := DLQConfig{
-		RetryBackoffMs:    1000,
-		BackoffMultiplier: 2.0,
-	}
-
 	tests := []struct {
-		attempt         int32
-		expectedBackoff time.Duration
+		name              string
+		retryBackoffMs    int64
+		backoffMultiplier float64
+		attempt           int32
+		expectedBackoff   time.Duration
+		rationale         string
 	}{
-		{1, 1 * time.Second}, // First retry: 1s
-		{2, 2 * time.Second}, // Second retry: 2s
-		{3, 4 * time.Second}, // Third retry: 4s
-		{4, 8 * time.Second}, // Fourth retry: 8s
+		// Happy path - standard exponential backoff
+		{
+			name:              "first retry with defaults",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 2.0,
+			attempt:           1,
+			expectedBackoff:   1 * time.Second,
+			rationale:         "First retry should use base backoff unchanged",
+		},
+		{
+			name:              "second retry doubles",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 2.0,
+			attempt:           2,
+			expectedBackoff:   2 * time.Second,
+			rationale:         "Exponential backoff should double on second attempt",
+		},
+		{
+			name:              "third retry quadruples",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 2.0,
+			attempt:           3,
+			expectedBackoff:   4 * time.Second,
+			rationale:         "Exponential backoff continues: 1s → 2s → 4s",
+		},
+		{
+			name:              "fourth retry 8 seconds",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 2.0,
+			attempt:           4,
+			expectedBackoff:   8 * time.Second,
+			rationale:         "Exponential backoff continues: 1s → 2s → 4s → 8s",
+		},
+
+		// Edge cases - zero and boundary values
+		{
+			name:              "zero retry backoff defaults to 1000ms",
+			retryBackoffMs:    0,
+			backoffMultiplier: 2.0,
+			attempt:           1,
+			expectedBackoff:   1 * time.Second,
+			rationale:         "Zero backoff should default to 1000ms to prevent tight loops",
+		},
+		{
+			name:              "zero multiplier defaults to 2.0",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 0,
+			attempt:           2,
+			expectedBackoff:   2 * time.Second,
+			rationale:         "Zero multiplier should default to 2.0 for exponential backoff",
+		},
+		{
+			name:              "attempt number 0 returns base backoff",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 2.0,
+			attempt:           0,
+			expectedBackoff:   1 * time.Second,
+			rationale:         "Attempt 0 should not multiply (loop doesn't execute)",
+		},
+
+		// Edge cases - small multipliers
+		{
+			name:              "multiplier 1.0 (linear backoff)",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 1.0,
+			attempt:           5,
+			expectedBackoff:   1 * time.Second,
+			rationale:         "Multiplier of 1.0 keeps backoff constant",
+		},
+		{
+			name:              "multiplier 1.5 (slower exponential)",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 1.5,
+			attempt:           3,
+			expectedBackoff:   2250 * time.Millisecond,
+			rationale:         "Slower exponential: 1000ms → 1500ms → 2250ms",
+		},
+
+		// Edge cases - large multipliers
+		{
+			name:              "multiplier 10.0 (rapid exponential)",
+			retryBackoffMs:    100,
+			backoffMultiplier: 10.0,
+			attempt:           3,
+			expectedBackoff:   10 * time.Second,
+			rationale:         "Large multiplier grows quickly: 100ms → 1s → 10s",
+		},
+
+		// Edge cases - very large attempt numbers (overflow prevention)
+		{
+			name:              "attempt 20 hits maximum backoff cap",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 2.0,
+			attempt:           20,
+			expectedBackoff:   5 * time.Minute,
+			rationale:         "Very large attempt should hit 5-minute cap to prevent overflow",
+		},
+		{
+			name:              "attempt 100 hits maximum backoff cap",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 2.0,
+			attempt:           100,
+			expectedBackoff:   5 * time.Minute,
+			rationale:         "Extreme attempt number should be capped at 5 minutes",
+		},
+		{
+			name:              "large base with large attempt hits cap",
+			retryBackoffMs:    60000, // 1 minute base
+			backoffMultiplier: 2.0,
+			attempt:           10,
+			expectedBackoff:   5 * time.Minute,
+			rationale:         "Large base * exponential growth must hit cap to prevent overflow",
+		},
+
+		// Negative testing - values that shouldn't occur but might
+		{
+			name:              "negative attempt number",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 2.0,
+			attempt:           -1,
+			expectedBackoff:   1 * time.Second,
+			rationale:         "Negative attempt should not multiply (loop doesn't execute)",
+		},
+		{
+			name:              "very small base backoff",
+			retryBackoffMs:    1,
+			backoffMultiplier: 2.0,
+			attempt:           3,
+			expectedBackoff:   4 * time.Millisecond,
+			rationale:         "Even tiny backoffs should work: 1ms → 2ms → 4ms",
+		},
+		{
+			name:              "fractional multiplier less than 1 (decreasing backoff)",
+			retryBackoffMs:    1000,
+			backoffMultiplier: 0.5,
+			attempt:           3,
+			expectedBackoff:   250 * time.Millisecond,
+			rationale:         "Fractional multiplier causes decreasing backoff: 1000ms → 500ms → 250ms",
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run("", func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
+			config := DLQConfig{
+				RetryBackoffMs:    tt.retryBackoffMs,
+				BackoffMultiplier: tt.backoffMultiplier,
+			}
+
 			backoff := config.CalculateBackoff(tt.attempt)
+
 			if backoff != tt.expectedBackoff {
-				t.Errorf("Attempt %d: expected backoff %v, got %v",
-					tt.attempt, tt.expectedBackoff, backoff)
+				t.Errorf("%s\nAttempt %d: expected backoff %v, got %v\nRationale: %s",
+					tt.name, tt.attempt, tt.expectedBackoff, backoff, tt.rationale)
 			}
 		})
 	}

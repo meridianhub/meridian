@@ -224,7 +224,7 @@ func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]D
 		// Check for context cancellation
 		select {
 		case <-inspectCtx.Done():
-			return results, inspectCtx.Err()
+			return results, fmt.Errorf("inspect context canceled: %w", inspectCtx.Err())
 		default:
 		}
 

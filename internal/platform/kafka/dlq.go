@@ -125,6 +125,7 @@ func (c *DLQConfig) DLQTopicName(originalTopic string) string {
 // CalculateBackoff calculates the backoff duration for a given retry attempt.
 // Uses exponential backoff with the configured multiplier.
 // attemptNumber is 1-based (first retry is attempt 1).
+// Maximum backoff is capped at 5 minutes to prevent overflow and excessive delays.
 func (c *DLQConfig) CalculateBackoff(attemptNumber int32) time.Duration {
 	if c.BackoffMultiplier == 0 {
 		c.BackoffMultiplier = 2.0
@@ -133,9 +134,16 @@ func (c *DLQConfig) CalculateBackoff(attemptNumber int32) time.Duration {
 		c.RetryBackoffMs = 1000
 	}
 
+	const maxBackoffMs = 5 * 60 * 1000 // 5 minutes in milliseconds
+
 	backoffMs := float64(c.RetryBackoffMs)
 	for i := int32(1); i < attemptNumber; i++ {
 		backoffMs *= c.BackoffMultiplier
+		// Cap at maximum to prevent overflow
+		if backoffMs > maxBackoffMs {
+			backoffMs = maxBackoffMs
+			break
+		}
 	}
 	return time.Duration(backoffMs) * time.Millisecond
 }
