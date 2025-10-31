@@ -331,7 +331,8 @@ func (c *ProtoConsumer) processMessageWithRetry(kafkaMsg *kafka.Message) error {
 		kafkaMsg.TopicPartition.Offset)
 
 	// Create context with timeout for DLQ publishing
-	dlqCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Derive from consumer context to respect shutdown signals
+	dlqCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
 	defer cancel()
 
 	// Send to DLQ with full metadata

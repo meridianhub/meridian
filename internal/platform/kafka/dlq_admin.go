@@ -224,7 +224,7 @@ func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]D
 		// Check for context cancellation
 		select {
 		case <-inspectCtx.Done():
-			return results, nil
+			return results, inspectCtx.Err()
 		default:
 		}
 
@@ -383,12 +383,14 @@ func NewDLQReplay(config DLQReplayConfig) (*DLQReplay, error) {
 // Returns an error if publishing fails.
 func (r *DLQReplay) ReplayMessage(ctx context.Context, dlqMsg DLQMessage) error {
 	// Create new message without DLQ headers
+	// Preserve original timestamp and timestamp type to maintain event-time semantics
 	originalTopic := dlqMsg.Metadata.OriginalTopic
 	replayMsg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &originalTopic, Partition: kafka.PartitionAny},
 		Key:            dlqMsg.Message.Key,
 		Value:          dlqMsg.Message.Value,
-		Timestamp:      time.Now(),
+		Timestamp:      dlqMsg.Message.Timestamp,
+		TimestampType:  dlqMsg.Message.TimestampType,
 	}
 
 	// Preserve non-DLQ headers
