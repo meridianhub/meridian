@@ -43,5 +43,6 @@ __debug_bin
 
 # Generated protobuf files (regenerate with buf or make proto)
 *.pb.go
+*.pb.validate.go
 *_grpc.pb.go
 __pycache__/
