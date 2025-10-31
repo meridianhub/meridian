@@ -48,7 +48,7 @@ fi
 
 # 3. Check cluster metadata
 echo -n "Checking cluster metadata... "
-if kafka_exec kafka-metadata --bootstrap-server localhost:9092 quorum describe --status 2>&1 | grep -q "Leader"; then
+if kafka_exec /opt/kafka/bin/kafka-metadata-quorum.sh --bootstrap-server localhost:9092 describe --status 2>&1 | grep -q "Leader"; then
     echo -e "${GREEN}✓ KRaft quorum formed${NC}"
 else
     echo -e "${RED}✗ KRaft quorum not healthy${NC}"
@@ -57,7 +57,7 @@ fi
 
 # 4. Check broker registration
 echo -n "Checking broker registration... "
-REGISTERED_BROKERS=$(kafka_exec kafka-broker-api-versions --bootstrap-server localhost:9092 2>&1 | grep -c "^kafka" || true)
+REGISTERED_BROKERS=$(kafka_exec /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>&1 | grep -c "^kafka" || true)
 if [ "$REGISTERED_BROKERS" -eq 3 ]; then
     echo -e "${GREEN}✓ All 3 brokers registered${NC}"
 else
@@ -76,13 +76,13 @@ fi
 # 6. Test basic topic operations
 echo -n "Testing topic operations... "
 TEST_TOPIC="health-check-$(date +%s)"
-if kafka_exec kafka-topics --create --topic "$TEST_TOPIC" --partitions 3 --replication-factor 2 --bootstrap-server localhost:9092 >/dev/null 2>&1; then
+if kafka_exec /opt/kafka/bin/kafka-topics.sh --create --topic "$TEST_TOPIC" --partitions 3 --replication-factor 2 --bootstrap-server localhost:9092 >/dev/null 2>&1; then
     # Verify topic was created with correct replication
-    TOPIC_INFO=$(kafka_exec kafka-topics --describe --topic "$TEST_TOPIC" --bootstrap-server localhost:9092 2>&1)
+    TOPIC_INFO=$(kafka_exec /opt/kafka/bin/kafka-topics.sh --describe --topic "$TEST_TOPIC" --bootstrap-server localhost:9092 2>&1)
     REPLICAS=$(echo "$TOPIC_INFO" | grep "ReplicationFactor: 2" | wc -l)
 
     # Cleanup
-    kafka_exec kafka-topics --delete --topic "$TEST_TOPIC" --bootstrap-server localhost:9092 >/dev/null 2>&1
+    kafka_exec /opt/kafka/bin/kafka-topics.sh --delete --topic "$TEST_TOPIC" --bootstrap-server localhost:9092 >/dev/null 2>&1
 
     if [ "$REPLICAS" -gt 0 ]; then
         echo -e "${GREEN}✓ Topic creation working (RF=2)${NC}"
@@ -98,6 +98,6 @@ echo ""
 echo -e "${GREEN}✅ Kafka cluster is healthy${NC}"
 echo ""
 echo "Cluster Summary:"
-kubectl get pods -l app=kafka -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.conditions[?(@.type==\"Ready\")].status,NODE:.spec.nodeName
+kubectl get pods -l app=kafka -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.conditions[?\(@.type==\"Ready\"\)].status,NODE:.spec.nodeName
 
 exit 0
