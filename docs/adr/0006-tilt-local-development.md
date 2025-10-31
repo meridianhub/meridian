@@ -32,8 +32,7 @@ Developers need a fast, productive local development environment for building mi
 The project deploys to **Kubernetes in production**, using:
 * Kubernetes manifests in `deployments/k8s/base/`
 * Kustomize for environment-specific overlays
-* StatefulSets for stateful services (CockroachDB)
-* Helm charts for third-party services (Kafka, Zookeeper)
+* StatefulSets for stateful services (CockroachDB, Kafka)
 
 **The question:** How do developers run and iterate on this stack locally?
 
@@ -153,10 +152,7 @@ https://skaffold.dev/
 meridian/
 ├── Tiltfile                        # Tilt configuration (Python DSL)
 ├── deployments/
-│   ├── k8s/base/                   # Kubernetes manifests (used by Tilt)
-│   └── tilt/                       # Tilt-specific configs
-│       ├── kafka-values.yaml       # Helm values for local Kafka
-│       └── zookeeper-values.yaml   # Helm values for local Zookeeper
+│   └── k8s/base/                   # Kubernetes manifests (used by Tilt)
 ├── docs/
 │   ├── tilt.md                     # Tilt usage guide
 │   └── docker.md                   # Docker troubleshooting
@@ -440,8 +436,7 @@ Useful for pre-merge integration tests in GitHub Actions.
 
 ✅ **Kubernetes manifests** - Exact same YAML from `deployments/k8s/base/`
 ✅ **Kustomize** - Same tool for environment overlays
-✅ **StatefulSets** - CockroachDB uses StatefulSet (like prod)
-✅ **Helm charts** - Kafka uses Bitnami charts (like prod)
+✅ **StatefulSets** - CockroachDB and Kafka use StatefulSets (like prod)
 ✅ **Services & networking** - Same ClusterIP services, DNS resolution
 ✅ **Resource limits** - Can test CPU/memory constraints
 ✅ **Readiness probes** - Tests service health checks
