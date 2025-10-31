@@ -7,6 +7,13 @@ reviews:
     - develop
     - main
 
+  # Exclude generated files from code review
+  path_filters:
+    exclude:
+      - "**/*.pb.go"
+      - "**/*.pb.validate.go"
+      - "**/*_grpc.pb.go"
+
   # Optional: Show review status in PR comments
   review_status: true
 
