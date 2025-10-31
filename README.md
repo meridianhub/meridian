@@ -94,7 +94,10 @@ Install missing tools automatically (macOS/Linux):
    git clone git@github.com:meridianhub/meridian.git
    cd meridian
    go mod download
-   .githooks/install.sh  # Install pre-commit hooks
+
+   # Install pre-commit hooks for automated validation
+   pip install pre-commit
+   pre-commit install
    ```
 
 2. **Create local Kubernetes cluster with local registry**:
@@ -171,6 +174,8 @@ make proto
 # Check for breaking changes
 make proto-breaking
 ```
+
+**Schema Evolution**: When modifying protobuf schemas, follow the guidelines in [Schema Evolution Developer Guide](docs/guides/SCHEMA_EVOLUTION.md) to ensure backward compatibility and proper validation.
 
 See `api/proto/README.md` for detailed protobuf development guidelines.
 
