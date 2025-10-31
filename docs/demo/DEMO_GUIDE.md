@@ -34,7 +34,8 @@ Demonstrates event-driven microservices with Kafka for CurrentAccount and Financ
 ✅ **Type Safety**: Proto messages ensure schema consistency
 ✅ **Double-Entry**: Proper accounting with debit/credit postings
 ✅ **Eventual Consistency**: Account status updated after ledger confirms
-✅ **Cloud-Native**: Kubernetes, CockroachDB, Kafka 3.9.1 with KRaft
+✅ **Cloud-Native**: Kubernetes, CockroachDB, Kafka 3.9.1 with KRaft (3-broker cluster)
+✅ **High Availability**: Multi-broker Kafka with replication factor 2 (tolerates 1 broker failure)
 
 ## Running the Demo
 
@@ -125,8 +126,11 @@ tilt logs meridian  # Check app logs
 
 **Kafka events not flowing:**
 ```bash
-kubectl logs -l app=kafka  # Check Kafka logs
-./scripts/kafka-watch.sh  # Monitor topics
+kubectl get pods -l app=kafka        # Verify all 3 brokers are running
+kubectl logs kafka-0                 # Check broker 0 logs
+kubectl logs kafka-1                 # Check broker 1 logs
+kubectl logs kafka-2                 # Check broker 2 logs
+./scripts/kafka-watch.sh             # Monitor topics
 ```
 
 **gRPC connection refused:**
@@ -135,9 +139,34 @@ kubectl port-forward service/meridian 9091:9091  # CurrentAccount
 kubectl port-forward service/meridian 9092:9092  # FinancialAccounting
 ```
 
+## Testing Kafka Failover
+
+The 3-broker Kafka cluster enables testing of high availability scenarios:
+
+```bash
+# View partition distribution across brokers
+kubectl exec kafka-0 -- kafka-topics --describe --topic current-account.deposits --bootstrap-server localhost:9092
+
+# Kill a broker to test failover
+kubectl delete pod kafka-1
+
+# Verify leadership transfers automatically
+kubectl exec kafka-0 -- kafka-topics --describe --topic current-account.deposits --bootstrap-server localhost:9092
+
+# Produce/consume messages to verify data persists
+kubectl exec kafka-0 -- kafka-console-producer --topic current-account.deposits --bootstrap-server localhost:9092
+kubectl exec kafka-0 -- kafka-console-consumer --topic current-account.deposits --from-beginning --bootstrap-server localhost:9092
+```
+
+**Expected Behavior:**
+- Topics have replicas on 2 brokers (replication factor 2)
+- Killing 1 broker triggers partition leader election
+- Messages remain available (no data loss)
+- System continues processing events
+
 ## Next Steps
 
 1. **Payment Stack**: PaymentInitiation → PaymentExecution → PaymentRailOperations
 2. **Regulatory Compliance**: RegulatoryCompliance rules engine
 3. **Lending**: ConsumerLoan with Interest BQ
-4. **Multi-broker Kafka**: KRaft quorum for HA
+4. **OpenTelemetry**: Distributed tracing with Jaeger

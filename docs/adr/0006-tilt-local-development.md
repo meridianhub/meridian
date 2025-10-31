@@ -202,10 +202,9 @@ docker_build(
 k8s_resource(
   'meridian',
   resource_deps=[
-    'cockroachdb',  # Wait for database
-    'redis',        # Wait for cache
-    'kafka',        # Wait for messaging
-    'zookeeper',
+    'cockroachdb',     # Wait for database
+    'redis',           # Wait for cache
+    'kafka-cluster',   # Wait for Kafka cluster (3 brokers)
   ],
 )
 ```
@@ -228,15 +227,19 @@ spec:
 ''')
 ```
 
-**Kafka + Zookeeper** (Helm charts):
+**Kafka** (3-broker StatefulSet with KRaft):
 ```python
-helm_repo('bitnami', 'https://charts.bitnami.com/bitnami')
-
-k8s_yaml(helm(
-  'bitnami/kafka',
-  name='kafka',
-  values=['deployments/tilt/kafka-values.yaml'],
-))
+# Multi-broker Kafka cluster (no Zookeeper - uses KRaft consensus)
+k8s_yaml(blob('''
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3  # Minimum for quorum
+  # ... (KRaft quorum configuration)
+'''))
 ```
 
 **Redis** (standard deployment):
@@ -280,8 +283,7 @@ local_resource(
 k8s_resource('meridian', labels=['app'])
 k8s_resource('cockroachdb', labels=['database'])
 k8s_resource('redis', labels=['cache'])
-k8s_resource('kafka', labels=['messaging'])
-k8s_resource('zookeeper', labels=['messaging'])
+k8s_resource('kafka-cluster', labels=['messaging'])
 ```
 
 **Tilt UI groups by label:**
@@ -293,8 +295,7 @@ k8s_resource('zookeeper', labels=['messaging'])
 ├─ cache ────────────────────┤
 │ ✓ redis                    │
 ├─ messaging ────────────────┤
-│ ✓ kafka                    │
-│ ✓ zookeeper                │
+│ ✓ kafka-cluster (3 pods)   │
 ├─ tests ────────────────────┤
 │ ✓ test (passed)            │
 ├─ quality ──────────────────┤
@@ -315,10 +316,12 @@ k8s_resource(
 
 k8s_resource('cockroachdb', port_forwards='26257:26257')
 k8s_resource('redis', port_forwards='6379:6379')
-k8s_resource('kafka', port_forwards='9092:9092')
+k8s_resource('kafka-cluster', port_forwards='9092:9092')  # Forwards to kafka-0
 ```
 
 **Automatic** - no manual `kubectl port-forward` needed!
+
+**Note:** Port forwarding connects to kafka-0 (first broker). All 3 brokers (kafka-0, kafka-1, kafka-2) are accessible within the cluster via the headless service.
 
 ### Developer Workflow
 
@@ -351,7 +354,7 @@ tilt up
 #   - Meridian gRPC: localhost:9090
 #   - CockroachDB:   localhost:26257
 #   - Redis:         localhost:6379
-#   - Kafka:         localhost:9092
+#   - Kafka Cluster: localhost:9092 (3 brokers: kafka-0, kafka-1, kafka-2)
 
 # Make code changes
 vim internal/domain/booking_log.go
@@ -415,7 +418,7 @@ See comprehensive troubleshooting guide in [docs/skills/tilt.md](../skills/tilt.
 * Slow builds → Clear Tilt cache
 * Port conflicts → Kill processes using ports
 * Database connection issues → Check CockroachDB logs
-* Kafka not connecting → Verify Zookeeper is healthy
+* Kafka not connecting → Check all 3 broker pods are ready (kubectl get pods -l app=kafka)
 
 ### CI/CD Integration
 
@@ -660,12 +663,20 @@ Both are valid choices; Tilt won on developer experience.
 **Typical local development resource usage:**
 * Kubernetes control plane: ~1GB RAM
 * CockroachDB: ~1-2GB RAM
-* Kafka + Zookeeper: ~512MB RAM
+* Kafka cluster (3 brokers): ~1.5GB RAM
 * Redis: ~128MB RAM
 * Meridian service: ~256MB RAM
-* **Total: ~3-4GB RAM**
+* **Total: ~4-5GB RAM**
 
-**Minimum recommended:** 8GB RAM system, 16GB preferred for comfortable dev.
+**Minimum recommended:** 12GB RAM (may experience swapping with multiple applications)
+**Comfortable development:** 16GB RAM (recommended for daily use)
+
+**Note on Kafka**: Multi-broker setup uses ~1.5GB total (384Mi per broker × 3) compared to previous single-broker ~512MB. The increased resource usage enables realistic testing of partition replication, leader election, and failover scenarios.
+
+**For 8GB RAM machines**: The 3-broker setup may cause resource pressure. Options:
+1. Close unnecessary applications (IDEs, browsers, etc.)
+2. Use Colima instead of Docker Desktop (lighter overhead)
+3. Modify Tiltfile for single-broker mode (see Tiltfile comments around line 208)
 
 ### Startup Time
 
