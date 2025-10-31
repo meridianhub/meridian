@@ -86,6 +86,10 @@ func (r *RedisService) StoreResult(ctx context.Context, result Result) error {
 		return err
 	}
 
+	if result.TTL <= 0 {
+		return ErrInvalidTTL
+	}
+
 	// Convert to protobuf
 	pbResult := toProto(result)
 
@@ -190,7 +194,7 @@ func (r *RedisService) Release(ctx context.Context, key Key, token string) error
 	// Check if lock was actually released (defensive type assertion)
 	deleted, ok := result.(int64)
 	if !ok {
-		return fmt.Errorf("unexpected redis response type: %T (expected int64)", result)
+		return fmt.Errorf("%w: got %T, expected int64", ErrUnexpectedRedisResponse, result)
 	}
 	if deleted == 0 {
 		return ErrLockNotHeld
@@ -203,6 +207,10 @@ func (r *RedisService) Release(ctx context.Context, key Key, token string) error
 func (r *RedisService) Refresh(ctx context.Context, key Key, token string, ttl time.Duration) error {
 	if err := key.Validate(); err != nil {
 		return err
+	}
+
+	if ttl <= 0 {
+		return ErrInvalidTTL
 	}
 
 	if token == "" {
@@ -228,7 +236,7 @@ func (r *RedisService) Refresh(ctx context.Context, key Key, token string, ttl t
 	// Check if lock was actually refreshed (defensive type assertion)
 	refreshed, ok := result.(int64)
 	if !ok {
-		return fmt.Errorf("unexpected redis response type: %T (expected int64)", result)
+		return fmt.Errorf("%w: got %T, expected int64", ErrUnexpectedRedisResponse, result)
 	}
 	if refreshed == 0 {
 		return ErrLockNotHeld

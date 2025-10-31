@@ -31,6 +31,9 @@ var (
 
 	// ErrInvalidStatus indicates an invalid or unknown operation status
 	ErrInvalidStatus = errors.New("invalid operation status")
+
+	// ErrUnexpectedRedisResponse indicates Redis returned an unexpected response type
+	ErrUnexpectedRedisResponse = errors.New("unexpected redis response type")
 )
 
 // Key represents an idempotency key with namespace and operation context
@@ -49,6 +52,7 @@ type Key struct {
 }
 
 // String returns the Redis key format: {namespace}:{operation}:{entity}:{request}
+// Note: Field values must not contain colons to avoid ambiguous key representations
 func (k Key) String() string {
 	if k.RequestID != "" {
 		return k.Namespace + ":" + k.Operation + ":" + k.EntityID + ":" + k.RequestID
@@ -56,12 +60,29 @@ func (k Key) String() string {
 	return k.Namespace + ":" + k.Operation + ":" + k.EntityID
 }
 
-// Validate checks if the key has all required fields
+// Validate checks if the key has all required fields and that none contain colons
 func (k Key) Validate() error {
 	if k.Namespace == "" || k.Operation == "" || k.EntityID == "" {
 		return ErrInvalidKey
 	}
+
+	// Prevent colon characters in fields to avoid key collisions
+	if containsColon(k.Namespace) || containsColon(k.Operation) ||
+		containsColon(k.EntityID) || containsColon(k.RequestID) {
+		return ErrInvalidKey
+	}
+
 	return nil
+}
+
+// containsColon checks if a string contains the colon character
+func containsColon(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' {
+			return true
+		}
+	}
+	return false
 }
 
 // Result represents a cached operation result

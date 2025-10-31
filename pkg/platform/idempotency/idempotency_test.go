@@ -198,6 +198,7 @@ func TestErrors_AreDistinct(t *testing.T) {
 		ErrEmptyToken,
 		ErrInvalidTTL,
 		ErrInvalidStatus,
+		ErrUnexpectedRedisResponse,
 	}
 
 	errorSet := make(map[string]bool)
@@ -209,7 +210,60 @@ func TestErrors_AreDistinct(t *testing.T) {
 		errorSet[msg] = true
 	}
 
-	if len(errorSet) != 8 {
-		t.Errorf("Expected 8 distinct errors, got %d", len(errorSet))
+	if len(errorSet) != 9 {
+		t.Errorf("Expected 9 distinct errors, got %d", len(errorSet))
+	}
+}
+
+func TestKey_Validate_RejectsColons(t *testing.T) {
+	tests := []struct {
+		name string
+		key  Key
+	}{
+		{
+			name: "colon in namespace",
+			key: Key{
+				Namespace: "name:space",
+				Operation: "deposit",
+				EntityID:  "ACC-123",
+			},
+		},
+		{
+			name: "colon in operation",
+			key: Key{
+				Namespace: "current-account",
+				Operation: "dep:osit",
+				EntityID:  "ACC-123",
+			},
+		},
+		{
+			name: "colon in entity ID",
+			key: Key{
+				Namespace: "current-account",
+				Operation: "deposit",
+				EntityID:  "ACC:123",
+			},
+		},
+		{
+			name: "colon in request ID",
+			key: Key{
+				Namespace: "current-account",
+				Operation: "deposit",
+				EntityID:  "ACC-123",
+				RequestID: "req:abc",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.key.Validate()
+			if err == nil {
+				t.Errorf("Key.Validate() expected error for key with colon, got nil")
+			}
+			if !errors.Is(err, ErrInvalidKey) {
+				t.Errorf("Key.Validate() error = %v, want %v", err, ErrInvalidKey)
+			}
+		})
 	}
 }

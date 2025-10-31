@@ -3,12 +3,17 @@ package idempotency
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	platformv1 "github.com/meridianhub/meridian/api/proto/meridian/platform/v1"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/protobuf/proto"
 )
 
 func setupRedisService(t *testing.T) (*RedisService, *miniredis.Miniredis, func()) {
@@ -507,5 +512,243 @@ func TestRedisService_InvalidKey(t *testing.T) {
 	_, err = service.IsHeld(ctx, invalidKey)
 	if !errors.Is(err, ErrInvalidKey) {
 		t.Errorf("IsHeld: expected ErrInvalidKey, got %v", err)
+	}
+}
+
+// Test concurrent lock acquisition
+func TestRedisService_Acquire_Concurrent(t *testing.T) {
+	service, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	key := testKey()
+	var successCount atomic.Int32
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			opts := LockOptions{
+				TTL:        30 * time.Second,
+				RetryDelay: 10 * time.Millisecond,
+				MaxRetries: 0, // No retries for this test
+				Token:      uuid.NewString(),
+			}
+			if err := service.Acquire(ctx, key, opts); err == nil {
+				successCount.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Only one goroutine should succeed
+	if successCount.Load() != 1 {
+		t.Errorf("Expected exactly 1 successful acquisition, got %d", successCount.Load())
+	}
+}
+
+// Test context cancellation during lock acquisition
+func TestRedisService_Acquire_ContextCancellation(t *testing.T) {
+	service, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	key := testKey()
+	opts := DefaultLockOptions()
+	opts.Token = uuid.NewString()
+
+	err := service.Acquire(ctx, key, opts)
+	if err == nil {
+		t.Error("Expected error due to context cancellation, got nil")
+	}
+	if !strings.Contains(err.Error(), "cancel") {
+		t.Errorf("Expected error to mention cancellation, got: %v", err)
+	}
+}
+
+// Test protobuf conversion with nil timestamp
+func TestRedisService_ProtoConversion_NilTimestamp(t *testing.T) {
+	service, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	key := testKey()
+
+	// Store result with pending status (zero CompletedAt time)
+	result := Result{
+		Key:         key,
+		Status:      StatusPending,
+		Data:        []byte(`{}`),
+		CompletedAt: time.Time{}, // Zero time
+		TTL:         time.Hour,
+	}
+
+	err := service.StoreResult(ctx, result)
+	if err != nil {
+		t.Fatalf("Failed to store result with zero time: %v", err)
+	}
+
+	// Retrieve and verify
+	retrieved, err := service.Check(ctx, key)
+	if err != nil {
+		t.Fatalf("Failed to check result: %v", err)
+	}
+
+	if !retrieved.CompletedAt.IsZero() {
+		t.Errorf("Expected zero CompletedAt, got %v", retrieved.CompletedAt)
+	}
+}
+
+// Test protobuf conversion with invalid status
+func TestRedisService_ProtoConversion_InvalidStatus(t *testing.T) {
+	service, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	key := testKey()
+
+	// Manually craft an invalid protobuf message with UNSPECIFIED status
+	pbResult := &platformv1.IdempotencyResult{
+		Namespace:  key.Namespace,
+		Operation:  key.Operation,
+		EntityId:   key.EntityID,
+		RequestId:  key.RequestID,
+		Status:     platformv1.OperationStatus_OPERATION_STATUS_UNSPECIFIED, // Invalid!
+		TtlSeconds: 3600,
+	}
+
+	// Serialize and store directly
+	data, err := proto.Marshal(pbResult)
+	if err != nil {
+		t.Fatalf("Failed to marshal proto: %v", err)
+	}
+
+	redisKey := "idempotency:result:" + key.String()
+	err = service.client.Set(ctx, redisKey, data, time.Hour).Err()
+	if err != nil {
+		t.Fatalf("Failed to store in Redis: %v", err)
+	}
+
+	// Attempt to retrieve - should fail due to invalid status
+	_, err = service.Check(ctx, key)
+	if err == nil {
+		t.Error("Expected error for invalid status, got nil")
+	}
+	if !errors.Is(err, ErrInvalidStatus) {
+		t.Errorf("Expected ErrInvalidStatus, got %v", err)
+	}
+}
+
+// Test with maximum TTL value
+func TestRedisService_MaxTTL(t *testing.T) {
+	service, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	key := testKey()
+
+	// Use a very large TTL (1 year)
+	maxTTL := 365 * 24 * time.Hour
+	result := Result{
+		Key:         key,
+		Status:      StatusCompleted,
+		Data:        []byte(`{"test": "data"}`),
+		CompletedAt: time.Now(),
+		TTL:         maxTTL,
+	}
+
+	err := service.StoreResult(ctx, result)
+	if err != nil {
+		t.Fatalf("Failed to store result with max TTL: %v", err)
+	}
+
+	// Verify retrieval
+	retrieved, err := service.Check(ctx, key)
+	if !errors.Is(err, ErrOperationAlreadyProcessed) {
+		t.Errorf("Expected ErrOperationAlreadyProcessed, got %v", err)
+	}
+	if retrieved == nil {
+		t.Fatal("Expected result, got nil")
+	}
+
+	// TTL should be close to what we set (within 1 second due to conversion precision)
+	if retrieved.TTL < maxTTL-time.Second || retrieved.TTL > maxTTL+time.Second {
+		t.Errorf("Expected TTL ~%v, got %v", maxTTL, retrieved.TTL)
+	}
+}
+
+func TestRedisService_StoreResult_InvalidTTL(t *testing.T) {
+	svc, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	key := Key{
+		Namespace: "test",
+		Operation: "test-op",
+		EntityID:  "test-123",
+	}
+
+	tests := []struct {
+		name string
+		ttl  time.Duration
+	}{
+		{"zero TTL", 0},
+		{"negative TTL", -1 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Result{
+				Key:    key,
+				Status: StatusCompleted,
+				TTL:    tt.ttl,
+			}
+
+			err := svc.StoreResult(context.Background(), result)
+			if !errors.Is(err, ErrInvalidTTL) {
+				t.Errorf("StoreResult() with %s: got error %v, want %v", tt.name, err, ErrInvalidTTL)
+			}
+		})
+	}
+}
+
+func TestRedisService_Refresh_InvalidTTL(t *testing.T) {
+	svc, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	key := Key{
+		Namespace: "test",
+		Operation: "test-lock",
+		EntityID:  "test-123",
+	}
+	token := uuid.NewString()
+
+	// First acquire the lock
+	opts := LockOptions{
+		TTL:        1 * time.Minute,
+		Token:      token,
+		MaxRetries: 0,
+	}
+	if err := svc.Acquire(context.Background(), key, opts); err != nil {
+		t.Fatalf("Failed to acquire lock: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		ttl  time.Duration
+	}{
+		{"zero TTL", 0},
+		{"negative TTL", -1 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := svc.Refresh(context.Background(), key, token, tt.ttl)
+			if !errors.Is(err, ErrInvalidTTL) {
+				t.Errorf("Refresh() with %s: got error %v, want %v", tt.name, err, ErrInvalidTTL)
+			}
+		})
 	}
 }
