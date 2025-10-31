@@ -74,10 +74,10 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 	}
 
 	// Validate currency matches account currency
-	if req.Amount.Amount.CurrencyCode != account.Balance.Currency {
+	if req.Amount.Amount.CurrencyCode != account.Balance.Currency() {
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
-			account.Balance.Currency, req.Amount.Amount.CurrencyCode)
+			account.Balance.Currency(), req.Amount.Amount.CurrencyCode)
 	}
 
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
@@ -93,15 +93,15 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 	// Round nanos to nearest cent (0.5 rounds up)
 	nanosCents := (req.Amount.Amount.Nanos + 5000000) / 10000000
 
-	amount := domain.Money{
-		AmountCents: unitsCents + int64(nanosCents),
-		Currency:    req.Amount.Amount.CurrencyCode,
+	amount, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, unitsCents+int64(nanosCents))
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
 	}
 
 	// Validate amount is positive
-	if amount.AmountCents <= 0 {
+	if amount.AmountCents() <= 0 {
 		return nil, status.Errorf(codes.InvalidArgument,
-			"deposit amount must be positive, got %d cents", amount.AmountCents)
+			"deposit amount must be positive, got %d cents", amount.AmountCents())
 	}
 
 	// Execute deposit
@@ -149,7 +149,7 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 		AccountId:             account.AccountID,
 		AccountIdentification: account.AccountIdentification,
 		AccountStatus:         mapStatusToProto(account.Status),
-		BaseCurrency:          mapCurrencyToProto(account.Balance.Currency),
+		BaseCurrency:          mapCurrencyToProto(account.Balance.Currency()),
 		CreatedAt:             timestamppb.New(account.CreatedAt),
 		UpdatedAt:             timestamppb.New(account.UpdatedAt),
 		// #nosec G115 - Version is bounded by database constraints
@@ -169,8 +169,9 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 }
 
 func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
-	units := m.AmountCents / 100
-	remainder := m.AmountCents % 100
+	amountCents := m.AmountCents()
+	units := amountCents / 100
+	remainder := amountCents % 100
 
 	// Convert remainder to nanos (9 digits, but we only use 8 for cents precision)
 	// For negative amounts, Google's money.Money expects:
@@ -188,7 +189,7 @@ func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
-			CurrencyCode: m.Currency,
+			CurrencyCode: m.Currency(),
 			Units:        units,
 			Nanos:        nanos,
 		},

@@ -17,6 +17,15 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// mustNewMoney is a test helper that creates Money or panics
+func mustNewMoney(currency string, amountCents int64) domain.Money {
+	m, err := domain.NewMoney(currency, amountCents)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
@@ -369,37 +378,37 @@ func TestToMoneyAmount(t *testing.T) {
 	}{
 		{
 			name:          "Positive amount",
-			input:         domain.Money{AmountCents: 12345, Currency: "GBP"}, // £123.45
+			input:         mustNewMoney("GBP", 12345), // £123.45
 			expectedUnits: 123,
 			expectedNanos: 450000000,
 		},
 		{
 			name:          "Negative amount",
-			input:         domain.Money{AmountCents: -12345, Currency: "GBP"}, // -£123.45
+			input:         mustNewMoney("GBP", -12345), // -£123.45
 			expectedUnits: -123,
 			expectedNanos: 450000000, // Nanos should be positive (absolute value)
 		},
 		{
 			name:          "Zero amount",
-			input:         domain.Money{AmountCents: 0, Currency: "USD"},
+			input:         mustNewMoney("USD", 0),
 			expectedUnits: 0,
 			expectedNanos: 0,
 		},
 		{
 			name:          "Whole units (no fractional)",
-			input:         domain.Money{AmountCents: 10000, Currency: "EUR"}, // €100.00
+			input:         mustNewMoney("EUR", 10000), // €100.00
 			expectedUnits: 100,
 			expectedNanos: 0,
 		},
 		{
 			name:          "Negative whole units",
-			input:         domain.Money{AmountCents: -10000, Currency: "EUR"}, // -€100.00
+			input:         mustNewMoney("EUR", -10000), // -€100.00
 			expectedUnits: -100,
 			expectedNanos: 0,
 		},
 		{
 			name:          "Small negative amount",
-			input:         domain.Money{AmountCents: -123, Currency: "GBP"}, // -£1.23
+			input:         mustNewMoney("GBP", -123), // -£1.23
 			expectedUnits: -1,
 			expectedNanos: 230000000,
 		},
@@ -409,8 +418,8 @@ func TestToMoneyAmount(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := toMoneyAmount(tt.input)
 
-			if result.Amount.CurrencyCode != tt.input.Currency {
-				t.Errorf("Expected currency %s, got %s", tt.input.Currency, result.Amount.CurrencyCode)
+			if result.Amount.CurrencyCode != tt.input.Currency() {
+				t.Errorf("Expected currency %s, got %s", tt.input.Currency(), result.Amount.CurrencyCode)
 			}
 
 			if result.Amount.Units != tt.expectedUnits {

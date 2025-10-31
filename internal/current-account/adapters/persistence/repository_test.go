@@ -70,7 +70,8 @@ func TestSaveUpdateExisting(t *testing.T) {
 	}
 
 	// Modify and save again
-	err := account.Deposit(domain.Money{AmountCents: 10000, Currency: "GBP"})
+	depositMoney, _ := domain.NewMoney("GBP", 10000)
+	err := account.Deposit(depositMoney)
 	if err != nil {
 		t.Fatalf("Deposit failed: %v", err)
 	}
@@ -85,8 +86,8 @@ func TestSaveUpdateExisting(t *testing.T) {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	if retrieved.Balance.AmountCents != 10000 {
-		t.Errorf("Expected balance 10000, got %d", retrieved.Balance.AmountCents)
+	if retrieved.Balance.AmountCents() != 10000 {
+		t.Errorf("Expected balance 10000, got %d", retrieved.Balance.AmountCents())
 	}
 
 	// Version should be incremented
@@ -207,7 +208,8 @@ func TestOptimisticLocking(t *testing.T) {
 	}
 
 	// First transaction modifies and saves successfully
-	if err := account2.Deposit(domain.Money{AmountCents: 5000, Currency: "GBP"}); err != nil {
+	deposit1, _ := domain.NewMoney("GBP", 5000)
+	if err := account2.Deposit(deposit1); err != nil {
 		t.Fatalf("Deposit failed: %v", err)
 	}
 
@@ -216,7 +218,8 @@ func TestOptimisticLocking(t *testing.T) {
 	}
 
 	// Second transaction tries to save with stale version
-	if err := account3.Deposit(domain.Money{AmountCents: 10000, Currency: "GBP"}); err != nil {
+	deposit2, _ := domain.NewMoney("GBP", 10000)
+	if err := account3.Deposit(deposit2); err != nil {
 		t.Fatalf("Deposit failed: %v", err)
 	}
 
@@ -231,8 +234,8 @@ func TestOptimisticLocking(t *testing.T) {
 		t.Fatalf("Final FindByID failed: %v", err)
 	}
 
-	if final.Balance.AmountCents != 5000 {
-		t.Errorf("Expected balance 5000, got %d", final.Balance.AmountCents)
+	if final.Balance.AmountCents() != 5000 {
+		t.Errorf("Expected balance 5000, got %d", final.Balance.AmountCents())
 	}
 
 	// Version should be incremented

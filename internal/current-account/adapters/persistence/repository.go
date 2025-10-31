@@ -147,11 +147,11 @@ func toEntity(account *domain.CurrentAccount) *CurrentAccountEntity {
 		AccountID:             account.AccountID,
 		AccountIdentification: account.AccountIdentification,
 		CustomerID:            account.CustomerID,
-		BalanceCents:          account.Balance.AmountCents,
-		AvailableBalanceCents: account.AvailableBalance.AmountCents,
-		Currency:              account.Balance.Currency,
+		BalanceCents:          account.Balance.AmountCents(),
+		AvailableBalanceCents: account.AvailableBalance.AmountCents(),
+		Currency:              account.Balance.Currency(),
 		Status:                string(account.Status),
-		OverdraftLimitCents:   account.OverdraftLimit.AmountCents,
+		OverdraftLimitCents:   account.OverdraftLimit.AmountCents(),
 		OverdraftEnabled:      account.OverdraftEnabled,
 		OverdraftRate:         account.OverdraftRate,
 		BalanceUpdatedAt:      account.BalanceUpdatedAt,
@@ -163,29 +163,25 @@ func toEntity(account *domain.CurrentAccount) *CurrentAccountEntity {
 
 // toDomain converts database entity to domain model
 func toDomain(entity *CurrentAccountEntity) *domain.CurrentAccount {
+	// Use NewMoney constructor - ignoring errors as DB values are already validated
+	balance, _ := domain.NewMoney(entity.Currency, entity.BalanceCents)
+	availableBalance, _ := domain.NewMoney(entity.Currency, entity.AvailableBalanceCents)
+	overdraftLimit, _ := domain.NewMoney(entity.Currency, entity.OverdraftLimitCents)
+
 	return &domain.CurrentAccount{
 		ID:                    entity.ID,
 		AccountID:             entity.AccountID,
 		AccountIdentification: entity.AccountIdentification,
 		CustomerID:            entity.CustomerID,
-		Balance: domain.Money{
-			AmountCents: entity.BalanceCents,
-			Currency:    entity.Currency,
-		},
-		AvailableBalance: domain.Money{
-			AmountCents: entity.AvailableBalanceCents,
-			Currency:    entity.Currency,
-		},
-		Status: domain.AccountStatus(entity.Status),
-		OverdraftLimit: domain.Money{
-			AmountCents: entity.OverdraftLimitCents,
-			Currency:    entity.Currency,
-		},
-		OverdraftEnabled: entity.OverdraftEnabled,
-		OverdraftRate:    entity.OverdraftRate,
-		BalanceUpdatedAt: entity.BalanceUpdatedAt,
-		Version:          entity.Version,
-		CreatedAt:        entity.CreatedAt,
-		UpdatedAt:        entity.UpdatedAt,
+		Balance:               balance,
+		AvailableBalance:      availableBalance,
+		Status:                domain.AccountStatus(entity.Status),
+		OverdraftLimit:        overdraftLimit,
+		OverdraftEnabled:      entity.OverdraftEnabled,
+		OverdraftRate:         entity.OverdraftRate,
+		BalanceUpdatedAt:      entity.BalanceUpdatedAt,
+		Version:               entity.Version,
+		CreatedAt:             entity.CreatedAt,
+		UpdatedAt:             entity.UpdatedAt,
 	}
 }
