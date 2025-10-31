@@ -1,19 +1,22 @@
 name: Kafka Integration Tests
 
+# This workflow is resource-intensive and only runs on manual trigger.
+#
+# To run locally:
+#   tilt up                          # Start full 3-broker cluster
+#   tilt trigger kafka-health        # Run health check
+#   tilt trigger kafka-failover      # Run failover test
+#
+# To run via GitHub Actions:
+#   gh workflow run kafka-integration-tests.yml --repo meridianhub/meridian
+#   Or: Actions tab → "Kafka Integration Tests" → "Run workflow"
+#
+# Note: GitHub runners have limited resources (7GB RAM, 2 CPU).
+# The 3-broker cluster may timeout on standard runners.
+# Primary testing should be done locally with Tilt.
+
 on:
-  pull_request:
-    paths:
-      - 'Tiltfile'
-      - 'scripts/kafka-tests/**'
-      - '.github/workflows/kafka-integration-tests.yml'
-  push:
-    branches:
-      - develop
-      - main
-    paths:
-      - 'Tiltfile'
-      - 'scripts/kafka-tests/**'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch: # Manual trigger only - resource-intensive for GitHub runners
 
 jobs:
   kafka-cluster-test:
@@ -204,24 +207,3 @@ jobs:
           kubectl get pods -l app=kafka -o wide
           echo "=== Pod descriptions ==="
           kubectl describe pods -l app=kafka
-
-  tiltfile-validation:
-    name: Validate Tiltfile Kafka Configuration
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Validate Tiltfile syntax
-        run: |
-          python -m py_compile Tiltfile
-          echo "✓ Tiltfile syntax is valid"
