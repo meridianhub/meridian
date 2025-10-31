@@ -12,6 +12,7 @@ Each skill document includes:
 ### Development Workflow
 - **[tilt.md](tilt.md)** - Fast Kubernetes development with Tilt and live reload
 - **[docker.md](docker.md)** - Docker configuration and multi-stage builds
+- **[schema-evolution.md](schema-evolution.md)** - Protobuf schema evolution with buf breaking change detection
 
 ### Deployment
 - **[kustomize.md](kustomize.md)** - Environment-specific Kubernetes deployments
