@@ -188,18 +188,12 @@ func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 	remainder := amountCents % 100
 
 	// Convert remainder to nanos (9 digits, but we only use 8 for cents precision)
-	// For negative amounts, Google's money.Money expects:
-	// - Units contains the integer part with sign
-	// - Nanos contains the fractional part as absolute value
-	// Example: -£1.23 = Units=-1, Nanos=230000000 (positive nanos)
-	var nanos int32
-	if remainder < 0 {
-		// #nosec G115 - remainder is always -99 to 0, abs value * 10000000 fits in int32
-		nanos = int32(-remainder * 10000000)
-	} else {
-		// #nosec G115 - remainder is always 0 to 99, multiplication result fits in int32
-		nanos = int32(remainder * 10000000)
-	}
+	// Per google.type.Money spec: nanos MUST share the sign of units
+	// - Positive amounts: both units and nanos are positive or zero
+	// - Negative amounts: both units and nanos are negative or zero
+	// Example: -£1.23 = Units=-1, Nanos=-230000000
+	// #nosec G115 - remainder is always -99 to 99, multiplication result fits in int32
+	nanos := int32(remainder * 10000000)
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{

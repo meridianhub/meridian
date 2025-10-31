@@ -147,8 +147,12 @@ func (a *CurrentAccount) Withdraw(amount Money) error {
 // calculateAvailableBalance updates available balance based on overdraft settings
 func (a *CurrentAccount) calculateAvailableBalance() {
 	if a.OverdraftEnabled {
-		// Use immutable Add method
-		newAvail, _ := a.Balance.Add(a.OverdraftLimit) // Safe: same currency
+		// Use immutable Add method; should never fail if SetOverdraftLimit validated correctly
+		newAvail, err := a.Balance.Add(a.OverdraftLimit)
+		if err != nil {
+			// This indicates a bug: either currency mismatch or overflow that bypassed validation
+			panic("BUG: OverdraftLimit currency mismatch or overflow detected in calculateAvailableBalance: " + err.Error())
+		}
 		a.AvailableBalance = newAvail
 	} else {
 		a.AvailableBalance = a.Balance

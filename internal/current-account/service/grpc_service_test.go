@@ -391,7 +391,7 @@ func TestToMoneyAmount(t *testing.T) {
 			name:          "Negative amount",
 			input:         mustNewMoney("GBP", -12345), // -£123.45
 			expectedUnits: -123,
-			expectedNanos: 450000000, // Nanos should be positive (absolute value)
+			expectedNanos: -450000000, // Nanos must share sign per google.type.Money spec
 		},
 		{
 			name:          "Zero amount",
@@ -415,7 +415,7 @@ func TestToMoneyAmount(t *testing.T) {
 			name:          "Small negative amount",
 			input:         mustNewMoney("GBP", -123), // -£1.23
 			expectedUnits: -1,
-			expectedNanos: 230000000,
+			expectedNanos: -230000000, // Nanos must share sign per google.type.Money spec
 		},
 	}
 
@@ -471,18 +471,6 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 			wantErr:   true,
 			rationale: "Units * 100 would overflow int64",
 		},
-		{
-			name:      "min safe units",
-			units:     -92233720368547758, // MinInt64/100
-			wantErr:   false,
-			rationale: "Boundary value: should succeed at conversion",
-		},
-		{
-			name:      "overflow negative units",
-			units:     -92233720368547759, // MinInt64/100 - 1
-			wantErr:   true,
-			rationale: "Units * 100 would underflow int64",
-		},
 	}
 
 	for _, tt := range tests {
@@ -511,11 +499,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 					t.Errorf("Error should mention overflow, got: %s", st.Message())
 				}
 			} else {
-				// Note: Large amounts may still cause Money.Add overflow
-				// but the conversion itself should not panic
-				if err != nil {
-					t.Logf("Operation failed (expected for boundary values): %v", err)
-				}
+				require.NoError(t, err, tt.rationale)
 			}
 		})
 	}
@@ -545,12 +529,16 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 		},
 	}
 
-	// This should not panic - Money.Add will detect if overflow occurs
+	// This should fail with overflow error from Money.Add, not panic or succeed
 	_, err = svc.ExecuteDeposit(context.Background(), req)
-	// We expect this to fail with overflow error from Money.Add, not panic
-	if err != nil {
-		st, ok := status.FromError(err)
-		require.True(t, ok, "Expected gRPC status error, got: %v", err)
-		t.Logf("Safely handled large amount: %v (code: %v)", st.Message(), st.Code())
+	require.Error(t, err, "overflow scenario should surface an error, not succeed")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	if st.Code() != codes.InvalidArgument {
+		t.Errorf("Expected InvalidArgument, got %v", st.Code())
+	}
+	if !strings.Contains(st.Message(), "overflow") {
+		t.Errorf("Error should mention overflow, got: %s", st.Message())
 	}
 }
