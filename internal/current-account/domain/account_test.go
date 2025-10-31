@@ -220,3 +220,40 @@ func TestCurrencyMismatch(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrCurrencyMismatch)
 }
+
+// Defensive test per ADR-008: Constructor validation
+
+func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
+	tests := []struct {
+		name      string
+		currency  string
+		wantErr   bool
+		rationale string
+	}{
+		{
+			name:      "empty currency",
+			currency:  "",
+			wantErr:   true,
+			rationale: "Empty currency should be rejected at construction",
+		},
+		{
+			name:      "valid currency",
+			currency:  "GBP",
+			wantErr:   false,
+			rationale: "Valid currency should succeed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", tt.currency)
+
+			if tt.wantErr {
+				assert.Error(t, err, tt.rationale)
+				assert.ErrorIs(t, err, ErrInvalidCurrency, "Should return ErrInvalidCurrency")
+			} else {
+				assert.NoError(t, err, tt.rationale)
+			}
+		})
+	}
+}

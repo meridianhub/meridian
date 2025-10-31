@@ -207,3 +207,40 @@ func TestMoney_Subtract_NearMinInt64_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int64(-9223372036854775808), result.AmountCents())
 }
+
+// Defensive test per ADR-008: Edge cases with zero-value structs
+
+func TestMoney_Equals_ZeroValueStruct_ReturnsFalse(t *testing.T) {
+	// Test comparing valid Money with zero-value Money struct
+	// Zero-value has empty currency and 0 amount
+	validMoney, _ := NewMoney("GBP", 0)
+	zeroValueMoney := Money{} // Direct struct creation bypasses constructor
+
+	// Should return false: currency mismatch ("GBP" != "")
+	result := validMoney.Equals(zeroValueMoney)
+
+	assert.False(t, result,
+		"Valid Money should not equal zero-value struct (currency mismatch)")
+}
+
+func TestMoney_Equals_BothZeroValue_ReturnsTrue(t *testing.T) {
+	// Two zero-value structs should be equal (both have empty currency and 0 amount)
+	zeroValue1 := Money{}
+	zeroValue2 := Money{}
+
+	result := zeroValue1.Equals(zeroValue2)
+
+	assert.True(t, result,
+		"Two zero-value Money structs should be equal")
+}
+
+func TestMoney_Equals_ZeroAmountDifferentCurrency_ReturnsFalse(t *testing.T) {
+	// Both have zero amount but different currencies
+	gbpZero, _ := NewMoney("GBP", 0)
+	usdZero, _ := NewMoney("USD", 0)
+
+	result := gbpZero.Equals(usdZero)
+
+	assert.False(t, result,
+		"Zero amounts with different currencies should not be equal")
+}
