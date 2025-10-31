@@ -29,8 +29,8 @@ make proto-lint              # Check style
 make proto-breaking          # Check compatibility against develop
 make proto                   # Regenerate Go code
 
-# With pre-commit hooks (recommended)
-pre-commit install           # One-time setup
+# With git hooks (recommended)
+.githooks/install.sh         # One-time setup
 git commit                   # Hooks run automatically
 ```
 
@@ -210,16 +210,13 @@ git commit -m "feat: Add AccountSuspended event for BIAN 14.0 Suspend operation"
 ### Initial Setup
 
 ```bash
-# Install pre-commit hooks (one-time)
-pip install pre-commit
-pre-commit install
-
-# Install buf (if not already installed)
-go install github.com/bufbuild/buf/cmd/buf@latest
+# Install git hooks (one-time)
+.githooks/install.sh
 
 # Verify installation
-which buf
-pre-commit --version
+ls -la .git/hooks/pre-commit
+
+# buf will be installed automatically by the hook if needed
 ```
 
 ### Daily Workflow
@@ -239,20 +236,18 @@ make proto             # Regenerate Go code
 # 4. Run tests
 make test
 
-# 5. Commit (pre-commit hooks run automatically)
+# 5. Commit (git hooks run automatically)
 git add .
 git commit -m "feat: Add AccountSuspended event"
 
-# Pre-commit hooks will:
-# - Run buf-lint
-# - Run buf-breaking against develop
+# Git hook will:
+# - Run buf lint on proto files
+# - Run buf breaking against develop
+# - Run gofumpt on Go files
 # - Run golangci-lint on Go files
-# - Check YAML syntax
-# - Trim trailing whitespace
-# - Fix end of files
 ```
 
-### Bypassing Pre-commit Hooks (Emergency Only)
+### Bypassing Git Hooks (Emergency Only)
 
 ```bash
 # Skip hooks for emergency hotfix (NOT RECOMMENDED)
@@ -499,17 +494,17 @@ message AccountUpdated {
 }
 ```
 
-### Pre-commit hooks fail
+### Git hooks fail
 
-**Skip specific hook for debugging**:
+**Skip hook temporarily for debugging**:
 ```bash
-SKIP=buf-breaking git commit -m "test commit"
+git commit --no-verify -m "test commit"
+# Remember to run validation manually afterward!
 ```
 
-**Update hook versions**:
+**Reinstall hooks**:
 ```bash
-pre-commit autoupdate
-pre-commit run --all-files
+.githooks/install.sh
 ```
 
 ### Generated Go code has compilation errors
@@ -550,7 +545,7 @@ on:
 - **Use semantic event names** aligned with BIAN
 - **Document schema changes** in commit messages
 - **Test with old and new consumers** during evolution
-- **Use pre-commit hooks** to catch issues early
+- **Use git hooks** to catch issues early (`.githooks/install.sh`)
 
 ### ❌ DON'T
 
@@ -567,7 +562,7 @@ on:
 - [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
 - [buf CLI Documentation](https://buf.build/docs/)
 - [BIAN Service Landscape](https://bian.org/servicelandscape-13-0-0/)
-- [Pre-commit Framework](https://pre-commit.com/)
+- [Git Hooks Documentation](./.githooks/README.md)
 
 ## Getting Help
 

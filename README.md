@@ -95,9 +95,8 @@ Install missing tools automatically (macOS/Linux):
    cd meridian
    go mod download
 
-   # Install pre-commit hooks for automated validation
-   pip install pre-commit
-   pre-commit install
+   # Install git hooks for automated validation
+   .githooks/install.sh
    ```
 
 2. **Create local Kubernetes cluster with local registry**:
