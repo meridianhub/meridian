@@ -181,8 +181,29 @@ spec:
             memory: 512Mi
 '''))
 
-# Kafka - Single broker with KRaft mode for local development
+# Kafka - 3-broker cluster with KRaft mode for local development
 # KRaft (Kafka Raft) replaces Zookeeper for metadata management
+# Multi-broker setup enables testing of:
+# - Partition replication and failover
+# - Leader election
+# - Quorum consensus
+# - Production-like scenarios in local dev
+#
+# Architecture:
+# - 3 brokers (kafka-0, kafka-1, kafka-2) each acting as both broker and controller
+# - KRaft quorum across all 3 nodes for metadata consensus
+# - Replication factor 2 for topics (allows 1 broker failure)
+# - Headless service for StatefulSet pod discovery
+# - Client service exposing kafka-0 as default endpoint
+#
+# Testing Failover:
+# 1. Create topic with RF=2: kubectl exec kafka-0 -- kafka-topics --create --topic test --partitions 3 --replication-factor 2 --bootstrap-server localhost:9092
+# 2. Describe topic: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
+# 3. Kill a broker: kubectl delete pod kafka-1
+# 4. Verify leadership transfer: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
+# 5. Produce/consume messages to verify data persists
+#
+# Resource Usage: ~1.5GB total (512MB per broker)
 k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
@@ -198,13 +219,33 @@ spec:
     targetPort: 9092
   selector:
     app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    app: kafka
+spec:
+  clusterIP: None
+  ports:
+  - name: broker
+    port: 9092
+    targetPort: 9092
+  - name: controller
+    port: 9093
+    targetPort: 9093
+  selector:
+    app: kafka
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: kafka
 spec:
-  replicas: 1
+  serviceName: kafka-headless
+  replicas: 3
   selector:
     matchLabels:
       app: kafka
@@ -219,39 +260,55 @@ spec:
         ports:
         - containerPort: 9092
           name: broker
+        - containerPort: 9093
+          name: controller
         env:
-        - name: KAFKA_NODE_ID
-          value: "1"
         - name: KAFKA_PROCESS_ROLES
           value: "broker,controller"
         - name: KAFKA_LISTENERS
           value: "PLAINTEXT://:9092,CONTROLLER://:9093"
-        - name: KAFKA_ADVERTISED_LISTENERS
-          value: "PLAINTEXT://kafka:9092"
         - name: KAFKA_CONTROLLER_LISTENER_NAMES
           value: "CONTROLLER"
         - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
           value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
         - name: KAFKA_CONTROLLER_QUORUM_VOTERS
-          value: "1@localhost:9093"
+          value: "1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093"
         - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
-          value: "1"
+          value: "2"
         - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-          value: "1"
+          value: "2"
         - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
           value: "1"
-        - name: KAFKA_LOG_DIRS
-          value: "/tmp/kraft-combined-logs"
+        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+          value: "2"
+        - name: KAFKA_MIN_INSYNC_REPLICAS
+          value: "1"
         - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
           value: "true"
         - name: KAFKA_HEAP_OPTS
-          value: "-Xms512M -Xmx512M"
+          value: "-Xms384M -Xmx384M"
         - name: CLUSTER_ID
           value: "MkU3OEVBNTcwNTJENDM2Qk"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - sh
+        - -c
+        - |
+          # Extract node ID from pod name (kafka-0 -> 1, kafka-1 -> 2, kafka-2 -> 3)
+          NODE_ID=$((${POD_NAME##*-} + 1))
+          export KAFKA_NODE_ID=$NODE_ID
+          export KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${POD_NAME}.kafka-headless:9092
+          export KAFKA_LOG_DIRS=/tmp/kraft-combined-logs
+
+          # Start Kafka
+          exec /opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/kraft/server.properties
         readinessProbe:
           tcpSocket:
             port: 9092
-          initialDelaySeconds: 10
+          initialDelaySeconds: 15
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 3
@@ -264,11 +321,11 @@ spec:
           failureThreshold: 3
         resources:
           requests:
-            cpu: 250m
-            memory: 512Mi
+            cpu: 200m
+            memory: 384Mi
           limits:
-            cpu: 1000m
-            memory: 1Gi
+            cpu: 500m
+            memory: 512Mi
 '''))
 
 # =============================================================================
@@ -319,7 +376,7 @@ k8s_resource(
   resource_deps=[
     'cockroachdb',
     'redis',
-    'kafka',
+    'kafka-cluster',
   ],
   labels=['app'],
   # Group RBAC and config resources under the main app
@@ -354,12 +411,21 @@ k8s_resource(
   resource_deps=[],
 )
 
-# Kafka resource (KRaft mode - no Zookeeper dependency)
+# Kafka cluster resources (3-broker KRaft cluster - no Zookeeper dependency)
+# Port forwarding to kafka-0 for client access
+# Individual pods visible in Tilt UI for monitoring cluster health
 k8s_resource(
   'kafka',
+  new_name='kafka-cluster',
   port_forwards='9092:9092',
   labels=['messaging'],
   resource_deps=[],
+  objects=[
+    'kafka:statefulset',
+    'kafka-headless:service',
+    'kafka:service',
+  ],
+  pod_readiness='wait',  # Wait for all 3 pods to be ready
 )
 
 # =============================================================================
@@ -402,11 +468,17 @@ Services:
   • Meridian gRPC    → localhost:9090
   • CockroachDB      → localhost:26257
   • Redis            → localhost:6379
-  • Kafka (KRaft)    → localhost:9092
+  • Kafka Cluster    → localhost:9092
+    - 3 brokers with KRaft quorum (kafka-0, kafka-1, kafka-2)
+    - Replication factor: 2 (tolerates 1 broker failure)
 
 Tilt UI              → http://localhost:10350
 
 Hot reload: Edit Go code and see changes in ~3 seconds
+
+Testing Kafka Failover:
+  kubectl delete pod kafka-1  # Kill broker
+  kubectl exec kafka-0 -- kafka-topics --describe --topic <topic> --bootstrap-server localhost:9092
 
 ========================================
 """)
