@@ -1,0 +1,209 @@
+name: Kafka Integration Tests
+
+# This workflow is resource-intensive and only runs on manual trigger.
+#
+# To run locally:
+#   tilt up                          # Start full 3-broker cluster
+#   tilt trigger kafka-health        # Run health check
+#   tilt trigger kafka-failover      # Run failover test
+#
+# To run via GitHub Actions:
+#   gh workflow run kafka-integration-tests.yml --repo meridianhub/meridian
+#   Or: Actions tab → "Kafka Integration Tests" → "Run workflow"
+#
+# Note: GitHub runners have limited resources (7GB RAM, 2 CPU).
+# The 3-broker cluster may timeout on standard runners.
+# Primary testing should be done locally with Tilt.
+
+on:
+  workflow_dispatch: # Manual trigger only - resource-intensive for GitHub runners
+
+jobs:
+  kafka-cluster-test:
+    name: Multi-Broker Kafka Cluster Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: kafka-test
+          wait: 5m
+
+      - name: Verify cluster
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Deploy Kafka cluster
+        run: |
+          # Extract just the Kafka YAML from Tiltfile and apply it
+          # This is a simplified approach - in production, you might use Helm or Kustomize
+
+          # For now, we'll apply the configuration directly
+          kubectl apply -f - <<'EOF'
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: kafka
+            labels:
+              app: kafka
+          spec:
+            type: ClusterIP
+            ports:
+            - name: broker
+              port: 9092
+              targetPort: 9092
+            selector:
+              app: kafka
+              statefulset.kubernetes.io/pod-name: kafka-0
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: kafka-headless
+            labels:
+              app: kafka
+          spec:
+            clusterIP: None
+            ports:
+            - name: broker
+              port: 9092
+              targetPort: 9092
+            - name: controller
+              port: 9093
+              targetPort: 9093
+            selector:
+              app: kafka
+          ---
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: kafka
+          spec:
+            serviceName: kafka-headless
+            replicas: 3
+            selector:
+              matchLabels:
+                app: kafka
+            template:
+              metadata:
+                labels:
+                  app: kafka
+              spec:
+                containers:
+                - name: kafka
+                  image: apache/kafka:3.9.1
+                  ports:
+                  - containerPort: 9092
+                    name: broker
+                  - containerPort: 9093
+                    name: controller
+                  env:
+                  # JVM heap settings
+                  - name: KAFKA_HEAP_OPTS
+                    value: "-Xms384M -Xmx384M"
+                  # Cluster ID for KRaft cluster membership (hardcoded for local dev consistency)
+                  - name: CLUSTER_ID
+                    value: "MkU3OEVBNTcwNTJENDM2Qk"
+                  # Pod name used to derive node ID dynamically
+                  - name: POD_NAME
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: metadata.name
+                  command:
+                  - sh
+                  - -c
+                  - |
+                    NODE_ID=$((${POD_NAME##*-} + 1))
+                    LOG_DIRS=/tmp/kraft-combined-logs
+                    CONFIG_FILE=/tmp/server-${POD_NAME}.properties
+
+                    echo "Generating server.properties for node ${NODE_ID}..."
+                    cat > ${CONFIG_FILE} << EOFCONFIG
+                    node.id=${NODE_ID}
+                    process.roles=broker,controller
+                    listeners=PLAINTEXT://:9092,CONTROLLER://:9093
+                    advertised.listeners=PLAINTEXT://${POD_NAME}.kafka-headless:9092
+                    controller.listener.names=CONTROLLER
+                    listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+                    controller.quorum.voters=1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093
+                    log.dirs=${LOG_DIRS}
+                    offsets.topic.replication.factor=2
+                    transaction.state.log.replication.factor=2
+                    transaction.state.log.min.isr=1
+                    default.replication.factor=2
+                    min.insync.replicas=1
+                    auto.create.topics.enable=true
+                    EOFCONFIG
+
+                    if [ ! -f ${LOG_DIRS}/meta.properties ]; then
+                      echo "Formatting KRaft storage for node ${NODE_ID}..."
+                      /opt/kafka/bin/kafka-storage.sh format -t ${CLUSTER_ID} -c ${CONFIG_FILE}
+                    fi
+
+                    exec /opt/kafka/bin/kafka-server-start.sh ${CONFIG_FILE}
+                  readinessProbe:
+                    tcpSocket:
+                      port: 9092
+                    initialDelaySeconds: 15
+                    periodSeconds: 5
+                    timeoutSeconds: 3
+                    failureThreshold: 3
+                  livenessProbe:
+                    tcpSocket:
+                      port: 9092
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 3
+                    failureThreshold: 3
+                  resources:
+                    requests:
+                      cpu: 200m
+                      memory: 384Mi
+                    limits:
+                      cpu: 500m
+                      memory: 512Mi
+          EOF
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y jq
+
+      - name: Wait for Kafka cluster
+        run: |
+          echo "Waiting for all 3 Kafka brokers to be ready..."
+          kubectl wait --for=condition=ready pod -l app=kafka --timeout=300s
+          kubectl get pods -l app=kafka
+
+      - name: Run cluster health check
+        run: |
+          chmod +x ./scripts/kafka-tests/cluster-health.sh
+          ./scripts/kafka-tests/cluster-health.sh
+
+      - name: Run failover test
+        run: |
+          chmod +x ./scripts/kafka-tests/failover-test.sh
+          ./scripts/kafka-tests/failover-test.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Kafka broker logs ==="
+          kubectl logs kafka-0 || true
+          kubectl logs kafka-1 || true
+          kubectl logs kafka-2 || true
+          echo "=== Pod status ==="
+          kubectl get pods -l app=kafka -o wide
+          echo "=== Pod descriptions ==="
+          kubectl describe pods -l app=kafka

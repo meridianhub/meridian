@@ -50,11 +50,26 @@ Reference specifications: BIAN Service Landscape 13.0.0
 - **API Protocol**: Protocol Buffers 3 + gRPC
 - **API Tooling**: buf CLI for linting and code generation
 - **Database**: CockroachDB or YugabyteDB (distributed SQL)
-- **Event Streaming**: Apache Kafka 3.x
+- **Event Streaming**: Apache Kafka 3.x (3-broker cluster with KRaft)
 - **Cache**: Redis 7.x
 - **Container Orchestration**: Kubernetes 1.28+
 - **Local Development**: Kind + ctlptl + Tilt for fast local Kubernetes workflows
 - **Observability**: OpenTelemetry, Prometheus, Grafana
+
+## System Requirements
+
+**Minimum**: 12GB RAM (may experience swap with other applications running)
+**Recommended**: 16GB RAM (comfortable development with IDE, browser, etc.)
+
+**Resource Breakdown**:
+- Kubernetes (Kind): ~1GB
+- CockroachDB: ~1-2GB
+- Kafka cluster (3 brokers): ~1.5GB
+- Redis: ~128MB
+- Meridian service: ~256MB
+- OS overhead: ~2GB
+
+**For 8GB RAM machines**: See [Resource-Constrained Development](docs/skills/tilt.md#resource-constrained-development) for single-broker Kafka configuration.
 
 ## Quick Start
 

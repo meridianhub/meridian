@@ -165,7 +165,10 @@ CurrentAccount Service (consumer):
 
 ### Kubernetes (Tilt for local dev)
 - 3 replicas of meridian service (CurrentAccount + FinancialAccounting)
-- 1 Kafka broker (KRaft mode, no Zookeeper)
+- 3 Kafka brokers (KRaft cluster with quorum, no Zookeeper)
+  - kafka-0, kafka-1, kafka-2 form KRaft quorum
+  - Replication factor: 2 (tolerates 1 broker failure)
+  - StatefulSet with headless service for pod discovery
 - 1 CockroachDB instance (distributed SQL)
 - 1 Redis instance (future: caching/sessions)
 
@@ -174,12 +177,16 @@ CurrentAccount Service (consumer):
 - **Separate databases** per service (no shared DB)
 - **Atlas migrations**: Schema as code, versioned
 
-### Kafka
+### Kafka Cluster
 - **Version**: 3.9.1
-- **Mode**: KRaft (no Zookeeper)
+- **Mode**: KRaft quorum (no Zookeeper)
+- **Brokers**: 3 (kafka-0, kafka-1, kafka-2)
 - **Topics**: Auto-created
 - **Partitions**: 3 per topic
-- **Replication**: 1 (single broker for dev)
+- **Replication**: 2 (allows 1 broker failure)
+- **Deployment**: StatefulSet for stable pod identities
+- **Discovery**: Headless service (kafka-headless) for broker communication
+- **Client access**: ClusterIP service (kafka) pointing to kafka-0
 
 ---
 
