@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/meridianhub/meridian/internal/current-account/domain"
@@ -97,7 +98,7 @@ func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) 
 		return nil, result.Error
 	}
 
-	return toDomain(&entity), nil
+	return toDomain(&entity)
 }
 
 // FindByIBAN retrieves an account by its IBAN
@@ -113,7 +114,7 @@ func (r *Repository) FindByIBAN(iban string) (*domain.CurrentAccount, error) {
 		return nil, result.Error
 	}
 
-	return toDomain(&entity), nil
+	return toDomain(&entity)
 }
 
 // FindByCustomerID retrieves all accounts for a customer
@@ -125,9 +126,13 @@ func (r *Repository) FindByCustomerID(customerID string) ([]*domain.CurrentAccou
 		return nil, result.Error
 	}
 
-	accounts := make([]*domain.CurrentAccount, len(entities))
-	for i, entity := range entities {
-		accounts[i] = toDomain(&entity)
+	accounts := make([]*domain.CurrentAccount, 0, len(entities))
+	for _, entity := range entities {
+		account, err := toDomain(&entity)
+		if err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, account)
 	}
 
 	return accounts, nil
@@ -162,11 +167,22 @@ func toEntity(account *domain.CurrentAccount) *CurrentAccountEntity {
 }
 
 // toDomain converts database entity to domain model
-func toDomain(entity *CurrentAccountEntity) *domain.CurrentAccount {
-	// Use NewMoney constructor - ignoring errors as DB values are already validated
-	balance, _ := domain.NewMoney(entity.Currency, entity.BalanceCents)
-	availableBalance, _ := domain.NewMoney(entity.Currency, entity.AvailableBalanceCents)
-	overdraftLimit, _ := domain.NewMoney(entity.Currency, entity.OverdraftLimitCents)
+func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
+	// Use NewMoney constructor - errors indicate data corruption
+	balance, err := domain.NewMoney(entity.Currency, entity.BalanceCents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create balance from database: %w", err)
+	}
+
+	availableBalance, err := domain.NewMoney(entity.Currency, entity.AvailableBalanceCents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create available balance from database: %w", err)
+	}
+
+	overdraftLimit, err := domain.NewMoney(entity.Currency, entity.OverdraftLimitCents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create overdraft limit from database: %w", err)
+	}
 
 	return &domain.CurrentAccount{
 		ID:                    entity.ID,
@@ -183,5 +199,5 @@ func toDomain(entity *CurrentAccountEntity) *domain.CurrentAccount {
 		Version:               entity.Version,
 		CreatedAt:             entity.CreatedAt,
 		UpdatedAt:             entity.UpdatedAt,
-	}
+	}, nil
 }

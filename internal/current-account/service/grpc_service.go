@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,8 +86,7 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
 	// Validate overflow: Units*100 must not overflow int64
-	const maxUnits = (1<<63 - 1) / 100 // Max safe units before overflow
-	if req.Amount.Amount.Units > maxUnits || req.Amount.Amount.Units < -maxUnits {
+	if req.Amount.Amount.Units > math.MaxInt64/100 || req.Amount.Amount.Units < math.MinInt64/100 {
 		return nil, status.Errorf(codes.InvalidArgument,
 			"amount too large: units %d would overflow", req.Amount.Amount.Units)
 	}
@@ -96,7 +96,18 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 	// Round nanos to nearest cent (0.5 rounds up)
 	nanosCents := (req.Amount.Amount.Nanos + 5000000) / 10000000
 
-	amount, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, unitsCents+int64(nanosCents))
+	// Use Money.Add to safely handle potential overflow from adding nanosCents
+	centsMoney, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, unitsCents)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+	}
+
+	nanosMoney, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, int64(nanosCents))
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+	}
+
+	amount, err := centsMoney.Add(nanosMoney)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
 	}
