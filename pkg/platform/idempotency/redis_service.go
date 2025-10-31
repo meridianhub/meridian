@@ -285,7 +285,7 @@ func fromProto(pb *platformv1.IdempotencyResult) (*Result, error) {
 
 	// Validate that status is one of the defined constants
 	if status != StatusPending && status != StatusCompleted && status != StatusFailed {
-		return nil, fmt.Errorf("invalid operation status from proto: %v", pb.Status)
+		return nil, fmt.Errorf("%w from proto: %v", ErrInvalidStatus, pb.Status)
 	}
 
 	return &Result{

@@ -197,6 +197,7 @@ func TestErrors_AreDistinct(t *testing.T) {
 		ErrResultNotFound,
 		ErrEmptyToken,
 		ErrInvalidTTL,
+		ErrInvalidStatus,
 	}
 
 	errorSet := make(map[string]bool)
@@ -208,7 +209,7 @@ func TestErrors_AreDistinct(t *testing.T) {
 		errorSet[msg] = true
 	}
 
-	if len(errorSet) != 7 {
-		t.Errorf("Expected 7 distinct errors, got %d", len(errorSet))
+	if len(errorSet) != 8 {
+		t.Errorf("Expected 8 distinct errors, got %d", len(errorSet))
 	}
 }

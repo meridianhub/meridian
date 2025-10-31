@@ -28,6 +28,9 @@ var (
 
 	// ErrInvalidTTL indicates TTL is zero or negative
 	ErrInvalidTTL = errors.New("TTL must be greater than zero")
+
+	// ErrInvalidStatus indicates an invalid or unknown operation status
+	ErrInvalidStatus = errors.New("invalid operation status")
 )
 
 // Key represents an idempotency key with namespace and operation context
