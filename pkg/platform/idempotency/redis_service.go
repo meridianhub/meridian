@@ -53,6 +53,8 @@ func (r *RedisService) Check(ctx context.Context, key Key) (*Result, error) {
 	}
 
 	// If operation was completed, return the cached result
+	// Note: Between checking status and returning, the key could theoretically expire
+	// (unlikely with typical TTLs of hours/days, but documented for completeness)
 	if result.Status == StatusCompleted {
 		return result, ErrOperationAlreadyProcessed
 	}
@@ -185,9 +187,12 @@ func (r *RedisService) Release(ctx context.Context, key Key, token string) error
 		return fmt.Errorf("failed to release lock: %w", err)
 	}
 
-	// Check if lock was actually released
+	// Check if lock was actually released (defensive type assertion)
 	deleted, ok := result.(int64)
-	if !ok || deleted == 0 {
+	if !ok {
+		return fmt.Errorf("unexpected redis response type: %T (expected int64)", result)
+	}
+	if deleted == 0 {
 		return ErrLockNotHeld
 	}
 
@@ -220,9 +225,12 @@ func (r *RedisService) Refresh(ctx context.Context, key Key, token string, ttl t
 		return fmt.Errorf("failed to refresh lock: %w", err)
 	}
 
-	// Check if lock was actually refreshed
+	// Check if lock was actually refreshed (defensive type assertion)
 	refreshed, ok := result.(int64)
-	if !ok || refreshed == 0 {
+	if !ok {
+		return fmt.Errorf("unexpected redis response type: %T (expected int64)", result)
+	}
+	if refreshed == 0 {
 		return ErrLockNotHeld
 	}
 
