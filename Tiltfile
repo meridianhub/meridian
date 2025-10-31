@@ -303,6 +303,17 @@ spec:
           export KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${POD_NAME}.kafka-headless:9092
           export KAFKA_LOG_DIRS=/tmp/kraft-combined-logs
 
+          # Format KRaft storage if not already formatted
+          # The meta.properties file indicates storage has been initialized
+          if [ ! -f $KAFKA_LOG_DIRS/meta.properties ]; then
+            echo "Formatting KRaft storage for node $KAFKA_NODE_ID..."
+            /opt/kafka/bin/kafka-storage.sh format \
+              -t $CLUSTER_ID \
+              -c /opt/kafka/config/kraft/server.properties
+          else
+            echo "KRaft storage already formatted for node $KAFKA_NODE_ID"
+          fi
+
           # Start Kafka
           exec /opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/kraft/server.properties
         readinessProbe:
