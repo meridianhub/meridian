@@ -28,12 +28,6 @@ const (
 	AccountStatusClosed AccountStatus = "CLOSED"
 )
 
-// Money represents a monetary amount with currency
-type Money struct {
-	AmountCents int64
-	Currency    string
-}
-
 // CurrentAccount represents a BIAN current account facility domain model
 type CurrentAccount struct {
 	ID                    uuid.UUID
@@ -55,36 +49,29 @@ type CurrentAccount struct {
 // NewCurrentAccount creates a new current account
 func NewCurrentAccount(accountID, iban, customerID, currency string) *CurrentAccount {
 	now := time.Now()
+	zeroMoney, _ := NewMoney(currency, 0) // Safe: currency validated by caller
+
 	return &CurrentAccount{
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AccountIdentification: iban,
 		CustomerID:            customerID,
-		Balance: Money{
-			AmountCents: 0,
-			Currency:    currency,
-		},
-		AvailableBalance: Money{
-			AmountCents: 0,
-			Currency:    currency,
-		},
-		Status: AccountStatusActive,
-		OverdraftLimit: Money{
-			AmountCents: 0,
-			Currency:    currency,
-		},
-		OverdraftEnabled: false,
-		OverdraftRate:    0,
-		BalanceUpdatedAt: now,
-		Version:          1,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		Balance:               zeroMoney,
+		AvailableBalance:      zeroMoney,
+		Status:                AccountStatusActive,
+		OverdraftLimit:        zeroMoney,
+		OverdraftEnabled:      false,
+		OverdraftRate:         0,
+		BalanceUpdatedAt:      now,
+		Version:               1,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 }
 
 // Deposit adds funds to the account
 func (a *CurrentAccount) Deposit(amount Money) error {
-	if amount.AmountCents <= 0 {
+	if !amount.IsPositive() {
 		return ErrInvalidAmount
 	}
 
@@ -96,11 +83,17 @@ func (a *CurrentAccount) Deposit(amount Money) error {
 		return ErrAccountClosed
 	}
 
-	if amount.Currency != a.Balance.Currency {
+	if amount.Currency() != a.Balance.Currency() {
 		return ErrCurrencyMismatch
 	}
 
-	a.Balance.AmountCents += amount.AmountCents
+	// Use immutable Add method
+	newBalance, err := a.Balance.Add(amount)
+	if err != nil {
+		return err
+	}
+
+	a.Balance = newBalance
 	a.calculateAvailableBalance()
 
 	now := time.Now()
@@ -112,7 +105,7 @@ func (a *CurrentAccount) Deposit(amount Money) error {
 
 // Withdraw removes funds from the account
 func (a *CurrentAccount) Withdraw(amount Money) error {
-	if amount.AmountCents <= 0 {
+	if !amount.IsPositive() {
 		return ErrInvalidAmount
 	}
 
@@ -124,16 +117,22 @@ func (a *CurrentAccount) Withdraw(amount Money) error {
 		return ErrAccountClosed
 	}
 
-	if amount.Currency != a.Balance.Currency {
+	if amount.Currency() != a.Balance.Currency() {
 		return ErrCurrencyMismatch
 	}
 
 	// Check if sufficient funds (including overdraft)
-	if amount.AmountCents > a.AvailableBalance.AmountCents {
+	if amount.AmountCents() > a.AvailableBalance.AmountCents() {
 		return ErrInsufficientFunds
 	}
 
-	a.Balance.AmountCents -= amount.AmountCents
+	// Use immutable Subtract method
+	newBalance, err := a.Balance.Subtract(amount)
+	if err != nil {
+		return err
+	}
+
+	a.Balance = newBalance
 	a.calculateAvailableBalance()
 
 	now := time.Now()
@@ -146,9 +145,11 @@ func (a *CurrentAccount) Withdraw(amount Money) error {
 // calculateAvailableBalance updates available balance based on overdraft settings
 func (a *CurrentAccount) calculateAvailableBalance() {
 	if a.OverdraftEnabled {
-		a.AvailableBalance.AmountCents = a.Balance.AmountCents + a.OverdraftLimit.AmountCents
+		// Use immutable Add method
+		newAvail, _ := a.Balance.Add(a.OverdraftLimit) // Safe: same currency
+		a.AvailableBalance = newAvail
 	} else {
-		a.AvailableBalance.AmountCents = a.Balance.AmountCents
+		a.AvailableBalance = a.Balance
 	}
 }
 
@@ -183,7 +184,7 @@ func (a *CurrentAccount) Close() error {
 
 // SetOverdraftLimit configures the overdraft facility
 func (a *CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled bool) error {
-	if limit.Currency != a.Balance.Currency {
+	if limit.Currency() != a.Balance.Currency() {
 		return ErrCurrencyMismatch
 	}
 
