@@ -41,6 +41,10 @@ type ProtoConsumer struct {
 	handlerTimeout time.Duration
 	// enableAutoCommit indicates whether Kafka handles commits automatically
 	enableAutoCommit bool
+	// dlqProducer handles failed messages (optional, may be nil)
+	dlqProducer *DLQProducer
+	// dlqConfig contains DLQ behavior configuration
+	dlqConfig *DLQConfig
 	// wg tracks the Subscribe goroutine for graceful shutdown
 	wg sync.WaitGroup
 	// ctx provides cancellation signal for graceful shutdown
@@ -70,6 +74,12 @@ type ConsumerConfig struct {
 	// HandlerTimeout is the maximum duration for processing a single message.
 	// Default: 30s. Handlers exceeding this timeout will be cancelled.
 	HandlerTimeout time.Duration
+	// DLQProducer is an optional dead letter queue producer for failed messages.
+	// If nil, DLQ functionality is disabled and errors are only logged.
+	DLQProducer *DLQProducer
+	// DLQConfig contains DLQ behavior configuration (retry count, backoff, etc.).
+	// Only used if DLQProducer is not nil.
+	DLQConfig *DLQConfig
 }
 
 var (
@@ -143,6 +153,8 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 		pollTimeout:      config.PollTimeout,
 		handlerTimeout:   config.HandlerTimeout,
 		enableAutoCommit: config.EnableAutoCommit,
+		dlqProducer:      config.DLQProducer,
+		dlqConfig:        config.DLQConfig,
 		ctx:              ctx,
 		cancel:           cancel,
 	}, nil
@@ -196,19 +208,16 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 				return fmt.Errorf("consumer error: %w", err)
 			}
 
-			// Process message
-			if err := c.processMessage(msg); err != nil {
+			// Process message with retry and DLQ support
+			if err := c.processMessageWithRetry(msg); err != nil {
 				// Log error with full context for debugging and monitoring
-				log.Printf("ERROR: Failed to process message from topic=%s partition=%d offset=%d: %v",
+				log.Printf("ERROR: Failed to process message from topic=%s partition=%d offset=%d after all retries: %v",
 					*msg.TopicPartition.Topic,
 					msg.TopicPartition.Partition,
 					msg.TopicPartition.Offset,
 					err)
-				// Continue consuming - consider implementing:
-				// - Dead letter queue for poison messages
-				// - Exponential backoff retry policy
-				// - Circuit breaker for downstream service failures
-				// - Metrics/alerting for failure rates
+				// If DLQ is not configured, just continue consuming
+				// The error has been logged for monitoring/alerting
 				continue
 			}
 
@@ -254,6 +263,101 @@ func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 		return fmt.Errorf("handler error: %w", err)
 	}
 
+	return nil
+}
+
+// processMessageWithRetry attempts to process a message with configurable retry and DLQ support.
+// This method implements exponential backoff retry logic and sends failed messages to DLQ after
+// exhausting all retry attempts.
+//
+// Behavior:
+//   - If DLQ is not configured: Attempts processing once, returns error on failure
+//   - If DLQ is configured: Retries up to MaxRetries times with exponential backoff,
+//     sends to DLQ after exhausting retries, returns nil (message handled)
+//
+// Returns an error only if:
+// - DLQ is not configured and processing fails
+// - DLQ publishing fails (rare - indicates infrastructure issue)
+func (c *ProtoConsumer) processMessageWithRetry(kafkaMsg *kafka.Message) error {
+	// If DLQ is not configured, use simple processing with no retry
+	if c.dlqProducer == nil || c.dlqConfig == nil {
+		return c.processMessage(kafkaMsg)
+	}
+
+	var lastErr error
+	firstFailureTime := time.Now()
+	maxRetries := c.dlqConfig.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = 3 // Default to 3 retries
+	}
+
+	// Attempt processing with retries
+	for attempt := int32(1); attempt <= maxRetries; attempt++ {
+		err := c.processMessage(kafkaMsg)
+		if err == nil {
+			// Success! Message processed
+			return nil
+		}
+
+		lastErr = err
+		log.Printf("WARN: Message processing attempt %d/%d failed for topic=%s partition=%d offset=%d: %v",
+			attempt, maxRetries,
+			*kafkaMsg.TopicPartition.Topic,
+			kafkaMsg.TopicPartition.Partition,
+			kafkaMsg.TopicPartition.Offset,
+			err)
+
+		// If this wasn't the last attempt, wait before retrying
+		if attempt < maxRetries {
+			backoff := c.dlqConfig.CalculateBackoff(attempt)
+			log.Printf("INFO: Retrying after %v backoff", backoff)
+
+			// Use select to respect shutdown signal during backoff
+			select {
+			case <-time.After(backoff):
+				// Continue to next retry
+			case <-c.ctx.Done():
+				// Consumer is shutting down, don't retry
+				return fmt.Errorf("retry cancelled due to shutdown: %w", lastErr)
+			}
+		}
+	}
+
+	// All retries exhausted, send to DLQ
+	log.Printf("ERROR: All %d retry attempts exhausted for topic=%s partition=%d offset=%d, sending to DLQ",
+		maxRetries,
+		*kafkaMsg.TopicPartition.Topic,
+		kafkaMsg.TopicPartition.Partition,
+		kafkaMsg.TopicPartition.Offset)
+
+	// Create context with timeout for DLQ publishing
+	dlqCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Send to DLQ with full metadata
+	if err := c.dlqProducer.PublishFailedMessage(
+		dlqCtx,
+		kafkaMsg,
+		lastErr,
+		maxRetries,
+		firstFailureTime,
+	); err != nil {
+		// DLQ publishing failed - this is a critical error
+		// Log and return error to prevent offset commit
+		log.Printf("CRITICAL: Failed to publish message to DLQ for topic=%s partition=%d offset=%d: %v",
+			*kafkaMsg.TopicPartition.Topic,
+			kafkaMsg.TopicPartition.Partition,
+			kafkaMsg.TopicPartition.Offset,
+			err)
+		return fmt.Errorf("DLQ publishing failed: %w", err)
+	}
+
+	log.Printf("INFO: Message successfully sent to DLQ for topic=%s partition=%d offset=%d",
+		*kafkaMsg.TopicPartition.Topic,
+		kafkaMsg.TopicPartition.Partition,
+		kafkaMsg.TopicPartition.Offset)
+
+	// Message handled (sent to DLQ), return nil to allow offset commit
 	return nil
 }
 
