@@ -516,6 +516,8 @@ func (m Money) Add(other Money) Money {
 
 **Principle**: Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious inputs.
 
+> 📖 **See [ADR-008: Defensive Testing Standards](docs/adr/0008-defensive-testing-standards.md)** for comprehensive guidelines, examples, and rationale.
+
 We follow **defensive testing** practices:
 
 1. **Happy Path Testing**: Verify expected behavior with valid inputs
