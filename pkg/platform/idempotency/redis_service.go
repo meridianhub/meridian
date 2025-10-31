@@ -47,7 +47,10 @@ func (r *RedisService) Check(ctx context.Context, key Key) (*Result, error) {
 	}
 
 	// Convert protobuf to domain model
-	result := fromProto(&pbResult)
+	result, err := fromProto(&pbResult)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert result from proto: %w", err)
+	}
 
 	// If operation was completed, return the cached result
 	if result.Status == StatusCompleted {
@@ -272,10 +275,17 @@ func toProto(result Result) *platformv1.IdempotencyResult {
 }
 
 // fromProto converts protobuf to Result
-func fromProto(pb *platformv1.IdempotencyResult) *Result {
+func fromProto(pb *platformv1.IdempotencyResult) (*Result, error) {
 	var completedAt time.Time
 	if pb.CompletedAt != nil {
 		completedAt = pb.CompletedAt.AsTime()
+	}
+
+	status := statusFromProto(pb.Status)
+
+	// Validate that status is one of the defined constants
+	if status != StatusPending && status != StatusCompleted && status != StatusFailed {
+		return nil, fmt.Errorf("invalid operation status from proto: %v", pb.Status)
 	}
 
 	return &Result{
@@ -285,12 +295,12 @@ func fromProto(pb *platformv1.IdempotencyResult) *Result {
 			EntityID:  pb.EntityId,
 			RequestID: pb.RequestId,
 		},
-		Status:      statusFromProto(pb.Status),
+		Status:      status,
 		Data:        pb.Data,
 		Error:       pb.Error,
 		CompletedAt: completedAt,
 		TTL:         time.Duration(pb.TtlSeconds) * time.Second,
-	}
+	}, nil
 }
 
 // statusToProto converts OperationStatus to protobuf enum

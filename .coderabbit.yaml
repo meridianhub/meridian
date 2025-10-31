@@ -7,12 +7,11 @@ reviews:
     - develop
     - main
 
-  # Exclude generated files from code review
+  # Exclude generated files from code review (! prefix = exclude pattern)
   path_filters:
-    exclude:
-      - "**/*.pb.go"
-      - "**/*.pb.validate.go"
-      - "**/*_grpc.pb.go"
+    - "!**/*.pb.go"
+    - "!**/*.pb.validate.go"
+    - "!**/*_grpc.pb.go"
 
   # Disable high-level summary/poem - focus on inline code review only
   high_level_summary: false
