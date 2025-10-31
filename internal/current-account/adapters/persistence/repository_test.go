@@ -3,8 +3,11 @@ package persistence
 import (
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -250,4 +253,106 @@ func TestOptimisticLocking(t *testing.T) {
 	if final.Version != 2 {
 		t.Errorf("Expected version 2, got %d", final.Version)
 	}
+}
+
+// Defensive tests for toDomain error handling per ADR-008
+
+func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
+	// Test: Empty currency in database should return error, not silently create invalid Money
+	entity := &CurrentAccountEntity{
+		ID:                    uuid.New(),
+		AccountID:             "ACC-001",
+		AccountIdentification: "GB82WEST12345698765432",
+		CustomerID:            "CUST-001",
+		BalanceCents:          10000,
+		AvailableBalanceCents: 10000,
+		Currency:              "", // Invalid: empty currency
+		Status:                "ACTIVE",
+		OverdraftLimitCents:   0,
+		OverdraftEnabled:      false,
+		OverdraftRate:         0,
+		BalanceUpdatedAt:      time.Now(),
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+
+	_, err := toDomain(entity)
+
+	assert.Error(t, err, "toDomain should fail with empty currency")
+	assert.Contains(t, err.Error(), "balance", "Error should indicate which field failed")
+	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
+}
+
+func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	// Manually insert corrupted data (empty currency) into database
+	entity := &CurrentAccountEntity{
+		ID:                    uuid.New(),
+		AccountID:             "ACC-CORRUPT",
+		AccountIdentification: "GB82WEST12345698765432",
+		CustomerID:            "CUST-001",
+		BalanceCents:          10000,
+		AvailableBalanceCents: 10000,
+		Currency:              "", // Corrupted: empty currency
+		Status:                "ACTIVE",
+		OverdraftLimitCents:   0,
+		OverdraftEnabled:      false,
+		OverdraftRate:         0,
+		BalanceUpdatedAt:      time.Now(),
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+
+	result := db.Create(entity)
+	require.NoError(t, result.Error, "Setup: Should be able to insert corrupted data")
+
+	// Now try to retrieve it - should fail gracefully
+	_, err := repo.FindByID("ACC-CORRUPT")
+
+	assert.Error(t, err, "FindByID should fail with corrupted currency")
+	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
+}
+
+func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	// Insert one valid account and one corrupted account for same customer
+	validAccount, err := domain.NewCurrentAccount("ACC-VALID", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(validAccount))
+
+	// Manually insert corrupted account
+	corruptedEntity := &CurrentAccountEntity{
+		ID:                    uuid.New(),
+		AccountID:             "ACC-CORRUPT",
+		AccountIdentification: "GB82WEST99999999999999",
+		CustomerID:            "CUST-001", // Same customer
+		BalanceCents:          5000,
+		AvailableBalanceCents: 5000,
+		Currency:              "", // Corrupted
+		Status:                "ACTIVE",
+		OverdraftLimitCents:   0,
+		OverdraftEnabled:      false,
+		OverdraftRate:         0,
+		BalanceUpdatedAt:      time.Now(),
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+	require.NoError(t, db.Create(corruptedEntity).Error)
+
+	// FindByCustomerID should fail on first corrupted record
+	_, err = repo.FindByCustomerID("CUST-001")
+
+	assert.Error(t, err, "FindByCustomerID should fail when any account is corrupted")
+	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
 }

@@ -437,3 +437,120 @@ func TestToMoneyAmount(t *testing.T) {
 		})
 	}
 }
+
+// Defensive tests for overflow scenarios per ADR-008
+
+func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := NewService(repo)
+
+	// Create account
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(account))
+
+	// Test: Units value that would overflow when multiplied by 100
+	tests := []struct {
+		name      string
+		units     int64
+		wantErr   bool
+		rationale string
+	}{
+		{
+			name:      "max safe units",
+			units:     92233720368547758, // MaxInt64/100
+			wantErr:   false,
+			rationale: "Boundary value: should succeed at conversion",
+		},
+		{
+			name:      "overflow positive units",
+			units:     92233720368547759, // MaxInt64/100 + 1
+			wantErr:   true,
+			rationale: "Units * 100 would overflow int64",
+		},
+		{
+			name:      "min safe units",
+			units:     -92233720368547758, // MinInt64/100
+			wantErr:   false,
+			rationale: "Boundary value: should succeed at conversion",
+		},
+		{
+			name:      "overflow negative units",
+			units:     -92233720368547759, // MinInt64/100 - 1
+			wantErr:   true,
+			rationale: "Units * 100 would underflow int64",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &pb.ExecuteDepositRequest{
+				AccountId: "ACC-001",
+				Amount: &commonpb.MoneyAmount{
+					Amount: &money.Money{
+						CurrencyCode: "GBP",
+						Units:        tt.units,
+						Nanos:        0,
+					},
+				},
+			}
+
+			_, err := svc.ExecuteDeposit(context.Background(), req)
+
+			if tt.wantErr {
+				require.Error(t, err, tt.rationale)
+				st, ok := status.FromError(err)
+				require.True(t, ok, "Expected gRPC status error")
+				if st.Code() != codes.InvalidArgument {
+					t.Errorf("Expected InvalidArgument, got %v", st.Code())
+				}
+				if !strings.Contains(st.Message(), "overflow") {
+					t.Errorf("Error should mention overflow, got: %s", st.Message())
+				}
+			} else {
+				// Note: Large amounts may still cause Money.Add overflow
+				// but the conversion itself should not panic
+				if err != nil {
+					t.Logf("Operation failed (expected for boundary values): %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := NewService(repo)
+
+	// Create account
+	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(account))
+
+	// Test: Large units + nanos uses Money.Add() safely
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        92233720368547758, // MaxInt64/100
+				Nanos:        990000000,         // 99 cents when rounded
+			},
+		},
+	}
+
+	// This should not panic - Money.Add will detect if overflow occurs
+	_, err = svc.ExecuteDeposit(context.Background(), req)
+	// We expect this to fail with overflow error from Money.Add, not panic
+	if err != nil {
+		st, ok := status.FromError(err)
+		require.True(t, ok, "Expected gRPC status error, got: %v", err)
+		t.Logf("Safely handled large amount: %v (code: %v)", st.Message(), st.Code())
+	}
+}
