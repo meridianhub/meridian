@@ -18,16 +18,24 @@ This will copy the hooks to your `.git/hooks/` directory.
 
 Runs before each commit to ensure code quality:
 
-1. **gofumpt**: Formats all staged Go files with stricter formatting rules
-2. **golangci-lint**: Lints all staged Go files against project standards
+#### Proto File Validation
+1. **buf lint**: Validates proto file style and correctness
+2. **buf breaking**: Checks for breaking schema changes against develop branch
+
+#### Go File Validation
+3. **gofumpt**: Formats all staged Go files with stricter formatting rules
+4. **golangci-lint**: Lints all staged Go files against project standards
 
 If any check fails, the commit will be blocked. Fix the issues and try again.
+
+**Proto Evolution**: For guidance on safe schema changes, see `docs/skills/schema-evolution.md`
 
 ## Automatic Tool Installation
 
 The pre-commit hook will automatically install missing tools:
-- `gofumpt` - via `go install`
-- `golangci-lint v2.5.0` - via official install script
+- `buf` - via `go install` (for proto validation)
+- `gofumpt` - via `go install` (for Go formatting)
+- `golangci-lint v2.5.0` - via official install script (for Go linting)
 
 ## Skipping Hooks (Emergency Only)
 
@@ -67,5 +75,16 @@ curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/insta
 ## CI Integration
 
 These hooks run the same checks as our GitHub Actions CI:
-- `.github/workflows/lint.yml` - Matches hook checks
+- `.github/workflows/lint.yml` - Matches Go linting checks
+- `.github/workflows/proto.yml` - Matches proto validation checks
 - Ensures commits that pass locally will pass CI
+
+## Schema Evolution Workflow
+
+When modifying proto files, the hook will:
+1. Check style with `buf lint`
+2. Verify compatibility with `buf breaking --against develop`
+3. Block commit if breaking changes detected
+4. Provide helpful tips for safe evolution patterns
+
+For detailed guidance, see `docs/skills/schema-evolution.md`
