@@ -1,0 +1,241 @@
+name: Kafka Integration Tests
+
+on:
+  pull_request:
+    paths:
+      - 'Tiltfile'
+      - 'scripts/kafka-tests/**'
+      - '.github/workflows/kafka-integration-tests.yml'
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'Tiltfile'
+      - 'scripts/kafka-tests/**'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  kafka-cluster-test:
+    name: Multi-Broker Kafka Cluster Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: kafka-test
+          wait: 5m
+
+      - name: Verify cluster
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Deploy Kafka cluster
+        run: |
+          # Extract just the Kafka YAML from Tiltfile and apply it
+          # This is a simplified approach - in production, you might use Helm or Kustomize
+
+          # For now, we'll apply the configuration directly
+          kubectl apply -f - <<'EOF'
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: kafka
+            labels:
+              app: kafka
+          spec:
+            type: ClusterIP
+            ports:
+            - name: broker
+              port: 9092
+              targetPort: 9092
+            selector:
+              app: kafka
+              statefulset.kubernetes.io/pod-name: kafka-0
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: kafka-headless
+            labels:
+              app: kafka
+          spec:
+            clusterIP: None
+            ports:
+            - name: broker
+              port: 9092
+              targetPort: 9092
+            - name: controller
+              port: 9093
+              targetPort: 9093
+            selector:
+              app: kafka
+          ---
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: kafka
+          spec:
+            serviceName: kafka-headless
+            replicas: 3
+            selector:
+              matchLabels:
+                app: kafka
+            template:
+              metadata:
+                labels:
+                  app: kafka
+              spec:
+                containers:
+                - name: kafka
+                  image: apache/kafka:3.9.1
+                  ports:
+                  - containerPort: 9092
+                    name: broker
+                  - containerPort: 9093
+                    name: controller
+                  env:
+                  - name: KAFKA_PROCESS_ROLES
+                    value: "broker,controller"
+                  - name: KAFKA_LISTENERS
+                    value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+                  - name: KAFKA_CONTROLLER_LISTENER_NAMES
+                    value: "CONTROLLER"
+                  - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+                    value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+                  - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+                    value: "1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093"
+                  - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+                    value: "2"
+                  - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+                    value: "2"
+                  - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+                    value: "1"
+                  - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+                    value: "2"
+                  - name: KAFKA_MIN_INSYNC_REPLICAS
+                    value: "1"
+                  - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+                    value: "true"
+                  - name: KAFKA_HEAP_OPTS
+                    value: "-Xms384M -Xmx384M"
+                  - name: CLUSTER_ID
+                    value: "MkU3OEVBNTcwNTJENDM2Qk"
+                  - name: POD_NAME
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: metadata.name
+                  command:
+                  - sh
+                  - -c
+                  - |
+                    NODE_ID=$((${POD_NAME##*-} + 1))
+                    LOG_DIRS=/tmp/kraft-combined-logs
+                    CONFIG_FILE=/tmp/server-${POD_NAME}.properties
+
+                    echo "Generating server.properties for node ${NODE_ID}..."
+                    cat > ${CONFIG_FILE} << EOFCONFIG
+                    node.id=${NODE_ID}
+                    process.roles=broker,controller
+                    listeners=PLAINTEXT://:9092,CONTROLLER://:9093
+                    advertised.listeners=PLAINTEXT://${POD_NAME}.kafka-headless:9092
+                    controller.listener.names=CONTROLLER
+                    listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+                    controller.quorum.voters=1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093
+                    log.dirs=${LOG_DIRS}
+                    offsets.topic.replication.factor=2
+                    transaction.state.log.replication.factor=2
+                    transaction.state.log.min.isr=1
+                    default.replication.factor=2
+                    min.insync.replicas=1
+                    auto.create.topics.enable=true
+                    EOFCONFIG
+
+                    if [ ! -f ${LOG_DIRS}/meta.properties ]; then
+                      echo "Formatting KRaft storage for node ${NODE_ID}..."
+                      /opt/kafka/bin/kafka-storage.sh format -t ${CLUSTER_ID} -c ${CONFIG_FILE}
+                    fi
+
+                    exec /opt/kafka/bin/kafka-server-start.sh ${CONFIG_FILE}
+                  readinessProbe:
+                    tcpSocket:
+                      port: 9092
+                    initialDelaySeconds: 15
+                    periodSeconds: 5
+                    timeoutSeconds: 3
+                    failureThreshold: 3
+                  livenessProbe:
+                    tcpSocket:
+                      port: 9092
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 3
+                    failureThreshold: 3
+                  resources:
+                    requests:
+                      cpu: 200m
+                      memory: 384Mi
+                    limits:
+                      cpu: 500m
+                      memory: 512Mi
+          EOF
+
+      - name: Wait for Kafka cluster
+        run: |
+          echo "Waiting for all 3 Kafka brokers to be ready..."
+          kubectl wait --for=condition=ready pod -l app=kafka --timeout=300s
+          kubectl get pods -l app=kafka
+
+      - name: Run cluster health check
+        run: |
+          chmod +x ./scripts/kafka-tests/cluster-health.sh
+          ./scripts/kafka-tests/cluster-health.sh
+
+      - name: Run failover test
+        run: |
+          chmod +x ./scripts/kafka-tests/failover-test.sh
+          ./scripts/kafka-tests/failover-test.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Kafka broker logs ==="
+          kubectl logs kafka-0 || true
+          kubectl logs kafka-1 || true
+          kubectl logs kafka-2 || true
+          echo "=== Pod status ==="
+          kubectl get pods -l app=kafka -o wide
+          echo "=== Pod descriptions ==="
+          kubectl describe pods -l app=kafka
+
+  tiltfile-validation:
+    name: Validate Tiltfile Kafka Configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Tilt
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
+
+      - name: Validate Tiltfile syntax
+        run: |
+          tilt version
+          tilt dump Tiltfile

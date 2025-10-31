@@ -271,32 +271,14 @@ spec:
         - containerPort: 9093
           name: controller
         env:
-        - name: KAFKA_PROCESS_ROLES
-          value: "broker,controller"
-        - name: KAFKA_LISTENERS
-          value: "PLAINTEXT://:9092,CONTROLLER://:9093"
-        - name: KAFKA_CONTROLLER_LISTENER_NAMES
-          value: "CONTROLLER"
-        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
-          value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
-        - name: KAFKA_CONTROLLER_QUORUM_VOTERS
-          value: "1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093"
-        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
-          value: "2"
-        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-          value: "2"
-        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
-          value: "1"
-        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
-          value: "2"
-        - name: KAFKA_MIN_INSYNC_REPLICAS
-          value: "1"
-        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
-          value: "true"
+        # JVM heap settings for broker memory management
         - name: KAFKA_HEAP_OPTS
           value: "-Xms384M -Xmx384M"
+        # Cluster ID - must be consistent across all brokers in the KRaft cluster
+        # Generated once and shared by all nodes for cluster membership
         - name: CLUSTER_ID
           value: "MkU3OEVBNTcwNTJENDM2Qk"
+        # Pod name used to derive node ID and configure per-pod settings
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -307,23 +289,67 @@ spec:
         - |
           # Extract node ID from pod name (kafka-0 -> 1, kafka-1 -> 2, kafka-2 -> 3)
           NODE_ID=$((${POD_NAME##*-} + 1))
-          export KAFKA_NODE_ID=$NODE_ID
-          export KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${POD_NAME}.kafka-headless:9092
-          export KAFKA_LOG_DIRS=/tmp/kraft-combined-logs
+
+          # Define paths
+          LOG_DIRS=/tmp/kraft-combined-logs
+          CONFIG_FILE=/tmp/server-${POD_NAME}.properties
+
+          echo "Generating server.properties for node ${NODE_ID} (${POD_NAME})..."
+
+          # Generate per-pod server.properties with correct configuration
+          cat > ${CONFIG_FILE} << EOF
+          # Node Configuration
+          node.id=${NODE_ID}
+          process.roles=broker,controller
+
+          # Listeners
+          listeners=PLAINTEXT://:9092,CONTROLLER://:9093
+          advertised.listeners=PLAINTEXT://${POD_NAME}.kafka-headless:9092
+          controller.listener.names=CONTROLLER
+          listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+
+          # KRaft Quorum
+          controller.quorum.voters=1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093
+
+          # Storage
+          log.dirs=${LOG_DIRS}
+
+          # Replication
+          offsets.topic.replication.factor=2
+          transaction.state.log.replication.factor=2
+          transaction.state.log.min.isr=1
+          default.replication.factor=2
+          min.insync.replicas=1
+
+          # Auto-create topics
+          auto.create.topics.enable=true
+
+          # Performance
+          num.network.threads=3
+          num.io.threads=8
+          socket.send.buffer.bytes=102400
+          socket.receive.buffer.bytes=102400
+          socket.request.max.bytes=104857600
+
+          # Log Retention
+          log.retention.hours=168
+          log.segment.bytes=1073741824
+          log.retention.check.interval.ms=300000
+          EOF
 
           # Format KRaft storage if not already formatted
-          # The meta.properties file indicates storage has been initialized
-          if [ ! -f $KAFKA_LOG_DIRS/meta.properties ]; then
-            echo "Formatting KRaft storage for node $KAFKA_NODE_ID..."
+          if [ ! -f ${LOG_DIRS}/meta.properties ]; then
+            echo "Formatting KRaft storage for node ${NODE_ID}..."
             /opt/kafka/bin/kafka-storage.sh format \
-              -t $CLUSTER_ID \
-              -c /opt/kafka/config/kraft/server.properties
+              -t ${CLUSTER_ID} \
+              -c ${CONFIG_FILE}
           else
-            echo "KRaft storage already formatted for node $KAFKA_NODE_ID"
+            echo "KRaft storage already formatted for node ${NODE_ID}"
           fi
 
-          # Start Kafka
-          exec /opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/kraft/server.properties
+          # Start Kafka with per-pod configuration
+          echo "Starting Kafka with configuration from ${CONFIG_FILE}..."
+          exec /opt/kafka/bin/kafka-server-start.sh ${CONFIG_FILE}
         readinessProbe:
           tcpSocket:
             port: 9092
@@ -468,6 +494,26 @@ local_resource(
   labels=['quality'],
   allow_parallel=True,
   auto_init=False,  # Run manually with 'tilt trigger lint'
+)
+
+# Kafka cluster health check - runs automatically after kafka-cluster is ready
+local_resource(
+  'kafka-health',
+  cmd='./scripts/kafka-tests/cluster-health.sh',
+  resource_deps=['kafka-cluster'],
+  labels=['messaging'],
+  auto_init=True,  # Runs automatically on Tilt startup
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger kafka-health'
+)
+
+# Kafka failover test - manual trigger for testing broker failure scenarios
+local_resource(
+  'kafka-failover',
+  cmd='./scripts/kafka-tests/failover-test.sh',
+  resource_deps=['kafka-cluster'],
+  labels=['messaging'],
+  auto_init=False,  # Run manually with 'tilt trigger kafka-failover'
+  trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
 # =============================================================================
