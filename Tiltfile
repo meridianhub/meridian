@@ -237,6 +237,7 @@ metadata:
     app: kafka
 spec:
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
   - name: broker
     port: 9092
@@ -254,6 +255,7 @@ metadata:
 spec:
   serviceName: kafka-headless
   replicas: 3
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: kafka
@@ -465,11 +467,6 @@ k8s_resource(
   port_forwards='9092:9092',
   labels=['messaging'],
   resource_deps=[],
-  objects=[
-    'kafka:statefulset',
-    'kafka-headless:service',
-    'kafka:service',
-  ],
   pod_readiness='wait',  # Wait for all 3 pods to be ready
 )
 
