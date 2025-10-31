@@ -470,6 +470,20 @@ k8s_resource(
   pod_readiness='wait',  # Wait for all 3 pods to be ready
 )
 
+# Label standalone kafka client service (defined via blob() earlier)
+# Groups it with messaging resources to prevent appearing as "uncategorized"
+k8s_resource(
+  new_name='kafka-client-service',
+  objects=['kafka:service'],
+  labels=['messaging'],
+  resource_deps=[],
+)
+
+# Note: meridian-version ConfigMap remains "uncategorized" due to kustomize hash suffix
+# The hash changes on every build, so we can't reference it statically in objects=[]
+# This is acceptable - it's a single small ConfigMap with build metadata
+# Alternative: Move to dedicated meridian-config if this becomes an issue
+
 # =============================================================================
 # Development Helpers
 # =============================================================================
