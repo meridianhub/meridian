@@ -230,24 +230,34 @@ make clean         # Clean build artifacts
    ```go
    // Good: Immutable struct with constructor
    type Money struct {
-       currency string
-       units    int64
-       nanos    int32
+       currency    string
+       amountCents int64
    }
 
-   func NewMoney(currency string, units int64, nanos int32) Money {
-       return Money{
-           currency: currency,
-           units:    units,
-           nanos:    nanos,
+   func NewMoney(currency string, amountCents int64) (Money, error) {
+       if currency == "" {
+           return Money{}, errors.New("currency required")
        }
+       return Money{
+           currency:    currency,
+           amountCents: amountCents,
+       }, nil
    }
 
    // Methods return new instances
-   func (m Money) Add(other Money) Money {
-       // Return new Money instance
-       return NewMoney(m.currency, m.units+other.units, m.nanos+other.nanos)
+   func (m Money) Add(other Money) (Money, error) {
+       if m.currency != other.currency {
+           return Money{}, ErrCurrencyMismatch
+       }
+       return Money{
+           currency:    m.currency,
+           amountCents: m.amountCents + other.amountCents,
+       }, nil
    }
+
+   // Accessors for unexported fields
+   func (m Money) AmountCents() int64 { return m.amountCents }
+   func (m Money) Currency() string { return m.currency }
 
    // Bad: Mutable struct with setter methods
    type Money struct {
