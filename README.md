@@ -175,7 +175,7 @@ make proto
 make proto-breaking
 ```
 
-**Schema Evolution**: When modifying protobuf schemas, follow the guidelines in [Schema Evolution Developer Guide](docs/guides/SCHEMA_EVOLUTION.md) to ensure backward compatibility and proper validation.
+**Schema Evolution**: When modifying protobuf schemas, follow the guidelines in [Schema Evolution Skill](docs/skills/schema-evolution.md) to ensure backward compatibility and proper validation.
 
 See `api/proto/README.md` for detailed protobuf development guidelines.
 

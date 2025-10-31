@@ -1,3 +1,22 @@
+---
+name: skill-schema-evolution
+description: Protobuf schema evolution workflow with buf breaking change detection and BIAN patterns
+triggers:
+  - Evolving protobuf schemas
+  - Adding fields to proto definitions
+  - Creating new event types
+  - BIAN specification updates
+  - Schema compatibility issues
+  - Pre-commit hook failures for proto
+  - buf breaking change errors
+  - Deciding between backward-compatible changes vs new event types
+instructions: |
+  Follow ADR-0004 for protobuf native versioning. Use Pattern 1 (add optional fields) for
+  backward-compatible changes. Use Pattern 2 (new event type) for new BIAN behavior qualifiers.
+  Run 'make proto-breaking' before commit. Pre-commit hooks enforce validation automatically.
+  New BIAN behaviors = new event types, not schema modifications.
+---
+
 # Schema Evolution Developer Guide
 
 This guide explains how to safely evolve protobuf schemas in Meridian following ADR-0004.
@@ -559,5 +578,5 @@ on:
 
 ## Changelog
 
-- **2025-10-31**: Initial developer guide created
-- **Reference**: Implements requirements from subtask 4.6 (buf breaking CI/CD integration)
+- **2025-10-31**: Initial skill created as part of buf breaking CI/CD integration (subtask 4.6)
+- **Reference**: Implements ADR-0004 schema evolution patterns with automated validation
