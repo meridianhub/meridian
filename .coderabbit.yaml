@@ -14,6 +14,10 @@ reviews:
       - "**/*.pb.validate.go"
       - "**/*_grpc.pb.go"
 
+  # Disable high-level summary/poem - focus on inline code review only
+  high_level_summary: false
+  poem: false
+
   # Optional: Show review status in PR comments
   review_status: true
 
