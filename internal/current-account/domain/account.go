@@ -28,6 +28,8 @@ const (
 )
 
 // CurrentAccount represents a BIAN current account facility domain model
+// TODO(immutability): Phase 2 - refactor to value semantics with value receivers
+// See docs/immutability-audit.md for full refactoring plan
 type CurrentAccount struct {
 	ID                    uuid.UUID
 	AccountID             string
@@ -192,6 +194,14 @@ func (a *CurrentAccount) Close() error {
 func (a *CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled bool) error {
 	if limit.Currency() != a.Balance.Currency() {
 		return ErrCurrencyMismatch
+	}
+
+	// Validate that Balance + OverdraftLimit won't overflow if enabled
+	if enabled {
+		_, err := a.Balance.Add(limit)
+		if err != nil {
+			return err // Return overflow error to caller
+		}
 	}
 
 	a.OverdraftLimit = limit

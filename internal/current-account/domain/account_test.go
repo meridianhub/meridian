@@ -257,3 +257,66 @@ func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
 		})
 	}
 }
+
+// Defensive test per ADR-008: Overflow prevention in SetOverdraftLimit
+
+func TestSetOverdraftLimit_OverflowPrevention(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+
+	// Set balance near max int64
+	largeBalance, err := NewMoney("GBP", 9223372036854775000) // Near MaxInt64
+	require.NoError(t, err)
+	account.Balance = largeBalance
+
+	// Try to set overdraft that would cause overflow
+	largeLimit, err := NewMoney("GBP", 1000)
+	require.NoError(t, err)
+
+	err = account.SetOverdraftLimit(largeLimit, 0.1, true)
+
+	assert.Error(t, err, "SetOverdraftLimit should reject overdraft that causes overflow")
+	assert.ErrorIs(t, err, ErrAmountOverflow, "Should return ErrAmountOverflow")
+}
+
+func TestSetOverdraftLimit_DisabledDoesNotCheckOverflow(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+
+	// Set balance near max int64
+	largeBalance, err := NewMoney("GBP", 9223372036854775000)
+	require.NoError(t, err)
+	account.Balance = largeBalance
+
+	// Set overdraft disabled - should succeed even if adding would overflow
+	largeLimit, err := NewMoney("GBP", 1000)
+	require.NoError(t, err)
+
+	err = account.SetOverdraftLimit(largeLimit, 0.1, false)
+
+	assert.NoError(t, err, "SetOverdraftLimit with enabled=false should not check overflow")
+}
+
+// Nice-to-have tests: Overflow in Deposit/Withdraw operations
+
+func TestDeposit_Overflow_ReturnsError(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	require.NoError(t, err)
+
+	// Set balance near max
+	largeBalance, err := NewMoney("GBP", 9223372036854775000)
+	require.NoError(t, err)
+	account.Balance = largeBalance
+
+	// Try to deposit amount that causes overflow
+	deposit, err := NewMoney("GBP", 1000)
+	require.NoError(t, err)
+
+	err = account.Deposit(deposit)
+
+	assert.Error(t, err, "Deposit causing overflow should fail")
+	assert.ErrorIs(t, err, ErrAmountOverflow)
+}
+
+// Note: Withdraw underflow is already covered by Money.Subtract tests
+// This test would be complex to set up due to available balance checks

@@ -244,3 +244,42 @@ func TestMoney_Equals_ZeroAmountDifferentCurrency_ReturnsFalse(t *testing.T) {
 	assert.False(t, result,
 		"Zero amounts with different currencies should not be equal")
 }
+
+// Nice-to-have tests: Currency validation edge cases
+
+func TestNewMoney_SpecialCharacters_Accepted(t *testing.T) {
+	// Currency codes can contain special chars in principle
+	// Testing defensive behavior
+	tests := []struct {
+		name     string
+		currency string
+		wantErr  bool
+	}{
+		{
+			name:     "standard currency",
+			currency: "GBP",
+			wantErr:  false,
+		},
+		{
+			name:     "whitespace only currency",
+			currency: "   ",
+			wantErr:  false, // Currently accepted - no trimming
+		},
+		{
+			name:     "currency with spaces",
+			currency: "G BP",
+			wantErr:  false, // Allowed - validation is minimal
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewMoney(tt.currency, 100)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
