@@ -512,6 +512,234 @@ func (m Money) Add(other Money) Money {
 - Mock external dependencies
 - Write integration tests for critical paths
 
+#### Defensive Testing: Happy Path AND Unhappy Path
+
+**Principle**: Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious inputs.
+
+We follow **defensive testing** practices:
+
+1. **Happy Path Testing**: Verify expected behavior with valid inputs
+2. **Unhappy Path Testing**: Verify graceful failure with invalid inputs
+3. **Edge Case Testing**: Test boundary conditions and extreme values
+4. **Negative Testing**: Test with values that should never occur
+
+**Key Testing Frameworks:**
+
+- **Boundary Value Analysis**: Test at the edges of valid input ranges
+- **Error Path Coverage**: Every error condition must have a test
+- **Defensive Programming Verification**: Validate assumptions don't silently fail
+
+**Examples of Defensive Test Cases:**
+
+```go
+func TestMoney_NewMoney_DefensiveTests(t *testing.T) {
+    tests := []struct {
+        name      string
+        currency  string
+        amount    int64
+        wantErr   bool
+        rationale string
+    }{
+        // Happy path
+        {
+            name:      "valid GBP amount",
+            currency:  "GBP",
+            amount:    100,
+            wantErr:   false,
+            rationale: "Standard valid input",
+        },
+
+        // Edge cases
+        {
+            name:      "zero amount",
+            currency:  "GBP",
+            amount:    0,
+            wantErr:   false,
+            rationale: "Zero is a valid monetary value",
+        },
+        {
+            name:      "maximum int64 value",
+            currency:  "GBP",
+            amount:    math.MaxInt64,
+            wantErr:   false,
+            rationale: "Test upper boundary",
+        },
+        {
+            name:      "minimum int64 value",
+            currency:  "GBP",
+            amount:    math.MinInt64,
+            wantErr:   false,
+            rationale: "Test lower boundary (large debt)",
+        },
+
+        // Negative testing (invalid inputs)
+        {
+            name:      "empty currency",
+            currency:  "",
+            amount:    100,
+            wantErr:   true,
+            rationale: "Currency is required - must fail",
+        },
+        {
+            name:      "whitespace-only currency",
+            currency:  "   ",
+            amount:    100,
+            wantErr:   true,
+            rationale: "Whitespace should not be valid",
+        },
+        {
+            name:      "invalid currency code",
+            currency:  "INVALID",
+            amount:    100,
+            wantErr:   true,
+            rationale: "Only ISO 4217 codes allowed",
+        },
+
+        // Strange values that might occur in distributed systems
+        {
+            name:      "negative amount",
+            currency:  "GBP",
+            amount:    -100,
+            wantErr:   false,
+            rationale: "Negative values represent debts/credits",
+        },
+        {
+            name:      "very large negative",
+            currency:  "GBP",
+            amount:    -999999999999,
+            wantErr:   false,
+            rationale: "System should handle large debts",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            money, err := NewMoney(tt.currency, tt.amount)
+
+            if tt.wantErr {
+                assert.Error(t, err, tt.rationale)
+                return
+            }
+
+            assert.NoError(t, err, tt.rationale)
+            assert.Equal(t, tt.currency, money.Currency())
+            assert.Equal(t, tt.amount, money.AmountCents())
+        })
+    }
+}
+
+func TestAccount_Deposit_DefensiveTests(t *testing.T) {
+    tests := []struct {
+        name           string
+        initialBalance int64
+        depositAmount  int64
+        wantErr        bool
+        expectedError  error
+        rationale      string
+    }{
+        // Happy path
+        {
+            name:           "normal deposit",
+            initialBalance: 1000,
+            depositAmount:  500,
+            wantErr:        false,
+            rationale:      "Standard valid deposit",
+        },
+
+        // Unhappy paths
+        {
+            name:           "zero deposit",
+            initialBalance: 1000,
+            depositAmount:  0,
+            wantErr:        true,
+            expectedError:  ErrInvalidAmount,
+            rationale:      "Zero deposits are meaningless",
+        },
+        {
+            name:           "negative deposit",
+            initialBalance: 1000,
+            depositAmount:  -500,
+            wantErr:        true,
+            expectedError:  ErrInvalidAmount,
+            rationale:      "Negative deposits don't make sense (use withdraw)",
+        },
+
+        // Edge cases
+        {
+            name:           "deposit causing overflow",
+            initialBalance: math.MaxInt64 - 100,
+            depositAmount:  200,
+            wantErr:        true,
+            expectedError:  ErrOverflow,
+            rationale:      "Must detect arithmetic overflow",
+        },
+        {
+            name:           "very small deposit (1 cent)",
+            initialBalance: 1000,
+            depositAmount:  1,
+            wantErr:        false,
+            rationale:      "Even 1 cent is a valid deposit",
+        },
+
+        // Defensive: Values that shouldn't happen but might in bugs
+        {
+            name:           "extremely large deposit",
+            initialBalance: 0,
+            depositAmount:  math.MaxInt64,
+            wantErr:        false,
+            rationale:      "System should handle large values gracefully",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            account := createTestAccount(tt.initialBalance)
+            depositMoney, _ := NewMoney("GBP", tt.depositAmount)
+
+            err := account.Deposit(depositMoney)
+
+            if tt.wantErr {
+                assert.Error(t, err, tt.rationale)
+                if tt.expectedError != nil {
+                    assert.ErrorIs(t, err, tt.expectedError)
+                }
+                // Verify account wasn't modified on error
+                assert.Equal(t, tt.initialBalance, account.Balance().AmountCents(),
+                    "balance should not change on failed deposit")
+                return
+            }
+
+            assert.NoError(t, err, tt.rationale)
+            expected := tt.initialBalance + tt.depositAmount
+            assert.Equal(t, expected, account.Balance().AmountCents())
+        })
+    }
+}
+```
+
+**Rationale Documentation**:
+- Every test case should include a `rationale` field explaining WHY this case matters
+- Document assumptions being tested ("assumes negative amounts are debts")
+- Note edge cases that caught bugs in other systems
+- Reference requirements or specifications when applicable
+
+**When to Apply Defensive Testing**:
+- ✅ All public APIs and domain model constructors
+- ✅ Financial calculations (money, interest, balances)
+- ✅ Currency operations (conversion, validation)
+- ✅ State transitions (account status changes)
+- ✅ Boundary conditions (max/min values)
+- ✅ Input validation (empty strings, nulls, special characters)
+- ✅ Concurrent operations (race conditions, deadlocks)
+- ✅ Network boundaries (malformed data, timeouts)
+
+**Red Flags Requiring Unhappy Path Tests**:
+- Functions that accept numeric inputs (test overflow, underflow, zero, negative)
+- Functions that accept strings (test empty, whitespace, special chars, very long)
+- Functions that return errors (test every error path)
+- Functions with preconditions (test what happens when violated)
+- Functions that modify state (test rollback on failure)
+
 ### Example: Table-Driven Test with Immutability Check
 
 ```go
