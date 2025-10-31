@@ -2,12 +2,14 @@ package idempotency
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	platformv1 "github.com/meridianhub/meridian/api/proto/meridian/platform/v1"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // RedisService implements Service using Redis for distributed idempotency and locking
@@ -38,18 +40,21 @@ func (r *RedisService) Check(ctx context.Context, key Key) (*Result, error) {
 		return nil, fmt.Errorf("failed to check idempotency: %w", err)
 	}
 
-	// Deserialize result
-	var result Result
-	if err := json.Unmarshal(data, &result); err != nil {
+	// Deserialize protobuf result
+	var pbResult platformv1.IdempotencyResult
+	if err := proto.Unmarshal(data, &pbResult); err != nil {
 		return nil, fmt.Errorf("failed to deserialize result: %w", err)
 	}
 
+	// Convert protobuf to domain model
+	result := fromProto(&pbResult)
+
 	// If operation was completed, return the cached result
 	if result.Status == StatusCompleted {
-		return &result, ErrOperationAlreadyProcessed
+		return result, ErrOperationAlreadyProcessed
 	}
 
-	return &result, nil
+	return result, nil
 }
 
 // MarkPending marks an operation as in-progress
@@ -76,8 +81,11 @@ func (r *RedisService) StoreResult(ctx context.Context, result Result) error {
 		return err
 	}
 
-	// Serialize result
-	data, err := json.Marshal(result)
+	// Convert to protobuf
+	pbResult := toProto(result)
+
+	// Serialize protobuf
+	data, err := proto.Marshal(pbResult)
 	if err != nil {
 		return fmt.Errorf("failed to serialize result: %w", err)
 	}
@@ -109,6 +117,10 @@ func (r *RedisService) Delete(ctx context.Context, key Key) error {
 func (r *RedisService) Acquire(ctx context.Context, key Key, opts LockOptions) error {
 	if err := key.Validate(); err != nil {
 		return err
+	}
+
+	if opts.TTL <= 0 {
+		return ErrInvalidTTL
 	}
 
 	if opts.Token == "" {
@@ -237,4 +249,76 @@ func (r *RedisService) resultKey(key Key) string {
 // lockKey generates Redis key for distributed locks
 func (r *RedisService) lockKey(key Key) string {
 	return "idempotency:lock:" + key.String()
+}
+
+// toProto converts Result to protobuf
+func toProto(result Result) *platformv1.IdempotencyResult {
+	var completedAt *timestamppb.Timestamp
+	if !result.CompletedAt.IsZero() {
+		completedAt = timestamppb.New(result.CompletedAt)
+	}
+
+	return &platformv1.IdempotencyResult{
+		Namespace:   result.Key.Namespace,
+		Operation:   result.Key.Operation,
+		EntityId:    result.Key.EntityID,
+		RequestId:   result.Key.RequestID,
+		Status:      statusToProto(result.Status),
+		Data:        result.Data,
+		Error:       result.Error,
+		CompletedAt: completedAt,
+		TtlSeconds:  int64(result.TTL.Seconds()),
+	}
+}
+
+// fromProto converts protobuf to Result
+func fromProto(pb *platformv1.IdempotencyResult) *Result {
+	var completedAt time.Time
+	if pb.CompletedAt != nil {
+		completedAt = pb.CompletedAt.AsTime()
+	}
+
+	return &Result{
+		Key: Key{
+			Namespace: pb.Namespace,
+			Operation: pb.Operation,
+			EntityID:  pb.EntityId,
+			RequestID: pb.RequestId,
+		},
+		Status:      statusFromProto(pb.Status),
+		Data:        pb.Data,
+		Error:       pb.Error,
+		CompletedAt: completedAt,
+		TTL:         time.Duration(pb.TtlSeconds) * time.Second,
+	}
+}
+
+// statusToProto converts OperationStatus to protobuf enum
+func statusToProto(status OperationStatus) platformv1.OperationStatus {
+	switch status {
+	case StatusPending:
+		return platformv1.OperationStatus_OPERATION_STATUS_PENDING
+	case StatusCompleted:
+		return platformv1.OperationStatus_OPERATION_STATUS_COMPLETED
+	case StatusFailed:
+		return platformv1.OperationStatus_OPERATION_STATUS_FAILED
+	default:
+		return platformv1.OperationStatus_OPERATION_STATUS_UNSPECIFIED
+	}
+}
+
+// statusFromProto converts protobuf enum to OperationStatus
+func statusFromProto(status platformv1.OperationStatus) OperationStatus {
+	switch status {
+	case platformv1.OperationStatus_OPERATION_STATUS_PENDING:
+		return StatusPending
+	case platformv1.OperationStatus_OPERATION_STATUS_COMPLETED:
+		return StatusCompleted
+	case platformv1.OperationStatus_OPERATION_STATUS_FAILED:
+		return StatusFailed
+	case platformv1.OperationStatus_OPERATION_STATUS_UNSPECIFIED:
+		return ""
+	default:
+		return ""
+	}
 }

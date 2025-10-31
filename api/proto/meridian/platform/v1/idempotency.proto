@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package meridian.platform.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/platform/v1;platformv1";
+
+// OperationStatus represents the state of an idempotent operation
+enum OperationStatus {
+  OPERATION_STATUS_UNSPECIFIED = 0;
+  OPERATION_STATUS_PENDING = 1;
+  OPERATION_STATUS_COMPLETED = 2;
+  OPERATION_STATUS_FAILED = 3;
+}
+
+// IdempotencyResult is the cached result of an operation stored in Redis
+message IdempotencyResult {
+  // key components
+  string namespace = 1 [(buf.validate.field).string = {min_len: 1}];
+  string operation = 2 [(buf.validate.field).string = {min_len: 1}];
+  string entity_id = 3 [(buf.validate.field).string = {min_len: 1}];
+  string request_id = 4; // optional
+
+  // result data
+  OperationStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // data contains the serialized operation result (application-specific)
+  bytes data = 6;
+
+  // error contains error message if status is FAILED
+  string error = 7;
+
+  // completed_at is when the operation finished (zero for pending)
+  google.protobuf.Timestamp completed_at = 8;
+
+  // ttl_seconds is how long this result should be cached
+  int64 ttl_seconds = 9 [(buf.validate.field).int64 = {gt: 0}];
+}

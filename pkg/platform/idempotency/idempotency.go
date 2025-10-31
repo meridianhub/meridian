@@ -25,6 +25,9 @@ var (
 
 	// ErrEmptyToken indicates lock token is empty
 	ErrEmptyToken = errors.New("lock token cannot be empty")
+
+	// ErrInvalidTTL indicates TTL is zero or negative
+	ErrInvalidTTL = errors.New("TTL must be greater than zero")
 )
 
 // Key represents an idempotency key with namespace and operation context
