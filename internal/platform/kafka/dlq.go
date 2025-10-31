@@ -215,13 +215,21 @@ func (d *DLQProducer) PublishFailedMessage(
 		return ErrEmptyDLQTopic
 	}
 
+	// Extract error information safely (handle nil error)
+	errorMessage := "<unknown error>"
+	errorStackTrace := ""
+	if err != nil {
+		errorMessage = err.Error()
+		errorStackTrace = fmt.Sprintf("%+v", err) // Capture full error context
+	}
+
 	// Create comprehensive metadata
 	metadata := DLQMetadata{
 		OriginalTopic:     originalTopic,
 		OriginalPartition: originalMsg.TopicPartition.Partition,
 		OriginalOffset:    int64(originalMsg.TopicPartition.Offset),
-		ErrorMessage:      err.Error(),
-		ErrorStackTrace:   fmt.Sprintf("%+v", err), // Capture full error context
+		ErrorMessage:      errorMessage,
+		ErrorStackTrace:   errorStackTrace,
 		RetryCount:        retryCount,
 		FirstFailureTime:  firstFailureTime,
 		LastFailureTime:   time.Now(),

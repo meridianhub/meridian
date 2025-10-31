@@ -384,9 +384,15 @@ func NewDLQReplay(config DLQReplayConfig) (*DLQReplay, error) {
 func (r *DLQReplay) ReplayMessage(ctx context.Context, dlqMsg DLQMessage) error {
 	// Create new message without DLQ headers
 	// Preserve original timestamp and timestamp type to maintain event-time semantics
+	// Preserve original partition to maintain ordering guarantees
 	originalTopic := dlqMsg.Metadata.OriginalTopic
+	partition := dlqMsg.Metadata.OriginalPartition
+	// Fall back to PartitionAny if recorded partition is invalid
+	if partition < 0 {
+		partition = kafka.PartitionAny
+	}
 	replayMsg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &originalTopic, Partition: kafka.PartitionAny},
+		TopicPartition: kafka.TopicPartition{Topic: &originalTopic, Partition: partition},
 		Key:            dlqMsg.Message.Key,
 		Value:          dlqMsg.Message.Value,
 		Timestamp:      dlqMsg.Message.Timestamp,
