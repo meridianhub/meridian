@@ -668,9 +668,15 @@ Both are valid choices; Tilt won on developer experience.
 * Meridian service: ~256MB RAM
 * **Total: ~4-5GB RAM**
 
-**Minimum recommended:** 8GB RAM system, 16GB preferred for comfortable dev.
+**Minimum recommended:** 12GB RAM (may experience swapping with multiple applications)
+**Comfortable development:** 16GB RAM (recommended for daily use)
 
 **Note on Kafka**: Multi-broker setup uses ~1.5GB total (384Mi per broker × 3) compared to previous single-broker ~512MB. The increased resource usage enables realistic testing of partition replication, leader election, and failover scenarios.
+
+**For 8GB RAM machines**: The 3-broker setup may cause resource pressure. Options:
+1. Close unnecessary applications (IDEs, browsers, etc.)
+2. Use Colima instead of Docker Desktop (lighter overhead)
+3. Modify Tiltfile for single-broker mode (see Tiltfile comments around line 208)
 
 ### Startup Time
 

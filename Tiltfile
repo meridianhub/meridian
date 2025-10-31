@@ -204,6 +204,14 @@ spec:
 # 5. Produce/consume messages to verify data persists
 #
 # Resource Usage: ~1.5GB total (512MB per broker)
+#
+# Resource-Constrained Development (8GB RAM machines):
+# For machines with limited RAM, you can reduce to single-broker mode by:
+# 1. Change replicas: 3 → 1
+# 2. Change KAFKA_DEFAULT_REPLICATION_FACTOR: "2" → "1"
+# 3. Change KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "2" → "1"
+# 4. Reduce memory per broker: 384Mi → 256Mi
+# This reduces Kafka memory from ~1.5GB to ~512MB
 k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
