@@ -58,7 +58,7 @@ tilt up
 ```
 
 Tilt will:
-- Deploy CockroachDB, Redis, Kafka, and Zookeeper
+- Deploy CockroachDB, Redis, and Kafka
 - Build and deploy the Meridian service
 - Set up port forwarding for all services
 - Enable live reload for Go code changes
@@ -73,7 +73,6 @@ Once all resources are green in the Tilt UI:
 - **CockroachDB SQL**: localhost:26257
 - **Redis**: localhost:6379
 - **Kafka**: localhost:9092
-- **Zookeeper**: localhost:2181
 
 ### 3. Development Workflow
 
@@ -115,7 +114,7 @@ Resources are organized with labels in the Tilt UI:
 - **app**: Main application (Meridian)
 - **database**: CockroachDB
 - **cache**: Redis
-- **messaging**: Kafka and Zookeeper
+- **messaging**: Kafka
 - **tests**: Test runner
 - **quality**: Linter
 
@@ -155,9 +154,9 @@ kubectl exec -it deployment/redis -- redis-cli
 - No authentication required
 - Default configuration
 
-### Kafka + Zookeeper
+### Kafka
 
-Single-node Kafka cluster for event streaming:
+3-broker Kafka cluster using KRaft consensus for event streaming:
 
 ```bash
 # List topics
@@ -173,9 +172,10 @@ kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 ```
 
 **Features**:
+- 3-broker cluster (kafka-0, kafka-1, kafka-2)
+- KRaft mode (no Zookeeper dependency)
 - Auto-create topics enabled
-- 3 partitions per topic by default
-- 1-hour log retention
+- Replication factor 2 for high availability
 - No authentication required
 
 ## Tilt Commands
@@ -269,13 +269,15 @@ kubectl logs statefulset/cockroachdb
 
 ### Kafka Not Connecting
 
-Check Zookeeper is running first:
+Check all Kafka brokers are ready:
 ```bash
-kubectl get pods -l app=zookeeper
-kubectl logs deployment/zookeeper
+kubectl get pods -l app=kafka
+kubectl logs kafka-0
+kubectl logs kafka-1
+kubectl logs kafka-2
 ```
 
-Kafka depends on Zookeeper being healthy.
+All 3 brokers must be running for the cluster to be healthy.
 
 ### Local Registry Issues
 
@@ -337,10 +339,7 @@ Tilt uses live_update to achieve ~3 second rebuilds:
 
 ### Resource Limits
 
-Adjust resource limits in values files if your machine is constrained:
-
-- `deployments/tilt/zookeeper-values.yaml`
-- `deployments/tilt/kafka-values.yaml`
+Kafka resource limits can be adjusted in the Tiltfile (around line 208) if your machine is constrained. The 3-broker setup uses approximately 1.5GB total memory (384Mi per broker).
 
 ### Parallel Updates
 
