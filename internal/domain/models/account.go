@@ -20,6 +20,7 @@ type Account struct {
 
 	// Customer relationship
 	CustomerID uuid.UUID `gorm:"type:uuid;not null;index" json:"customer_id"`
+	Customer   *Customer `gorm:"foreignKey:CustomerID;constraint:OnDelete:RESTRICT" json:"customer,omitempty"`
 
 	// Balance information
 	Balance          int64 `gorm:"not null;default:0" json:"balance"`           // in smallest currency unit (pence)

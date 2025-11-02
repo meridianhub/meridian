@@ -9,7 +9,7 @@ import (
 
 // BaseModel contains common fields for all domain models
 type BaseModel struct {
-	ID        uuid.UUID  `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	ID        uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	CreatedAt time.Time  `gorm:"not null;default:now()" json:"created_at"`
 	UpdatedAt time.Time  `gorm:"not null;default:now()" json:"updated_at"`
 	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`

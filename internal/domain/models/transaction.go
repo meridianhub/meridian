@@ -16,6 +16,7 @@ type Transaction struct {
 
 	// Account relationship
 	AccountID uuid.UUID `gorm:"type:uuid;not null;index" json:"account_id"`
+	Account   *Account  `gorm:"foreignKey:AccountID;constraint:OnDelete:RESTRICT" json:"account,omitempty"`
 
 	// Transaction details
 	Amount      int64  `gorm:"not null" json:"amount"`                              // in smallest currency unit
@@ -28,6 +29,7 @@ type Transaction struct {
 
 	// Counterparty information (for transfers)
 	CounterpartyAccountID *uuid.UUID `gorm:"type:uuid;index" json:"counterparty_account_id,omitempty"`
+	CounterpartyAccount   *Account   `gorm:"foreignKey:CounterpartyAccountID;constraint:OnDelete:SET NULL" json:"counterparty_account,omitempty"`
 	CounterpartyName      string     `gorm:"type:varchar(255)" json:"counterparty_name,omitempty"`
 
 	// Balance after transaction

@@ -12,6 +12,7 @@ import (
 
 func main() {
 	stmts, err := gormschema.New("postgres").Load(
+		&models.Customer{},
 		&models.Account{},
 		&models.Transaction{},
 	)
