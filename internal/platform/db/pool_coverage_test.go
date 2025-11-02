@@ -94,7 +94,11 @@ func TestPostgresPool_Integration_DrainConnections(t *testing.T) {
 		queryCtx, queryCancel := context.WithCancel(ctx)
 		defer queryCancel()
 		go func() {
-			rows, _ := tempPool.QueryContext(queryCtx, "SELECT pg_sleep(2)")
+			rows, err := tempPool.QueryContext(queryCtx, "SELECT pg_sleep(2)")
+			if err != nil {
+				t.Logf("Query failed during drain test (expected if context cancelled): %v", err)
+				return
+			}
 			if rows != nil {
 				defer func() { _ = rows.Close() }()
 				_ = rows.Err() // Check for errors after iteration
@@ -122,7 +126,11 @@ func TestPostgresPool_Integration_DrainConnections(t *testing.T) {
 		queryCtx, queryCancel := context.WithCancel(ctx)
 		defer queryCancel()
 		go func() {
-			rows, _ := tempPool.QueryContext(queryCtx, "SELECT pg_sleep(5)")
+			rows, err := tempPool.QueryContext(queryCtx, "SELECT pg_sleep(5)")
+			if err != nil {
+				t.Logf("Query failed during cancelled context test (expected if context cancelled): %v", err)
+				return
+			}
 			if rows != nil {
 				defer func() { _ = rows.Close() }()
 				_ = rows.Err() // Check for errors after iteration

@@ -505,13 +505,16 @@ func TestPostgresPool_Integration_GracefulShutdown(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
-		go func() {
+		go func(queryNum int) {
 			defer wg.Done()
 			var balance float64
-			_ = pool.QueryRowContext(ctx,
+			err := pool.QueryRowContext(ctx,
 				"SELECT balance FROM accounts WHERE account_id = $1",
 				"ACC-SHUTDOWN").Scan(&balance)
-		}()
+			if err != nil {
+				t.Logf("Query %d failed during shutdown test (may be expected): %v", queryNum, err)
+			}
+		}(i)
 	}
 
 	// Wait for queries to complete
