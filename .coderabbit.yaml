@@ -26,3 +26,13 @@ reviews:
   # Optional: Auto-approve PRs that pass all checks
   auto_review:
     enabled: true
+
+  # Finishing touches configuration
+  finishing_touches:
+    # Docstring coverage settings
+    # Adjust threshold to match project practices - most exported types
+    # and functions have comprehensive godoc comments
+    # Lower threshold accounts for internal helpers and test files
+    docstrings:
+      enabled: true
+      threshold: 50
