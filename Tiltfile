@@ -507,6 +507,16 @@ local_resource(
   auto_init=False,  # Run manually with 'tilt trigger lint'
 )
 
+# Run database migrations on startup - uses Atlas to apply schema changes
+local_resource(
+  'migrate',
+  cmd='atlas migrate apply --env local --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
+  resource_deps=['cockroachdb'],
+  labels=['database'],
+  auto_init=True,  # Runs automatically on Tilt startup after CockroachDB is ready
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger migrate'
+)
+
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
 local_resource(
   'kafka-health',
@@ -551,6 +561,11 @@ Services:
 Tilt UI              → http://localhost:10350
 
 Hot reload: Edit Go code and see changes in ~3 seconds
+
+Database Migrations:
+  • Atlas migrations run automatically on startup
+  • Manual trigger: tilt trigger migrate
+  • Check status: atlas migrate status --env local --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"
 
 Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker
