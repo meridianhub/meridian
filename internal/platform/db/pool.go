@@ -3,10 +3,18 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // Register pgx driver
+)
+
+var (
+	// ErrConfigNil is returned when a nil config is passed to NewPostgresPool
+	ErrConfigNil = errors.New("config cannot be nil")
+	// ErrConnectionStringEmpty is returned when an empty connection string is provided
+	ErrConnectionStringEmpty = errors.New("connection string cannot be empty")
 )
 
 // PostgresPool implements the DB interface using database/sql with pgx driver.
@@ -23,22 +31,15 @@ type PostgresPool struct {
 // - Health check intervals
 func NewPostgresPool(ctx context.Context, cfg *Config) (*PostgresPool, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("config cannot be nil")
+		return nil, fmt.Errorf("failed to create pool: %w", ErrConfigNil)
 	}
 
 	if cfg.ConnectionString == "" {
-		return nil, fmt.Errorf("connection string cannot be empty")
+		return nil, fmt.Errorf("failed to create pool: %w", ErrConnectionStringEmpty)
 	}
 
 	// Build connection string with CockroachDB-specific parameters
 	connStr := cfg.ConnectionString
-
-	// Add runtime parameters for CockroachDB best practices
-	// Note: These should ideally be part of the connection string
-	if cfg.StatementTimeout > 0 {
-		// statement_timeout can be set via SET after connection
-		// For connection string: add ?options=-c%20statement_timeout=30s
-	}
 
 	// Open connection using pgx driver
 	db, err := sql.Open("pgx", connStr)
@@ -54,7 +55,8 @@ func NewPostgresPool(ctx context.Context, cfg *Config) (*PostgresPool, error) {
 
 	// Verify initial connection
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		// Ignore close error during cleanup - ping failure is the real issue
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -62,7 +64,8 @@ func NewPostgresPool(ctx context.Context, cfg *Config) (*PostgresPool, error) {
 	// Use serializable isolation for CockroachDB best practices
 	_, err = db.ExecContext(ctx, "SET default_transaction_isolation = 'serializable'")
 	if err != nil {
-		db.Close()
+		// Ignore close error during cleanup - isolation setting failure is the real issue
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to set default transaction isolation: %w", err)
 	}
 
@@ -71,7 +74,8 @@ func NewPostgresPool(ctx context.Context, cfg *Config) (*PostgresPool, error) {
 		timeoutMs := cfg.StatementTimeout.Milliseconds()
 		_, err = db.ExecContext(ctx, fmt.Sprintf("SET statement_timeout = '%dms'", timeoutMs))
 		if err != nil {
-			db.Close()
+			// Ignore close error during cleanup - timeout setting failure is the real issue
+			_ = db.Close()
 			return nil, fmt.Errorf("failed to set statement timeout: %w", err)
 		}
 	}

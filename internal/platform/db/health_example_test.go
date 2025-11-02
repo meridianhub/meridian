@@ -17,7 +17,7 @@ func ExampleHealthChecker() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	// Create health checker with custom config
 	healthConfig := &db.HealthCheckConfig{
@@ -52,7 +52,7 @@ func ExampleHealthChecker_Check() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	healthChecker := db.NewHealthChecker(pool, nil)
 
@@ -97,7 +97,7 @@ func ExamplePostgresPool_DrainConnections() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	// ... application is running ...
 
@@ -115,7 +115,7 @@ func ExamplePostgresPool_DrainConnections() {
 	}
 
 	// Now safe to close the pool
-	pool.Close()
+	_ = pool.Close()
 }
 
 // ExampleHealthChecker_GetStats demonstrates monitoring pool utilization.
@@ -125,7 +125,7 @@ func ExampleHealthChecker_GetStats() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	healthChecker := db.NewHealthChecker(pool, nil)
 
@@ -164,7 +164,7 @@ func ExampleHealthChecker_kubernetes() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	healthChecker := db.NewHealthChecker(pool, nil)
 	go healthChecker.PeriodicHealthCheck()

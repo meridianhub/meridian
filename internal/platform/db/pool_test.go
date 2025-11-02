@@ -39,21 +39,21 @@ func TestNewPostgresPool(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			pool, err := NewPostgresPool(ctx, tt.cfg)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("NewPostgresPool() expected error, got nil")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("NewPostgresPool() unexpected error: %v", err)
 				return
 			}
-			
+
 			if pool != nil {
-				defer pool.Close()
+				defer func() { _ = pool.Close() }()
 			}
 		})
 	}
@@ -100,20 +100,20 @@ func TestPostgresPool_BeginTx_DefaultSerializable(t *testing.T) {
 	// This test verifies that BeginTx uses serializable isolation when opts is nil
 	// We can't easily test this without a real database connection, so we just verify
 	// the code structure is correct
-	
+
 	ctx := context.Background()
-	
+
 	// Test with nil opts (should default to serializable)
-	var opts *sql.TxOptions = nil
+	var opts *sql.TxOptions
 	if opts == nil {
 		opts = &sql.TxOptions{
 			Isolation: sql.LevelSerializable,
 		}
 	}
-	
+
 	if opts.Isolation != sql.LevelSerializable {
 		t.Errorf("BeginTx default isolation = %v, want Serializable", opts.Isolation)
 	}
-	
+
 	_ = ctx // Suppress unused warning
 }

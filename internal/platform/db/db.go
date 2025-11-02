@@ -1,3 +1,15 @@
+// Package db provides a database abstraction layer optimized for distributed SQL databases.
+//
+// This package implements a unified DB interface that works seamlessly with both connection
+// pools and transactions, enabling repository code to be written once and work in either context.
+// The design is optimized for CockroachDB and YugabyteDB with support for:
+// - Serializable isolation by default
+// - Automatic transaction retry logic
+// - Connection pooling with health checks
+// - Context-aware operations for timeout and cancellation
+//
+// The core DB interface is implemented by both PostgresPool (connection pooling) and Tx
+// (transaction wrapper), allowing the same repository methods to work with either.
 package db
 
 import (

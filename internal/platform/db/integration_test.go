@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -15,11 +16,14 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// setupPostgresContainer creates a PostgreSQL container for integration testing
-func setupPostgresContainer(t *testing.T) (*PostgresPool, func()) {
-	t.Helper()
+var (
+	// errSimulated is a test error used to simulate failures
+	errSimulated = errors.New("simulated error")
+)
 
-	ctx := context.Background()
+// setupPostgresContainer creates a PostgreSQL container for integration testing
+func setupPostgresContainer(ctx context.Context, t *testing.T) (*PostgresPool, func()) {
+	t.Helper()
 
 	// Create PostgreSQL container
 	pgContainer, err := postgres.Run(ctx,
@@ -73,10 +77,9 @@ func TestPostgresPool_Integration_QueryContext(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Insert test data
 	_, err := pool.ExecContext(ctx,
@@ -89,7 +92,7 @@ func TestPostgresPool_Integration_QueryContext(t *testing.T) {
 		"SELECT account_id, name, balance FROM accounts WHERE account_id = $1",
 		"ACC-001")
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Verify results
 	require.True(t, rows.Next(), "expected at least one row")
@@ -104,7 +107,9 @@ func TestPostgresPool_Integration_QueryContext(t *testing.T) {
 	assert.Equal(t, 1000.00, balance)
 
 	require.False(t, rows.Next(), "expected only one row")
-	require.NoError(t, rows.Err())
+	if err := rows.Err(); err != nil {
+		require.NoError(t, err)
+	}
 }
 
 func TestPostgresPool_Integration_ExecContext(t *testing.T) {
@@ -112,10 +117,9 @@ func TestPostgresPool_Integration_ExecContext(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	t.Run("INSERT operation", func(t *testing.T) {
 		result, err := pool.ExecContext(ctx,
@@ -186,10 +190,9 @@ func TestPostgresPool_Integration_Transaction(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Insert initial accounts
 	_, err := pool.ExecContext(ctx,
@@ -240,10 +243,9 @@ func TestPostgresPool_Integration_TransactionRollback(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Insert initial account
 	_, err := pool.ExecContext(ctx,
@@ -262,7 +264,7 @@ func TestPostgresPool_Integration_TransactionRollback(t *testing.T) {
 		}
 
 		// Simulate error - return error to trigger rollback
-		return fmt.Errorf("simulated error")
+		return errSimulated
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "simulated error")
@@ -281,10 +283,9 @@ func TestPostgresPool_Integration_TransactionIsolation(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Insert test account
 	_, err := pool.ExecContext(ctx,
@@ -328,10 +329,9 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Insert test accounts
 	for i := 1; i <= 10; i++ {
@@ -393,7 +393,8 @@ func TestPostgresPool_Integration_ContextCancellation(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
+	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
 	defer cleanup()
 
 	t.Run("query with timeout", func(t *testing.T) {
@@ -405,8 +406,16 @@ func TestPostgresPool_Integration_ContextCancellation(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 
 		// Query should fail due to timeout
-		_, err := pool.QueryContext(ctx,
+		rows, err := pool.QueryContext(ctx,
 			"SELECT account_id, name, balance FROM accounts")
+		if err == nil && rows != nil {
+			defer func() { _ = rows.Close() }()
+			// Consume rows to trigger context error
+			for rows.Next() {
+				// Just consume rows
+			}
+			err = rows.Err()
+		}
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "context")
 	})
@@ -415,7 +424,7 @@ func TestPostgresPool_Integration_ContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		err := WithTransaction(ctx, pool, func(tx DB) error {
+		err := WithTransaction(ctx, pool, func(_ DB) error {
 			// Simulate slow operation
 			time.Sleep(200 * time.Millisecond)
 			return nil
@@ -429,8 +438,17 @@ func TestPostgresPool_Integration_ContextCancellation(t *testing.T) {
 		// Cancel immediately
 		cancel()
 
-		_, err := pool.QueryContext(ctx,
+		rows, err := pool.QueryContext(ctx,
 			"SELECT account_id, name, balance FROM accounts")
+		if err == nil && rows != nil {
+			defer func() { _ = rows.Close() }()
+			for rows.Next() {
+				// Consume rows
+			}
+			if rowErr := rows.Err(); rowErr != nil {
+				err = rowErr
+			}
+		}
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "context")
 	})
@@ -441,10 +459,9 @@ func TestPostgresPool_Integration_HealthCheck(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	t.Run("Ping returns no error", func(t *testing.T) {
 		err := pool.Ping(ctx)
@@ -453,7 +470,8 @@ func TestPostgresPool_Integration_HealthCheck(t *testing.T) {
 
 	t.Run("Ping after close returns error", func(t *testing.T) {
 		// Create separate pool for this test
-		tempPool, tempCleanup := setupPostgresContainer(t)
+		tempCtx := context.Background()
+		tempPool, tempCleanup := setupPostgresContainer(tempCtx, t)
 		defer tempCleanup()
 
 		// Close the pool
@@ -471,10 +489,9 @@ func TestPostgresPool_Integration_GracefulShutdown(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Insert test data
 	_, err := pool.ExecContext(ctx,
@@ -503,8 +520,14 @@ func TestPostgresPool_Integration_GracefulShutdown(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Operations after close should fail
-	_, err = pool.QueryContext(ctx,
+	rows, err := pool.QueryContext(ctx,
 		"SELECT account_id FROM accounts")
+	if err == nil && rows != nil {
+		_ = rows.Close()
+		if rowErr := rows.Err(); rowErr != nil {
+			err = rowErr
+		}
+	}
 	assert.Error(t, err)
 }
 
@@ -513,10 +536,9 @@ func TestPostgresPool_Integration_QueryRowContext(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Insert test data
 	_, err := pool.ExecContext(ctx,
@@ -554,10 +576,9 @@ func TestPostgresPool_Integration_NestedTransactionError(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Attempting nested transaction should return error
 	err := WithTransaction(ctx, pool, func(tx DB) error {
@@ -575,10 +596,9 @@ func TestPostgresPool_Integration_ReadOnlyTransaction(t *testing.T) {
 		t.Skip("Skipping integration test")
 	}
 
-	pool, cleanup := setupPostgresContainer(t)
-	defer cleanup()
-
 	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
 
 	// Insert test data
 	_, err := pool.ExecContext(ctx,

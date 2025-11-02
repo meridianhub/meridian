@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 )
@@ -157,7 +158,7 @@ func TestHealthChecker_GetLastCheckError(t *testing.T) {
 		hc.mu.Unlock()
 
 		err := hc.GetLastCheckError()
-		if err != expectedErr {
+		if !errors.Is(err, expectedErr) {
 			t.Errorf("Expected error %v, got %v", expectedErr, err)
 		}
 	})
@@ -169,12 +170,12 @@ func TestHealthChecker_Stop(t *testing.T) {
 	}
 	hc := NewHealthChecker(pool, nil)
 
-	t.Run("stop without starting is safe", func(t *testing.T) {
+	t.Run("stop without starting is safe", func(_ *testing.T) {
 		// Should not panic or hang
 		hc.Stop()
 	})
 
-	t.Run("multiple stops are safe", func(t *testing.T) {
+	t.Run("multiple stops are safe", func(_ *testing.T) {
 		hc.Stop()
 		hc.Stop() // Should not panic
 	})

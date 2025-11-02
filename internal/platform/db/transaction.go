@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-// Transaction isolation levels supported by CockroachDB and YugabyteDB
+// IsolationLevel represents transaction isolation levels supported by CockroachDB and YugabyteDB
 type IsolationLevel int
 
 const (
@@ -32,6 +32,8 @@ var (
 	ErrNestedTransaction = errors.New("nested transactions are not supported")
 	// ErrTransactionRolledBack is returned when transaction was rolled back due to error
 	ErrTransactionRolledBack = errors.New("transaction rolled back")
+	// ErrPingNotSupported is returned when Ping is called on a transaction
+	ErrPingNotSupported = errors.New("ping not supported on transactions")
 )
 
 // DefaultTxOptions returns transaction options optimized for CockroachDB
@@ -83,7 +85,7 @@ func WithTransactionOptions(ctx context.Context, db DB, opts *TxOptions, fn func
 		} else if err != nil {
 			// Function returned error, rollback
 			if rbErr := txWrapper.Rollback(); rbErr != nil {
-				err = fmt.Errorf("%w (rollback failed: %v)", err, rbErr)
+				err = fmt.Errorf("%w (rollback failed: %w)", err, rbErr)
 			}
 		}
 	}()
@@ -125,13 +127,13 @@ func (t *Tx) QueryRowContext(ctx context.Context, query string, args ...interfac
 }
 
 // BeginTx returns an error as nested transactions are not supported
-func (t *Tx) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+func (t *Tx) BeginTx(_ context.Context, _ *sql.TxOptions) (*sql.Tx, error) {
 	return nil, ErrNestedTransaction
 }
 
 // Ping returns an error as transactions don't support ping
-func (t *Tx) Ping(ctx context.Context) error {
-	return errors.New("ping not supported on transactions")
+func (t *Tx) Ping(_ context.Context) error {
+	return ErrPingNotSupported
 }
 
 // Close is a no-op for transactions (use Commit/Rollback instead)
