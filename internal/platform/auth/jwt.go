@@ -91,21 +91,29 @@ func (c *Claims) GetUserID() string {
 }
 
 // GetRoles extracts the roles from the validated claims.
+// Returns a defensive copy to prevent external mutation.
 // Returns an empty slice if no roles are present.
 func (c *Claims) GetRoles() []string {
 	if c.Roles == nil {
 		return []string{}
 	}
-	return c.Roles
+	// Return defensive copy to maintain immutability
+	roles := make([]string, len(c.Roles))
+	copy(roles, c.Roles)
+	return roles
 }
 
 // GetScopes extracts the scopes from the validated claims.
+// Returns a defensive copy to prevent external mutation.
 // Returns an empty slice if no scopes are present.
 func (c *Claims) GetScopes() []string {
 	if c.Scopes == nil {
 		return []string{}
 	}
-	return c.Scopes
+	// Return defensive copy to maintain immutability
+	scopes := make([]string, len(c.Scopes))
+	copy(scopes, c.Scopes)
+	return scopes
 }
 
 // HasRole checks if the claims contain a specific role.

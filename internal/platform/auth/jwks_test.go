@@ -90,15 +90,15 @@ func TestNewJWKSProvider(t *testing.T) {
 		cfg := &JWKSProviderConfig{
 			URL:        server.URL,
 			Client:     http.DefaultClient,
-			CacheTTL:   1 * time.Hour,
-			RefreshTTL: 10 * time.Second,
+			CacheTTL:   1 * time.Minute,
+			RefreshTTL: 45 * time.Second, // More than half of CacheTTL to avoid adjustment
 		}
 
 		provider, err := NewJWKSProvider(ctx, cfg)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, provider)
-		assert.Equal(t, 10*time.Second, provider.refreshTTL)
+		assert.Equal(t, 45*time.Second, provider.refreshTTL)
 
 		// Clean up
 		err = provider.Close()

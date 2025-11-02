@@ -87,6 +87,12 @@ func NewJWKSProvider(ctx context.Context, cfg *JWKSProviderConfig) (*JWKSProvide
 		cfg.CacheTTL = 24 * time.Hour // Default 24 hours
 	}
 
+	// Validate that refresh interval is reasonable relative to cache TTL
+	if cfg.RefreshTTL > 0 && cfg.RefreshTTL < cfg.CacheTTL/2 {
+		// Refresh more frequently than half the cache TTL could cause thrashing
+		cfg.RefreshTTL = cfg.CacheTTL / 2
+	}
+
 	provider := &JWKSProvider{
 		url:         cfg.URL,
 		client:      cfg.Client,
@@ -200,8 +206,11 @@ func (p *JWKSProvider) autoRefresh(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			// Use context derived from parent to maintain proper cancellation chain
+			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			// Ignore errors during automatic refresh - the cache will continue to serve old keys
-			_ = p.refresh(ctx)
+			_ = p.refresh(refreshCtx)
+			cancel()
 		case <-p.stopRefresh:
 			return
 		case <-ctx.Done():
