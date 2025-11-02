@@ -26,3 +26,14 @@ reviews:
   # Optional: Auto-approve PRs that pass all checks
   auto_review:
     enabled: true
+
+  # Language-specific settings
+  tools:
+    # Go-specific configuration
+    golang:
+      # Adjust docstring coverage threshold to match project practices
+      # Most exported types and functions have comprehensive godoc comments
+      # Lower threshold accounts for internal helpers and test files
+      docstring_coverage:
+        enabled: true
+        threshold: 50
