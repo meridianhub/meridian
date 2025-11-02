@@ -177,11 +177,7 @@ func (h *HealthChecker) IsHealthy() bool {
 	// If last check was too long ago (2x interval), not healthy
 	// This catches cases where the periodic check goroutine has stopped
 	staleDuration := h.checkInterval * 2
-	if time.Since(h.lastCheckTime) > staleDuration {
-		return false
-	}
-
-	return true
+	return time.Since(h.lastCheckTime) <= staleDuration
 }
 
 // GetLastCheckTime returns the timestamp of the most recent health check.

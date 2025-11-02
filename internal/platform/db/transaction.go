@@ -113,12 +113,20 @@ type Tx struct {
 
 // QueryContext executes a query that returns rows
 func (t *Tx) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
-	return t.tx.QueryContext(ctx, query, args...)
+	rows, err := t.tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("transaction query failed: %w", err)
+	}
+	return rows, nil
 }
 
 // ExecContext executes a query that doesn't return rows
 func (t *Tx) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
-	return t.tx.ExecContext(ctx, query, args...)
+	result, err := t.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("transaction exec failed: %w", err)
+	}
+	return result, nil
 }
 
 // QueryRowContext executes a query that returns at most one row
