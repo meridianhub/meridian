@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff migrate-lint migrate-apply migrate-status migrate-hash
 
 # Default target
 all: help
@@ -61,6 +61,13 @@ help:
 	@echo "  make tidy              - Tidy and verify Go modules"
 	@echo "  make deps              - Download dependencies"
 	@echo "  make install           - Install development tools"
+	@echo ""
+	@echo "Database Migration targets:"
+	@echo "  make migrate-diff      - Generate new migration from GORM model changes"
+	@echo "  make migrate-lint      - Lint migrations for destructive changes"
+	@echo "  make migrate-apply     - Apply pending migrations (requires DATABASE_URL)"
+	@echo "  make migrate-status    - Show migration status (requires DATABASE_URL)"
+	@echo "  make migrate-hash      - Verify migration checksums"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -220,3 +227,38 @@ proto-plugins-info:
 	@echo "  2. Update versions in buf.gen.yaml"
 	@echo "  3. Run 'make proto' to test generation"
 	@echo "  4. Commit buf.gen.yaml with updated versions"
+
+## migrate-diff: Generate a new migration from GORM model changes
+migrate-diff:
+	@echo "Generating migration from GORM models..."
+	@read -p "Enter migration name: " name; \
+	atlas migrate diff $$name --env local
+	@echo "Migration generated. Review migrations/ directory."
+
+## migrate-lint: Lint migrations for potential issues
+migrate-lint:
+	@echo "Linting migrations for destructive changes..."
+	atlas migrate lint --env local --latest 1
+
+## migrate-apply: Apply pending migrations (use with DATABASE_URL)
+migrate-apply:
+	@echo "Applying migrations..."
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "Error: DATABASE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	atlas migrate apply --env local --url "$$DATABASE_URL"
+
+## migrate-status: Show migration status
+migrate-status:
+	@echo "Migration status:"
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "Error: DATABASE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	atlas migrate status --env local --url "$$DATABASE_URL"
+
+## migrate-hash: Verify migration integrity
+migrate-hash:
+	@echo "Verifying migration checksums..."
+	atlas migrate hash --env local
