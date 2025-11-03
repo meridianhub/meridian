@@ -26,6 +26,42 @@ CLIENT_ID="meridian-service"
 TEST_USER="developer@meridian.local"
 TEST_PASSWORD="developer"
 
+# Production safety check
+if [[ "$KEYCLOAK_URL" =~ ^https:// ]] || [[ ! "$KEYCLOAK_URL" =~ localhost|127\.0\.0\.1 ]]; then
+    echo -e "${RED}=========================================${NC}"
+    echo -e "${RED}WARNING: PRODUCTION ENVIRONMENT DETECTED${NC}"
+    echo -e "${RED}=========================================${NC}"
+    echo ""
+    echo "This script is intended for LOCAL DEVELOPMENT ONLY"
+    echo "Target URL: $KEYCLOAK_URL"
+    echo ""
+    echo -e "${YELLOW}This will create test users with weak credentials!${NC}"
+    echo ""
+    read -p "Are you SURE you want to run this against a non-local environment? (type 'yes' to continue): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo "Aborted."
+        exit 1
+    fi
+    echo ""
+fi
+
+# Check for required dependencies
+if ! command -v jq &> /dev/null; then
+    echo -e "${RED}Error: jq is not installed${NC}"
+    echo "This script requires jq for JSON parsing."
+    echo ""
+    echo "Install jq:"
+    echo "  macOS:   brew install jq"
+    echo "  Ubuntu:  sudo apt-get install jq"
+    echo "  RHEL:    sudo yum install jq"
+    exit 1
+fi
+
+if ! command -v curl &> /dev/null; then
+    echo -e "${RED}Error: curl is not installed${NC}"
+    exit 1
+fi
+
 echo "========================================="
 echo "Keycloak Setup for Meridian"
 echo "========================================="

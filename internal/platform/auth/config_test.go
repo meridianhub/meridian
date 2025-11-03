@@ -215,10 +215,11 @@ func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
 	assert.Equal(t, AuthModeJWKS, config.Mode)
-	assert.Equal(t, "http://localhost:8080/realms/meridian/protocol/openid-connect/certs", config.JWKSURL)
+	assert.Equal(t, "http://localhost:18080/realms/meridian/protocol/openid-connect/certs", config.JWKSURL)
 	assert.Equal(t, time.Hour, config.JWKSCacheTTL)
 	assert.Equal(t, 30*time.Minute, config.JWKSRefreshTTL)
 	assert.NotNil(t, config.HTTPClient)
+	assert.Equal(t, 30*time.Second, config.HTTPClient.Timeout)
 }
 
 func TestConfig_NewAuthenticator(t *testing.T) {

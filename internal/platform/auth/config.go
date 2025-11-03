@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,14 @@ var (
 	// ErrMissingIntrospectionURL is returned when OAUTH_INTROSPECTION_URL is not set
 	ErrMissingIntrospectionURL = errors.New("OAUTH_INTROSPECTION_URL is required for introspection")
 )
+
+// defaultHTTPClient returns an HTTP client with reasonable timeout settings.
+// This prevents hanging requests by setting a 30-second timeout for auth operations.
+func defaultHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+	}
+}
 
 // AuthMode defines the authentication mode for the service
 // nolint:revive // AuthMode is more descriptive than Mode for auth.AuthMode
@@ -96,7 +105,7 @@ func NewConfigFromEnv() (Config, error) {
 
 	config := Config{
 		Mode:       mode,
-		HTTPClient: http.DefaultClient,
+		HTTPClient: defaultHTTPClient(),
 	}
 
 	switch mode {
@@ -169,10 +178,10 @@ func NewConfigFromEnv() (Config, error) {
 func DefaultConfig() Config {
 	return Config{
 		Mode:           AuthModeJWKS,
-		JWKSURL:        "http://localhost:8080/realms/meridian/protocol/openid-connect/certs",
+		JWKSURL:        "http://localhost:18080/realms/meridian/protocol/openid-connect/certs",
 		JWKSCacheTTL:   1 * time.Hour,
 		JWKSRefreshTTL: 30 * time.Minute,
-		HTTPClient:     http.DefaultClient,
+		HTTPClient:     defaultHTTPClient(),
 	}
 }
 
@@ -270,21 +279,13 @@ func splitScopes(scopes string) []string {
 	if scopes == "" {
 		return nil
 	}
-
-	var result []string
-	current := ""
-	for i := 0; i < len(scopes); i++ {
-		if scopes[i] == ',' {
-			if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		} else if scopes[i] != ' ' { // Trim spaces
-			current += string(scopes[i])
+	parts := strings.Split(scopes, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
 		}
-	}
-	if current != "" {
-		result = append(result, current)
 	}
 	return result
 }

@@ -59,7 +59,7 @@ func NewOAuth2Client(config *OAuth2Config) (*OAuth2Client, error) {
 	}
 
 	if config.Client == nil {
-		config.Client = http.DefaultClient
+		config.Client = defaultHTTPClient()
 	}
 
 	return &OAuth2Client{
@@ -187,7 +187,7 @@ func NewOAuth2Introspector(introspectionURL, clientID, clientSecret string, clie
 	}
 
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultHTTPClient()
 	}
 
 	return &OAuth2Introspector{
