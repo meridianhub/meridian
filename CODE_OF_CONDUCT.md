@@ -4,6 +4,8 @@
 
 Meridian is a professional software project focused on building a modern banking platform. This Code of Conduct establishes expectations for participation in our community to foster productive technical collaboration.
 
+As a learning project, we welcome questions and view mistakes as opportunities for growth and improvement. This is an environment where developers can explore banking platform architecture, ask clarifying questions, and learn from both successes and failures.
+
 ## Our Standards
 
 ### Expected Behavior
@@ -28,7 +30,7 @@ This Code of Conduct applies to:
 
 - Project repositories and issue trackers
 - Pull request discussions and code reviews
-- Community channels (Slack, Discord, mailing lists, etc.)
+- GitHub Discussions and community channels (if/when established)
 - Project events and meetings
 - Public representation of the project
 
@@ -43,6 +45,8 @@ If you experience or witness unacceptable behavior:
    - GitHub private message
    - Project communication channels (marked private)
    - Email to repository administrators
+
+**Note**: For security vulnerabilities or security-related concerns, please follow the procedures outlined in [SECURITY.md](SECURITY.md) instead.
 
 ### Response
 

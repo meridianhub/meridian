@@ -57,7 +57,7 @@ This security policy applies to:
 
 The following are generally not considered security vulnerabilities:
 
-- Issues requiring physical access to infrastructure
+- Issues requiring unauthorized physical access to infrastructure
 - Social engineering attacks against users
 - Vulnerabilities in third-party dependencies (report to upstream projects)
 - Issues already publicly disclosed or known
