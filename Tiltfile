@@ -508,13 +508,35 @@ local_resource(
 )
 
 # Run database migrations on startup - uses Atlas to apply schema changes
+# Migrations are applied in order:
+# 1. current_account schema (customers, accounts)
+# 2. position_keeping schema (transactions with FK to accounts)
+# 3. audit schema (triggers and audit log)
 local_resource(
-  'migrate',
-  cmd='atlas migrate apply --env local --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
+  'migrate-current-account',
+  cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
   resource_deps=['cockroachdb'],
   labels=['database'],
-  auto_init=True,  # Runs automatically on Tilt startup after CockroachDB is ready
-  trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger migrate'
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+  'migrate-position-keeping',
+  cmd='atlas migrate apply --env local --config file://atlas.position_keeping.hcl --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
+  resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+  'migrate-audit',
+  cmd='psql "postgres://root@localhost:26257/defaultdb?sslmode=disable" -f migrations/audit/20251103000001_audit_schema.sql && psql "postgres://root@localhost:26257/defaultdb?sslmode=disable" -f migrations/audit/20251103000002_attach_triggers.sql',
+  resource_deps=['migrate-position-keeping'],  # Depends on business tables existing
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
@@ -563,9 +585,16 @@ Tilt UI              → http://localhost:10350
 Hot reload: Edit Go code and see changes in ~3 seconds
 
 Database Migrations:
-  • Atlas migrations run automatically on startup
-  • Manual trigger: tilt trigger migrate
-  • Check status: atlas migrate status --env local --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"
+  • Migrations run automatically on startup (3 stages):
+    1. current_account schema (customers, accounts)
+    2. position_keeping schema (transactions)
+    3. audit schema (triggers and audit log)
+  • Manual triggers:
+    - tilt trigger migrate-current-account
+    - tilt trigger migrate-position-keeping
+    - tilt trigger migrate-audit
+  • Check status:
+    - make migrate-status-all (requires DATABASE_URL env var)
 
 Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker

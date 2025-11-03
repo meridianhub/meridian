@@ -40,7 +40,7 @@ type Transaction struct {
 	ReversedAt  *time.Time `gorm:"index" json:"reversed_at,omitempty"`
 }
 
-// TableName overrides the table name used by Transaction to `transactions`
+// TableName overrides the table name used by Transaction to `position_keeping.transactions`
 func (Transaction) TableName() string {
-	return "transactions"
+	return "position_keeping.transactions"
 }

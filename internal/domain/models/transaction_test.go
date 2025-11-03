@@ -9,8 +9,8 @@ import (
 
 func TestTransaction_TableName(t *testing.T) {
 	transaction := Transaction{}
-	if transaction.TableName() != "transactions" {
-		t.Errorf("TableName() = %v, want %v", transaction.TableName(), "transactions")
+	if transaction.TableName() != "position_keeping.transactions" {
+		t.Errorf("TableName() = %v, want %v", transaction.TableName(), "position_keeping.transactions")
 	}
 }
 

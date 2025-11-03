@@ -19,7 +19,7 @@ type Customer struct {
 	Accounts []Account `gorm:"foreignKey:CustomerID;constraint:OnDelete:RESTRICT" json:"accounts,omitempty"`
 }
 
-// TableName overrides the table name used by Customer to `customers`
+// TableName overrides the table name used by Customer to `current_account.customers`
 func (Customer) TableName() string {
-	return "customers"
+	return "current_account.customers"
 }

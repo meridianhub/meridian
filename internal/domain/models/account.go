@@ -34,7 +34,7 @@ type Account struct {
 	ClosedAt *time.Time `gorm:"index" json:"closed_at,omitempty"`
 }
 
-// TableName overrides the table name used by Account to `accounts`
+// TableName overrides the table name used by Account to `current_account.accounts`
 func (Account) TableName() string {
-	return "accounts"
+	return "current_account.accounts"
 }

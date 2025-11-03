@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff migrate-lint migrate-apply migrate-status migrate-hash
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-apply-audit migrate-status-all migrate-lint-all migrate-hash-all
 
 # Default target
 all: help
@@ -63,11 +63,14 @@ help:
 	@echo "  make install           - Install development tools"
 	@echo ""
 	@echo "Database Migration targets:"
-	@echo "  make migrate-diff      - Generate new migration from GORM model changes"
-	@echo "  make migrate-lint      - Lint migrations for destructive changes"
-	@echo "  make migrate-apply     - Apply pending migrations (requires DATABASE_URL)"
-	@echo "  make migrate-status    - Show migration status (requires DATABASE_URL)"
-	@echo "  make migrate-hash      - Verify migration checksums"
+	@echo "  make migrate-diff-all          - Generate migrations for all schemas"
+	@echo "  make migrate-diff-current      - Generate migration for current_account schema"
+	@echo "  make migrate-diff-position     - Generate migration for position_keeping schema"
+	@echo "  make migrate-apply-all         - Apply all pending migrations"
+	@echo "  make migrate-apply-audit       - Apply audit schema and triggers"
+	@echo "  make migrate-status-all        - Show migration status for all schemas"
+	@echo "  make migrate-lint-all          - Lint all migrations"
+	@echo "  make migrate-hash-all          - Verify all migration checksums"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -228,37 +231,74 @@ proto-plugins-info:
 	@echo "  3. Run 'make proto' to test generation"
 	@echo "  4. Commit buf.gen.yaml with updated versions"
 
-## migrate-diff: Generate a new migration from GORM model changes
-migrate-diff:
-	@echo "Generating migration from GORM models..."
-	@read -p "Enter migration name: " name; \
-	atlas migrate diff $$name --env local
-	@echo "Migration generated. Review migrations/ directory."
+## migrate-diff-all: Generate migrations for all schemas
+migrate-diff-all: migrate-diff-current migrate-diff-position
+	@echo "All schema migrations generated."
 
-## migrate-lint: Lint migrations for potential issues
-migrate-lint:
-	@echo "Linting migrations for destructive changes..."
-	atlas migrate lint --env local --latest 1
+## migrate-diff-current: Generate migration for current_account schema
+migrate-diff-current:
+	@echo "Generating migration for current_account schema..."
+	@read -p "Enter migration name for current_account: " name; \
+	atlas migrate diff $$name --env local --config atlas.current_account.hcl
+	@echo "current_account migration generated. Review migrations/current_account/ directory."
 
-## migrate-apply: Apply pending migrations (use with DATABASE_URL)
-migrate-apply:
-	@echo "Applying migrations..."
+## migrate-diff-position: Generate migration for position_keeping schema
+migrate-diff-position:
+	@echo "Generating migration for position_keeping schema..."
+	@read -p "Enter migration name for position_keeping: " name; \
+	atlas migrate diff $$name --env local --config atlas.position_keeping.hcl
+	@echo "position_keeping migration generated. Review migrations/position_keeping/ directory."
+
+## migrate-apply-all: Apply all pending migrations
+migrate-apply-all:
+	@echo "Applying migrations for all schemas..."
 	@if [ -z "$$DATABASE_URL" ]; then \
 		echo "Error: DATABASE_URL environment variable not set"; \
 		exit 1; \
 	fi
-	atlas migrate apply --env local --url "$$DATABASE_URL"
+	@echo "Applying current_account migrations..."
+	@atlas migrate apply --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
+	@echo "Applying position_keeping migrations..."
+	@atlas migrate apply --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
+	@echo "All schema migrations applied."
 
-## migrate-status: Show migration status
-migrate-status:
-	@echo "Migration status:"
+## migrate-apply-audit: Apply audit schema and triggers (manual SQL)
+migrate-apply-audit:
+	@echo "Applying audit schema..."
 	@if [ -z "$$DATABASE_URL" ]; then \
 		echo "Error: DATABASE_URL environment variable not set"; \
 		exit 1; \
 	fi
-	atlas migrate status --env local --url "$$DATABASE_URL"
+	@echo "Creating audit schema and functions..."
+	@psql "$$DATABASE_URL" -f migrations/audit/20251103000001_audit_schema.sql
+	@echo "Attaching audit triggers to tables..."
+	@psql "$$DATABASE_URL" -f migrations/audit/20251103000002_attach_triggers.sql
+	@echo "Audit system configured."
 
-## migrate-hash: Verify migration integrity
-migrate-hash:
-	@echo "Verifying migration checksums..."
-	atlas migrate hash --env local
+## migrate-status-all: Show migration status for all schemas
+migrate-status-all:
+	@echo "Migration status for all schemas:"
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "Error: DATABASE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	@echo "\n=== current_account schema ==="
+	@atlas migrate status --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
+	@echo "\n=== position_keeping schema ==="
+	@atlas migrate status --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
+
+## migrate-lint-all: Lint all migrations for potential issues
+migrate-lint-all:
+	@echo "Linting migrations for all schemas..."
+	@echo "Linting current_account migrations..."
+	@atlas migrate lint --env local --config atlas.current_account.hcl --latest 1
+	@echo "Linting position_keeping migrations..."
+	@atlas migrate lint --env local --config atlas.position_keeping.hcl --latest 1
+	@echo "All migrations linted successfully."
+
+## migrate-hash-all: Verify migration integrity for all schemas
+migrate-hash-all:
+	@echo "Verifying migration checksums for all schemas..."
+	@atlas migrate hash --env local --config atlas.current_account.hcl
+	@atlas migrate hash --env local --config atlas.position_keeping.hcl
+	@echo "All migration checksums verified."
