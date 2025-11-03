@@ -145,6 +145,38 @@ EOF
     echo -e " ${GREEN}✓${NC}"
 }
 
+# Function to check if realm role exists
+role_exists() {
+    local token=$1
+    local role_name=$2
+    curl -sf -H "Authorization: Bearer $token" \
+        "$KEYCLOAK_URL/admin/realms/$REALM_NAME/roles/$role_name" > /dev/null 2>&1
+}
+
+# Function to create realm roles
+create_realm_roles() {
+    local token=$1
+    echo -n "Creating realm roles..."
+
+    # Create 'user' role
+    if ! role_exists "$token" "user"; then
+        curl -sf -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/roles" \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/json" \
+            -d '{"name": "user", "description": "Standard user role"}' > /dev/null
+    fi
+
+    # Create 'admin' role
+    if ! role_exists "$token" "admin"; then
+        curl -sf -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/roles" \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/json" \
+            -d '{"name": "admin", "description": "Administrator role"}' > /dev/null
+    fi
+
+    echo -e " ${GREEN}✓${NC}"
+}
+
 # Function to check if client exists
 client_exists() {
     local token=$1
@@ -165,15 +197,14 @@ create_client() {
 {
   "clientId": "$CLIENT_ID",
   "name": "Meridian Service",
-  "description": "Meridian gRPC service",
+  "description": "Meridian gRPC service (public client for local dev)",
   "enabled": true,
   "protocol": "openid-connect",
-  "publicClient": false,
+  "publicClient": true,
   "bearerOnly": false,
   "standardFlowEnabled": true,
   "implicitFlowEnabled": false,
   "directAccessGrantsEnabled": true,
-  "serviceAccountsEnabled": true,
   "authorizationServicesEnabled": false,
   "redirectUris": ["http://localhost:*"],
   "webOrigins": ["+"],
@@ -245,6 +276,9 @@ main() {
     else
         create_realm "$TOKEN"
     fi
+
+    # Create realm roles (idempotent)
+    create_realm_roles "$TOKEN"
 
     # Create client if it doesn't exist
     if client_exists "$TOKEN"; then
