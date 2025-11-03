@@ -5,9 +5,9 @@ CREATE SCHEMA "position_keeping";
 CREATE TABLE "position_keeping"."transactions" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "created_at" timestamptz NOT NULL DEFAULT now(),
-  "created_by" character varying(100) NULL,
+  "created_by" character varying(100) NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
-  "updated_by" character varying(100) NULL,
+  "updated_by" character varying(100) NOT NULL,
   "deleted_at" timestamptz NULL,
   "transaction_id" character varying(100) NOT NULL,
   "transaction_type" character varying(50) NOT NULL,

@@ -5,9 +5,9 @@ CREATE SCHEMA "current_account";
 CREATE TABLE "current_account"."customers" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "created_at" timestamptz NOT NULL DEFAULT now(),
-  "created_by" character varying(100) NULL,
+  "created_by" character varying(100) NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
-  "updated_by" character varying(100) NULL,
+  "updated_by" character varying(100) NOT NULL,
   "deleted_at" timestamptz NULL,
   "customer_number" character varying(50) NOT NULL,
   "first_name" character varying(100) NOT NULL,
@@ -27,9 +27,9 @@ CREATE UNIQUE INDEX "idx_current_account_customers_email" ON "current_account"."
 CREATE TABLE "current_account"."accounts" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "created_at" timestamptz NOT NULL DEFAULT now(),
-  "created_by" character varying(100) NULL,
+  "created_by" character varying(100) NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
-  "updated_by" character varying(100) NULL,
+  "updated_by" character varying(100) NOT NULL,
   "deleted_at" timestamptz NULL,
   "account_number" character varying(34) NOT NULL,
   "account_type" character varying(50) NOT NULL,
