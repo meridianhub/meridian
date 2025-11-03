@@ -70,6 +70,7 @@ type JWKSProvider struct {
 	keys        map[string]*rsa.PublicKey
 	lastFetch   time.Time
 	stopRefresh chan struct{}
+	closeOnce   sync.Once
 }
 
 // NewJWKSProvider creates a new JWKS provider with the specified configuration.
@@ -219,9 +220,12 @@ func (p *JWKSProvider) autoRefresh(ctx context.Context) {
 	}
 }
 
-// Close stops the automatic refresh goroutine
+// Close stops the automatic refresh goroutine.
+// This method is idempotent and safe to call multiple times.
 func (p *JWKSProvider) Close() error {
-	close(p.stopRefresh)
+	p.closeOnce.Do(func() {
+		close(p.stopRefresh)
+	})
 	return nil
 }
 

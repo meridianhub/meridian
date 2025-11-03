@@ -88,8 +88,19 @@ func (c *OAuth2Client) GetToken(ctx context.Context) (string, error) {
 	// Cache token with expiry
 	c.mu.Lock()
 	c.cachedToken = tokenResp.AccessToken
-	// Refresh token 30 seconds before actual expiry
-	c.expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn-30) * time.Second)
+	// Refresh token shortly before the real expiry without going negative for short-lived tokens
+	now := time.Now()
+	expiresIn := time.Duration(tokenResp.ExpiresIn) * time.Second
+	const refreshLead = 30 * time.Second
+	switch {
+	case expiresIn <= 0:
+		c.expiresAt = now
+	case expiresIn > refreshLead:
+		c.expiresAt = now.Add(expiresIn - refreshLead)
+	default:
+		// For very short-lived tokens, refresh halfway through their lifetime
+		c.expiresAt = now.Add(expiresIn / 2)
+	}
 	c.mu.Unlock()
 
 	return tokenResp.AccessToken, nil

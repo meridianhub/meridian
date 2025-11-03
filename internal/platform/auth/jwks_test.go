@@ -488,4 +488,29 @@ func TestJWKSProvider_Close(t *testing.T) {
 		// Give time for goroutine to exit
 		time.Sleep(200 * time.Millisecond)
 	})
+
+	t.Run("close is idempotent", func(t *testing.T) {
+		jwks, _ := createTestJWKS(t)
+		server := mockJWKSServer(t, jwks)
+		defer server.Close()
+
+		cfg := &JWKSProviderConfig{
+			URL:        server.URL,
+			Client:     http.DefaultClient,
+			RefreshTTL: 100 * time.Millisecond,
+		}
+
+		provider, err := NewJWKSProvider(ctx, cfg)
+		require.NoError(t, err)
+
+		// Close multiple times should not panic
+		err = provider.Close()
+		assert.NoError(t, err)
+
+		err = provider.Close()
+		assert.NoError(t, err)
+
+		err = provider.Close()
+		assert.NoError(t, err)
+	})
 }

@@ -282,6 +282,88 @@ func TestOAuth2Client_GetToken(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidOAuthResponse)
 		assert.Empty(t, token)
 	})
+
+	t.Run("handles short-lived tokens correctly", func(t *testing.T) {
+		// Test token with ExpiresIn = 15s (less than 30s refresh lead)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			resp := TokenResponse{
+				AccessToken: "short-lived-token",
+				TokenType:   "Bearer",
+				ExpiresIn:   15, // 15 seconds
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer server.Close()
+
+		config := &OAuth2Config{
+			ClientID:     "test-client",
+			ClientSecret: "test-secret",
+			TokenURL:     server.URL,
+			Client:       http.DefaultClient,
+		}
+
+		client, err := NewOAuth2Client(config)
+		require.NoError(t, err)
+
+		beforeFetch := time.Now()
+		token, err := client.GetToken(ctx)
+		afterFetch := time.Now()
+
+		assert.NoError(t, err)
+		assert.Equal(t, "short-lived-token", token)
+
+		// Verify expiry is set to halfway through lifetime (7.5s)
+		// Should be: now + (15s / 2) = now + 7.5s
+		client.mu.RLock()
+		expiresAt := client.expiresAt
+		client.mu.RUnlock()
+
+		// expiresAt should be between (beforeFetch + 7s) and (afterFetch + 8s)
+		expectedMin := beforeFetch.Add(7 * time.Second)
+		expectedMax := afterFetch.Add(8 * time.Second)
+
+		assert.True(t, expiresAt.After(expectedMin), "expiresAt should be at least 7s from fetch start")
+		assert.True(t, expiresAt.Before(expectedMax), "expiresAt should be at most 8s from fetch end")
+	})
+
+	t.Run("handles zero or negative ExpiresIn", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			resp := TokenResponse{
+				AccessToken: "instant-expire-token",
+				TokenType:   "Bearer",
+				ExpiresIn:   0, // Already expired
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer server.Close()
+
+		config := &OAuth2Config{
+			ClientID:     "test-client",
+			ClientSecret: "test-secret",
+			TokenURL:     server.URL,
+			Client:       http.DefaultClient,
+		}
+
+		client, err := NewOAuth2Client(config)
+		require.NoError(t, err)
+
+		beforeFetch := time.Now()
+		token, err := client.GetToken(ctx)
+		afterFetch := time.Now()
+
+		assert.NoError(t, err)
+		assert.Equal(t, "instant-expire-token", token)
+
+		// Verify expiry is set to now (not backdated)
+		client.mu.RLock()
+		expiresAt := client.expiresAt
+		client.mu.RUnlock()
+
+		assert.True(t, !expiresAt.Before(beforeFetch), "expiresAt should not be before fetch start")
+		assert.True(t, !expiresAt.After(afterFetch.Add(time.Second)), "expiresAt should not be after fetch end + 1s")
+	})
 }
 
 func TestOAuth2Client_ClearCache(t *testing.T) {
