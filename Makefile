@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-apply-audit migrate-status-all migrate-lint-all migrate-hash-all
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all
 
 # Default target
 all: help
@@ -67,7 +67,6 @@ help:
 	@echo "  make migrate-diff-current      - Generate migration for current_account schema"
 	@echo "  make migrate-diff-position     - Generate migration for position_keeping schema"
 	@echo "  make migrate-apply-all         - Apply all pending migrations"
-	@echo "  make migrate-apply-audit       - Apply audit schema and triggers"
 	@echo "  make migrate-status-all        - Show migration status for all schemas"
 	@echo "  make migrate-lint-all          - Lint all migrations"
 	@echo "  make migrate-hash-all          - Verify all migration checksums"
@@ -256,24 +255,11 @@ migrate-apply-all:
 		echo "Error: DATABASE_URL environment variable not set"; \
 		exit 1; \
 	fi
-	@echo "Applying current_account migrations..."
+	@echo "Applying current_account migrations (includes current_account_audit)..."
 	@atlas migrate apply --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
-	@echo "Applying position_keeping migrations..."
+	@echo "Applying position_keeping migrations (includes position_keeping_audit)..."
 	@atlas migrate apply --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
-	@echo "All schema migrations applied."
-
-## migrate-apply-audit: Apply audit schema and triggers (manual SQL)
-migrate-apply-audit:
-	@echo "Applying audit schema..."
-	@if [ -z "$$DATABASE_URL" ]; then \
-		echo "Error: DATABASE_URL environment variable not set"; \
-		exit 1; \
-	fi
-	@echo "Creating audit schema and functions..."
-	@psql "$$DATABASE_URL" -f migrations/audit/20251103000001_audit_schema.sql
-	@echo "Attaching audit triggers to tables..."
-	@psql "$$DATABASE_URL" -f migrations/audit/20251103000002_attach_triggers.sql
-	@echo "Audit system configured."
+	@echo "All schema migrations applied (each service includes its own audit schema)."
 
 ## migrate-status-all: Show migration status for all schemas
 migrate-status-all:

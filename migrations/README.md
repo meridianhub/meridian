@@ -6,25 +6,27 @@ This directory contains database migrations organized by schema, following BIAN 
 
 ### Schema-per-Service Pattern
 
-Each BIAN service domain has its own PostgreSQL schema:
+Each BIAN service domain has its own PostgreSQL schemas for business data and audit:
 
 - **`current_account`**: Customer and Account models (BIAN Current Account domain)
+- **`current_account_audit`**: Audit logs for current_account service
 - **`position_keeping`**: Transaction models (BIAN Position Keeping domain)
-- **`audit`**: Audit logging system (cross-cutting concern)
+- **`position_keeping_audit`**: Audit logs for position_keeping service
+
+Each microservice owns both its business schema and audit schema, ensuring complete service isolation.
 
 ### Migration Organization
 
 ```
 migrations/
-├── current_account/        # Customers and accounts
-│   ├── 20251103083007_initial.sql
+├── current_account/        # Current Account service
+│   ├── 20251103174203_initial.sql         # Business tables (customers, accounts)
+│   ├── 20251103180000_audit_system.sql    # Service-specific audit (current_account_audit)
 │   └── atlas.sum
-├── position_keeping/       # Transactions (depends on current_account)
-│   ├── 20251103083136_initial.sql
-│   └── atlas.sum
-└── audit/                  # Audit system (manual SQL)
-    ├── 20251103000001_audit_schema.sql
-    └── 20251103000002_attach_triggers.sql
+└── position_keeping/       # Position Keeping service
+    ├── 20251103174231_initial.sql         # Business tables (transactions)
+    ├── 20251103180000_audit_system.sql    # Service-specific audit (position_keeping_audit)
+    └── atlas.sum
 ```
 
 ## Migration Tools
@@ -65,16 +67,14 @@ make migrate-diff-position      # position_keeping schema
 ```bash
 tilt up
 # Migrations apply automatically in order:
-# 1. current_account
-# 2. position_keeping
-# 3. audit
+# 1. current_account (includes current_account_audit)
+# 2. position_keeping (includes position_keeping_audit)
 ```
 
 **Manual application:**
 ```bash
 export DATABASE_URL="postgres://user:pass@host:5432/dbname"
-make migrate-apply-all          # Apply all schemas
-make migrate-apply-audit        # Apply audit system
+make migrate-apply-all          # Apply all schemas (each includes its audit schema)
 ```
 
 ### Check Migration Status
@@ -94,9 +94,10 @@ make migrate-lint-all
 
 Migrations must be applied in this order due to foreign key dependencies:
 
-1. **current_account** - Base tables (customers, accounts)
-2. **position_keeping** - Transactions (references accounts)
-3. **audit** - Audit triggers (references all business tables)
+1. **current_account** - Customers, accounts, and current_account_audit schema
+2. **position_keeping** - Transactions (references accounts) and position_keeping_audit schema
+
+Each service migration includes both business tables and its audit schema, ensuring complete service isolation.
 
 This order is enforced in:
 - Tiltfile (via `resource_deps`)
@@ -107,43 +108,55 @@ This order is enforced in:
 
 ### Overview
 
-All changes to business tables are automatically logged to `audit.change_log`:
+Each microservice has its own audit schema for complete isolation:
 
-- **What changed**: Schema, table, operation (INSERT/UPDATE/DELETE)
+- **`current_account_audit.change_log`**: Logs changes to customers and accounts
+- **`position_keeping_audit.change_log`**: Logs changes to transactions
+
+All changes are automatically logged with:
+- **What changed**: Table name, operation (INSERT/UPDATE/DELETE)
 - **Who changed it**: `created_by`/`updated_by` from BaseModel
 - **When changed**: Timestamp with timezone
 - **What data changed**: JSONB diff of old vs new values
 
-### Audit Triggers
+### Service-Specific Audit
 
-Triggers are attached via stored procedure:
+Each service's audit schema is:
+- **Isolated**: Only accessible by the owning service
+- **Self-contained**: Includes all triggers, functions, and views
+- **Independently deployable**: Service migrations include audit setup
 
-```sql
-SELECT audit.enable_audit_log('current_account', 'customers');
-SELECT audit.enable_audit_log('current_account', 'accounts');
-SELECT audit.enable_audit_log('position_keeping', 'transactions');
-```
+Audit triggers are automatically attached during migration.
 
 ### Querying Audit History
 
-**Get history for a specific record:**
+**For current_account service:**
 ```sql
-SELECT * FROM audit.get_record_history('record-uuid-here');
-```
+-- Get history for a specific customer or account
+SELECT * FROM current_account_audit.get_record_history('record-uuid-here');
 
-**View human-readable change summary:**
-```sql
-SELECT * FROM audit.change_summary
+-- View human-readable change summary
+SELECT * FROM current_account_audit.change_summary
 WHERE table_full_name = 'current_account.customers'
 ORDER BY changed_at DESC
 LIMIT 100;
-```
 
-**Find all changes by a user:**
-```sql
-SELECT * FROM audit.change_log
+-- Find all changes by a user
+SELECT * FROM current_account_audit.change_log
 WHERE changed_by = 'user@example.com'
 ORDER BY changed_at DESC;
+```
+
+**For position_keeping service:**
+```sql
+-- Get history for a specific transaction
+SELECT * FROM position_keeping_audit.get_record_history('record-uuid-here');
+
+-- View human-readable change summary
+SELECT * FROM position_keeping_audit.change_summary
+WHERE table_full_name = 'position_keeping.transactions'
+ORDER BY changed_at DESC
+LIMIT 100;
 ```
 
 ## BaseModel Fields
@@ -175,8 +188,9 @@ type BaseModel struct {
    make migrate-diff-current  # or migrate-diff-position
    ```
 5. Enable audit logging:
-   - Add trigger attachment to `migrations/audit/002_attach_triggers.sql`
-   - Or run: `SELECT audit.enable_audit_log('schema_name', 'table_name');`
+   - Add trigger to the service's audit migration (e.g., `migrations/current_account/YYYYMMDDHHMMSS_audit_system.sql`)
+   - Or run: `SELECT current_account_audit.enable_audit_log('table_name');` (for current_account tables)
+   - Or run: `SELECT position_keeping_audit.enable_audit_log('table_name');` (for position_keeping tables)
 
 ### Adding a New Schema
 

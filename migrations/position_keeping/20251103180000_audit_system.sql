@@ -1,16 +1,15 @@
--- Audit Schema and Trigger System
--- This creates a separate audit schema with automatic change tracking via triggers
--- All changes to business tables are logged to audit.change_log
+-- Position Keeping Audit System
+-- This creates a service-specific audit schema for the Position Keeping domain
+-- All changes to position_keeping tables are logged to position_keeping_audit.change_log
 
--- Create audit schema
-CREATE SCHEMA IF NOT EXISTS audit;
+-- Create audit schema for position_keeping service
+CREATE SCHEMA IF NOT EXISTS position_keeping_audit;
 
--- Audit log table - stores all changes to business tables
-CREATE TABLE audit.change_log (
+-- Audit log table - stores all changes to position_keeping tables
+CREATE TABLE position_keeping_audit.change_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- What changed
-    schema_name VARCHAR(100) NOT NULL,
     table_name VARCHAR(100) NOT NULL,
     operation VARCHAR(10) NOT NULL, -- INSERT, UPDATE, DELETE
 
@@ -19,7 +18,7 @@ CREATE TABLE audit.change_log (
 
     -- Change metadata
     changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    changed_by VARCHAR(100) NOT NULL,
+    changed_by VARCHAR(100),
 
     -- Change details
     old_values JSONB, -- NULL for INSERT
@@ -32,20 +31,18 @@ CREATE TABLE audit.change_log (
 );
 
 -- Indexes for efficient audit queries
-CREATE INDEX idx_change_log_record_id ON audit.change_log(record_id);
-CREATE INDEX idx_change_log_table ON audit.change_log(schema_name, table_name);
-CREATE INDEX idx_change_log_changed_at ON audit.change_log(changed_at);
-CREATE INDEX idx_change_log_changed_by ON audit.change_log(changed_by);
-CREATE INDEX idx_change_log_operation ON audit.change_log(operation);
+CREATE INDEX idx_change_log_record_id ON position_keeping_audit.change_log(record_id);
+CREATE INDEX idx_change_log_table ON position_keeping_audit.change_log(table_name);
+CREATE INDEX idx_change_log_changed_at ON position_keeping_audit.change_log(changed_at);
+CREATE INDEX idx_change_log_changed_by ON position_keeping_audit.change_log(changed_by);
+CREATE INDEX idx_change_log_operation ON position_keeping_audit.change_log(operation);
 
--- Generic audit trigger function
--- This function can be attached to any table with BaseModel structure
-CREATE OR REPLACE FUNCTION audit.log_change()
+-- Generic audit trigger function for position_keeping tables
+CREATE OR REPLACE FUNCTION position_keeping_audit.log_change()
 RETURNS TRIGGER AS $$
 DECLARE
-    audit_row audit.change_log;
+    audit_row position_keeping_audit.change_log;
 BEGIN
-    audit_row.schema_name := TG_TABLE_SCHEMA;
     audit_row.table_name := TG_TABLE_NAME;
     audit_row.operation := TG_OP;
     audit_row.changed_at := now();
@@ -72,8 +69,7 @@ BEGIN
     END CASE;
 
     -- Insert audit record
-    INSERT INTO audit.change_log (
-        schema_name,
+    INSERT INTO position_keeping_audit.change_log (
         table_name,
         operation,
         record_id,
@@ -82,7 +78,6 @@ BEGIN
         old_values,
         new_values
     ) VALUES (
-        audit_row.schema_name,
         audit_row.table_name,
         audit_row.operation,
         audit_row.record_id,
@@ -102,11 +97,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Helper function to attach audit trigger to a table
--- Usage: SELECT audit.enable_audit_log('current_account', 'customers');
-CREATE OR REPLACE FUNCTION audit.enable_audit_log(
-    p_schema_name VARCHAR(100),
-    p_table_name VARCHAR(100)
-)
+CREATE OR REPLACE FUNCTION position_keeping_audit.enable_audit_log(p_table_name VARCHAR(100))
 RETURNS VOID AS $$
 DECLARE
     trigger_name VARCHAR(200);
@@ -115,21 +106,19 @@ BEGIN
 
     EXECUTE format(
         'CREATE TRIGGER %I
-         AFTER INSERT OR UPDATE OR DELETE ON %I.%I
-         FOR EACH ROW EXECUTE FUNCTION audit.log_change()',
+         AFTER INSERT OR UPDATE OR DELETE ON position_keeping.%I
+         FOR EACH ROW EXECUTE FUNCTION position_keeping_audit.log_change()',
         trigger_name,
-        p_schema_name,
         p_table_name
     );
 END;
 $$ LANGUAGE plpgsql;
 
 -- Helper view for easy audit queries
--- Shows all changes with human-readable formatting
-CREATE VIEW audit.change_summary AS
+CREATE VIEW position_keeping_audit.change_summary AS
 SELECT
     id,
-    schema_name || '.' || table_name AS table_full_name,
+    'position_keeping.' || table_name AS table_full_name,
     operation,
     record_id,
     changed_at,
@@ -142,11 +131,11 @@ SELECT
         ELSE NULL
     END AS changed_fields,
     transaction_id
-FROM audit.change_log
+FROM position_keeping_audit.change_log
 ORDER BY changed_at DESC;
 
 -- Function to get audit history for a specific record
-CREATE OR REPLACE FUNCTION audit.get_record_history(
+CREATE OR REPLACE FUNCTION position_keeping_audit.get_record_history(
     p_record_id UUID,
     p_limit INT DEFAULT 100
 )
@@ -170,14 +159,12 @@ BEGIN
             WHEN cl.operation = 'INSERT' THEN cl.new_values
             WHEN cl.operation = 'DELETE' THEN cl.old_values
         END AS changed_fields
-    FROM audit.change_log cl
+    FROM position_keeping_audit.change_log cl
     WHERE cl.record_id = p_record_id
     ORDER BY cl.changed_at DESC
     LIMIT p_limit;
 END;
 $$ LANGUAGE plpgsql;
 
--- Grant permissions (adjust as needed for production)
--- GRANT USAGE ON SCHEMA audit TO app_user;
--- GRANT SELECT ON ALL TABLES IN SCHEMA audit TO app_user;
--- GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA audit TO app_user;
+-- Attach audit triggers to position_keeping tables
+SELECT position_keeping_audit.enable_audit_log('transactions');
