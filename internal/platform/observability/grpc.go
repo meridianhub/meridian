@@ -3,14 +3,38 @@ package observability
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+)
+
+// parseGRPCMethod parses a gRPC method string (e.g., "/package.Service/Method")
+// into service and method components for OpenTelemetry semantic conventions
+func parseGRPCMethod(fullMethod string) (service, method string) {
+	// Full method format: "/package.Service/Method"
+	fullMethod = strings.TrimPrefix(fullMethod, "/")
+	parts := strings.Split(fullMethod, "/")
+
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+
+	// Fallback: use full method for both if parsing fails
+	return fullMethod, fullMethod
+}
+
+// grpcPropagator is a cached composite propagator for trace context extraction/injection
+// Cached at package level for performance to avoid allocation on every RPC call
+var grpcPropagator = propagation.NewCompositeTextMapPropagator(
+	propagation.TraceContext{},
+	propagation.Baggage{},
 )
 
 // UnaryServerInterceptor returns a gRPC unary server interceptor for tracing
@@ -42,13 +66,16 @@ func (t *Tracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		md, _ := metadata.FromIncomingContext(ctx)
 		ctx = extractTraceContext(ctx, md)
 
+		// Parse gRPC method for semantic conventions
+		service, method := parseGRPCMethod(info.FullMethod)
+
 		// Start span for this RPC
 		ctx, span := t.Start(ctx, info.FullMethod,
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(
-				attribute.String("rpc.system", "grpc"),
-				attribute.String("rpc.service", info.FullMethod),
-				attribute.String("rpc.method", info.FullMethod),
+				semconv.RPCSystemKey.String("grpc"),
+				semconv.RPCServiceKey.String(service),
+				semconv.RPCMethodKey.String(method),
 			),
 		)
 		defer span.End()
@@ -103,13 +130,16 @@ func (t *Tracer) StreamServerInterceptor() grpc.StreamServerInterceptor {
 		md, _ := metadata.FromIncomingContext(ctx)
 		ctx = extractTraceContext(ctx, md)
 
+		// Parse gRPC method for semantic conventions
+		service, method := parseGRPCMethod(info.FullMethod)
+
 		// Start span for this stream
 		ctx, span := t.Start(ctx, info.FullMethod,
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(
-				attribute.String("rpc.system", "grpc"),
-				attribute.String("rpc.service", info.FullMethod),
-				attribute.String("rpc.method", info.FullMethod),
+				semconv.RPCSystemKey.String("grpc"),
+				semconv.RPCServiceKey.String(service),
+				semconv.RPCMethodKey.String(method),
 				attribute.Bool("rpc.stream", true),
 			),
 		)
@@ -210,13 +240,16 @@ func (t *Tracer) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 		invoker grpc.UnaryInvoker,
 		opts ...grpc.CallOption,
 	) error {
+		// Parse gRPC method for semantic conventions
+		service, methodName := parseGRPCMethod(method)
+
 		// Start span for this RPC call
 		ctx, span := t.Start(ctx, method,
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(
-				attribute.String("rpc.system", "grpc"),
-				attribute.String("rpc.service", method),
-				attribute.String("rpc.method", method),
+				semconv.RPCSystemKey.String("grpc"),
+				semconv.RPCServiceKey.String(service),
+				semconv.RPCMethodKey.String(methodName),
 			),
 		)
 		defer span.End()
@@ -270,13 +303,16 @@ func (t *Tracer) StreamClientInterceptor() grpc.StreamClientInterceptor {
 		streamer grpc.Streamer,
 		opts ...grpc.CallOption,
 	) (grpc.ClientStream, error) {
+		// Parse gRPC method for semantic conventions
+		service, methodName := parseGRPCMethod(method)
+
 		// Start span for this stream
 		ctx, span := t.Start(ctx, method,
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(
-				attribute.String("rpc.system", "grpc"),
-				attribute.String("rpc.service", method),
-				attribute.String("rpc.method", method),
+				semconv.RPCSystemKey.String("grpc"),
+				semconv.RPCServiceKey.String(service),
+				semconv.RPCMethodKey.String(methodName),
 				attribute.Bool("rpc.stream", true),
 			),
 		)
@@ -353,24 +389,14 @@ func (s *tracedClientStream) CloseSend() error {
 
 // extractTraceContext extracts trace context from gRPC metadata
 func extractTraceContext(ctx context.Context, md metadata.MD) context.Context {
-	propagator := propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	)
-
 	// Convert metadata to TextMapCarrier
 	carrier := metadataCarrier(md)
 
-	return propagator.Extract(ctx, carrier)
+	return grpcPropagator.Extract(ctx, carrier)
 }
 
 // injectTraceContext injects trace context into gRPC metadata
 func injectTraceContext(ctx context.Context) context.Context {
-	propagator := propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	)
-
 	md, ok := metadata.FromOutgoingContext(ctx)
 	if !ok {
 		md = metadata.New(nil)
@@ -380,7 +406,7 @@ func injectTraceContext(ctx context.Context) context.Context {
 	carrier := metadataCarrier(md)
 
 	// Inject trace context
-	propagator.Inject(ctx, carrier)
+	grpcPropagator.Inject(ctx, carrier)
 
 	return metadata.NewOutgoingContext(ctx, md)
 }

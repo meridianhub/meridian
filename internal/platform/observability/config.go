@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -96,35 +97,11 @@ func DefaultConfig() (TracerConfig, error) {
 func getEnvOrDefault(key, defaultValue string) string {
 	value := os.Getenv(key)
 	// Trim whitespace to handle cases like "   " being treated as empty
-	value = trimWhitespace(value)
+	value = strings.TrimSpace(value)
 	if value != "" {
 		return value
 	}
 	return defaultValue
-}
-
-// trimWhitespace removes leading and trailing whitespace
-func trimWhitespace(s string) string {
-	// Simple trim implementation without importing strings
-	start := 0
-	end := len(s)
-
-	// Trim leading whitespace
-	for start < end && isWhitespace(s[start]) {
-		start++
-	}
-
-	// Trim trailing whitespace
-	for end > start && isWhitespace(s[end-1]) {
-		end--
-	}
-
-	return s[start:end]
-}
-
-// isWhitespace checks if a character is whitespace
-func isWhitespace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 // WithServiceName returns a config with the service name set

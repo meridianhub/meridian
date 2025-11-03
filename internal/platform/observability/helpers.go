@@ -118,11 +118,13 @@ func StartKafkaProducerSpan(ctx context.Context, tracer *Tracer, opts KafkaSpanO
 	}
 
 	if opts.Partition >= 0 {
+		// Note: messaging.kafka.destination.partition is not yet standardized in OTel semantic conventions v1.27.0
+		// Using custom attribute until officially added to semconv
 		attrs = append(attrs, attribute.Int("messaging.kafka.destination.partition", int(opts.Partition)))
 	}
 
 	if opts.Key != "" {
-		attrs = append(attrs, attribute.String("messaging.kafka.message.key", opts.Key))
+		attrs = append(attrs, semconv.MessagingKafkaMessageKeyKey.String(opts.Key))
 	}
 
 	return tracer.Start(ctx, opts.Topic+" publish",
@@ -156,15 +158,17 @@ func StartKafkaConsumerSpan(ctx context.Context, tracer *Tracer, opts KafkaSpanO
 	}
 
 	if opts.Partition >= 0 {
+		// Note: messaging.kafka.destination.partition is not yet standardized in OTel semantic conventions v1.27.0
+		// Using custom attribute until officially added to semconv
 		attrs = append(attrs, attribute.Int("messaging.kafka.destination.partition", int(opts.Partition)))
 	}
 
 	if opts.Offset >= 0 {
-		attrs = append(attrs, attribute.Int64("messaging.kafka.message.offset", opts.Offset))
+		attrs = append(attrs, semconv.MessagingKafkaOffsetKey.Int64(opts.Offset))
 	}
 
 	if opts.Key != "" {
-		attrs = append(attrs, attribute.String("messaging.kafka.message.key", opts.Key))
+		attrs = append(attrs, semconv.MessagingKafkaMessageKeyKey.String(opts.Key))
 	}
 
 	return tracer.Start(ctx, opts.Topic+" receive",

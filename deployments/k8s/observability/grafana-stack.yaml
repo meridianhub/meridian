@@ -428,6 +428,7 @@ data:
     apiVersion: 1
     datasources:
     - name: Prometheus
+      uid: prometheus
       type: prometheus
       access: proxy
       url: http://prometheus:9090
@@ -435,6 +436,7 @@ data:
       editable: true
 
     - name: Loki
+      uid: loki
       type: loki
       access: proxy
       url: http://loki:3100
@@ -442,6 +444,7 @@ data:
       editable: true
 
     - name: Tempo
+      uid: tempo
       type: tempo
       access: proxy
       url: http://tempo:3200

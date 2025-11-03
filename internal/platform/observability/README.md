@@ -212,12 +212,12 @@ The observability package integrates with the Grafana stack deployed via Tilt:
 
 When running Tilt:
 
-- Grafana: http://localhost:3000
-- Prometheus: http://localhost:9090
+- Grafana: <http://localhost:3000>
+- Prometheus: <http://localhost:9090>
 
 ### Viewing Traces in Grafana
 
-1. Open Grafana at http://localhost:3000
+1. Open Grafana at <http://localhost:3000>
 2. Navigate to "Explore"
 3. Select "Tempo" datasource
 4. Search for traces by:
@@ -229,7 +229,7 @@ When running Tilt:
 
 ## Architecture
 
-```
+```text
 Application
     ↓
 OpenTelemetry SDK (tracing.go)
