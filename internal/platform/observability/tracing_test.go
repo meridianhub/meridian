@@ -241,6 +241,7 @@ func TestTracerConfig_WithMethods(t *testing.T) {
 		WithEnvironment("test").
 		WithOTLPEndpoint("collector:4317").
 		WithSamplingRate(0.5).
+		WithUseTLS(true).
 		WithEnabled(true)
 
 	assert.Equal(t, "test-service", cfg.ServiceName)
@@ -248,5 +249,190 @@ func TestTracerConfig_WithMethods(t *testing.T) {
 	assert.Equal(t, "test", cfg.Environment)
 	assert.Equal(t, "collector:4317", cfg.OTLPEndpoint)
 	assert.Equal(t, 0.5, cfg.SamplingRate)
+	assert.True(t, cfg.UseTLS)
 	assert.True(t, cfg.Enabled)
+}
+
+// Defensive Tests - ADR-008 Compliance
+
+func TestDefaultConfig_DefensiveTests(t *testing.T) {
+	tests := []struct {
+		name      string
+		env       map[string]string
+		wantErr   bool
+		check     func(*testing.T, observability.TracerConfig)
+		rationale string
+	}{
+		{
+			name: "whitespace-only service name",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME": "   ",
+			},
+			wantErr:   true,
+			rationale: "Whitespace-only values should be treated as empty and rejected",
+		},
+		{
+			name: "sampling rate exactly 0.0 (NeverSample)",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME":       "test",
+				"OTEL_TRACES_SAMPLER_ARG": "0.0",
+			},
+			wantErr: false,
+			check: func(t *testing.T, cfg observability.TracerConfig) {
+				assert.Equal(t, 0.0, cfg.SamplingRate)
+			},
+			rationale: "Zero sampling rate is valid for disabling all traces",
+		},
+		{
+			name: "sampling rate exactly 1.0 (AlwaysSample)",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME":       "test",
+				"OTEL_TRACES_SAMPLER_ARG": "1.0",
+			},
+			wantErr: false,
+			check: func(t *testing.T, cfg observability.TracerConfig) {
+				assert.Equal(t, 1.0, cfg.SamplingRate)
+			},
+			rationale: "100% sampling is valid for development",
+		},
+		{
+			name: "negative sampling rate",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME":       "test",
+				"OTEL_TRACES_SAMPLER_ARG": "-0.5",
+			},
+			wantErr:   true,
+			rationale: "Negative sampling rates are invalid",
+		},
+		{
+			name: "sampling rate above 1.0",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME":       "test",
+				"OTEL_TRACES_SAMPLER_ARG": "1.5",
+			},
+			wantErr:   true,
+			rationale: "Sampling rates above 1.0 are invalid",
+		},
+		{
+			name: "invalid boolean for OTEL_TRACES_ENABLED",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME":   "test",
+				"OTEL_TRACES_ENABLED": "yes",
+			},
+			wantErr:   true,
+			rationale: "Non-boolean values should be rejected",
+		},
+		{
+			name: "production environment defaults to TLS enabled",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME": "test",
+				"OTEL_ENVIRONMENT":  "production",
+			},
+			wantErr: false,
+			check: func(t *testing.T, cfg observability.TracerConfig) {
+				assert.True(t, cfg.UseTLS, "Production should default to TLS enabled")
+			},
+			rationale: "Production environments should use TLS by default for security",
+		},
+		{
+			name: "development environment defaults to TLS disabled",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME": "test",
+				"OTEL_ENVIRONMENT":  "development",
+			},
+			wantErr: false,
+			check: func(t *testing.T, cfg observability.TracerConfig) {
+				assert.False(t, cfg.UseTLS, "Development should default to TLS disabled")
+			},
+			rationale: "Development environments can use insecure connections for simplicity",
+		},
+		{
+			name: "explicit TLS override",
+			env: map[string]string{
+				"OTEL_SERVICE_NAME":           "test",
+				"OTEL_ENVIRONMENT":            "production",
+				"OTEL_EXPORTER_OTLP_INSECURE": "true",
+			},
+			wantErr: false,
+			check: func(t *testing.T, cfg observability.TracerConfig) {
+				assert.False(t, cfg.UseTLS, "Explicit insecure flag should override environment default")
+			},
+			rationale: "Allow explicit override of TLS setting for testing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set environment variables
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+
+			cfg, err := observability.DefaultConfig()
+
+			if tt.wantErr {
+				assert.Error(t, err, "Rationale: %s", tt.rationale)
+				return
+			}
+
+			require.NoError(t, err, "Rationale: %s", tt.rationale)
+			if tt.check != nil {
+				tt.check(t, cfg)
+			}
+		})
+	}
+}
+
+func TestNewTracer_ValidatesConfig(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		config    observability.TracerConfig
+		wantErr   bool
+		rationale string
+	}{
+		{
+			name: "invalid config rejected by NewTracer",
+			config: observability.TracerConfig{
+				ServiceName:  "", // Empty - invalid
+				OTLPEndpoint: "alloy:4317",
+			},
+			wantErr:   true,
+			rationale: "NewTracer should validate config and reject empty service name",
+		},
+		{
+			name: "config with invalid sampling rate rejected",
+			config: observability.TracerConfig{
+				ServiceName:  "test",
+				OTLPEndpoint: "alloy:4317",
+				SamplingRate: 2.0, // Invalid
+			},
+			wantErr:   true,
+			rationale: "NewTracer should validate sampling rate bounds",
+		},
+		{
+			name: "valid config accepted",
+			config: observability.TracerConfig{
+				ServiceName:  "test",
+				OTLPEndpoint: "alloy:4317",
+				SamplingRate: 0.5,
+				Enabled:      false, // Disabled to avoid OTLP connection
+			},
+			wantErr:   false,
+			rationale: "Valid config should be accepted",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := observability.NewTracer(ctx, tt.config)
+
+			if tt.wantErr {
+				assert.Error(t, err, "Rationale: %s", tt.rationale)
+			} else {
+				assert.NoError(t, err, "Rationale: %s", tt.rationale)
+			}
+		})
+	}
 }

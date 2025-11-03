@@ -15,8 +15,8 @@ package observability
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -27,8 +27,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 // TracerConfig holds configuration for OpenTelemetry tracing
@@ -49,6 +48,11 @@ type TracerConfig struct {
 	// 1.0 = sample all traces (recommended for development)
 	// 0.1 = sample 10% of traces (recommended for production)
 	SamplingRate float64
+
+	// UseTLS enables TLS for OTLP connection (recommended for production)
+	// false = insecure connection (development only)
+	// true = TLS with system certificates (production)
+	UseTLS bool
 
 	// Enabled controls whether tracing is active
 	Enabled bool
@@ -82,6 +86,11 @@ type Tracer struct {
 //	}
 //	defer tracer.Shutdown(ctx)
 func NewTracer(ctx context.Context, config TracerConfig) (*Tracer, error) {
+	// Validate configuration first
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid tracer config: %w", err)
+	}
+
 	if !config.Enabled {
 		// Return a no-op tracer when disabled
 		return &Tracer{
@@ -92,7 +101,7 @@ func NewTracer(ctx context.Context, config TracerConfig) (*Tracer, error) {
 	}
 
 	// Create OTLP exporter
-	exporter, err := createOTLPExporter(ctx, config.OTLPEndpoint)
+	exporter, err := createOTLPExporter(ctx, config.OTLPEndpoint, config.UseTLS)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
@@ -126,21 +135,30 @@ func NewTracer(ctx context.Context, config TracerConfig) (*Tracer, error) {
 }
 
 // createOTLPExporter creates an OTLP trace exporter using gRPC
-func createOTLPExporter(ctx context.Context, endpoint string) (*otlptrace.Exporter, error) {
-	// Create gRPC connection to OTLP collector
-	conn, err := grpc.NewClient(
-		endpoint,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create gRPC connection: %w", err)
+//
+// The exporter manages the gRPC connection lifecycle internally.
+// When useTLS is true, uses TLS 1.3 with system certificates (production).
+// When useTLS is false, uses insecure connection (development only).
+func createOTLPExporter(ctx context.Context, endpoint string, useTLS bool) (*otlptrace.Exporter, error) {
+	var opts []otlptracegrpc.Option
+
+	opts = append(opts, otlptracegrpc.WithEndpoint(endpoint))
+
+	if useTLS {
+		// Production: Use TLS with system certificates
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS13,
+		}
+		opts = append(opts, otlptracegrpc.WithTLSCredentials(credentials.NewTLS(tlsConfig)))
+	} else {
+		// Development: Use insecure connection
+		// WARNING: Only use in local development. Production should use TLS.
+		opts = append(opts, otlptracegrpc.WithInsecure())
 	}
 
 	// Create OTLP trace exporter
-	exporter, err := otlptracegrpc.New(
-		ctx,
-		otlptracegrpc.WithGRPCConn(conn),
-	)
+	// The exporter manages the gRPC connection lifecycle
+	exporter, err := otlptracegrpc.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
@@ -254,7 +272,7 @@ func (t *Tracer) SetAttributes(ctx context.Context, attrs ...attribute.KeyValue)
 // Shutdown flushes any pending spans and shuts down the tracer
 //
 // This should be called during application shutdown to ensure all traces are exported.
-// A context with timeout is recommended.
+// The caller should provide a context with an appropriate timeout.
 //
 // Example:
 //
@@ -267,9 +285,6 @@ func (t *Tracer) Shutdown(ctx context.Context) error {
 	if t.provider == nil {
 		return nil
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 
 	if err := t.provider.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown tracer provider: %w", err)

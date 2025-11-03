@@ -27,6 +27,7 @@ var (
 //   - OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (default: "alloy:4317")
 //   - OTEL_TRACES_SAMPLER_ARG: Sampling rate 0.0-1.0 (default: 1.0 for dev, 0.1 for prod)
 //   - OTEL_TRACES_ENABLED: Enable tracing (default: "true")
+//   - OTEL_EXPORTER_OTLP_INSECURE: Disable TLS (default: "true" for dev, "false" for prod)
 //
 // Example:
 //
@@ -36,7 +37,7 @@ var (
 //	}
 //	tracer, err := observability.NewTracer(ctx, cfg)
 func DefaultConfig() (TracerConfig, error) {
-	serviceName := os.Getenv("OTEL_SERVICE_NAME")
+	serviceName := getEnvOrDefault("OTEL_SERVICE_NAME", "")
 	if serviceName == "" {
 		return TracerConfig{}, ErrServiceNameRequired
 	}
@@ -65,22 +66,65 @@ func DefaultConfig() (TracerConfig, error) {
 		return TracerConfig{}, fmt.Errorf("invalid OTEL_TRACES_ENABLED: %w", err)
 	}
 
+	// Default TLS based on environment
+	// Development: insecure (no TLS) for simplicity
+	// Production/Staging: TLS enabled for security
+	defaultInsecure := "true" // Development default
+	if environment == "production" || environment == "staging" {
+		defaultInsecure = "false" // Production requires TLS
+	}
+
+	insecureStr := getEnvOrDefault("OTEL_EXPORTER_OTLP_INSECURE", defaultInsecure)
+	insecure, err := strconv.ParseBool(insecureStr)
+	if err != nil {
+		return TracerConfig{}, fmt.Errorf("invalid OTEL_EXPORTER_OTLP_INSECURE: %w", err)
+	}
+
 	return TracerConfig{
 		ServiceName:    serviceName,
 		ServiceVersion: getEnvOrDefault("OTEL_SERVICE_VERSION", "unknown"),
 		Environment:    environment,
 		OTLPEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "alloy:4317"),
 		SamplingRate:   samplingRate,
+		UseTLS:         !insecure, // Convert insecure flag to useTLS
 		Enabled:        enabled,
 	}, nil
 }
 
 // getEnvOrDefault returns the environment variable value or a default if not set
+// Trims whitespace from the value before returning
 func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
+	value := os.Getenv(key)
+	// Trim whitespace to handle cases like "   " being treated as empty
+	value = trimWhitespace(value)
+	if value != "" {
 		return value
 	}
 	return defaultValue
+}
+
+// trimWhitespace removes leading and trailing whitespace
+func trimWhitespace(s string) string {
+	// Simple trim implementation without importing strings
+	start := 0
+	end := len(s)
+
+	// Trim leading whitespace
+	for start < end && isWhitespace(s[start]) {
+		start++
+	}
+
+	// Trim trailing whitespace
+	for end > start && isWhitespace(s[end-1]) {
+		end--
+	}
+
+	return s[start:end]
+}
+
+// isWhitespace checks if a character is whitespace
+func isWhitespace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 // WithServiceName returns a config with the service name set
@@ -110,6 +154,12 @@ func (c TracerConfig) WithOTLPEndpoint(endpoint string) TracerConfig {
 // WithSamplingRate returns a config with the sampling rate set
 func (c TracerConfig) WithSamplingRate(rate float64) TracerConfig {
 	c.SamplingRate = rate
+	return c
+}
+
+// WithUseTLS returns a config with TLS enabled or disabled
+func (c TracerConfig) WithUseTLS(useTLS bool) TracerConfig {
+	c.UseTLS = useTLS
 	return c
 }
 
