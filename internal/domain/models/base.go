@@ -46,7 +46,13 @@ func (base *BaseModel) BeforeCreate(tx *gorm.DB) error {
 	}
 
 	// Extract user ID from JWT context (set by auth interceptor)
-	if userID := getUserIDFromContext(tx.Statement.Context); userID != "" {
+	// Guard against nil tx or nil tx.Statement
+	var userID string
+	if tx != nil && tx.Statement != nil {
+		userID = getUserIDFromContext(tx.Statement.Context)
+	}
+
+	if userID != "" {
 		base.CreatedBy = userID
 		base.UpdatedBy = userID
 	} else if base.CreatedBy == "" {
@@ -64,7 +70,13 @@ func (base *BaseModel) BeforeCreate(tx *gorm.DB) error {
 // NOTE: This method mutates the receiver, which is required by GORM's hook interface.
 func (base *BaseModel) BeforeUpdate(tx *gorm.DB) error {
 	// Extract user ID from JWT context
-	if userID := getUserIDFromContext(tx.Statement.Context); userID != "" {
+	// Guard against nil tx or nil tx.Statement
+	var userID string
+	if tx != nil && tx.Statement != nil {
+		userID = getUserIDFromContext(tx.Statement.Context)
+	}
+
+	if userID != "" {
 		base.UpdatedBy = userID
 	} else if base.UpdatedBy == "" {
 		// Fallback to system for background jobs or migrations
