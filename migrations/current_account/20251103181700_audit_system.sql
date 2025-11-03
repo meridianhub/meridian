@@ -105,9 +105,12 @@ BEGIN
     trigger_name := 'audit_' || p_table_name || '_trigger';
 
     EXECUTE format(
-        'CREATE TRIGGER %I
+        'DROP TRIGGER IF EXISTS %I ON current_account.%I;
+         CREATE TRIGGER %I
          AFTER INSERT OR UPDATE OR DELETE ON current_account.%I
          FOR EACH ROW EXECUTE FUNCTION current_account_audit.log_change()',
+        trigger_name,
+        p_table_name,
         trigger_name,
         p_table_name
     );
