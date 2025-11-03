@@ -154,14 +154,14 @@ All domain models inherit from `BaseModel` which includes audit fields:
 type BaseModel struct {
     ID        uuid.UUID  // Primary key
     CreatedAt time.Time  // Creation timestamp
-    CreatedBy string     // Who created this record
+    CreatedBy string     // Who created this record (optional until auth context available)
     UpdatedAt time.Time  // Last update timestamp
-    UpdatedBy string     // Who last updated this record
+    UpdatedBy string     // Who last updated this record (optional until auth context available)
     DeletedAt *time.Time // Soft delete timestamp
 }
 ```
 
-**Important**: Always set `CreatedBy` and `UpdatedBy` when creating or updating records.
+**Note**: `CreatedBy` and `UpdatedBy` are currently optional (nullable) fields. Once authentication/authorization context is available in the application layer, these should be populated from the current user context. The audit triggers will use these values to track who made changes.
 
 ## Schema Modifications
 

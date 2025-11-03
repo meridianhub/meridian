@@ -26,7 +26,10 @@ func main() {
 			&models.Account{},
 		}
 	case "position_keeping":
+		// Transaction references Account via FK, so Account must be included
+		// for GORM to generate proper foreign key constraints
 		modelList = []interface{}{
+			&models.Account{}, // FK reference
 			&models.Transaction{},
 		}
 	case "":
@@ -48,7 +51,6 @@ func main() {
 	}
 
 	// Prepend CREATE SCHEMA statements for all referenced schemas
-	// GORM includes FK-referenced tables, so we need all their schemas too
 	output := stmts
 	if *schemaFilter != "" {
 		// For position_keeping, we need both schemas since transactions reference accounts

@@ -11,9 +11,9 @@ import (
 type BaseModel struct {
 	ID        uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	CreatedAt time.Time  `gorm:"not null;default:now()" json:"created_at"`
-	CreatedBy string     `gorm:"type:varchar(100);not null" json:"created_by"`
+	CreatedBy string     `gorm:"type:varchar(100)" json:"created_by,omitempty"` // Optional until auth context available
 	UpdatedAt time.Time  `gorm:"not null;default:now()" json:"updated_at"`
-	UpdatedBy string     `gorm:"type:varchar(100);not null" json:"updated_by"`
+	UpdatedBy string     `gorm:"type:varchar(100)" json:"updated_by,omitempty"` // Optional until auth context available
 	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
 }
 

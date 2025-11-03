@@ -27,7 +27,7 @@ env "local" {
   // Schema configuration
   // NOTE: position_keeping depends on current_account schema existing (for FK constraints)
   // Apply current_account migrations before position_keeping migrations
-  schemas = ["position_keeping", "current_account"]
+  schemas = ["position_keeping"]
 
   // Lint configuration to catch dangerous changes
   lint {
@@ -52,7 +52,7 @@ env "ci" {
 
   src = data.external_schema.gorm.url
 
-  schemas = ["position_keeping", "current_account"]
+  schemas = ["position_keeping"]
 
   lint {
     destructive {
@@ -75,5 +75,5 @@ env "production" {
     dir = "file://migrations/position_keeping"
   }
 
-  schemas = ["position_keeping", "current_account"]
+  schemas = ["position_keeping"]
 }
