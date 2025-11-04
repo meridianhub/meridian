@@ -38,6 +38,38 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_changed_at ON current_account_audit.aud
 CREATE INDEX IF NOT EXISTS idx_audit_log_changed_by ON current_account_audit.audit_log(changed_by);
 CREATE INDEX IF NOT EXISTS idx_audit_log_operation ON current_account_audit.audit_log(operation);
 
+-- Create audit outbox table for async processing
+-- GORM hooks write to outbox, background worker moves to audit_log
+CREATE TABLE IF NOT EXISTS current_account_audit.audit_outbox (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- What changed
+    table_name VARCHAR(100) NOT NULL,
+    operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+
+    -- Record identification
+    record_id UUID NOT NULL,
+
+    -- Change details
+    old_values JSONB,
+    new_values JSONB,
+
+    -- Processing status
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'failed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    retry_count INT NOT NULL DEFAULT 0,
+    last_error TEXT,
+
+    -- Additional context
+    changed_by VARCHAR(100),
+    transaction_id VARCHAR(100),
+    client_ip INET,
+    user_agent TEXT
+);
+
+-- Index for worker to efficiently find pending entries
+CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created ON current_account_audit.audit_outbox(status, created_at);
+
 -- Create helper view for easy audit queries
 CREATE OR REPLACE VIEW current_account_audit.change_summary AS
 SELECT
