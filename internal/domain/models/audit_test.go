@@ -45,6 +45,10 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	db, err := gorm.Open(postgresdriver.Open(connStr), &gorm.Config{})
 	require.NoError(t, err, "Failed to connect to test database")
 
+	// Enable pgcrypto extension for gen_random_uuid() function
+	err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error
+	require.NoError(t, err, "Failed to enable pgcrypto extension")
+
 	// Create schemas (PostgreSQL supports schemas like CockroachDB)
 	err = db.Exec("CREATE SCHEMA IF NOT EXISTS current_account").Error
 	require.NoError(t, err, "Failed to create current_account schema")
