@@ -1,5 +1,13 @@
-// Atlas configuration for database migrations
-// This configuration enables automatic migration generation from Go structs
+// DEPRECATED: This configuration is no longer used.
+//
+// The migration system now uses per-schema configurations for service isolation:
+//   - atlas.shared.hcl          → migrations/shared/          (_audit_factory schema)
+//   - atlas.current_account.hcl → migrations/current_account/ (current_account + current_account_audit)
+//   - atlas.position_keeping.hcl → migrations/position_keeping/ (position_keeping + position_keeping_audit)
+//
+// This file is kept for reference only. Use the schema-specific configurations instead.
+//
+// Historical note: This configuration enabled automatic migration generation from Go structs
 
 data "external_schema" "gorm" {
   program = [

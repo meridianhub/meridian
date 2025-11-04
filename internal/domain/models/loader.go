@@ -1,3 +1,13 @@
+// DEPRECATED: This file is no longer used by the Atlas migration system.
+//
+// The actual Atlas integration is handled by cmd/atlas-loader/main.go, which is referenced
+// in the atlas.*.hcl configuration files via the external_schema data source.
+//
+// Historical purpose: This file was an early attempt at Atlas integration before the
+// current external loader pattern was implemented.
+//
+// This file can be safely removed in a future cleanup PR.
+
 package models
 
 import (
@@ -9,7 +19,7 @@ import (
 )
 
 // LoadModels loads all GORM models for Atlas schema inspection
-// This function is used by Atlas to discover the schema from Go structs
+// DEPRECATED: Not used. See cmd/atlas-loader/main.go instead.
 func LoadModels() (*gorm.DB, error) {
 	// Create a database connection for Atlas schema inspection
 	db, err := gorm.Open(postgres.New(postgres.Config{

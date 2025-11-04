@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,22 +16,35 @@ const (
 
 // BaseModel contains common fields for all domain models.
 //
-// NOTE: Exported fields violate strict immutability but are required for GORM ORM compatibility.
-// GORM requires exported fields for:
-// - Scanning database rows into structs
-// - Marshaling structs to database queries
-// - JSON serialization/deserialization
+// # Immutability Trade-off
 //
-// Trade-off: We accept mutable fields for GORM compatibility while enforcing immutability through:
-// - Constructor functions (NewAccount, NewCustomer, NewTransaction)
-// - GORM hooks (BeforeCreate, BeforeUpdate) for audit trail
-// - API layer validation preventing invalid states
+// Exported fields violate strict immutability but are required for GORM ORM compatibility.
+// GORM requires exported fields for scanning, marshaling, and JSON serialization.
+// We enforce immutability through constructor functions, GORM hooks, and API validation.
+//
+// # Audit Field Strategy (CreatedBy/UpdatedBy)
+//
+// These fields are NOT NULL in the database but automatically populated by GORM hooks:
+//
+// 1. With JWT Context (normal operation):
+//   - BeforeCreate extracts user_id from JWT context → CreatedBy/UpdatedBy
+//   - BeforeUpdate extracts user_id from JWT context → UpdatedBy
+//
+// 2. Without JWT Context (migrations, background jobs):
+//   - Falls back to SystemUser constant ("system")
+//   - Ensures NOT NULL constraint is always satisfied
+//
+// 3. Application code should NOT manually set these fields:
+//   - Hooks automatically populate from auth context
+//   - Manual override only for testing or data imports
+//
+// See internal/platform/auth for JWT context injection via gRPC interceptors.
 type BaseModel struct {
 	ID        uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	CreatedAt time.Time  `gorm:"not null;default:now()" json:"created_at"`
-	CreatedBy string     `gorm:"type:varchar(100);not null" json:"created_by"` // Populated from JWT context
+	CreatedBy string     `gorm:"type:varchar(100);not null" json:"created_by"` // Auto-populated from JWT context or SystemUser
 	UpdatedAt time.Time  `gorm:"not null;default:now()" json:"updated_at"`
-	UpdatedBy string     `gorm:"type:varchar(100);not null" json:"updated_by"` // Populated from JWT context
+	UpdatedBy string     `gorm:"type:varchar(100);not null" json:"updated_by"` // Auto-populated from JWT context or SystemUser
 	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
 }
 
@@ -87,14 +101,20 @@ func (base *BaseModel) BeforeUpdate(tx *gorm.DB) error {
 }
 
 // getUserIDFromContext extracts the user ID from the context.
-// Returns empty string if not found.
+// Returns empty string if not found or if type assertion fails.
 func getUserIDFromContext(ctx any) string {
 	if ctx == nil {
 		return ""
 	}
 
+	// Safely convert to context.Context interface
+	stdCtx, ok := ctx.(context.Context)
+	if !ok {
+		return ""
+	}
+
 	// Try to extract user_id from context (set by JWT auth interceptor)
-	if userID, ok := ctx.(interface{ Value(interface{}) interface{} }).Value(auth.UserIDContextKey).(string); ok {
+	if userID, ok := stdCtx.Value(auth.UserIDContextKey).(string); ok {
 		return userID
 	}
 
