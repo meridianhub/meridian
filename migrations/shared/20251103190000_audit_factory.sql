@@ -35,7 +35,7 @@ BEGIN
 
             -- Change metadata
             changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            changed_by VARCHAR(100) NOT NULL,
+            changed_by VARCHAR(100),  -- Nullable to support operations before auth context available
 
             -- Change details
             old_values JSONB,
@@ -69,19 +69,19 @@ BEGIN
             CASE TG_OP
                 WHEN ''INSERT'' THEN
                     audit_row.record_id := NEW.id;
-                    audit_row.changed_by := NEW.created_by;
+                    audit_row.changed_by := COALESCE(NEW.created_by, ''system'');
                     audit_row.new_values := to_jsonb(NEW);
                     audit_row.old_values := NULL;
 
                 WHEN ''UPDATE'' THEN
                     audit_row.record_id := NEW.id;
-                    audit_row.changed_by := NEW.updated_by;
+                    audit_row.changed_by := COALESCE(NEW.updated_by, ''system'');
                     audit_row.new_values := to_jsonb(NEW);
                     audit_row.old_values := to_jsonb(OLD);
 
                 WHEN ''DELETE'' THEN
                     audit_row.record_id := OLD.id;
-                    audit_row.changed_by := OLD.updated_by;
+                    audit_row.changed_by := COALESCE(OLD.updated_by, ''system'');
                     audit_row.new_values := NULL;
                     audit_row.old_values := to_jsonb(OLD);
             END CASE;

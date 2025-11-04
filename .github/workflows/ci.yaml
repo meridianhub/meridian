@@ -82,6 +82,7 @@ jobs:
         run: |
           curl -sSf https://atlasgo.sh | sh -s -- --yes
           atlas version
+        timeout-minutes: 5
 
       - name: Lint shared migrations
         run: |
