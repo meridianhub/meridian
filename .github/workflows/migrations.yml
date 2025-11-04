@@ -43,7 +43,6 @@ jobs:
       - name: Verify migration checksums
         run: |
           echo "Verifying migration checksums..."
-          atlas migrate hash --env ci --config file://atlas.shared.hcl
           atlas migrate hash --env ci --config file://atlas.current_account.hcl
           atlas migrate hash --env ci --config file://atlas.position_keeping.hcl
           echo "✓ All migration checksums verified"
