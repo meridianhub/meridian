@@ -1,0 +1,76 @@
+name: Database Migrations
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'migrations/**'
+      - 'atlas*.hcl'
+      - 'cmd/atlas-loader/**'
+      - 'internal/domain/models/**'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'migrations/**'
+      - 'atlas*.hcl'
+      - 'cmd/atlas-loader/**'
+      - 'internal/domain/models/**'
+
+permissions:
+  contents: read
+
+jobs:
+  lint-migrations:
+    name: Lint Migrations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install Atlas CLI
+        run: |
+          curl -sSf https://atlasgo.sh | sh -s -- --yes
+          atlas version
+        timeout-minutes: 5
+
+      - name: Lint shared migrations
+        run: |
+          echo "Linting shared migrations..."
+          atlas migrate lint \
+            --env ci \
+            --config file://atlas.shared.hcl \
+            --latest 1 \
+            --log '{{ json . }}'
+
+      - name: Lint current_account migrations
+        run: |
+          echo "Linting current_account migrations..."
+          atlas migrate lint \
+            --env ci \
+            --config file://atlas.current_account.hcl \
+            --latest 1 \
+            --log '{{ json . }}'
+
+      - name: Lint position_keeping migrations
+        run: |
+          echo "Linting position_keeping migrations..."
+          atlas migrate lint \
+            --env ci \
+            --config file://atlas.position_keeping.hcl \
+            --latest 1 \
+            --log '{{ json . }}'
+
+      - name: Verify migration checksums
+        run: |
+          echo "Verifying migration checksums..."
+          atlas migrate hash --env ci --config file://atlas.shared.hcl
+          atlas migrate hash --env ci --config file://atlas.current_account.hcl
+          atlas migrate hash --env ci --config file://atlas.position_keeping.hcl
+          echo "✓ All migration checksums verified"
