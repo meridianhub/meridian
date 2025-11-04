@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -284,6 +285,14 @@ func (t *Tracer) SetAttributes(ctx context.Context, attrs ...attribute.KeyValue)
 func (t *Tracer) Shutdown(ctx context.Context) error {
 	if t.provider == nil {
 		return nil
+	}
+
+	// Check if caller provided a deadline, add fallback if not
+	_, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
 	}
 
 	if err := t.provider.Shutdown(ctx); err != nil {

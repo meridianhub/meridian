@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -346,9 +347,10 @@ func (t *Tracer) StreamClientInterceptor() grpc.StreamClientInterceptor {
 // tracedClientStream wraps grpc.ClientStream with tracing
 type tracedClientStream struct {
 	grpc.ClientStream
-	ctx    context.Context
-	span   trace.Span
-	tracer *Tracer
+	ctx     context.Context
+	span    trace.Span
+	tracer  *Tracer
+	endOnce sync.Once // Ensures span is ended exactly once
 }
 
 // SendMsg records a span event when sending messages
@@ -372,7 +374,9 @@ func (s *tracedClientStream) RecvMsg(m interface{}) error {
 			// Normal stream completion
 			s.tracer.AddEvent(s.ctx, "stream.complete")
 			s.span.SetStatus(codes.Ok, "")
-			s.span.End()
+			s.endOnce.Do(func() {
+				s.span.End()
+			})
 		} else {
 			// Error during streaming
 			s.tracer.AddEvent(s.ctx, "stream.receive.error",
@@ -383,10 +387,12 @@ func (s *tracedClientStream) RecvMsg(m interface{}) error {
 			// Check if error is terminal (non-recoverable)
 			st, ok := status.FromError(err)
 			if ok && st.Code() != grpccodes.OK {
-				// Terminal error - end span with error status
+				// Terminal error - set status and record error before ending span
 				s.span.SetStatus(codes.Error, st.Message())
 				s.span.RecordError(err)
-				s.span.End()
+				s.endOnce.Do(func() {
+					s.span.End()
+				})
 			}
 		}
 	} else {
@@ -403,7 +409,9 @@ func (s *tracedClientStream) RecvMsg(m interface{}) error {
 // CloseSend closes the stream and ends the span
 func (s *tracedClientStream) CloseSend() error {
 	err := s.ClientStream.CloseSend()
-	s.span.End()
+	s.endOnce.Do(func() {
+		s.span.End()
+	})
 	//nolint:wrapcheck // Intentionally passing through gRPC stream error
 	return err
 }
