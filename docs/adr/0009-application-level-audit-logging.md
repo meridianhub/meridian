@@ -46,11 +46,11 @@ This incompatibility prevents the audit factory pattern from working in the loca
 
 **Cons:**
 - Significant code duplication across schemas
-- Still requires trigger functions (CockroachDB trigger support is limited)
+- CockroachDB v23.1 requires trigger functions to be written in PL/pgSQL (no alternative)
 - Harder to test trigger logic
 - Maintenance burden (3x the code for shared, current_account, position_keeping)
 
-**Verdict:** ❌ Rejected - CockroachDB trigger function support is still limited even without PL/pgSQL
+**Verdict:** ❌ Rejected - CockroachDB requires PL/pgSQL for trigger functions, which defeats the purpose of removing PL/pgSQL dependency. Database-level triggers are not viable without PL/pgSQL support.
 
 ### Option 2: Application-Level Audit Logging (GORM Hooks)
 
@@ -125,14 +125,30 @@ type AuditLog struct {
 
 ```go
 // Implement in internal/domain/models/audit.go
+const auditOldValueKey = "audit:old_value"
+
 func (m *Customer) AfterCreate(tx *gorm.DB) error {
     return recordAudit(tx, "current_account_audit", "customers", "INSERT", m.ID, nil, m)
 }
 
-func (m *Customer) AfterUpdate(tx *gorm.DB) error {
+func (m *Customer) BeforeUpdate(tx *gorm.DB) error {
+    // Capture old values BEFORE the update happens
     var old Customer
-    tx.First(&old, m.ID) // Get old values
-    return recordAudit(tx, "current_account_audit", "customers", "UPDATE", m.ID, &old, m)
+    if err := tx.First(&old, m.ID).Error; err != nil {
+        return err
+    }
+    // Store old values in transaction context for AfterUpdate to access
+    tx.Statement.Context = context.WithValue(tx.Statement.Context, auditOldValueKey, &old)
+    return nil
+}
+
+func (m *Customer) AfterUpdate(tx *gorm.DB) error {
+    // Retrieve old values from context (captured in BeforeUpdate)
+    old, ok := tx.Statement.Context.Value(auditOldValueKey).(*Customer)
+    if !ok {
+        return fmt.Errorf("failed to retrieve old values from context")
+    }
+    return recordAudit(tx, "current_account_audit", "customers", "UPDATE", m.ID, old, m)
 }
 
 func (m *Customer) AfterDelete(tx *gorm.DB) error {
@@ -196,10 +212,35 @@ Repeat for `position_keeping_audit` schema.
 
 ### Mitigation Strategies
 
-1. **Async audit logging**: Use goroutine + channel for non-blocking audit writes
-2. **Batch audit writes**: Accumulate audit records and batch-insert periodically
-3. **Selective auditing**: Only audit critical tables (customers, accounts, transactions)
-4. **Audit sampling**: For high-volume tables, sample audit records (e.g., 10%)
+**For Financial Systems (Recommended):**
+
+1. **Synchronous audit within transaction**: Keep audit writes in same transaction as business operations
+   - ✅ Guarantees atomicity (audit record committed with business data)
+   - ✅ Complete audit trail (no lost records)
+   - ⚠️ Performance cost: +1 INSERT per operation (acceptable for financial compliance)
+   - ⚠️ Transaction size increase (monitor and set appropriate limits)
+
+2. **Selective auditing**: Only audit critical tables requiring compliance (customers, accounts, transactions)
+   - Reduce write amplification by excluding low-risk tables
+   - Document which tables are/aren't audited and rationale
+
+3. **Optimize JSON serialization**: Only include fields that change
+   - Compute diff before serialization to reduce JSONB size
+   - Set maximum audit record size limits
+
+**For Non-Critical Systems (If Eventual Consistency is Acceptable):**
+
+4. **Async audit logging with retry**: Use goroutine + channel for non-blocking writes
+   - ⚠️ Breaks atomicity: Audit records may be lost on application crash
+   - ⚠️ NOT RECOMMENDED for financial/compliance-critical systems
+   - Requires robust retry mechanism and dead-letter queue for failed audits
+   - Must implement idempotency to handle duplicates on retry
+
+5. **Batch audit writes**: Accumulate audit records and batch-insert periodically
+   - ⚠️ Same atomicity concerns as async logging
+   - ⚠️ NOT RECOMMENDED for systems requiring complete audit trails
+
+**Decision for Meridian**: We will use **synchronous audit within transaction** (Strategy #1) for financial compliance. Performance impact is acceptable given regulatory requirements for complete, tamper-resistant audit trails.
 
 ### Benchmarking Plan
 

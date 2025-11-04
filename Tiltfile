@@ -663,7 +663,8 @@ local_resource(
 # Migrations are applied in order:
 # 1. current_account (customers, accounts, current_account_audit)
 # 2. position_keeping (transactions, position_keeping_audit) - depends on current_account for FKs
-# Note: Audit logging is handled at application level via GORM hooks (see ADR-0009)
+# Note: Phase 1 creates empty audit tables (current work). Audit logging via GORM hooks
+#       will be implemented in Phase 2 (future PR). See ADR-0009 for rationale and implementation plan.
 local_resource(
   'migrate-current-account',
   cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
@@ -754,7 +755,8 @@ Database Migrations:
     1. current_account (customers, accounts, current_account_audit)
     2. position_keeping (transactions, position_keeping_audit)
   • Each service has its own audit schema for isolation
-  • Audit logging handled at application level via GORM hooks (see ADR-0009)
+  • Phase 1: Empty audit tables created (current work)
+  • Phase 2: GORM hooks for audit logging (future PR, see ADR-0009)
   • Manual triggers:
     - tilt trigger migrate-current-account
     - tilt trigger migrate-position-keeping
