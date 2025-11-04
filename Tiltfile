@@ -661,22 +661,14 @@ local_resource(
 # Run database migrations on startup - uses Atlas to apply schema changes
 # Each service has its own business schema and audit schema
 # Migrations are applied in order:
-# 1. shared (audit factory infrastructure)
-# 2. current_account (customers, accounts, current_account_audit)
-# 3. position_keeping (transactions, position_keeping_audit) - depends on current_account for FKs
-local_resource(
-  'migrate-shared',
-  cmd='atlas migrate apply --env local --config file://atlas.shared.hcl --url "{}"'.format(database_url),
-  resource_deps=['cockroachdb'],
-  labels=['database'],
-  auto_init=True,
-  trigger_mode=TRIGGER_MODE_MANUAL,
-)
-
+# 1. current_account (customers, accounts, current_account_audit)
+# 2. position_keeping (transactions, position_keeping_audit) - depends on current_account for FKs
+# Note: Phase 1 creates empty audit tables (current work). Audit logging via GORM hooks
+#       will be implemented in Phase 2 (future PR). See ADR-0009 for rationale and implementation plan.
 local_resource(
   'migrate-current-account',
   cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
-  resource_deps=['migrate-shared'],
+  resource_deps=['cockroachdb'],
   labels=['database'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,
@@ -759,14 +751,13 @@ Tilt UI              → http://localhost:10350
 Hot reload: Edit Go code and see changes in ~3 seconds
 
 Database Migrations:
-  • Migrations run automatically on startup (3 resources):
-    1. shared (_audit_factory infrastructure)
-    2. current_account (customers, accounts, current_account_audit)
-    3. position_keeping (transactions, position_keeping_audit)
-  • shared is infrastructure, not a business service - provides audit factory
+  • Migrations run automatically on startup (2 resources):
+    1. current_account (customers, accounts, current_account_audit)
+    2. position_keeping (transactions, position_keeping_audit)
   • Each service has its own audit schema for isolation
+  • Phase 1: Empty audit tables created (current work)
+  • Phase 2: GORM hooks for audit logging (future PR, see ADR-0009)
   • Manual triggers:
-    - tilt trigger migrate-shared
     - tilt trigger migrate-current-account
     - tilt trigger migrate-position-keeping
   • Check status:

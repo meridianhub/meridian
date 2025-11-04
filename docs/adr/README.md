@@ -35,9 +35,12 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 | [ADR-0001](0001-record-architecture-decisions.md) | Record Architecture Decisions | Accepted | 2025-10-24 |
 | [ADR-0002](0002-microservices-per-bian-domain.md) | Microservices Architecture with One Service per BIAN Domain | Accepted | 2025-10-25 |
 | [ADR-0003](0003-database-schema-migrations.md) | Database Schema Migrations with Atlas | Accepted | 2025-10-25 (Revised) |
-| [ADR-0004](0004-separated-schema-management.md) | Separated Schema Management with Adapters | Accepted | 2025-10-25 (Revised) |
+| [ADR-0004](0004-event-schema-evolution.md) | Event Schema Evolution with Protobuf and Buf | Accepted | 2025-10-25 |
 | [ADR-0005](0005-adapter-pattern-layer-translation.md) | Adapter Pattern for Layer Translation | Accepted | 2025-10-25 |
 | [ADR-0006](0006-tilt-local-development.md) | Tilt for Local Kubernetes Development | Accepted | 2025-10-25 |
+| [ADR-0007](0007-raw-yaml-over-helm-for-initial-development.md) | Raw YAML over Helm for Initial Development | Accepted | 2025-10-25 |
+| [ADR-0008](0008-defensive-testing-standards.md) | Defensive Testing Standards | Accepted | 2025-10-25 |
+| [ADR-0009](0009-application-level-audit-logging.md) | Application-Level Audit Logging | Proposed | 2025-11-04 |
 
 ## Categories
 
@@ -47,11 +50,16 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 
 ### Data Management & Architecture Patterns
 - [ADR-0003](0003-database-schema-migrations.md) - Database Schema Migrations with Atlas
-- [ADR-0004](0004-separated-schema-management.md) - Separated Schema Management with Adapters
+- [ADR-0004](0004-event-schema-evolution.md) - Event Schema Evolution with Protobuf and Buf
 - [ADR-0005](0005-adapter-pattern-layer-translation.md) - Adapter Pattern for Layer Translation
+- [ADR-0009](0009-application-level-audit-logging.md) - Application-Level Audit Logging
 
-### Development Environment
+### Development Environment & Infrastructure
 - [ADR-0006](0006-tilt-local-development.md) - Tilt for Local Kubernetes Development
+- [ADR-0007](0007-raw-yaml-over-helm-for-initial-development.md) - Raw YAML over Helm for Initial Development
+
+### Quality & Testing
+- [ADR-0008](0008-defensive-testing-standards.md) - Defensive Testing Standards
 
 ## Key Architectural Changes
 
