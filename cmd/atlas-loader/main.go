@@ -11,6 +11,11 @@ import (
 	"github.com/meridianhub/meridian/internal/domain/models"
 )
 
+const (
+	schemaCurrentAccount  = "current_account"
+	schemaPositionKeeping = "position_keeping"
+)
+
 func main() {
 	// Parse schema filter flag
 	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping)")
@@ -20,12 +25,12 @@ func main() {
 	var modelList []interface{}
 
 	switch *schemaFilter {
-	case "current_account":
+	case schemaCurrentAccount:
 		modelList = []interface{}{
 			&models.Customer{},
 			&models.Account{},
 		}
-	case "position_keeping":
+	case schemaPositionKeeping:
 		// Transaction references Account via FK, so Account must be included
 		// for GORM to generate proper foreign key constraints
 		modelList = []interface{}{
@@ -55,7 +60,7 @@ func main() {
 	if *schemaFilter != "" {
 		// For position_keeping, we need both schemas since transactions reference accounts
 		var schemaStmt string
-		if *schemaFilter == "position_keeping" {
+		if *schemaFilter == schemaPositionKeeping {
 			schemaStmt = "CREATE SCHEMA IF NOT EXISTS current_account;\nCREATE SCHEMA IF NOT EXISTS position_keeping;\n\n"
 		} else {
 			schemaStmt = fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s;\n\n", *schemaFilter)

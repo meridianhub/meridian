@@ -44,6 +44,11 @@ full_image = '{}/{}'.format(docker_registry, image_name)
 # Kubernetes namespace
 k8s_namespace = 'default'
 
+# Database configuration
+# SECURITY: Never commit credentials to version control
+# For local development with CockroachDB (insecure mode, no password required)
+database_url = os.getenv('DATABASE_URL', 'postgres://root@localhost:26257/defaultdb?sslmode=disable')
+
 # =============================================================================
 # Backing Services
 # =============================================================================
@@ -661,7 +666,7 @@ local_resource(
 # 3. position_keeping (transactions, position_keeping_audit) - depends on current_account for FKs
 local_resource(
   'migrate-shared',
-  cmd='atlas migrate apply --env local --config file://atlas.shared.hcl --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
+  cmd='atlas migrate apply --env local --config file://atlas.shared.hcl --url "{}"'.format(database_url),
   resource_deps=['cockroachdb'],
   labels=['database'],
   auto_init=True,
@@ -670,7 +675,7 @@ local_resource(
 
 local_resource(
   'migrate-current-account',
-  cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
+  cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
   resource_deps=['migrate-shared'],
   labels=['database'],
   auto_init=True,
@@ -679,7 +684,7 @@ local_resource(
 
 local_resource(
   'migrate-position-keeping',
-  cmd='atlas migrate apply --env local --config file://atlas.position_keeping.hcl --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
+  cmd='atlas migrate apply --env local --config file://atlas.position_keeping.hcl --url "{}"'.format(database_url),
   resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
   labels=['database'],
   auto_init=True,
