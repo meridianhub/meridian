@@ -375,6 +375,90 @@ spec:
             memory: 512Mi
 '''))
 
+# Keycloak - Identity and Access Management
+# Provides OAuth 2.0 / OpenID Connect authentication for local development
+# Pre-configured with:
+# - Realm: meridian
+# - Admin user: admin/admin
+# - Client ID: meridian-service
+# - JWKS endpoint: http://keycloak:8080/realms/meridian/protocol/openid-connect/certs
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  labels:
+    app: keycloak
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: keycloak
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:26.0
+        args:
+        - start-dev
+        - --http-port=8080
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: KEYCLOAK_ADMIN
+          value: admin
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          value: admin
+        - name: KC_HTTP_RELATIVE_PATH
+          value: /
+        - name: KC_HOSTNAME_STRICT
+          value: "false"
+        - name: KC_HOSTNAME_STRICT_HTTPS
+          value: "false"
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+'''))
+
 # =============================================================================
 # Main Application
 # =============================================================================
@@ -424,6 +508,7 @@ k8s_resource(
     'cockroachdb',
     'redis',
     'kafka-cluster',
+    'keycloak',
   ],
   labels=['app'],
   # Group RBAC and config resources under the main app
@@ -479,6 +564,14 @@ k8s_resource(
   resource_deps=[],
 )
 
+# Keycloak resource
+k8s_resource(
+  'keycloak',
+  port_forwards='18080:8080',  # Admin console on port 18080 to avoid conflict with app
+  labels=['auth'],
+  resource_deps=[],
+)
+
 # Note: meridian-version ConfigMap remains "uncategorized" due to kustomize hash suffix
 # The hash changes on every build, so we can't reference it statically in objects=[]
 # This is acceptable - it's a single small ConfigMap with build metadata
@@ -527,6 +620,17 @@ local_resource(
   trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
+# Keycloak setup - runs automatically after keycloak is ready
+# Configures realm, client, and test user
+local_resource(
+  'keycloak-setup',
+  cmd='./scripts/keycloak-setup.sh',
+  resource_deps=['keycloak'],
+  labels=['auth'],
+  auto_init=True,  # Runs automatically on Tilt startup
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger keycloak-setup'
+)
+
 # =============================================================================
 # UI Configuration
 # =============================================================================
@@ -547,6 +651,10 @@ Services:
   • Kafka Cluster    → localhost:9092
     - 3 brokers with KRaft quorum (kafka-0, kafka-1, kafka-2)
     - Replication factor: 2 (tolerates 1 broker failure)
+  • Keycloak         → http://localhost:18080
+    - Admin console: admin/admin
+    - Realm: meridian (create manually)
+    - JWKS: http://localhost:18080/realms/meridian/protocol/openid-connect/certs
 
 Tilt UI              → http://localhost:10350
 
