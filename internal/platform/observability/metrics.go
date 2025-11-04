@@ -143,8 +143,9 @@ func (mc *MetricsCollector) StartMetricsServer(ctx context.Context, addr string)
 	mux.Handle("/metrics", mc.Handler())
 
 	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
 	}
 
 	// Graceful shutdown
