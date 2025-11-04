@@ -74,7 +74,7 @@ echo ""
 # Function to wait for Keycloak to be ready
 wait_for_keycloak() {
     echo -n "Waiting for Keycloak to be ready..."
-    for i in {1..60}; do
+    for _ in {1..60}; do
         if curl -sf "$KEYCLOAK_URL/health/ready" > /dev/null 2>&1; then
             echo -e " ${GREEN}✓${NC}"
             return 0

@@ -361,10 +361,10 @@ func (s *service) AdminOnlyMethod(ctx context.Context, req *pb.Request) (*pb.Res
 When running `tilt up`, Keycloak is automatically configured with:
 
 - **Realm**: `meridian`
-- **Admin Console**: http://localhost:18080 (admin/admin)
+- **Admin Console**: <http://localhost:18080> (admin/admin)
 - **Test User**: developer@meridian.local / developer
 - **Client ID**: meridian-service (public client - no secret required)
-- **JWKS Endpoint**: http://localhost:18080/realms/meridian/protocol/openid-connect/certs
+- **JWKS Endpoint**: <http://localhost:18080/realms/meridian/protocol/openid-connect/certs>
 
 **Note**: The `meridian-service` client is configured as a **public client** for local development convenience. This allows password grant flow without requiring a client secret. In production, use confidential clients with proper secret management.
 
