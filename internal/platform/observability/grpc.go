@@ -14,7 +14,6 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
-	grpccodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
@@ -365,36 +364,37 @@ func (s *tracedClientStream) SendMsg(m interface{}) error {
 }
 
 // RecvMsg records a span event when receiving messages
-// Ends the span when streaming concludes (io.EOF or terminal error)
+// Ends the span when streaming concludes (io.EOF or any error)
 func (s *tracedClientStream) RecvMsg(m interface{}) error {
 	err := s.ClientStream.RecvMsg(m)
 	if err != nil {
-		// Check if this is a terminal error (stream ended)
+		// Any error means the stream is done - end the span
 		if errors.Is(err, io.EOF) {
 			// Normal stream completion
 			s.tracer.AddEvent(s.ctx, "stream.complete")
 			s.span.SetStatus(codes.Ok, "")
-			s.endOnce.Do(func() {
-				s.span.End()
-			})
 		} else {
-			// Error during streaming
+			// Error during streaming - record event and set error status
 			s.tracer.AddEvent(s.ctx, "stream.receive.error",
 				trace.WithAttributes(
 					attribute.String("error", err.Error()),
 				),
 			)
-			// Check if error is terminal (non-recoverable)
+
+			// Set span status to error with appropriate message
 			st, ok := status.FromError(err)
-			if ok && st.Code() != grpccodes.OK {
-				// Terminal error - set status and record error before ending span
+			if ok {
 				s.span.SetStatus(codes.Error, st.Message())
-				s.span.RecordError(err)
-				s.endOnce.Do(func() {
-					s.span.End()
-				})
+			} else {
+				s.span.SetStatus(codes.Error, err.Error())
 			}
+			s.span.RecordError(err)
 		}
+
+		// Always end span on any error (EOF or otherwise)
+		s.endOnce.Do(func() {
+			s.span.End()
+		})
 	} else {
 		s.tracer.AddEvent(s.ctx, "stream.receive",
 			trace.WithAttributes(
