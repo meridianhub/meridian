@@ -10,7 +10,7 @@
 
 The initial migration system (PR #67) implemented a database-level audit factory pattern using PostgreSQL PL/pgSQL stored procedures and triggers. This approach encountered a critical compatibility issue with CockroachDB:
 
-```
+```text
 pq: plpgsql not supported in user-defined functions:
 at or near "table_name": syntax error: unimplemented: this syntax
 ```

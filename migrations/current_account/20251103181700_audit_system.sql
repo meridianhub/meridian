@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS current_account_audit.audit_log (
 
     -- What changed
     table_name VARCHAR(100) NOT NULL,
-    operation VARCHAR(10) NOT NULL,
+    operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
 
     -- Record identification
     record_id UUID NOT NULL,
