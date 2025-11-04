@@ -759,11 +759,14 @@ Tilt UI              → http://localhost:10350
 Hot reload: Edit Go code and see changes in ~3 seconds
 
 Database Migrations:
-  • Migrations run automatically on startup (2 services):
-    1. current_account (customers, accounts, current_account_audit)
-    2. position_keeping (transactions, position_keeping_audit)
+  • Migrations run automatically on startup (3 resources):
+    1. shared (_audit_factory infrastructure)
+    2. current_account (customers, accounts, current_account_audit)
+    3. position_keeping (transactions, position_keeping_audit)
+  • shared is infrastructure, not a business service - provides audit factory
   • Each service has its own audit schema for isolation
   • Manual triggers:
+    - tilt trigger migrate-shared
     - tilt trigger migrate-current-account
     - tilt trigger migrate-position-keeping
   • Check status:
