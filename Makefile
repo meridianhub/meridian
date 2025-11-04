@@ -269,11 +269,13 @@ migrate-apply-all:
 		echo "Error: DATABASE_URL environment variable not set"; \
 		exit 1; \
 	fi
+	@echo "Applying shared migrations (audit factory)..."
+	@atlas migrate apply --env local --config atlas.shared.hcl --url "$$DATABASE_URL"
 	@echo "Applying current_account migrations (includes current_account_audit)..."
 	@atlas migrate apply --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
 	@echo "Applying position_keeping migrations (includes position_keeping_audit)..."
 	@atlas migrate apply --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
-	@echo "All schema migrations applied (each service includes its own audit schema)."
+	@echo "All schema migrations applied (shared + each service with its own audit schema)."
 
 ## migrate-status-all: Show migration status for all schemas
 migrate-status-all:
@@ -282,6 +284,8 @@ migrate-status-all:
 		echo "Error: DATABASE_URL environment variable not set"; \
 		exit 1; \
 	fi
+	@printf "\n=== shared (audit factory) ===\n"
+	@atlas migrate status --env local --config atlas.shared.hcl --url "$$DATABASE_URL"
 	@printf "\n=== current_account schema ===\n"
 	@atlas migrate status --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
 	@printf "\n=== position_keeping schema ===\n"
@@ -290,6 +294,8 @@ migrate-status-all:
 ## migrate-lint-all: Lint all migrations for potential issues
 migrate-lint-all:
 	@echo "Linting migrations for all schemas..."
+	@echo "Linting shared migrations..."
+	@atlas migrate lint --env local --config atlas.shared.hcl --latest 1
 	@echo "Linting current_account migrations..."
 	@atlas migrate lint --env local --config atlas.current_account.hcl --latest 1
 	@echo "Linting position_keeping migrations..."
@@ -299,6 +305,7 @@ migrate-lint-all:
 ## migrate-hash-all: Verify migration integrity for all schemas
 migrate-hash-all:
 	@echo "Verifying migration checksums for all schemas..."
+	@atlas migrate hash --env local --config atlas.shared.hcl
 	@atlas migrate hash --env local --config atlas.current_account.hcl
 	@atlas migrate hash --env local --config atlas.position_keeping.hcl
 	@echo "All migration checksums verified."

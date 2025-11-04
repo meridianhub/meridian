@@ -8,26 +8,35 @@ This directory contains database migrations organized by schema, following BIAN 
 
 Each BIAN service domain has its own PostgreSQL schemas for business data and audit:
 
+- **`_audit_factory`**: Shared audit infrastructure (reusable factory for all services)
 - **`current_account`**: Customer and Account models (BIAN Current Account domain)
 - **`current_account_audit`**: Audit logs for current_account service
 - **`position_keeping`**: Transaction models (BIAN Position Keeping domain)
 - **`position_keeping_audit`**: Audit logs for position_keeping service
 
-Each microservice owns both its business schema and audit schema, ensuring complete service isolation.
+Each microservice owns both its business schema and audit schema, ensuring complete service isolation. The shared `_audit_factory` schema provides reusable audit infrastructure to eliminate duplication.
 
 ### Migration Organization
 
 ```text
 migrations/
+├── shared/                 # Shared infrastructure (audit factory)
+│   ├── 20251103190000_audit_factory.sql    # Reusable audit creation procedures
+│   └── atlas.sum
 ├── current_account/        # Current Account service
 │   ├── 20251103174203_initial.sql         # Business tables (customers, accounts)
-│   ├── 20251103180000_audit_system.sql    # Service-specific audit (current_account_audit)
+│   ├── 20251103180000_audit_system.sql    # Initializes current_account_audit via factory
 │   └── atlas.sum
 └── position_keeping/       # Position Keeping service
     ├── 20251103174231_initial.sql         # Business tables (transactions)
-    ├── 20251103180000_audit_system.sql    # Service-specific audit (position_keeping_audit)
+    ├── 20251103180000_audit_system.sql    # Initializes position_keeping_audit via factory
     └── atlas.sum
 ```
+
+**Migration Application Order:**
+1. `shared/` - Creates `_audit_factory` schema with reusable procedures
+2. `current_account/` - Creates business + audit schemas
+3. `position_keeping/` - Creates business + audit schemas (depends on current_account for FKs)
 
 ## Migration Tools
 
@@ -108,10 +117,18 @@ This order is enforced in:
 
 ### Overview
 
-Each microservice has its own audit schema for complete isolation:
+The audit system uses a **shared factory pattern** to eliminate code duplication while maintaining service isolation:
 
-- **`current_account_audit.change_log`**: Logs changes to customers and accounts
-- **`position_keeping_audit.change_log`**: Logs changes to transactions
+- **`_audit_factory` schema**: Contains reusable procedures (`init_service_audit()`) that create audit infrastructure
+- **Per-service audit schemas**: Each service gets its own audit schema (e.g., `current_account_audit`, `position_keeping_audit`)
+- **Zero duplication**: All audit logic lives in one place, called by each service migration
+
+Each service audit schema includes:
+- **`change_log` table**: JSONB-based change tracking with indexes
+- **`log_change()` trigger function**: Captures INSERT/UPDATE/DELETE operations
+- **`enable_audit_log()` helper**: Attaches triggers to tables
+- **`change_summary` view**: Human-readable change history
+- **`get_record_history()` function**: Query changes for specific records
 
 All changes are automatically logged with:
 - **What changed**: Table name, operation (INSERT/UPDATE/DELETE)
@@ -119,14 +136,30 @@ All changes are automatically logged with:
 - **When changed**: Timestamp with timezone
 - **What data changed**: JSONB diff of old vs new values
 
+### Audit Factory Usage
+
+To add audit to a new service:
+
+```sql
+-- In your service's audit migration file:
+SELECT _audit_factory.init_service_audit(
+    'your_service',              -- Service schema to audit
+    'your_service_audit',        -- Audit schema name
+    ARRAY['table1', 'table2']    -- Tables to attach triggers to
+);
+```
+
+This single call creates the entire audit infrastructure for your service.
+
 ### Service-Specific Audit
 
 Each service's audit schema is:
 - **Isolated**: Only accessible by the owning service
-- **Self-contained**: Includes all triggers, functions, and views
-- **Independently deployable**: Service migrations include audit setup
+- **Self-contained**: All triggers, functions, and views in service audit schema
+- **Independently deployable**: Service migrations call the factory
+- **Zero maintenance**: Bug fixes to audit logic update the factory, not each service
 
-Audit triggers are automatically attached during migration.
+Audit triggers are automatically attached during migration via the factory.
 
 ### Querying Audit History
 

@@ -510,12 +510,22 @@ local_resource(
 # Run database migrations on startup - uses Atlas to apply schema changes
 # Each service has its own business schema and audit schema
 # Migrations are applied in order:
-# 1. current_account (customers, accounts, current_account_audit)
-# 2. position_keeping (transactions, position_keeping_audit) - depends on current_account for FKs
+# 1. shared (audit factory infrastructure)
+# 2. current_account (customers, accounts, current_account_audit)
+# 3. position_keeping (transactions, position_keeping_audit) - depends on current_account for FKs
+local_resource(
+  'migrate-shared',
+  cmd='atlas migrate apply --env local --config file://atlas.shared.hcl --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
+  resource_deps=['cockroachdb'],
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
 local_resource(
   'migrate-current-account',
   cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "postgres://root@localhost:26257/defaultdb?sslmode=disable"',
-  resource_deps=['cockroachdb'],
+  resource_deps=['migrate-shared'],
   labels=['database'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,
