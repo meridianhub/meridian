@@ -24,8 +24,38 @@ jobs:
       pull-requests: read
       issues: read
       id-token: write
+      checks: read
+      actions: read
 
     steps:
+      # Wait for critical CI checks to complete before reviewing
+      - name: Wait for Tests
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: 'Run Tests'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+          allowed-conclusions: success
+
+      - name: Wait for Build
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: 'Build Docker Image'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+          allowed-conclusions: success
+
+      - name: Wait for Linting
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: 'golangci-lint'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+          allowed-conclusions: success
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
