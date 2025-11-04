@@ -16,6 +16,9 @@ type DatabaseChecker struct {
 
 // NewDatabaseChecker creates a new database health checker.
 func NewDatabaseChecker(pool *db.PostgresPool) *DatabaseChecker {
+	if pool == nil {
+		panic("NewDatabaseChecker: pool cannot be nil")
+	}
 	return &DatabaseChecker{
 		pool: pool,
 	}
@@ -46,7 +49,7 @@ func (d *DatabaseChecker) Check(ctx context.Context) ComponentResult {
 		Status:       status,
 		Message:      message,
 		ResponseTime: responseTime,
-		CheckedAt:    time.Now(),
+		CheckedAt:    start,
 		Error:        err,
 	}
 }
@@ -58,6 +61,9 @@ type RedisChecker struct {
 
 // NewRedisChecker creates a new Redis health checker.
 func NewRedisChecker(client *redis.Client) *RedisChecker {
+	if client == nil {
+		panic("NewRedisChecker: client cannot be nil")
+	}
 	return &RedisChecker{
 		client: client,
 	}
@@ -105,6 +111,9 @@ type KafkaChecker struct {
 // NewKafkaChecker creates a new Kafka health checker with a custom check function.
 // The check function should verify Kafka connectivity (e.g., admin client metadata check).
 func NewKafkaChecker(checkFunc KafkaCheckFunc) *KafkaChecker {
+	if checkFunc == nil {
+		panic("NewKafkaChecker: checkFunc cannot be nil")
+	}
 	return &KafkaChecker{
 		checkFunc: checkFunc,
 	}

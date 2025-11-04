@@ -97,6 +97,9 @@ func TestDatabaseChecker_Check_Unhealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start postgres container: %v", err)
 	}
+	defer func() {
+		_ = testcontainers.TerminateContainer(pgContainer)
+	}()
 
 	connStr, err := pgContainer.ConnectionString(ctx)
 	if err != nil {
@@ -109,6 +112,7 @@ func TestDatabaseChecker_Check_Unhealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
 	}
+	defer func() { _ = pool.Close() }()
 
 	checker := NewDatabaseChecker(pool)
 
