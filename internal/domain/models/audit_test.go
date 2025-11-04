@@ -71,7 +71,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 			last_error TEXT,
 			changed_by VARCHAR(100),
 			transaction_id VARCHAR(100),
-			client_ip INET,
+			client_ip VARCHAR(45),
 			user_agent TEXT
 		)
 	`).Error
