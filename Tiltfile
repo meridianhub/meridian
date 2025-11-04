@@ -44,6 +44,11 @@ full_image = '{}/{}'.format(docker_registry, image_name)
 # Kubernetes namespace
 k8s_namespace = 'default'
 
+# Database configuration
+# SECURITY: Never commit credentials to version control
+# For local development with CockroachDB (insecure mode, no password required)
+database_url = os.getenv('DATABASE_URL', 'postgres://root@localhost:26257/defaultdb?sslmode=disable')
+
 # =============================================================================
 # Backing Services
 # =============================================================================
@@ -653,6 +658,39 @@ local_resource(
   auto_init=False,  # Run manually with 'tilt trigger lint'
 )
 
+# Run database migrations on startup - uses Atlas to apply schema changes
+# Each service has its own business schema and audit schema
+# Migrations are applied in order:
+# 1. shared (audit factory infrastructure)
+# 2. current_account (customers, accounts, current_account_audit)
+# 3. position_keeping (transactions, position_keeping_audit) - depends on current_account for FKs
+local_resource(
+  'migrate-shared',
+  cmd='atlas migrate apply --env local --config file://atlas.shared.hcl --url "{}"'.format(database_url),
+  resource_deps=['cockroachdb'],
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+  'migrate-current-account',
+  cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
+  resource_deps=['migrate-shared'],
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+  'migrate-position-keeping',
+  cmd='atlas migrate apply --env local --config file://atlas.position_keeping.hcl --url "{}"'.format(database_url),
+  resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
 local_resource(
   'kafka-health',
@@ -719,6 +757,20 @@ Observability Stack:
 Tilt UI              → http://localhost:10350
 
 Hot reload: Edit Go code and see changes in ~3 seconds
+
+Database Migrations:
+  • Migrations run automatically on startup (3 resources):
+    1. shared (_audit_factory infrastructure)
+    2. current_account (customers, accounts, current_account_audit)
+    3. position_keeping (transactions, position_keeping_audit)
+  • shared is infrastructure, not a business service - provides audit factory
+  • Each service has its own audit schema for isolation
+  • Manual triggers:
+    - tilt trigger migrate-shared
+    - tilt trigger migrate-current-account
+    - tilt trigger migrate-position-keeping
+  • Check status:
+    - make migrate-status-all (requires DATABASE_URL env var)
 
 Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker

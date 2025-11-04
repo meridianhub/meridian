@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all
 
 # Default target
 all: help
@@ -61,6 +61,15 @@ help:
 	@echo "  make tidy              - Tidy and verify Go modules"
 	@echo "  make deps              - Download dependencies"
 	@echo "  make install           - Install development tools"
+	@echo ""
+	@echo "Database Migration targets:"
+	@echo "  make migrate-diff-all          - Generate migrations for all schemas"
+	@echo "  make migrate-diff-current      - Generate migration for current_account schema"
+	@echo "  make migrate-diff-position     - Generate migration for position_keeping schema"
+	@echo "  make migrate-apply-all         - Apply all pending migrations"
+	@echo "  make migrate-status-all        - Show migration status for all schemas"
+	@echo "  make migrate-lint-all          - Lint all migrations"
+	@echo "  make migrate-hash-all          - Verify all migration checksums"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -220,3 +229,83 @@ proto-plugins-info:
 	@echo "  2. Update versions in buf.gen.yaml"
 	@echo "  3. Run 'make proto' to test generation"
 	@echo "  4. Commit buf.gen.yaml with updated versions"
+
+## migrate-diff-all: Generate migrations for all schemas
+migrate-diff-all: migrate-diff-current migrate-diff-position
+	@echo "All schema migrations generated."
+
+## migrate-diff-current: Generate migration for current_account schema
+migrate-diff-current:
+	@echo "Generating migration for current_account schema..."
+	@if [ -z "$$MIGRATION_NAME" ]; then \
+		if [ -t 0 ]; then \
+			read -p "Enter migration name for current_account: " MIGRATION_NAME; \
+		else \
+			echo "Error: MIGRATION_NAME environment variable not set (required in non-interactive mode)"; \
+			exit 1; \
+		fi; \
+	fi; \
+	atlas migrate diff $$MIGRATION_NAME --env local --config atlas.current_account.hcl
+	@echo "current_account migration generated. Review migrations/current_account/ directory."
+
+## migrate-diff-position: Generate migration for position_keeping schema
+migrate-diff-position:
+	@echo "Generating migration for position_keeping schema..."
+	@if [ -z "$$MIGRATION_NAME" ]; then \
+		if [ -t 0 ]; then \
+			read -p "Enter migration name for position_keeping: " MIGRATION_NAME; \
+		else \
+			echo "Error: MIGRATION_NAME environment variable not set (required in non-interactive mode)"; \
+			exit 1; \
+		fi; \
+	fi; \
+	atlas migrate diff $$MIGRATION_NAME --env local --config atlas.position_keeping.hcl
+	@echo "position_keeping migration generated. Review migrations/position_keeping/ directory."
+
+## migrate-apply-all: Apply all pending migrations
+migrate-apply-all:
+	@echo "Applying migrations for all schemas..."
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "Error: DATABASE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	@echo "Applying shared migrations (audit factory)..."
+	@atlas migrate apply --env local --config atlas.shared.hcl --url "$$DATABASE_URL"
+	@echo "Applying current_account migrations (includes current_account_audit)..."
+	@atlas migrate apply --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
+	@echo "Applying position_keeping migrations (includes position_keeping_audit)..."
+	@atlas migrate apply --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
+	@echo "All schema migrations applied (shared + each service with its own audit schema)."
+
+## migrate-status-all: Show migration status for all schemas
+migrate-status-all:
+	@echo "Migration status for all schemas:"
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "Error: DATABASE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	@printf "\n=== shared (audit factory) ===\n"
+	@atlas migrate status --env local --config atlas.shared.hcl --url "$$DATABASE_URL"
+	@printf "\n=== current_account schema ===\n"
+	@atlas migrate status --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
+	@printf "\n=== position_keeping schema ===\n"
+	@atlas migrate status --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
+
+## migrate-lint-all: Lint all migrations for potential issues
+migrate-lint-all:
+	@echo "Linting migrations for all schemas..."
+	@echo "Linting shared migrations..."
+	@atlas migrate lint --env local --config atlas.shared.hcl --latest 1
+	@echo "Linting current_account migrations..."
+	@atlas migrate lint --env local --config atlas.current_account.hcl --latest 1
+	@echo "Linting position_keeping migrations..."
+	@atlas migrate lint --env local --config atlas.position_keeping.hcl --latest 1
+	@echo "All migrations linted successfully."
+
+## migrate-hash-all: Verify migration integrity for all schemas
+migrate-hash-all:
+	@echo "Verifying migration checksums for all schemas..."
+	@atlas migrate hash --env local --config atlas.shared.hcl
+	@atlas migrate hash --env local --config atlas.current_account.hcl
+	@atlas migrate hash --env local --config atlas.position_keeping.hcl
+	@echo "All migration checksums verified."
