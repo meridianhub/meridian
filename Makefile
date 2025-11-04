@@ -80,8 +80,11 @@ help:
 build: tidy
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@mkdir -p $(DIST_DIR)
-	$(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME) $(CMD_DIR)/...
-	@echo "Build complete: $(DIST_DIR)/$(BINARY_NAME)"
+	$(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME) $(CMD_DIR)/meridian
+	$(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/atlas-loader $(CMD_DIR)/atlas-loader
+	@echo "Build complete:"
+	@echo "  - $(DIST_DIR)/$(BINARY_NAME)"
+	@echo "  - $(DIST_DIR)/atlas-loader"
 
 ## test: Run tests with coverage
 test:

@@ -25,10 +25,11 @@ require (
 	google.golang.org/genproto v0.0.0-20251022142026-3a174f9686a8
 	google.golang.org/grpc v1.75.1
 	google.golang.org/protobuf v1.36.10
-	gorm.io/driver/postgres v1.6.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
+
+require gorm.io/driver/postgres v1.6.0 // indirect
 
 require (
 	// Atlas pseudo-version v0.36.2-0.20250806044935-5bb51a0a956e is intentionally pinned.
