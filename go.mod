@@ -29,7 +29,11 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
-require gorm.io/driver/postgres v1.6.0 // indirect
+require (
+	github.com/testcontainers/testcontainers-go/modules/kafka v0.39.0 // indirect
+	golang.org/x/mod v0.28.0 // indirect
+	gorm.io/driver/postgres v1.6.0 // indirect
+)
 
 require (
 	// Atlas pseudo-version v0.36.2-0.20250806044935-5bb51a0a956e is intentionally pinned.
