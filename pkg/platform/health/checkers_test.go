@@ -15,10 +15,16 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+const (
+	componentNameDatabase = "database"
+	componentNameRedis    = "redis"
+	componentNameKafka    = "kafka"
+)
+
 // TestDatabaseChecker_Name verifies the checker name
 func TestDatabaseChecker_Name(t *testing.T) {
 	checker := &DatabaseChecker{}
-	if checker.Name() != "database" {
+	if checker.Name() != componentNameDatabase {
 		t.Errorf("Name() = %v, want database", checker.Name())
 	}
 }
@@ -60,7 +66,7 @@ func TestDatabaseChecker_Check_Healthy(t *testing.T) {
 	checker := NewDatabaseChecker(pool)
 	result := checker.Check(ctx)
 
-	if result.Name != "database" {
+	if result.Name != componentNameDatabase {
 		t.Errorf("Name = %v, want database", result.Name)
 	}
 	if result.Status != StatusHealthy {
@@ -126,7 +132,7 @@ func TestDatabaseChecker_Check_Unhealthy(t *testing.T) {
 // TestRedisChecker_Name verifies the checker name
 func TestRedisChecker_Name(t *testing.T) {
 	checker := &RedisChecker{}
-	if checker.Name() != "redis" {
+	if checker.Name() != componentNameRedis {
 		t.Errorf("Name() = %v, want redis", checker.Name())
 	}
 }
@@ -145,7 +151,7 @@ func TestRedisChecker_Check_Healthy(t *testing.T) {
 	checker := NewRedisChecker(client)
 	result := checker.Check(context.Background())
 
-	if result.Name != "redis" {
+	if result.Name != componentNameRedis {
 		t.Errorf("Name = %v, want redis", result.Name)
 	}
 	if result.Status != StatusHealthy {
@@ -185,7 +191,7 @@ func TestRedisChecker_Check_Unhealthy(t *testing.T) {
 // TestKafkaChecker_Name verifies the checker name
 func TestKafkaChecker_Name(t *testing.T) {
 	checker := &KafkaChecker{}
-	if checker.Name() != "kafka" {
+	if checker.Name() != componentNameKafka {
 		t.Errorf("Name() = %v, want kafka", checker.Name())
 	}
 }
@@ -228,7 +234,7 @@ func TestKafkaChecker_Check_Healthy(t *testing.T) {
 	checker := NewKafkaChecker(checkFunc)
 	result := checker.Check(ctx)
 
-	if result.Name != "kafka" {
+	if result.Name != componentNameKafka {
 		t.Errorf("Name = %v, want kafka", result.Name)
 	}
 	if result.Status != StatusHealthy {
