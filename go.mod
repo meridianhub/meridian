@@ -27,10 +27,13 @@ require (
 	google.golang.org/protobuf v1.36.10
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/driver/sqlite v1.6.0
-	gorm.io/gorm v1.31.0
+	gorm.io/gorm v1.31.1
 )
 
 require (
+	// Atlas pseudo-version v0.36.2-0.20250806044935-5bb51a0a956e is intentionally pinned.
+	// This is required by atlas-provider-gorm v0.6.0 and includes critical fixes for GORM integration.
+	// Do not upgrade to v0.38.0 until atlas-provider-gorm releases a compatible version.
 	ariga.io/atlas v0.36.2-0.20250806044935-5bb51a0a956e // indirect
 	cel.dev/expr v0.24.0 // indirect
 	cloud.google.com/go v0.121.6 // indirect
