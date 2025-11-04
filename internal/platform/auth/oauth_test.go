@@ -93,7 +93,8 @@ func TestNewOAuth2Client(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.NotNil(t, client)
-		assert.Equal(t, http.DefaultClient, client.config.Client)
+		assert.NotNil(t, client.config.Client)
+		assert.Equal(t, 30*time.Second, client.config.Client.Timeout)
 	})
 
 	t.Run("error with nil configuration", func(t *testing.T) {
@@ -426,7 +427,8 @@ func TestNewOAuth2Introspector(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.NotNil(t, introspector)
-		assert.Equal(t, http.DefaultClient, introspector.client)
+		assert.NotNil(t, introspector.client)
+		assert.Equal(t, 30*time.Second, introspector.client.Timeout)
 	})
 
 	t.Run("error with empty introspection URL", func(t *testing.T) {
