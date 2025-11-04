@@ -1,4 +1,14 @@
 ---
+# Grafana Observability Stack - Development Configuration
+#
+# This configuration is optimized for local development with Tilt.
+# For production deployments, add security hardening:
+#   - Set securityContext.runAsNonRoot: true
+#   - Set securityContext.allowPrivilegeEscalation: false
+#   - Set securityContext.runAsUser to non-root UID
+#   - Add resource limits and requests
+#   - Use secrets for sensitive configuration
+---
 # Grafana Alloy - OpenTelemetry Collector
 # Receives traces/metrics/logs and forwards to Tempo/Prometheus/Loki
 apiVersion: v1
@@ -80,7 +90,7 @@ spec:
     spec:
       containers:
       - name: alloy
-        image: grafana/alloy:latest
+        image: grafana/alloy:v1.5.1
         args:
         - run
         - /etc/alloy/config.alloy
@@ -186,7 +196,7 @@ spec:
     spec:
       containers:
       - name: tempo
-        image: grafana/tempo:latest
+        image: grafana/tempo:2.6.1
         args:
         - -config.file=/etc/tempo/tempo.yaml
         ports:
@@ -284,7 +294,7 @@ spec:
     spec:
       containers:
       - name: loki
-        image: grafana/loki:latest
+        image: grafana/loki:3.3.2
         args:
         - -config.file=/etc/loki/loki.yaml
         ports:
@@ -388,7 +398,7 @@ spec:
     spec:
       containers:
       - name: prometheus
-        image: prom/prometheus:latest
+        image: prom/prometheus:v3.0.1
         args:
         - --config.file=/etc/prometheus/prometheus.yml
         - --storage.tsdb.path=/prometheus
@@ -495,7 +505,7 @@ spec:
     spec:
       containers:
       - name: grafana
-        image: grafana/grafana:latest
+        image: grafana/grafana:11.4.0
         ports:
         - containerPort: 3000
           name: grafana-http

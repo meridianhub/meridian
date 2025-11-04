@@ -76,6 +76,7 @@ Configuration is loaded from environment variables:
 | `OTEL_SERVICE_VERSION` | Service version | `unknown` |
 | `OTEL_ENVIRONMENT` | Environment (dev, staging, prod) | `development` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `alloy:4317` |
+| `OTEL_EXPORTER_OTLP_INSECURE` | Disable TLS for OTLP connection | `true` (dev), `false` (prod) |
 | `OTEL_TRACES_SAMPLER_ARG` | Sampling rate (0.0-1.0) | `1.0` (dev), `0.1` (prod) |
 | `OTEL_TRACES_ENABLED` | Enable tracing | `true` |
 
@@ -86,12 +87,14 @@ Configuration is loaded from environment variables:
 export OTEL_SERVICE_NAME=current-account-service
 export OTEL_SERVICE_VERSION=1.0.0
 export OTEL_ENVIRONMENT=development
+export OTEL_EXPORTER_OTLP_INSECURE=true  # Insecure connection (dev only)
 export OTEL_TRACES_SAMPLER_ARG=1.0  # Sample 100% of traces
 
 # Production
 export OTEL_SERVICE_NAME=current-account-service
 export OTEL_SERVICE_VERSION=1.0.0
 export OTEL_ENVIRONMENT=production
+export OTEL_EXPORTER_OTLP_INSECURE=false  # TLS enabled (prod)
 export OTEL_TRACES_SAMPLER_ARG=0.1  # Sample 10% of traces
 ```
 
