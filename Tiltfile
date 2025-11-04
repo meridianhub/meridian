@@ -460,6 +460,59 @@ spec:
 '''))
 
 # =============================================================================
+# Observability Stack (Grafana, Loki, Tempo, Prometheus, Alloy)
+# =============================================================================
+# NOTE: This configuration provides a complete observability stack for local development.
+# The stack includes:
+# - Grafana Alloy: OpenTelemetry collector (receives OTLP traces/metrics)
+# - Grafana Tempo: Distributed tracing backend
+# - Grafana Loki: Log aggregation and storage
+# - Prometheus: Metrics collection and storage
+# - Grafana: Visualization and dashboards
+#
+# Grafana is accessible at http://localhost:3000 (no login required in dev mode)
+# All services are configured with anonymous access for easy local development
+
+k8s_yaml('deployments/k8s/observability/grafana-stack.yaml')
+
+# Grafana resources
+k8s_resource(
+  'grafana',
+  port_forwards='3000:3000',
+  labels=['observability'],
+  resource_deps=['tempo', 'loki', 'prometheus'],
+)
+
+# Tempo (traces)
+k8s_resource(
+  'tempo',
+  labels=['observability'],
+  resource_deps=[],
+)
+
+# Loki (logs)
+k8s_resource(
+  'loki',
+  labels=['observability'],
+  resource_deps=[],
+)
+
+# Prometheus (metrics)
+k8s_resource(
+  'prometheus',
+  port_forwards='9090:9090',
+  labels=['observability'],
+  resource_deps=[],
+)
+
+# Alloy (collector)
+k8s_resource(
+  'alloy',
+  labels=['observability'],
+  resource_deps=['tempo', 'prometheus'],
+)
+
+# =============================================================================
 # Main Application
 # =============================================================================
 
@@ -655,6 +708,13 @@ Services:
     - Admin console: admin/admin
     - Realm: meridian (create manually)
     - JWKS: http://localhost:18080/realms/meridian/protocol/openid-connect/certs
+
+Observability Stack:
+  • Grafana          → http://localhost:3000 (dashboards, traces, logs, metrics)
+  • Prometheus       → http://localhost:9090 (metrics queries)
+  • Tempo            → traces via Alloy OTLP endpoint (alloy:4317)
+  • Loki             → logs aggregation
+  • Alloy            → OpenTelemetry collector
 
 Tilt UI              → http://localhost:10350
 
