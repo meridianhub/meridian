@@ -237,15 +237,29 @@ migrate-diff-all: migrate-diff-current migrate-diff-position
 ## migrate-diff-current: Generate migration for current_account schema
 migrate-diff-current:
 	@echo "Generating migration for current_account schema..."
-	@read -p "Enter migration name for current_account: " name; \
-	atlas migrate diff $$name --env local --config atlas.current_account.hcl
+	@if [ -z "$$MIGRATION_NAME" ]; then \
+		if [ -t 0 ]; then \
+			read -p "Enter migration name for current_account: " MIGRATION_NAME; \
+		else \
+			echo "Error: MIGRATION_NAME environment variable not set (required in non-interactive mode)"; \
+			exit 1; \
+		fi; \
+	fi; \
+	atlas migrate diff $$MIGRATION_NAME --env local --config atlas.current_account.hcl
 	@echo "current_account migration generated. Review migrations/current_account/ directory."
 
 ## migrate-diff-position: Generate migration for position_keeping schema
 migrate-diff-position:
 	@echo "Generating migration for position_keeping schema..."
-	@read -p "Enter migration name for position_keeping: " name; \
-	atlas migrate diff $$name --env local --config atlas.position_keeping.hcl
+	@if [ -z "$$MIGRATION_NAME" ]; then \
+		if [ -t 0 ]; then \
+			read -p "Enter migration name for position_keeping: " MIGRATION_NAME; \
+		else \
+			echo "Error: MIGRATION_NAME environment variable not set (required in non-interactive mode)"; \
+			exit 1; \
+		fi; \
+	fi; \
+	atlas migrate diff $$MIGRATION_NAME --env local --config atlas.position_keeping.hcl
 	@echo "position_keeping migration generated. Review migrations/position_keeping/ directory."
 
 ## migrate-apply-all: Apply all pending migrations
@@ -268,9 +282,9 @@ migrate-status-all:
 		echo "Error: DATABASE_URL environment variable not set"; \
 		exit 1; \
 	fi
-	@echo "\n=== current_account schema ==="
+	@printf "\n=== current_account schema ===\n"
 	@atlas migrate status --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
-	@echo "\n=== position_keeping schema ==="
+	@printf "\n=== position_keeping schema ===\n"
 	@atlas migrate status --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
 
 ## migrate-lint-all: Lint all migrations for potential issues

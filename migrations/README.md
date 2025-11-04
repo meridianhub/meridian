@@ -17,7 +17,7 @@ Each microservice owns both its business schema and audit schema, ensuring compl
 
 ### Migration Organization
 
-```
+```text
 migrations/
 ├── current_account/        # Current Account service
 │   ├── 20251103174203_initial.sql         # Business tables (customers, accounts)
