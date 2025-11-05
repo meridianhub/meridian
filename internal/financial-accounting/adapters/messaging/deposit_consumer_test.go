@@ -14,17 +14,18 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func setupTestServices(t *testing.T) *service.PostingService {
+func setupTestServices(t *testing.T) (*service.PostingService, func()) {
 	t.Helper()
 
-	db, _ := testdb.SetupPostgres(t, &persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
+	db, cleanup := testdb.SetupPostgres(t, &persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
 
 	repo := persistence.NewLedgerRepository(db)
-	return service.NewPostingService(repo, "BANK-CASH-001")
+	return service.NewPostingService(repo, "BANK-CASH-001"), cleanup
 }
 
 func TestNewDepositConsumer(t *testing.T) {
-	postingService := setupTestServices(t)
+	postingService, cleanup := setupTestServices(t)
+	defer cleanup()
 
 	tests := []struct {
 		name    string
@@ -73,7 +74,8 @@ func TestNewDepositConsumer(t *testing.T) {
 }
 
 func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
-	postingService := setupTestServices(t)
+	postingService, cleanup := setupTestServices(t)
+	defer cleanup()
 
 	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
 		BootstrapServers: "localhost:9092",

@@ -13,14 +13,15 @@ import (
 	"gorm.io/gorm"
 )
 
-func setupTestDB(t *testing.T) *gorm.DB {
+func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	db, _ := testdb.SetupPostgres(t, &persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
-	return db
+	db, cleanup := testdb.SetupPostgres(t, &persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
+	return db, cleanup
 }
 
 func TestProcessDeposit(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 
@@ -78,7 +79,8 @@ func TestProcessDeposit(t *testing.T) {
 }
 
 func TestValidateDoubleEntry(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
@@ -113,7 +115,8 @@ func TestValidateDoubleEntry(t *testing.T) {
 }
 
 func TestProcessDeposit_InvalidAmount(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 
@@ -133,7 +136,8 @@ func TestProcessDeposit_InvalidAmount(t *testing.T) {
 }
 
 func TestGetPostingsByBookingLog(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
@@ -183,7 +187,8 @@ func TestGetPostingsByBookingLog(t *testing.T) {
 }
 
 func TestValidateDoubleEntry_Unbalanced(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
