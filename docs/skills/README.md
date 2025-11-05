@@ -51,14 +51,17 @@ instructions: |
 
 ## Creating New Skills
 
-1. **Copy an existing skill** as a template
-2. **Fill in metadata**:
-   - Choose a descriptive name (lowercase-with-hyphens)
-   - Write a concise description
-   - List specific trigger scenarios
-   - Provide actionable instructions
-3. **Write the skill content** with commands and examples
-4. **Add to this README** in the appropriate category
+1. **Copy an existing skill as a template** - Use files like `tilt.md` or `docker.md` in this directory as starting points
+2. **Fill in YAML frontmatter metadata**:
+   - `name`: Choose a descriptive name (lowercase-with-hyphens)
+   - `description`: Write a concise one-line summary
+   - `triggers`: List 2-4 specific scenarios when this skill applies
+   - `instructions`: Provide 2-3 sentences of actionable guidance with key commands
+3. **Write the skill content** - Include:
+   - Detailed procedures with concrete examples
+   - Command-line examples with expected output
+   - Troubleshooting section for common issues
+4. **Add to this README** in the appropriate category above
 
 **Naming conventions**:
 - Use lowercase with hyphens: `my-skill-name`
@@ -109,13 +112,13 @@ Content starts here...
 **Possible causes**:
 - Triggers don't match conversation context
 - YAML syntax errors
-- File not listed in `CLAUDE.md`
+- File not listed in project's `CLAUDE.md` configuration (if used)
 - Missing required fields
 
 **Debug steps**:
 1. Validate YAML frontmatter syntax
 2. Make triggers more specific and descriptive
-3. Check `CLAUDE.md` lists the file correctly
+3. If using a `CLAUDE.md` configuration file, ensure the skill is listed there
 4. Verify all four required fields are present
 
 ## Related Documentation

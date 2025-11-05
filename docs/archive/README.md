@@ -4,7 +4,7 @@ This directory contains documentation that is no longer actively maintained but 
 
 ## Archived Documents
 
-- **task-8-service-integration.md** - Implementation report for Task 8 (service-to-service integration). Preserved for historical context but superseded by actual implementation.
+- **task-8-service-integration.md** - Implementation report for service-to-service integration. Preserved for historical context but superseded by actual implementation.
 - **immutability-audit.md** - Analysis document from code review. Implementation details now covered in CONTRIBUTING.md under Code Standards.
 - **rbac-testing-guide.md** - RBAC testing guidance. Content has been integrated into relevant test documentation.
 
@@ -19,7 +19,7 @@ Documents should be archived when:
 ## When NOT to Archive
 
 Keep documents active when:
-- They describe current architecture (use ADRs instead)
-- They provide operational guidance (use runbooks or skills)
-- They explain how to use the system (keep in main docs)
+- They describe current architecture (use ADRs in `docs/adr/` instead)
+- They provide operational guidance (use runbooks in `docs/runbooks/` or skills in `docs/skills/`)
+- They explain how to use the system (keep in root docs like README.md, CONTRIBUTING.md, or `docs/`)
 - They are referenced by active code or other documentation

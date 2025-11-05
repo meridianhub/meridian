@@ -43,7 +43,7 @@ Reference specifications: BIAN Service Landscape 13.0.0
 
 ## Technology Stack
 
-- **Language**: Go 1.25.3+
+- **Language**: Go 1.25+
 - **API Protocol**: Protocol Buffers 3 + gRPC
 - **API Tooling**: buf CLI for linting and code generation
 - **Database**: CockroachDB or YugabyteDB (distributed SQL)
@@ -70,7 +70,7 @@ Reference specifications: BIAN Service Landscape 13.0.0
 
 ## Quick Start
 
-**Prerequisites**: Go 1.23+, Docker, kubectl, kind, tilt ([see detailed setup](CONTRIBUTING.md#development-environment-setup))
+**Prerequisites**: Go 1.25+, Docker, kubectl, kind, tilt ([see detailed setup](CONTRIBUTING.md#development-environment-setup))
 
 ```bash
 # 1. Clone and install dependencies
