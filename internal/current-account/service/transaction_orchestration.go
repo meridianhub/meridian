@@ -101,7 +101,8 @@ func (s *Service) orchestrateDeposit(ctx context.Context, txCtx *DepositTransact
 					Amount: &money.Money{
 						CurrencyCode: txCtx.Amount.Currency(),
 						Units:        txCtx.Amount.AmountCents() / 100,
-						Nanos:        int32((txCtx.Amount.AmountCents() % 100) * 10000000),
+						// #nosec G115 - remainder is always -99 to 99, multiplication result fits in int32
+						Nanos: int32((txCtx.Amount.AmountCents() % 100) * 10000000),
 					},
 				},
 				Direction:   commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
@@ -153,7 +154,8 @@ func (s *Service) orchestrateDeposit(ctx context.Context, txCtx *DepositTransact
 				PostingAmount: &money.Money{
 					CurrencyCode: txCtx.Amount.Currency(),
 					Units:        txCtx.Amount.AmountCents() / 100,
-					Nanos:        int32((txCtx.Amount.AmountCents() % 100) * 10000000),
+					// #nosec G115 - remainder is always -99 to 99, multiplication result fits in int32
+					Nanos: int32((txCtx.Amount.AmountCents() % 100) * 10000000),
 				},
 				AccountId:      txCtx.AccountID,
 				ValueDate:      timestamppb.New(txCtx.Timestamp),
