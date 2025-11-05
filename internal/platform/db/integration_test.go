@@ -394,7 +394,7 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 	// CONCURRENT PHASE: Each worker operates on its pre-created account
 	t.Logf("Starting concurrent phase with %d workers, %d iterations each...", concurrency, iterations)
 	var wg sync.WaitGroup
-	errors := make(chan error, concurrency*iterations)
+	errors := make(chan error, concurrency) // Sized for max concurrent errors (one per worker)
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
@@ -407,12 +407,12 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 			for j := 0; j < iterations; j++ {
 				// Use timeout context for each operation
 				queryCtx, queryCancel := context.WithTimeout(ctx, 3*time.Second)
+				defer queryCancel() // Ensure cancellation even if panic occurs
+
 				var balance float64
 				err := pool.QueryRowContext(queryCtx,
 					"SELECT balance FROM accounts WHERE account_id = $1",
 					accountID).Scan(&balance)
-				queryCancel()
-
 				if err != nil {
 					errors <- fmt.Errorf("worker %d iteration %d query: %w", workerID, j, err)
 					return
@@ -420,11 +420,11 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 
 				// Update with timeout
 				updateCtx, updateCancel := context.WithTimeout(ctx, 3*time.Second)
+				defer updateCancel() // Ensure cancellation even if panic occurs
+
 				_, err = pool.ExecContext(updateCtx,
 					"UPDATE accounts SET balance = balance + $1 WHERE account_id = $2",
 					10.00, accountID)
-				updateCancel()
-
 				if err != nil {
 					errors <- fmt.Errorf("worker %d iteration %d update: %w", workerID, j, err)
 					return
@@ -433,12 +433,12 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 
 			// Verify final balance
 			checkCtx, checkCancel := context.WithTimeout(ctx, 3*time.Second)
+			defer checkCancel() // Ensure cancellation even if panic occurs
+
 			var finalBalance float64
 			err := pool.QueryRowContext(checkCtx,
 				"SELECT balance FROM accounts WHERE account_id = $1",
 				accountID).Scan(&finalBalance)
-			checkCancel()
-
 			if err != nil {
 				errors <- fmt.Errorf("worker %d final check: %w", workerID, err)
 				return
