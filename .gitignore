@@ -46,3 +46,5 @@ __debug_bin
 *.pb.validate.go
 *_grpc.pb.go
 __pycache__/
+# Add current-account binary to .gitignore
+current-account

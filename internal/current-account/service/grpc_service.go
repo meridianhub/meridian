@@ -18,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/current-account/clients"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	caobservability "github.com/meridianhub/meridian/internal/current-account/observability"
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -33,6 +34,12 @@ var (
 	ErrOriginalAccountStateNotFound   = errors.New("original account state not available for compensation")
 	ErrPositionLogIDNotFound          = errors.New("position log ID not available for compensation")
 	ErrLedgerPostingIDNotFound        = errors.New("ledger posting ID not available for compensation")
+)
+
+// Operation status constants for consistency across the service
+const (
+	operationStatusSuccess         = "success"
+	operationStatusInvalidCurrency = "invalid_currency"
 )
 
 // Service implements the CurrentAccountService gRPC service
@@ -134,12 +141,19 @@ func NewServiceWithClients(config Config) (*Service, error) {
 
 // InitiateCurrentAccount creates a new current account facility
 func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurrentAccountRequest) (*pb.InitiateCurrentAccountResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("initiate_account", operationStatus, time.Since(start))
+	}()
+
 	// Generate account ID
 	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
 
 	// Map currency enum to string
 	currency := mapCurrency(req.BaseCurrency)
 	if currency == "" {
+		operationStatus = operationStatusInvalidCurrency
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported currency: %v", req.BaseCurrency)
 	}
 
@@ -151,13 +165,18 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 		currency,
 	)
 	if err != nil {
+		operationStatus = "domain_error"
 		return nil, status.Errorf(codes.InvalidArgument, "failed to create account: %v", err)
 	}
 
 	// Save to database
 	if err := s.repo.Save(account); err != nil {
+		operationStatus = "save_failed"
 		return nil, status.Errorf(codes.Internal, "failed to create account: %v", err)
 	}
+
+	// Record initial balance
+	caobservability.RecordBalance(accountID, account.Balance.AmountCents(), currency)
 
 	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
@@ -168,17 +187,26 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 
 // ExecuteDeposit processes a deposit transaction
 func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("execute_deposit", operationStatus, time.Since(start))
+	}()
+
 	// Retrieve account
 	account, err := s.repo.FindByID(req.AccountId)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = "account_not_found"
 			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
 		}
+		operationStatus = "retrieve_failed"
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
 	// Validate currency matches account currency
 	if req.Amount.Amount.CurrencyCode != account.Balance.Currency() {
+		operationStatus = "currency_mismatch"
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
 			account.Balance.Currency(), req.Amount.Amount.CurrencyCode)
@@ -187,6 +215,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
 	// Validate overflow: Units*100 must not overflow int64
 	if req.Amount.Amount.Units > math.MaxInt64/100 || req.Amount.Amount.Units < math.MinInt64/100 {
+		operationStatus = "amount_overflow"
 		return nil, status.Errorf(codes.InvalidArgument,
 			"amount too large: units %d would overflow", req.Amount.Amount.Units)
 	}
@@ -199,27 +228,32 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// Use Money.Add to safely handle potential overflow from adding nanosCents
 	centsMoney, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, unitsCents)
 	if err != nil {
+		operationStatus = operationStatusInvalidCurrency
 		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
 	}
 
 	nanosMoney, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, int64(nanosCents))
 	if err != nil {
+		operationStatus = operationStatusInvalidCurrency
 		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
 	}
 
 	amount, err := centsMoney.Add(nanosMoney)
 	if err != nil {
+		operationStatus = operationStatusInvalidCurrency
 		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
 	}
 
 	// Validate amount is positive
 	if amount.AmountCents() <= 0 {
+		operationStatus = "invalid_amount"
 		return nil, status.Errorf(codes.InvalidArgument,
 			"deposit amount must be positive, got %d cents", amount.AmountCents())
 	}
 
 	// Execute deposit on domain model
 	if err := account.Deposit(amount); err != nil {
+		operationStatus = "deposit_failed"
 		return nil, status.Errorf(codes.InvalidArgument, "deposit failed: %v", err)
 	}
 
@@ -233,8 +267,13 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 			"transaction_id", transactionID)
 
 		if err := s.repo.Save(account); err != nil {
+			operationStatus = "save_failed"
 			return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
 		}
+
+		// Record business metrics
+		caobservability.RecordDeposit(account.AccountID, account.Balance.Currency())
+		caobservability.RecordBalance(account.AccountID, account.Balance.AmountCents(), account.Balance.Currency())
 
 		return &pb.ExecuteDepositResponse{
 			AccountId:        account.AccountID,
@@ -246,11 +285,27 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Orchestrate transaction with saga pattern
-	return s.orchestrateDeposit(ctx, account, amount, transactionID)
+	resp, err := s.orchestrateDeposit(ctx, account, amount, transactionID)
+	if err != nil {
+		operationStatus = "saga_failed"
+		return nil, err
+	}
+
+	// Record business metrics on success
+	caobservability.RecordDeposit(account.AccountID, account.Balance.Currency())
+	caobservability.RecordBalance(account.AccountID, account.Balance.AmountCents(), account.Balance.Currency())
+
+	return resp, nil
 }
 
 // orchestrateDeposit orchestrates the distributed transaction using saga pattern
 func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.CurrentAccount, amount domain.Money, transactionID string) (*pb.ExecuteDepositResponse, error) {
+	sagaStart := time.Now()
+	sagaStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordSagaDuration("deposit", sagaStatus, time.Since(sagaStart))
+	}()
+
 	// Extract or generate correlation ID
 	correlationID := clients.ExtractCorrelationID(ctx)
 	if correlationID == "" {
@@ -296,6 +351,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 				},
 			)
 			if err != nil {
+				caobservability.RecordExternalServiceError("position_keeping", "update_log")
 				return fmt.Errorf("failed to log position: %w", err)
 			}
 
@@ -341,8 +397,12 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 				},
 			)
 			if err != nil {
+				caobservability.RecordExternalServiceError("position_keeping", "compensate_log")
 				return fmt.Errorf("failed to compensate position log: %w", err)
 			}
+
+			// Record compensation
+			caobservability.RecordSagaCompensation("deposit", "log_position")
 
 			s.logger.Info("log_position compensation completed",
 				"position_log_id", positionLogID)
@@ -380,6 +440,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 				},
 			)
 			if err != nil {
+				caobservability.RecordExternalServiceError("financial_accounting", "capture_posting")
 				return fmt.Errorf("failed to post to ledger: %w", err)
 			}
 
@@ -423,8 +484,12 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 				},
 			)
 			if err != nil {
+				caobservability.RecordExternalServiceError("financial_accounting", "compensate_posting")
 				return fmt.Errorf("failed to compensate ledger posting: %w", err)
 			}
+
+			// Record compensation
+			caobservability.RecordSagaCompensation("deposit", "post_ledger")
 
 			s.logger.Info("post_ledger compensation completed",
 				"ledger_posting_id", ledgerPostingID)
@@ -481,6 +546,9 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 
 	// Handle saga result
 	if !result.Success {
+		sagaStatus = "failed"
+		caobservability.RecordSagaFailure("deposit", result.FailedStep)
+
 		s.logger.Error("deposit saga failed",
 			"account_id", account.AccountID,
 			"transaction_id", transactionID,
@@ -512,11 +580,19 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 
 // RetrieveCurrentAccount gets current account details
 func (s *Service) RetrieveCurrentAccount(_ context.Context, req *pb.RetrieveCurrentAccountRequest) (*pb.RetrieveCurrentAccountResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("retrieve_account", operationStatus, time.Since(start))
+	}()
+
 	account, err := s.repo.FindByID(req.AccountId)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = "account_not_found"
 			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
 		}
+		operationStatus = "retrieve_failed"
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
