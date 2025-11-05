@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
+	"github.com/meridianhub/meridian/internal/current-account/clients"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -22,13 +24,28 @@ import (
 // Service implements the CurrentAccountService gRPC service
 type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
-	repo *persistence.Repository
+	repo             *persistence.Repository
+	positionClient   clients.PositionKeepingClient
+	accountingClient clients.FinancialAccountingClient
+	logger           *slog.Logger
 }
 
 // NewService creates a new current account service
-func NewService(repo *persistence.Repository) *Service {
+func NewService(
+	repo *persistence.Repository,
+	positionClient clients.PositionKeepingClient,
+	accountingClient clients.FinancialAccountingClient,
+	logger *slog.Logger,
+) *Service {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &Service{
-		repo: repo,
+		repo:             repo,
+		positionClient:   positionClient,
+		accountingClient: accountingClient,
+		logger:           logger,
 	}
 }
 
@@ -67,7 +84,14 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 }
 
 // ExecuteDeposit processes a deposit transaction
-func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
+func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
+	// Extract or generate correlation ID
+	correlationID := ExtractCorrelationID(ctx)
+
+	s.logger.Info("executing deposit",
+		"account_id", req.AccountId,
+		"correlation_id", correlationID)
+
 	// Retrieve account
 	account, err := s.repo.FindByID(req.AccountId)
 	if err != nil {
@@ -118,25 +142,43 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 			"deposit amount must be positive, got %d cents", amount.AmountCents())
 	}
 
-	// Execute deposit
-	if err := account.Deposit(amount); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "deposit failed: %v", err)
-	}
-
-	// Save updated account
-	if err := s.repo.Save(account); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
-	}
-
 	// Generate transaction ID
-	transactionID := fmt.Sprintf("TXN-%s", uuid.New().String()[:8])
+	transactionID := generateTransactionID()
+
+	// Create transaction context for saga orchestration
+	txCtx := &DepositTransactionContext{
+		AccountID:     account.AccountID,
+		TransactionID: transactionID,
+		Amount:        amount,
+		Description:   req.Description,
+		Reference:     req.Reference,
+		CorrelationID: correlationID,
+		Timestamp:     time.Now(),
+		Account:       account,
+	}
+
+	// Execute saga orchestration
+	if err := s.orchestrateDeposit(ctx, txCtx); err != nil {
+		s.logger.Error("deposit orchestration failed",
+			"account_id", req.AccountId,
+			"transaction_id", transactionID,
+			"correlation_id", correlationID,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "deposit transaction failed: %v", err)
+	}
+
+	// Reload account to get final state after saga
+	finalAccount, err := s.repo.FindByID(req.AccountId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to reload account: %v", err)
+	}
 
 	// Return response
 	return &pb.ExecuteDepositResponse{
-		AccountId:        account.AccountID,
+		AccountId:        finalAccount.AccountID,
 		TransactionId:    transactionID,
-		NewBalance:       toMoneyAmount(account.Balance),
-		AvailableBalance: toMoneyAmount(account.AvailableBalance),
+		NewBalance:       toMoneyAmount(finalAccount.Balance),
+		AvailableBalance: toMoneyAmount(finalAccount.AvailableBalance),
 		Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
 	}, nil
 }

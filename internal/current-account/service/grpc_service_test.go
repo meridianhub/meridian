@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
 	"github.com/stretchr/testify/require"
@@ -17,6 +21,79 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+var errNotImplemented = errors.New("not implemented")
+
+// nullPositionKeepingClient is a minimal mock that does nothing (for tests that don't need downstream calls)
+type nullPositionKeepingClient struct{}
+
+func (n *nullPositionKeepingClient) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
+	return &positionkeepingv1.InitiateFinancialPositionLogResponse{
+		Log: &positionkeepingv1.FinancialPositionLog{
+			LogId: "POS-TEST",
+		},
+	}, nil
+}
+
+func (n *nullPositionKeepingClient) UpdateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.UpdateFinancialPositionLogRequest) (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullPositionKeepingClient) RetrieveFinancialPositionLog(_ context.Context, _ *positionkeepingv1.RetrieveFinancialPositionLogRequest) (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullPositionKeepingClient) BulkImportTransactions(_ context.Context, _ *positionkeepingv1.BulkImportTransactionsRequest) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullPositionKeepingClient) ListFinancialPositionLogs(_ context.Context, _ *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullPositionKeepingClient) Close() error {
+	return nil
+}
+
+// nullFinancialAccountingClient is a minimal mock that does nothing
+type nullFinancialAccountingClient struct{}
+
+func (n *nullFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullFinancialAccountingClient) RetrieveFinancialBookingLog(_ context.Context, _ *financialaccountingv1.RetrieveFinancialBookingLogRequest) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullFinancialAccountingClient) ListFinancialBookingLogs(_ context.Context, _ *financialaccountingv1.ListFinancialBookingLogsRequest) (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+	return &financialaccountingv1.CaptureLedgerPostingResponse{
+		LedgerPosting: &financialaccountingv1.LedgerPosting{
+			Id: "POST-TEST",
+		},
+	}, nil
+}
+
+func (n *nullFinancialAccountingClient) RetrieveLedgerPosting(_ context.Context, _ *financialaccountingv1.RetrieveLedgerPostingRequest) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
+	return nil, errNotImplemented
+}
+
+func (n *nullFinancialAccountingClient) Close() error {
+	return nil
+}
+
+// createTestService creates a service with null clients for basic tests
+func createTestService(repo *persistence.Repository) *Service {
+	return NewService(repo, &nullPositionKeepingClient{}, &nullFinancialAccountingClient{}, slog.Default())
+}
 
 // mustNewMoney is a test helper that creates Money or panics
 func mustNewMoney(currency string, amountCents int64) domain.Money {
@@ -56,7 +133,7 @@ func TestInitiateCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
@@ -91,7 +168,7 @@ func TestExecuteDeposit(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -146,7 +223,7 @@ func TestExecuteDepositAccountNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	req := &pb.ExecuteDepositRequest{
 		AccountId: "ACC-NONEXISTENT",
@@ -179,7 +256,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -220,7 +297,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -257,7 +334,7 @@ func TestRetrieveCurrentAccountNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	req := &pb.RetrieveCurrentAccountRequest{
 		AccountId: "ACC-NONEXISTENT",
@@ -306,7 +383,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	// Create GBP account
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -351,7 +428,7 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
@@ -445,7 +522,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -510,7 +587,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := createTestService(repo)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
