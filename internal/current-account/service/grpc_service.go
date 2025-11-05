@@ -5,31 +5,131 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
+	"github.com/meridianhub/meridian/internal/current-account/clients"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// Sentinel errors for consistent error handling
+var (
+	ErrRepositoryNil                  = errors.New("repository cannot be nil")
+	ErrPositionKeepingTargetEmpty     = errors.New("position keeping target cannot be empty")
+	ErrFinancialAccountingTargetEmpty = errors.New("financial accounting target cannot be empty")
+	ErrOriginalAccountStateNotFound   = errors.New("original account state not available for compensation")
+	ErrPositionLogIDNotFound          = errors.New("position log ID not available for compensation")
+	ErrLedgerPostingIDNotFound        = errors.New("ledger posting ID not available for compensation")
+)
+
 // Service implements the CurrentAccountService gRPC service
 type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
-	repo *persistence.Repository
+	repo             *persistence.Repository
+	posKeepingClient clients.PositionKeepingClient
+	finAcctClient    clients.FinancialAccountingClient
+	logger           *slog.Logger
+	tracer           *observability.Tracer
 }
 
-// NewService creates a new current account service
+// Config contains configuration for creating a new Service with external clients
+type Config struct {
+	Repository                *persistence.Repository
+	PositionKeepingTarget     string // e.g., "positionkeeping-service:50051"
+	FinancialAccountingTarget string // e.g., "financialaccounting-service:50052"
+	Logger                    *slog.Logger
+	Tracer                    *observability.Tracer
+}
+
+// NewService creates a new current account service with minimal dependencies.
+// This is primarily used for testing. For production use, prefer NewServiceWithClients.
 func NewService(repo *persistence.Repository) *Service {
-	return &Service{
-		repo: repo,
+	if repo == nil {
+		panic("repository cannot be nil")
 	}
+	return &Service{
+		repo:   repo,
+		logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+}
+
+// NewServiceWithClients creates a new current account service with full external client dependencies.
+// This factory handles client creation, wrapping with resilience patterns (circuit breaker, retry),
+// and validation of all required configuration.
+func NewServiceWithClients(config Config) (*Service, error) {
+	// Validate required dependencies
+	if config.Repository == nil {
+		return nil, ErrRepositoryNil
+	}
+	if config.PositionKeepingTarget == "" {
+		return nil, ErrPositionKeepingTargetEmpty
+	}
+	if config.FinancialAccountingTarget == "" {
+		return nil, ErrFinancialAccountingTargetEmpty
+	}
+
+	// Apply default logger if not provided
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	}
+
+	// Create Position Keeping client
+	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
+		Target:  config.PositionKeepingTarget,
+		Timeout: 30 * time.Second,
+		Tracer:  config.Tracer,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create position keeping client: %w", err)
+	}
+
+	// Wrap with resilience patterns (circuit breaker + retry)
+	resilientPosKeepingClient := clients.NewResilientPositionKeepingClient(
+		posKeepingGRPCClient,
+		clients.ResilientClientConfig{
+			Logger: logger,
+		},
+	)
+
+	// Create Financial Accounting client
+	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
+		Target:  config.FinancialAccountingTarget,
+		Timeout: 30 * time.Second,
+		Tracer:  config.Tracer,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create financial accounting client: %w", err)
+	}
+
+	// Wrap with resilience patterns (circuit breaker + retry)
+	resilientFinAcctClient := clients.NewResilientFinancialAccountingClient(
+		finAcctGRPCClient,
+		clients.ResilientClientConfig{
+			Logger: logger,
+		},
+	)
+
+	return &Service{
+		repo:             config.Repository,
+		posKeepingClient: resilientPosKeepingClient,
+		finAcctClient:    resilientFinAcctClient,
+		logger:           logger,
+		tracer:           config.Tracer,
+	}, nil
 }
 
 // InitiateCurrentAccount creates a new current account facility
@@ -67,7 +167,7 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 }
 
 // ExecuteDeposit processes a deposit transaction
-func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
+func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
 	// Retrieve account
 	account, err := s.repo.FindByID(req.AccountId)
 	if err != nil {
@@ -118,20 +218,289 @@ func (s *Service) ExecuteDeposit(_ context.Context, req *pb.ExecuteDepositReques
 			"deposit amount must be positive, got %d cents", amount.AmountCents())
 	}
 
-	// Execute deposit
+	// Execute deposit on domain model
 	if err := account.Deposit(amount); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "deposit failed: %v", err)
-	}
-
-	// Save updated account
-	if err := s.repo.Save(account); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
 	}
 
 	// Generate transaction ID
 	transactionID := fmt.Sprintf("TXN-%s", uuid.New().String()[:8])
 
-	// Return response
+	// If clients are not configured, fall back to simple save (backward compatibility)
+	if s.posKeepingClient == nil || s.finAcctClient == nil {
+		s.logger.Info("executing deposit without transaction orchestration (clients not configured)",
+			"account_id", account.AccountID,
+			"transaction_id", transactionID)
+
+		if err := s.repo.Save(account); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
+		}
+
+		return &pb.ExecuteDepositResponse{
+			AccountId:        account.AccountID,
+			TransactionId:    transactionID,
+			NewBalance:       toMoneyAmount(account.Balance),
+			AvailableBalance: toMoneyAmount(account.AvailableBalance),
+			Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
+		}, nil
+	}
+
+	// Orchestrate transaction with saga pattern
+	return s.orchestrateDeposit(ctx, account, amount, transactionID)
+}
+
+// orchestrateDeposit orchestrates the distributed transaction using saga pattern
+func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.CurrentAccount, amount domain.Money, transactionID string) (*pb.ExecuteDepositResponse, error) {
+	// Extract or generate correlation ID
+	correlationID := clients.ExtractCorrelationID(ctx)
+	if correlationID == "" {
+		correlationID = uuid.New().String()
+		s.logger.Info("generated new correlation ID", "correlation_id", correlationID)
+		// Add the generated correlation ID to the context so it can be propagated
+		ctx = observability.WithCorrelationID(ctx, correlationID)
+	} else {
+		s.logger.Info("using existing correlation ID", "correlation_id", correlationID)
+	}
+
+	// Create saga orchestrator
+	saga := clients.NewSagaOrchestrator(s.logger)
+
+	// Step 1: Log position in PositionKeeping service
+	var positionLogID string
+	saga.AddStep("log_position",
+		// Action: Create position log entry
+		func(stepCtx context.Context) error {
+			s.logger.Info("executing log_position step",
+				"account_id", account.AccountID,
+				"transaction_id", transactionID)
+
+			// Propagate correlation ID
+			stepCtx = clients.PropagateCorrelationID(stepCtx)
+
+			// Generate entry ID for idempotency
+			entryID := uuid.New().String()
+
+			// Call PositionKeeping service
+			resp, err := s.posKeepingClient.UpdateFinancialPositionLog(stepCtx,
+				&positionkeepingv1.UpdateFinancialPositionLogRequest{
+					LogId: account.AccountID, // Use account ID as position log ID
+					NewEntry: &positionkeepingv1.TransactionLogEntry{
+						EntryId:       entryID,
+						TransactionId: transactionID,
+						AccountId:     account.AccountID,
+						Amount:        toMoneyAmount(amount),
+						Direction:     commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+						Timestamp:     timestamppb.Now(),
+						Description:   fmt.Sprintf("Deposit to account %s", account.AccountID),
+					},
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("failed to log position: %w", err)
+			}
+
+			positionLogID = resp.Log.LogId
+
+			s.logger.Info("log_position step completed",
+				"position_log_id", positionLogID,
+				"transaction_id", transactionID)
+
+			return nil
+		},
+		// Compensate: Reverse position log entry
+		func(stepCtx context.Context) error {
+			s.logger.Info("compensating log_position step",
+				"position_log_id", positionLogID,
+				"transaction_id", transactionID)
+
+			if positionLogID == "" {
+				s.logger.Warn("cannot compensate log_position: position log ID not captured")
+				return ErrPositionLogIDNotFound
+			}
+
+			// Propagate correlation ID
+			stepCtx = clients.PropagateCorrelationID(stepCtx)
+
+			// Generate entry ID for compensation
+			compEntryID := uuid.New().String()
+			compTransactionID := fmt.Sprintf("COMP-%s", transactionID)
+
+			// Create compensating entry (debit to reverse the credit)
+			_, err := s.posKeepingClient.UpdateFinancialPositionLog(stepCtx,
+				&positionkeepingv1.UpdateFinancialPositionLogRequest{
+					LogId: positionLogID,
+					NewEntry: &positionkeepingv1.TransactionLogEntry{
+						EntryId:       compEntryID,
+						TransactionId: compTransactionID,
+						AccountId:     account.AccountID,
+						Amount:        toMoneyAmount(amount),
+						Direction:     commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
+						Timestamp:     timestamppb.Now(),
+						Description:   fmt.Sprintf("Compensation for deposit transaction %s", transactionID),
+					},
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("failed to compensate position log: %w", err)
+			}
+
+			s.logger.Info("log_position compensation completed",
+				"position_log_id", positionLogID)
+
+			return nil
+		},
+	)
+
+	// Step 2: Post to ledger in FinancialAccounting service
+	var ledgerPostingID string
+	saga.AddStep("post_ledger",
+		// Action: Create ledger posting
+		func(stepCtx context.Context) error {
+			s.logger.Info("executing post_ledger step",
+				"account_id", account.AccountID,
+				"transaction_id", transactionID)
+
+			// Propagate correlation ID
+			stepCtx = clients.PropagateCorrelationID(stepCtx)
+
+			// Convert MoneyAmount to google.type.Money for the request
+			moneyAmt := toMoneyAmount(amount)
+
+			// Call FinancialAccounting service
+			resp, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
+				&financialaccountingv1.CaptureLedgerPostingRequest{
+					FinancialBookingLogId: account.AccountID, // Use account ID as booking log ID
+					PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+					PostingAmount:         moneyAmt.Amount,
+					AccountId:             account.AccountID,
+					ValueDate:             timestamppb.Now(),
+					IdempotencyKey: &commonpb.IdempotencyKey{
+						Key: transactionID,
+					},
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("failed to post to ledger: %w", err)
+			}
+
+			ledgerPostingID = resp.LedgerPosting.Id
+
+			s.logger.Info("post_ledger step completed",
+				"ledger_posting_id", ledgerPostingID,
+				"transaction_id", transactionID)
+
+			return nil
+		},
+		// Compensate: Reverse ledger posting
+		func(stepCtx context.Context) error {
+			s.logger.Info("compensating post_ledger step",
+				"ledger_posting_id", ledgerPostingID,
+				"transaction_id", transactionID)
+
+			if ledgerPostingID == "" {
+				s.logger.Warn("cannot compensate post_ledger: ledger posting ID not captured")
+				return ErrLedgerPostingIDNotFound
+			}
+
+			// Propagate correlation ID
+			stepCtx = clients.PropagateCorrelationID(stepCtx)
+
+			// Convert MoneyAmount to google.type.Money for the request
+			moneyAmt := toMoneyAmount(amount)
+
+			// Create compensating ledger entry (debit to reverse the credit)
+			compTransactionID := fmt.Sprintf("COMP-%s", transactionID)
+			_, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
+				&financialaccountingv1.CaptureLedgerPostingRequest{
+					FinancialBookingLogId: account.AccountID,
+					PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
+					PostingAmount:         moneyAmt.Amount,
+					AccountId:             account.AccountID,
+					ValueDate:             timestamppb.Now(),
+					IdempotencyKey: &commonpb.IdempotencyKey{
+						Key: compTransactionID,
+					},
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("failed to compensate ledger posting: %w", err)
+			}
+
+			s.logger.Info("post_ledger compensation completed",
+				"ledger_posting_id", ledgerPostingID)
+
+			return nil
+		},
+	)
+
+	// Step 3: Save account to database (only after external services succeed)
+	saga.AddStep("save_account",
+		// Action: Persist the updated account balance
+		func(_ context.Context) error {
+			s.logger.Info("executing save_account step",
+				"account_id", account.AccountID,
+				"transaction_id", transactionID,
+				"new_balance", account.Balance.AmountCents())
+
+			if err := s.repo.Save(account); err != nil {
+				return fmt.Errorf("failed to save account: %w", err)
+			}
+
+			s.logger.Info("save_account step completed",
+				"account_id", account.AccountID,
+				"new_balance", account.Balance.AmountCents())
+
+			return nil
+		},
+		// Compensate: No database save needed - account never persisted
+		func(_ context.Context) error {
+			s.logger.Info("compensating save_account step (no-op)",
+				"account_id", account.AccountID,
+				"reason", "external services failed before persisting balance")
+
+			// No action needed - if we reach here, it means the save failed
+			// or we're rolling back before the save completed. The account
+			// in memory has the updated balance, but it was never persisted,
+			// so there's nothing to rollback in the database.
+			// The external services (position log and ledger) will be
+			// compensated by their respective compensation actions.
+
+			s.logger.Info("save_account compensation completed (no-op)")
+			return nil
+		},
+	)
+
+	// Execute saga
+	s.logger.Info("executing deposit saga",
+		"account_id", account.AccountID,
+		"transaction_id", transactionID,
+		"correlation_id", correlationID,
+		"steps", saga.StepCount())
+
+	result := saga.Execute(ctx)
+
+	// Handle saga result
+	if !result.Success {
+		s.logger.Error("deposit saga failed",
+			"account_id", account.AccountID,
+			"transaction_id", transactionID,
+			"failed_step", result.FailedStep,
+			"completed_steps", result.CompletedSteps,
+			"compensated_steps", result.CompensatedSteps,
+			"error", result.Error)
+
+		return nil, status.Errorf(codes.Internal,
+			"deposit transaction failed at step %s: %v (compensated %d/%d steps)",
+			result.FailedStep, result.Error, result.CompensatedSteps, result.CompletedSteps)
+	}
+
+	s.logger.Info("deposit saga completed successfully",
+		"account_id", account.AccountID,
+		"transaction_id", transactionID,
+		"correlation_id", correlationID,
+		"completed_steps", result.CompletedSteps)
+
+	// Return successful response
 	return &pb.ExecuteDepositResponse{
 		AccountId:        account.AccountID,
 		TransactionId:    transactionID,
