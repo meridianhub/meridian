@@ -3,6 +3,8 @@ package kafka
 import (
 	"context"
 	"errors"
+	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -15,6 +17,31 @@ var (
 	errTestFailure        = errors.New("test processing failure")
 	errProtobufProcessing = errors.New("protobuf processing failure")
 )
+
+// skipIfKafkaUnavailable checks if Kafka is available and skips the test if not.
+// This is used for integration tests that require a running Kafka broker.
+// Tests are skipped when:
+// - SKIP_KAFKA_TESTS environment variable is set (useful for CI)
+// - Cannot connect to localhost:9092 within 1 second
+func skipIfKafkaUnavailable(t *testing.T) {
+	t.Helper()
+
+	// Skip if explicitly requested via environment variable
+	if os.Getenv("SKIP_KAFKA_TESTS") != "" {
+		t.Skip("Skipping Kafka integration test (SKIP_KAFKA_TESTS set)")
+	}
+
+	// Try to connect to Kafka with a short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	dialer := &net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "tcp", "localhost:9092")
+	if err != nil {
+		t.Skipf("Kafka not available at localhost:9092: %v", err)
+	}
+	_ = conn.Close()
+}
 
 func TestDLQMetadata_ToKafkaHeaders(t *testing.T) {
 	now := time.Now()
@@ -401,18 +428,15 @@ func TestDLQProducer_PublishFailedMessage_Validation(t *testing.T) {
 }
 
 func TestDLQProducer_PublishFailedProtoMessage_Validation(t *testing.T) {
-	// Skip Kafka connection tests in short mode (CI)
-	if testing.Short() {
-		t.Skip("Skipping Kafka integration test in short mode")
-	}
+	skipIfKafkaUnavailable(t)
 
-	// Setup - skip if Kafka not available
+	// Setup
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
 		ClientID:         "test-dlq-producer",
 	})
 	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
+		t.Fatalf("Failed to create producer: %v", err)
 	}
 	defer producer.Close()
 
@@ -460,18 +484,15 @@ func TestDLQProducer_PublishFailedProtoMessage_Validation(t *testing.T) {
 // TestDLQProducer_PublishFailedMessage_Integration tests actual DLQ message publishing.
 // This test requires a running Kafka broker.
 func TestDLQProducer_PublishFailedMessage_Integration(t *testing.T) {
-	// Skip Kafka connection tests in short mode (CI)
-	if testing.Short() {
-		t.Skip("Skipping Kafka integration test in short mode")
-	}
+	skipIfKafkaUnavailable(t)
 
-	// Setup - skip if Kafka not available
+	// Setup
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
 		ClientID:         "test-dlq-producer",
 	})
 	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
+		t.Fatalf("Failed to create producer: %v", err)
 	}
 	defer producer.Close()
 
@@ -519,18 +540,15 @@ func TestDLQProducer_PublishFailedMessage_Integration(t *testing.T) {
 // TestDLQProducer_PublishFailedProtoMessage_Integration tests protobuf message publishing to DLQ.
 // This test requires a running Kafka broker.
 func TestDLQProducer_PublishFailedProtoMessage_Integration(t *testing.T) {
-	// Skip Kafka connection tests in short mode (CI)
-	if testing.Short() {
-		t.Skip("Skipping Kafka integration test in short mode")
-	}
+	skipIfKafkaUnavailable(t)
 
-	// Setup - skip if Kafka not available
+	// Setup
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
 		ClientID:         "test-dlq-producer",
 	})
 	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
+		t.Fatalf("Failed to create producer: %v", err)
 	}
 	defer producer.Close()
 

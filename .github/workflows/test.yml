@@ -37,6 +37,8 @@ jobs:
         run: go mod download
 
       - name: Run tests with coverage
+        env:
+          SKIP_KAFKA_TESTS: "1"
         run: |
           mkdir -p coverage
           go test -v -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
