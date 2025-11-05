@@ -18,16 +18,17 @@ import (
 
 // DepositTransactionContext holds the context for a deposit transaction saga
 type DepositTransactionContext struct {
-	AccountID       string
-	TransactionID   string
-	Amount          domain.Money
-	Description     string
-	Reference       string
-	CorrelationID   string
-	Timestamp       time.Time
-	Account         *domain.CurrentAccount
-	PositionLogID   string
-	LedgerPostingID string
+	AccountID         string
+	TransactionID     string
+	Amount            domain.Money
+	Description       string
+	Reference         string
+	CorrelationID     string
+	Timestamp         time.Time
+	Account           *domain.CurrentAccount
+	PreDepositBalance domain.Money // Snapshot of balance before deposit for compensation
+	PositionLogID     string
+	LedgerPostingID   string
 }
 
 // orchestrateDeposit orchestrates a complete deposit transaction using saga pattern
@@ -45,6 +46,9 @@ func (s *Service) orchestrateDeposit(ctx context.Context, txCtx *DepositTransact
 				"amount_cents", txCtx.Amount.AmountCents(),
 				"correlation_id", txCtx.CorrelationID)
 
+			// Capture pre-deposit balance snapshot for deterministic compensation
+			txCtx.PreDepositBalance = txCtx.Account.Balance
+
 			if err := txCtx.Account.Deposit(txCtx.Amount); err != nil {
 				return fmt.Errorf("deposit failed: %w", err)
 			}
@@ -56,20 +60,28 @@ func (s *Service) orchestrateDeposit(ctx context.Context, txCtx *DepositTransact
 			return nil
 		},
 		func(_ context.Context) error {
-			// Compensation: Reverse the deposit
+			// Compensation: Restore pre-deposit balance snapshot
 			s.logger.Warn("compensating account balance update",
 				"account_id", txCtx.AccountID,
 				"transaction_id", txCtx.TransactionID,
+				"pre_deposit_balance_cents", txCtx.PreDepositBalance.AmountCents(),
 				"correlation_id", txCtx.CorrelationID)
 
-			// Reload account from database
+			// Reload account from database to get current state
 			account, err := s.repo.FindByID(txCtx.AccountID)
 			if err != nil {
 				return fmt.Errorf("failed to reload account for compensation: %w", err)
 			}
 
-			// Reverse the deposit by withdrawing the same amount
-			if err := account.Withdraw(txCtx.Amount); err != nil {
+			// Calculate the amount to subtract (difference between current and pre-deposit balance)
+			currentBalance := account.Balance
+			balanceDiff, err := currentBalance.Subtract(txCtx.PreDepositBalance)
+			if err != nil {
+				return fmt.Errorf("failed to calculate balance difference: %w", err)
+			}
+
+			// Withdraw the difference to restore pre-deposit balance
+			if err := account.Withdraw(balanceDiff); err != nil {
 				return fmt.Errorf("compensation withdrawal failed: %w", err)
 			}
 
@@ -203,5 +215,5 @@ func (s *Service) orchestrateDeposit(ctx context.Context, txCtx *DepositTransact
 
 // generateTransactionID creates a new transaction ID
 func generateTransactionID() string {
-	return fmt.Sprintf("TXN-%s", uuid.New().String()[:8])
+	return fmt.Sprintf("TXN-%s", uuid.New().String())
 }

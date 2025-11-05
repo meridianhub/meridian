@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"testing"
@@ -29,12 +30,17 @@ var errNotImplemented = errors.New("not implemented")
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	// Use a unique in-memory database for each test to avoid locking issues in parallel tests
-	db, err := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{
+	// Use a unique shared-cache in-memory database per test so pooled connections see the same schema
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
+	}
+
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 
 	// Run migrations
