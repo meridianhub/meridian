@@ -2,6 +2,7 @@ package clients
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -9,8 +10,6 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/sony/gobreaker/v2"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // ResilientPositionKeepingClient wraps PositionKeepingClient with resilience patterns
@@ -90,7 +89,23 @@ func NewResilientPositionKeepingClient(
 
 	cb := NewCircuitBreaker(cbConfig, config.Logger)
 
-	// Create retry config
+	// Create retry config with defaults
+	if config.MaxRetries == 0 {
+		config.MaxRetries = 3
+	}
+	if config.InitialInterval == 0 {
+		config.InitialInterval = 100 * time.Millisecond
+	}
+	if config.MaxInterval == 0 {
+		config.MaxInterval = 5 * time.Second
+	}
+	if config.Multiplier == 0 {
+		config.Multiplier = 2.0
+	}
+	if config.RandomizationFactor == 0 {
+		config.RandomizationFactor = 0.5
+	}
+
 	retryConfig := RetryConfig{
 		MaxRetries:          config.MaxRetries,
 		InitialInterval:     config.InitialInterval,
@@ -149,7 +164,23 @@ func NewResilientFinancialAccountingClient(
 
 	cb := NewCircuitBreaker(cbConfig, config.Logger)
 
-	// Create retry config
+	// Create retry config with defaults
+	if config.MaxRetries == 0 {
+		config.MaxRetries = 3
+	}
+	if config.InitialInterval == 0 {
+		config.InitialInterval = 100 * time.Millisecond
+	}
+	if config.MaxInterval == 0 {
+		config.MaxInterval = 5 * time.Second
+	}
+	if config.Multiplier == 0 {
+		config.Multiplier = 2.0
+	}
+	if config.RandomizationFactor == 0 {
+		config.RandomizationFactor = 0.5
+	}
+
 	retryConfig := RetryConfig{
 		MaxRetries:          config.MaxRetries,
 		InitialInterval:     config.InitialInterval,
@@ -195,7 +226,7 @@ func executeWithResilience[T any](
 	})
 	if err != nil {
 		// Check if circuit breaker is open
-		if status.Code(err) == codes.Unavailable {
+		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
 			logger.Warn("circuit breaker open",
 				"operation", operationName)
 		}
