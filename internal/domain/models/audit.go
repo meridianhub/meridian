@@ -56,6 +56,28 @@ func (AuditOutbox) TableName() string {
 	return "current_account_audit.audit_outbox"
 }
 
+// AuditLog represents a permanent audit log entry.
+// Records are moved from the audit_outbox to audit_log by the background worker.
+// Once written, audit log entries are immutable and provide a permanent audit trail.
+type AuditLog struct {
+	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	Table         string    `gorm:"column:table_name;type:varchar(100);not null;index" json:"table_name"`
+	Operation     string    `gorm:"type:varchar(10);not null;index" json:"operation"` // INSERT, UPDATE, DELETE
+	RecordID      uuid.UUID `gorm:"type:uuid;not null;index" json:"record_id"`
+	OldValues     string    `gorm:"type:text" json:"old_values,omitempty"` // JSON representation of old values
+	NewValues     string    `gorm:"type:text" json:"new_values,omitempty"` // JSON representation of new values
+	CreatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
+	ChangedBy     *string   `gorm:"type:varchar(100)" json:"changed_by,omitempty"`
+	TransactionID *string   `gorm:"type:varchar(100)" json:"transaction_id,omitempty"`
+	ClientIP      *string   `gorm:"type:varchar(45)" json:"client_ip,omitempty"`
+	UserAgent     *string   `gorm:"type:text" json:"user_agent,omitempty"`
+}
+
+// TableName overrides the table name for AuditLog.
+func (AuditLog) TableName() string {
+	return "current_account_audit.audit_log"
+}
+
 // recordAudit writes an audit outbox entry within the current transaction.
 // This function is called by GORM hooks (AfterCreate, AfterUpdate, AfterDelete).
 //

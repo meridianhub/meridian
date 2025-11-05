@@ -79,12 +79,49 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	`).Error
 	require.NoError(t, err, "Failed to create audit_outbox table")
 
-	// Create indexes
+	// Create indexes for audit_outbox
 	err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
 		ON current_account_audit.audit_outbox(status, created_at)
 	`).Error
 	require.NoError(t, err, "Failed to create audit_outbox indexes")
+
+	// Create audit_log table
+	err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS current_account_audit.audit_log (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			table_name VARCHAR(100) NOT NULL,
+			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+			record_id UUID NOT NULL,
+			old_values TEXT,
+			new_values TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			changed_by VARCHAR(100),
+			transaction_id VARCHAR(100),
+			client_ip VARCHAR(45),
+			user_agent TEXT
+		)
+	`).Error
+	require.NoError(t, err, "Failed to create audit_log table")
+
+	// Create indexes for audit_log
+	err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_audit_log_table_name
+		ON current_account_audit.audit_log(table_name)
+	`).Error
+	require.NoError(t, err, "Failed to create audit_log table_name index")
+
+	err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_audit_log_operation
+		ON current_account_audit.audit_log(operation)
+	`).Error
+	require.NoError(t, err, "Failed to create audit_log operation index")
+
+	err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_audit_log_record_id
+		ON current_account_audit.audit_log(record_id)
+	`).Error
+	require.NoError(t, err, "Failed to create audit_log record_id index")
 
 	// Register cleanup
 	t.Cleanup(func() {
@@ -642,5 +679,99 @@ func TestAuditWorker_Stop_MultipleCallsSafe(t *testing.T) {
 	db.Model(&models.AuditOutbox{}).Where("status = ?", "completed").Count(&processed)
 	if processed > 0 {
 		t.Errorf("Worker processed entries after Stop(), expected 0 but got %d", processed)
+	}
+}
+
+// TestAuditWorker_InsertsIntoAuditLog verifies that the worker successfully
+// creates audit_log entries from outbox entries (end-to-end test).
+func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	// Create test outbox entries
+	createTestEntries(t, db, 5)
+
+	// Fetch the created entries for verification later
+	var entries []models.AuditOutbox
+	err := db.Where("status = ?", statusPending).Find(&entries).Error
+	if err != nil {
+		t.Fatalf("Failed to fetch outbox entries: %v", err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("Expected 5 entries, got %d", len(entries))
+	}
+
+	// Verify audit_log table starts empty
+	var initialCount int64
+	db.Table("current_account_audit.audit_log").Count(&initialCount)
+	if initialCount != 0 {
+		t.Fatalf("Expected audit_log to be empty, but found %d entries", initialCount)
+	}
+
+	// Create and start worker
+	worker := NewAuditWorker(db, logger)
+	worker.pollInterval = 100 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	worker.Start(ctx)
+
+	// Wait for processing to complete
+	waitForProcessing(t, db, 5, 5*time.Second)
+
+	worker.Stop()
+
+	// Verify all outbox entries were processed
+	var completed int64
+	db.Model(&models.AuditOutbox{}).Where("status = ?", "completed").Count(&completed)
+	if completed != 5 {
+		t.Errorf("Expected 5 completed outbox entries, got %d", completed)
+	}
+
+	// Verify audit_log entries were created
+	var auditLogCount int64
+	db.Table("current_account_audit.audit_log").Count(&auditLogCount)
+	if auditLogCount != 5 {
+		t.Errorf("Expected 5 audit_log entries, got %d", auditLogCount)
+	}
+
+	// Verify audit_log entries match outbox entries
+	for _, entry := range entries {
+		var auditLog struct {
+			ID            uuid.UUID
+			Table         string `gorm:"column:table_name"`
+			Operation     string
+			RecordID      uuid.UUID `gorm:"column:record_id"`
+			OldValues     string    `gorm:"column:old_values"`
+			NewValues     string    `gorm:"column:new_values"`
+			ChangedBy     *string   `gorm:"column:changed_by"`
+			TransactionID *string   `gorm:"column:transaction_id"`
+			ClientIP      *string   `gorm:"column:client_ip"`
+			UserAgent     *string   `gorm:"column:user_agent"`
+		}
+
+		err := db.Table("current_account_audit.audit_log").
+			Where("record_id = ? AND operation = ?", entry.RecordID, entry.Operation).
+			First(&auditLog).Error
+		if err != nil {
+			t.Errorf("Failed to find audit_log entry for outbox %s: %v", entry.ID, err)
+			continue
+		}
+
+		// Verify key fields match
+		if auditLog.Table != entry.Table {
+			t.Errorf("Table mismatch: expected %s, got %s", entry.Table, auditLog.Table)
+		}
+		if auditLog.Operation != entry.Operation {
+			t.Errorf("Operation mismatch: expected %s, got %s", entry.Operation, auditLog.Operation)
+		}
+		if auditLog.RecordID != entry.RecordID {
+			t.Errorf("RecordID mismatch: expected %s, got %s", entry.RecordID, auditLog.RecordID)
+		}
 	}
 }
