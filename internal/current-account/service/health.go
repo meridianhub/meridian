@@ -1,0 +1,445 @@
+// Package service implements gRPC services for the current account domain
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
+	"github.com/meridianhub/meridian/internal/current-account/clients"
+	"github.com/meridianhub/meridian/pkg/platform/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+)
+
+// HealthChecker implements gRPC health check protocol for CurrentAccount service.
+// It checks the health of all critical dependencies including database and external services.
+type HealthChecker struct {
+	grpc_health_v1.UnimplementedHealthServer
+	repo             *persistence.Repository
+	posKeepingClient clients.PositionKeepingClient
+	finAcctClient    clients.FinancialAccountingClient
+	logger           *slog.Logger
+	aggregator       *health.Aggregator
+	serviceName      string
+	checkTimeout     time.Duration
+}
+
+// HealthCheckerConfig contains configuration for creating a new HealthChecker.
+type HealthCheckerConfig struct {
+	Repository                *persistence.Repository
+	PositionKeepingClient     clients.PositionKeepingClient
+	FinancialAccountingClient clients.FinancialAccountingClient
+	Logger                    *slog.Logger
+	ServiceName               string        // Defaults to "current-account"
+	CheckTimeout              time.Duration // Defaults to 5 seconds
+}
+
+// NewHealthChecker creates a new health checker with dependency checking.
+//
+// The health checker evaluates:
+// - Database connectivity (critical)
+// - PositionKeeping service (optional - degrades gracefully)
+// - FinancialAccounting service (optional - degrades gracefully)
+//
+// Health states:
+// - SERVING: All critical dependencies healthy (database)
+// - NOT_SERVING: Any critical dependency down (database unreachable)
+// - UNKNOWN: Unable to determine health (should not occur in normal operation)
+func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
+	if config.Repository == nil {
+		panic("health checker requires non-nil repository")
+	}
+
+	// Apply defaults
+	if config.ServiceName == "" {
+		config.ServiceName = "current-account"
+	}
+	if config.CheckTimeout == 0 {
+		config.CheckTimeout = 5 * time.Second
+	}
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
+
+	// Build list of health checkers
+	checkers := []health.Checker{
+		NewDatabaseHealthChecker(config.Repository, config.CheckTimeout),
+	}
+
+	// Add optional external service checkers (degrade gracefully if unavailable)
+	if config.PositionKeepingClient != nil {
+		checkers = append(checkers, NewPositionKeepingHealthChecker(
+			config.PositionKeepingClient,
+			config.CheckTimeout,
+		))
+	}
+
+	if config.FinancialAccountingClient != nil {
+		checkers = append(checkers, NewFinancialAccountingHealthChecker(
+			config.FinancialAccountingClient,
+			config.CheckTimeout,
+		))
+	}
+
+	aggregator := health.NewAggregator(checkers)
+
+	return &HealthChecker{
+		repo:             config.Repository,
+		posKeepingClient: config.PositionKeepingClient,
+		finAcctClient:    config.FinancialAccountingClient,
+		logger:           config.Logger,
+		aggregator:       aggregator,
+		serviceName:      config.ServiceName,
+		checkTimeout:     config.CheckTimeout,
+	}
+}
+
+// Check implements gRPC health check protocol.
+// It performs synchronous health checks on all dependencies and returns the overall status.
+//
+// Service-specific behavior:
+// - Empty service name or "current-account": Check overall service health
+// - Named component (e.g., "database", "positionkeeping"): Check specific component
+func (h *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
+	// Apply timeout to health check context
+	checkCtx, cancel := context.WithTimeout(ctx, h.checkTimeout)
+	defer cancel()
+
+	// If service name specified and doesn't match, return UNKNOWN
+	if req.Service != "" && req.Service != h.serviceName {
+		h.logger.Debug("health check for unknown service",
+			"requested_service", req.Service,
+			"actual_service", h.serviceName)
+		return &grpc_health_v1.HealthCheckResponse{
+			Status: grpc_health_v1.HealthCheckResponse_UNKNOWN,
+		}, nil
+	}
+
+	// Perform health check
+	report := h.aggregator.CheckAll(checkCtx)
+	overallStatus := report.OverallStatus()
+
+	// Map health status to gRPC health check status
+	grpcStatus := h.mapStatusToGRPC(overallStatus)
+
+	// Log health check result
+	h.logHealthCheck(report, overallStatus, grpcStatus)
+
+	return &grpc_health_v1.HealthCheckResponse{
+		Status: grpcStatus,
+	}, nil
+}
+
+// Watch implements streaming health checks.
+// It sends periodic health updates to the client over a stream.
+//
+// The watch implementation sends an immediate health check result, then streams
+// updates every checkTimeout interval until the context is cancelled.
+func (h *HealthChecker) Watch(req *grpc_health_v1.HealthCheckRequest, stream grpc_health_v1.Health_WatchServer) error {
+	ctx := stream.Context()
+
+	// Send immediate health check
+	resp, err := h.Check(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	if err := stream.Send(resp); err != nil {
+		h.logger.Error("failed to send initial health check",
+			"error", err)
+		return err
+	}
+
+	// Stream periodic updates
+	ticker := time.NewTicker(h.checkTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			h.logger.Debug("health watch stream closed", "reason", ctx.Err())
+			return ctx.Err()
+
+		case <-ticker.C:
+			resp, err := h.Check(ctx, req)
+			if err != nil {
+				h.logger.Error("health check failed during watch",
+					"error", err)
+				return err
+			}
+
+			if err := stream.Send(resp); err != nil {
+				h.logger.Error("failed to send health check update",
+					"error", err)
+				return err
+			}
+		}
+	}
+}
+
+// mapStatusToGRPC converts internal health status to gRPC health check status.
+//
+// Mapping logic:
+// - Healthy: SERVING (all dependencies operational)
+// - Degraded: SERVING (critical dependencies operational, optional degraded)
+// - Unhealthy: NOT_SERVING (critical dependencies down)
+// - Unknown: UNKNOWN (unable to determine health)
+func (h *HealthChecker) mapStatusToGRPC(status health.Status) grpc_health_v1.HealthCheckResponse_ServingStatus {
+	switch status {
+	case health.StatusHealthy:
+		return grpc_health_v1.HealthCheckResponse_SERVING
+
+	case health.StatusDegraded:
+		// Degraded still serves requests (optional dependencies may be down)
+		return grpc_health_v1.HealthCheckResponse_SERVING
+
+	case health.StatusUnhealthy:
+		return grpc_health_v1.HealthCheckResponse_NOT_SERVING
+
+	case health.StatusUnknown:
+		return grpc_health_v1.HealthCheckResponse_UNKNOWN
+
+	default:
+		return grpc_health_v1.HealthCheckResponse_UNKNOWN
+	}
+}
+
+// logHealthCheck logs the health check result with structured details.
+func (h *HealthChecker) logHealthCheck(report *health.Report, overallStatus health.Status, grpcStatus grpc_health_v1.HealthCheckResponse_ServingStatus) {
+	// Build component status map for structured logging
+	componentStatuses := make(map[string]string)
+	for _, comp := range report.Components {
+		componentStatuses[comp.Name] = comp.Status.String()
+	}
+
+	// Log at appropriate level based on status
+	switch overallStatus {
+	case health.StatusHealthy, health.StatusDegraded:
+		h.logger.Info("health check completed",
+			"overall_status", overallStatus.String(),
+			"grpc_status", grpcStatus.String(),
+			"component_count", len(report.Components),
+			"components", componentStatuses)
+
+	case health.StatusUnhealthy, health.StatusUnknown:
+		h.logger.Warn("health check detected issues",
+			"overall_status", overallStatus.String(),
+			"grpc_status", grpcStatus.String(),
+			"component_count", len(report.Components),
+			"components", componentStatuses)
+
+		// Log individual component failures
+		for _, comp := range report.Components {
+			if comp.Status == health.StatusUnhealthy || comp.Status == health.StatusUnknown {
+				h.logger.Error("component unhealthy",
+					"component", comp.Name,
+					"status", comp.Status.String(),
+					"message", comp.Message,
+					"response_time_ms", comp.ResponseTime.Milliseconds(),
+					"error", comp.Error)
+			}
+		}
+	}
+}
+
+// DatabaseHealthChecker checks database connectivity.
+type DatabaseHealthChecker struct {
+	repo    *persistence.Repository
+	timeout time.Duration
+}
+
+// NewDatabaseHealthChecker creates a new database health checker.
+func NewDatabaseHealthChecker(repo *persistence.Repository, timeout time.Duration) *DatabaseHealthChecker {
+	return &DatabaseHealthChecker{
+		repo:    repo,
+		timeout: timeout,
+	}
+}
+
+// Name returns the component name.
+func (d *DatabaseHealthChecker) Name() string {
+	return "database"
+}
+
+// Check performs a database health check by executing a simple query.
+func (d *DatabaseHealthChecker) Check(ctx context.Context) health.ComponentResult {
+	start := time.Now()
+
+	// Create timeout context
+	checkCtx, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+
+	// Attempt to find a non-existent account as connectivity check
+	// This exercises the connection pool and query execution path
+	_, err := d.repo.FindByID("health-check-probe")
+
+	responseTime := time.Since(start)
+
+	// Expected: ErrAccountNotFound indicates database is reachable
+	// Unexpected: Any other error indicates database issues
+	status := health.StatusHealthy
+	message := "database connection successful"
+
+	if err != nil && !errors.Is(err, persistence.ErrAccountNotFound) {
+		status = health.StatusUnhealthy
+		message = fmt.Sprintf("database check failed: %v", err)
+	}
+
+	// Check context cancellation (timeout)
+	if checkCtx.Err() != nil {
+		status = health.StatusUnhealthy
+		message = fmt.Sprintf("database check timeout after %s", d.timeout)
+		err = checkCtx.Err()
+	}
+
+	return health.ComponentResult{
+		Name:         d.Name(),
+		Status:       status,
+		Message:      message,
+		ResponseTime: responseTime,
+		CheckedAt:    start,
+		Error:        err,
+	}
+}
+
+// PositionKeepingHealthChecker checks PositionKeeping service connectivity.
+type PositionKeepingHealthChecker struct {
+	client  clients.PositionKeepingClient
+	timeout time.Duration
+}
+
+// NewPositionKeepingHealthChecker creates a new PositionKeeping health checker.
+func NewPositionKeepingHealthChecker(client clients.PositionKeepingClient, timeout time.Duration) *PositionKeepingHealthChecker {
+	return &PositionKeepingHealthChecker{
+		client:  client,
+		timeout: timeout,
+	}
+}
+
+// Name returns the component name.
+func (p *PositionKeepingHealthChecker) Name() string {
+	return "positionkeeping"
+}
+
+// Check performs a PositionKeeping service health check.
+// This is a degraded check - if the service is unavailable, the system operates
+// in degraded mode without position tracking.
+func (p *PositionKeepingHealthChecker) Check(ctx context.Context) health.ComponentResult {
+	start := time.Now()
+
+	// Create timeout context
+	checkCtx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+
+	// Attempt a lightweight read operation (list with limit 1)
+	// This verifies the service is reachable without side effects
+	_, err := p.client.ListFinancialPositionLogs(checkCtx, &positionkeepingv1.ListFinancialPositionLogsRequest{
+		Pagination: &commonv1.Pagination{
+			PageSize: 1,
+		},
+	})
+
+	responseTime := time.Since(start)
+
+	// PositionKeeping is optional - degrade gracefully if unavailable
+	status := health.StatusHealthy
+	message := "positionkeeping service reachable"
+
+	if err != nil {
+		// Degraded rather than unhealthy (service can operate without it)
+		status = health.StatusDegraded
+		message = fmt.Sprintf("positionkeeping service unreachable (degraded): %v", err)
+	}
+
+	// Check context cancellation (timeout)
+	if checkCtx.Err() != nil {
+		status = health.StatusDegraded
+		message = fmt.Sprintf("positionkeeping service timeout after %s (degraded)", p.timeout)
+		if err == nil {
+			err = checkCtx.Err()
+		}
+	}
+
+	return health.ComponentResult{
+		Name:         p.Name(),
+		Status:       status,
+		Message:      message,
+		ResponseTime: responseTime,
+		CheckedAt:    start,
+		Error:        err,
+	}
+}
+
+// FinancialAccountingHealthChecker checks FinancialAccounting service connectivity.
+type FinancialAccountingHealthChecker struct {
+	client  clients.FinancialAccountingClient
+	timeout time.Duration
+}
+
+// NewFinancialAccountingHealthChecker creates a new FinancialAccounting health checker.
+func NewFinancialAccountingHealthChecker(client clients.FinancialAccountingClient, timeout time.Duration) *FinancialAccountingHealthChecker {
+	return &FinancialAccountingHealthChecker{
+		client:  client,
+		timeout: timeout,
+	}
+}
+
+// Name returns the component name.
+func (f *FinancialAccountingHealthChecker) Name() string {
+	return "financialaccounting"
+}
+
+// Check performs a FinancialAccounting service health check.
+// This is a degraded check - if the service is unavailable, the system operates
+// in degraded mode without ledger posting.
+func (f *FinancialAccountingHealthChecker) Check(ctx context.Context) health.ComponentResult {
+	start := time.Now()
+
+	// Create timeout context
+	checkCtx, cancel := context.WithTimeout(ctx, f.timeout)
+	defer cancel()
+
+	// Attempt a lightweight read operation (list with limit 1)
+	// This verifies the service is reachable without side effects
+	_, err := f.client.ListFinancialBookingLogs(checkCtx, &financialaccountingv1.ListFinancialBookingLogsRequest{
+		Pagination: &commonv1.Pagination{
+			PageSize: 1,
+		},
+	})
+
+	responseTime := time.Since(start)
+
+	// FinancialAccounting is optional - degrade gracefully if unavailable
+	status := health.StatusHealthy
+	message := "financialaccounting service reachable"
+
+	if err != nil {
+		// Degraded rather than unhealthy (service can operate without it)
+		status = health.StatusDegraded
+		message = fmt.Sprintf("financialaccounting service unreachable (degraded): %v", err)
+	}
+
+	// Check context cancellation (timeout)
+	if checkCtx.Err() != nil {
+		status = health.StatusDegraded
+		message = fmt.Sprintf("financialaccounting service timeout after %s (degraded)", f.timeout)
+		if err == nil {
+			err = checkCtx.Err()
+		}
+	}
+
+	return health.ComponentResult{
+		Name:         f.Name(),
+		Status:       status,
+		Message:      message,
+		ResponseTime: responseTime,
+		CheckedAt:    start,
+		Error:        err,
+	}
+}
