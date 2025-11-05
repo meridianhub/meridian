@@ -10,17 +10,17 @@ import (
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 )
 
-// ErrTargetAddressRequired is returned when target address is not provided
-var ErrTargetAddressRequired = errors.New("target address is required")
+// ErrFinancialAccountingTargetRequired is returned when target address is not provided
+var ErrFinancialAccountingTargetRequired = errors.New("target address is required")
 
 // FinancialAccountingGRPCClient implements FinancialAccountingClient using gRPC
 type FinancialAccountingGRPCClient struct {
-	conn   *grpc.ClientConn
-	client financialaccountingv1.FinancialAccountingServiceClient
-	tracer *observability.Tracer
+	conn    *grpc.ClientConn
+	client  financialaccountingv1.FinancialAccountingServiceClient
+	tracer  *observability.Tracer
+	timeout time.Duration
 }
 
 // FinancialAccountingClientConfig holds configuration for the FinancialAccounting client
@@ -57,7 +57,7 @@ type FinancialAccountingClientConfig struct {
 //	defer client.Close()
 func NewFinancialAccountingClient(cfg *FinancialAccountingClientConfig) (*FinancialAccountingGRPCClient, error) {
 	if cfg.Target == "" {
-		return nil, ErrTargetAddressRequired
+		return nil, ErrFinancialAccountingTargetRequired
 	}
 
 	// Set default timeout if not specified
@@ -90,9 +90,10 @@ func NewFinancialAccountingClient(cfg *FinancialAccountingClientConfig) (*Financ
 	}
 
 	return &FinancialAccountingGRPCClient{
-		conn:   conn,
-		client: financialaccountingv1.NewFinancialAccountingServiceClient(conn),
-		tracer: cfg.Tracer,
+		conn:    conn,
+		client:  financialaccountingv1.NewFinancialAccountingServiceClient(conn),
+		tracer:  cfg.Tracer,
+		timeout: cfg.Timeout,
 	}, nil
 }
 
@@ -101,8 +102,10 @@ func (c *FinancialAccountingGRPCClient) InitiateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.InitiateFinancialBookingLogRequest,
 ) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
-	// Propagate correlation ID if present in context
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.InitiateFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -117,7 +120,10 @@ func (c *FinancialAccountingGRPCClient) UpdateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
 ) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.UpdateFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -132,7 +138,10 @@ func (c *FinancialAccountingGRPCClient) RetrieveFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.RetrieveFinancialBookingLogRequest,
 ) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.RetrieveFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -147,7 +156,10 @@ func (c *FinancialAccountingGRPCClient) ListFinancialBookingLogs(
 	ctx context.Context,
 	req *financialaccountingv1.ListFinancialBookingLogsRequest,
 ) (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.ListFinancialBookingLogs(ctx, req)
 	if err != nil {
@@ -162,7 +174,10 @@ func (c *FinancialAccountingGRPCClient) CaptureLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.CaptureLedgerPostingRequest,
 ) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.CaptureLedgerPosting(ctx, req)
 	if err != nil {
@@ -177,7 +192,10 @@ func (c *FinancialAccountingGRPCClient) RetrieveLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.RetrieveLedgerPostingRequest,
 ) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.RetrieveLedgerPosting(ctx, req)
 	if err != nil {
@@ -195,64 +213,4 @@ func (c *FinancialAccountingGRPCClient) Close() error {
 		}
 	}
 	return nil
-}
-
-// propagateCorrelationID extracts correlation ID from context and adds it to gRPC metadata
-//
-// Correlation IDs are used for request tracing across service boundaries.
-// This method checks for common correlation ID keys and propagates them
-// via gRPC metadata headers.
-func (c *FinancialAccountingGRPCClient) propagateCorrelationID(ctx context.Context) context.Context {
-	// Extract correlation ID from context
-	// Common keys: "correlation-id", "x-correlation-id", "x-request-id"
-	correlationID := extractCorrelationIDFromContext(ctx)
-	if correlationID == "" {
-		return ctx
-	}
-
-	// Get existing metadata or create new
-	md, ok := metadata.FromOutgoingContext(ctx)
-	if !ok {
-		md = metadata.New(nil)
-	} else {
-		// Clone to avoid modifying shared metadata
-		md = md.Copy()
-	}
-
-	// Add correlation ID to metadata
-	md.Set("x-correlation-id", correlationID)
-
-	return metadata.NewOutgoingContext(ctx, md)
-}
-
-// extractCorrelationIDFromContext attempts to extract correlation ID from context
-//
-// Checks multiple common keys used for correlation IDs across different systems.
-func extractCorrelationIDFromContext(ctx context.Context) string {
-	// Try common correlation ID keys
-	keys := []string{
-		"correlation-id",
-		"x-correlation-id",
-		"x-request-id",
-		"request-id",
-	}
-
-	for _, key := range keys {
-		if val := ctx.Value(key); val != nil {
-			if id, ok := val.(string); ok {
-				return id
-			}
-		}
-	}
-
-	// Check incoming metadata as fallback
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		for _, key := range keys {
-			if vals := md.Get(key); len(vals) > 0 {
-				return vals[0]
-			}
-		}
-	}
-
-	return ""
 }

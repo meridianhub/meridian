@@ -10,7 +10,6 @@ import (
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 )
 
 // ErrPositionKeepingTargetRequired is returned when target address is not provided
@@ -18,9 +17,10 @@ var ErrPositionKeepingTargetRequired = errors.New("target address is required")
 
 // PositionKeepingGRPCClient implements PositionKeepingClient using gRPC
 type PositionKeepingGRPCClient struct {
-	conn   *grpc.ClientConn
-	client positionkeepingv1.PositionKeepingServiceClient
-	tracer *observability.Tracer
+	conn    *grpc.ClientConn
+	client  positionkeepingv1.PositionKeepingServiceClient
+	tracer  *observability.Tracer
+	timeout time.Duration
 }
 
 // PositionKeepingClientConfig holds configuration for the PositionKeeping client
@@ -90,9 +90,10 @@ func NewPositionKeepingClient(cfg *PositionKeepingClientConfig) (*PositionKeepin
 	}
 
 	return &PositionKeepingGRPCClient{
-		conn:   conn,
-		client: positionkeepingv1.NewPositionKeepingServiceClient(conn),
-		tracer: cfg.Tracer,
+		conn:    conn,
+		client:  positionkeepingv1.NewPositionKeepingServiceClient(conn),
+		tracer:  cfg.Tracer,
+		timeout: cfg.Timeout,
 	}, nil
 }
 
@@ -101,8 +102,10 @@ func (c *PositionKeepingGRPCClient) InitiateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
 ) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
-	// Propagate correlation ID if present in context
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.InitiateFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -117,7 +120,10 @@ func (c *PositionKeepingGRPCClient) UpdateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
 ) (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.UpdateFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -132,7 +138,10 @@ func (c *PositionKeepingGRPCClient) RetrieveFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.RetrieveFinancialPositionLogRequest,
 ) (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.RetrieveFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -147,7 +156,10 @@ func (c *PositionKeepingGRPCClient) BulkImportTransactions(
 	ctx context.Context,
 	req *positionkeepingv1.BulkImportTransactionsRequest,
 ) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.BulkImportTransactions(ctx, req)
 	if err != nil {
@@ -162,7 +174,10 @@ func (c *PositionKeepingGRPCClient) ListFinancialPositionLogs(
 	ctx context.Context,
 	req *positionkeepingv1.ListFinancialPositionLogsRequest,
 ) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
-	ctx = c.propagateCorrelationID(ctx)
+	ctx, cancel := WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = PropagateCorrelationID(ctx)
 
 	resp, err := c.client.ListFinancialPositionLogs(ctx, req)
 	if err != nil {
@@ -180,64 +195,4 @@ func (c *PositionKeepingGRPCClient) Close() error {
 		}
 	}
 	return nil
-}
-
-// propagateCorrelationID extracts correlation ID from context and adds it to gRPC metadata
-//
-// Correlation IDs are used for request tracing across service boundaries.
-// This method checks for common correlation ID keys and propagates them
-// via gRPC metadata headers.
-func (c *PositionKeepingGRPCClient) propagateCorrelationID(ctx context.Context) context.Context {
-	// Extract correlation ID from context
-	// Common keys: "correlation-id", "x-correlation-id", "x-request-id"
-	correlationID := extractCorrelationID(ctx)
-	if correlationID == "" {
-		return ctx
-	}
-
-	// Get existing metadata or create new
-	md, ok := metadata.FromOutgoingContext(ctx)
-	if !ok {
-		md = metadata.New(nil)
-	} else {
-		// Clone to avoid modifying shared metadata
-		md = md.Copy()
-	}
-
-	// Add correlation ID to metadata
-	md.Set("x-correlation-id", correlationID)
-
-	return metadata.NewOutgoingContext(ctx, md)
-}
-
-// extractCorrelationID attempts to extract correlation ID from context
-//
-// Checks multiple common keys used for correlation IDs across different systems.
-func extractCorrelationID(ctx context.Context) string {
-	// Try common correlation ID keys
-	keys := []string{
-		"correlation-id",
-		"x-correlation-id",
-		"x-request-id",
-		"request-id",
-	}
-
-	for _, key := range keys {
-		if val := ctx.Value(key); val != nil {
-			if id, ok := val.(string); ok {
-				return id
-			}
-		}
-	}
-
-	// Check incoming metadata as fallback
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		for _, key := range keys {
-			if vals := md.Get(key); len(vals) > 0 {
-				return vals[0]
-			}
-		}
-	}
-
-	return ""
 }
