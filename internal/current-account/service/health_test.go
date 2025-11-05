@@ -302,9 +302,11 @@ func TestHealthChecker_Watch(t *testing.T) {
 		CheckTimeout: 100 * time.Millisecond, // Short timeout for test
 	})
 
-	// Create a mock stream
+	// Create a mock stream with cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
 	stream := &mockHealthWatchServer{
-		ctx:       context.Background(),
+		ctx:       ctx,
+		cancel:    cancel,
 		responses: make([]*grpc_health_v1.HealthCheckResponse, 0),
 	}
 
@@ -320,7 +322,7 @@ func TestHealthChecker_Watch(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 
 	// Cancel context to stop watch
-	stream.cancel()
+	cancel()
 
 	// Wait for goroutine to finish
 	err := <-errChan
