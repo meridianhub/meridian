@@ -94,7 +94,7 @@ func (r *RedisChecker) Check(ctx context.Context) ComponentResult {
 		Status:       status,
 		Message:      message,
 		ResponseTime: responseTime,
-		CheckedAt:    time.Now(),
+		CheckedAt:    start,
 		Error:        err,
 	}
 }
@@ -144,7 +144,7 @@ func (k *KafkaChecker) Check(ctx context.Context) ComponentResult {
 		Status:       status,
 		Message:      message,
 		ResponseTime: responseTime,
-		CheckedAt:    time.Now(),
+		CheckedAt:    start,
 		Error:        err,
 	}
 }

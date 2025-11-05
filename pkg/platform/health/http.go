@@ -12,6 +12,9 @@ type HTTPHandler struct {
 
 // NewHTTPHandler creates a new HTTP health check handler.
 func NewHTTPHandler(aggregator *Aggregator) *HTTPHandler {
+	if aggregator == nil {
+		panic("NewHTTPHandler: aggregator cannot be nil")
+	}
 	return &HTTPHandler{
 		aggregator: aggregator,
 	}
