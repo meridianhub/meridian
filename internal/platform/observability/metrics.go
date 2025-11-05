@@ -169,9 +169,10 @@ func (mc *MetricsCollector) StartMetricsServer(ctx context.Context, addr string)
 	// Graceful shutdown
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		// Use Background() instead of ctx to avoid immediate cancellation
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := server.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck // Intentionally using fresh context for shutdown grace period
 			// Log error but can't do much else during shutdown
 			_ = err
 		}
