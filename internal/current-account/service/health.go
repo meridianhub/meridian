@@ -153,7 +153,7 @@ func (h *HealthChecker) Watch(req *grpc_health_v1.HealthCheckRequest, stream grp
 	if err := stream.Send(resp); err != nil {
 		h.logger.Error("failed to send initial health check",
 			"error", err)
-		return err
+		return fmt.Errorf("failed to send initial health status: %w", err)
 	}
 
 	// Stream periodic updates
@@ -164,7 +164,7 @@ func (h *HealthChecker) Watch(req *grpc_health_v1.HealthCheckRequest, stream grp
 		select {
 		case <-ctx.Done():
 			h.logger.Debug("health watch stream closed", "reason", ctx.Err())
-			return ctx.Err()
+			return fmt.Errorf("health watch context cancelled: %w", ctx.Err())
 
 		case <-ticker.C:
 			resp, err := h.Check(ctx, req)
@@ -177,7 +177,7 @@ func (h *HealthChecker) Watch(req *grpc_health_v1.HealthCheckRequest, stream grp
 			if err := stream.Send(resp); err != nil {
 				h.logger.Error("failed to send health check update",
 					"error", err)
-				return err
+				return fmt.Errorf("failed to send health status update: %w", err)
 			}
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/meridianhub/meridian/internal/current-account/clients"
 	"github.com/meridianhub/meridian/internal/current-account/service"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -37,8 +38,9 @@ func ExampleHealthChecker() {
 	grpcServer := grpc.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 
-	// Start server
-	lis, err := net.Listen("tcp", ":50051")
+	// Start server using ListenConfig for context support
+	lc := &net.ListenConfig{}
+	lis, err := lc.Listen(context.Background(), "tcp", ":50051")
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
@@ -70,6 +72,8 @@ func ExampleHealthChecker_Check() {
 		log.Println("Service is unhealthy and not serving requests")
 	case grpc_health_v1.HealthCheckResponse_UNKNOWN:
 		log.Println("Service health status is unknown")
+	case grpc_health_v1.HealthCheckResponse_SERVICE_UNKNOWN:
+		log.Println("Service not found")
 	}
 }
 
@@ -158,21 +162,29 @@ func ExampleHealthChecker_grpccurl() {
 
 // ExampleHealthChecker_clientUsage demonstrates using a gRPC health check client.
 func ExampleHealthChecker_clientUsage() {
-	// Create gRPC connection
-	conn, err := grpc.NewClient("localhost:50051", grpc.WithInsecure())
+	// Create gRPC connection with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	//nolint:staticcheck // Example code showing connection pattern
+	conn, err := grpc.DialContext(ctx, "localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("Failed to close connection: %v", closeErr)
+		}
+	}()
 
 	// Create health check client
 	client := grpc_health_v1.NewHealthClient(conn)
 
-	// Perform synchronous health check
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Perform synchronous health check (reusing ctx from connection)
+	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer checkCancel()
 
-	resp, err := client.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+	resp, err := client.Check(checkCtx, &grpc_health_v1.HealthCheckRequest{
 		Service: "current-account",
 	})
 	if err != nil {
@@ -182,7 +194,7 @@ func ExampleHealthChecker_clientUsage() {
 	log.Printf("Service health: %v", resp.Status)
 
 	// Stream health updates
-	stream, err := client.Watch(ctx, &grpc_health_v1.HealthCheckRequest{
+	stream, err := client.Watch(checkCtx, &grpc_health_v1.HealthCheckRequest{
 		Service: "current-account",
 	})
 	if err != nil {

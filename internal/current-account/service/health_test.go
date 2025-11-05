@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -136,15 +137,20 @@ func TestHealthChecker_Check_DatabaseOnly(t *testing.T) {
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
 }
 
+var (
+	errConnectionRefused = errors.New("connection refused")
+	errTimeout           = errors.New("timeout")
+)
+
 func TestHealthChecker_Check_ExternalServiceDegraded(t *testing.T) {
 	repo := setupTestRepository(t)
 	posClient := &mockPositionKeepingClient{
 		failOnUpdate: true,
-		failureError: errors.New("connection refused"),
+		failureError: errConnectionRefused,
 	}
 	finClient := &mockFinancialAccountingClient{
 		failOnCapture: true,
-		failureError:  errors.New("timeout"),
+		failureError:  errTimeout,
 	}
 
 	// Modify mocks to fail on List operations for health checks
@@ -346,7 +352,7 @@ type mockHealthWatchServer struct {
 
 func (m *mockHealthWatchServer) Send(resp *grpc_health_v1.HealthCheckResponse) error {
 	if m.ctx.Err() != nil {
-		return m.ctx.Err()
+		return fmt.Errorf("stream context error: %w", m.ctx.Err())
 	}
 	m.responses = append(m.responses, resp)
 	return nil
@@ -359,21 +365,21 @@ func (m *mockHealthWatchServer) Context() context.Context {
 	return m.ctx
 }
 
-func (m *mockHealthWatchServer) SendMsg(msg interface{}) error {
+func (m *mockHealthWatchServer) SendMsg(_ interface{}) error {
 	return nil
 }
 
-func (m *mockHealthWatchServer) RecvMsg(msg interface{}) error {
+func (m *mockHealthWatchServer) RecvMsg(_ interface{}) error {
 	return nil
 }
 
-func (m *mockHealthWatchServer) SetHeader(md metadata.MD) error {
+func (m *mockHealthWatchServer) SetHeader(_ metadata.MD) error {
 	return nil
 }
 
-func (m *mockHealthWatchServer) SendHeader(md metadata.MD) error {
+func (m *mockHealthWatchServer) SendHeader(_ metadata.MD) error {
 	return nil
 }
 
-func (m *mockHealthWatchServer) SetTrailer(md metadata.MD) {
+func (m *mockHealthWatchServer) SetTrailer(_ metadata.MD) {
 }
