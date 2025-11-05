@@ -92,6 +92,12 @@ func (mc *MetricsCollector) Handler() http.Handler {
 }
 
 // RecordHTTPRequest records an HTTP request metric
+//
+// IMPORTANT: The 'path' parameter should be a route pattern (e.g., "/accounts/{id}")
+// rather than the actual request path (e.g., "/accounts/123") to prevent cardinality
+// explosion. High cardinality labels can cause excessive memory usage in Prometheus.
+//
+// When using with a router, pass the matched route pattern instead of r.URL.Path.
 func (mc *MetricsCollector) RecordHTTPRequest(method, path string, status int, duration time.Duration) {
 	mc.HTTPRequestsTotal.WithLabelValues(method, path, fmt.Sprintf("%d", status)).Inc()
 	mc.HTTPRequestDurationSeconds.WithLabelValues(method, path).Observe(duration.Seconds())
@@ -113,6 +119,17 @@ func (mc *MetricsCollector) RecordKafkaPublish(topic, status string) {
 }
 
 // HTTPMiddleware returns an HTTP middleware that records request metrics
+//
+// WARNING: This middleware uses r.URL.Path which can cause cardinality explosion
+// if your routes contain variable path segments (e.g., /accounts/123, /accounts/456).
+// For production use, consider extracting the route pattern from your router and
+// passing it to RecordHTTPRequest instead of using this generic middleware.
+//
+// Example with chi router:
+//
+//	rctx := chi.RouteContext(r.Context())
+//	routePattern := rctx.RoutePattern()  // Returns "/accounts/{id}" instead of "/accounts/123"
+//	mc.RecordHTTPRequest(r.Method, routePattern, rw.statusCode, duration)
 func (mc *MetricsCollector) HTTPMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
