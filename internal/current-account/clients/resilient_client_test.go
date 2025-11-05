@@ -21,8 +21,9 @@ var errCloseFailed = errors.New("close failed")
 
 // mockPositionKeepingClient for testing
 type mockPositionKeepingClient struct {
-	initiateFn func(ctx context.Context, req *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error)
-	closeFn    func() error
+	initiateFn   func(ctx context.Context, req *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error)
+	bulkImportFn func(ctx context.Context, req *positionkeepingv1.BulkImportTransactionsRequest) (*positionkeepingv1.BulkImportTransactionsResponse, error)
+	closeFn      func() error
 }
 
 func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(ctx context.Context, req *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
@@ -37,7 +38,10 @@ func (m *mockPositionKeepingClient) RetrieveFinancialPositionLog(_ context.Conte
 	return nil, nil
 }
 
-func (m *mockPositionKeepingClient) BulkImportTransactions(_ context.Context, _ *positionkeepingv1.BulkImportTransactionsRequest) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
+func (m *mockPositionKeepingClient) BulkImportTransactions(ctx context.Context, req *positionkeepingv1.BulkImportTransactionsRequest) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
+	if m.bulkImportFn != nil {
+		return m.bulkImportFn(ctx, req)
+	}
 	return nil, nil
 }
 
@@ -344,16 +348,81 @@ func TestResilientClient_ContextCancellation(t *testing.T) {
 	assert.Contains(t, err.Error(), "context deadline exceeded")
 }
 
+// TestResilientClient_NonIdempotentOperationsNoRetry verifies non-idempotent operations don't retry
+func TestResilientClient_NonIdempotentOperationsNoRetry(t *testing.T) {
+	t.Parallel()
+
+	t.Run("BulkImportTransactions", func(t *testing.T) {
+		var callCount atomic.Int32
+
+		mockClient := &mockPositionKeepingClient{
+			bulkImportFn: func(_ context.Context, _ *positionkeepingv1.BulkImportTransactionsRequest) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
+				callCount.Add(1)
+				return nil, status.Error(codes.Unavailable, "service unavailable")
+			},
+		}
+
+		config := clients.ResilientClientConfig{
+			MaxRetries:       3, // Would retry if enabled
+			FailureThreshold: 10,
+			Logger:           slog.Default(),
+		}
+
+		resilientClient := clients.NewResilientPositionKeepingClient(mockClient, config)
+		defer func() {
+			assert.NoError(t, resilientClient.Close())
+		}()
+
+		ctx := context.Background()
+		_, err := resilientClient.BulkImportTransactions(ctx, &positionkeepingv1.BulkImportTransactionsRequest{})
+
+		assert.Error(t, err)
+		assert.Equal(t, int32(1), callCount.Load(), "should not retry non-idempotent operation")
+	})
+
+	t.Run("UpdateFinancialBookingLog", func(t *testing.T) {
+		var callCount atomic.Int32
+
+		mockClient := &mockFinancialAccountingClient{
+			updateBookingFn: func(_ context.Context, _ *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+				callCount.Add(1)
+				return nil, status.Error(codes.Unavailable, "service unavailable")
+			},
+		}
+
+		config := clients.ResilientClientConfig{
+			MaxRetries:       3, // Would retry if enabled
+			FailureThreshold: 10,
+			Logger:           slog.Default(),
+		}
+
+		resilientClient := clients.NewResilientFinancialAccountingClient(mockClient, config)
+		defer func() {
+			assert.NoError(t, resilientClient.Close())
+		}()
+
+		ctx := context.Background()
+		_, err := resilientClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{})
+
+		assert.Error(t, err)
+		assert.Equal(t, int32(1), callCount.Load(), "should not retry non-idempotent operation")
+	})
+}
+
 // mockFinancialAccountingClient for testing
 type mockFinancialAccountingClient struct {
-	closeFn func() error
+	closeFn         func() error
+	updateBookingFn func(context.Context, *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error)
 }
 
 func (m *mockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
 	return nil, nil
 }
 
-func (m *mockFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+func (m *mockFinancialAccountingClient) UpdateFinancialBookingLog(ctx context.Context, req *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	if m.updateBookingFn != nil {
+		return m.updateBookingFn(ctx, req)
+	}
 	return nil, nil
 }
 

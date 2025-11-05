@@ -12,8 +12,19 @@ import (
 	"github.com/sony/gobreaker/v2"
 )
 
-// ErrTypeAssertion is returned when a type assertion fails in executeWithResilience
-var ErrTypeAssertion = errors.New("type assertion failed")
+var (
+	// ErrTypeAssertion is returned when a type assertion fails in executeWithResilience
+	ErrTypeAssertion = errors.New("type assertion failed")
+
+	// noRetryConfig disables retries for non-idempotent operations
+	noRetryConfig = RetryConfig{
+		MaxRetries:          0,
+		InitialInterval:     0,
+		MaxInterval:         0,
+		Multiplier:          1.0,
+		RandomizationFactor: 0,
+	}
+)
 
 // ResilientPositionKeepingClient wraps PositionKeepingClient with resilience patterns
 type ResilientPositionKeepingClient struct {
@@ -249,6 +260,8 @@ func (r *ResilientPositionKeepingClient) RetrieveFinancialPositionLog(
 }
 
 // BulkImportTransactions imports multiple transactions with resilience
+// NOTE: Retries are disabled for this operation because it lacks an idempotency_key.
+// The operation relies on optimistic concurrency control (version field) to prevent duplicates.
 func (r *ResilientPositionKeepingClient) BulkImportTransactions(
 	ctx context.Context,
 	req *positionkeepingv1.BulkImportTransactionsRequest,
@@ -256,7 +269,7 @@ func (r *ResilientPositionKeepingClient) BulkImportTransactions(
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
-		r.retryConfig,
+		noRetryConfig, // No retries - not idempotent
 		r.logger,
 		"BulkImportTransactions",
 		func() (*positionkeepingv1.BulkImportTransactionsResponse, error) {
@@ -308,6 +321,8 @@ func (r *ResilientFinancialAccountingClient) InitiateFinancialBookingLog(
 }
 
 // UpdateFinancialBookingLog updates an existing financial booking log with resilience
+// NOTE: Retries are disabled for this operation because it lacks an idempotency_key.
+// Updates should be handled idempotently by the caller if retries are needed.
 func (r *ResilientFinancialAccountingClient) UpdateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
@@ -315,7 +330,7 @@ func (r *ResilientFinancialAccountingClient) UpdateFinancialBookingLog(
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
-		r.retryConfig,
+		noRetryConfig, // No retries - not idempotent
 		r.logger,
 		"UpdateFinancialBookingLog",
 		func() (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
