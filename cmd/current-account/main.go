@@ -362,7 +362,7 @@ func createServiceWithClients(
 		tracer,
 	)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
 	}
 
 	// Return the service and the clients for use in health checking
