@@ -17,7 +17,7 @@ import (
 func setupTestServices(t *testing.T) (*service.PostingService, func()) {
 	t.Helper()
 
-	db, cleanup := testdb.SetupPostgres(t, &persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{}})
 
 	repo := persistence.NewLedgerRepository(db)
 	return service.NewPostingService(repo, "BANK-CASH-001"), cleanup

@@ -15,7 +15,7 @@ import (
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, &CurrentAccountEntity{})
+	return testdb.SetupPostgres(t, []interface{}{&CurrentAccountEntity{}})
 }
 
 func TestSaveNewAccount(t *testing.T) {

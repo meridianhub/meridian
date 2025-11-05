@@ -28,7 +28,7 @@ func mustNewMoney(currency string, amountCents int64) domain.Money {
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, &persistence.CurrentAccountEntity{})
+	return testdb.SetupPostgres(t, []interface{}{&persistence.CurrentAccountEntity{}})
 }
 
 func TestInitiateCurrentAccount(t *testing.T) {

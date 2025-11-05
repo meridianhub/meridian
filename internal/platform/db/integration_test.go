@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -445,7 +446,9 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 			}
 
 			expectedBalance := 100.00 + float64(iterations)*10.00
-			if finalBalance != expectedBalance {
+			// Use tolerance for floating-point comparison to handle precision issues
+			const tolerance = 0.01
+			if math.Abs(finalBalance-expectedBalance) > tolerance {
 				errors <- fmt.Errorf("worker %d: %w (expected %.2f, got %.2f)", workerID, errBalanceMismatch, expectedBalance, finalBalance)
 			}
 		}(i)

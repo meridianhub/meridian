@@ -15,7 +15,7 @@ import (
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, &persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{}})
 	return db, cleanup
 }
 
