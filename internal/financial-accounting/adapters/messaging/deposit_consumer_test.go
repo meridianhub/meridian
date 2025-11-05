@@ -10,29 +10,14 @@ import (
 	"github.com/meridianhub/meridian/internal/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/financial-accounting/service"
 	"github.com/meridianhub/meridian/internal/platform/kafka"
+	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 func setupTestServices(t *testing.T) *service.PostingService {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to obtain sql.DB: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-
-	err = db.AutoMigrate(&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
-	if err != nil {
-		t.Fatalf("Failed to migrate: %v", err)
-	}
+	db, _ := testdb.SetupPostgres(t, &persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
 
 	repo := persistence.NewLedgerRepository(db)
 	return service.NewPostingService(repo, "BANK-CASH-001")

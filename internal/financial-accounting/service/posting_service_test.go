@@ -8,31 +8,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/financial-accounting/domain"
+	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/shopspring/decimal"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to obtain sql.DB: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-
-	// Run migrations
-	err = db.AutoMigrate(&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
-	if err != nil {
-		t.Fatalf("Failed to migrate: %v", err)
-	}
-
+	db, _ := testdb.SetupPostgres(t, &persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
 	return db
 }
 

@@ -9,13 +9,12 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 // mustNewMoney is a test helper that creates Money or panics
@@ -29,26 +28,7 @@ func mustNewMoney(currency string, amountCents int64) domain.Money {
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-
-	// Run migrations
-	if err := db.AutoMigrate(&persistence.CurrentAccountEntity{}); err != nil {
-		t.Fatalf("Failed to migrate database: %v", err)
-	}
-
-	cleanup := func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			_ = sqlDB.Close()
-		}
-	}
-
-	return db, cleanup
+	return testdb.SetupPostgres(t, &persistence.CurrentAccountEntity{})
 }
 
 func TestInitiateCurrentAccount(t *testing.T) {
