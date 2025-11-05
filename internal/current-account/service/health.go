@@ -105,34 +105,54 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 //
 // Service-specific behavior:
 // - Empty service name or "current-account": Check overall service health
-// - Named component (e.g., "database", "positionkeeping"): Check specific component
+// - Named component (e.g., "database", "positionkeeping", "financialaccounting"): Check specific component
 func (h *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
 	// Apply timeout to health check context
 	checkCtx, cancel := context.WithTimeout(ctx, h.checkTimeout)
 	defer cancel()
 
-	// If service name specified and doesn't match, return UNKNOWN
-	if req.Service != "" && req.Service != h.serviceName {
-		h.logger.Debug("health check for unknown service",
-			"requested_service", req.Service,
-			"actual_service", h.serviceName)
+	// Empty service name or matching service name: check all components
+	if req.Service == "" || req.Service == h.serviceName {
+		// Perform health check on all components
+		report := h.aggregator.CheckAll(checkCtx)
+		overallStatus := report.OverallStatus()
+
+		// Map health status to gRPC health check status
+		grpcStatus := h.mapStatusToGRPC(overallStatus)
+
+		// Log health check result
+		h.logHealthCheck(report, overallStatus, grpcStatus)
+
 		return &grpc_health_v1.HealthCheckResponse{
-			Status: grpc_health_v1.HealthCheckResponse_UNKNOWN,
+			Status: grpcStatus,
 		}, nil
 	}
 
-	// Perform health check
-	report := h.aggregator.CheckAll(checkCtx)
-	overallStatus := report.OverallStatus()
+	// Check if request is for a specific component
+	componentResult, found := h.aggregator.CheckByName(checkCtx, req.Service)
+	if found {
+		// Component found - return its specific health status
+		grpcStatus := h.mapStatusToGRPC(componentResult.Status)
 
-	// Map health status to gRPC health check status
-	grpcStatus := h.mapStatusToGRPC(overallStatus)
+		// Log component health check
+		h.logger.Info("component health check completed",
+			"component", componentResult.Name,
+			"status", componentResult.Status.String(),
+			"grpc_status", grpcStatus.String(),
+			"response_time_ms", componentResult.ResponseTime.Milliseconds(),
+			"message", componentResult.Message)
 
-	// Log health check result
-	h.logHealthCheck(report, overallStatus, grpcStatus)
+		return &grpc_health_v1.HealthCheckResponse{
+			Status: grpcStatus,
+		}, nil
+	}
 
+	// Service name doesn't match and component not found - return UNKNOWN
+	h.logger.Debug("health check for unknown service or component",
+		"requested", req.Service,
+		"service_name", h.serviceName)
 	return &grpc_health_v1.HealthCheckResponse{
-		Status: grpcStatus,
+		Status: grpc_health_v1.HealthCheckResponse_UNKNOWN,
 	}, nil
 }
 

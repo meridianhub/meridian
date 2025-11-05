@@ -13,10 +13,10 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
+	"github.com/meridianhub/meridian/internal/current-account/clients"
 	"github.com/meridianhub/meridian/internal/current-account/service"
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"gorm.io/driver/postgres"
@@ -103,14 +103,14 @@ func run(logger *slog.Logger) error {
 		"position_keeping", positionKeepingTarget,
 		"financial_accounting", financialAccountingTarget)
 
-	// Create service with external clients
-	currentAccountService, err := service.NewServiceWithClients(service.Config{
-		Repository:                repo,
-		PositionKeepingTarget:     positionKeepingTarget,
-		FinancialAccountingTarget: financialAccountingTarget,
-		Logger:                    logger,
-		Tracer:                    tracer,
-	})
+	// Create service with external clients and capture the clients for health checking
+	currentAccountService, posKeepingClient, finAcctClient, err := createServiceWithClients(
+		repo,
+		positionKeepingTarget,
+		financialAccountingTarget,
+		logger,
+		tracer,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
 	}
@@ -130,11 +130,16 @@ func run(logger *slog.Logger) error {
 	// Register services
 	pb.RegisterCurrentAccountServiceServer(grpcServer, currentAccountService)
 
-	// Register health check service
-	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-	healthServer.SetServingStatus("meridian.current_account.v1.CurrentAccountService", grpc_health_v1.HealthCheckResponse_SERVING)
+	// Register health check service with dependency checking
+	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
+		Repository:                repo,
+		PositionKeepingClient:     posKeepingClient,
+		FinancialAccountingClient: finAcctClient,
+		Logger:                    logger,
+		ServiceName:               "current-account",
+		CheckTimeout:              5 * time.Second,
+	})
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 
 	// Register reflection service for debugging
 	reflection.Register(grpcServer)
@@ -174,8 +179,8 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown
 	logger.Info("shutting down server...")
 
-	// Mark health check as not serving
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+	// Note: Custom health checker will automatically return NOT_SERVING when dependencies fail
+	// No need to manually mark status as the checker evaluates actual dependency health
 
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -300,4 +305,66 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return value
+}
+
+// createServiceWithClients creates the service and returns it along with the external clients
+// for use in health checking. This approach creates the clients once and shares them between
+// the service and health checker to avoid duplicate connections.
+func createServiceWithClients(
+	repo *persistence.Repository,
+	positionKeepingTarget string,
+	financialAccountingTarget string,
+	logger *slog.Logger,
+	tracer *observability.Tracer,
+) (*service.Service, clients.PositionKeepingClient, clients.FinancialAccountingClient, error) {
+	// Create Position Keeping client
+	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
+		Target:  positionKeepingTarget,
+		Timeout: 30 * time.Second,
+		Tracer:  tracer,
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create position keeping client: %w", err)
+	}
+
+	// Wrap with resilience patterns (circuit breaker + retry)
+	resilientPosKeepingClient := clients.NewResilientPositionKeepingClient(
+		posKeepingGRPCClient,
+		clients.ResilientClientConfig{
+			Logger: logger,
+		},
+	)
+
+	// Create Financial Accounting client
+	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
+		Target:  financialAccountingTarget,
+		Timeout: 30 * time.Second,
+		Tracer:  tracer,
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create financial accounting client: %w", err)
+	}
+
+	// Wrap with resilience patterns (circuit breaker + retry)
+	resilientFinAcctClient := clients.NewResilientFinancialAccountingClient(
+		finAcctGRPCClient,
+		clients.ResilientClientConfig{
+			Logger: logger,
+		},
+	)
+
+	// Create service with the pre-created clients
+	svc, err := service.NewServiceWithExistingClients(
+		repo,
+		resilientPosKeepingClient,
+		resilientFinAcctClient,
+		logger,
+		tracer,
+	)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
+	}
+
+	// Return the service and the clients for use in health checking
+	return svc, resilientPosKeepingClient, resilientFinAcctClient, nil
 }

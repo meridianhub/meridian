@@ -73,6 +73,34 @@ func NewService(repo *persistence.Repository) *Service {
 	}
 }
 
+// NewServiceWithExistingClients creates a new service with pre-created client instances.
+// This constructor is useful when clients need to be shared with other components
+// (e.g., health checkers) to avoid creating duplicate connections.
+func NewServiceWithExistingClients(
+	repo *persistence.Repository,
+	posKeepingClient clients.PositionKeepingClient,
+	finAcctClient clients.FinancialAccountingClient,
+	logger *slog.Logger,
+	tracer *observability.Tracer,
+) (*Service, error) {
+	if repo == nil {
+		return nil, ErrRepositoryNil
+	}
+
+	// Apply default logger if not provided
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	}
+
+	return &Service{
+		repo:             repo,
+		posKeepingClient: posKeepingClient,
+		finAcctClient:    finAcctClient,
+		logger:           logger,
+		tracer:           tracer,
+	}, nil
+}
+
 // NewServiceWithClients creates a new current account service with full external client dependencies.
 // This factory handles client creation, wrapping with resilience patterns (circuit breaker, retry),
 // and validation of all required configuration.
@@ -176,7 +204,7 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 	}
 
 	// Record initial balance
-	caobservability.RecordBalance(accountID, account.Balance.AmountCents(), currency)
+	caobservability.RecordBalance(account.Balance.AmountCents(), currency)
 
 	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
@@ -272,8 +300,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		}
 
 		// Record business metrics
-		caobservability.RecordDeposit(account.AccountID, account.Balance.Currency())
-		caobservability.RecordBalance(account.AccountID, account.Balance.AmountCents(), account.Balance.Currency())
+		caobservability.RecordDeposit(account.Balance.Currency())
+		caobservability.RecordBalance(account.Balance.AmountCents(), account.Balance.Currency())
 
 		return &pb.ExecuteDepositResponse{
 			AccountId:        account.AccountID,
@@ -292,8 +320,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Record business metrics on success
-	caobservability.RecordDeposit(account.AccountID, account.Balance.Currency())
-	caobservability.RecordBalance(account.AccountID, account.Balance.AmountCents(), account.Balance.Currency())
+	caobservability.RecordDeposit(account.Balance.Currency())
+	caobservability.RecordBalance(account.Balance.AmountCents(), account.Balance.Currency())
 
 	return resp, nil
 }
