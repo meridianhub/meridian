@@ -256,17 +256,8 @@ func (w *Worker) processEntry(ctx context.Context, entry *models.AuditOutbox) er
 		return fmt.Errorf("failed to mark entry as processing: %w", err)
 	}
 
-	// TODO: Implement actual audit log insertion (follow-up PR after #88)
-	// Next step: Create AuditLog model and insert into audit_log table
-	// This will complete the async audit flow:
-	//   Business operation → audit_outbox (Phase 2) → worker processes (this PR) → audit_log (next PR)
-	// Real implementation:
-	//   1. Create models.AuditLog from entry data
-	//   2. Insert into current_account_audit.audit_log table
-	//   3. Handle any errors from the insert
-
-	// Simulate processing (temporary - replaced in next PR)
-	err := w.simulateProcessing(entry)
+	// Insert audit log entry into permanent audit_log table
+	err := w.insertAuditLog(ctx, entry)
 	if err != nil {
 		return w.handleProcessingError(ctx, entry, err)
 	}
@@ -288,32 +279,29 @@ func (w *Worker) processEntry(ctx context.Context, entry *models.AuditOutbox) er
 	return nil
 }
 
-// simulateProcessing is a placeholder for the actual audit log insertion logic.
-// TODO: Replace this function in a follow-up PR with actual audit_log table insertion.
+// insertAuditLog creates a permanent audit log entry from an outbox entry.
+// This completes the async audit flow: business operation → audit_outbox → worker → audit_log.
 //
-// Implementation plan for next PR:
-//  1. Create models.AuditLog struct matching audit_log table schema
-//  2. Copy fields from AuditOutbox entry to AuditLog
-//  3. Insert into current_account_audit.audit_log table
-//  4. Return any errors from the insert operation
-//
-// Example implementation:
-//
-//	auditLog := &models.AuditLog{
-//	    Table:         entry.Table,
-//	    Operation:     entry.Operation,
-//	    RecordID:      entry.RecordID,
-//	    OldValues:     entry.OldValues,
-//	    NewValues:     entry.NewValues,
-//	    ChangedBy:     entry.ChangedBy,
-//	    TransactionID: entry.TransactionID,
-//	    ClientIP:      entry.ClientIP,
-//	    UserAgent:     entry.UserAgent,
-//	    CreatedAt:     time.Now(),
-//	}
-//	return w.db.WithContext(ctx).Create(auditLog).Error
-func (w *Worker) simulateProcessing(_ *models.AuditOutbox) error {
-	// Temporary: Always succeed to allow testing of worker infrastructure
+// The function copies all relevant fields from the outbox entry to the audit log,
+// excluding worker-specific fields (status, retry_count, last_error).
+func (w *Worker) insertAuditLog(ctx context.Context, entry *models.AuditOutbox) error {
+	auditLog := &models.AuditLog{
+		Table:         entry.Table,
+		Operation:     entry.Operation,
+		RecordID:      entry.RecordID,
+		OldValues:     entry.OldValues,
+		NewValues:     entry.NewValues,
+		ChangedBy:     entry.ChangedBy,
+		TransactionID: entry.TransactionID,
+		ClientIP:      entry.ClientIP,
+		UserAgent:     entry.UserAgent,
+		CreatedAt:     time.Now(),
+	}
+
+	if err := w.db.WithContext(ctx).Create(auditLog).Error; err != nil {
+		return fmt.Errorf("failed to insert audit log entry: %w", err)
+	}
+
 	return nil
 }
 
