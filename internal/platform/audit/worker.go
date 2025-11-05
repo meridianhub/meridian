@@ -49,6 +49,7 @@ type Worker struct {
 	maxRetries   int
 	logger       *slog.Logger
 	shutdown     chan struct{}
+	shutdownOnce sync.Once
 	wg           sync.WaitGroup
 }
 
@@ -95,10 +96,12 @@ func (w *Worker) Start(ctx context.Context) {
 
 // Stop initiates graceful shutdown of the worker.
 // It signals the worker to stop and waits for the current batch to complete.
-// Safe to call multiple times.
+// Safe to call multiple times - subsequent calls will block until shutdown completes.
 func (w *Worker) Stop() {
-	w.logger.Info("audit worker stopping")
-	close(w.shutdown)
+	w.shutdownOnce.Do(func() {
+		w.logger.Info("audit worker stopping")
+		close(w.shutdown)
+	})
 	w.wg.Wait()
 	w.logger.Info("audit worker stopped")
 }

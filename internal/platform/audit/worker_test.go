@@ -2,6 +2,9 @@ package audit
 
 import (
 	"context"
+	"log/slog"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -601,4 +604,43 @@ func TestAuditWorker_ProcessBatch_PartialFailure(t *testing.T) {
 	// - We can verify partial batch completion
 	// - We can verify retry logic for failed entries
 	_ = err // Placeholder for future assertions
+}
+
+// TestAuditWorker_Stop_MultipleCallsSafe verifies that calling Stop() multiple times
+// doesn't panic and is safe for concurrent calls.
+func TestAuditWorker_Stop_MultipleCallsSafe(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	worker := NewAuditWorker(db, logger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	worker.Start(ctx)
+
+	// Wait a moment for worker to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Call Stop() multiple times concurrently - should not panic
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			worker.Stop() // Should be safe to call multiple times
+		}()
+	}
+
+	wg.Wait()
+
+	// Verify worker actually stopped by checking it doesn't process new entries
+	createTestEntries(t, db, 5)
+	time.Sleep(200 * time.Millisecond)
+
+	var processed int64
+	db.Model(&models.AuditOutbox{}).Where("status = ?", "completed").Count(&processed)
+	if processed > 0 {
+		t.Errorf("Worker processed entries after Stop(), expected 0 but got %d", processed)
+	}
 }
