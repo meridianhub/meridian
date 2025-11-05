@@ -76,6 +76,7 @@ func getDBConnectionString() string {
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
 		// Default for local development (matches Tiltfile)
+		// #nosec G101 -- Local development credential only, overridden by DATABASE_URL in production
 		connStr = "postgres://meridian:meridian@localhost:26257/meridian?sslmode=disable"
 	}
 	return connStr
