@@ -27,7 +27,7 @@ func TestRecordDeposit(t *testing.T) {
 	depositsTotal.Reset()
 
 	// Record a metric
-	RecordDeposit("ACC-12345", "GBP")
+	RecordDeposit("GBP")
 
 	// Verify metric was recorded
 	count := testutil.CollectAndCount(depositsTotal)
@@ -41,7 +41,7 @@ func TestRecordBalance(t *testing.T) {
 	balanceGauge.Reset()
 
 	// Record a metric
-	RecordBalance("ACC-12345", 10000, "GBP")
+	RecordBalance(10000, "GBP")
 
 	// Verify metric was recorded
 	count := testutil.CollectAndCount(balanceGauge)
@@ -122,7 +122,7 @@ func TestMetricsLabels(t *testing.T) {
 		{
 			name: "deposit_labels",
 			metricFunc: func() {
-				RecordDeposit("ACC-123", "USD")
+				RecordDeposit("USD")
 			},
 			metric: depositsTotal,
 		},

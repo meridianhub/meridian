@@ -210,6 +210,108 @@ func TestHealthChecker_Check_EmptyServiceName(t *testing.T) {
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
 }
 
+func TestHealthChecker_Check_ComponentSpecificDatabase(t *testing.T) {
+	repo := setupTestRepository(t)
+	posClient := &mockPositionKeepingClient{
+		failOnUpdate: false,
+	}
+	finClient := &mockFinancialAccountingClient{
+		failOnCapture: false,
+	}
+
+	checker := NewHealthChecker(HealthCheckerConfig{
+		Repository:                repo,
+		PositionKeepingClient:     posClient,
+		FinancialAccountingClient: finClient,
+		Logger:                    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	})
+
+	ctx := context.Background()
+	resp, err := checker.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "database",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
+	// Verify only database checked (no calls to external services)
+	assert.Equal(t, 0, posClient.listCalls)
+	assert.Equal(t, 0, finClient.listCalls)
+}
+
+func TestHealthChecker_Check_ComponentSpecificPositionKeeping(t *testing.T) {
+	repo := setupTestRepository(t)
+	posClient := &mockPositionKeepingClient{
+		failOnUpdate: false,
+	}
+	finClient := &mockFinancialAccountingClient{
+		failOnCapture: false,
+	}
+
+	checker := NewHealthChecker(HealthCheckerConfig{
+		Repository:                repo,
+		PositionKeepingClient:     posClient,
+		FinancialAccountingClient: finClient,
+		Logger:                    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	})
+
+	ctx := context.Background()
+	resp, err := checker.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "positionkeeping",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
+	// Verify only positionkeeping checked
+	assert.Equal(t, 1, posClient.listCalls)
+	assert.Equal(t, 0, finClient.listCalls)
+}
+
+func TestHealthChecker_Check_ComponentSpecificFinancialAccounting(t *testing.T) {
+	repo := setupTestRepository(t)
+	posClient := &mockPositionKeepingClient{
+		failOnUpdate: false,
+	}
+	finClient := &mockFinancialAccountingClient{
+		failOnCapture: false,
+	}
+
+	checker := NewHealthChecker(HealthCheckerConfig{
+		Repository:                repo,
+		PositionKeepingClient:     posClient,
+		FinancialAccountingClient: finClient,
+		Logger:                    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	})
+
+	ctx := context.Background()
+	resp, err := checker.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "financialaccounting",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
+	// Verify only financialaccounting checked
+	assert.Equal(t, 0, posClient.listCalls)
+	assert.Equal(t, 1, finClient.listCalls)
+}
+
+func TestHealthChecker_Check_ComponentNotFound(t *testing.T) {
+	repo := setupTestRepository(t)
+
+	checker := NewHealthChecker(HealthCheckerConfig{
+		Repository: repo,
+		Logger:     slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	})
+
+	ctx := context.Background()
+	resp, err := checker.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "nonexistent-component",
+	})
+
+	require.NoError(t, err)
+	// Non-existent component should return UNKNOWN
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_UNKNOWN, resp.Status)
+}
+
 func TestHealthChecker_mapStatusToGRPC(t *testing.T) {
 	checker := &HealthChecker{
 		logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),

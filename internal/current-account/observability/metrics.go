@@ -25,7 +25,7 @@ var (
 			Name: "current_account_deposits_total",
 			Help: "Total number of deposit transactions",
 		},
-		[]string{"account_id", "currency"},
+		[]string{"currency"},
 	)
 
 	withdrawalsTotal = promauto.NewCounterVec(
@@ -33,7 +33,7 @@ var (
 			Name: "current_account_withdrawals_total",
 			Help: "Total number of withdrawal transactions",
 		},
-		[]string{"account_id", "currency"},
+		[]string{"currency"},
 	)
 
 	balanceGauge = promauto.NewGaugeVec(
@@ -41,7 +41,7 @@ var (
 			Name: "current_account_balance_cents",
 			Help: "Current account balance in cents",
 		},
-		[]string{"account_id", "currency"},
+		[]string{"currency"},
 	)
 
 	// Saga metrics
@@ -86,18 +86,18 @@ func RecordOperationDuration(operation, status string, duration time.Duration) {
 }
 
 // RecordDeposit records a deposit transaction
-func RecordDeposit(accountID, currency string) {
-	depositsTotal.WithLabelValues(accountID, currency).Inc()
+func RecordDeposit(currency string) {
+	depositsTotal.WithLabelValues(currency).Inc()
 }
 
 // RecordWithdrawal records a withdrawal transaction
-func RecordWithdrawal(accountID, currency string) {
-	withdrawalsTotal.WithLabelValues(accountID, currency).Inc()
+func RecordWithdrawal(currency string) {
+	withdrawalsTotal.WithLabelValues(currency).Inc()
 }
 
 // RecordBalance records the current account balance
-func RecordBalance(accountID string, balanceCents int64, currency string) {
-	balanceGauge.WithLabelValues(accountID, currency).Set(float64(balanceCents))
+func RecordBalance(balanceCents int64, currency string) {
+	balanceGauge.WithLabelValues(currency).Set(float64(balanceCents))
 }
 
 // RecordSagaFailure records a saga failure
