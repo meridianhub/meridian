@@ -12,6 +12,9 @@ import (
 	"github.com/sony/gobreaker/v2"
 )
 
+// ErrTypeAssertion is returned when a type assertion fails in executeWithResilience
+var ErrTypeAssertion = errors.New("type assertion failed")
+
 // ResilientPositionKeepingClient wraps PositionKeepingClient with resilience patterns
 type ResilientPositionKeepingClient struct {
 	client         PositionKeepingClient
@@ -31,10 +34,11 @@ type ResilientFinancialAccountingClient struct {
 // ResilientClientConfig holds configuration for resilient service clients
 type ResilientClientConfig struct {
 	// Circuit breaker configuration
-	CircuitBreakerName    string
-	CircuitBreakerTimeout time.Duration
-	MaxRequests           uint32
-	FailureThreshold      uint32
+	CircuitBreakerName     string
+	CircuitBreakerTimeout  time.Duration
+	CircuitBreakerInterval time.Duration
+	MaxRequests            uint32
+	FailureThreshold       uint32
 
 	// Retry configuration
 	MaxRetries          int
@@ -47,21 +51,22 @@ type ResilientClientConfig struct {
 	Logger *slog.Logger
 }
 
-// NewResilientPositionKeepingClient creates a resilient wrapper around PositionKeepingClient
-func NewResilientPositionKeepingClient(
-	client PositionKeepingClient,
-	config ResilientClientConfig,
-) *ResilientPositionKeepingClient {
+// applyConfigDefaults applies default values to ResilientClientConfig and returns circuit breaker and retry configs
+func applyConfigDefaults(config *ResilientClientConfig, defaultName string) (CircuitBreakerConfig, RetryConfig) {
+	// Apply logger default
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
 
-	// Apply defaults
+	// Apply circuit breaker defaults
 	if config.CircuitBreakerName == "" {
-		config.CircuitBreakerName = "position-keeping"
+		config.CircuitBreakerName = defaultName
 	}
 	if config.CircuitBreakerTimeout == 0 {
 		config.CircuitBreakerTimeout = 30 * time.Second
+	}
+	if config.CircuitBreakerInterval == 0 {
+		config.CircuitBreakerInterval = 60 * time.Second
 	}
 	if config.MaxRequests == 0 {
 		config.MaxRequests = 1
@@ -70,11 +75,11 @@ func NewResilientPositionKeepingClient(
 		config.FailureThreshold = 5
 	}
 
-	// Create circuit breaker
+	// Create circuit breaker config
 	cbConfig := CircuitBreakerConfig{
 		Name:        config.CircuitBreakerName,
 		MaxRequests: config.MaxRequests,
-		Interval:    60 * time.Second,
+		Interval:    config.CircuitBreakerInterval,
 		Timeout:     config.CircuitBreakerTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			return counts.ConsecutiveFailures >= config.FailureThreshold
@@ -87,9 +92,7 @@ func NewResilientPositionKeepingClient(
 		},
 	}
 
-	cb := NewCircuitBreaker(cbConfig, config.Logger)
-
-	// Create retry config with defaults
+	// Apply retry defaults
 	if config.MaxRetries == 0 {
 		config.MaxRetries = 3
 	}
@@ -106,6 +109,7 @@ func NewResilientPositionKeepingClient(
 		config.RandomizationFactor = 0.5
 	}
 
+	// Create retry config
 	retryConfig := RetryConfig{
 		MaxRetries:          config.MaxRetries,
 		InitialInterval:     config.InitialInterval,
@@ -113,6 +117,17 @@ func NewResilientPositionKeepingClient(
 		Multiplier:          config.Multiplier,
 		RandomizationFactor: config.RandomizationFactor,
 	}
+
+	return cbConfig, retryConfig
+}
+
+// NewResilientPositionKeepingClient creates a resilient wrapper around PositionKeepingClient
+func NewResilientPositionKeepingClient(
+	client PositionKeepingClient,
+	config ResilientClientConfig,
+) *ResilientPositionKeepingClient {
+	cbConfig, retryConfig := applyConfigDefaults(&config, "position-keeping")
+	cb := NewCircuitBreaker(cbConfig, config.Logger)
 
 	return &ResilientPositionKeepingClient{
 		client:         client,
@@ -127,67 +142,8 @@ func NewResilientFinancialAccountingClient(
 	client FinancialAccountingClient,
 	config ResilientClientConfig,
 ) *ResilientFinancialAccountingClient {
-	if config.Logger == nil {
-		config.Logger = slog.Default()
-	}
-
-	// Apply defaults
-	if config.CircuitBreakerName == "" {
-		config.CircuitBreakerName = "financial-accounting"
-	}
-	if config.CircuitBreakerTimeout == 0 {
-		config.CircuitBreakerTimeout = 30 * time.Second
-	}
-	if config.MaxRequests == 0 {
-		config.MaxRequests = 1
-	}
-	if config.FailureThreshold == 0 {
-		config.FailureThreshold = 5
-	}
-
-	// Create circuit breaker
-	cbConfig := CircuitBreakerConfig{
-		Name:        config.CircuitBreakerName,
-		MaxRequests: config.MaxRequests,
-		Interval:    60 * time.Second,
-		Timeout:     config.CircuitBreakerTimeout,
-		ReadyToTrip: func(counts gobreaker.Counts) bool {
-			return counts.ConsecutiveFailures >= config.FailureThreshold
-		},
-		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			config.Logger.Info("circuit breaker state changed",
-				"service", name,
-				"from", from.String(),
-				"to", to.String())
-		},
-	}
-
+	cbConfig, retryConfig := applyConfigDefaults(&config, "financial-accounting")
 	cb := NewCircuitBreaker(cbConfig, config.Logger)
-
-	// Create retry config with defaults
-	if config.MaxRetries == 0 {
-		config.MaxRetries = 3
-	}
-	if config.InitialInterval == 0 {
-		config.InitialInterval = 100 * time.Millisecond
-	}
-	if config.MaxInterval == 0 {
-		config.MaxInterval = 5 * time.Second
-	}
-	if config.Multiplier == 0 {
-		config.Multiplier = 2.0
-	}
-	if config.RandomizationFactor == 0 {
-		config.RandomizationFactor = 0.5
-	}
-
-	retryConfig := RetryConfig{
-		MaxRetries:          config.MaxRetries,
-		InitialInterval:     config.InitialInterval,
-		MaxInterval:         config.MaxInterval,
-		Multiplier:          config.Multiplier,
-		RandomizationFactor: config.RandomizationFactor,
-	}
 
 	return &ResilientFinancialAccountingClient{
 		client:         client,
@@ -221,7 +177,12 @@ func executeWithResilience[T any](
 			return fmt.Errorf("circuit breaker execution failed: %w", err)
 		}
 
-		result = res.(T)
+		// Type assertion with check
+		var ok bool
+		result, ok = res.(T)
+		if !ok {
+			return fmt.Errorf("%w: expected %T, got %T", ErrTypeAssertion, result, res)
+		}
 		return nil
 	})
 	if err != nil {
