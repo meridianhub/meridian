@@ -7,35 +7,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-
-	// Run migrations
-	if err := db.AutoMigrate(&CurrentAccountEntity{}); err != nil {
-		t.Fatalf("Failed to migrate database: %v", err)
-	}
-
-	cleanup := func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			_ = sqlDB.Close()
-		}
-	}
-
-	return db, cleanup
+	return testdb.SetupPostgres(t, []interface{}{&CurrentAccountEntity{}})
 }
 
 func TestSaveNewAccount(t *testing.T) {

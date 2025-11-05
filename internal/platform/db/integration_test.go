@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +17,10 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-var errSimulated = errors.New("simulated error")
+var (
+	errSimulated       = errors.New("simulated error")
+	errBalanceMismatch = errors.New("balance mismatch")
+)
 
 // setupPostgresContainer creates a PostgreSQL container for integration testing
 func setupPostgresContainer(ctx context.Context, t *testing.T) (*PostgresPool, func()) {
@@ -39,13 +43,25 @@ func setupPostgresContainer(ctx context.Context, t *testing.T) (*PostgresPool, f
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err, "failed to get connection string")
 
-	// Create connection pool
+	// Create connection pool with sufficient connections for concurrent tests
 	cfg := DefaultConfig(connStr)
-	cfg.MaxConnections = 10
-	cfg.MinConnections = 2
+	cfg.MaxConnections = 25 // Slightly more than max concurrency (20) to prevent exhaustion
+	cfg.MinConnections = 5
 
 	pool, err := NewPostgresPool(ctx, cfg)
 	require.NoError(t, err, "failed to create postgres pool")
+
+	// Verify pool connectivity with retries (CI environments may have brief delays)
+	var pingErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		pingErr = pool.Ping(ctx)
+		if pingErr == nil {
+			break
+		}
+		t.Logf("Ping attempt %d failed: %v, retrying...", attempt, pingErr)
+		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+	}
+	require.NoError(t, pingErr, "failed to ping postgres after retries")
 
 	// Create test table
 	createTableSQL := `
@@ -60,6 +76,17 @@ func setupPostgresContainer(ctx context.Context, t *testing.T) (*PostgresPool, f
 	`
 	_, err = pool.ExecContext(ctx, createTableSQL)
 	require.NoError(t, err, "failed to create test table")
+
+	// Verify table creation (ensures PostgreSQL is fully ready for writes)
+	var tableExists bool
+	err = pool.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables
+			WHERE table_name = 'accounts'
+		)
+	`).Scan(&tableExists)
+	require.NoError(t, err, "failed to verify table creation")
+	require.True(t, tableExists, "accounts table should exist after creation")
 
 	cleanup := func() {
 		_ = pool.Close()
@@ -336,46 +363,93 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 	pool, cleanup := setupPostgresContainer(ctx, t)
 	defer cleanup()
 
-	// Insert test accounts
-	for i := 1; i <= 10; i++ {
-		_, err := pool.ExecContext(ctx,
-			"INSERT INTO accounts (account_id, name, balance) VALUES ($1, $2, $3)",
-			fmt.Sprintf("ACC-%03d", i), fmt.Sprintf("Account %d", i), float64(i*100))
-		require.NoError(t, err)
-	}
+	// Verify database readiness with health check
+	t.Log("Verifying database readiness...")
+	require.NoError(t, pool.Ping(ctx), "database should be ready")
 
-	// Run concurrent queries
 	concurrency := 20
 	iterations := 10
+
+	// SETUP PHASE: Pre-create all accounts sequentially to avoid race conditions
+	t.Logf("Setting up %d test accounts...", concurrency)
+	for i := 0; i < concurrency; i++ {
+		accountID := fmt.Sprintf("ACC-%03d", i)
+		setupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err := pool.ExecContext(setupCtx,
+			"INSERT INTO accounts (account_id, name, balance) VALUES ($1, $2, $3)",
+			accountID, fmt.Sprintf("Worker %d Account", i), 100.00)
+		cancel()
+		require.NoError(t, err, "failed to create account %s", accountID)
+	}
+
+	// Verify all accounts were created
+	var accountCount int
+	require.NoError(t, pool.QueryRowContext(ctx, "SELECT COUNT(*) FROM accounts").Scan(&accountCount))
+	require.Equal(t, concurrency, accountCount, "all accounts should be created before concurrent phase")
+
+	// Log connection pool stats before concurrent phase
+	stats := pool.Stats()
+	t.Logf("Pool stats before concurrent phase - InUse: %d, Idle: %d, MaxOpen: %d",
+		stats.InUse, stats.Idle, stats.MaxOpenConnections)
+
+	// CONCURRENT PHASE: Each worker operates on its pre-created account
+	t.Logf("Starting concurrent phase with %d workers, %d iterations each...", concurrency, iterations)
 	var wg sync.WaitGroup
-	errors := make(chan error, concurrency*iterations)
+	errors := make(chan error, concurrency) // Sized for max concurrent errors (one per worker)
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 
-			for j := 0; j < iterations; j++ {
-				accountID := fmt.Sprintf("ACC-%03d", (workerID%10)+1)
+			accountID := fmt.Sprintf("ACC-%03d", workerID)
 
-				// Query account
+			// Perform iterations on this worker's unique account
+			for j := 0; j < iterations; j++ {
+				// Use timeout context for each operation
+				queryCtx, queryCancel := context.WithTimeout(ctx, 3*time.Second)
+				defer queryCancel() // Ensure cancellation even if panic occurs
+
 				var balance float64
-				err := pool.QueryRowContext(ctx,
+				err := pool.QueryRowContext(queryCtx,
 					"SELECT balance FROM accounts WHERE account_id = $1",
 					accountID).Scan(&balance)
 				if err != nil {
-					errors <- fmt.Errorf("worker %d iteration %d: %w", workerID, j, err)
+					errors <- fmt.Errorf("worker %d iteration %d query: %w", workerID, j, err)
 					return
 				}
 
-				// Update account
-				_, err = pool.ExecContext(ctx,
+				// Update with timeout
+				updateCtx, updateCancel := context.WithTimeout(ctx, 3*time.Second)
+				defer updateCancel() // Ensure cancellation even if panic occurs
+
+				_, err = pool.ExecContext(updateCtx,
 					"UPDATE accounts SET balance = balance + $1 WHERE account_id = $2",
 					10.00, accountID)
 				if err != nil {
-					errors <- fmt.Errorf("worker %d iteration %d: %w", workerID, j, err)
+					errors <- fmt.Errorf("worker %d iteration %d update: %w", workerID, j, err)
 					return
 				}
+			}
+
+			// Verify final balance
+			checkCtx, checkCancel := context.WithTimeout(ctx, 3*time.Second)
+			defer checkCancel() // Ensure cancellation even if panic occurs
+
+			var finalBalance float64
+			err := pool.QueryRowContext(checkCtx,
+				"SELECT balance FROM accounts WHERE account_id = $1",
+				accountID).Scan(&finalBalance)
+			if err != nil {
+				errors <- fmt.Errorf("worker %d final check: %w", workerID, err)
+				return
+			}
+
+			expectedBalance := 100.00 + float64(iterations)*10.00
+			// Use tolerance for floating-point comparison to handle precision issues
+			const tolerance = 0.01
+			if math.Abs(finalBalance-expectedBalance) > tolerance {
+				errors <- fmt.Errorf("worker %d: %w (expected %.2f, got %.2f)", workerID, errBalanceMismatch, expectedBalance, finalBalance)
 			}
 		}(i)
 	}
@@ -383,11 +457,24 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 	wg.Wait()
 	close(errors)
 
-	// Check for errors
+	// Collect and report all errors with details
 	errorList := []error{}
 	for err := range errors {
 		errorList = append(errorList, err)
 	}
+
+	// Log final pool stats for debugging
+	finalStats := pool.Stats()
+	t.Logf("Pool stats after concurrent phase - InUse: %d, Idle: %d, MaxOpen: %d, WaitCount: %d",
+		finalStats.InUse, finalStats.Idle, finalStats.MaxOpenConnections, finalStats.WaitCount)
+
+	if len(errorList) > 0 {
+		t.Logf("Encountered %d errors during concurrent operations:", len(errorList))
+		for _, err := range errorList {
+			t.Logf("  - %v", err)
+		}
+	}
+
 	assert.Empty(t, errorList, "concurrent queries should not produce errors")
 }
 

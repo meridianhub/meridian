@@ -8,36 +8,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/financial-accounting/domain"
+	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/shopspring/decimal"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
-func setupTestDB(t *testing.T) *gorm.DB {
+func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to obtain sql.DB: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-
-	// Run migrations
-	err = db.AutoMigrate(&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{})
-	if err != nil {
-		t.Fatalf("Failed to migrate: %v", err)
-	}
-
-	return db
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{}})
+	return db, cleanup
 }
 
 func TestProcessDeposit(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 
@@ -95,7 +79,8 @@ func TestProcessDeposit(t *testing.T) {
 }
 
 func TestValidateDoubleEntry(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
@@ -130,7 +115,8 @@ func TestValidateDoubleEntry(t *testing.T) {
 }
 
 func TestProcessDeposit_InvalidAmount(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 
@@ -150,7 +136,8 @@ func TestProcessDeposit_InvalidAmount(t *testing.T) {
 }
 
 func TestGetPostingsByBookingLog(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
@@ -200,7 +187,8 @@ func TestGetPostingsByBookingLog(t *testing.T) {
 }
 
 func TestValidateDoubleEntry_Unbalanced(t *testing.T) {
-	db := setupTestDB(t)
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
 	ctx := context.Background()
