@@ -407,12 +407,41 @@ func TestResilientClient_NonIdempotentOperationsNoRetry(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, int32(1), callCount.Load(), "should not retry non-idempotent operation")
 	})
+
+	t.Run("CaptureLedgerPosting", func(t *testing.T) {
+		var callCount atomic.Int32
+
+		mockClient := &mockFinancialAccountingClient{
+			capturePostingFn: func(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+				callCount.Add(1)
+				return nil, status.Error(codes.Unavailable, "service unavailable")
+			},
+		}
+
+		config := clients.ResilientClientConfig{
+			MaxRetries:       3, // Would retry if enabled
+			FailureThreshold: 10,
+			Logger:           slog.Default(),
+		}
+
+		resilientClient := clients.NewResilientFinancialAccountingClient(mockClient, config)
+		defer func() {
+			assert.NoError(t, resilientClient.Close())
+		}()
+
+		ctx := context.Background()
+		_, err := resilientClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{})
+
+		assert.Error(t, err)
+		assert.Equal(t, int32(1), callCount.Load(), "should not retry until server-side idempotency confirmed")
+	})
 }
 
 // mockFinancialAccountingClient for testing
 type mockFinancialAccountingClient struct {
-	closeFn         func() error
-	updateBookingFn func(context.Context, *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error)
+	closeFn          func() error
+	updateBookingFn  func(context.Context, *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error)
+	capturePostingFn func(context.Context, *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error)
 }
 
 func (m *mockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
@@ -434,7 +463,10 @@ func (m *mockFinancialAccountingClient) ListFinancialBookingLogs(_ context.Conte
 	return nil, nil
 }
 
-func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+func (m *mockFinancialAccountingClient) CaptureLedgerPosting(ctx context.Context, req *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+	if m.capturePostingFn != nil {
+		return m.capturePostingFn(ctx, req)
+	}
 	return nil, nil
 }
 

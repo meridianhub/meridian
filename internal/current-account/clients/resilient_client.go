@@ -374,6 +374,9 @@ func (r *ResilientFinancialAccountingClient) ListFinancialBookingLogs(
 }
 
 // CaptureLedgerPosting creates a new ledger posting with resilience
+// NOTE: Retries are disabled until server-side idempotency deduplication is confirmed.
+// The protobuf includes idempotency_key, but retries are disabled to prevent duplicate
+// ledger postings until the server implementation is verified to use it for deduplication.
 func (r *ResilientFinancialAccountingClient) CaptureLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.CaptureLedgerPostingRequest,
@@ -381,7 +384,7 @@ func (r *ResilientFinancialAccountingClient) CaptureLedgerPosting(
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
-		r.retryConfig,
+		noRetryConfig, // No retries - server-side idempotency not yet confirmed
 		r.logger,
 		"CaptureLedgerPosting",
 		func() (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
