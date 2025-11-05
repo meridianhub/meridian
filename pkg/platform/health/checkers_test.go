@@ -23,7 +23,9 @@ const (
 
 // TestDatabaseChecker_Name verifies the checker name
 func TestDatabaseChecker_Name(t *testing.T) {
-	checker := &DatabaseChecker{}
+	// Use a minimal pool for testing Name() - Name() doesn't access the pool
+	pool := &db.PostgresPool{}
+	checker := NewDatabaseChecker(pool)
 	if checker.Name() != componentNameDatabase {
 		t.Errorf("Name() = %v, want database", checker.Name())
 	}
@@ -135,7 +137,12 @@ func TestDatabaseChecker_Check_Unhealthy(t *testing.T) {
 
 // TestRedisChecker_Name verifies the checker name
 func TestRedisChecker_Name(t *testing.T) {
-	checker := &RedisChecker{}
+	// Use miniredis for a lightweight valid instance
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+	checker := NewRedisChecker(client)
 	if checker.Name() != componentNameRedis {
 		t.Errorf("Name() = %v, want redis", checker.Name())
 	}
@@ -194,7 +201,9 @@ func TestRedisChecker_Check_Unhealthy(t *testing.T) {
 
 // TestKafkaChecker_Name verifies the checker name
 func TestKafkaChecker_Name(t *testing.T) {
-	checker := &KafkaChecker{}
+	// Use a no-op check function for the Name test
+	checkFunc := func(_ context.Context) error { return nil }
+	checker := NewKafkaChecker(checkFunc)
 	if checker.Name() != componentNameKafka {
 		t.Errorf("Name() = %v, want kafka", checker.Name())
 	}
