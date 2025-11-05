@@ -16,7 +16,10 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-var errSimulated = errors.New("simulated error")
+var (
+	errSimulated       = errors.New("simulated error")
+	errBalanceMismatch = errors.New("balance mismatch")
+)
 
 // setupPostgresContainer creates a PostgreSQL container for integration testing
 func setupPostgresContainer(ctx context.Context, t *testing.T) (*PostgresPool, func()) {
@@ -336,35 +339,37 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 	pool, cleanup := setupPostgresContainer(ctx, t)
 	defer cleanup()
 
-	// Insert test accounts
-	for i := 1; i <= 10; i++ {
-		_, err := pool.ExecContext(ctx,
-			"INSERT INTO accounts (account_id, name, balance) VALUES ($1, $2, $3)",
-			fmt.Sprintf("ACC-%03d", i), fmt.Sprintf("Account %d", i), float64(i*100))
-		require.NoError(t, err)
-	}
-
 	// Run concurrent queries
 	concurrency := 20
 	iterations := 10
 	var wg sync.WaitGroup
 	errors := make(chan error, concurrency*iterations)
 
+	// Each worker gets its own unique account to avoid serialization conflicts
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 
-			for j := 0; j < iterations; j++ {
-				accountID := fmt.Sprintf("ACC-%03d", (workerID%10)+1)
+			// Create a unique account for this worker
+			accountID := fmt.Sprintf("ACC-%03d", workerID)
+			_, err := pool.ExecContext(ctx,
+				"INSERT INTO accounts (account_id, name, balance) VALUES ($1, $2, $3)",
+				accountID, fmt.Sprintf("Worker %d Account", workerID), 100.00)
+			if err != nil {
+				errors <- fmt.Errorf("worker %d setup: %w", workerID, err)
+				return
+			}
 
+			// Perform iterations on this worker's unique account
+			for j := 0; j < iterations; j++ {
 				// Query account
 				var balance float64
 				err := pool.QueryRowContext(ctx,
 					"SELECT balance FROM accounts WHERE account_id = $1",
 					accountID).Scan(&balance)
 				if err != nil {
-					errors <- fmt.Errorf("worker %d iteration %d: %w", workerID, j, err)
+					errors <- fmt.Errorf("worker %d iteration %d query: %w", workerID, j, err)
 					return
 				}
 
@@ -373,9 +378,24 @@ func TestPostgresPool_Integration_ConcurrentQueries(t *testing.T) {
 					"UPDATE accounts SET balance = balance + $1 WHERE account_id = $2",
 					10.00, accountID)
 				if err != nil {
-					errors <- fmt.Errorf("worker %d iteration %d: %w", workerID, j, err)
+					errors <- fmt.Errorf("worker %d iteration %d update: %w", workerID, j, err)
 					return
 				}
+			}
+
+			// Verify final balance is correct (initial 100 + 10 iterations * 10.00)
+			var finalBalance float64
+			err = pool.QueryRowContext(ctx,
+				"SELECT balance FROM accounts WHERE account_id = $1",
+				accountID).Scan(&finalBalance)
+			if err != nil {
+				errors <- fmt.Errorf("worker %d final check: %w", workerID, err)
+				return
+			}
+
+			expectedBalance := 100.00 + float64(iterations)*10.00
+			if finalBalance != expectedBalance {
+				errors <- fmt.Errorf("worker %d: %w (expected %.2f, got %.2f)", workerID, errBalanceMismatch, expectedBalance, finalBalance)
 			}
 		}(i)
 	}
