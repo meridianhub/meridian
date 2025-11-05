@@ -256,6 +256,8 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 	if correlationID == "" {
 		correlationID = uuid.New().String()
 		s.logger.Info("generated new correlation ID", "correlation_id", correlationID)
+		// Add the generated correlation ID to the context so it can be propagated
+		ctx = observability.WithCorrelationID(ctx, correlationID)
 	} else {
 		s.logger.Info("using existing correlation ID", "correlation_id", correlationID)
 	}
@@ -263,57 +265,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 	// Create saga orchestrator
 	saga := clients.NewSagaOrchestrator(s.logger)
 
-	// Store original account state for compensation
-	var originalAccount *domain.CurrentAccount
-
-	// Step 1: Save account to database
-	saga.AddStep("save_account",
-		// Action: Save updated account
-		func(_ context.Context) error {
-			s.logger.Info("executing save_account step",
-				"account_id", account.AccountID,
-				"transaction_id", transactionID)
-
-			// Save original state before persisting
-			var err error
-			originalAccount, err = s.repo.FindByID(account.AccountID)
-			if err != nil {
-				return fmt.Errorf("failed to retrieve original account state: %w", err)
-			}
-
-			if err := s.repo.Save(account); err != nil {
-				return fmt.Errorf("failed to save account: %w", err)
-			}
-
-			s.logger.Info("save_account step completed",
-				"account_id", account.AccountID,
-				"new_balance", account.Balance.AmountCents())
-
-			return nil
-		},
-		// Compensate: Rollback account state
-		func(_ context.Context) error {
-			s.logger.Info("compensating save_account step",
-				"account_id", account.AccountID)
-
-			if originalAccount == nil {
-				s.logger.Warn("cannot compensate save_account: original state not captured")
-				return ErrOriginalAccountStateNotFound
-			}
-
-			if err := s.repo.Save(originalAccount); err != nil {
-				return fmt.Errorf("failed to rollback account state: %w", err)
-			}
-
-			s.logger.Info("save_account compensation completed",
-				"account_id", account.AccountID,
-				"restored_balance", originalAccount.Balance.AmountCents())
-
-			return nil
-		},
-	)
-
-	// Step 2: Log position in PositionKeeping service
+	// Step 1: Log position in PositionKeeping service
 	var positionLogID string
 	saga.AddStep("log_position",
 		// Action: Create position log entry
@@ -399,7 +351,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 		},
 	)
 
-	// Step 3: Post to ledger in FinancialAccounting service
+	// Step 2: Post to ledger in FinancialAccounting service
 	var ledgerPostingID string
 	saga.AddStep("post_ledger",
 		// Action: Create ledger posting
@@ -477,6 +429,43 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			s.logger.Info("post_ledger compensation completed",
 				"ledger_posting_id", ledgerPostingID)
 
+			return nil
+		},
+	)
+
+	// Step 3: Save account to database (only after external services succeed)
+	saga.AddStep("save_account",
+		// Action: Persist the updated account balance
+		func(_ context.Context) error {
+			s.logger.Info("executing save_account step",
+				"account_id", account.AccountID,
+				"transaction_id", transactionID,
+				"new_balance", account.Balance.AmountCents())
+
+			if err := s.repo.Save(account); err != nil {
+				return fmt.Errorf("failed to save account: %w", err)
+			}
+
+			s.logger.Info("save_account step completed",
+				"account_id", account.AccountID,
+				"new_balance", account.Balance.AmountCents())
+
+			return nil
+		},
+		// Compensate: No database save needed - account never persisted
+		func(_ context.Context) error {
+			s.logger.Info("compensating save_account step (no-op)",
+				"account_id", account.AccountID,
+				"reason", "external services failed before persisting balance")
+
+			// No action needed - if we reach here, it means the save failed
+			// or we're rolling back before the save completed. The account
+			// in memory has the updated balance, but it was never persisted,
+			// so there's nothing to rollback in the database.
+			// The external services (position log and ledger) will be
+			// compensated by their respective compensation actions.
+
+			s.logger.Info("save_account compensation completed (no-op)")
 			return nil
 		},
 	)

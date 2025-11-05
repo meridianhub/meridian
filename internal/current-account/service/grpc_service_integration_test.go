@@ -328,10 +328,10 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 // when the PositionKeeping service fails.
 //
 // Expected behavior:
-// 1. Account is saved to database (step 1 succeeds)
-// 2. PositionKeeping UpdateFinancialPositionLog fails (step 2 fails)
-// 3. Saga triggers compensation for step 1 (rollback account state)
-// 4. FinancialAccounting CaptureLedgerPosting is never called (step 3 not reached)
+// 1. PositionKeeping UpdateFinancialPositionLog fails (step 1 fails)
+// 2. FinancialAccounting CaptureLedgerPosting is never called (step 2 not reached)
+// 3. Account save is never called (step 3 not reached)
+// 4. No compensation needed (no steps completed)
 // 5. Transaction fails with appropriate error
 func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	// Setup
@@ -373,14 +373,13 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	assert.Contains(t, st.Message(), "compensated", "Error should mention compensation")
 
 	// Verify account state after failure
-	// NOTE: Current limitation - compensation fails due to optimistic locking version conflict.
-	// The account remains in the updated state. This is a known issue that should be addressed
-	// by implementing proper compensation with version handling.
+	// With the fixed saga ordering, the account is never saved if external services fail,
+	// so the balance should remain unchanged
 	updatedAccount, err := repo.FindByID("ACC-002")
 	require.NoError(t, err)
-	// Account balance is NOT rolled back due to version conflict in compensation
-	assert.NotEqual(t, originalBalance, updatedAccount.Balance.AmountCents(),
-		"Account balance is NOT rolled back due to compensation version conflict (known limitation)")
+	// Account balance should be unchanged because save_account is the final step
+	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+		"Account balance should remain unchanged when external services fail")
 
 	// Verify service calls
 	assert.Equal(t, 1, mockPosKeeping.updateCalls, "PositionKeeping should be called once (and fail)")
@@ -396,12 +395,11 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 // when the FinancialAccounting service fails after PositionKeeping succeeds.
 //
 // Expected behavior:
-// 1. Account is saved to database (step 1 succeeds)
-// 2. PositionKeeping UpdateFinancialPositionLog succeeds (step 2 succeeds)
-// 3. FinancialAccounting CaptureLedgerPosting fails (step 3 fails)
+// 1. PositionKeeping UpdateFinancialPositionLog succeeds (step 1 succeeds)
+// 2. FinancialAccounting CaptureLedgerPosting fails (step 2 fails)
+// 3. Account save is never called (step 3 not reached)
 // 4. Saga triggers compensation in reverse order:
-//   - Compensate step 2: Create reversing position entry (debit)
-//   - Compensate step 1: Rollback account state
+//   - Compensate step 1: Create reversing position entry (debit)
 //
 // 5. Transaction fails with appropriate error
 func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.T) {
@@ -444,11 +442,12 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 	assert.Contains(t, st.Message(), "compensated", "Error should mention compensation")
 
 	// Verify account state after failure
-	// NOTE: Current limitation - compensation fails due to optimistic locking version conflict.
+	// With the fixed saga ordering, the account is never saved if external services fail,
+	// so the balance should remain unchanged
 	updatedAccount, err := repo.FindByID("ACC-003")
 	require.NoError(t, err)
-	assert.NotEqual(t, originalBalance, updatedAccount.Balance.AmountCents(),
-		"Account balance is NOT rolled back due to compensation version conflict (known limitation)")
+	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+		"Account balance should remain unchanged when external services fail")
 
 	// Verify service calls
 	assert.Equal(t, 2, mockPosKeeping.updateCalls, "PositionKeeping should be called twice (action + compensation)")
@@ -650,11 +649,11 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 		"PositionKeeping compensation should be triggered")
 
 	// Verify account state after failure
-	// NOTE: Current limitation - compensation fails due to optimistic locking version conflict.
+	// With the fixed saga ordering, the account is never saved if external services fail
 	updatedAccount, err := repo.FindByID("ACC-004")
 	require.NoError(t, err)
-	assert.NotEqual(t, originalBalance, updatedAccount.Balance.AmountCents(),
-		"Account balance is NOT rolled back due to compensation version conflict (known limitation)")
+	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+		"Account balance should remain unchanged when external services fail")
 }
 
 // Test 7: Context propagation through saga steps
