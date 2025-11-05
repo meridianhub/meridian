@@ -289,6 +289,9 @@ func (d *DatabaseHealthChecker) Check(ctx context.Context) health.ComponentResul
 	if err != nil && !errors.Is(err, persistence.ErrAccountNotFound) {
 		status = health.StatusUnhealthy
 		message = fmt.Sprintf("database check failed: %v", err)
+	} else if errors.Is(err, persistence.ErrAccountNotFound) {
+		// Clear the error - ErrAccountNotFound is the expected successful result
+		err = nil
 	}
 
 	// Check context cancellation (timeout)
