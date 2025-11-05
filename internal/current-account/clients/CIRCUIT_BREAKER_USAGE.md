@@ -157,7 +157,7 @@ if err != nil {
 
 The circuit breaker logs state transitions automatically:
 
-```
+```text
 level=INFO msg="circuit breaker state changed" name=financial-accounting-service from=closed to=open
 level=INFO msg="circuit breaker state changed" name=financial-accounting-service from=open to=half-open
 level=INFO msg="circuit breaker state changed" name=financial-accounting-service from=half-open to=closed

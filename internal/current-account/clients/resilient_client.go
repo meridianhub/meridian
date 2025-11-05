@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc/codes"
@@ -207,16 +208,16 @@ func executeWithResilience[T any](
 // InitiateFinancialPositionLog creates a new financial position log with resilience
 func (r *ResilientPositionKeepingClient) InitiateFinancialPositionLog(
 	ctx context.Context,
-	req interface{},
-) (interface{}, error) {
+	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
+) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
 		r.retryConfig,
 		r.logger,
 		"InitiateFinancialPositionLog",
-		func() (interface{}, error) {
-			return r.client.InitiateFinancialPositionLog(ctx, req.(*positionkeepingv1.InitiateFinancialPositionLogRequest))
+		func() (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
+			return r.client.InitiateFinancialPositionLog(ctx, req)
 		},
 	)
 }
@@ -224,16 +225,16 @@ func (r *ResilientPositionKeepingClient) InitiateFinancialPositionLog(
 // UpdateFinancialPositionLog updates an existing financial position log with resilience
 func (r *ResilientPositionKeepingClient) UpdateFinancialPositionLog(
 	ctx context.Context,
-	req interface{},
-) (interface{}, error) {
+	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
+) (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
 		r.retryConfig,
 		r.logger,
 		"UpdateFinancialPositionLog",
-		func() (interface{}, error) {
-			return r.client.UpdateFinancialPositionLog(ctx, req.(*positionkeepingv1.UpdateFinancialPositionLogRequest))
+		func() (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
+			return r.client.UpdateFinancialPositionLog(ctx, req)
 		},
 	)
 }
@@ -241,16 +242,16 @@ func (r *ResilientPositionKeepingClient) UpdateFinancialPositionLog(
 // RetrieveFinancialPositionLog retrieves a specific financial position log with resilience
 func (r *ResilientPositionKeepingClient) RetrieveFinancialPositionLog(
 	ctx context.Context,
-	req interface{},
-) (interface{}, error) {
+	req *positionkeepingv1.RetrieveFinancialPositionLogRequest,
+) (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
 		r.retryConfig,
 		r.logger,
 		"RetrieveFinancialPositionLog",
-		func() (interface{}, error) {
-			return r.client.RetrieveFinancialPositionLog(ctx, req.(*positionkeepingv1.RetrieveFinancialPositionLogRequest))
+		func() (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
+			return r.client.RetrieveFinancialPositionLog(ctx, req)
 		},
 	)
 }
@@ -258,16 +259,16 @@ func (r *ResilientPositionKeepingClient) RetrieveFinancialPositionLog(
 // BulkImportTransactions imports multiple transactions with resilience
 func (r *ResilientPositionKeepingClient) BulkImportTransactions(
 	ctx context.Context,
-	req interface{},
-) (interface{}, error) {
+	req *positionkeepingv1.BulkImportTransactionsRequest,
+) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
 		r.retryConfig,
 		r.logger,
 		"BulkImportTransactions",
-		func() (interface{}, error) {
-			return r.client.BulkImportTransactions(ctx, req.(*positionkeepingv1.BulkImportTransactionsRequest))
+		func() (*positionkeepingv1.BulkImportTransactionsResponse, error) {
+			return r.client.BulkImportTransactions(ctx, req)
 		},
 	)
 }
@@ -275,16 +276,16 @@ func (r *ResilientPositionKeepingClient) BulkImportTransactions(
 // ListFinancialPositionLogs lists financial position logs with resilience
 func (r *ResilientPositionKeepingClient) ListFinancialPositionLogs(
 	ctx context.Context,
-	req interface{},
-) (interface{}, error) {
+	req *positionkeepingv1.ListFinancialPositionLogsRequest,
+) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
 		r.retryConfig,
 		r.logger,
 		"ListFinancialPositionLogs",
-		func() (interface{}, error) {
-			return r.client.ListFinancialPositionLogs(ctx, req.(*positionkeepingv1.ListFinancialPositionLogsRequest))
+		func() (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
+			return r.client.ListFinancialPositionLogs(ctx, req)
 		},
 	)
 }
@@ -295,6 +296,108 @@ func (r *ResilientPositionKeepingClient) Close() error {
 		return fmt.Errorf("failed to close position keeping client: %w", err)
 	}
 	return nil
+}
+
+// InitiateFinancialBookingLog creates a new financial booking log with resilience
+func (r *ResilientFinancialAccountingClient) InitiateFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.InitiateFinancialBookingLogRequest,
+) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+	return executeWithResilience(
+		ctx,
+		r.circuitBreaker,
+		r.retryConfig,
+		r.logger,
+		"InitiateFinancialBookingLog",
+		func() (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+			return r.client.InitiateFinancialBookingLog(ctx, req)
+		},
+	)
+}
+
+// UpdateFinancialBookingLog updates an existing financial booking log with resilience
+func (r *ResilientFinancialAccountingClient) UpdateFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
+) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	return executeWithResilience(
+		ctx,
+		r.circuitBreaker,
+		r.retryConfig,
+		r.logger,
+		"UpdateFinancialBookingLog",
+		func() (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+			return r.client.UpdateFinancialBookingLog(ctx, req)
+		},
+	)
+}
+
+// RetrieveFinancialBookingLog retrieves a specific financial booking log with resilience
+func (r *ResilientFinancialAccountingClient) RetrieveFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.RetrieveFinancialBookingLogRequest,
+) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
+	return executeWithResilience(
+		ctx,
+		r.circuitBreaker,
+		r.retryConfig,
+		r.logger,
+		"RetrieveFinancialBookingLog",
+		func() (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
+			return r.client.RetrieveFinancialBookingLog(ctx, req)
+		},
+	)
+}
+
+// ListFinancialBookingLogs lists financial booking logs with resilience
+func (r *ResilientFinancialAccountingClient) ListFinancialBookingLogs(
+	ctx context.Context,
+	req *financialaccountingv1.ListFinancialBookingLogsRequest,
+) (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
+	return executeWithResilience(
+		ctx,
+		r.circuitBreaker,
+		r.retryConfig,
+		r.logger,
+		"ListFinancialBookingLogs",
+		func() (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
+			return r.client.ListFinancialBookingLogs(ctx, req)
+		},
+	)
+}
+
+// CaptureLedgerPosting creates a new ledger posting with resilience
+func (r *ResilientFinancialAccountingClient) CaptureLedgerPosting(
+	ctx context.Context,
+	req *financialaccountingv1.CaptureLedgerPostingRequest,
+) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+	return executeWithResilience(
+		ctx,
+		r.circuitBreaker,
+		r.retryConfig,
+		r.logger,
+		"CaptureLedgerPosting",
+		func() (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+			return r.client.CaptureLedgerPosting(ctx, req)
+		},
+	)
+}
+
+// RetrieveLedgerPosting retrieves a specific ledger posting with resilience
+func (r *ResilientFinancialAccountingClient) RetrieveLedgerPosting(
+	ctx context.Context,
+	req *financialaccountingv1.RetrieveLedgerPostingRequest,
+) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
+	return executeWithResilience(
+		ctx,
+		r.circuitBreaker,
+		r.retryConfig,
+		r.logger,
+		"RetrieveLedgerPosting",
+		func() (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
+			return r.client.RetrieveLedgerPosting(ctx, req)
+		},
+	)
 }
 
 // Close closes the underlying client connection
