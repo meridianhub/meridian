@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -160,6 +161,10 @@ func (mc *MetricsCollector) StartMetricsServer(ctx context.Context, addr string)
 	}()
 
 	if err := server.ListenAndServe(); err != nil {
+		// http.ErrServerClosed is returned on graceful shutdown, not an error
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
 		return fmt.Errorf("metrics server failed: %w", err)
 	}
 	return nil
