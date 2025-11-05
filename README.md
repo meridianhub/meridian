@@ -1,19 +1,16 @@
 # Meridian - BIAN-Compliant Open Banking Ledger
 
-A learning-focused reference implementation of an open banking ledger following BIAN (Banking Industry Architecture Network) standards. This project demonstrates how to build a distributed banking system using modern microservices patterns and BIAN-compliant service domains.
+A learning-focused reference implementation of an open banking ledger following BIAN (Banking Industry Architecture Network) standards.
 
-## Project Goals
-
-This is a **reference implementation** for educational purposes, demonstrating:
-
+**What it demonstrates:**
 - BIAN-compliant service domain architecture
 - Modern microservices patterns for financial systems
-- Double-entry accounting principles in distributed systems
-- Protocol Buffer-based API design for banking services
+- Double-entry accounting in distributed systems
+- Protocol Buffer-based API design
 - Event-driven architecture with Kafka
-- Kubernetes-native deployment patterns
+- Kubernetes-native deployment
 
-**Note**: This is not production-ready software. It's designed as a learning tool and architectural reference for building BIAN-compliant banking systems.
+**Note**: This is a learning tool, not production-ready software. It's designed as an architectural reference for building BIAN-compliant banking systems.
 
 ## Project Structure
 
@@ -73,256 +70,100 @@ Reference specifications: BIAN Service Landscape 13.0.0
 
 ## Quick Start
 
-### Automated Setup
-
-Verify your development environment:
+**Prerequisites**: Go 1.23+, Docker, kubectl, kind, tilt ([see detailed setup](CONTRIBUTING.md#development-environment-setup))
 
 ```bash
-./scripts/setup-check.sh
-```
+# 1. Clone and install dependencies
+git clone git@github.com:meridianhub/meridian.git
+cd meridian
+go mod download
+./setup-hooks.sh
 
-Install missing tools automatically (macOS/Linux):
+# 2. Create local Kubernetes cluster (Docker must be running)
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
-```bash
-./scripts/install-tools.sh
-```
-
-### Getting Started in < 5 Minutes
-
-1. **Clone and setup**:
-   ```bash
-   git clone git@github.com:meridianhub/meridian.git
-   cd meridian
-   go mod download
-
-   # Install git hooks for automated validation
-   ./setup-hooks.sh
-   ```
-
-2. **Create local Kubernetes cluster with local registry**:
-   ```bash
-   # Ensure Docker Desktop is running
-   # The --registry flag creates a local registry for faster image builds (no remote push/pull)
-   ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
-   ```
-
-3. **Start local environment**:
-   ```bash
-   tilt up
-   ```
-
-4. **Access services**:
-   - Tilt UI: http://localhost:10350
-   - Meridian API: http://localhost:8080
-   - Meridian gRPC: localhost:9090
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
-
-## Development Workflow
-
-### Prerequisites
-
-Required tools (see [CONTRIBUTING.md](CONTRIBUTING.md#development-environment-setup) for installation):
-
-- **Go 1.25.3+**: Core language
-- **buf CLI**: Protocol buffer tooling
-- **Docker**: Container runtime
-- **Kind**: Local Kubernetes cluster
-- **ctlptl**: Cluster lifecycle management
-- **kubectl**: Kubernetes CLI
-- **Helm**: Package manager
-- **Tilt**: Local development orchestration
-- **golangci-lint**: Code linting
-- **Make**: Build automation
-
-### Manual Development Workflow
-
-If not using Tilt:
-
-1. **Generate protobuf code**:
-   ```bash
-   make proto
-   ```
-
-2. **Build the project**:
-   ```bash
-   make build
-   ```
-
-3. **Run tests**:
-   ```bash
-   make test
-   ```
-
-4. **Run linters**:
-   ```bash
-   make lint
-   ```
-
-### Working with Protocol Buffers
-
-All API contracts are defined using Protocol Buffers in `api/proto/`:
-
-```bash
-# Lint protobuf files
-make proto-lint
-
-# Generate Go code from proto definitions
-make proto
-
-# Check for breaking changes
-make proto-breaking
-```
-
-**Schema Evolution**: When modifying protobuf schemas, follow the guidelines in [Schema Evolution Skill](docs/skills/schema-evolution.md) to ensure backward compatibility and proper validation.
-
-See `api/proto/README.md` for detailed protobuf development guidelines.
-
-### Local Development
-
-Use Tilt for local Kubernetes development:
-
-```bash
-# Start local development environment
+# 3. Start development environment
 tilt up
 ```
 
-This will:
-- Build container images
-- Deploy to local Kubernetes cluster
-- Enable hot-reload on code changes
-- Provide logs and resource monitoring
+**Access services**:
+- Tilt UI: http://localhost:10350
+- Meridian API: http://localhost:8080
+- Meridian gRPC: localhost:9090
 
-## Architecture Decision Records
+For detailed development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-All architectural decisions are documented in `docs/adr/`:
+## Development
 
-- **ADR-0001**: Record Architecture Decisions (MADR format)
-- **ADR-0002**: Microservices Per BIAN Domain
-- **ADR-0003**: Database Schema Migrations with Atlas
-- **ADR-0004**: Event Schema Evolution Strategy (Protobuf Native)
-- **ADR-0005**: Adapter Pattern for Layer Translation
-- **ADR-0006**: Tilt for Local Development
-- **ADR-0007**: Raw YAML Over Helm for Initial Development
+**Common commands**:
+```bash
+make proto         # Generate protobuf code
+make build         # Build the project
+make test          # Run tests
+make lint          # Run linters
+```
 
-See [docs/adr/README.md](docs/adr/README.md) for the complete list and rationale behind each decision.
+**Local development**: Use `tilt up` for hot-reload Kubernetes development ([Tilt guide](docs/skills/tilt.md))
+
+**Working with protobuf**: See [api/proto/README.md](api/proto/README.md) and [Schema Evolution skill](docs/skills/schema-evolution.md)
+
+## Architecture
+
+**Key architectural decisions** are documented in [docs/adr/](docs/adr/) including:
+- Microservices per BIAN domain
+- Database schema migrations with Atlas
+- Event schema evolution with protobuf
+- Adapter pattern for layer translation
+- Local development with Tilt
+
+See [docs/adr/README.md](docs/adr/README.md) for the complete catalog.
 
 ## API Documentation
 
-### Common Types
+Protocol Buffer definitions for all services are in [api/proto/](api/proto/).
 
-Located in `api/proto/meridian/common/v1/`:
+**Key APIs**:
+- Common types: Money, AccountType, Currency, Pagination
+- Error codes: Categorized by domain (general, financial, BIAN-specific)
+- Health checks: Standard health service for all components
 
-- **types.proto**: Shared types for Money, AccountType, Currency, Pagination
-- **error.proto**: Standardized error codes and error handling
-- **health.proto**: Health check service for all components
-
-### Error Codes
-
-Errors are categorized for different domains:
-
-- **1000-1999**: General errors (INTERNAL, INVALID_ARGUMENT, NOT_FOUND, etc.)
-- **2000-2999**: Financial errors (INSUFFICIENT_FUNDS, POSTING_FAILED, etc.)
-- **3000-3999**: BIAN-specific errors (CONTROL_RECORD_NOT_FOUND, etc.)
+See [api/proto/README.md](api/proto/README.md) for detailed API documentation.
 
 ## Troubleshooting
 
-### Setup Issues
-
-**"command not found" errors**:
-```bash
-# Verify tool installation
-./scripts/setup-check.sh
-
-# Install missing tools
-./scripts/install-tools.sh
-```
-
-**Kubernetes cluster not accessible**:
-```bash
-# Check cluster status
-kubectl cluster-info
-
-# Create a Kind cluster with local registry (recommended):
-ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
-
-# Or use alternatives:
-minikube start                   # minikube
-# Or enable Kubernetes in Docker Desktop settings
-```
-
-**Protocol buffer generation fails**:
-```bash
-# Ensure buf is installed
-buf --version
-
-# Clean and regenerate
-make clean
-make proto
-```
-
-**Tests failing**:
-```bash
-# Run with verbose output
-go test -v ./...
-
-# Run specific test
-go test -v -run TestName ./path/to/package
-```
-
-**Tilt not starting**:
-```bash
-# Check Tilt logs
-tilt up --stream
-
-# Verify Kubernetes context
-kubectl config current-context
-kubectl get nodes
-```
-
-See [docs/skills/docker.md](docs/skills/docker.md) and [docs/skills/tilt.md](docs/skills/tilt.md) for detailed troubleshooting.
+For setup and development issues, see:
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Development setup troubleshooting
+- [docs/skills/docker.md](docs/skills/docker.md) - Docker configuration
+- [docs/skills/tilt.md](docs/skills/tilt.md) - Tilt and Kubernetes issues
+- [docs/runbooks/](docs/runbooks/) - Operational procedures
 
 ## Contributing
 
-Contributions are welcome! This is a learning project, so questions and mistakes are opportunities for growth.
+Contributions welcome! This is a learning project - questions and mistakes are opportunities for growth.
 
-**Quick Start**:
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make your changes following code standards
-4. Run tests (`make test`) and linters (`make lint`)
-5. Create a Pull Request
+**Quick start**:
+1. Fork and create a feature branch
+2. Make changes following [code standards](CONTRIBUTING.md#code-standards)
+3. Run `make test` and `make lint`
+4. Create a Pull Request
 
-**Detailed Guide**: See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 - Development environment setup
-- Code standards and testing guidelines
+- Code standards (immutability, TDD, defensive testing)
 - Pull request process
 - Architecture decision records
 
-### Code Standards
-
-- Follow Go conventions and idioms
-- Write table-driven tests
-- Update ADRs for architectural changes
-- Keep protobuf definitions backward-compatible
-- Document BIAN compliance in comments
-- Use conventional commit messages
-
 ## Learning Resources
 
-### BIAN Standards
+**BIAN Standards**:
+- [BIAN Service Landscape](https://bian.org/servicelandscape/) - Banking service domain architecture
+- [BIAN Semantic APIs](https://bian.org/semantic-apis/) - API design standards
 
-- [BIAN Service Landscape](https://bian.org/servicelandscape/)
-- [BIAN Semantic APIs](https://bian.org/semantic-apis/)
-- BIAN specifications in `../bian/bian-public-main/release13.0.0/`
-
-### Related Technologies
-
-- [Protocol Buffers](https://protobuf.dev/)
-- [buf CLI](https://buf.build/docs/)
-- [gRPC](https://grpc.io/)
-- [CockroachDB](https://www.cockroachlabs.com/docs/)
-- [Apache Kafka](https://kafka.apache.org/documentation/)
+**Technologies**:
+- [Protocol Buffers](https://protobuf.dev/) & [buf CLI](https://buf.build/docs/)
+- [gRPC](https://grpc.io/) - API framework
+- [CockroachDB](https://www.cockroachlabs.com/docs/) - Distributed SQL database
+- [Apache Kafka](https://kafka.apache.org/documentation/) - Event streaming
 
 ## License
 

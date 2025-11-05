@@ -1,175 +1,54 @@
 # Claude Code Skills Integration
 
-This document explains how ADRs (Architecture Decision Records) and runbooks in this repository function as contextual skills for Claude Code.
+This document explains how documentation in this repository functions as contextual skills for Claude Code.
 
 ## Overview
 
-ADRs and runbooks contain metadata headers that make them discoverable as "skills" - focused pieces of context that Claude Code can load just-in-time when needed, rather than loading all documentation into every conversation.
+ADRs (Architecture Decision Records), runbooks, and skills contain YAML frontmatter metadata that makes them discoverable as "skills" - focused pieces of context that Claude Code can load just-in-time when needed.
 
-## Why This Approach?
+**Context efficiency**: Load only relevant documentation based on conversation context, rather than loading everything.
 
-**Context efficiency**: Instead of loading all ADRs and runbooks into every conversation (expensive and potentially distracting), Claude Code can:
-1. Recognize when a decision or operational question relates to documented patterns
-2. Load only the relevant ADR or runbook
-3. Apply that specific context to the current task
+For detailed information about creating and using skills, see [docs/skills/README.md](skills/README.md).
 
-**Standard format**: The skill metadata uses YAML frontmatter, a widely-adopted format for documentation metadata that's human-readable and machine-parseable.
+## Available Skills
+
+**Architecture Decision Records** (in `docs/adr/`):
+- ADR-0002: Microservices per BIAN domain
+- ADR-0003: Database schema migrations
+- ADR-0004: Event schema evolution
+- ADR-0005: Adapter pattern for layer translation
+- ADR-0006: Tilt for local development
+- [See complete list](adr/README.md)
+
+**Operational Skills** (in `docs/skills/`):
+- Docker configuration
+- Tilt and Kubernetes development
+- Schema evolution with protobuf
+- Kustomize deployments
+- Security scanning
+- [See complete list](skills/README.md)
+
+**Runbooks** (in `docs/runbooks/`):
+- Incident response procedures
+- Disaster recovery procedures
 
 ## Skill Metadata Format
 
-Each ADR and runbook starts with YAML frontmatter like this:
+All skills use YAML frontmatter:
 
 ```yaml
 ---
-name: adr-002-microservices-per-bian-domain
-description: One microservice per BIAN domain for independent scaling, deployment, and failure isolation
+name: skill-name
+description: Brief description
 triggers:
-  - Designing service boundaries
-  - Deciding between microservices vs monolith
-  - Planning service deployment architecture
+  - When to use this
 instructions: |
-  Create one service per BIAN domain (FinancialAccounting, PositionKeeping, CurrentAccount).
-  Each service independently deployable with own database. Use gRPC for sync communication,
-  Kafka for async events.
+  Quick guidance on applying this knowledge
 ---
 ```
 
-This metadata:
-- **Standard YAML frontmatter** - familiar format used across documentation tools
-- **Provides structured info** for Claude Code to understand document purpose
-- **Enables smart loading** based on conversation context via triggers
-- **Instructions field** - concise guidance for applying the knowledge
-
-## How Claude Code Uses These Skills
-
-When you're working with Claude Code on the Meridian project:
-
-1. **Architecture decisions**: If discussing service boundaries, database patterns, or platform choices, Claude Code can load relevant ADRs like:
-   - ADR-0002: Microservices per BIAN domain
-   - ADR-0003: Database schema migrations
-   - ADR-0006: Tilt for local development
-
-2. **Operational scenarios**: If handling incidents, Claude Code can load:
-   - Incident Response runbook for active issues
-   - Disaster Recovery runbook for catastrophic failures
-
-3. **Just-in-time context**: Skills are loaded only when relevant, keeping conversations focused and token-efficient.
-
-## Creating New Skills
-
-### For ADRs
-
-When creating a new ADR from `docs/adr/template.md`:
-
-1. Copy the template (which includes YAML frontmatter placeholders with inline examples)
-2. Fill in the frontmatter fields:
-   - `name`: Unique identifier using format `adr-NNN-brief-slug` where NNN is zero-padded (e.g., `adr-007-event-sourcing-pattern`)
-   - `description`: One-line summary (~50-80 chars) of the architectural decision
-   - `triggers`: List of specific scenarios when this ADR should be referenced
-   - `instructions`: 2-3 sentences of actionable guidance focusing on "what" and "why"
-
-3. Write the ADR content as normal
-
-**Naming Convention**: Use zero-padded numbers (001, 002, ... 010, 011) for consistency and proper sorting.
-
-### For Runbooks
-
-When creating a new runbook:
-
-1. Start with YAML frontmatter:
-   ```yaml
-   ---
-   name: [runbook-name]
-   description: [What operational scenario this covers]
-   triggers:
-     - [When to reference this runbook]
-     - [Another trigger scenario]
-   instructions: |
-     [Concise operational guidance]
-   ---
-   ```
-
-2. Write the runbook content with clear procedures
-
-## Benefits
-
-1. **Smaller context windows**: Only load what's needed for the current task
-2. **Faster responses**: Less text to process means faster Claude Code responses
-3. **Better focus**: Relevant context without noise from unrelated documents
-4. **Self-documenting**: The metadata acts as a catalog of available knowledge
-5. **Standard format**: YAML frontmatter is widely used and human-readable
-6. **Tooling compatible**: Many documentation tools recognize and use YAML frontmatter
-
-## Implementation Note
-
-This is an adaptive use of Claude Code's skills system. While typically skills are standalone tool integrations, we're using the same metadata pattern to make our documentation "skillable" - loadable on demand when contextually relevant.
-
-The key insight: **good documentation with structured metadata becomes intelligent, context-aware documentation**.
-
-## Troubleshooting
-
-### YAML Frontmatter Not Rendering Invisibly
-
-**Problem**: Frontmatter appears as text in markdown viewers instead of being hidden.
-
-**Solution**:
-- Ensure triple-dash delimiters (`---`) are on their own lines
-- First `---` must be the very first line of the file (no blank lines before)
-- Second `---` must have no trailing spaces
-- Check for tab characters - use spaces for indentation in YAML
-
-**Valid Example**:
-```yaml
----
-name: adr-007-example
-description: Example description
----
-
-# ADR Title
-```
-
-### YAML Syntax Errors
-
-**Problem**: Metadata doesn't parse correctly.
-
-**Solution**:
-- Validate YAML syntax using an online validator (yamllint.com) or `yq` command
-- Common issues:
-  - Missing colons after field names
-  - Incorrect indentation (must use spaces, not tabs)
-  - Unescaped special characters in strings (use quotes if needed)
-  - Missing pipe (`|`) for multi-line `instructions` field
-
-**Valid Multi-line Example**:
-```yaml
-instructions: |
-  Line one of instructions.
-  Line two continues here.
-  Line three wraps up.
-```
-
-### Required Fields Missing
-
-**Problem**: Skill doesn't load or behaves unexpectedly.
-
-**Solution**: Ensure all four required fields are present:
-- `name`: Must be unique across all skills
-- `description`: Must be non-empty
-- `triggers`: Must have at least one trigger scenario
-- `instructions`: Must provide actionable guidance
-
-### Skills Not Loading in Claude Code
-
-**Problem**: Claude Code doesn't seem to reference the skills.
-
-**Possible Causes**:
-- Triggers may not match conversation context - review and refine trigger scenarios
-- File paths in CLAUDE.md may be incorrect - verify paths are relative to repo root
-- YAML syntax errors preventing parsing - validate frontmatter
-- Claude Code may need explicit prompting to check specific skills
-
-**Troubleshooting Steps**:
-1. Verify YAML frontmatter syntax is valid
-2. Check that `CLAUDE.md` lists the skill files with correct paths
-3. Ensure trigger scenarios are specific and match likely conversation topics
-4. Try explicitly mentioning the ADR/runbook topic in conversation
+See [docs/skills/README.md](skills/README.md) for:
+- Detailed metadata format guide
+- How to create new skills
+- Troubleshooting YAML frontmatter
+- Best practices for triggers and instructions

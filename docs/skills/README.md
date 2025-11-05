@@ -20,9 +20,9 @@ Each skill document includes:
 ### Security
 - **[security.md](security.md)** - Security scanning and vulnerability management
 
-## Format
+## Skill Metadata Format
 
-Skills follow the same metadata format as ADRs:
+Skills use YAML frontmatter at the start of each document:
 
 ```yaml
 ---
@@ -37,15 +37,90 @@ instructions: |
 ---
 ```
 
-## Usage
+**Required fields**:
+- `name`: Unique identifier (e.g., `tilt-development`, `schema-evolution`)
+- `description`: One-line summary (~50-80 chars)
+- `triggers`: List of scenarios when this skill is relevant
+- `instructions`: 2-3 sentences of actionable guidance
 
-These skills are designed to be:
-- **Searchable** by AI assistants via triggers and descriptions
-- **Actionable** with concrete commands and examples
-- **Contextual** with enough detail to understand when and how to use them
+**Format notes**:
+- Use YAML frontmatter with `---` delimiters
+- First `---` must be on line 1 (no blank lines before)
+- Use spaces for indentation (not tabs)
+- Multi-line `instructions` require pipe (`|`) character
+
+## Creating New Skills
+
+1. **Copy an existing skill** as a template
+2. **Fill in metadata**:
+   - Choose a descriptive name (lowercase-with-hyphens)
+   - Write a concise description
+   - List specific trigger scenarios
+   - Provide actionable instructions
+3. **Write the skill content** with commands and examples
+4. **Add to this README** in the appropriate category
+
+**Naming conventions**:
+- Use lowercase with hyphens: `my-skill-name`
+- Be specific: `tilt-development` not just `tilt`
+- Focus on the task: `schema-evolution` not `protobuf-stuff`
+
+## How Skills Are Used
+
+Claude Code can load skills just-in-time based on conversation context:
+
+1. **Pattern matching**: Triggers match conversation topics
+2. **Context loading**: Only relevant skills are loaded
+3. **Guidance application**: Instructions provide actionable steps
+
+**Example**: When discussing "Kubernetes local development", Claude Code might load the `tilt.md` skill to provide specific guidance.
+
+## Troubleshooting
+
+### YAML Syntax Errors
+
+**Symptoms**: Skill doesn't load or metadata appears as text
+
+**Common fixes**:
+- Ensure `---` delimiters are on their own lines
+- Use spaces (not tabs) for indentation
+- Validate with `yq` command or online YAML validator
+- Quote strings with special characters
+- Use `|` for multi-line instructions
+
+**Valid example**:
+```yaml
+---
+name: example-skill
+description: Example skill description
+triggers:
+  - Example scenario
+instructions: |
+  Line one of instructions.
+  Line two continues here.
+---
+
+# Skill Title
+Content starts here...
+```
+
+### Skills Not Loading
+
+**Possible causes**:
+- Triggers don't match conversation context
+- YAML syntax errors
+- File not listed in `CLAUDE.md`
+- Missing required fields
+
+**Debug steps**:
+1. Validate YAML frontmatter syntax
+2. Make triggers more specific and descriptive
+3. Check `CLAUDE.md` lists the file correctly
+4. Verify all four required fields are present
 
 ## Related Documentation
 
-- Main docs (human-focused): `../` (parent directory)
-- Architecture decisions: `../adr/`
-- Claude Code skills config: `../claude-code-skills.md`
+- Architecture decisions: `../adr/` - Architectural choices and rationale
+- Runbooks: `../runbooks/` - Operational procedures
+- Main project docs: `../` - General documentation
+- Claude Code config: `../claude-code-skills.md` - Skills system overview
