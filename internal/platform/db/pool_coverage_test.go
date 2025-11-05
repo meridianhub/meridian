@@ -164,7 +164,7 @@ func TestPostgresPool_Integration_Stats(t *testing.T) {
 		stats := pool.Stats()
 
 		// Should have max connections configured
-		assert.Equal(t, 10, stats.MaxOpenConnections)
+		assert.Equal(t, 25, stats.MaxOpenConnections)
 
 		// OpenConnections should be >= 0
 		assert.GreaterOrEqual(t, stats.OpenConnections, 0)
@@ -368,7 +368,7 @@ func TestHealthChecker_Integration(t *testing.T) {
 		})
 
 		stats := checker.GetStats()
-		assert.Equal(t, 10, stats.MaxOpenConnections)
+		assert.Equal(t, 25, stats.MaxOpenConnections)
 		assert.GreaterOrEqual(t, stats.OpenConnections, 0)
 	})
 
