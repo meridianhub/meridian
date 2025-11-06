@@ -27,7 +27,10 @@ type AuditTrailEntry struct {
 	SystemContext map[string]string
 }
 
-// NewAuditTrailEntry creates a new audit trail entry with validation.
+// NewAuditTrailEntry creates a validated AuditTrailEntry for the given user and action.
+// If userID is empty it returns ErrInvalidUserID; if action is empty it returns ErrInvalidAction.
+// If systemContext is nil it is initialized to an empty map. The returned entry has a new UUID
+// in AuditID and the current UTC time in Timestamp, with remaining fields set from the inputs.
 func NewAuditTrailEntry(
 	userID string,
 	action string,

@@ -33,10 +33,16 @@ type TransactionLogEntry struct {
 	CreatedAt     time.Time
 }
 
-// NewTransactionLogEntry creates a new transaction log entry with validation.
-// If the source is invalid, it defaults to TransactionSourceManual to handle
-// legacy data or unknown sources gracefully. This ensures the entry can still
-// be created while tracking the source as a manual entry for audit purposes.
+// NewTransactionLogEntry creates a new TransactionLogEntry for the specified transaction and account.
+// It validates inputs and applies a default for an invalid source (TransactionSourceManual) to handle
+// legacy data or unknown sources gracefully. This ensures the entry can still be created while tracking
+// the source as a manual entry for audit purposes.
+// On success the returned entry has a newly generated EntryID and CreatedAt set to the current UTC time.
+// Possible validation errors:
+//   - ErrInvalidTransactionID when transactionID is uuid.Nil
+//   - ErrInvalidAccountID when accountID is empty
+//   - ErrInvalidEntryAmount when amount is not greater than zero
+//   - ErrInvalidPostingDirection when direction is invalid
 func NewTransactionLogEntry(
 	transactionID uuid.UUID,
 	accountID string,

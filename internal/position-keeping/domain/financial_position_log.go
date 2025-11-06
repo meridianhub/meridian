@@ -55,7 +55,9 @@ type FinancialPositionLog struct {
 	Version               int64 // Optimistic lock version, incremented on status transitions
 }
 
-// NewFinancialPositionLog creates a new financial position log for an account.
+// NewFinancialPositionLog creates a FinancialPositionLog for the given account, initializing identifiers, timestamps, version, empty entry and audit collections, and status tracking.
+// If initialEntry is non-nil it will be appended to the log; any error produced while adding the entry is returned.
+// Returns ErrEmptyAccountID when accountID is empty.
 func NewFinancialPositionLog(
 	accountID string,
 	initialEntry *TransactionLogEntry,
