@@ -581,6 +581,68 @@ k8s_resource(
 )
 
 # =============================================================================
+# Microservices
+# =============================================================================
+
+# Current-Account Service - gRPC microservice for customer and account management
+docker_build(
+  'current-account',
+  context='.',
+  dockerfile='cmd/current-account/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': local('date -u +"%Y-%m-%dT%H:%M:%SZ"'),
+  },
+)
+
+# Deploy Current-Account Kubernetes manifests
+k8s_yaml('deployments/k8s/current-account/deployment.yaml')
+k8s_yaml('deployments/k8s/current-account/service.yaml')
+
+# Set resource dependencies for Current-Account
+k8s_resource(
+  'current-account',
+  port_forwards=[
+    '50051:50051',  # gRPC API
+  ],
+  resource_deps=[
+    'cockroachdb',
+    'migrate-current-account',
+  ],
+  labels=['microservices'],
+)
+
+# Financial-Accounting Service - gRPC microservice for ledger and booking operations
+docker_build(
+  'financial-accounting',
+  context='.',
+  dockerfile='cmd/financial-accounting/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': local('date -u +"%Y-%m-%dT%H:%M:%SZ"'),
+  },
+)
+
+# Deploy Financial-Accounting Kubernetes manifests
+k8s_yaml('deployments/k8s/financial-accounting/deployment.yaml')
+k8s_yaml('deployments/k8s/financial-accounting/service.yaml')
+
+# Set resource dependencies for Financial-Accounting
+k8s_resource(
+  'financial-accounting',
+  port_forwards=[
+    '50052:50052',  # gRPC API
+  ],
+  resource_deps=[
+    'cockroachdb',
+    'migrate-current-account',  # Financial accounting depends on current account schema
+  ],
+  labels=['microservices'],
+)
+
+# =============================================================================
 # Resource Configuration
 # =============================================================================
 
@@ -727,26 +789,32 @@ print("""
 ========================================
 
 Services:
-  • Meridian API     → http://localhost:8080
-  • Meridian gRPC    → localhost:9090
-  • CockroachDB      → localhost:26257
-  • Redis            → localhost:6379
-  • Kafka Cluster    → localhost:9092
+  • Meridian API           → http://localhost:8080
+  • Meridian gRPC          → localhost:9090
+
+Microservices:
+  • Current-Account        → localhost:50051 (gRPC)
+  • Financial-Accounting   → localhost:50052 (gRPC)
+
+Backing Services:
+  • CockroachDB            → localhost:26257
+  • Redis                  → localhost:6379
+  • Kafka Cluster          → localhost:9092
     - 3 brokers with KRaft quorum (kafka-0, kafka-1, kafka-2)
     - Replication factor: 2 (tolerates 1 broker failure)
-  • Keycloak         → http://localhost:18080
+  • Keycloak               → http://localhost:18080
     - Admin console: admin/admin
     - Realm: meridian (create manually)
     - JWKS: http://localhost:18080/realms/meridian/protocol/openid-connect/certs
 
 Observability Stack:
-  • Grafana          → http://localhost:3000 (dashboards, traces, logs, metrics)
-  • Prometheus       → http://localhost:9090 (metrics queries)
-  • Tempo            → traces via Alloy OTLP endpoint (alloy:4317)
-  • Loki             → logs aggregation
-  • Alloy            → OpenTelemetry collector
+  • Grafana                → http://localhost:3000 (dashboards, traces, logs, metrics)
+  • Prometheus             → http://localhost:9090 (metrics queries)
+  • Tempo                  → traces via Alloy OTLP endpoint (alloy:4317)
+  • Loki                   → logs aggregation
+  • Alloy                  → OpenTelemetry collector
 
-Tilt UI              → http://localhost:10350
+Tilt UI                    → http://localhost:10350
 
 Hot reload: Edit Go code and see changes in ~3 seconds
 
