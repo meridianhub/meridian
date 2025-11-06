@@ -62,12 +62,12 @@ func TestNewMoney(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			if !money.Amount.Equal(tt.amount) {
-				t.Errorf("Expected amount %v, got %v", tt.amount, money.Amount)
+			if !money.Amount().Equal(tt.amount) {
+				t.Errorf("Expected amount %v, got %v", tt.amount, money.Amount())
 			}
 
-			if money.Currency != tt.currency {
-				t.Errorf("Expected currency %v, got %v", tt.currency, money.Currency)
+			if money.Currency() != tt.currency {
+				t.Errorf("Expected currency %v, got %v", tt.currency, money.Currency())
 			}
 		})
 	}
@@ -115,8 +115,8 @@ func TestMoney_Add(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			if !result.Amount.Equal(tt.expectedAmount) {
-				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, result.Amount)
+			if !result.Amount().Equal(tt.expectedAmount) {
+				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, result.Amount())
 			}
 		})
 	}
@@ -164,8 +164,8 @@ func TestMoney_Subtract(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			if !result.Amount.Equal(tt.expectedAmount) {
-				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, result.Amount)
+			if !result.Amount().Equal(tt.expectedAmount) {
+				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, result.Amount())
 			}
 		})
 	}
