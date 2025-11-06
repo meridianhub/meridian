@@ -42,7 +42,12 @@ func (t TransactionStatus) IsFinal() bool {
 
 // CanTransitionTo checks if a transition to the target status is valid.
 func (t TransactionStatus) CanTransitionTo(target TransactionStatus) bool {
-	// Final states cannot transition
+	// Special case: POSTED can transition to REVERSED
+	if t == TransactionStatusPosted {
+		return target == TransactionStatusReversed
+	}
+
+	// Other final states cannot transition
 	if t.IsFinal() {
 		return false
 	}

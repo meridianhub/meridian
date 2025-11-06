@@ -91,8 +91,11 @@ func TestTransactionStatus_CanTransitionTo(t *testing.T) {
 		// Invalid transitions from AMENDED
 		{"amended to pending", TransactionStatusAmended, TransactionStatusPending, false},
 
-		// Final states cannot transition
-		{"posted cannot transition", TransactionStatusPosted, TransactionStatusReconciled, false},
+		// POSTED can transition to REVERSED
+		{"posted to reversed", TransactionStatusPosted, TransactionStatusReversed, true},
+		{"posted to other states invalid", TransactionStatusPosted, TransactionStatusReconciled, false},
+
+		// Other final states cannot transition
 		{"failed cannot transition", TransactionStatusFailed, TransactionStatusPending, false},
 		{"rejected cannot transition", TransactionStatusRejected, TransactionStatusPending, false},
 		{"cancelled cannot transition", TransactionStatusCancelled, TransactionStatusPending, false},
