@@ -21,7 +21,7 @@ func TestNewFinancialPositionLog(t *testing.T) {
 		"REF-001",
 		TransactionSourceManual,
 	)
-	validLineage := NewTransactionLineage(uuid.New(), "payment")
+	validLineage, _ := NewTransactionLineage(uuid.New(), "payment")
 
 	t.Run("valid log with initial entry", func(t *testing.T) {
 		log, err := NewFinancialPositionLog("ACC-001", validEntry, validLineage)

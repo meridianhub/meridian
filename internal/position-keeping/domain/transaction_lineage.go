@@ -21,15 +21,20 @@ type TransactionLineage struct {
 func NewTransactionLineage(
 	transactionID uuid.UUID,
 	transactionType string,
-) *TransactionLineage {
+) (*TransactionLineage, error) {
+	// Validate transaction ID is not nil
+	if transactionID == uuid.Nil {
+		return nil, ErrInvalidTransactionID
+	}
+
 	return &TransactionLineage{
 		TransactionID:         transactionID,
 		ParentTransactionID:   nil,
 		ChildTransactionIDs:   make([]uuid.UUID, 0),
 		RelatedTransactionIDs: make([]uuid.UUID, 0),
 		TransactionType:       transactionType,
-		CreatedAt:             time.Now(),
-	}
+		CreatedAt:             time.Now().UTC(),
+	}, nil
 }
 
 // SetParent sets the parent transaction ID.
