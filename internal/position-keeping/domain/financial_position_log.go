@@ -116,6 +116,11 @@ func (l *FinancialPositionLog) MarkReconciled(
 		return ErrAlreadyPosted
 	}
 
+	// Validate we can add audit entry before modifying state
+	if auditEntry != nil && len(l.AuditTrail) >= MaxAuditEntries {
+		return ErrTooManyAuditEntries
+	}
+
 	// Update transaction status to reconciled
 	if err := l.StatusTracking.UpdateStatus(TransactionStatusReconciled, reason); err != nil {
 		return err
@@ -124,7 +129,7 @@ func (l *FinancialPositionLog) MarkReconciled(
 	// Update reconciliation status
 	l.StatusTracking.MarkReconciled(reconciliationStatus)
 
-	// Add audit entry
+	// Add audit entry (we already checked capacity above)
 	if auditEntry != nil {
 		if err := l.AddAuditEntry(auditEntry); err != nil {
 			return err
@@ -146,12 +151,17 @@ func (l *FinancialPositionLog) MarkPosted(
 		return ErrAlreadyPosted
 	}
 
+	// Validate we can add audit entry before modifying state
+	if auditEntry != nil && len(l.AuditTrail) >= MaxAuditEntries {
+		return ErrTooManyAuditEntries
+	}
+
 	// Update status to posted
 	if err := l.StatusTracking.UpdateStatus(TransactionStatusPosted, reason); err != nil {
 		return err
 	}
 
-	// Add audit entry
+	// Add audit entry (we already checked capacity above)
 	if auditEntry != nil {
 		if err := l.AddAuditEntry(auditEntry); err != nil {
 			return err
@@ -173,12 +183,17 @@ func (l *FinancialPositionLog) Reject(
 		return ErrAlreadyPosted
 	}
 
+	// Validate we can add audit entry before modifying state
+	if auditEntry != nil && len(l.AuditTrail) >= MaxAuditEntries {
+		return ErrTooManyAuditEntries
+	}
+
 	// Update status to rejected
 	if err := l.StatusTracking.UpdateStatus(TransactionStatusRejected, reason); err != nil {
 		return err
 	}
 
-	// Add audit entry
+	// Add audit entry (we already checked capacity above)
 	if auditEntry != nil {
 		if err := l.AddAuditEntry(auditEntry); err != nil {
 			return err
@@ -200,12 +215,17 @@ func (l *FinancialPositionLog) Amend(
 		return ErrCannotAmend
 	}
 
+	// Validate we can add audit entry before modifying state
+	if auditEntry != nil && len(l.AuditTrail) >= MaxAuditEntries {
+		return ErrTooManyAuditEntries
+	}
+
 	// Update status to amended
 	if err := l.StatusTracking.UpdateStatus(TransactionStatusAmended, reason); err != nil {
 		return err
 	}
 
-	// Add audit entry
+	// Add audit entry (we already checked capacity above)
 	if auditEntry != nil {
 		if err := l.AddAuditEntry(auditEntry); err != nil {
 			return err
@@ -234,12 +254,17 @@ func (l *FinancialPositionLog) Fail(
 		return ErrAlreadyPosted
 	}
 
+	// Validate we can add audit entry before modifying state
+	if auditEntry != nil && len(l.AuditTrail) >= MaxAuditEntries {
+		return ErrTooManyAuditEntries
+	}
+
 	// Update status to failed
 	if err := l.StatusTracking.MarkFailed(failureReason); err != nil {
 		return err
 	}
 
-	// Add audit entry
+	// Add audit entry (we already checked capacity above)
 	if auditEntry != nil {
 		if err := l.AddAuditEntry(auditEntry); err != nil {
 			return err
@@ -261,12 +286,17 @@ func (l *FinancialPositionLog) Cancel(
 		return ErrAlreadyPosted
 	}
 
+	// Validate we can add audit entry before modifying state
+	if auditEntry != nil && len(l.AuditTrail) >= MaxAuditEntries {
+		return ErrTooManyAuditEntries
+	}
+
 	// Update status to cancelled
 	if err := l.StatusTracking.UpdateStatus(TransactionStatusCancelled, reason); err != nil {
 		return err
 	}
 
-	// Add audit entry
+	// Add audit entry (we already checked capacity above)
 	if auditEntry != nil {
 		if err := l.AddAuditEntry(auditEntry); err != nil {
 			return err
