@@ -49,7 +49,7 @@ func NewAuditTrailEntry(
 
 	return &AuditTrailEntry{
 		AuditID:       uuid.New(),
-		Timestamp:     time.Now(),
+		Timestamp:     time.Now().UTC(),
 		UserID:        userID,
 		Action:        action,
 		Details:       details,

@@ -20,7 +20,7 @@ func NewStatusTracking() *StatusTracking {
 	return &StatusTracking{
 		CurrentStatus:        TransactionStatusPending,
 		PreviousStatus:       nil,
-		StatusUpdatedAt:      time.Now(),
+		StatusUpdatedAt:      time.Now().UTC(),
 		StatusReason:         "Initial creation",
 		FailureReason:        "",
 		ReconciliationStatus: ReconciliationStatusUnreconciled,
@@ -36,7 +36,7 @@ func (s *StatusTracking) UpdateStatus(newStatus TransactionStatus, reason string
 	previous := s.CurrentStatus
 	s.PreviousStatus = &previous
 	s.CurrentStatus = newStatus
-	s.StatusUpdatedAt = time.Now()
+	s.StatusUpdatedAt = time.Now().UTC()
 	s.StatusReason = reason
 
 	return nil
@@ -54,7 +54,7 @@ func (s *StatusTracking) MarkFailed(failureReason string) error {
 // MarkReconciled updates the reconciliation status.
 func (s *StatusTracking) MarkReconciled(reconciliationStatus ReconciliationStatus) {
 	s.ReconciliationStatus = reconciliationStatus
-	s.StatusUpdatedAt = time.Now()
+	s.StatusUpdatedAt = time.Now().UTC()
 }
 
 // IsReconciled returns true if the transaction is reconciled.

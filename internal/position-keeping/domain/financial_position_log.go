@@ -55,7 +55,7 @@ func NewFinancialPositionLog(
 		return nil, ErrEmptyAccountID
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	log := &FinancialPositionLog{
 		LogID:                 uuid.New(),
 		AccountID:             accountID,
@@ -89,7 +89,7 @@ func (l *FinancialPositionLog) AddEntry(entry *TransactionLogEntry) error {
 	}
 
 	l.TransactionLogEntries = append(l.TransactionLogEntries, entry)
-	l.UpdatedAt = time.Now()
+	l.UpdatedAt = time.Now().UTC()
 
 	return nil
 }
@@ -101,7 +101,7 @@ func (l *FinancialPositionLog) AddAuditEntry(entry *AuditTrailEntry) error {
 	}
 
 	l.AuditTrail = append(l.AuditTrail, entry)
-	l.UpdatedAt = time.Now()
+	l.UpdatedAt = time.Now().UTC()
 
 	return nil
 }
@@ -136,7 +136,7 @@ func (l *FinancialPositionLog) MarkReconciled(
 		}
 	}
 
-	l.UpdatedAt = time.Now()
+	l.UpdatedAt = time.Now().UTC()
 	l.Version++
 
 	return nil
@@ -168,7 +168,7 @@ func (l *FinancialPositionLog) MarkPosted(
 		}
 	}
 
-	l.UpdatedAt = time.Now()
+	l.UpdatedAt = time.Now().UTC()
 	l.Version++
 
 	return nil
@@ -200,7 +200,7 @@ func (l *FinancialPositionLog) Reject(
 		}
 	}
 
-	l.UpdatedAt = time.Now()
+	l.UpdatedAt = time.Now().UTC()
 	l.Version++
 
 	return nil
@@ -232,7 +232,7 @@ func (l *FinancialPositionLog) Amend(
 		}
 	}
 
-	l.UpdatedAt = time.Now()
+	l.UpdatedAt = time.Now().UTC()
 	l.Version++
 
 	return nil
@@ -271,7 +271,7 @@ func (l *FinancialPositionLog) Fail(
 		}
 	}
 
-	l.UpdatedAt = time.Now()
+	l.UpdatedAt = time.Now().UTC()
 	l.Version++
 
 	return nil
@@ -303,7 +303,7 @@ func (l *FinancialPositionLog) Cancel(
 		}
 	}
 
-	l.UpdatedAt = time.Now()
+	l.UpdatedAt = time.Now().UTC()
 	l.Version++
 
 	return nil

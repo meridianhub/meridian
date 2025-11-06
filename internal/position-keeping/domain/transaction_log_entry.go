@@ -74,6 +74,6 @@ func NewTransactionLogEntry(
 		Description:   description,
 		Reference:     reference,
 		Source:        source,
-		CreatedAt:     time.Now(),
+		CreatedAt:     time.Now().UTC(),
 	}, nil
 }
