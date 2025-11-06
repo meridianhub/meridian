@@ -15,7 +15,10 @@ type StatusTracking struct {
 	ReconciliationStatus ReconciliationStatus
 }
 
-// NewStatusTracking creates a new status tracking record with initial status.
+// NewStatusTracking creates a StatusTracking initialized to the pending state.
+// The returned record has CurrentStatus set to TransactionStatusPending, PreviousStatus nil,
+// StatusUpdatedAt set to the current UTC time, StatusReason set to "Initial creation",
+// FailureReason empty, and ReconciliationStatus set to ReconciliationStatusUnreconciled.
 func NewStatusTracking() *StatusTracking {
 	return &StatusTracking{
 		CurrentStatus:        TransactionStatusPending,

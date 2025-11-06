@@ -17,7 +17,11 @@ type TransactionLineage struct {
 	CreatedAt             time.Time
 }
 
-// NewTransactionLineage creates a new transaction lineage record.
+// NewTransactionLineage creates a TransactionLineage for the provided transaction ID and type.
+// It returns ErrInvalidTransactionID if transactionID is uuid.Nil.
+// The returned lineage has ParentTransactionID set to nil, empty ChildTransactionIDs and
+// RelatedTransactionIDs slices, TransactionType set to the provided type, and CreatedAt set to
+// the current UTC time.
 func NewTransactionLineage(
 	transactionID uuid.UUID,
 	transactionType string,

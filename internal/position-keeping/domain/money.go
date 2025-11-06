@@ -48,7 +48,8 @@ type Money struct {
 	currency Currency
 }
 
-// NewMoney creates a new Money instance with validation.
+// NewMoney creates a Money value with the given amount and currency.
+// It returns an error wrapping ErrInvalidCurrency that includes the invalid currency if the currency is not supported.
 func NewMoney(amount decimal.Decimal, currency Currency) (Money, error) {
 	if !currency.IsValid() {
 		return Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, currency)
