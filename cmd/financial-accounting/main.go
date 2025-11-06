@@ -119,6 +119,8 @@ func run(logger *slog.Logger) error {
 
 	// Register health check service
 	healthServer := health.NewServer()
+	// Set health status for both the default service name (used by K8s probes) and the named service
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	healthServer.SetServingStatus("financial-accounting", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
@@ -160,7 +162,8 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown
 	logger.Info("shutting down server...")
 
-	// Mark service as not serving
+	// Mark service as not serving (both default and named service)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
 	healthServer.SetServingStatus("financial-accounting", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
 
 	// Create shutdown context with timeout

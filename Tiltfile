@@ -597,6 +597,7 @@ docker_build(
 )
 
 # Deploy Current-Account Kubernetes manifests
+k8s_yaml('deployments/k8s/current-account/secret.yaml')
 k8s_yaml('deployments/k8s/current-account/deployment.yaml')
 k8s_yaml('deployments/k8s/current-account/service.yaml')
 
@@ -626,6 +627,7 @@ docker_build(
 )
 
 # Deploy Financial-Accounting Kubernetes manifests
+k8s_yaml('deployments/k8s/financial-accounting/secret.yaml')
 k8s_yaml('deployments/k8s/financial-accounting/deployment.yaml')
 k8s_yaml('deployments/k8s/financial-accounting/service.yaml')
 
