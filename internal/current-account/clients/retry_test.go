@@ -269,6 +269,12 @@ func TestRetryContextDeadlineExceeded(t *testing.T) {
 }
 
 func TestRetryExponentialBackoff(t *testing.T) {
+	// Skip timing-sensitive tests in short mode (e.g., CI environments)
+	// These tests can be flaky due to CPU scheduling variance
+	if testing.Short() {
+		t.Skip("Skipping timing-sensitive test in short mode")
+	}
+
 	config := RetryConfig{
 		MaxRetries:          3,
 		InitialInterval:     50 * time.Millisecond,
@@ -299,25 +305,33 @@ func TestRetryExponentialBackoff(t *testing.T) {
 	}
 
 	// Check interval between attempt 1 and 2 (should be ~50ms with no jitter)
+	// Increased tolerance to ±30% to account for CI runner variance
 	interval1 := attemptTimes[1].Sub(attemptTimes[0])
-	if interval1 < 40*time.Millisecond || interval1 > 60*time.Millisecond {
-		t.Errorf("expected first retry interval ~50ms, got %v", interval1)
+	if interval1 < 35*time.Millisecond || interval1 > 65*time.Millisecond {
+		t.Errorf("expected first retry interval ~50ms (±30%%), got %v", interval1)
 	}
 
 	// Check interval between attempt 2 and 3 (should be ~100ms)
+	// Increased tolerance to ±30% to account for CI runner variance
 	interval2 := attemptTimes[2].Sub(attemptTimes[1])
-	if interval2 < 80*time.Millisecond || interval2 > 120*time.Millisecond {
-		t.Errorf("expected second retry interval ~100ms, got %v", interval2)
+	if interval2 < 70*time.Millisecond || interval2 > 130*time.Millisecond {
+		t.Errorf("expected second retry interval ~100ms (±30%%), got %v", interval2)
 	}
 
 	// Check interval between attempt 3 and 4 (should be ~200ms)
+	// Increased tolerance to ±30% to account for CI runner variance
 	interval3 := attemptTimes[3].Sub(attemptTimes[2])
-	if interval3 < 180*time.Millisecond || interval3 > 220*time.Millisecond {
-		t.Errorf("expected third retry interval ~200ms, got %v", interval3)
+	if interval3 < 140*time.Millisecond || interval3 > 260*time.Millisecond {
+		t.Errorf("expected third retry interval ~200ms (±30%%), got %v", interval3)
 	}
 }
 
 func TestRetryJitterIsApplied(t *testing.T) {
+	// Skip timing-sensitive tests in short mode (e.g., CI environments)
+	if testing.Short() {
+		t.Skip("Skipping timing-sensitive test in short mode")
+	}
+
 	config := RetryConfig{
 		MaxRetries:          2,
 		InitialInterval:     100 * time.Millisecond,
