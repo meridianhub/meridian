@@ -51,7 +51,7 @@ func TestTransactionCaptured_ToProto(t *testing.T) {
 	assert.Equal(t, txID.String(), proto.TransactionId)
 	assert.Equal(t, int64(10000), proto.AmountCents)
 	assert.Equal(t, commonv1.Currency_CURRENCY_GBP, proto.Currency)
-	assert.Equal(t, "debit", proto.Direction)
+	assert.Equal(t, "DEBIT", proto.Direction)
 	assert.Equal(t, "AUTOMATED", proto.Source)
 	assert.Equal(t, "Test transaction", proto.Description)
 	assert.Equal(t, "REF-001", proto.Reference)
