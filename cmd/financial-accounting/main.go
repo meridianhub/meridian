@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -27,6 +28,12 @@ var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
+)
+
+// Static errors for configuration validation
+var (
+	ErrBankCashAccountIDRequired = errors.New("BANK_CASH_ACCOUNT_ID environment variable is required")
+	ErrBankCashAccountIDInvalid  = errors.New("BANK_CASH_ACCOUNT_ID must be a valid UUID")
 )
 
 func main() {
@@ -117,12 +124,12 @@ func run(logger *slog.Logger) error {
 	// Validate bank cash account ID is configured
 	bankCashAccountID := getEnvOrDefault("BANK_CASH_ACCOUNT_ID", "")
 	if bankCashAccountID == "" {
-		return fmt.Errorf("BANK_CASH_ACCOUNT_ID environment variable is required")
+		return ErrBankCashAccountIDRequired
 	}
 
 	// Validate UUID format
 	if len(bankCashAccountID) != 36 || bankCashAccountID[8] != '-' || bankCashAccountID[13] != '-' {
-		return fmt.Errorf("BANK_CASH_ACCOUNT_ID must be a valid UUID, got: %s", bankCashAccountID)
+		return fmt.Errorf("%w: got %s", ErrBankCashAccountIDInvalid, bankCashAccountID)
 	}
 
 	logger.Info("bank cash account configured",
