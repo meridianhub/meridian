@@ -51,7 +51,7 @@ func TestTransactionSource_IsValid_InvalidValue(t *testing.T) {
 		{"numeric", TransactionSource("123")},
 		{"special chars", TransactionSource("@#$")},
 		{"with spaces", TransactionSource("MANUAL ")},
-		{"underscore instead of dash", TransactionSource("CURRENT-ACCOUNT")},
+		{"dash instead of underscore", TransactionSource("CURRENT-ACCOUNT")},
 	}
 
 	for _, tt := range tests {
