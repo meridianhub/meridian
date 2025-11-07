@@ -349,18 +349,26 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 		}
 	}
 
-	// Delete and re-insert audit trail entries
-	// Note: The domain aggregate owns the complete audit history. This delete/re-insert
-	// approach assumes the domain layer maintains the full audit trail and we simply
-	// persist the current state. If audit entries should be append-only at the persistence
-	// layer, consider an alternative approach that compares and only inserts new entries.
-	_, err = tx.Exec(ctx, "DELETE FROM position_keeping.audit_trail_entries WHERE financial_position_log_id = $1", dbID)
+	// Append-only audit trail: Only insert new audit entries not already persisted.
+	// This preserves audit immutability by never deleting or modifying existing entries.
+	existingAuditIDs, err := r.getExistingAuditIDs(ctx, tx, dbID)
 	if err != nil {
-		return fmt.Errorf("failed to delete old audit trail entries: %w", err)
+		return err
 	}
 
-	if err := r.insertAuditTrailEntries(ctx, tx, dbID, log.AuditTrail); err != nil {
-		return err
+	// Filter for only new audit entries
+	newAuditEntries := make([]*domain.AuditTrailEntry, 0)
+	for _, entry := range log.AuditTrail {
+		if _, exists := existingAuditIDs[entry.AuditID]; !exists {
+			newAuditEntries = append(newAuditEntries, entry)
+		}
+	}
+
+	// Insert only new audit entries
+	if len(newAuditEntries) > 0 {
+		if err := r.insertAuditTrailEntries(ctx, tx, dbID, newAuditEntries); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -692,6 +700,30 @@ func (r *PostgresRepository) loadTransactionLineage(ctx context.Context, financi
 	return nil
 }
 
+func (r *PostgresRepository) getExistingAuditIDs(ctx context.Context, tx pgx.Tx, financialPosLogID uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	query := `
+		SELECT audit_id
+		FROM position_keeping.audit_trail_entries
+		WHERE financial_position_log_id = $1 AND deleted_at IS NULL`
+
+	rows, err := tx.Query(ctx, query, financialPosLogID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load existing audit IDs: %w", err)
+	}
+	defer rows.Close()
+
+	existingIDs := make(map[uuid.UUID]struct{})
+	for rows.Next() {
+		var auditID uuid.UUID
+		if err := rows.Scan(&auditID); err != nil {
+			return nil, fmt.Errorf("failed to scan audit ID: %w", err)
+		}
+		existingIDs[auditID] = struct{}{}
+	}
+
+	return existingIDs, nil
+}
+
 func (r *PostgresRepository) loadAuditTrailEntries(ctx context.Context, financialPosLogID uuid.UUID, log *domain.FinancialPositionLog) error {
 	query := `
 		SELECT audit_id, timestamp, user_id, action, details, ip_address, system_context
@@ -739,8 +771,220 @@ func (r *PostgresRepository) loadAuditTrailEntries(ctx context.Context, financia
 	return nil
 }
 
+// loadTransactionLogEntriesBatch loads transaction log entries for multiple logs in a single query.
+// This avoids N+1 query issues when loading many logs.
+func (r *PostgresRepository) loadTransactionLogEntriesBatch(ctx context.Context, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
+	if len(dbIDs) == 0 {
+		return nil
+	}
+
+	// Build IN clause with placeholders
+	placeholders := make([]string, len(dbIDs))
+	args := make([]any, len(dbIDs))
+	for i, id := range dbIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT financial_position_log_id, entry_id, transaction_id, account_id, amount_cents, currency,
+			direction, timestamp, description, reference, source
+		FROM position_keeping.transaction_log_entries
+		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL
+		ORDER BY financial_position_log_id, timestamp ASC`, strings.Join(placeholders, ","))
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to load transaction log entries batch: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var financialPosLogID uuid.UUID
+		var entry domain.TransactionLogEntry
+		var amountCents int64
+		var currency, direction, source string
+		var description, reference sql.NullString
+
+		err := rows.Scan(
+			&financialPosLogID,
+			&entry.EntryID, &entry.TransactionID, &entry.AccountID,
+			&amountCents, &currency, &direction, &entry.Timestamp,
+			&description, &reference, &source,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to scan transaction log entry in batch: %w", err)
+		}
+
+		// Convert cents to decimal and create Money
+		amount := centsToDecimal(amountCents)
+		money, err := domain.NewMoney(amount, domain.Currency(currency))
+		if err != nil {
+			return fmt.Errorf("failed to create Money value in batch: %w", err)
+		}
+		entry.Amount = money
+		entry.Direction = domain.ParsePostingDirection(direction)
+		entry.Source = domain.ParseTransactionSource(source)
+
+		if description.Valid {
+			entry.Description = description.String
+		}
+		if reference.Valid {
+			entry.Reference = reference.String
+		}
+
+		// Append to the appropriate log
+		if log, ok := dbIDToLog[financialPosLogID]; ok {
+			log.TransactionLogEntries = append(log.TransactionLogEntries, &entry)
+		}
+	}
+
+	return nil
+}
+
+// loadTransactionLineageBatch loads transaction lineages for multiple logs in a single query.
+// This avoids N+1 query issues when loading many logs.
+func (r *PostgresRepository) loadTransactionLineageBatch(ctx context.Context, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
+	if len(dbIDs) == 0 {
+		return nil
+	}
+
+	// Build IN clause with placeholders
+	placeholders := make([]string, len(dbIDs))
+	args := make([]any, len(dbIDs))
+	for i, id := range dbIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT financial_position_log_id, transaction_id, parent_transaction_id, child_transaction_ids,
+			related_transaction_ids, transaction_type
+		FROM position_keeping.transaction_lineages
+		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL`, strings.Join(placeholders, ","))
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to load transaction lineage batch: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var financialPosLogID uuid.UUID
+		var transactionID uuid.UUID
+		var transactionType string
+		var parentID sql.NullString
+		var childIDsJSON, relatedIDsJSON []byte
+
+		err := rows.Scan(
+			&financialPosLogID,
+			&transactionID, &parentID,
+			&childIDsJSON, &relatedIDsJSON, &transactionType,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to scan transaction lineage in batch: %w", err)
+		}
+
+		var parent *uuid.UUID
+		if parentID.Valid {
+			pid, err := uuid.Parse(parentID.String)
+			if err != nil {
+				return fmt.Errorf("failed to parse parent transaction ID in batch: %w", err)
+			}
+			parent = &pid
+		}
+
+		var childIDs []uuid.UUID
+		if err := json.Unmarshal(childIDsJSON, &childIDs); err != nil {
+			return fmt.Errorf("failed to unmarshal child transaction IDs in batch: %w", err)
+		}
+
+		var relatedIDs []uuid.UUID
+		if err := json.Unmarshal(relatedIDsJSON, &relatedIDs); err != nil {
+			return fmt.Errorf("failed to unmarshal related transaction IDs in batch: %w", err)
+		}
+
+		// Create the immutable TransactionLineage
+		lineage, err := domain.NewTransactionLineage(transactionID, transactionType, parent, childIDs, relatedIDs)
+		if err != nil {
+			return fmt.Errorf("failed to create transaction lineage in batch: %w", err)
+		}
+
+		// Assign to the appropriate log
+		if log, ok := dbIDToLog[financialPosLogID]; ok {
+			log.TransactionLineage = lineage
+		}
+	}
+
+	return nil
+}
+
+// loadAuditTrailEntriesBatch loads audit trail entries for multiple logs in a single query.
+// This avoids N+1 query issues when loading many logs.
+func (r *PostgresRepository) loadAuditTrailEntriesBatch(ctx context.Context, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
+	if len(dbIDs) == 0 {
+		return nil
+	}
+
+	// Build IN clause with placeholders
+	placeholders := make([]string, len(dbIDs))
+	args := make([]any, len(dbIDs))
+	for i, id := range dbIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT financial_position_log_id, audit_id, timestamp, user_id, action, details, ip_address, system_context
+		FROM position_keeping.audit_trail_entries
+		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL
+		ORDER BY financial_position_log_id, timestamp ASC`, strings.Join(placeholders, ","))
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to load audit trail entries batch: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var financialPosLogID uuid.UUID
+		var entry domain.AuditTrailEntry
+		var details, ipAddress sql.NullString
+		var sysContext []byte
+
+		err := rows.Scan(
+			&financialPosLogID,
+			&entry.AuditID, &entry.Timestamp, &entry.UserID, &entry.Action,
+			&details, &ipAddress, &sysContext,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to scan audit trail entry in batch: %w", err)
+		}
+
+		if details.Valid {
+			entry.Details = details.String
+		}
+		if ipAddress.Valid {
+			entry.IPAddress = ipAddress.String
+		}
+
+		if err := json.Unmarshal(sysContext, &entry.SystemContext); err != nil {
+			return fmt.Errorf("failed to unmarshal system context in batch: %w", err)
+		}
+
+		// Append to the appropriate log
+		if log, ok := dbIDToLog[financialPosLogID]; ok {
+			log.AuditTrail = append(log.AuditTrail, &entry)
+		}
+	}
+
+	return nil
+}
+
 func (r *PostgresRepository) scanLogs(ctx context.Context, rows pgx.Rows) ([]*domain.FinancialPositionLog, error) {
 	logs := []*domain.FinancialPositionLog{}
+	dbIDToLog := make(map[uuid.UUID]*domain.FinancialPositionLog)
+	dbIDs := []uuid.UUID{}
 
 	for rows.Next() {
 		var dbID uuid.UUID
@@ -773,20 +1017,27 @@ func (r *PostgresRepository) scanLogs(ctx context.Context, rows pgx.Rows) ([]*do
 
 		log.StatusTracking = &statusTracking
 
-		// Load related entities
-		if err := r.loadTransactionLogEntries(ctx, dbID, &log); err != nil {
-			return nil, err
-		}
-
-		if err := r.loadTransactionLineage(ctx, dbID, &log); err != nil {
-			return nil, err
-		}
-
-		if err := r.loadAuditTrailEntries(ctx, dbID, &log); err != nil {
-			return nil, err
-		}
-
 		logs = append(logs, &log)
+		dbIDToLog[dbID] = &log
+		dbIDs = append(dbIDs, dbID)
+	}
+
+	// If no logs were found, return early
+	if len(logs) == 0 {
+		return logs, nil
+	}
+
+	// Batch load all related entities for all logs to avoid N+1 queries
+	if err := r.loadTransactionLogEntriesBatch(ctx, dbIDs, dbIDToLog); err != nil {
+		return nil, err
+	}
+
+	if err := r.loadTransactionLineageBatch(ctx, dbIDs, dbIDToLog); err != nil {
+		return nil, err
+	}
+
+	if err := r.loadAuditTrailEntriesBatch(ctx, dbIDs, dbIDToLog); err != nil {
+		return nil, err
 	}
 
 	return logs, nil
