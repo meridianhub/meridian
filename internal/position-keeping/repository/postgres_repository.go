@@ -56,6 +56,7 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 	}()
 
 	// Insert main financial_position_log
+	// TODO: Consider extracting user ID from context for proper audit trails instead of hardcoding "system"
 	logQuery := `
 		INSERT INTO position_keeping.financial_position_logs (
 			id, created_at, created_by, updated_at, updated_by,
@@ -349,6 +350,10 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	}
 
 	// Delete and re-insert audit trail entries
+	// Note: The domain aggregate owns the complete audit history. This delete/re-insert
+	// approach assumes the domain layer maintains the full audit trail and we simply
+	// persist the current state. If audit entries should be append-only at the persistence
+	// layer, consider an alternative approach that compares and only inserts new entries.
 	_, err = tx.Exec(ctx, "DELETE FROM position_keeping.audit_trail_entries WHERE financial_position_log_id = $1", dbID)
 	if err != nil {
 		return fmt.Errorf("failed to delete old audit trail entries: %w", err)
@@ -438,11 +443,13 @@ func (r *PostgresRepository) FindPendingForReconciliation(ctx context.Context, l
 			AND reconciliation_status = 'UNRECONCILED'
 		ORDER BY created_at ASC`
 
+	args := []any{}
 	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", limit)
+		query += " LIMIT $1"
+		args = append(args, limit)
 	}
 
-	rows, err := r.pool.Query(ctx, query)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pending logs: %w", err)
 	}
@@ -838,15 +845,22 @@ func nullStringValue(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
-// decimalToCents converts a decimal amount to cents (int64)
-// Assumes 2 decimal places (e.g., 123.45 -> 12345 cents)
+// decimalToCents converts a decimal amount to cents (int64) for database storage.
+// This function assumes 2 decimal places which is appropriate for most currencies
+// (GBP, USD, EUR, etc.). Note that some currencies have different decimal place
+// requirements (e.g., JPY has 0, some cryptocurrencies have more). The domain
+// layer currently supports currencies with 2 decimal places as defined in
+// domain.Currency constants.
+// Example: 123.45 -> 12345 cents
 func decimalToCents(d decimal.Decimal) int64 {
 	cents := d.Mul(decimal.NewFromInt(100))
 	return cents.IntPart()
 }
 
-// centsToDecimal converts cents (int64) to a decimal amount
-// Assumes 2 decimal places (e.g., 12345 cents -> 123.45)
+// centsToDecimal converts cents (int64) from database storage to a decimal amount.
+// This function assumes 2 decimal places which is appropriate for most currencies
+// (GBP, USD, EUR, etc.). See decimalToCents for currency decimal place notes.
+// Example: 12345 cents -> 123.45
 func centsToDecimal(cents int64) decimal.Decimal {
 	return decimal.NewFromInt(cents).Div(decimal.NewFromInt(100))
 }
