@@ -10,7 +10,7 @@ CREATE TABLE "position_keeping"."financial_position_logs" (
   "updated_by" character varying(100) NOT NULL,
   "deleted_at" timestamptz NULL,
   "log_id" uuid NOT NULL,
-  "account_id" character varying(100) NOT NULL,
+  "account_id" character varying(34) NOT NULL,
   "version" bigint NOT NULL DEFAULT 1,
   "current_status" character varying(20) NOT NULL,
   "previous_status" character varying(20) NULL,
@@ -18,7 +18,8 @@ CREATE TABLE "position_keeping"."financial_position_logs" (
   "status_reason" text NOT NULL,
   "failure_reason" text NULL,
   "reconciliation_status" character varying(20) NOT NULL,
-  PRIMARY KEY ("id")
+  PRIMARY KEY ("id"),
+  CONSTRAINT "fk_position_keeping_financial_position_logs_account" FOREIGN KEY ("account_id") REFERENCES "current_account"."accounts" ("account_number") ON UPDATE NO ACTION ON DELETE RESTRICT
 );
 -- Create index "idx_position_keeping_financial_position_logs_account_id" to table: "financial_position_logs"
 CREATE INDEX "idx_position_keeping_financial_position_logs_account_id" ON "position_keeping"."financial_position_logs" ("account_id");

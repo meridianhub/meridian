@@ -14,7 +14,8 @@ type FinancialPositionLog struct {
 
 	// Aggregate Root Fields
 	LogID     uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_position_keeping_financial_position_logs_log_id" json:"log_id"`
-	AccountID string    `gorm:"type:varchar(100);not null;index:idx_position_keeping_financial_position_logs_account_id" json:"account_id"`
+	AccountID string    `gorm:"type:varchar(34);not null;index:idx_position_keeping_financial_position_logs_account_id" json:"account_id"` // IBAN format, FK to accounts.account_number
+	Account   *Account  `gorm:"foreignKey:AccountID;references:AccountNumber;constraint:OnDelete:RESTRICT" json:"account,omitempty"`
 	Version   int64     `gorm:"not null;default:1" json:"version"` // Optimistic locking
 
 	// Status Tracking (embedded value object)
