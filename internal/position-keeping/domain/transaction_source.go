@@ -29,3 +29,13 @@ func (t TransactionSource) IsValid() bool {
 func (t TransactionSource) String() string {
 	return string(t)
 }
+
+// ParseTransactionSource converts a string to TransactionSource.
+// Returns TransactionSourceManual for unrecognized values.
+func ParseTransactionSource(s string) TransactionSource {
+	source := TransactionSource(s)
+	if source.IsValid() {
+		return source
+	}
+	return TransactionSourceManual
+}

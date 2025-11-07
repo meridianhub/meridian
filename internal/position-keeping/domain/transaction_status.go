@@ -86,3 +86,13 @@ func (t TransactionStatus) CanTransitionTo(target TransactionStatus) bool {
 
 	return false
 }
+
+// ParseTransactionStatus converts a string to TransactionStatus.
+// Returns TransactionStatusPending for unrecognized values.
+func ParseTransactionStatus(s string) TransactionStatus {
+	status := TransactionStatus(s)
+	if status.IsValid() {
+		return status
+	}
+	return TransactionStatusPending
+}
