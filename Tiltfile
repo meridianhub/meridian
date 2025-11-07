@@ -6,6 +6,12 @@
 # Load Tilt extensions
 load('ext://restart_process', 'docker_build_with_restart')
 
+# Cross-platform build date helper
+def get_build_date():
+    """Returns current UTC datetime in ISO 8601 format (cross-platform)"""
+    from datetime import datetime
+    return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
 # Allow Tilt to connect to local Kubernetes cluster
 allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desktop', 'colima', 'rancher-desktop'])
 
@@ -531,7 +537,7 @@ docker_build(
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': local('date -u +"%Y-%m-%dT%H:%M:%SZ"'),
+    'BUILD_DATE': get_build_date(),
   },
   live_update=[
     # Sync Go source code
@@ -592,12 +598,13 @@ docker_build(
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': local('date -u +"%Y-%m-%dT%H:%M:%SZ"'),
+    'BUILD_DATE': get_build_date(),
   },
 )
 
 # Deploy Current-Account Kubernetes manifests
 k8s_yaml('deployments/k8s/current-account/secret.yaml')
+k8s_yaml('deployments/k8s/current-account/configmap.yaml')
 k8s_yaml('deployments/k8s/current-account/deployment.yaml')
 k8s_yaml('deployments/k8s/current-account/service.yaml')
 
@@ -622,12 +629,13 @@ docker_build(
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': local('date -u +"%Y-%m-%dT%H:%M:%SZ"'),
+    'BUILD_DATE': get_build_date(),
   },
 )
 
 # Deploy Financial-Accounting Kubernetes manifests
 k8s_yaml('deployments/k8s/financial-accounting/secret.yaml')
+k8s_yaml('deployments/k8s/financial-accounting/configmap.yaml')
 k8s_yaml('deployments/k8s/financial-accounting/deployment.yaml')
 k8s_yaml('deployments/k8s/financial-accounting/service.yaml')
 

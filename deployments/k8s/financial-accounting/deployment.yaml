@@ -38,16 +38,15 @@ spec:
         - name: grpc
           containerPort: 50052
           protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: financial-accounting-config
         env:
-        - name: GRPC_PORT
-          value: "50052"
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: financial-accounting-db
               key: DATABASE_URL
-        - name: LOG_LEVEL
-          value: "info"
         - name: BANK_CASH_ACCOUNT_ID
           value: "00000000-0000-0000-0000-000000000001"
         - name: POD_NAME

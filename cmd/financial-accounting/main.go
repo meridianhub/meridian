@@ -41,11 +41,28 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
+	// Check feature flags and environment
+	environment := getEnvOrDefault("ENVIRONMENT", "production")
+	incompleteImplementation := getEnvOrDefault("FEATURE_INCOMPLETE_IMPLEMENTATION", "false")
+
+	// Prevent deployment to production with incomplete implementation
+	if environment == "production" && incompleteImplementation == "true" {
+		logger.Error("FATAL: Cannot deploy incomplete implementation to production",
+			"environment", environment,
+			"incomplete", incompleteImplementation,
+			"action_required", "Set FEATURE_INCOMPLETE_IMPLEMENTATION=false and complete gRPC service implementation")
+		os.Exit(1)
+	}
+
 	// WARNING: Service implementation incomplete
-	logger.Warn("financial-accounting service is running with incomplete gRPC implementation",
-		"status", "infrastructure-only",
-		"missing", "FinancialAccountingService gRPC methods",
-		"note", "Only health checks and reflection are available")
+	if incompleteImplementation == "true" {
+		logger.Warn("financial-accounting service is running with incomplete gRPC implementation",
+			"status", "infrastructure-only",
+			"missing", "FinancialAccountingService gRPC methods",
+			"note", "Only health checks and reflection are available",
+			"environment", environment,
+			"production_blocked", "true")
+	}
 
 	// Run the service
 	if err := run(logger); err != nil {
@@ -96,6 +113,20 @@ func run(logger *slog.Logger) error {
 	defer closeDatabase(db, logger)
 
 	logger.Info("database connection established")
+
+	// Validate bank cash account ID is configured
+	bankCashAccountID := getEnvOrDefault("BANK_CASH_ACCOUNT_ID", "")
+	if bankCashAccountID == "" {
+		return fmt.Errorf("BANK_CASH_ACCOUNT_ID environment variable is required")
+	}
+
+	// Validate UUID format
+	if len(bankCashAccountID) != 36 || bankCashAccountID[8] != '-' || bankCashAccountID[13] != '-' {
+		return fmt.Errorf("BANK_CASH_ACCOUNT_ID must be a valid UUID, got: %s", bankCashAccountID)
+	}
+
+	logger.Info("bank cash account configured",
+		"account_id", bankCashAccountID)
 
 	// Create ledger repository
 	ledgerRepo := persistence.NewLedgerRepository(db)
