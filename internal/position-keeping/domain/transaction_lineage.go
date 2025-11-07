@@ -8,89 +8,113 @@ import (
 
 // TransactionLineage captures the relationship between transactions.
 // It maintains the parent-child hierarchy and related transaction references.
+// This is an immutable value object - all fields are unexported and accessed through getter methods.
 type TransactionLineage struct {
-	TransactionID         uuid.UUID
-	ParentTransactionID   *uuid.UUID
-	ChildTransactionIDs   []uuid.UUID
-	RelatedTransactionIDs []uuid.UUID
-	TransactionType       string
-	CreatedAt             time.Time
+	transactionID         uuid.UUID
+	parentTransactionID   *uuid.UUID
+	childTransactionIDs   []uuid.UUID
+	relatedTransactionIDs []uuid.UUID
+	transactionType       string
+	createdAt             time.Time
 }
 
-// NewTransactionLineage creates a TransactionLineage for the provided transaction ID and type.
+// NewTransactionLineage creates an immutable TransactionLineage with all relationships established upfront.
 // It returns ErrInvalidTransactionID if transactionID is uuid.Nil.
-// The returned lineage has ParentTransactionID set to nil, empty ChildTransactionIDs and
-// RelatedTransactionIDs slices, TransactionType set to the provided type, and CreatedAt set to
-// the current UTC time.
+// All slice and pointer parameters are defensively copied to prevent external mutation.
+// Pass nil for parentTransactionID and empty slices for childTransactionIDs/relatedTransactionIDs if not needed.
 func NewTransactionLineage(
 	transactionID uuid.UUID,
 	transactionType string,
+	parentTransactionID *uuid.UUID,
+	childTransactionIDs []uuid.UUID,
+	relatedTransactionIDs []uuid.UUID,
 ) (*TransactionLineage, error) {
 	// Validate transaction ID is not nil
 	if transactionID == uuid.Nil {
 		return nil, ErrInvalidTransactionID
 	}
 
+	// Defensive copy of parent ID pointer
+	var parent *uuid.UUID
+	if parentTransactionID != nil {
+		p := *parentTransactionID
+		parent = &p
+	}
+
+	// Defensive copy of child IDs slice
+	children := make([]uuid.UUID, len(childTransactionIDs))
+	copy(children, childTransactionIDs)
+
+	// Defensive copy of related IDs slice
+	related := make([]uuid.UUID, len(relatedTransactionIDs))
+	copy(related, relatedTransactionIDs)
+
 	return &TransactionLineage{
-		TransactionID:         transactionID,
-		ParentTransactionID:   nil,
-		ChildTransactionIDs:   make([]uuid.UUID, 0),
-		RelatedTransactionIDs: make([]uuid.UUID, 0),
-		TransactionType:       transactionType,
-		CreatedAt:             time.Now().UTC(),
+		transactionID:         transactionID,
+		parentTransactionID:   parent,
+		childTransactionIDs:   children,
+		relatedTransactionIDs: related,
+		transactionType:       transactionType,
+		createdAt:             time.Now().UTC(),
 	}, nil
-}
-
-// SetParent sets the parent transaction ID.
-// Returns an error if parentID is nil.
-func (l *TransactionLineage) SetParent(parentID uuid.UUID) error {
-	if parentID == uuid.Nil {
-		return ErrInvalidTransactionID
-	}
-	l.ParentTransactionID = &parentID
-	return nil
-}
-
-// AddChild adds a child transaction ID.
-// Returns an error if childID is nil or invalid.
-func (l *TransactionLineage) AddChild(childID uuid.UUID) error {
-	if childID == uuid.Nil {
-		return ErrInvalidTransactionID
-	}
-
-	// Avoid duplicates
-	for _, id := range l.ChildTransactionIDs {
-		if id == childID {
-			return nil
-		}
-	}
-	l.ChildTransactionIDs = append(l.ChildTransactionIDs, childID)
-	return nil
-}
-
-// AddRelated adds a related transaction ID.
-// Returns an error if relatedID is nil or invalid.
-func (l *TransactionLineage) AddRelated(relatedID uuid.UUID) error {
-	if relatedID == uuid.Nil {
-		return ErrInvalidTransactionID
-	}
-
-	// Avoid duplicates
-	for _, id := range l.RelatedTransactionIDs {
-		if id == relatedID {
-			return nil
-		}
-	}
-	l.RelatedTransactionIDs = append(l.RelatedTransactionIDs, relatedID)
-	return nil
 }
 
 // HasParent returns true if this transaction has a parent.
 func (l *TransactionLineage) HasParent() bool {
-	return l.ParentTransactionID != nil
+	return l.parentTransactionID != nil
 }
 
 // HasChildren returns true if this transaction has children.
 func (l *TransactionLineage) HasChildren() bool {
-	return len(l.ChildTransactionIDs) > 0
+	return len(l.childTransactionIDs) > 0
+}
+
+// TransactionID returns the transaction ID.
+func (l *TransactionLineage) TransactionID() uuid.UUID {
+	return l.transactionID
+}
+
+// ParentTransactionID returns a copy of the parent transaction ID pointer.
+// Returns nil if there is no parent.
+func (l *TransactionLineage) ParentTransactionID() *uuid.UUID {
+	if l.parentTransactionID == nil {
+		return nil
+	}
+	// Defensive copy of pointer
+	p := *l.parentTransactionID
+	return &p
+}
+
+// ChildTransactionIDs returns a defensive copy of the child transaction IDs slice.
+// Mutating the returned slice will not affect the internal state.
+func (l *TransactionLineage) ChildTransactionIDs() []uuid.UUID {
+	if len(l.childTransactionIDs) == 0 {
+		return nil
+	}
+	// Defensive copy of slice
+	result := make([]uuid.UUID, len(l.childTransactionIDs))
+	copy(result, l.childTransactionIDs)
+	return result
+}
+
+// RelatedTransactionIDs returns a defensive copy of the related transaction IDs slice.
+// Mutating the returned slice will not affect the internal state.
+func (l *TransactionLineage) RelatedTransactionIDs() []uuid.UUID {
+	if len(l.relatedTransactionIDs) == 0 {
+		return nil
+	}
+	// Defensive copy of slice
+	result := make([]uuid.UUID, len(l.relatedTransactionIDs))
+	copy(result, l.relatedTransactionIDs)
+	return result
+}
+
+// TransactionType returns the transaction type.
+func (l *TransactionLineage) TransactionType() string {
+	return l.transactionType
+}
+
+// CreatedAt returns the creation timestamp.
+func (l *TransactionLineage) CreatedAt() time.Time {
+	return l.createdAt
 }
