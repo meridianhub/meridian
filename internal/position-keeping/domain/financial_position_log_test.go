@@ -349,3 +349,555 @@ func TestFinancialPositionLog_IsReconciled(t *testing.T) {
 		t.Error("Expected IsReconciled to be true after marking as reconciled")
 	}
 }
+
+// Helper functions for capacity boundary tests
+
+// createLogWithEntries creates a log with the specified number of transaction entries
+func createLogWithEntries(t *testing.T, numEntries int) *FinancialPositionLog {
+	t.Helper()
+	log, err := NewFinancialPositionLog("ACC-TEST", nil, nil)
+	if err != nil {
+		t.Fatalf("Failed to create log: %v", err)
+	}
+
+	validMoney, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+
+	for i := 0; i < numEntries; i++ {
+		entry, err := NewTransactionLogEntry(
+			uuid.New(),
+			"ACC-TEST",
+			validMoney,
+			PostingDirectionDebit,
+			time.Now(),
+			"Test entry",
+			"REF-"+string(rune(i)),
+			TransactionSourceManual,
+		)
+		if err != nil {
+			t.Fatalf("Failed to create entry %d: %v", i, err)
+		}
+
+		if err := log.AddEntry(entry); err != nil {
+			t.Fatalf("Failed to add entry %d: %v", i, err)
+		}
+	}
+
+	return log
+}
+
+// createLogWithAuditEntries creates a log with the specified number of audit entries
+func createLogWithAuditEntries(t *testing.T, numAudits int) *FinancialPositionLog {
+	t.Helper()
+	log, err := NewFinancialPositionLog("ACC-TEST", nil, nil)
+	if err != nil {
+		t.Fatalf("Failed to create log: %v", err)
+	}
+
+	for i := 0; i < numAudits; i++ {
+		auditEntry, err := NewAuditTrailEntry(
+			"user-123",
+			"audit",
+			"Test audit entry",
+			"192.168.1.1",
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("Failed to create audit entry %d: %v", i, err)
+		}
+
+		if err := log.AddAuditEntry(auditEntry); err != nil {
+			t.Fatalf("Failed to add audit entry %d: %v", i, err)
+		}
+	}
+
+	return log
+}
+
+// Transaction Entry Capacity Boundary Tests
+
+func TestFinancialPositionLog_AddEntry_OneBelowLimit(t *testing.T) {
+	log := createLogWithEntries(t, MaxTransactionEntries-1)
+
+	if log.EntryCount() != MaxTransactionEntries-1 {
+		t.Errorf("Expected %d entries, got %d", MaxTransactionEntries-1, log.EntryCount())
+	}
+
+	// Should be able to add one more
+	validMoney, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	entry, _ := NewTransactionLogEntry(
+		uuid.New(),
+		"ACC-TEST",
+		validMoney,
+		PostingDirectionDebit,
+		time.Now(),
+		"Final entry",
+		"REF-FINAL",
+		TransactionSourceManual,
+	)
+
+	err := log.AddEntry(entry)
+	if err != nil {
+		t.Errorf("Expected success when adding entry at %d (one below limit), got error: %v", MaxTransactionEntries-1, err)
+	}
+
+	if log.EntryCount() != MaxTransactionEntries {
+		t.Errorf("Expected %d entries after adding, got %d", MaxTransactionEntries, log.EntryCount())
+	}
+}
+
+func TestFinancialPositionLog_AddEntry_AtLimit(t *testing.T) {
+	log := createLogWithEntries(t, MaxTransactionEntries)
+
+	if log.EntryCount() != MaxTransactionEntries {
+		t.Errorf("Expected %d entries, got %d", MaxTransactionEntries, log.EntryCount())
+	}
+
+	// Should NOT be able to add one more
+	validMoney, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	entry, _ := NewTransactionLogEntry(
+		uuid.New(),
+		"ACC-TEST",
+		validMoney,
+		PostingDirectionDebit,
+		time.Now(),
+		"Overflow entry",
+		"REF-OVERFLOW",
+		TransactionSourceManual,
+	)
+
+	err := log.AddEntry(entry)
+	if err == nil {
+		t.Error("Expected error when adding entry at limit (10,000 entries), got nil")
+	}
+	if !errors.Is(err, ErrTooManyEntries) {
+		t.Errorf("Expected ErrTooManyEntries, got %v", err)
+	}
+
+	// Entry count should remain unchanged
+	if log.EntryCount() != MaxTransactionEntries {
+		t.Errorf("Expected %d entries after failed add, got %d", MaxTransactionEntries, log.EntryCount())
+	}
+}
+
+func TestFinancialPositionLog_AddEntry_ExceedsLimit(t *testing.T) {
+	log := createLogWithEntries(t, MaxTransactionEntries)
+
+	// Attempt to add multiple entries beyond limit
+	validMoney, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+
+	for i := 0; i < 5; i++ {
+		entry, _ := NewTransactionLogEntry(
+			uuid.New(),
+			"ACC-TEST",
+			validMoney,
+			PostingDirectionDebit,
+			time.Now(),
+			"Overflow entry",
+			"REF-OVERFLOW",
+			TransactionSourceManual,
+		)
+
+		err := log.AddEntry(entry)
+		if err == nil {
+			t.Errorf("Expected error when adding entry beyond limit (attempt %d), got nil", i+1)
+		}
+		if !errors.Is(err, ErrTooManyEntries) {
+			t.Errorf("Attempt %d: Expected ErrTooManyEntries, got %v", i+1, err)
+		}
+	}
+
+	// Entry count should remain at limit
+	if log.EntryCount() != MaxTransactionEntries {
+		t.Errorf("Expected %d entries after failed attempts, got %d", MaxTransactionEntries, log.EntryCount())
+	}
+}
+
+// Audit Entry Capacity Boundary Tests
+
+func TestFinancialPositionLog_AddAuditEntry_OneBelowLimit(t *testing.T) {
+	log := createLogWithAuditEntries(t, MaxAuditEntries-1)
+
+	if log.AuditEntryCount() != MaxAuditEntries-1 {
+		t.Errorf("Expected %d audit entries, got %d", MaxAuditEntries-1, log.AuditEntryCount())
+	}
+
+	// Should be able to add one more
+	auditEntry, _ := NewAuditTrailEntry(
+		"user-123",
+		"audit",
+		"Final audit entry",
+		"192.168.1.1",
+		nil,
+	)
+
+	err := log.AddAuditEntry(auditEntry)
+	if err != nil {
+		t.Errorf("Expected success when adding audit entry at %d (one below limit), got error: %v", MaxAuditEntries-1, err)
+	}
+
+	if log.AuditEntryCount() != MaxAuditEntries {
+		t.Errorf("Expected %d audit entries after adding, got %d", MaxAuditEntries, log.AuditEntryCount())
+	}
+}
+
+func TestFinancialPositionLog_AddAuditEntry_AtLimit(t *testing.T) {
+	log := createLogWithAuditEntries(t, MaxAuditEntries)
+
+	if log.AuditEntryCount() != MaxAuditEntries {
+		t.Errorf("Expected %d audit entries, got %d", MaxAuditEntries, log.AuditEntryCount())
+	}
+
+	// Should NOT be able to add one more
+	auditEntry, _ := NewAuditTrailEntry(
+		"user-123",
+		"audit",
+		"Overflow audit entry",
+		"192.168.1.1",
+		nil,
+	)
+
+	err := log.AddAuditEntry(auditEntry)
+	if err == nil {
+		t.Error("Expected error when adding audit entry at limit (10,000 entries), got nil")
+	}
+	if !errors.Is(err, ErrTooManyAuditEntries) {
+		t.Errorf("Expected ErrTooManyAuditEntries, got %v", err)
+	}
+
+	// Audit entry count should remain unchanged
+	if log.AuditEntryCount() != MaxAuditEntries {
+		t.Errorf("Expected %d audit entries after failed add, got %d", MaxAuditEntries, log.AuditEntryCount())
+	}
+}
+
+func TestFinancialPositionLog_AddAuditEntry_ExceedsLimit(t *testing.T) {
+	log := createLogWithAuditEntries(t, MaxAuditEntries)
+
+	// Attempt to add multiple audit entries beyond limit
+	for i := 0; i < 5; i++ {
+		auditEntry, _ := NewAuditTrailEntry(
+			"user-123",
+			"audit",
+			"Overflow audit entry",
+			"192.168.1.1",
+			nil,
+		)
+
+		err := log.AddAuditEntry(auditEntry)
+		if err == nil {
+			t.Errorf("Expected error when adding audit entry beyond limit (attempt %d), got nil", i+1)
+		}
+		if !errors.Is(err, ErrTooManyAuditEntries) {
+			t.Errorf("Attempt %d: Expected ErrTooManyAuditEntries, got %v", i+1, err)
+		}
+	}
+
+	// Audit entry count should remain at limit
+	if log.AuditEntryCount() != MaxAuditEntries {
+		t.Errorf("Expected %d audit entries after failed attempts, got %d", MaxAuditEntries, log.AuditEntryCount())
+	}
+}
+
+// State Transition at Audit Capacity Tests
+
+func TestFinancialPositionLog_MarkReconciled_AtAuditCapacity(t *testing.T) {
+	log := createLogWithAuditEntries(t, MaxAuditEntries)
+
+	initialStatus := log.StatusTracking.CurrentStatus
+	initialVersion := log.Version
+
+	auditEntry, _ := NewAuditTrailEntry(
+		"user-123",
+		"reconciled",
+		"Attempt to reconcile",
+		"192.168.1.1",
+		nil,
+	)
+
+	err := log.MarkReconciled(ReconciliationStatusMatched, "Reconciled", auditEntry)
+
+	// Should fail with ErrTooManyAuditEntries
+	if err == nil {
+		t.Error("Expected error when marking reconciled with audit trail at capacity, got nil")
+	}
+	if !errors.Is(err, ErrTooManyAuditEntries) {
+		t.Errorf("Expected ErrTooManyAuditEntries, got %v", err)
+	}
+
+	// CRITICAL: Status must NOT have changed
+	if log.StatusTracking.CurrentStatus != initialStatus {
+		t.Errorf("Expected status to remain %v after failed MarkReconciled, got %v",
+			initialStatus, log.StatusTracking.CurrentStatus)
+	}
+
+	// CRITICAL: Version must NOT have incremented
+	if log.Version != initialVersion {
+		t.Errorf("Expected version to remain %d after failed MarkReconciled, got %d",
+			initialVersion, log.Version)
+	}
+
+	// Reconciliation status should not have changed
+	if log.StatusTracking.ReconciliationStatus != ReconciliationStatusUnreconciled {
+		t.Errorf("Expected reconciliation status to remain UNRECONCILED, got %v",
+			log.StatusTracking.ReconciliationStatus)
+	}
+
+	// Audit trail count should remain at limit
+	if log.AuditEntryCount() != MaxAuditEntries {
+		t.Errorf("Expected %d audit entries, got %d", MaxAuditEntries, log.AuditEntryCount())
+	}
+}
+
+func TestFinancialPositionLog_MarkPosted_AtAuditCapacity(t *testing.T) {
+	log := createLogWithAuditEntries(t, MaxAuditEntries)
+
+	initialStatus := log.StatusTracking.CurrentStatus
+	initialVersion := log.Version
+
+	auditEntry, _ := NewAuditTrailEntry(
+		"user-123",
+		"posted",
+		"Attempt to post",
+		"192.168.1.1",
+		nil,
+	)
+
+	err := log.MarkPosted("Posted successfully", auditEntry)
+
+	// Should fail with ErrTooManyAuditEntries
+	if err == nil {
+		t.Error("Expected error when marking posted with audit trail at capacity, got nil")
+	}
+	if !errors.Is(err, ErrTooManyAuditEntries) {
+		t.Errorf("Expected ErrTooManyAuditEntries, got %v", err)
+	}
+
+	// CRITICAL: Status must NOT have changed
+	if log.StatusTracking.CurrentStatus != initialStatus {
+		t.Errorf("Expected status to remain %v after failed MarkPosted, got %v",
+			initialStatus, log.StatusTracking.CurrentStatus)
+	}
+
+	// CRITICAL: Version must NOT have incremented
+	if log.Version != initialVersion {
+		t.Errorf("Expected version to remain %d after failed MarkPosted, got %d",
+			initialVersion, log.Version)
+	}
+
+	// Should not be marked as posted
+	if log.IsPosted() {
+		t.Error("Expected IsPosted to be false after failed MarkPosted")
+	}
+
+	// Audit trail count should remain at limit
+	if log.AuditEntryCount() != MaxAuditEntries {
+		t.Errorf("Expected %d audit entries, got %d", MaxAuditEntries, log.AuditEntryCount())
+	}
+}
+
+func TestFinancialPositionLog_StateTransitions_AtAuditCapacity(t *testing.T) {
+	tests := []struct {
+		name                  string
+		setupLog              func() *FinancialPositionLog
+		transition            func(*FinancialPositionLog) error
+		expectedInitialStatus TransactionStatus
+	}{
+		{
+			name: "Reject at audit capacity",
+			setupLog: func() *FinancialPositionLog {
+				return createLogWithAuditEntries(t, MaxAuditEntries)
+			},
+			transition: func(log *FinancialPositionLog) error {
+				audit, _ := NewAuditTrailEntry("user-123", "rejected", "Rejected", "192.168.1.1", nil)
+				return log.Reject("Validation failed", audit)
+			},
+			expectedInitialStatus: TransactionStatusPending,
+		},
+		{
+			name: "Fail at audit capacity",
+			setupLog: func() *FinancialPositionLog {
+				return createLogWithAuditEntries(t, MaxAuditEntries)
+			},
+			transition: func(log *FinancialPositionLog) error {
+				audit, _ := NewAuditTrailEntry("user-123", "failed", "Failed", "192.168.1.1", nil)
+				return log.Fail("Insufficient funds", audit)
+			},
+			expectedInitialStatus: TransactionStatusPending,
+		},
+		{
+			name: "Cancel at audit capacity",
+			setupLog: func() *FinancialPositionLog {
+				return createLogWithAuditEntries(t, MaxAuditEntries)
+			},
+			transition: func(log *FinancialPositionLog) error {
+				audit, _ := NewAuditTrailEntry("user-123", "cancelled", "Cancelled", "192.168.1.1", nil)
+				return log.Cancel("User requested cancellation", audit)
+			},
+			expectedInitialStatus: TransactionStatusPending,
+		},
+		{
+			name: "Amend at audit capacity",
+			setupLog: func() *FinancialPositionLog {
+				log := createLogWithAuditEntries(t, MaxAuditEntries-1)
+				// Mark as reconciled first (this will add one audit entry, bringing us to MaxAuditEntries)
+				audit, _ := NewAuditTrailEntry("user-123", "reconciled", "Reconciled", "192.168.1.1", nil)
+				_ = log.MarkReconciled(ReconciliationStatusMatched, "Matched", audit)
+				return log
+			},
+			transition: func(log *FinancialPositionLog) error {
+				audit, _ := NewAuditTrailEntry("user-123", "amended", "Amended", "192.168.1.1", nil)
+				return log.Amend("Amendment needed", audit)
+			},
+			expectedInitialStatus: TransactionStatusReconciled,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log := tt.setupLog()
+
+			initialStatus := log.StatusTracking.CurrentStatus
+			initialVersion := log.Version
+
+			// Verify initial status matches expected
+			if initialStatus != tt.expectedInitialStatus {
+				t.Errorf("Initial status expected to be %v, got %v", tt.expectedInitialStatus, initialStatus)
+			}
+
+			// Verify audit trail is at capacity
+			if log.AuditEntryCount() != MaxAuditEntries {
+				t.Errorf("Expected %d audit entries before transition, got %d", MaxAuditEntries, log.AuditEntryCount())
+			}
+
+			err := tt.transition(log)
+
+			// Should fail with ErrTooManyAuditEntries
+			if err == nil {
+				t.Error("Expected error when attempting state transition with audit trail at capacity, got nil")
+			}
+			if !errors.Is(err, ErrTooManyAuditEntries) {
+				t.Errorf("Expected ErrTooManyAuditEntries, got %v", err)
+			}
+
+			// CRITICAL: Status must NOT have changed
+			if log.StatusTracking.CurrentStatus != initialStatus {
+				t.Errorf("Expected status to remain %v after failed transition, got %v",
+					initialStatus, log.StatusTracking.CurrentStatus)
+			}
+
+			// CRITICAL: Version must NOT have incremented
+			if log.Version != initialVersion {
+				t.Errorf("Expected version to remain %d after failed transition, got %d",
+					initialVersion, log.Version)
+			}
+
+			// Audit trail count should remain at limit
+			if log.AuditEntryCount() != MaxAuditEntries {
+				t.Errorf("Expected %d audit entries after failed transition, got %d", MaxAuditEntries, log.AuditEntryCount())
+			}
+		})
+	}
+}
+
+// Compound Scenario Test
+
+func TestFinancialPositionLog_CompoundCapacity(t *testing.T) {
+	// Create log with maximum transaction entries
+	log := createLogWithEntries(t, MaxTransactionEntries)
+
+	// Add maximum audit entries
+	for i := 0; i < MaxAuditEntries; i++ {
+		auditEntry, _ := NewAuditTrailEntry(
+			"user-123",
+			"audit",
+			"Test audit entry",
+			"192.168.1.1",
+			nil,
+		)
+		if err := log.AddAuditEntry(auditEntry); err != nil {
+			t.Fatalf("Failed to add audit entry %d: %v", i, err)
+		}
+	}
+
+	// Verify both capacities are at limit
+	if log.EntryCount() != MaxTransactionEntries {
+		t.Errorf("Expected %d transaction entries, got %d", MaxTransactionEntries, log.EntryCount())
+	}
+	if log.AuditEntryCount() != MaxAuditEntries {
+		t.Errorf("Expected %d audit entries, got %d", MaxAuditEntries, log.AuditEntryCount())
+	}
+
+	// Attempt to add another transaction entry - should fail
+	validMoney, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	entry, _ := NewTransactionLogEntry(
+		uuid.New(),
+		"ACC-TEST",
+		validMoney,
+		PostingDirectionDebit,
+		time.Now(),
+		"Overflow entry",
+		"REF-OVERFLOW",
+		TransactionSourceManual,
+	)
+
+	err := log.AddEntry(entry)
+	if err == nil {
+		t.Error("Expected error when adding transaction entry at compound capacity, got nil")
+	}
+	if !errors.Is(err, ErrTooManyEntries) {
+		t.Errorf("Expected ErrTooManyEntries, got %v", err)
+	}
+
+	// Attempt to add another audit entry - should fail
+	auditEntry, _ := NewAuditTrailEntry(
+		"user-123",
+		"audit",
+		"Overflow audit entry",
+		"192.168.1.1",
+		nil,
+	)
+
+	err = log.AddAuditEntry(auditEntry)
+	if err == nil {
+		t.Error("Expected error when adding audit entry at compound capacity, got nil")
+	}
+	if !errors.Is(err, ErrTooManyAuditEntries) {
+		t.Errorf("Expected ErrTooManyAuditEntries, got %v", err)
+	}
+
+	// Attempt state transition with audit entry - should fail
+	auditEntry2, _ := NewAuditTrailEntry(
+		"user-123",
+		"posted",
+		"Attempt to post",
+		"192.168.1.1",
+		nil,
+	)
+
+	initialStatus := log.StatusTracking.CurrentStatus
+	initialVersion := log.Version
+
+	err = log.MarkPosted("Posted successfully", auditEntry2)
+	if err == nil {
+		t.Error("Expected error when marking posted at compound capacity, got nil")
+	}
+	if !errors.Is(err, ErrTooManyAuditEntries) {
+		t.Errorf("Expected ErrTooManyAuditEntries, got %v", err)
+	}
+
+	// Verify state did not change
+	if log.StatusTracking.CurrentStatus != initialStatus {
+		t.Errorf("Expected status to remain %v, got %v", initialStatus, log.StatusTracking.CurrentStatus)
+	}
+	if log.Version != initialVersion {
+		t.Errorf("Expected version to remain %d, got %d", initialVersion, log.Version)
+	}
+
+	// Verify counts remain at limits
+	if log.EntryCount() != MaxTransactionEntries {
+		t.Errorf("Expected %d transaction entries after compound test, got %d", MaxTransactionEntries, log.EntryCount())
+	}
+	if log.AuditEntryCount() != MaxAuditEntries {
+		t.Errorf("Expected %d audit entries after compound test, got %d", MaxAuditEntries, log.AuditEntryCount())
+	}
+}
