@@ -44,7 +44,8 @@ func TestAtlasLoaderBinary(t *testing.T) {
 				"CREATE TABLE",
 				"customers",
 				"accounts",
-				"transactions",
+				"financial_position_logs",
+				"transaction_log_entries",
 			},
 			wantNotStdout: []string{
 				"CREATE SCHEMA", // No schema statement without filter
@@ -60,7 +61,8 @@ func TestAtlasLoaderBinary(t *testing.T) {
 				"accounts",
 			},
 			wantNotStdout: []string{
-				"transactions", // position_keeping model should not be included
+				"financial_position_logs", // position_keeping model should not be included
+				"transaction_log_entries", // position_keeping model should not be included
 			},
 		},
 		{
@@ -70,8 +72,11 @@ func TestAtlasLoaderBinary(t *testing.T) {
 			wantStdout: []string{
 				"CREATE SCHEMA IF NOT EXISTS current_account",
 				"CREATE SCHEMA IF NOT EXISTS position_keeping",
-				"accounts",     // Included for FK reference
-				"transactions", // position_keeping model
+				"accounts",                // Included for FK reference
+				"financial_position_logs", // position_keeping aggregate root
+				"transaction_log_entries", // position_keeping model
+				"transaction_lineages",    // position_keeping model
+				"audit_trail_entries",     // position_keeping model
 				// Note: customers table also included because Account has FK to Customer
 				// GORM requires the full FK chain for proper constraint generation
 			},

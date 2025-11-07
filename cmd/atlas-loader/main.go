@@ -31,18 +31,24 @@ func main() {
 			&models.Account{},
 		}
 	case schemaPositionKeeping:
-		// Transaction references Account via FK, so Account must be included
+		// FinancialPositionLog references Account via AccountID, so Account must be included
 		// for GORM to generate proper foreign key constraints
 		modelList = []interface{}{
 			&models.Account{}, // FK reference
-			&models.Transaction{},
+			&models.FinancialPositionLog{},
+			&models.TransactionLogEntry{},
+			&models.TransactionLineage{},
+			&models.AuditTrailEntry{},
 		}
 	case "":
 		// No filter - load all models (for backward compatibility)
 		modelList = []interface{}{
 			&models.Customer{},
 			&models.Account{},
-			&models.Transaction{},
+			&models.FinancialPositionLog{},
+			&models.TransactionLogEntry{},
+			&models.TransactionLineage{},
+			&models.AuditTrailEntry{},
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown schema filter: %s\n", *schemaFilter)
