@@ -46,7 +46,8 @@ type TransactionLogEntry struct {
 	EntryID                uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_position_keeping_transaction_log_entries_entry_id" json:"entry_id"`
 	FinancialPositionLogID uuid.UUID `gorm:"type:uuid;not null;index:idx_position_keeping_transaction_log_entries_log_id" json:"financial_position_log_id"`
 	TransactionID          uuid.UUID `gorm:"type:uuid;not null;index:idx_position_keeping_transaction_log_entries_transaction_id" json:"transaction_id"`
-	AccountID              string    `gorm:"type:varchar(34);not null" json:"account_id"`         // IBAN format, consistent with FinancialPositionLog
+	AccountID              string    `gorm:"type:varchar(34);not null" json:"account_id"` // IBAN format, FK to accounts.account_number
+	Account                *Account  `gorm:"foreignKey:AccountID;references:AccountNumber;constraint:OnDelete:RESTRICT" json:"account,omitempty"`
 	AmountCents            int64     `gorm:"not null" json:"amount_cents"`                        // Store as smallest currency unit
 	Currency               string    `gorm:"type:char(3);not null;default:'GBP'" json:"currency"` // ISO 4217
 	Direction              string    `gorm:"type:varchar(10);not null" json:"direction"`          // 'debit' or 'credit'
