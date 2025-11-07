@@ -102,7 +102,7 @@ func (r *LedgerRepository) GetPostingsByBookingLogID(ctx context.Context, bookin
 // toPostingEntity converts domain model to database entity
 func toPostingEntity(posting *domain.LedgerPosting) (LedgerPostingEntity, error) {
 	// Convert decimal amount to cents (multiply by 100)
-	scaled := posting.Amount.Amount.Mul(decimalHundred)
+	scaled := posting.Amount.Amount().Mul(decimalHundred)
 
 	// Validate that the amount can be represented exactly in cents (no fractional cents)
 	if !scaled.Equal(scaled.Truncate(0)) {
@@ -116,7 +116,7 @@ func toPostingEntity(posting *domain.LedgerPosting) (LedgerPostingEntity, error)
 		FinancialBookingLogID: posting.FinancialBookingLogID,
 		PostingDirection:      string(posting.Direction),
 		AmountCents:           amountCents,
-		Currency:              string(posting.Amount.Currency),
+		Currency:              string(posting.Amount.Currency()),
 		AccountID:             posting.AccountID,
 		ValueDate:             posting.ValueDate,
 		PostingResult:         posting.PostingResult,
