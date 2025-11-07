@@ -40,10 +40,7 @@ func (FinancialPositionLog) TableName() string {
 // TransactionLogEntry represents a single transaction entry in the position log.
 // Maps to position_keeping.transaction_log_entries table.
 type TransactionLogEntry struct {
-	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-
-	// Audit Fields (minimal - only created_at)
-	CreatedAt time.Time `gorm:"type:timestamptz;not null;default:now()" json:"created_at"`
+	BaseModel
 
 	// Domain Fields
 	EntryID                uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_position_keeping_transaction_log_entries_entry_id" json:"entry_id"`
@@ -70,10 +67,7 @@ func (TransactionLogEntry) TableName() string {
 // TransactionLineage tracks parent-child relationships between transactions.
 // Maps to position_keeping.transaction_lineages table.
 type TransactionLineage struct {
-	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-
-	// Audit Fields (minimal - only created_at)
-	CreatedAt time.Time `gorm:"type:timestamptz;not null;default:now()" json:"created_at"`
+	BaseModel
 
 	// Domain Fields
 	FinancialPositionLogID uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_position_keeping_transaction_lineages_log_id" json:"financial_position_log_id"` // One-to-one
@@ -95,7 +89,7 @@ func (TransactionLineage) TableName() string {
 // AuditTrailEntry captures audit information for compliance.
 // Maps to position_keeping.audit_trail_entries table.
 type AuditTrailEntry struct {
-	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	BaseModel
 
 	// Domain Fields
 	AuditID                uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_position_keeping_audit_trail_entries_audit_id" json:"audit_id"`

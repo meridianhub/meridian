@@ -32,6 +32,11 @@ CREATE UNIQUE INDEX "idx_position_keeping_financial_position_logs_log_id" ON "po
 -- Create "audit_trail_entries" table
 CREATE TABLE "position_keeping"."audit_trail_entries" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "created_by" character varying(100) NOT NULL,
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_by" character varying(100) NOT NULL,
+  "deleted_at" timestamptz NULL,
   "audit_id" uuid NOT NULL,
   "financial_position_log_id" uuid NOT NULL,
   "timestamp" timestamptz NOT NULL,
@@ -45,6 +50,8 @@ CREATE TABLE "position_keeping"."audit_trail_entries" (
 );
 -- Create index "idx_position_keeping_audit_trail_entries_audit_id" to table: "audit_trail_entries"
 CREATE UNIQUE INDEX "idx_position_keeping_audit_trail_entries_audit_id" ON "position_keeping"."audit_trail_entries" ("audit_id");
+-- Create index "idx_position_keeping_audit_trail_entries_deleted_at" to table: "audit_trail_entries"
+CREATE INDEX "idx_position_keeping_audit_trail_entries_deleted_at" ON "position_keeping"."audit_trail_entries" ("deleted_at");
 -- Create index "idx_position_keeping_audit_trail_entries_log_id" to table: "audit_trail_entries"
 CREATE INDEX "idx_position_keeping_audit_trail_entries_log_id" ON "position_keeping"."audit_trail_entries" ("financial_position_log_id");
 -- Create index "idx_position_keeping_audit_trail_entries_timestamp" to table: "audit_trail_entries"
@@ -55,6 +62,10 @@ CREATE INDEX "idx_position_keeping_audit_trail_entries_user_id" ON "position_kee
 CREATE TABLE "position_keeping"."transaction_lineages" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "created_at" timestamptz NOT NULL DEFAULT now(),
+  "created_by" character varying(100) NOT NULL,
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_by" character varying(100) NOT NULL,
+  "deleted_at" timestamptz NULL,
   "financial_position_log_id" uuid NOT NULL,
   "transaction_id" uuid NOT NULL,
   "parent_transaction_id" uuid NULL,
@@ -64,6 +75,8 @@ CREATE TABLE "position_keeping"."transaction_lineages" (
   PRIMARY KEY ("id"),
   CONSTRAINT "fk_position_keeping_financial_position_logs_transaction_lineage" FOREIGN KEY ("financial_position_log_id") REFERENCES "position_keeping"."financial_position_logs" ("id") ON UPDATE NO ACTION ON DELETE CASCADE
 );
+-- Create index "idx_position_keeping_transaction_lineages_deleted_at" to table: "transaction_lineages"
+CREATE INDEX "idx_position_keeping_transaction_lineages_deleted_at" ON "position_keeping"."transaction_lineages" ("deleted_at");
 -- Create index "idx_position_keeping_transaction_lineages_log_id" to table: "transaction_lineages"
 CREATE UNIQUE INDEX "idx_position_keeping_transaction_lineages_log_id" ON "position_keeping"."transaction_lineages" ("financial_position_log_id");
 -- Create index "idx_position_keeping_transaction_lineages_parent_id" to table: "transaction_lineages"
@@ -74,6 +87,10 @@ CREATE INDEX "idx_position_keeping_transaction_lineages_transaction_id" ON "posi
 CREATE TABLE "position_keeping"."transaction_log_entries" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "created_at" timestamptz NOT NULL DEFAULT now(),
+  "created_by" character varying(100) NOT NULL,
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_by" character varying(100) NOT NULL,
+  "deleted_at" timestamptz NULL,
   "entry_id" uuid NOT NULL,
   "financial_position_log_id" uuid NOT NULL,
   "transaction_id" uuid NOT NULL,
@@ -88,6 +105,8 @@ CREATE TABLE "position_keeping"."transaction_log_entries" (
   PRIMARY KEY ("id"),
   CONSTRAINT "fk_position_keeping_financial_position_logs_transaction_adbf542" FOREIGN KEY ("financial_position_log_id") REFERENCES "position_keeping"."financial_position_logs" ("id") ON UPDATE NO ACTION ON DELETE CASCADE
 );
+-- Create index "idx_position_keeping_transaction_log_entries_deleted_at" to table: "transaction_log_entries"
+CREATE INDEX "idx_position_keeping_transaction_log_entries_deleted_at" ON "position_keeping"."transaction_log_entries" ("deleted_at");
 -- Create index "idx_position_keeping_transaction_log_entries_entry_id" to table: "transaction_log_entries"
 CREATE UNIQUE INDEX "idx_position_keeping_transaction_log_entries_entry_id" ON "position_keeping"."transaction_log_entries" ("entry_id");
 -- Create index "idx_position_keeping_transaction_log_entries_log_id" to table: "transaction_log_entries"
@@ -96,3 +115,16 @@ CREATE INDEX "idx_position_keeping_transaction_log_entries_log_id" ON "position_
 CREATE INDEX "idx_position_keeping_transaction_log_entries_timestamp" ON "position_keeping"."transaction_log_entries" ("timestamp");
 -- Create index "idx_position_keeping_transaction_log_entries_transaction_id" to table: "transaction_log_entries"
 CREATE INDEX "idx_position_keeping_transaction_log_entries_transaction_id" ON "position_keeping"."transaction_log_entries" ("transaction_id");
+-- Add validation constraints
+ALTER TABLE "position_keeping"."transaction_log_entries"
+  ADD CONSTRAINT "chk_transaction_log_entries_currency"
+  CHECK (char_length("currency") = 3);
+ALTER TABLE "position_keeping"."transaction_log_entries"
+  ADD CONSTRAINT "chk_transaction_log_entries_direction"
+  CHECK ("direction" IN ('debit', 'credit'));
+ALTER TABLE "position_keeping"."financial_position_logs"
+  ADD CONSTRAINT "chk_financial_position_logs_current_status"
+  CHECK ("current_status" IN ('pending', 'completed', 'failed', 'reconciled'));
+ALTER TABLE "position_keeping"."financial_position_logs"
+  ADD CONSTRAINT "chk_financial_position_logs_reconciliation_status"
+  CHECK ("reconciliation_status" IN ('pending', 'matched', 'unmatched', 'resolved'));
