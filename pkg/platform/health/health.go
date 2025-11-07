@@ -21,19 +21,26 @@ const (
 	StatusUnknown
 )
 
+const (
+	statusHealthyStr   = "healthy"
+	statusDegradedStr  = "degraded"
+	statusUnhealthyStr = "unhealthy"
+	statusUnknownStr   = "unknown"
+)
+
 // String returns the string representation of a health status.
 func (s Status) String() string {
 	switch s {
 	case StatusHealthy:
-		return "healthy"
+		return statusHealthyStr
 	case StatusDegraded:
-		return "degraded"
+		return statusDegradedStr
 	case StatusUnhealthy:
-		return "unhealthy"
+		return statusUnhealthyStr
 	case StatusUnknown:
-		return "unknown"
+		return statusUnknownStr
 	default:
-		return "unknown"
+		return statusUnknownStr
 	}
 }
 
