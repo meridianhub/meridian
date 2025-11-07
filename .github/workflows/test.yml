@@ -41,6 +41,11 @@ jobs:
           SKIP_KAFKA_TESTS: "1"
         run: |
           mkdir -p coverage
+          # Use -short flag to skip timing-sensitive tests in CI
+          # These tests validate exponential backoff, jitter, and timeouts which
+          # can be flaky due to CPU scheduler variance in CI environments.
+          # Functional correctness (retry attempts, error handling) is still validated.
+          # Run full test suite locally without -short for complete validation.
           go test -short -v -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
           echo "Filtering generated proto files from coverage..."
           grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true

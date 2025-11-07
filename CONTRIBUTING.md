@@ -867,7 +867,41 @@ go test ./internal/accounting/...
 
 # Specific test
 go test -run TestAccountService_CreateAccount ./internal/...
+
+# Run tests without -short flag (includes timing-sensitive tests)
+go test ./...
 ```
+
+### Timing-Sensitive Tests
+
+Some tests validate time-based behavior (e.g., exponential backoff, jitter, timeouts) and are sensitive to CPU scheduler variance in CI environments.
+
+**Local Development:**
+- Run full test suite without `-short` flag: `go test ./...`
+- This includes all timing validation tests
+
+**CI Environment:**
+- Tests run with `-short` flag to skip timing-sensitive tests
+- Functional correctness is still validated (retry attempts, error handling, context cancellation)
+
+**Before Committing Timing-Sensitive Changes:**
+1. Run tests without `-short` flag locally: `go test ./...`
+2. Verify timing assertions pass consistently
+3. If tests are flaky locally, they will definitely flake in CI
+
+**Writing Timing-Sensitive Tests:**
+- Add `testing.Short()` guard at the start:
+  ```go
+  func TestRetryExponentialBackoff(t *testing.T) {
+      if testing.Short() {
+          t.Skip("Skipping timing-sensitive test in short mode")
+      }
+      // ... timing assertions ...
+  }
+  ```
+- Use generous tolerance ranges (±30% or more for CI variance)
+- Document why specific tolerance values are chosen
+- Test functional behavior separately without timing assertions
 
 ### Writing Tests
 
