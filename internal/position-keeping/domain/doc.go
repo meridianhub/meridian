@@ -44,7 +44,7 @@
 //
 // Example:
 //
-//	lineage, err := domain.NewTransactionLineage(txID, "payment", nil, nil, nil)
+//	lineage, err := domain.NewTransactionLineage(txID, "payment")
 //	if err != nil {
 //	    return err
 //	}
@@ -204,11 +204,11 @@
 //   - SystemContext map is cloned in constructor (defensive copy)
 //   - External mutations cannot affect audit data
 //
-// TransactionLineage (as of this PR):
-//   - Fields unexported (transactionID, parentTransactionID, etc.)
-//   - Slice getters return defensive copies
-//   - Constructor accepts all relationships upfront
-//   - No mutation methods (SetParent, AddChild removed)
+// TransactionLineage:
+//   - Fields are currently exported (TransactionID, ParentTransactionID, etc.)
+//   - Mutation methods available: SetParent(), AddChild(), AddRelated()
+//   - Validates UUID inputs (rejects uuid.Nil)
+//   - Prevents duplicate children/related IDs
 //
 // ## Entities (Controlled Mutability)
 //
@@ -268,10 +268,10 @@
 //	lineage, err := domain.NewTransactionLineage(
 //	    uuid.New(),
 //	    "payment",
-//	    nil,   // no parent
-//	    nil,   // no children
-//	    nil,   // no related
 //	)
+//	if err != nil {
+//	    return err
+//	}
 //
 //	// 2. Create position log
 //	log, err := domain.NewFinancialPositionLog("ACCT-123", nil, lineage)
@@ -328,16 +328,17 @@
 // ## Workflow 3: Handle Transaction Reversal
 //
 //	// 1. Get original transaction ID from posted log
-//	originalTxID := postedLog.TransactionLineage.TransactionID()
+//	originalTxID := postedLog.TransactionLineage.TransactionID
 //
 //	// 2. Create lineage for reversal (parent = original)
 //	reversalLineage, err := domain.NewTransactionLineage(
 //	    uuid.New(),
 //	    "reversal",
-//	    &originalTxID,  // parent
-//	    nil,
-//	    nil,
 //	)
+//	if err != nil {
+//	    return err
+//	}
+//	reversalLineage.SetParent(originalTxID)  // Set parent relationship
 //
 //	// 3. Create new position log for reversal
 //	reversalLog, err := domain.NewFinancialPositionLog(
@@ -349,7 +350,7 @@
 //	// 4. Add reversal entry (opposite direction)
 //	reversalMoney, _ := domain.NewMoney(originalAmount, currency)
 //	reversalEntry, err := domain.NewTransactionLogEntry(
-//	    reversalLineage.TransactionID(),
+//	    reversalLineage.TransactionID,
 //	    accountID,
 //	    reversalMoney,
 //	    domain.PostingDirectionCredit,  // Opposite of original debit
@@ -366,6 +367,7 @@
 //	if log.StatusTracking.CurrentStatus == domain.TransactionStatusPosted {
 //	    return domain.ErrAlreadyPosted
 //	}
+//	// Note: StatusTracking fields are currently exported for direct access
 //
 //	// 2. Create audit entry
 //	auditEntry, _ := domain.NewAuditTrailEntry(
