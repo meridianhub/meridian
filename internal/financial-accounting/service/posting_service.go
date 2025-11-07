@@ -117,9 +117,9 @@ func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID u
 	for _, posting := range postings {
 		switch posting.Direction {
 		case domain.PostingDirectionDebit:
-			debitTotal = debitTotal.Add(posting.Amount.Amount)
+			debitTotal = debitTotal.Add(posting.Amount.Amount())
 		case domain.PostingDirectionCredit:
-			creditTotal = creditTotal.Add(posting.Amount.Amount)
+			creditTotal = creditTotal.Add(posting.Amount.Amount())
 		}
 	}
 

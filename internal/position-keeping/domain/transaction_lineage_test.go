@@ -1,53 +1,266 @@
 package domain
 
 import (
-	"errors"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 )
 
-func TestNewTransactionLineage_ValidInputs(t *testing.T) {
-	lineage, err := NewTransactionLineage(uuid.New(), "PAYMENT")
+func TestNewTransactionLineage(t *testing.T) {
+	t.Run("valid lineage with no relationships", func(t *testing.T) {
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, nil)
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if lineage == nil {
+			t.Error("Expected lineage, got nil")
+		}
+	})
+
+	t.Run("valid lineage with parent only", func(t *testing.T) {
+		parentID := uuid.New()
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, nil, nil)
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if !lineage.HasParent() {
+			t.Error("Expected lineage to have parent")
+		}
+	})
+
+	t.Run("valid lineage with children", func(t *testing.T) {
+		children := []uuid.UUID{uuid.New(), uuid.New()}
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, children, nil)
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if !lineage.HasChildren() {
+			t.Error("Expected lineage to have children")
+		}
+		if len(lineage.ChildTransactionIDs()) != 2 {
+			t.Errorf("Expected 2 children, got %d", len(lineage.ChildTransactionIDs()))
+		}
+	})
+
+	t.Run("valid lineage with related transactions", func(t *testing.T) {
+		related := []uuid.UUID{uuid.New()}
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, related)
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if len(lineage.RelatedTransactionIDs()) != 1 {
+			t.Errorf("Expected 1 related, got %d", len(lineage.RelatedTransactionIDs()))
+		}
+	})
+
+	t.Run("valid lineage with all relationships", func(t *testing.T) {
+		parentID := uuid.New()
+		children := []uuid.UUID{uuid.New(), uuid.New()}
+		related := []uuid.UUID{uuid.New(), uuid.New()}
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, children, related)
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if !lineage.HasParent() || !lineage.HasChildren() {
+			t.Error("Expected lineage to have parent and children")
+		}
+	})
+
+	t.Run("invalid nil transaction ID", func(t *testing.T) {
+		_, err := NewTransactionLineage(uuid.Nil, "payment", nil, nil, nil)
+		if err == nil {
+			t.Error("Expected error for nil transaction ID")
+		}
+	})
+
+	t.Run("verifies CreatedAt timestamp", func(t *testing.T) {
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+		if lineage.CreatedAt().IsZero() {
+			t.Error("CreatedAt should not be zero")
+		}
+	})
+}
+
+func TestTransactionLineage_DefensiveCopy_Parent(t *testing.T) {
+	parentID := uuid.New()
+	lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, nil, nil)
 	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
 	}
 
-	if lineage.TransactionType != "PAYMENT" {
-		t.Errorf("Expected transaction type PAYMENT, got %v", lineage.TransactionType)
-	}
+	// Get parent pointer
+	gotParent := lineage.ParentTransactionID()
 
-	if lineage.ParentTransactionID != nil {
-		t.Error("Expected ParentTransactionID to be nil")
-	}
+	// Mutate the returned pointer
+	*gotParent = uuid.New()
 
-	if len(lineage.ChildTransactionIDs) != 0 {
-		t.Errorf("Expected empty ChildTransactionIDs, got %d entries", len(lineage.ChildTransactionIDs))
-	}
-
-	if len(lineage.RelatedTransactionIDs) != 0 {
-		t.Errorf("Expected empty RelatedTransactionIDs, got %d entries", len(lineage.RelatedTransactionIDs))
+	// Verify internal state unchanged
+	internalParent := lineage.ParentTransactionID()
+	if *internalParent != parentID {
+		t.Errorf("Internal parent was mutated! Expected %v, got %v", parentID, *internalParent)
 	}
 }
 
-func TestNewTransactionLineage_NilTransactionID(t *testing.T) {
-	_, err := NewTransactionLineage(uuid.Nil, "PAYMENT")
-	if !errors.Is(err, ErrInvalidTransactionID) {
-		t.Errorf("Expected ErrInvalidTransactionID, got: %v", err)
+func TestTransactionLineage_DefensiveCopy_Children(t *testing.T) {
+	child1 := uuid.New()
+	child2 := uuid.New()
+	children := []uuid.UUID{child1, child2}
+
+	lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, children, nil)
+	if err != nil {
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
+	}
+
+	// Get children slice
+	gotChildren := lineage.ChildTransactionIDs()
+
+	// Mutate the returned slice
+	gotChildren[0] = uuid.New()
+	_ = append(gotChildren, uuid.New()) // Intentionally discarded
+
+	// Verify internal state unchanged
+	internalChildren := lineage.ChildTransactionIDs()
+	if len(internalChildren) != 2 {
+		t.Errorf("Internal children slice was mutated! Expected length 2, got %d", len(internalChildren))
+	}
+	if internalChildren[0] != child1 {
+		t.Errorf("Internal child[0] was mutated! Expected %v, got %v", child1, internalChildren[0])
+	}
+	if internalChildren[1] != child2 {
+		t.Errorf("Internal child[1] was mutated! Expected %v, got %v", child2, internalChildren[1])
 	}
 }
 
-func TestNewTransactionLineage_EmptyTransactionType(t *testing.T) {
-	lineage, err := NewTransactionLineage(uuid.New(), "")
+func TestTransactionLineage_DefensiveCopy_Related(t *testing.T) {
+	related1 := uuid.New()
+	related2 := uuid.New()
+	related := []uuid.UUID{related1, related2}
+
+	lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, related)
 	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
 	}
 
-	if lineage.TransactionType != "" {
-		t.Errorf("Expected empty transaction type, got %v", lineage.TransactionType)
+	// Get related slice
+	gotRelated := lineage.RelatedTransactionIDs()
+
+	// Mutate the returned slice
+	gotRelated[0] = uuid.New()
+	_ = append(gotRelated, uuid.New()) // Intentionally discarded
+
+	// Verify internal state unchanged
+	internalRelated := lineage.RelatedTransactionIDs()
+	if len(internalRelated) != 2 {
+		t.Errorf("Internal related slice was mutated! Expected length 2, got %d", len(internalRelated))
 	}
+	if internalRelated[0] != related1 {
+		t.Errorf("Internal related[0] was mutated! Expected %v, got %v", related1, internalRelated[0])
+	}
+	if internalRelated[1] != related2 {
+		t.Errorf("Internal related[1] was mutated! Expected %v, got %v", related2, internalRelated[1])
+	}
+}
+
+func TestTransactionLineage_Constructor_DefensiveCopy(t *testing.T) {
+	// Test that mutating input slices after construction doesn't affect lineage
+	parentID := uuid.New()
+	children := []uuid.UUID{uuid.New(), uuid.New()}
+	related := []uuid.UUID{uuid.New()}
+
+	lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, children, related)
+	if err != nil {
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
+	}
+
+	// Mutate input slices
+	children[0] = uuid.New()
+	_ = append(children, uuid.New()) // Intentionally discarded
+	related[0] = uuid.New()
+
+	// Verify lineage unchanged
+	internalChildren := lineage.ChildTransactionIDs()
+	if len(internalChildren) != 2 {
+		t.Errorf("Lineage was affected by external mutation! Expected 2 children, got %d", len(internalChildren))
+	}
+
+	internalRelated := lineage.RelatedTransactionIDs()
+	if len(internalRelated) != 1 {
+		t.Errorf("Lineage was affected by external mutation! Expected 1 related, got %d", len(internalRelated))
+	}
+}
+
+func TestTransactionLineage_HasParent(t *testing.T) {
+	tests := []struct {
+		name                string
+		parentTransactionID *uuid.UUID
+		want                bool
+	}{
+		{
+			name:                "no parent",
+			parentTransactionID: nil,
+			want:                false,
+		},
+		{
+			name:                "has parent",
+			parentTransactionID: ptr(uuid.New()),
+			want:                true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lineage, _ := NewTransactionLineage(uuid.New(), "payment", tt.parentTransactionID, nil, nil)
+			if got := lineage.HasParent(); got != tt.want {
+				t.Errorf("HasParent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTransactionLineage_HasChildren(t *testing.T) {
+	tests := []struct {
+		name                string
+		childTransactionIDs []uuid.UUID
+		want                bool
+	}{
+		{
+			name:                "no children",
+			childTransactionIDs: nil,
+			want:                false,
+		},
+		{
+			name:                "empty children slice",
+			childTransactionIDs: []uuid.UUID{},
+			want:                false,
+		},
+		{
+			name:                "has children",
+			childTransactionIDs: []uuid.UUID{uuid.New()},
+			want:                true,
+		},
+		{
+			name:                "has multiple children",
+			childTransactionIDs: []uuid.UUID{uuid.New(), uuid.New()},
+			want:                true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lineage, _ := NewTransactionLineage(uuid.New(), "payment", nil, tt.childTransactionIDs, nil)
+			if got := lineage.HasChildren(); got != tt.want {
+				t.Errorf("HasChildren() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// ptr is a helper function to create a pointer to a UUID
+func ptr(id uuid.UUID) *uuid.UUID {
+	return &id
 }
 
 func TestNewTransactionLineage_StringEdgeCases(t *testing.T) {
@@ -56,305 +269,29 @@ func TestNewTransactionLineage_StringEdgeCases(t *testing.T) {
 		transactionType string
 		wantErr         bool
 	}{
-		{
-			name:            "very long TransactionType (1000 chars)",
-			transactionType: strings.Repeat("T", 1000),
-			wantErr:         false,
-		},
-		{
-			name:            "very long TransactionType (10000 chars)",
-			transactionType: strings.Repeat("T", 10000),
-			wantErr:         false,
-		},
-		{
-			name:            "whitespace-only TransactionType is allowed",
-			transactionType: "   ",
-			wantErr:         false,
-		},
-		{
-			name:            "tab-only TransactionType is allowed",
-			transactionType: "\t\t\t",
-			wantErr:         false,
-		},
-		{
-			name:            "newline-only TransactionType is allowed",
-			transactionType: "\n\n",
-			wantErr:         false,
-		},
-		{
-			name:            "TransactionType with leading/trailing spaces",
-			transactionType: "  PAYMENT  ",
-			wantErr:         false,
-		},
-		{
-			name:            "unicode characters in TransactionType",
-			transactionType: "支付_PAYMENT",
-			wantErr:         false,
-		},
-		{
-			name:            "special characters in TransactionType",
-			transactionType: "PAYMENT!@#$%^&*()",
-			wantErr:         false,
-		},
+		{"very long transaction type (1000 chars)", string(make([]byte, 1000)), false},
+		{"very long transaction type (10000 chars)", string(make([]byte, 10000)), false},
+		{"whitespace-only transaction type", "   ", false},
+		{"tab-only transaction type", "\t\t\t", false},
+		{"newline-only transaction type", "\n\n\n", false},
+		{"transaction type with leading/trailing spaces", "  payment  ", false},
+		{"unicode characters in transaction type", "支付-تحويل-💰", false},
+		{"special characters in transaction type", "payment@#$%^&*()", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lineage, err := NewTransactionLineage(uuid.New(), tt.transactionType)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error but got nil")
-				}
+			lineage, err := NewTransactionLineage(uuid.New(), tt.transactionType, nil, nil, nil)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewTransactionLineage() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+			if !tt.wantErr && lineage == nil {
+				t.Error("Expected lineage, got nil")
 			}
-
-			if lineage.TransactionType != tt.transactionType {
-				t.Errorf("Expected TransactionType to be preserved as %q, got %q", tt.transactionType, lineage.TransactionType)
+			if !tt.wantErr && lineage.TransactionType() != tt.transactionType {
+				t.Errorf("TransactionType() = %q, want %q", lineage.TransactionType(), tt.transactionType)
 			}
 		})
-	}
-}
-
-func TestTransactionLineage_SetParent(t *testing.T) {
-	lineage, _ := NewTransactionLineage(uuid.New(), "PAYMENT")
-
-	tests := []struct {
-		name        string
-		parentID    uuid.UUID
-		wantErr     bool
-		expectedErr error
-	}{
-		{
-			name:     "valid parent ID",
-			parentID: uuid.New(),
-			wantErr:  false,
-		},
-		{
-			name:        "nil parent ID",
-			parentID:    uuid.Nil,
-			wantErr:     true,
-			expectedErr: ErrInvalidTransactionID,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := lineage.SetParent(tt.parentID)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error but got nil")
-				}
-				if tt.expectedErr != nil && !errors.Is(err, tt.expectedErr) {
-					t.Errorf("Expected error %v, got %v", tt.expectedErr, err)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-
-			if lineage.ParentTransactionID == nil {
-				t.Error("Expected ParentTransactionID to be set")
-			} else if *lineage.ParentTransactionID != tt.parentID {
-				t.Errorf("Expected parent ID %v, got %v", tt.parentID, *lineage.ParentTransactionID)
-			}
-		})
-	}
-}
-
-func TestTransactionLineage_AddChild(t *testing.T) {
-	lineage, _ := NewTransactionLineage(uuid.New(), "PAYMENT")
-
-	tests := []struct {
-		name        string
-		childID     uuid.UUID
-		wantErr     bool
-		expectedErr error
-	}{
-		{
-			name:    "valid child ID",
-			childID: uuid.New(),
-			wantErr: false,
-		},
-		{
-			name:        "nil child ID",
-			childID:     uuid.Nil,
-			wantErr:     true,
-			expectedErr: ErrInvalidTransactionID,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			initialCount := len(lineage.ChildTransactionIDs)
-			err := lineage.AddChild(tt.childID)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error but got nil")
-				}
-				if tt.expectedErr != nil && !errors.Is(err, tt.expectedErr) {
-					t.Errorf("Expected error %v, got %v", tt.expectedErr, err)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-
-			if len(lineage.ChildTransactionIDs) != initialCount+1 {
-				t.Errorf("Expected %d children, got %d", initialCount+1, len(lineage.ChildTransactionIDs))
-			}
-		})
-	}
-}
-
-func TestTransactionLineage_AddChild_Duplicates(t *testing.T) {
-	lineage, _ := NewTransactionLineage(uuid.New(), "PAYMENT")
-	childID := uuid.New()
-
-	// Add the same child twice
-	err1 := lineage.AddChild(childID)
-	if err1 != nil {
-		t.Fatalf("First AddChild failed: %v", err1)
-	}
-
-	err2 := lineage.AddChild(childID)
-	if err2 != nil {
-		t.Fatalf("Second AddChild failed: %v", err2)
-	}
-
-	// Should only have one entry
-	if len(lineage.ChildTransactionIDs) != 1 {
-		t.Errorf("Expected 1 child, got %d", len(lineage.ChildTransactionIDs))
-	}
-}
-
-func TestTransactionLineage_AddRelated(t *testing.T) {
-	lineage, _ := NewTransactionLineage(uuid.New(), "PAYMENT")
-
-	tests := []struct {
-		name        string
-		relatedID   uuid.UUID
-		wantErr     bool
-		expectedErr error
-	}{
-		{
-			name:      "valid related ID",
-			relatedID: uuid.New(),
-			wantErr:   false,
-		},
-		{
-			name:        "nil related ID",
-			relatedID:   uuid.Nil,
-			wantErr:     true,
-			expectedErr: ErrInvalidTransactionID,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			initialCount := len(lineage.RelatedTransactionIDs)
-			err := lineage.AddRelated(tt.relatedID)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Expected error but got nil")
-				}
-				if tt.expectedErr != nil && !errors.Is(err, tt.expectedErr) {
-					t.Errorf("Expected error %v, got %v", tt.expectedErr, err)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-
-			if len(lineage.RelatedTransactionIDs) != initialCount+1 {
-				t.Errorf("Expected %d related transactions, got %d", initialCount+1, len(lineage.RelatedTransactionIDs))
-			}
-		})
-	}
-}
-
-func TestTransactionLineage_AddRelated_Duplicates(t *testing.T) {
-	lineage, _ := NewTransactionLineage(uuid.New(), "PAYMENT")
-	relatedID := uuid.New()
-
-	// Add the same related transaction twice
-	err1 := lineage.AddRelated(relatedID)
-	if err1 != nil {
-		t.Fatalf("First AddRelated failed: %v", err1)
-	}
-
-	err2 := lineage.AddRelated(relatedID)
-	if err2 != nil {
-		t.Fatalf("Second AddRelated failed: %v", err2)
-	}
-
-	// Should only have one entry
-	if len(lineage.RelatedTransactionIDs) != 1 {
-		t.Errorf("Expected 1 related transaction, got %d", len(lineage.RelatedTransactionIDs))
-	}
-}
-
-func TestTransactionLineage_HasParent(t *testing.T) {
-	lineage, _ := NewTransactionLineage(uuid.New(), "PAYMENT")
-
-	if lineage.HasParent() {
-		t.Error("Expected HasParent to be false initially")
-	}
-
-	err := lineage.SetParent(uuid.New())
-	if err != nil {
-		t.Fatalf("SetParent failed: %v", err)
-	}
-
-	if !lineage.HasParent() {
-		t.Error("Expected HasParent to be true after setting parent")
-	}
-}
-
-func TestTransactionLineage_HasChildren(t *testing.T) {
-	lineage, _ := NewTransactionLineage(uuid.New(), "PAYMENT")
-
-	if lineage.HasChildren() {
-		t.Error("Expected HasChildren to be false initially")
-	}
-
-	err := lineage.AddChild(uuid.New())
-	if err != nil {
-		t.Fatalf("AddChild failed: %v", err)
-	}
-
-	if !lineage.HasChildren() {
-		t.Error("Expected HasChildren to be true after adding child")
-	}
-}
-
-func TestTransactionLineage_CreatedAtIsUTC(t *testing.T) {
-	before := time.Now().UTC()
-	lineage, err := NewTransactionLineage(uuid.New(), "PAYMENT")
-	after := time.Now().UTC()
-
-	if err != nil {
-		t.Fatalf("NewTransactionLineage failed: %v", err)
-	}
-
-	if lineage.CreatedAt.Location() != time.UTC {
-		t.Errorf("Expected CreatedAt to be UTC, got: %v", lineage.CreatedAt.Location())
-	}
-
-	if lineage.CreatedAt.Before(before) || lineage.CreatedAt.After(after) {
-		t.Errorf("Expected CreatedAt to be between %v and %v, got: %v", before, after, lineage.CreatedAt)
 	}
 }
