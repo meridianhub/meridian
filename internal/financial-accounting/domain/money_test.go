@@ -46,11 +46,11 @@ func TestNewMoney(t *testing.T) {
 				if err != nil {
 					t.Errorf("unexpected error: %v", err)
 				}
-				if !money.Amount.Equal(amount) {
-					t.Errorf("expected amount %v, got %v", amount, money.Amount)
+				if !money.Amount().Equal(amount) {
+					t.Errorf("expected amount %v, got %v", amount, money.Amount())
 				}
-				if money.Currency != tt.currency {
-					t.Errorf("expected currency %v, got %v", tt.currency, money.Currency)
+				if money.Currency() != tt.currency {
+					t.Errorf("expected currency %v, got %v", tt.currency, money.Currency())
 				}
 			}
 		})
@@ -66,8 +66,8 @@ func TestMoney_Add(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Amount.Equal(decimal.NewFromInt(150)) {
-		t.Errorf("expected 150, got %v", result.Amount)
+	if !result.Amount().Equal(decimal.NewFromInt(150)) {
+		t.Errorf("expected 150, got %v", result.Amount())
 	}
 
 	_, err = gbp100.Add(usd100)
@@ -84,8 +84,8 @@ func TestMoney_Subtract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Amount.Equal(decimal.NewFromInt(70)) {
-		t.Errorf("expected 70, got %v", result.Amount)
+	if !result.Amount().Equal(decimal.NewFromInt(70)) {
+		t.Errorf("expected 70, got %v", result.Amount())
 	}
 }
 
