@@ -22,6 +22,8 @@ var (
 	ErrTooManyEntries = errors.New("maximum number of transaction entries exceeded")
 	// ErrTooManyAuditEntries is returned when the maximum number of audit entries is exceeded
 	ErrTooManyAuditEntries = errors.New("maximum number of audit entries exceeded")
+	// ErrInvalidReconciliationStatus is returned when trying to mark as reconciled with unreconciled status
+	ErrInvalidReconciliationStatus = errors.New("reconciliation status must not be unreconciled when marking as reconciled")
 )
 
 const (
@@ -114,6 +116,11 @@ func (l *FinancialPositionLog) MarkReconciled(
 ) error {
 	if l.StatusTracking.CurrentStatus == TransactionStatusPosted {
 		return ErrAlreadyPosted
+	}
+
+	// Validate reconciliation status is actually a reconciled state
+	if reconciliationStatus == ReconciliationStatusUnreconciled {
+		return ErrInvalidReconciliationStatus
 	}
 
 	// Validate we can add audit entry before modifying state

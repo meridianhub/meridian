@@ -43,8 +43,10 @@ func NewAuditTrailEntry(
 		return nil, ErrInvalidAction
 	}
 
-	if systemContext == nil {
-		systemContext = make(map[string]string)
+	// Clone the map to prevent external mutation of audit data
+	clonedContext := make(map[string]string)
+	for k, v := range systemContext {
+		clonedContext[k] = v
 	}
 
 	return &AuditTrailEntry{
@@ -54,6 +56,6 @@ func NewAuditTrailEntry(
 		Action:        action,
 		Details:       details,
 		IPAddress:     ipAddress,
-		SystemContext: systemContext,
+		SystemContext: clonedContext,
 	}, nil
 }

@@ -38,30 +38,47 @@ func NewTransactionLineage(
 }
 
 // SetParent sets the parent transaction ID.
-func (l *TransactionLineage) SetParent(parentID uuid.UUID) {
+// Returns an error if parentID is nil.
+func (l *TransactionLineage) SetParent(parentID uuid.UUID) error {
+	if parentID == uuid.Nil {
+		return ErrInvalidTransactionID
+	}
 	l.ParentTransactionID = &parentID
+	return nil
 }
 
 // AddChild adds a child transaction ID.
-func (l *TransactionLineage) AddChild(childID uuid.UUID) {
+// Returns an error if childID is nil or invalid.
+func (l *TransactionLineage) AddChild(childID uuid.UUID) error {
+	if childID == uuid.Nil {
+		return ErrInvalidTransactionID
+	}
+
 	// Avoid duplicates
 	for _, id := range l.ChildTransactionIDs {
 		if id == childID {
-			return
+			return nil
 		}
 	}
 	l.ChildTransactionIDs = append(l.ChildTransactionIDs, childID)
+	return nil
 }
 
 // AddRelated adds a related transaction ID.
-func (l *TransactionLineage) AddRelated(relatedID uuid.UUID) {
+// Returns an error if relatedID is nil or invalid.
+func (l *TransactionLineage) AddRelated(relatedID uuid.UUID) error {
+	if relatedID == uuid.Nil {
+		return ErrInvalidTransactionID
+	}
+
 	// Avoid duplicates
 	for _, id := range l.RelatedTransactionIDs {
 		if id == relatedID {
-			return
+			return nil
 		}
 	}
 	l.RelatedTransactionIDs = append(l.RelatedTransactionIDs, relatedID)
+	return nil
 }
 
 // HasParent returns true if this transaction has a parent.
