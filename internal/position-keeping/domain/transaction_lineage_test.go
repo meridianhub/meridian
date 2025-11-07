@@ -74,7 +74,10 @@ func TestNewTransactionLineage(t *testing.T) {
 	})
 
 	t.Run("verifies CreatedAt timestamp", func(t *testing.T) {
-		lineage, _ := NewTransactionLineage(uuid.New(), "payment", nil, nil, nil)
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
 		if lineage.CreatedAt().IsZero() {
 			t.Error("CreatedAt should not be zero")
 		}
@@ -83,7 +86,10 @@ func TestNewTransactionLineage(t *testing.T) {
 
 func TestTransactionLineage_DefensiveCopy_Parent(t *testing.T) {
 	parentID := uuid.New()
-	lineage, _ := NewTransactionLineage(uuid.New(), "payment", &parentID, nil, nil)
+	lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, nil, nil)
+	if err != nil {
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
+	}
 
 	// Get parent pointer
 	gotParent := lineage.ParentTransactionID()
@@ -103,7 +109,10 @@ func TestTransactionLineage_DefensiveCopy_Children(t *testing.T) {
 	child2 := uuid.New()
 	children := []uuid.UUID{child1, child2}
 
-	lineage, _ := NewTransactionLineage(uuid.New(), "payment", nil, children, nil)
+	lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, children, nil)
+	if err != nil {
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
+	}
 
 	// Get children slice
 	gotChildren := lineage.ChildTransactionIDs()
@@ -130,7 +139,10 @@ func TestTransactionLineage_DefensiveCopy_Related(t *testing.T) {
 	related2 := uuid.New()
 	related := []uuid.UUID{related1, related2}
 
-	lineage, _ := NewTransactionLineage(uuid.New(), "payment", nil, nil, related)
+	lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, related)
+	if err != nil {
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
+	}
 
 	// Get related slice
 	gotRelated := lineage.RelatedTransactionIDs()
@@ -158,7 +170,10 @@ func TestTransactionLineage_Constructor_DefensiveCopy(t *testing.T) {
 	children := []uuid.UUID{uuid.New(), uuid.New()}
 	related := []uuid.UUID{uuid.New()}
 
-	lineage, _ := NewTransactionLineage(uuid.New(), "payment", &parentID, children, related)
+	lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, children, related)
+	if err != nil {
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
+	}
 
 	// Mutate input slices
 	children[0] = uuid.New()

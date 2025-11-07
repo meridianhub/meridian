@@ -41,13 +41,17 @@ func NewTransactionLineage(
 		parent = &p
 	}
 
-	// Defensive copy of child IDs slice
-	children := make([]uuid.UUID, len(childTransactionIDs))
-	copy(children, childTransactionIDs)
+	// Defensive copy of child IDs slice (only allocate when needed)
+	var children []uuid.UUID
+	if len(childTransactionIDs) > 0 {
+		children = append([]uuid.UUID(nil), childTransactionIDs...)
+	}
 
-	// Defensive copy of related IDs slice
-	related := make([]uuid.UUID, len(relatedTransactionIDs))
-	copy(related, relatedTransactionIDs)
+	// Defensive copy of related IDs slice (only allocate when needed)
+	var related []uuid.UUID
+	if len(relatedTransactionIDs) > 0 {
+		related = append([]uuid.UUID(nil), relatedTransactionIDs...)
+	}
 
 	return &TransactionLineage{
 		transactionID:         transactionID,
