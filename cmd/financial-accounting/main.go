@@ -1,8 +1,9 @@
-// Package main is the entry point for the CurrentAccount service.
+// Package main is the entry point for the FinancialAccounting service.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -11,12 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
-	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/internal/current-account/clients"
-	"github.com/meridianhub/meridian/internal/current-account/service"
+	"github.com/meridianhub/meridian/internal/financial-accounting/adapters/persistence"
+	"github.com/meridianhub/meridian/internal/financial-accounting/service"
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"gorm.io/driver/postgres"
@@ -30,6 +30,12 @@ var (
 	BuildDate = "unknown"
 )
 
+// Static errors for configuration validation
+var (
+	ErrBankCashAccountIDRequired = errors.New("BANK_CASH_ACCOUNT_ID environment variable is required")
+	ErrBankCashAccountIDInvalid  = errors.New("BANK_CASH_ACCOUNT_ID must be a valid UUID")
+)
+
 func main() {
 	// Initialize structured logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -37,10 +43,33 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting current-account service",
+	logger.Info("starting financial-accounting service",
 		"version", Version,
 		"commit", Commit,
 		"build_date", BuildDate)
+
+	// Check feature flags and environment
+	environment := getEnvOrDefault("ENVIRONMENT", "production")
+	incompleteImplementation := getEnvOrDefault("FEATURE_INCOMPLETE_IMPLEMENTATION", "false")
+
+	// Prevent deployment to production with incomplete implementation
+	if environment == "production" && incompleteImplementation == "true" {
+		logger.Error("FATAL: Cannot deploy incomplete implementation to production",
+			"environment", environment,
+			"incomplete", incompleteImplementation,
+			"action_required", "Set FEATURE_INCOMPLETE_IMPLEMENTATION=false and complete gRPC service implementation")
+		os.Exit(1)
+	}
+
+	// WARNING: Service implementation incomplete
+	if incompleteImplementation == "true" {
+		logger.Warn("financial-accounting service is running with incomplete gRPC implementation",
+			"status", "infrastructure-only",
+			"missing", "FinancialAccountingService gRPC methods",
+			"note", "Only health checks and reflection are available",
+			"environment", environment,
+			"production_blocked", "true")
+	}
 
 	// Run the service
 	if err := run(logger); err != nil {
@@ -62,7 +91,7 @@ func run(logger *slog.Logger) error {
 
 	// Override service name and version from build info
 	tracerConfig = tracerConfig.
-		WithServiceName("current-account-service").
+		WithServiceName("financial-accounting-service").
 		WithServiceVersion(Version)
 
 	tracer, err := observability.NewTracer(ctx, tracerConfig)
@@ -92,30 +121,27 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("database connection established")
 
-	// Create repository
-	repo := persistence.NewRepository(db)
-
-	// Get external service targets from environment
-	positionKeepingTarget := getEnvOrDefault("POSITION_KEEPING_TARGET", "positionkeeping-service:50051")
-	financialAccountingTarget := getEnvOrDefault("FINANCIAL_ACCOUNTING_TARGET", "financialaccounting-service:50052")
-
-	logger.Info("external service configuration",
-		"position_keeping", positionKeepingTarget,
-		"financial_accounting", financialAccountingTarget)
-
-	// Create service with external clients and capture the clients for health checking
-	currentAccountService, posKeepingClient, finAcctClient, err := createServiceWithClients(
-		repo,
-		positionKeepingTarget,
-		financialAccountingTarget,
-		logger,
-		tracer,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create service: %w", err)
+	// Validate bank cash account ID is configured
+	bankCashAccountID := getEnvOrDefault("BANK_CASH_ACCOUNT_ID", "")
+	if bankCashAccountID == "" {
+		return ErrBankCashAccountIDRequired
 	}
 
-	logger.Info("service initialized with external clients")
+	// Validate UUID format
+	if len(bankCashAccountID) != 36 || bankCashAccountID[8] != '-' || bankCashAccountID[13] != '-' {
+		return fmt.Errorf("%w: got %s", ErrBankCashAccountIDInvalid, bankCashAccountID)
+	}
+
+	logger.Info("bank cash account configured",
+		"account_id", bankCashAccountID)
+
+	// Create ledger repository
+	ledgerRepo := persistence.NewLedgerRepository(db)
+
+	// Create posting service (using validated bankCashAccountID from above)
+	postingService := service.NewPostingService(ledgerRepo, bankCashAccountID)
+
+	logger.Info("posting service initialized", "bank_cash_account_id", bankCashAccountID)
 
 	// Create gRPC server with observability interceptors
 	grpcServer := grpc.NewServer(
@@ -127,19 +153,17 @@ func run(logger *slog.Logger) error {
 		),
 	)
 
-	// Register services
-	pb.RegisterCurrentAccountServiceServer(grpcServer, currentAccountService)
+	// Register Financial Accounting service
+	// TODO: Create and register FinancialAccountingService implementation
+	// This will be completed in a follow-up commit once the gRPC service wrapper is created
+	_ = postingService // Placeholder until we create the gRPC service wrapper
 
-	// Register health check service with dependency checking
-	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
-		Repository:                repo,
-		PositionKeepingClient:     posKeepingClient,
-		FinancialAccountingClient: finAcctClient,
-		Logger:                    logger,
-		ServiceName:               "current-account",
-		CheckTimeout:              5 * time.Second,
-	})
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
+	// Register health check service
+	healthServer := health.NewServer()
+	// Set health status for both the default service name (used by K8s probes) and the named service
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	healthServer.SetServingStatus("financial-accounting", grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
 	// Register reflection service for debugging
 	reflection.Register(grpcServer)
@@ -147,7 +171,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get port from environment
-	port := getEnvOrDefault("GRPC_PORT", "50051")
+	port := getEnvOrDefault("GRPC_PORT", "50052")
 	address := fmt.Sprintf(":%s", port)
 
 	// Create listener
@@ -179,8 +203,9 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown
 	logger.Info("shutting down server...")
 
-	// Note: Custom health checker will automatically return NOT_SERVING when dependencies fail
-	// No need to manually mark status as the checker evaluates actual dependency health
+	// Mark service as not serving (both default and named service)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+	healthServer.SetServingStatus("financial-accounting", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
 
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -305,66 +330,4 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return value
-}
-
-// createServiceWithClients creates the service and returns it along with the external clients
-// for use in health checking. This approach creates the clients once and shares them between
-// the service and health checker to avoid duplicate connections.
-func createServiceWithClients(
-	repo *persistence.Repository,
-	positionKeepingTarget string,
-	financialAccountingTarget string,
-	logger *slog.Logger,
-	tracer *observability.Tracer,
-) (*service.Service, clients.PositionKeepingClient, clients.FinancialAccountingClient, error) {
-	// Create Position Keeping client
-	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
-		Target:  positionKeepingTarget,
-		Timeout: 30 * time.Second,
-		Tracer:  tracer,
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create position keeping client: %w", err)
-	}
-
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientPosKeepingClient := clients.NewResilientPositionKeepingClient(
-		posKeepingGRPCClient,
-		clients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
-
-	// Create Financial Accounting client
-	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
-		Target:  financialAccountingTarget,
-		Timeout: 30 * time.Second,
-		Tracer:  tracer,
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create financial accounting client: %w", err)
-	}
-
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientFinAcctClient := clients.NewResilientFinancialAccountingClient(
-		finAcctGRPCClient,
-		clients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
-
-	// Create service with the pre-created clients
-	svc, err := service.NewServiceWithExistingClients(
-		repo,
-		resilientPosKeepingClient,
-		resilientFinAcctClient,
-		logger,
-		tracer,
-	)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
-	}
-
-	// Return the service and the clients for use in health checking
-	return svc, resilientPosKeepingClient, resilientFinAcctClient, nil
 }
