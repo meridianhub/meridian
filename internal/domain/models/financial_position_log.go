@@ -16,7 +16,7 @@ type FinancialPositionLog struct {
 	LogID     uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_position_keeping_financial_position_logs_log_id" json:"log_id"`
 	AccountID string    `gorm:"type:varchar(34);not null;index:idx_position_keeping_financial_position_logs_account_id" json:"account_id"` // IBAN format, FK to accounts.account_number
 	Account   *Account  `gorm:"foreignKey:AccountID;references:AccountNumber;constraint:OnDelete:RESTRICT" json:"account,omitempty"`
-	Version   int64     `gorm:"not null;default:1" json:"version"` // Optimistic locking
+	Version   int64     `gorm:"version;not null;default:1" json:"version"` // Optimistic locking - gorm:version enables auto-increment and concurrent update protection
 
 	// Status Tracking (embedded value object)
 	CurrentStatus        string    `gorm:"type:varchar(20);not null;index:idx_position_keeping_financial_position_logs_current_status" json:"current_status"`
@@ -46,7 +46,7 @@ type TransactionLogEntry struct {
 	EntryID                uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_position_keeping_transaction_log_entries_entry_id" json:"entry_id"`
 	FinancialPositionLogID uuid.UUID `gorm:"type:uuid;not null;index:idx_position_keeping_transaction_log_entries_log_id" json:"financial_position_log_id"`
 	TransactionID          uuid.UUID `gorm:"type:uuid;not null;index:idx_position_keeping_transaction_log_entries_transaction_id" json:"transaction_id"`
-	AccountID              string    `gorm:"type:varchar(100);not null" json:"account_id"`
+	AccountID              string    `gorm:"type:varchar(34);not null" json:"account_id"`         // IBAN format, consistent with FinancialPositionLog
 	AmountCents            int64     `gorm:"not null" json:"amount_cents"`                        // Store as smallest currency unit
 	Currency               string    `gorm:"type:char(3);not null;default:'GBP'" json:"currency"` // ISO 4217
 	Direction              string    `gorm:"type:varchar(10);not null" json:"direction"`          // 'debit' or 'credit'

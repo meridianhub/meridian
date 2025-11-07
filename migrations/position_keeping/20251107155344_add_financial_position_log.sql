@@ -94,7 +94,7 @@ CREATE TABLE "position_keeping"."transaction_log_entries" (
   "entry_id" uuid NOT NULL,
   "financial_position_log_id" uuid NOT NULL,
   "transaction_id" uuid NOT NULL,
-  "account_id" character varying(100) NOT NULL,
+  "account_id" character varying(34) NOT NULL,
   "amount_cents" bigint NOT NULL,
   "currency" character(3) NOT NULL DEFAULT 'GBP',
   "direction" character varying(10) NOT NULL,
