@@ -225,25 +225,25 @@ func TestNewAuditTrailEntry_WhitespaceOnlyStrings(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "whitespace-only UserID",
+			name:    "whitespace-only UserID is currently accepted (no trimming)",
 			userID:  "   ",
 			action:  "ACTION",
-			wantErr: nil, // Whitespace is technically not empty
+			wantErr: nil,
 		},
 		{
-			name:    "whitespace-only Action",
+			name:    "whitespace-only Action is currently accepted (no trimming)",
 			userID:  "user123",
 			action:  "   ",
-			wantErr: nil, // Whitespace is technically not empty
+			wantErr: nil,
 		},
 		{
-			name:    "tab-only UserID",
+			name:    "tab-only UserID is currently accepted (no trimming)",
 			userID:  "\t\t",
 			action:  "ACTION",
 			wantErr: nil,
 		},
 		{
-			name:    "newline-only Action",
+			name:    "newline-only Action is currently accepted (no trimming)",
 			userID:  "user123",
 			action:  "\n\n",
 			wantErr: nil,
@@ -256,6 +256,185 @@ func TestNewAuditTrailEntry_WhitespaceOnlyStrings(t *testing.T) {
 
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Expected error %v, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestNewAuditTrailEntry_StringEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		userID      string
+		action      string
+		details     string
+		ipAddress   string
+		wantErr     bool
+		expectedErr error
+	}{
+		{
+			name:      "very long UserID (1000 chars)",
+			userID:    strings.Repeat("U", 1000),
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "very long Action (1000 chars)",
+			userID:    "user123",
+			action:    strings.Repeat("A", 1000),
+			details:   "Details",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "very long Details (100000 chars)",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   strings.Repeat("D", 100000),
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "very long IPAddress (1000 chars) is accepted",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: strings.Repeat("1", 1000),
+			wantErr:   false,
+		},
+		{
+			name:      "empty Details is allowed (optional field)",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "whitespace-only Details is allowed",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "   ",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "empty IPAddress is allowed (optional field)",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: "",
+			wantErr:   false,
+		},
+		{
+			name:      "whitespace-only IPAddress is allowed",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: "   ",
+			wantErr:   false,
+		},
+		{
+			name:      "UserID with leading/trailing spaces",
+			userID:    "  user123  ",
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "Action with leading/trailing spaces",
+			userID:    "user123",
+			action:    "  UPDATE  ",
+			details:   "Details",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "unicode characters in UserID",
+			userID:    "用户-123",
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "unicode characters in Action",
+			userID:    "user123",
+			action:    "更新_ACCOUNT",
+			details:   "Details",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "unicode characters in Details",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "更新账户余额 Updated account balance 💰",
+			ipAddress: "192.168.1.1",
+			wantErr:   false,
+		},
+		{
+			name:      "special characters in IPAddress (IPv6)",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+			wantErr:   false,
+		},
+		{
+			name:      "invalid IPv4 format is accepted (no validation)",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: "999.999.999.999",
+			wantErr:   false,
+		},
+		{
+			name:      "non-IP string in IPAddress is accepted",
+			userID:    "user123",
+			action:    "UPDATE",
+			details:   "Details",
+			ipAddress: "not-an-ip-address",
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry, err := NewAuditTrailEntry(tt.userID, tt.action, tt.details, tt.ipAddress, nil)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error but got nil")
+				}
+				if tt.expectedErr != nil && !errors.Is(err, tt.expectedErr) {
+					t.Errorf("Expected error %v, got %v", tt.expectedErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			if entry.UserID != tt.userID {
+				t.Errorf("Expected UserID to be preserved as %q, got %q", tt.userID, entry.UserID)
+			}
+
+			if entry.Action != tt.action {
+				t.Errorf("Expected Action to be preserved as %q, got %q", tt.action, entry.Action)
+			}
+
+			if entry.Details != tt.details {
+				t.Errorf("Expected Details to be preserved as %q, got %q", tt.details, entry.Details)
+			}
+
+			if entry.IPAddress != tt.ipAddress {
+				t.Errorf("Expected IPAddress to be preserved as %q, got %q", tt.ipAddress, entry.IPAddress)
 			}
 		})
 	}
