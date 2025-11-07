@@ -262,3 +262,36 @@ func TestTransactionLineage_HasChildren(t *testing.T) {
 func ptr(id uuid.UUID) *uuid.UUID {
 	return &id
 }
+
+func TestNewTransactionLineage_StringEdgeCases(t *testing.T) {
+	tests := []struct {
+		name            string
+		transactionType string
+		wantErr         bool
+	}{
+		{"very long transaction type (1000 chars)", string(make([]byte, 1000)), false},
+		{"very long transaction type (10000 chars)", string(make([]byte, 10000)), false},
+		{"whitespace-only transaction type", "   ", false},
+		{"tab-only transaction type", "\t\t\t", false},
+		{"newline-only transaction type", "\n\n\n", false},
+		{"transaction type with leading/trailing spaces", "  payment  ", false},
+		{"unicode characters in transaction type", "支付-تحويل-💰", false},
+		{"special characters in transaction type", "payment@#$%^&*()", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lineage, err := NewTransactionLineage(uuid.New(), tt.transactionType, nil, nil, nil)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewTransactionLineage() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && lineage == nil {
+				t.Error("Expected lineage, got nil")
+			}
+			if !tt.wantErr && lineage.TransactionType() != tt.transactionType {
+				t.Errorf("TransactionType() = %q, want %q", lineage.TransactionType(), tt.transactionType)
+			}
+		})
+	}
+}
