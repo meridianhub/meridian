@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -370,7 +371,7 @@ func createLogWithEntries(t *testing.T, numEntries int) *FinancialPositionLog {
 			PostingDirectionDebit,
 			time.Now(),
 			"Test entry",
-			"REF-"+string(rune(i)),
+			fmt.Sprintf("REF-%d", i),
 			TransactionSourceManual,
 		)
 		if err != nil {
