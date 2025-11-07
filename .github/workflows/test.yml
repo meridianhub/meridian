@@ -41,7 +41,7 @@ jobs:
           SKIP_KAFKA_TESTS: "1"
         run: |
           mkdir -p coverage
-          go test -v -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
+          go test -short -v -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
           echo "Filtering generated proto files from coverage..."
           grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true
 

@@ -378,6 +378,10 @@ func TestRetryJitterIsApplied(t *testing.T) {
 	}
 
 	// Verify all intervals are within expected range
+	// Wider tolerance (±60% vs ±30% in exponential backoff test) because:
+	// 1. Test uses 50% randomization factor (±50% jitter by design)
+	// 2. CI scheduler variance compounds with intentional randomization
+	// Expected: 100ms ± 50% jitter ± CI variance = 40-160ms range
 	for _, interval := range intervals {
 		if interval < 40*time.Millisecond || interval > 160*time.Millisecond {
 			t.Errorf("expected interval between 40ms and 160ms with jitter, got %v", interval)
