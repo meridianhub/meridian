@@ -41,6 +41,12 @@ func main() {
 		"commit", Commit,
 		"build_date", BuildDate)
 
+	// WARNING: Service implementation incomplete
+	logger.Warn("financial-accounting service is running with incomplete gRPC implementation",
+		"status", "infrastructure-only",
+		"missing", "FinancialAccountingService gRPC methods",
+		"note", "Only health checks and reflection are available")
+
 	// Run the service
 	if err := run(logger); err != nil {
 		logger.Error("service failed", "error", err)
@@ -191,7 +197,7 @@ func run(logger *slog.Logger) error {
 
 // initDatabase initializes the database connection with connection pooling
 func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
-	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian:meridian@localhost:5432/meridian?sslmode=disable")
+	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian:meridian@cockroachdb:26257/meridian?sslmode=disable")
 
 	// Open database connection
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{

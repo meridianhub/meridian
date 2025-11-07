@@ -22,10 +22,6 @@ spec:
         app: financial-accounting
         component: microservice
         tier: backend
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "50052"
-        prometheus.io/path: "/metrics"
     spec:
       securityContext:
         runAsNonRoot: true

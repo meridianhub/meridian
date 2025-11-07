@@ -22,10 +22,6 @@ spec:
         app: current-account
         component: microservice
         tier: backend
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "50051"
-        prometheus.io/path: "/metrics"
     spec:
       securityContext:
         runAsNonRoot: true
