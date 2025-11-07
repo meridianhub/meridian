@@ -6,10 +6,21 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/meridianhub/meridian/internal/platform/kafka"
 	"github.com/meridianhub/meridian/internal/position-keeping/domain"
 	"google.golang.org/protobuf/proto"
 )
+
+// protoPublisher is an interface for publishing protobuf messages to Kafka.
+// This interface allows the KafkaEventPublisher to be unit-tested without
+// requiring a real Kafka connection.
+type protoPublisher interface {
+	// Publish publishes a protobuf message to a topic with a partition key
+	Publish(ctx context.Context, topic, key string, msg proto.Message) error
+	// Flush waits for outstanding messages to be delivered
+	Flush(timeoutMs int) int
+	// Close closes the producer
+	Close()
+}
 
 var (
 	// ErrNilProducer is returned when producer is nil
@@ -57,16 +68,17 @@ func DefaultTopicConfig() TopicConfig {
 }
 
 // KafkaEventPublisher publishes position keeping domain events to Kafka topics.
-// It uses the platform kafka.ProtoProducer for reliable message delivery.
+// It uses the protoPublisher interface for reliable message delivery.
 type KafkaEventPublisher struct {
-	producer    *kafka.ProtoProducer
+	producer    protoPublisher
 	topicConfig TopicConfig
 }
 
 // NewKafkaEventPublisher creates a new Kafka-based event publisher.
 // The producer must be configured with appropriate retry and acknowledgment settings
 // for production use. Use DefaultTopicConfig() for standard topic naming.
-func NewKafkaEventPublisher(producer *kafka.ProtoProducer, topicConfig TopicConfig) (*KafkaEventPublisher, error) {
+// The producer parameter can be any implementation of protoPublisher (typically *kafka.ProtoProducer).
+func NewKafkaEventPublisher(producer protoPublisher, topicConfig TopicConfig) (*KafkaEventPublisher, error) {
 	if producer == nil {
 		return nil, ErrNilProducer
 	}
