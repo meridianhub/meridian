@@ -131,10 +131,7 @@ func run(logger *slog.Logger) error {
 	// Create ledger repository
 	ledgerRepo := persistence.NewLedgerRepository(db)
 
-	// Get bank cash account ID from environment (required for posting service)
-	bankCashAccountID := getEnvOrDefault("BANK_CASH_ACCOUNT_ID", "00000000-0000-0000-0000-000000000001")
-
-	// Create posting service
+	// Create posting service (using validated bankCashAccountID from above)
 	postingService := service.NewPostingService(ledgerRepo, bankCashAccountID)
 
 	logger.Info("posting service initialized", "bank_cash_account_id", bankCashAccountID)
