@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: financial-accounting
+  labels:
+    app: financial-accounting
+    component: microservice
+spec:
+  type: ClusterIP
+  ports:
+  - name: grpc
+    port: 50052
+    targetPort: grpc
+    protocol: TCP
+  selector:
+    app: financial-accounting
