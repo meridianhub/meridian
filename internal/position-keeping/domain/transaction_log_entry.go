@@ -34,6 +34,9 @@ type TransactionLogEntry struct {
 }
 
 // NewTransactionLogEntry creates a new transaction log entry with validation.
+// If the source is invalid, it defaults to TransactionSourceManual to handle
+// legacy data or unknown sources gracefully. This ensures the entry can still
+// be created while tracking the source as a manual entry for audit purposes.
 func NewTransactionLogEntry(
 	transactionID uuid.UUID,
 	accountID string,
@@ -60,8 +63,10 @@ func NewTransactionLogEntry(
 		return nil, ErrInvalidPostingDirection
 	}
 
+	// Default invalid sources to Manual for graceful degradation
+	// This handles legacy data and unknown sources while maintaining audit trail
 	if !source.IsValid() {
-		source = TransactionSourceManual // Default to manual if invalid
+		source = TransactionSourceManual
 	}
 
 	return &TransactionLogEntry{

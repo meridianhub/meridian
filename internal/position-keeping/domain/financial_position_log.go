@@ -35,6 +35,14 @@ const (
 
 // FinancialPositionLog represents a comprehensive log of financial position for an account.
 // This is the aggregate root for the Position Keeping domain.
+//
+// The Version field implements optimistic concurrency control to prevent lost updates
+// in concurrent scenarios. The persistence layer should use this field in UPDATE
+// statements (e.g., WHERE log_id = ? AND version = ?) to detect conflicts.
+// The Version is incremented by all state-changing lifecycle methods that modify
+// StatusTracking (MarkReconciled, MarkPosted, Reject, Amend, Fail, Cancel).
+// AddEntry does NOT increment Version as it represents accumulation within a draft
+// state rather than a lifecycle state transition.
 type FinancialPositionLog struct {
 	LogID                 uuid.UUID
 	AccountID             string
@@ -44,7 +52,7 @@ type FinancialPositionLog struct {
 	StatusTracking        *StatusTracking
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
-	Version               int64
+	Version               int64 // Optimistic lock version, incremented on status transitions
 }
 
 // NewFinancialPositionLog creates a new financial position log for an account.
