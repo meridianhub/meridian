@@ -80,3 +80,79 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
+
+  tiltfile-syntax:
+    name: Tiltfile Syntax
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Tilt
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
+        timeout-minutes: 2
+
+      - name: Create minimal kubeconfig
+        run: |
+          # Tilt requires a kubeconfig even for syntax validation
+          mkdir -p ~/.kube
+          cat > ~/.kube/config <<'EOF'
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - cluster:
+              server: https://127.0.0.1:6443
+            name: kind-meridian-local
+          contexts:
+          - context:
+              cluster: kind-meridian-local
+              user: kind-meridian-local
+            name: kind-meridian-local
+          current-context: kind-meridian-local
+          users:
+          - name: kind-meridian-local
+          EOF
+
+      - name: Validate Tiltfile syntax
+        run: |
+          # Run tilt ci with a short timeout to validate syntax
+          set +e
+          timeout 10s tilt ci 2>&1 | tee tilt-output.txt
+          EXIT_CODE=$?
+          set -e
+
+          # Check for syntax errors
+          if grep -q "got illegal token\|syntax error\|Traceback (most recent call last)" tilt-output.txt; then
+            echo "❌ Tiltfile has syntax errors!"
+            grep -A 5 "got illegal token\|syntax error\|Traceback" tilt-output.txt || true
+            exit 1
+          fi
+
+          # Check if it loaded successfully
+          if grep -q "Successfully loaded Tiltfile" tilt-output.txt; then
+            echo "✅ Tiltfile syntax is valid!"
+            exit 0
+          fi
+
+          # Timeout is expected without a real cluster
+          if [ $EXIT_CODE -eq 124 ]; then
+            if grep -q "Loading Tiltfile" tilt-output.txt; then
+              echo "✅ Tiltfile syntax is valid!"
+              exit 0
+            fi
+          fi
+
+          echo "❌ Unexpected validation result"
+          cat tilt-output.txt
+          exit 1
+        timeout-minutes: 1
+
+      - name: Upload validation output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tilt-validation-output
+          path: tilt-output.txt
+          retention-days: 7
