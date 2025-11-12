@@ -86,6 +86,38 @@ check_command() {
     echo ""
 }
 
+list_local_contexts() {
+    # Helper function to list available local Kubernetes contexts and provide guidance
+    # Shows kind-meridian-local first if available, then lists other local contexts
+    # Falls back to cluster creation instructions if no local contexts found
+
+    local local_contexts
+    local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "kind-|docker-desktop|rancher-desktop|minikube|colima")
+
+    if [ -n "$local_contexts" ]; then
+        echo -e "  Switch to a local cluster that works offline:"
+        echo -e ""
+        # Show the most likely context first (kind-meridian-local)
+        if echo "$local_contexts" | grep -q "kind-meridian-local"; then
+            echo -e "  ${BLUE}→ kubectl config use-context kind-meridian-local${NC}"
+            echo -e ""
+        fi
+        echo -e "  ${GREEN}All available local contexts:${NC}"
+        while IFS= read -r ctx; do
+            if [ "$ctx" != "kind-meridian-local" ]; then
+                echo -e "    kubectl config use-context $ctx"
+            fi
+        done <<< "$local_contexts"
+    else
+        echo -e "  1. Ensure Docker Desktop is running"
+        echo -e "  2. Create a local Kind cluster:"
+        echo -e ""
+        echo -e "     ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
+        echo -e ""
+        echo -e "  3. The cluster will be automatically selected as your context"
+    fi
+}
+
 check_k8s_cluster() {
     echo "Checking Kubernetes cluster connectivity..."
 
@@ -93,10 +125,32 @@ check_k8s_cluster() {
     local current_context
     current_context=$(kubectl config current-context 2>/dev/null || echo "none")
 
-    # Try to connect to cluster with timeout (single invocation)
+    # Check if we're pointing to a remote cluster before attempting connection
+    local is_remote_cluster=false
+    if echo "$current_context" | grep -q "arn:aws:eks\|\.eks\.\|gke_\|aks-"; then
+        is_remote_cluster=true
+    fi
+
+    # Quick network connectivity check (only for remote clusters)
+    local network_available=true
+    if [ "$is_remote_cluster" = true ]; then
+        # Quick check - try to resolve a common domain with 2 second timeout
+        if ! timeout 2 nc -z 8.8.8.8 53 2>/dev/null && ! timeout 2 host google.com >/dev/null 2>&1; then
+            network_available=false
+        fi
+    fi
+
+    # Try to connect to cluster with shorter timeout for offline scenarios
     local cluster_error
     local exit_code=0
-    cluster_error=$(timeout 5 kubectl cluster-info 2>&1) || exit_code=$?
+    local timeout_duration=5
+
+    # Use shorter timeout if we know we're offline
+    if [ "$network_available" = false ]; then
+        timeout_duration=2
+    fi
+
+    cluster_error=$(timeout "$timeout_duration" kubectl cluster-info 2>&1) || exit_code=$?
 
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}✓${NC} Kubernetes cluster accessible"
@@ -109,43 +163,60 @@ check_k8s_cluster() {
     else
         echo -e "${RED}✗${NC} Cannot connect to Kubernetes cluster"
         echo -e "  Current context: $current_context"
+        echo -e ""
 
-        # Provide specific diagnosis based on error
-        # Check for AWS/EKS context or AWS authentication errors
-        if echo "$current_context" | grep -q "arn:aws:eks\|\.eks\."; then
+        # Provide specific diagnosis based on context and network status
+        # Check for offline scenario first
+        if [ "$network_available" = false ]; then
+            echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════╗${NC}"
+            echo -e "  ${YELLOW}║  OFFLINE MODE DETECTED                                 ║${NC}"
+            echo -e "  ${YELLOW}╚════════════════════════════════════════════════════════╝${NC}"
             echo -e ""
-            echo -e "  ${YELLOW}Diagnosis:${NC} kubectl is configured for AWS EKS cluster requiring SSO login"
-            echo -e ""
-            echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Switch to a local cluster context:"
+            echo -e "  No network connectivity detected. This is normal for:"
+            echo -e "    • Working offline (airplane mode, no WiFi)"
+            echo -e "    • VPN disconnected"
+            echo -e "    • Network issues"
             echo -e ""
 
-            # Check for available local contexts
-            local local_contexts
-            local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "kind-|docker-desktop|rancher-desktop|minikube|colima")
-
-            if [ -n "$local_contexts" ]; then
-                echo -e "  ${GREEN}Available local contexts:${NC}"
-                while IFS= read -r ctx; do
-                    echo -e "    kubectl config use-context $ctx"
-                done <<< "$local_contexts"
+            if [ "$is_remote_cluster" = true ]; then
+                echo -e "  ${YELLOW}Additional issue:${NC} kubectl is configured for remote cluster"
+                echo -e "  Context: ${BLUE}$current_context${NC}"
                 echo -e ""
-                echo -e "  ${YELLOW}Run one of the above commands to switch to local development.${NC}"
-            else
-                echo -e "  ${YELLOW}No local cluster contexts found. Create a local cluster:${NC}"
-                echo -e ""
-                echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
-                echo -e "    1. Ensure Docker Desktop is running"
-                echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
-                echo -e "    3. Verify: kubectl config use-context kind-meridian-local"
-                echo -e ""
-                echo -e "  ${YELLOW}Alternative options:${NC}"
-                echo -e "    - Docker Desktop: Enable Kubernetes in settings (Preferences → Kubernetes)"
-                echo -e "    - Rancher Desktop: Enable Kubernetes in preferences"
-                echo -e "    - minikube: minikube start"
             fi
-        elif echo "$cluster_error" | grep -q "connection refused\|no such host"; then
+
+            echo -e "  ${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
+            echo -e "  ${GREEN}║  RECOMMENDED FIX:                                      ║${NC}"
+            echo -e "  ${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
             echo -e ""
-            echo -e "  ${YELLOW}Diagnosis:${NC} Cluster not running or unreachable"
+
+            list_local_contexts
+        # Check for AWS/EKS context with network available
+        elif echo "$current_context" | grep -q "arn:aws:eks\|\.eks\."; then
+            echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════╗${NC}"
+            echo -e "  ${YELLOW}║  REMOTE CLUSTER DETECTED                               ║${NC}"
+            echo -e "  ${YELLOW}╚════════════════════════════════════════════════════════╝${NC}"
+            echo -e ""
+            echo -e "  kubectl is configured for AWS EKS production cluster"
+            echo -e "  Context: ${BLUE}$current_context${NC}"
+            echo -e ""
+            echo -e "  ${YELLOW}This requires:${NC}"
+            echo -e "    • AWS SSO login"
+            echo -e "    • Production access permissions"
+            echo -e "    • Active AWS session"
+            echo -e ""
+            echo -e "  ${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
+            echo -e "  ${GREEN}║  RECOMMENDED FIX:                                      ║${NC}"
+            echo -e "  ${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
+            echo -e ""
+
+            list_local_contexts
+        elif echo "$cluster_error" | grep -q "connection refused\|no such host"; then
+            echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════╗${NC}"
+            echo -e "  ${YELLOW}║  CLUSTER NOT RUNNING                                   ║${NC}"
+            echo -e "  ${YELLOW}╚════════════════════════════════════════════════════════╝${NC}"
+            echo -e ""
+            echo -e "  The configured cluster is not running or unreachable"
+            echo -e "  Context: ${BLUE}$current_context${NC}"
             echo -e ""
 
             # Offer to create cluster automatically if ctlptl and kind are available
@@ -171,17 +242,21 @@ check_k8s_cluster() {
                 echo -e ""
             fi
 
-            echo -e "  ${YELLOW}ACTION REQUIRED:${NC} Start a local Kubernetes cluster"
+            echo -e "  ${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
+            echo -e "  ${GREEN}║  RECOMMENDED FIX:                                      ║${NC}"
+            echo -e "  ${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
             echo -e ""
-            echo -e "  ${GREEN}Recommended (Kind + ctlptl):${NC}"
-            echo -e "    1. Ensure Docker Desktop is running"
-            echo -e "    2. Create cluster: ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
-            echo -e "    3. Verify: kubectl get nodes"
+            echo -e "  Create a local Kubernetes cluster:"
+            echo -e ""
+            echo -e "  1. Ensure Docker Desktop is running"
+            echo -e "  2. Create cluster:"
+            echo -e ""
+            echo -e "     ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
             echo -e ""
             echo -e "  ${YELLOW}Alternative options:${NC}"
-            echo -e "    - Docker Desktop: Enable Kubernetes (Preferences → Kubernetes → Enable)"
-            echo -e "    - Rancher Desktop: Enable Kubernetes in preferences"
-            echo -e "    - minikube: minikube start"
+            echo -e "    • Docker Desktop: Enable Kubernetes (Preferences → Kubernetes → Enable)"
+            echo -e "    • Rancher Desktop: Enable Kubernetes in preferences"
+            echo -e "    • minikube: minikube start"
         else
             echo -e ""
             echo -e "  ${YELLOW}Error details:${NC}"
