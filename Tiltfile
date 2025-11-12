@@ -16,11 +16,12 @@
 # Verify images are cached: docker images
 # Then run: tilt up (works completely offline)
 
-# Cross-platform build date helper
+# Build date helper (requires POSIX-compliant shell)
 def get_build_date():
-    """Returns current UTC datetime in ISO 8601 format (cross-platform)"""
-    from datetime import datetime
-    return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    """Returns current UTC datetime in ISO 8601 format (macOS/Linux/WSL)"""
+    # Use shell command instead of Python datetime (Starlark doesn't support datetime)
+    # Note: Requires POSIX 'date' command (available on macOS, Linux, WSL, Git Bash)
+    return str(local('date -u +"%Y-%m-%dT%H:%M:%SZ"')).strip()
 
 # Allow Tilt to connect to local Kubernetes cluster
 allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desktop', 'colima', 'rancher-desktop'])
