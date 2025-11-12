@@ -60,6 +60,41 @@ func TestTransactionCaptured_ToProto(t *testing.T) {
 	assert.NotNil(t, proto.Timestamp)
 }
 
+func TestTransactionCaptured_ToProto_JPY(t *testing.T) {
+	logID := uuid.New()
+	txID := uuid.New()
+	timestamp := time.Now().UTC()
+
+	// JPY has 0 decimal places, so 1000 JPY = 1000 minor units (not 100000)
+	money, err := domain.NewMoney(decimal.NewFromInt(1000), domain.CurrencyJPY)
+	require.NoError(t, err)
+
+	event := &domain.TransactionCaptured{
+		LogID:         logID,
+		AccountID:     "ACC-456",
+		TransactionID: txID,
+		Amount:        money,
+		Direction:     domain.PostingDirectionCredit,
+		Source:        domain.TransactionSourceManual,
+		Description:   "JPY transaction",
+		Reference:     "REF-JPY",
+		CorrelationID: "CORR-JPY",
+		Timestamp:     timestamp,
+		Version:       1,
+	}
+
+	protoEvent := event.ToProto()
+	require.NotNil(t, protoEvent)
+
+	proto, ok := protoEvent.(*eventsv1.TransactionCapturedEvent)
+	require.True(t, ok)
+
+	// Critical assertion: JPY amount should be 1000, not 100000
+	// JPY has 0 decimal places, so no multiplication by 100
+	assert.Equal(t, int64(1000), proto.AmountCents, "JPY should not be multiplied by 100")
+	assert.Equal(t, commonv1.Currency_CURRENCY_JPY, proto.Currency)
+}
+
 func TestTransactionAmended_EventType(t *testing.T) {
 	event := &domain.TransactionAmended{}
 	assert.Equal(t, "position_keeping.transaction_amended.v1", event.EventType())

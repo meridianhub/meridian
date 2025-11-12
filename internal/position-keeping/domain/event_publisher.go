@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"errors"
+	"sync"
 )
 
 // ErrPublisherNotConfigured is returned when event publisher is not set up
@@ -43,7 +44,9 @@ func (p *NoOpEventPublisher) PublishBatch(_ context.Context, _ []DomainEvent) er
 
 // InMemoryEventPublisher stores events in memory for testing purposes.
 // Not suitable for production use - events are lost on restart.
+// Thread-safe for concurrent access via mutex protection.
 type InMemoryEventPublisher struct {
+	mu     sync.RWMutex
 	events []DomainEvent
 }
 
@@ -56,22 +59,34 @@ func NewInMemoryEventPublisher() *InMemoryEventPublisher {
 
 // Publish stores the event in memory.
 func (p *InMemoryEventPublisher) Publish(_ context.Context, event DomainEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.events = append(p.events, event)
 	return nil
 }
 
 // PublishBatch stores all events in memory.
 func (p *InMemoryEventPublisher) PublishBatch(_ context.Context, events []DomainEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.events = append(p.events, events...)
 	return nil
 }
 
 // GetPublishedEvents returns all events that have been published (for testing assertions).
+// Returns a copy to prevent external modification of internal state.
 func (p *InMemoryEventPublisher) GetPublishedEvents() []DomainEvent {
-	return p.events
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	// Return a copy to prevent race conditions
+	eventsCopy := make([]DomainEvent, len(p.events))
+	copy(eventsCopy, p.events)
+	return eventsCopy
 }
 
 // Clear removes all published events (for test cleanup).
 func (p *InMemoryEventPublisher) Clear() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.events = make([]DomainEvent, 0)
 }

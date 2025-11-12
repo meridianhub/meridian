@@ -57,8 +57,9 @@ func (e *TransactionCaptured) OccurredAt() time.Time {
 
 // ToProto converts to protobuf representation.
 func (e *TransactionCaptured) ToProto() interface{} {
-	// Convert decimal amount to cents (int64)
-	amountCents := e.Amount.Amount().Shift(2).IntPart()
+	// Convert decimal amount to minor units (cents, pence, sen, etc.)
+	// This is currency-aware: JPY has 0 decimal places, others have 2
+	amountCents := e.Amount.ToMinorUnits()
 
 	return &eventsv1.TransactionCapturedEvent{
 		LogId:         e.LogID.String(),

@@ -113,3 +113,25 @@ func (m Money) IsNegative() bool {
 func (m Money) String() string {
 	return fmt.Sprintf("%s %s", m.amount.StringFixed(2), m.currency)
 }
+
+// DecimalPlaces returns the number of decimal places for the currency.
+// Most currencies use 2 decimal places, but some (like JPY) use 0.
+func (c Currency) DecimalPlaces() int32 {
+	switch c {
+	case CurrencyJPY:
+		return 0
+	case CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyCHF, CurrencyCAD, CurrencyAUD:
+		return 2
+	default:
+		// Future-proof for additional currencies
+		return 2
+	}
+}
+
+// ToMinorUnits converts the Money amount to minor units (cents, pence, sen, etc.)
+// This is currency-aware: JPY returns the amount as-is (no decimals), while
+// GBP/USD/EUR multiply by 100 to convert to cents/pence.
+func (m Money) ToMinorUnits() int64 {
+	decimalPlaces := m.currency.DecimalPlaces()
+	return m.amount.Shift(decimalPlaces).IntPart()
+}

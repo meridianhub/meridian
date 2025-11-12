@@ -250,3 +250,91 @@ func TestCurrency_IsValid(t *testing.T) {
 		})
 	}
 }
+
+func TestCurrency_DecimalPlaces(t *testing.T) {
+	tests := []struct {
+		name     string
+		currency Currency
+		want     int32
+	}{
+		{"GBP uses 2 decimal places", CurrencyGBP, 2},
+		{"USD uses 2 decimal places", CurrencyUSD, 2},
+		{"EUR uses 2 decimal places", CurrencyEUR, 2},
+		{"JPY uses 0 decimal places", CurrencyJPY, 0},
+		{"CHF uses 2 decimal places", CurrencyCHF, 2},
+		{"CAD uses 2 decimal places", CurrencyCAD, 2},
+		{"AUD uses 2 decimal places", CurrencyAUD, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.currency.DecimalPlaces(); got != tt.want {
+				t.Errorf("Currency.DecimalPlaces() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMoney_ToMinorUnits(t *testing.T) {
+	tests := []struct {
+		name     string
+		amount   decimal.Decimal
+		currency Currency
+		want     int64
+	}{
+		{
+			name:     "GBP 100.00 = 10000 pence",
+			amount:   decimal.NewFromInt(100),
+			currency: CurrencyGBP,
+			want:     10000,
+		},
+		{
+			name:     "USD 123.45 = 12345 cents",
+			amount:   decimal.NewFromFloat(123.45),
+			currency: CurrencyUSD,
+			want:     12345,
+		},
+		{
+			name:     "EUR 0.01 = 1 cent",
+			amount:   decimal.NewFromFloat(0.01),
+			currency: CurrencyEUR,
+			want:     1,
+		},
+		{
+			name:     "JPY 1000 = 1000 (no decimals)",
+			amount:   decimal.NewFromInt(1000),
+			currency: CurrencyJPY,
+			want:     1000,
+		},
+		{
+			name:     "JPY 1234.56 rounds to 1234 (no decimals)",
+			amount:   decimal.NewFromFloat(1234.56),
+			currency: CurrencyJPY,
+			want:     1234,
+		},
+		{
+			name:     "negative GBP -50.25 = -5025 pence",
+			amount:   decimal.NewFromFloat(-50.25),
+			currency: CurrencyGBP,
+			want:     -5025,
+		},
+		{
+			name:     "zero amount",
+			amount:   decimal.Zero,
+			currency: CurrencyUSD,
+			want:     0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			money, err := NewMoney(tt.amount, tt.currency)
+			if err != nil {
+				t.Fatalf("NewMoney() error = %v", err)
+			}
+			if got := money.ToMinorUnits(); got != tt.want {
+				t.Errorf("Money.ToMinorUnits() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

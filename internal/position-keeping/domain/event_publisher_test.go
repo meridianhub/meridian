@@ -144,3 +144,81 @@ func TestInMemoryEventPublisher_MultipleEvents(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, logID2, reconciled.LogID)
 }
+
+func TestInMemoryEventPublisher_ConcurrentPublish(t *testing.T) {
+	publisher := domain.NewInMemoryEventPublisher()
+	ctx := context.Background()
+
+	const numGoroutines = 100
+	const eventsPerGoroutine = 10
+
+	// Launch multiple goroutines publishing events concurrently
+	done := make(chan bool)
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			for j := 0; j < eventsPerGoroutine; j++ {
+				event := &domain.TransactionCaptured{
+					LogID:     uuid.New(),
+					AccountID: "ACC-WORKER",
+					Timestamp: time.Now().UTC(),
+				}
+				err := publisher.Publish(ctx, event)
+				require.NoError(t, err)
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < numGoroutines; i++ {
+		<-done
+	}
+
+	// Verify all events were published (no race condition data loss)
+	published := publisher.GetPublishedEvents()
+	assert.Equal(t, numGoroutines*eventsPerGoroutine, len(published),
+		"all events should be published without race condition data loss")
+}
+
+func TestInMemoryEventPublisher_ConcurrentReadWrite(t *testing.T) {
+	publisher := domain.NewInMemoryEventPublisher()
+	ctx := context.Background()
+
+	const numWriters = 50
+	const numReaders = 50
+	const eventsPerWriter = 10
+
+	done := make(chan bool)
+
+	// Launch writer goroutines
+	for i := 0; i < numWriters; i++ {
+		go func() {
+			for j := 0; j < eventsPerWriter; j++ {
+				event := &domain.TransactionPosted{
+					LogID:     uuid.New(),
+					Timestamp: time.Now().UTC(),
+				}
+				_ = publisher.Publish(ctx, event)
+			}
+			done <- true
+		}()
+	}
+
+	// Launch reader goroutines (concurrent with writers)
+	for i := 0; i < numReaders; i++ {
+		go func() {
+			_ = publisher.GetPublishedEvents()
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < (numWriters + numReaders); i++ {
+		<-done
+	}
+
+	// Verify final event count
+	published := publisher.GetPublishedEvents()
+	assert.Equal(t, numWriters*eventsPerWriter, len(published),
+		"concurrent reads should not interfere with writes")
+}
