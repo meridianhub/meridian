@@ -86,6 +86,38 @@ check_command() {
     echo ""
 }
 
+list_local_contexts() {
+    # Helper function to list available local Kubernetes contexts and provide guidance
+    # Shows kind-meridian-local first if available, then lists other local contexts
+    # Falls back to cluster creation instructions if no local contexts found
+
+    local local_contexts
+    local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "kind-|docker-desktop|rancher-desktop|minikube|colima")
+
+    if [ -n "$local_contexts" ]; then
+        echo -e "  Switch to a local cluster that works offline:"
+        echo -e ""
+        # Show the most likely context first (kind-meridian-local)
+        if echo "$local_contexts" | grep -q "kind-meridian-local"; then
+            echo -e "  ${BLUE}→ kubectl config use-context kind-meridian-local${NC}"
+            echo -e ""
+        fi
+        echo -e "  ${GREEN}All available local contexts:${NC}"
+        while IFS= read -r ctx; do
+            if [ "$ctx" != "kind-meridian-local" ]; then
+                echo -e "    kubectl config use-context $ctx"
+            fi
+        done <<< "$local_contexts"
+    else
+        echo -e "  1. Ensure Docker Desktop is running"
+        echo -e "  2. Create a local Kind cluster:"
+        echo -e ""
+        echo -e "     ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
+        echo -e ""
+        echo -e "  3. The cluster will be automatically selected as your context"
+    fi
+}
+
 check_k8s_cluster() {
     echo "Checking Kubernetes cluster connectivity..."
 
@@ -157,32 +189,7 @@ check_k8s_cluster() {
             echo -e "  ${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
             echo -e ""
 
-            # Check for available local contexts
-            local local_contexts
-            local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "kind-|docker-desktop|rancher-desktop|minikube|colima")
-
-            if [ -n "$local_contexts" ]; then
-                echo -e "  Switch to a local cluster that works offline:"
-                echo -e ""
-                # Show the most likely context first (kind-meridian-local)
-                if echo "$local_contexts" | grep -q "kind-meridian-local"; then
-                    echo -e "  ${BLUE}→ kubectl config use-context kind-meridian-local${NC}"
-                    echo -e ""
-                fi
-                echo -e "  ${GREEN}All available local contexts:${NC}"
-                while IFS= read -r ctx; do
-                    if [ "$ctx" != "kind-meridian-local" ]; then
-                        echo -e "    kubectl config use-context $ctx"
-                    fi
-                done <<< "$local_contexts"
-            else
-                echo -e "  1. Ensure Docker Desktop is running"
-                echo -e "  2. Create a local Kind cluster:"
-                echo -e ""
-                echo -e "     ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
-                echo -e ""
-                echo -e "  3. The cluster will be automatically selected as your context"
-            fi
+            list_local_contexts
         # Check for AWS/EKS context with network available
         elif echo "$current_context" | grep -q "arn:aws:eks\|\.eks\."; then
             echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════╗${NC}"
@@ -202,38 +209,7 @@ check_k8s_cluster() {
             echo -e "  ${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
             echo -e ""
 
-            # Check for available local contexts
-            local local_contexts
-            local_contexts=$(kubectl config get-contexts -o name 2>/dev/null | grep -E "kind-|docker-desktop|rancher-desktop|minikube|colima")
-
-            if [ -n "$local_contexts" ]; then
-                echo -e "  Switch to your local development cluster:"
-                echo -e ""
-                # Show the most likely context first (kind-meridian-local)
-                if echo "$local_contexts" | grep -q "kind-meridian-local"; then
-                    echo -e "  ${BLUE}→ kubectl config use-context kind-meridian-local${NC}"
-                    echo -e ""
-                fi
-                echo -e "  ${GREEN}All available local contexts:${NC}"
-                while IFS= read -r ctx; do
-                    if [ "$ctx" != "kind-meridian-local" ]; then
-                        echo -e "    kubectl config use-context $ctx"
-                    fi
-                done <<< "$local_contexts"
-            else
-                echo -e "  No local cluster found. Create one:"
-                echo -e ""
-                echo -e "  1. Ensure Docker Desktop is running"
-                echo -e "  2. Create cluster:"
-                echo -e ""
-                echo -e "     ${BLUE}ctlptl create cluster kind --name=kind-meridian-local${NC}"
-                echo -e ""
-                echo -e "  3. The cluster will be automatically selected as your context"
-                echo -e ""
-                echo -e "  ${YELLOW}Alternative options:${NC}"
-                echo -e "    • Docker Desktop: Enable Kubernetes (Preferences → Kubernetes)"
-                echo -e "    • Rancher Desktop: Enable Kubernetes in preferences"
-            fi
+            list_local_contexts
         elif echo "$cluster_error" | grep -q "connection refused\|no such host"; then
             echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════╗${NC}"
             echo -e "  ${YELLOW}║  CLUSTER NOT RUNNING                                   ║${NC}"
