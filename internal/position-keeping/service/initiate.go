@@ -173,10 +173,15 @@ func protoEntryToDomain(proto *positionkeepingv1.TransactionLogEntry) (*domain.T
 	}
 
 	var direction domain.PostingDirection
-	if proto.Direction == commonv1.PostingDirection_POSTING_DIRECTION_DEBIT {
+	switch proto.Direction {
+	case commonv1.PostingDirection_POSTING_DIRECTION_DEBIT:
 		direction = domain.PostingDirectionDebit
-	} else if proto.Direction == commonv1.PostingDirection_POSTING_DIRECTION_CREDIT {
+	case commonv1.PostingDirection_POSTING_DIRECTION_CREDIT:
 		direction = domain.PostingDirectionCredit
+	case commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED:
+		direction = domain.PostingDirectionDebit // Unspecified defaults to debit
+	default:
+		direction = domain.PostingDirectionDebit
 	}
 
 	timestamp := time.Now().UTC()

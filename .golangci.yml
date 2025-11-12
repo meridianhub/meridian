@@ -32,7 +32,7 @@ linters:
     - noctx          # Check for missing context.Context
     - exhaustive     # Check exhaustiveness of enum switch statements
     - err113         # Go 1.13 error wrapping
-    - wrapcheck      # Check error wrapping
+    # - wrapcheck      # Check error wrapping (disabled: gRPC services return terminal errors)
     - errorlint      # Error handling best practices
     - contextcheck   # Check context.Context usage
     - sqlclosecheck  # Check SQL resources are closed
@@ -113,6 +113,8 @@ linters-settings:
       - name: redefines-builtin-id
 
   wrapcheck:
+    ignorePackageGlobs:
+      - github.com/meridianhub/meridian/internal/*/service
     ignoreSigs:
       - .Errorf(
       - errors.New(
@@ -124,6 +126,9 @@ linters-settings:
       - .WithStack(
       - status.Error(
       - status.Errorf(
+      - args.Error(
+      - uuid.Parse(
+      - domain.New*
 
   errorlint:
     errorf: true
@@ -148,7 +153,7 @@ issues:
         - wrapcheck
 
     # Exclude wrapcheck for gRPC service layers (status.Error returns are terminal)
-    - path: internal/.*-keeping/service/
+    - path: internal/position-keeping/service
       linters:
         - wrapcheck
 

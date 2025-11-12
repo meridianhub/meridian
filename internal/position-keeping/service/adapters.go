@@ -75,11 +75,18 @@ func toProtoMoneyAmount(domainMoney domain.Money) *commonv1.MoneyAmount {
 	fraction := amount.Sub(amount.Truncate(0))
 	nanos := fraction.Mul(decimal.NewFromInt(1000000000)).IntPart()
 
+	// Clamp nanos to int32 range to prevent overflow
+	if nanos > 999999999 {
+		nanos = 999999999
+	} else if nanos < -999999999 {
+		nanos = -999999999
+	}
+
 	return &commonv1.MoneyAmount{
 		Amount: &money.Money{
 			CurrencyCode: domainMoney.Currency().String(),
 			Units:        units,
-			Nanos:        int32(nanos),
+			Nanos:        int32(nanos), // Safe after clamping
 		},
 	}
 }
