@@ -299,58 +299,74 @@ func TestBulkTransactionCaptured_ToProto(t *testing.T) {
 
 func TestDomainEvent_AggregateID(t *testing.T) {
 	logID := uuid.New()
+	batchID := uuid.New()
 
 	tests := []struct {
-		name  string
-		event domain.DomainEvent
+		name              string
+		event             domain.DomainEvent
+		expectedAggregate string
 	}{
 		{
 			name: "TransactionCaptured",
 			event: &domain.TransactionCaptured{
 				LogID: logID,
 			},
+			expectedAggregate: logID.String(),
 		},
 		{
 			name: "TransactionAmended",
 			event: &domain.TransactionAmended{
 				LogID: logID,
 			},
+			expectedAggregate: logID.String(),
 		},
 		{
 			name: "TransactionReconciled",
 			event: &domain.TransactionReconciled{
 				LogID: logID,
 			},
+			expectedAggregate: logID.String(),
 		},
 		{
 			name: "TransactionPosted",
 			event: &domain.TransactionPosted{
 				LogID: logID,
 			},
+			expectedAggregate: logID.String(),
 		},
 		{
 			name: "TransactionRejected",
 			event: &domain.TransactionRejected{
 				LogID: logID,
 			},
+			expectedAggregate: logID.String(),
 		},
 		{
 			name: "TransactionFailed",
 			event: &domain.TransactionFailed{
 				LogID: logID,
 			},
+			expectedAggregate: logID.String(),
 		},
 		{
 			name: "TransactionCancelled",
 			event: &domain.TransactionCancelled{
 				LogID: logID,
 			},
+			expectedAggregate: logID.String(),
+		},
+		{
+			name: "BulkTransactionCaptured",
+			event: &domain.BulkTransactionCaptured{
+				BatchID: batchID,
+			},
+			expectedAggregate: batchID.String(),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, logID.String(), tt.event.AggregateID())
+			assert.Equal(t, tt.expectedAggregate, tt.event.AggregateID())
 		})
 	}
 }

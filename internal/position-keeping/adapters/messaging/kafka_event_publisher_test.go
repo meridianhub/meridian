@@ -220,6 +220,10 @@ func TestKafkaEventPublisher_TopicMapping(t *testing.T) {
 	batchID := uuid.New()
 	timestamp := time.Now().UTC()
 
+	// Create Money for TransactionCaptured
+	money, err := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	require.NoError(t, err)
+
 	tests := []struct {
 		name          string
 		event         domain.DomainEvent
@@ -228,10 +232,17 @@ func TestKafkaEventPublisher_TopicMapping(t *testing.T) {
 		{
 			name: "TransactionCaptured",
 			event: &domain.TransactionCaptured{
-				LogID:     logID,
-				AccountID: "ACC-123",
-				Timestamp: timestamp,
-				Version:   1,
+				LogID:         logID,
+				AccountID:     "ACC-123",
+				TransactionID: uuid.New(),
+				Amount:        money,
+				Direction:     domain.PostingDirectionDebit,
+				Source:        domain.TransactionSourceAutomated,
+				Description:   "Test transaction",
+				Reference:     "REF-001",
+				CorrelationID: "CORR-123",
+				Timestamp:     timestamp,
+				Version:       1,
 			},
 			expectedTopic: "position-keeping.transaction-captured.v1",
 		},
@@ -370,12 +381,23 @@ func TestKafkaEventPublisher_PublishBatch(t *testing.T) {
 	logID2 := uuid.New()
 	timestamp := time.Now().UTC()
 
+	// Create Money for TransactionCaptured
+	money, err := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	require.NoError(t, err)
+
 	events := []domain.DomainEvent{
 		&domain.TransactionCaptured{
-			LogID:     logID1,
-			AccountID: "ACC-123",
-			Timestamp: timestamp,
-			Version:   1,
+			LogID:         logID1,
+			AccountID:     "ACC-123",
+			TransactionID: uuid.New(),
+			Amount:        money,
+			Direction:     domain.PostingDirectionDebit,
+			Source:        domain.TransactionSourceAutomated,
+			Description:   "Test transaction",
+			Reference:     "REF-001",
+			CorrelationID: "CORR-123",
+			Timestamp:     timestamp,
+			Version:       1,
 		},
 		&domain.TransactionAmended{
 			LogID:     logID2,

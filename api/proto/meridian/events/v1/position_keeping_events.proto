@@ -125,7 +125,7 @@ message TransactionReconciledEvent {
 
   // reconciliation_status indicates the reconciliation outcome
   string reconciliation_status = 3 [(buf.validate.field).string = {
-    in: ["auto_reconciled", "manually_reconciled", "reconciled_with_discrepancy"]
+    in: ["unreconciled", "auto_reconciled", "manually_reconciled", "reconciled_with_discrepancy"]
   }];
 
   // reason provides context for the reconciliation
