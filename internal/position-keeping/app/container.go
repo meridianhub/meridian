@@ -103,7 +103,9 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 		return fmt.Errorf("%w: %d", ErrMaxIdleConnsOverflow, c.Config.Database.MaxIdleConns)
 	}
 
+	// #nosec G115 -- overflow validated above
 	poolConfig.MaxConns = int32(c.Config.Database.MaxOpenConns)
+	// #nosec G115 -- overflow validated above
 	poolConfig.MinConns = int32(c.Config.Database.MaxIdleConns)
 	poolConfig.MaxConnLifetime = c.Config.Database.ConnMaxLifetime
 	poolConfig.MaxConnIdleTime = c.Config.Database.ConnMaxIdleTime
