@@ -322,6 +322,7 @@ type BulkTransactionCaptured struct {
 	Source           TransactionSource
 	CorrelationID    string
 	Timestamp        time.Time
+	Version          int64
 }
 
 // EventType returns the event type identifier.
@@ -353,6 +354,7 @@ func (e *BulkTransactionCaptured) ToProto() interface{} {
 		Source:           e.Source.String(),
 		CorrelationId:    e.CorrelationID,
 		Timestamp:        timestamppb.New(e.Timestamp),
+		Version:          e.Version,
 	}
 }
 

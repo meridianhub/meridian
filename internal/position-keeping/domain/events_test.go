@@ -280,6 +280,7 @@ func TestBulkTransactionCaptured_ToProto(t *testing.T) {
 		Source:           domain.TransactionSourceImported,
 		CorrelationID:    "CORR-123",
 		Timestamp:        timestamp,
+		Version:          1,
 	}
 
 	protoEvent := event.ToProto()
@@ -295,6 +296,7 @@ func TestBulkTransactionCaptured_ToProto(t *testing.T) {
 	assert.Equal(t, logID2.String(), proto.LogIds[1])
 	assert.Equal(t, "IMPORTED", proto.Source)
 	assert.Equal(t, "CORR-123", proto.CorrelationId)
+	assert.Equal(t, int64(1), proto.Version)
 }
 
 func TestDomainEvent_AggregateID(t *testing.T) {

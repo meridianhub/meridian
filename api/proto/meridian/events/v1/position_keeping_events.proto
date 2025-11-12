@@ -342,4 +342,9 @@ message BulkTransactionCapturedEvent {
 
   // timestamp when the event was created
   google.protobuf.Timestamp timestamp = 6 [(buf.validate.field).required = true];
+
+  // version supports optimistic concurrency control
+  int64 version = 7 [(buf.validate.field).int64 = {
+    gte: 1
+  }];
 }
