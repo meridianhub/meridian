@@ -239,6 +239,8 @@ func NewBulkTransactionCapturedEvent(t *testing.T, count int) *domain.BulkTransa
 	if count < 1 {
 		count = 10 // Default to 10 transactions
 	}
+	// Validate count is within int32 range and domain limit (10000)
+	// #nosec G115 - count is validated to be <= 10000, which is well within int32 range
 	if count > 10000 {
 		t.Fatalf("Bulk transaction count exceeds maximum of 10000: %d", count)
 	}
@@ -250,7 +252,7 @@ func NewBulkTransactionCapturedEvent(t *testing.T, count int) *domain.BulkTransa
 
 	return &domain.BulkTransactionCaptured{
 		BatchID:          uuid.New(),
-		TransactionCount: int32(count),
+		TransactionCount: int32(count), // Safe: count validated <= 10000
 		LogIDs:           logIDs,
 		Source:           domain.TransactionSourceImported,
 		CorrelationID:    "TEST-BULK-CORR-001",
