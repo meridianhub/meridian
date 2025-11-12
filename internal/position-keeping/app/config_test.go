@@ -9,6 +9,8 @@ import (
 func TestLoadConfig_Defaults(t *testing.T) {
 	// Clear environment
 	clearEnv(t)
+	// DATABASE_URL is required (no default to avoid hardcoded credentials)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -423,6 +425,51 @@ func TestGetEnvAsFloat_Invalid(t *testing.T) {
 	result := getEnvAsFloat("TEST_FLOAT", 0.5)
 	if result != 0.5 {
 		t.Errorf("getEnvAsFloat() = %f, want 0.5 (default)", result)
+	}
+}
+
+func TestGetEnvAsSlice_WithWhitespace(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected []string
+	}{
+		{
+			name:     "spaces around values",
+			value:    " kafka1:9092 , kafka2:9092 , kafka3:9092 ",
+			expected: []string{"kafka1:9092", "kafka2:9092", "kafka3:9092"},
+		},
+		{
+			name:     "tabs and spaces",
+			value:    "value1\t,\tvalue2\t,\tvalue3",
+			expected: []string{"value1", "value2", "value3"},
+		},
+		{
+			name:     "no whitespace",
+			value:    "value1,value2,value3",
+			expected: []string{"value1", "value2", "value3"},
+		},
+		{
+			name:     "empty values filtered",
+			value:    "value1, , value3",
+			expected: []string{"value1", "value3"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("TEST_SLICE", tt.value)
+			result := getEnvAsSlice("TEST_SLICE", []string{"default"})
+			if len(result) != len(tt.expected) {
+				t.Errorf("getEnvAsSlice() length = %d, want %d", len(result), len(tt.expected))
+				return
+			}
+			for i, v := range result {
+				if v != tt.expected[i] {
+					t.Errorf("getEnvAsSlice()[%d] = %s, want %s", i, v, tt.expected[i])
+				}
+			}
+		})
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -117,7 +118,7 @@ func loadServerConfig() ServerConfig {
 // loadDatabaseConfig loads database configuration from environment variables
 func loadDatabaseConfig() DatabaseConfig {
 	return DatabaseConfig{
-		URL:                 getEnvOrDefault("DATABASE_URL", "postgres://meridian:meridian@cockroachdb:26257/meridian?sslmode=disable"),
+		URL:                 os.Getenv("DATABASE_URL"), // Required - no default to avoid hardcoded credentials
 		MaxOpenConns:        getEnvAsInt("DB_MAX_OPEN_CONNS", 25),
 		MaxIdleConns:        getEnvAsInt("DB_MAX_IDLE_CONNS", 5),
 		ConnMaxLifetime:     getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
@@ -277,28 +278,20 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 }
 
 // getEnvAsSlice returns the environment variable value as string slice or default
-// Expects comma-separated values
+// Expects comma-separated values with whitespace trimming
 func getEnvAsSlice(key string, defaultValue []string) []string {
 	valueStr := os.Getenv(key)
 	if valueStr == "" {
 		return defaultValue
 	}
 
-	// Simple comma-separated parsing
 	var result []string
-	current := ""
-	for _, char := range valueStr {
-		if char == ',' {
-			if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		} else {
-			current += string(char)
+	parts := strings.Split(valueStr, ",")
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
 		}
-	}
-	if current != "" {
-		result = append(result, current)
 	}
 
 	if len(result) == 0 {

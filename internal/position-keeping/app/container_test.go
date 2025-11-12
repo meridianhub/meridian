@@ -110,6 +110,7 @@ func TestContainerClose_WithTimeout(t *testing.T) {
 func TestKafkaDisabled(t *testing.T) {
 	// Verify that when Kafka is disabled, container uses no-op publisher
 	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
 	t.Setenv("KAFKA_ENABLED", "false")
 
 	config, err := LoadConfig()
@@ -129,6 +130,7 @@ func TestKafkaDisabled(t *testing.T) {
 
 func TestDatabasePoolConfiguration(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
 	t.Setenv("DB_MAX_OPEN_CONNS", "50")
 	t.Setenv("DB_MAX_IDLE_CONNS", "10")
 	t.Setenv("DB_CONN_MAX_LIFETIME", "15m")
@@ -156,6 +158,7 @@ func TestDatabasePoolConfiguration(t *testing.T) {
 
 func TestObservabilityConfiguration(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
 	t.Setenv("SERVICE_NAME", "test-service")
 	t.Setenv("SERVICE_VERSION", "1.2.3")
 	t.Setenv("ENVIRONMENT", "test")
