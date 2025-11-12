@@ -122,6 +122,8 @@ linters-settings:
       - .WithMessage(
       - .WithMessagef(
       - .WithStack(
+      - status.Error(
+      - status.Errorf(
 
   errorlint:
     errorf: true
@@ -143,6 +145,11 @@ issues:
         - errcheck
         - goconst
         - unparam
+        - wrapcheck
+
+    # Exclude wrapcheck for gRPC service layers (status.Error returns are terminal)
+    - path: internal/.*-keeping/service/
+      linters:
         - wrapcheck
 
     # Exclude all linters for integration tests (require external services)
