@@ -95,6 +95,14 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 	}
 
 	// Configure connection pool
+	// Validate connection counts fit in int32 range
+	if c.Config.Database.MaxOpenConns > 2147483647 {
+		return fmt.Errorf("%w: %d", ErrMaxOpenConnsOverflow, c.Config.Database.MaxOpenConns)
+	}
+	if c.Config.Database.MaxIdleConns > 2147483647 {
+		return fmt.Errorf("%w: %d", ErrMaxIdleConnsOverflow, c.Config.Database.MaxIdleConns)
+	}
+
 	poolConfig.MaxConns = int32(c.Config.Database.MaxOpenConns)
 	poolConfig.MinConns = int32(c.Config.Database.MaxIdleConns)
 	poolConfig.MaxConnLifetime = c.Config.Database.ConnMaxLifetime

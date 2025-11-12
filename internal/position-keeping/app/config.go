@@ -176,6 +176,8 @@ var (
 	ErrKafkaBrokersEmpty      = fmt.Errorf("kafka brokers must not be empty when kafka is enabled")
 	ErrInvalidSamplingRate    = fmt.Errorf("sampling rate must be between 0.0 and 1.0")
 	ErrContainerCloseFailures = fmt.Errorf("errors during container close")
+	ErrMaxOpenConnsOverflow   = fmt.Errorf("max open connections exceeds int32 limit")
+	ErrMaxIdleConnsOverflow   = fmt.Errorf("max idle connections exceeds int32 limit")
 )
 
 // Validate validates the configuration
