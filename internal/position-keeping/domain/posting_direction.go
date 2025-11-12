@@ -26,3 +26,13 @@ func (p PostingDirection) Opposite() PostingDirection {
 	}
 	return PostingDirectionDebit
 }
+
+// ParsePostingDirection converts a string to PostingDirection.
+// Returns PostingDirectionDebit for unrecognized values.
+func ParsePostingDirection(s string) PostingDirection {
+	direction := PostingDirection(s)
+	if direction.IsValid() {
+		return direction
+	}
+	return PostingDirectionDebit
+}

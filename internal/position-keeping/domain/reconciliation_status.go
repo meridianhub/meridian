@@ -25,3 +25,13 @@ func (r ReconciliationStatus) IsValid() bool {
 func (r ReconciliationStatus) String() string {
 	return string(r)
 }
+
+// ParseReconciliationStatus converts a string to ReconciliationStatus.
+// Returns ReconciliationStatusUnreconciled for unrecognized values.
+func ParseReconciliationStatus(s string) ReconciliationStatus {
+	status := ReconciliationStatus(s)
+	if status.IsValid() {
+		return status
+	}
+	return ReconciliationStatusUnreconciled
+}
