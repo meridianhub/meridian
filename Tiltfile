@@ -2,9 +2,19 @@
 
 # Tiltfile for Meridian local development
 # Fast Kubernetes development with live reload
-
-# Load Tilt extensions
-load('ext://restart_process', 'docker_build_with_restart')
+#
+# Offline Development:
+# Once all Docker images are cached locally, this entire stack runs offline.
+# No external network access required after initial setup.
+#
+# To ensure offline readiness, pre-pull all required images:
+#   docker pull cockroachdb/cockroach:v23.1.11
+#   docker pull redis:7-alpine
+#   docker pull apache/kafka:3.9.1
+#   docker pull quay.io/keycloak/keycloak:26.0
+#
+# Verify images are cached: docker images
+# Then run: tilt up (works completely offline)
 
 # Cross-platform build date helper
 def get_build_date():
