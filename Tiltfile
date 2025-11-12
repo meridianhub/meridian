@@ -19,8 +19,8 @@
 # Cross-platform build date helper
 def get_build_date():
     """Returns current UTC datetime in ISO 8601 format (cross-platform)"""
-    from datetime import datetime
-    return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    # Use shell command instead of Python datetime (Starlark doesn't support datetime)
+    return str(local('date -u +"%Y-%m-%dT%H:%M:%SZ"')).strip()
 
 # Allow Tilt to connect to local Kubernetes cluster
 allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desktop', 'colima', 'rancher-desktop'])
