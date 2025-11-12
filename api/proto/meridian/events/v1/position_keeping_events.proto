@@ -39,12 +39,12 @@ message TransactionCapturedEvent {
 
   // direction indicates debit or credit
   string direction = 6 [(buf.validate.field).string = {
-    in: ["debit", "credit"]
+    in: ["DEBIT", "CREDIT"]
   }];
 
   // source indicates where the transaction originated
   string source = 7 [(buf.validate.field).string = {
-    in: ["manual", "api", "batch", "reconciliation", "correction"]
+    in: ["MANUAL", "AUTOMATED", "IMPORTED", "RECONCILIATION", "ADJUSTMENT", "CURRENT_ACCOUNT", "FINANCIAL_ACCOUNTING"]
   }];
 
   // description provides human-readable context
@@ -331,7 +331,7 @@ message BulkTransactionCapturedEvent {
 
   // source indicates where the bulk operation originated
   string source = 4 [(buf.validate.field).string = {
-    in: ["batch", "import", "migration", "reconciliation"]
+    in: ["MANUAL", "AUTOMATED", "IMPORTED", "RECONCILIATION", "ADJUSTMENT", "CURRENT_ACCOUNT", "FINANCIAL_ACCOUNTING"]
   }];
 
   // correlation_id links related events across services

@@ -316,14 +316,28 @@ func (e *TransactionCancelled) ToProto() interface{} {
 }
 
 // BulkTransactionCaptured represents a domain event for bulk transaction captures.
+// Used when multiple transactions are captured in a single batch operation (e.g., file import).
+//
+// Batch Size Limits:
+//   - Minimum: 1 transaction (validated by protobuf: min_items=1)
+//   - Maximum: 10,000 transactions (validated by protobuf: max_items=10000)
+//   - Recommended: 100-1000 transactions per batch for optimal performance
+//
+// For batches exceeding 10,000 transactions, split into multiple BulkTransactionCaptured
+// events. Use the same CorrelationID across split batches to link them together.
+//
+// Memory Considerations:
+//   - Each UUID in LogIDs is 16 bytes
+//   - Max batch (10,000 UUIDs) ≈ 156KB of UUIDs alone
+//   - Keep batch sizes reasonable to avoid memory pressure
 type BulkTransactionCaptured struct {
-	BatchID          uuid.UUID
-	TransactionCount int32
-	LogIDs           []uuid.UUID
-	Source           TransactionSource
-	CorrelationID    string
-	Timestamp        time.Time
-	Version          int64
+	BatchID          uuid.UUID         // Unique identifier for this bulk operation
+	TransactionCount int32             // Number of transactions in this batch
+	LogIDs           []uuid.UUID       // Position log IDs created (1-10,000 items)
+	Source           TransactionSource // Origin of bulk operation (e.g., IMPORTED)
+	CorrelationID    string            // Links related batches across services
+	Timestamp        time.Time         // When the bulk capture occurred
+	Version          int64             // Aggregate version for optimistic locking
 }
 
 // EventType returns the event type identifier.

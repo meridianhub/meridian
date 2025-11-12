@@ -72,6 +72,7 @@ func DefaultTopicConfig() TopicConfig {
 type KafkaEventPublisher struct {
 	producer    protoPublisher
 	topicConfig TopicConfig
+	topicMap    map[string]string // Pre-built map for O(1) topic lookup
 }
 
 // NewKafkaEventPublisher creates a new Kafka-based event publisher.
@@ -83,9 +84,22 @@ func NewKafkaEventPublisher(producer protoPublisher, topicConfig TopicConfig) (*
 		return nil, ErrNilProducer
 	}
 
+	// Pre-build topic routing map for O(1) lookups instead of O(n) switch statements
+	topicMap := map[string]string{
+		"position_keeping.transaction_captured.v1":      topicConfig.TransactionCapturedTopic,
+		"position_keeping.transaction_amended.v1":       topicConfig.TransactionAmendedTopic,
+		"position_keeping.transaction_reconciled.v1":    topicConfig.TransactionReconciledTopic,
+		"position_keeping.transaction_posted.v1":        topicConfig.TransactionPostedTopic,
+		"position_keeping.transaction_rejected.v1":      topicConfig.TransactionRejectedTopic,
+		"position_keeping.transaction_failed.v1":        topicConfig.TransactionFailedTopic,
+		"position_keeping.transaction_cancelled.v1":     topicConfig.TransactionCancelledTopic,
+		"position_keeping.bulk_transaction_captured.v1": topicConfig.BulkTransactionCapturedTopic,
+	}
+
 	return &KafkaEventPublisher{
 		producer:    producer,
 		topicConfig: topicConfig,
+		topicMap:    topicMap,
 	}, nil
 }
 
@@ -140,27 +154,14 @@ func (p *KafkaEventPublisher) PublishBatch(ctx context.Context, events []domain.
 }
 
 // getTopicForEvent maps event types to their corresponding Kafka topics.
+// Uses a pre-built map for O(1) lookup performance, making it scalable
+// for adding new event types without degrading performance.
 func (p *KafkaEventPublisher) getTopicForEvent(event domain.DomainEvent) string {
-	switch event.EventType() {
-	case "position_keeping.transaction_captured.v1":
-		return p.topicConfig.TransactionCapturedTopic
-	case "position_keeping.transaction_amended.v1":
-		return p.topicConfig.TransactionAmendedTopic
-	case "position_keeping.transaction_reconciled.v1":
-		return p.topicConfig.TransactionReconciledTopic
-	case "position_keeping.transaction_posted.v1":
-		return p.topicConfig.TransactionPostedTopic
-	case "position_keeping.transaction_rejected.v1":
-		return p.topicConfig.TransactionRejectedTopic
-	case "position_keeping.transaction_failed.v1":
-		return p.topicConfig.TransactionFailedTopic
-	case "position_keeping.transaction_cancelled.v1":
-		return p.topicConfig.TransactionCancelledTopic
-	case "position_keeping.bulk_transaction_captured.v1":
-		return p.topicConfig.BulkTransactionCapturedTopic
-	default:
+	topic, exists := p.topicMap[event.EventType()]
+	if !exists {
 		return ""
 	}
+	return topic
 }
 
 // Close closes the underlying Kafka producer and releases resources.
