@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/internal/platform/auth"
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"github.com/meridianhub/meridian/internal/position-keeping/domain"
 	"github.com/meridianhub/meridian/internal/position-keeping/repository"
@@ -17,8 +18,9 @@ type Container struct {
 	Logger *slog.Logger
 
 	// Infrastructure
-	DBPool *pgxpool.Pool
-	Tracer *observability.Tracer
+	DBPool          *pgxpool.Pool
+	Tracer          *observability.Tracer
+	AuthInterceptor *auth.Interceptor
 
 	// Adapters
 	EventPublisher domain.EventPublisher
@@ -37,6 +39,10 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 	// Initialize dependencies in order
 	if err := container.initializeTracer(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize tracer: %w", err)
+	}
+
+	if err := container.initializeAuth(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize auth: %w", err)
 	}
 
 	if err := container.initializeDatabase(ctx); err != nil {
@@ -84,6 +90,57 @@ func (c *Container) initializeTracer(ctx context.Context) error {
 		"environment", tracerConfig.Environment,
 		"sampling_rate", tracerConfig.SamplingRate,
 		"otlp_configured", tracerConfig.OTLPEndpoint != "")
+
+	return nil
+}
+
+// initializeAuth initializes the JWT authentication interceptor
+func (c *Container) initializeAuth(ctx context.Context) error {
+	// If auth is disabled, skip initialization
+	if !c.Config.Auth.Enabled {
+		c.Logger.Info("auth disabled (set AUTH_ENABLED=true to enable)")
+		return nil
+	}
+
+	// Create JWKS provider
+	jwksConfig := &auth.JWKSProviderConfig{
+		URL:        c.Config.Auth.JWKSURL,
+		CacheTTL:   c.Config.Auth.JWKSCacheTTL,
+		RefreshTTL: c.Config.Auth.JWKSRefreshTTL,
+	}
+
+	provider, err := auth.NewJWKSProvider(ctx, jwksConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create JWKS provider: %w", err)
+	}
+
+	// Create JWT validator
+	validator, err := auth.NewJWTValidatorWithJWKS(provider)
+	if err != nil {
+		return fmt.Errorf("failed to create JWT validator: %w", err)
+	}
+
+	// Create interceptor with bypass methods for health checks and reflection
+	interceptorConfig := &auth.InterceptorConfig{
+		JWKSValidator: validator,
+		BypassMethods: []string{
+			"/grpc.health.v1.Health/Check",
+			"/grpc.health.v1.Health/Watch",
+			"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+		},
+	}
+
+	interceptor, err := auth.NewAuthInterceptor(interceptorConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create auth interceptor: %w", err)
+	}
+
+	c.AuthInterceptor = interceptor
+	c.Logger.Info("auth interceptor initialized",
+		"jwks_url", jwksConfig.URL,
+		"cache_ttl", jwksConfig.CacheTTL,
+		"refresh_ttl", jwksConfig.RefreshTTL,
+		"bypass_methods", len(interceptorConfig.BypassMethods))
 
 	return nil
 }

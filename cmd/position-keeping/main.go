@@ -153,9 +153,12 @@ func run(logger *slog.Logger) error {
 		streamInterceptors = append(streamInterceptors, container.Tracer.StreamServerInterceptor())
 	}
 
-	// 3. Auth (TODO: Add when authentication is ready)
-	// unaryInterceptors = append(unaryInterceptors, auth.UnaryInterceptor())
-	// streamInterceptors = append(streamInterceptors, auth.StreamInterceptor())
+	// 3. Auth (JWT validation with JWKS)
+	if container.AuthInterceptor != nil {
+		unaryInterceptors = append(unaryInterceptors, container.AuthInterceptor.UnaryInterceptor())
+		streamInterceptors = append(streamInterceptors, container.AuthInterceptor.StreamInterceptor())
+		logger.Info("auth interceptor enabled in chain")
+	}
 
 	// 4. Recovery (last in chain to catch all panics)
 	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
