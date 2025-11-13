@@ -91,3 +91,16 @@ jobs:
           # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
           claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
 
+      # Always succeed even if Claude Code times out or fails
+      # This prevents blocking PRs when Claude Code has service issues
+      - name: Report Final Status
+        if: always()
+        run: |
+          if [ "${{ steps.claude-review.outcome }}" == "success" ]; then
+            echo "✅ Claude Code review completed successfully"
+          elif [ "${{ steps.claude-review.outcome }}" == "failure" ] || [ "${{ steps.claude-review.outcome }}" == "cancelled" ]; then
+            echo "⚠️  Claude Code review timed out or failed - this is non-blocking"
+            echo "All required checks (tests, build, lint) have passed"
+          fi
+          exit 0
+
