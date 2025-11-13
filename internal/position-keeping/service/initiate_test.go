@@ -360,3 +360,90 @@ func TestInitiateFinancialPositionLog_RepositoryError(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 	mockIdempotency.AssertExpectations(t)
 }
+
+func TestInitiateFinancialPositionLog_MarkPendingError(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+
+	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
+		AccountId: "test-account-123",
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.NewString(),
+		},
+	}
+
+	// Mock idempotency check - no previous operation
+	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
+		Return(nil, idempotency.ErrResultNotFound)
+
+	// Mock idempotency mark pending to fail
+	mockIdempotency.On("MarkPending", ctx, mock.AnythingOfType("idempotency.Key"), mock.AnythingOfType("time.Duration")).
+		Return(assert.AnError)
+
+	// Act
+	resp, err := svc.InitiateFinancialPositionLog(ctx, req)
+
+	// Assert
+	require.Error(t, err, "Expected error from MarkPending failure")
+	assert.Nil(t, resp, "Expected nil response on error")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code(), "Expected Internal error code for MarkPending failure")
+	assert.Contains(t, st.Message(), "failed to mark operation as pending", "Expected error message about MarkPending")
+
+	mockIdempotency.AssertExpectations(t)
+}
+
+func TestInitiateFinancialPositionLog_StoreResultError(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+
+	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
+		AccountId: "test-account-123",
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.NewString(),
+		},
+	}
+
+	// Mock idempotency check - no previous operation
+	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
+		Return(nil, idempotency.ErrResultNotFound)
+
+	// Mock idempotency mark pending
+	mockIdempotency.On("MarkPending", ctx, mock.AnythingOfType("idempotency.Key"), mock.AnythingOfType("time.Duration")).
+		Return(nil)
+
+	// Mock repository create
+	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+		Return(nil)
+
+	// Mock idempotency store result to fail
+	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).
+		Return(assert.AnError)
+
+	// Act
+	resp, err := svc.InitiateFinancialPositionLog(ctx, req)
+
+	// Assert
+	require.Error(t, err, "Expected error from StoreResult failure")
+	assert.Nil(t, resp, "Expected nil response on error")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code(), "Expected Internal error code for StoreResult failure")
+	assert.Contains(t, st.Message(), "failed to store idempotency result", "Expected error message about StoreResult")
+
+	mockRepo.AssertExpectations(t)
+	mockIdempotency.AssertExpectations(t)
+}
