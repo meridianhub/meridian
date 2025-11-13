@@ -280,22 +280,20 @@ func newHealthServer(container *app.Container, logger *slog.Logger) *healthServe
 
 // Check performs a health check
 func (h *healthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
-	// Check database connectivity
-	start := time.Now()
-	err := h.container.DBPool.Ping(ctx)
-	responseTime := time.Since(start)
+	// Use existing PgxPoolChecker for database health check
+	checker := app.NewPgxPoolChecker(h.container.DBPool)
+	result := checker.Check(ctx)
 
-	status := "healthy"
 	grpcStatus := grpc_health_v1.HealthCheckResponse_SERVING
-
-	if err != nil {
-		h.logger.Warn("health check failed: database ping failed", "error", err, "response_time", responseTime)
-		status = "unhealthy"
+	status := "healthy"
+	if result.Status == health.StatusUnhealthy {
 		grpcStatus = grpc_health_v1.HealthCheckResponse_NOT_SERVING
+		status = "unhealthy"
+		h.logger.Warn("health check failed: database ping failed", "error", result.Error, "response_time", result.ResponseTime)
 	}
 
 	// Record health check metric
-	healthCheckTotal.WithLabelValues("database", status).Inc()
+	healthCheckTotal.WithLabelValues(result.Name, status).Inc()
 
 	return &grpc_health_v1.HealthCheckResponse{
 		Status: grpcStatus,
