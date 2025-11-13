@@ -52,6 +52,11 @@ spec:
           value: "8080"
         - name: GRPC_PORT
           value: "9090"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: meridian-db
+              key: DATABASE_URL
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
