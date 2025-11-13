@@ -113,9 +113,13 @@ func run(logger *slog.Logger) error {
 	logger.Info("dependency container initialized")
 
 	// Create idempotency service
-	// For now use nil (idempotency features disabled) until Redis integration is ready
-	// TODO(task-15): Wire up idempotency.NewRedisService(redisClient) when Redis is configured
 	var idempotencySvc idempotency.Service
+	if container.RedisClient != nil {
+		idempotencySvc = idempotency.NewRedisService(container.RedisClient)
+		logger.Info("idempotency service enabled with Redis")
+	} else {
+		logger.Info("idempotency service disabled (Redis not configured)")
+	}
 
 	// Create gRPC service
 	positionKeepingService := service.NewPositionKeepingService(
@@ -172,6 +176,10 @@ func run(logger *slog.Logger) error {
 	// Create health check aggregator
 	healthCheckers := []health.Checker{
 		app.NewPgxPoolChecker(container.DBPool),
+	}
+	// Add Redis health checker if Redis is enabled
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
 	}
 	healthAggregator := health.NewAggregator(healthCheckers)
 	healthHandler := health.NewHTTPHandler(healthAggregator)

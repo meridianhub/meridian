@@ -9,6 +9,7 @@ import (
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"github.com/meridianhub/meridian/internal/position-keeping/domain"
 	"github.com/meridianhub/meridian/internal/position-keeping/repository"
+	"github.com/redis/go-redis/v9"
 )
 
 // Container holds all application dependencies
@@ -17,8 +18,9 @@ type Container struct {
 	Logger *slog.Logger
 
 	// Infrastructure
-	DBPool *pgxpool.Pool
-	Tracer *observability.Tracer
+	DBPool      *pgxpool.Pool
+	RedisClient *redis.Client
+	Tracer      *observability.Tracer
 
 	// Adapters
 	EventPublisher domain.EventPublisher
@@ -41,6 +43,10 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 
 	if err := container.initializeDatabase(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
+	}
+
+	if err := container.initializeRedis(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize redis: %w", err)
 	}
 
 	container.initializeEventPublisher()
@@ -125,6 +131,38 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 	return nil
 }
 
+// initializeRedis initializes the Redis client
+func (c *Container) initializeRedis(ctx context.Context) error {
+	// If Redis is not enabled, skip initialization
+	if !c.Config.Redis.Enabled {
+		c.Logger.Info("redis disabled, idempotency features will use nil service")
+		return nil
+	}
+
+	// Create Redis client
+	client := redis.NewClient(&redis.Options{
+		Addr:            c.Config.Redis.Address,
+		Password:        c.Config.Redis.Password,
+		DB:              c.Config.Redis.DB,
+		PoolSize:        c.Config.Redis.PoolSize,
+		ConnMaxIdleTime: c.Config.Redis.ConnMaxIdleTime,
+	})
+
+	// Verify connection
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return fmt.Errorf("failed to ping redis: %w", err)
+	}
+
+	c.RedisClient = client
+	c.Logger.Info("redis client initialized",
+		"address", c.Config.Redis.Address,
+		"db", c.Config.Redis.DB,
+		"pool_size", c.Config.Redis.PoolSize)
+
+	return nil
+}
+
 // initializeEventPublisher initializes Kafka event publisher or no-op publisher
 func (c *Container) initializeEventPublisher() {
 	if !c.Config.Kafka.Enabled {
@@ -157,6 +195,16 @@ func (c *Container) Close(ctx context.Context) error {
 	if c.DBPool != nil {
 		c.DBPool.Close()
 		c.Logger.Info("database pool closed")
+	}
+
+	// Close Redis client
+	if c.RedisClient != nil {
+		if err := c.RedisClient.Close(); err != nil {
+			c.Logger.Error("failed to close redis client", "error", err)
+			errs = append(errs, fmt.Errorf("redis close: %w", err))
+		} else {
+			c.Logger.Info("redis client closed")
+		}
 	}
 
 	// Shutdown tracer
