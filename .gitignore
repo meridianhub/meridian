@@ -48,3 +48,7 @@ __debug_bin
 __pycache__/
 # Add current-account binary to .gitignore
 current-account
+
+# Local development secrets (generated from .example files)
+deployments/k8s/*/secret.yaml
+deployments/k8s/base/secret.yaml

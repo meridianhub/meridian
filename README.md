@@ -79,10 +79,13 @@ cd meridian
 go mod download
 ./setup-hooks.sh
 
-# 2. Create local Kubernetes cluster (Docker must be running)
+# 2. Setup local development secrets
+./scripts/setup-local-secrets.sh
+
+# 3. Create local Kubernetes cluster (Docker must be running)
 ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
-# 3. Start development environment
+# 4. Start development environment
 tilt up
 ```
 
