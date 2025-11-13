@@ -346,6 +346,10 @@ func TestInitiateFinancialPositionLog_RepositoryError(t *testing.T) {
 	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(assert.AnError)
 
+	// Mock idempotency delete for cleanup on error
+	mockIdempotency.On("Delete", ctx, mock.AnythingOfType("idempotency.Key")).
+		Return(nil)
+
 	// Act
 	resp, err := svc.InitiateFinancialPositionLog(ctx, req)
 
@@ -431,6 +435,10 @@ func TestInitiateFinancialPositionLog_StoreResultError(t *testing.T) {
 	// Mock idempotency store result to fail
 	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).
 		Return(assert.AnError)
+
+	// Mock idempotency delete for cleanup on error
+	mockIdempotency.On("Delete", ctx, mock.AnythingOfType("idempotency.Key")).
+		Return(nil)
 
 	// Act
 	resp, err := svc.InitiateFinancialPositionLog(ctx, req)

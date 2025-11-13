@@ -20,7 +20,7 @@ import (
 func (s *PositionKeepingService) InitiateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
-) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
+) (resp *positionkeepingv1.InitiateFinancialPositionLogResponse, err error) {
 	// Validate request
 	if err := validateInitiateRequest(req); err != nil {
 		return nil, err
@@ -33,6 +33,17 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 	}
 	if cachedResponse != nil {
 		return cachedResponse, nil
+	}
+
+	// Clean up pending idempotency key on error to prevent 5-minute lockout
+	// If the operation fails after MarkPending, release the key so retries can proceed
+	if idempotencyKey != nil {
+		defer func() {
+			if err != nil {
+				// Best-effort cleanup; ignore delete errors as TTL will eventually expire
+				_ = s.idempotency.Delete(ctx, *idempotencyKey)
+			}
+		}()
 	}
 
 	// Check for context cancellation after potentially slow idempotency check
@@ -129,9 +140,10 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		}
 	}
 
-	return &positionkeepingv1.InitiateFinancialPositionLogResponse{
+	resp = &positionkeepingv1.InitiateFinancialPositionLogResponse{
 		Log: toProtoFinancialPositionLog(log),
-	}, nil
+	}
+	return resp, nil
 }
 
 // validateInitiateRequest validates the initiate request
