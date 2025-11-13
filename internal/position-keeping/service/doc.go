@@ -22,12 +22,15 @@
 //
 // # gRPC Operations
 //
-// The service implements all operations defined in position_keeping.proto:
-//   - InitiateFinancialPositionLog: Create a new financial position log
-//   - UpdateFinancialPositionLog: Update an existing log
+// This PR (Part 1 of 3) implements the following operations:
+//   - InitiateFinancialPositionLog: Create a new financial position log with idempotency support
 //   - RetrieveFinancialPositionLog: Fetch a log by ID
-//   - BulkImportTransactions: Import multiple transactions atomically
 //   - ListFinancialPositionLogs: Query logs with filtering and pagination
+//
+// Future PRs will add:
+//   - UpdateFinancialPositionLog: Update an existing log (Part 2)
+//   - ControlFinancialPositionLog: Manage log lifecycle (Part 2)
+//   - BulkImportTransactions: Import multiple transactions atomically (Part 3)
 //
 // # Error Handling
 //

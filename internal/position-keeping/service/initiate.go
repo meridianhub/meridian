@@ -38,21 +38,27 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		// Check if operation was already completed
 		result, err := s.idempotency.Check(ctx, idempotencyKey)
 		if err == nil && result.Status == idempotency.StatusCompleted {
-			// Return cached result
+			// Return cached result - must not retry the operation once completed
 			var cachedData struct {
 				LogID string `json:"log_id"`
 			}
-			if err := json.Unmarshal(result.Data, &cachedData); err == nil {
-				logID, err := uuid.Parse(cachedData.LogID)
-				if err == nil {
-					log, err := s.repository.FindByID(ctx, logID)
-					if err == nil {
-						return &positionkeepingv1.InitiateFinancialPositionLogResponse{
-							Log: toProtoFinancialPositionLog(log),
-						}, nil
-					}
-				}
+			if err := json.Unmarshal(result.Data, &cachedData); err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
 			}
+
+			logID, err := uuid.Parse(cachedData.LogID)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "cached idempotency response contains invalid log_id: %v", err)
+			}
+
+			log, err := s.repository.FindByID(ctx, logID)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to load cached financial position log: %v", err)
+			}
+
+			return &positionkeepingv1.InitiateFinancialPositionLogResponse{
+				Log: toProtoFinancialPositionLog(log),
+			}, nil
 		}
 	}
 

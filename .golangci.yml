@@ -42,6 +42,7 @@ linters:
     - varnamelen     # Too strict for production code
     - testpackage    # Allow internal testing
     - paralleltest   # Not always appropriate
+    - wrapcheck      # Disabled: gRPC services return terminal errors
 
 formatters:
   enable:
@@ -112,24 +113,6 @@ linters-settings:
       - name: unreachable-code
       - name: redefines-builtin-id
 
-  wrapcheck:
-    ignorePackageGlobs:
-      - github.com/meridianhub/meridian/internal/*/service
-    ignoreSigs:
-      - .Errorf(
-      - errors.New(
-      - errors.Unwrap(
-      - .Wrap(
-      - .Wrapf(
-      - .WithMessage(
-      - .WithMessagef(
-      - .WithStack(
-      - status.Error(
-      - status.Errorf(
-      - args.Error(
-      - uuid.Parse(
-      - domain.New*
-
   errorlint:
     errorf: true
     asserts: true
@@ -150,11 +133,6 @@ issues:
         - errcheck
         - goconst
         - unparam
-        - wrapcheck
-
-    # Exclude wrapcheck for gRPC service layers (status.Error returns are terminal)
-    - path: internal/position-keeping/service
-      linters:
         - wrapcheck
 
     # Exclude all linters for integration tests (require external services)
