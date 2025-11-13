@@ -110,3 +110,65 @@ func TestTransactionStatus_CanTransitionTo(t *testing.T) {
 		})
 	}
 }
+
+func TestTransactionStatus_String(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		status   TransactionStatus
+		expected string
+	}{
+		{"pending", TransactionStatusPending, "PENDING"},
+		{"reconciled", TransactionStatusReconciled, "RECONCILED"},
+		{"posted", TransactionStatusPosted, "POSTED"},
+		{"failed", TransactionStatusFailed, "FAILED"},
+		{"rejected", TransactionStatusRejected, "REJECTED"},
+		{"amended", TransactionStatusAmended, "AMENDED"},
+		{"cancelled", TransactionStatusCancelled, "CANCELLED"},
+		{"reversed", TransactionStatusReversed, "REVERSED"},
+		{"empty", TransactionStatus(""), ""},
+		{"invalid", TransactionStatus("INVALID"), "INVALID"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.status.String()
+			if result != tt.expected {
+				t.Errorf("Expected String() to return %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestParseTransactionStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected TransactionStatus
+	}{
+		{"valid pending", "PENDING", TransactionStatusPending},
+		{"valid reconciled", "RECONCILED", TransactionStatusReconciled},
+		{"valid posted", "POSTED", TransactionStatusPosted},
+		{"valid failed", "FAILED", TransactionStatusFailed},
+		{"valid rejected", "REJECTED", TransactionStatusRejected},
+		{"valid amended", "AMENDED", TransactionStatusAmended},
+		{"valid cancelled", "CANCELLED", TransactionStatusCancelled},
+		{"valid reversed", "REVERSED", TransactionStatusReversed},
+		{"invalid defaults to pending", "INVALID", TransactionStatusPending},
+		{"empty defaults to pending", "", TransactionStatusPending},
+		{"lowercase defaults to pending", "pending", TransactionStatusPending},
+		{"with spaces defaults to pending", "POSTED ", TransactionStatusPending},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseTransactionStatus(tt.input)
+			if result != tt.expected {
+				t.Errorf("Expected ParseTransactionStatus(%q) to return %v, got %v", tt.input, tt.expected, result)
+			}
+		})
+	}
+}
