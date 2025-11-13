@@ -3,22 +3,26 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/position-keeping/app"
 	"github.com/meridianhub/meridian/internal/position-keeping/interceptors"
 	"github.com/meridianhub/meridian/internal/position-keeping/service"
+	"github.com/meridianhub/meridian/pkg/platform/health"
 	"github.com/meridianhub/meridian/pkg/platform/idempotency"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -29,6 +33,39 @@ var (
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
+
+// Prometheus metrics
+var (
+	grpcRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "position_keeping_grpc_requests_total",
+			Help: "Total number of gRPC requests",
+		},
+		[]string{"method", "status"},
+	)
+	grpcRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "position_keeping_grpc_request_duration_seconds",
+			Help:    "Duration of gRPC requests in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method"},
+	)
+	healthCheckTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "position_keeping_health_check_total",
+			Help: "Total number of health checks performed",
+		},
+		[]string{"component", "status"},
+	)
+)
+
+func init() {
+	// Register Prometheus metrics
+	prometheus.MustRegister(grpcRequestsTotal)
+	prometheus.MustRegister(grpcRequestDuration)
+	prometheus.MustRegister(healthCheckTotal)
+}
 
 func main() {
 	// Initialize structured logging
@@ -65,7 +102,8 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("configuration loaded",
 		"environment", config.Observability.Environment,
-		"grpc_port", config.Server.Port)
+		"grpc_port", config.Server.Port,
+		"metrics_port", config.Observability.MetricsPort)
 
 	// Initialize dependency container
 	container, err := app.NewContainer(ctx, config, logger)
@@ -73,14 +111,16 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to initialize container: %w", err)
 	}
 	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.GracefulShutdownTimeout)
 		defer cancel()
-		if err := container.Close(closeCtx); err != nil {
+		if err := container.Close(shutdownCtx); err != nil {
 			logger.Error("failed to close container", "error", err)
 		}
 	}()
 
-	// Initialize idempotency service (Redis-backed or in-memory fallback)
+	logger.Info("dependency container initialized")
+
+	// Initialize idempotency service (Redis-backed or no-op fallback)
 	idempotencySvc, err := initializeIdempotencyService(config, logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize idempotency service: %w", err)
@@ -98,39 +138,45 @@ func run(logger *slog.Logger) error {
 	// Create gRPC server with interceptor chain
 	var serverOptions []grpc.ServerOption
 
-	// Build interceptor chain: tracing → auth (future) → recovery
-	// Order matters: tracing first to capture all requests, recovery last to catch all panics
+	// Build interceptor chain: metrics → tracing → auth (future) → recovery
+	// Order matters: metrics first for all requests, tracing for observability, recovery last to catch panics
 	var unaryInterceptors []grpc.UnaryServerInterceptor
 	var streamInterceptors []grpc.StreamServerInterceptor
 
-	// 1. Tracing (optional if OTLP endpoint configured)
+	// 1. Metrics (always enabled)
+	unaryInterceptors = append(unaryInterceptors,
+		app.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
+
+	// 2. Tracing (optional if OTLP endpoint configured)
 	if container.Tracer != nil {
 		unaryInterceptors = append(unaryInterceptors, container.Tracer.UnaryServerInterceptor())
 		streamInterceptors = append(streamInterceptors, container.Tracer.StreamServerInterceptor())
 	}
 
-	// 2. Auth (TODO: Add when authentication is ready)
+	// 3. Auth (TODO: Add when authentication is ready)
 	// unaryInterceptors = append(unaryInterceptors, auth.UnaryInterceptor())
 	// streamInterceptors = append(streamInterceptors, auth.StreamInterceptor())
 
-	// 3. Recovery (last in chain to catch all panics)
+	// 4. Recovery (last in chain to catch all panics)
 	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
 	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(logger))
 
 	serverOptions = append(serverOptions,
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
-		grpc.ChainStreamInterceptor(streamInterceptors...),
 	)
+	if len(streamInterceptors) > 0 {
+		serverOptions = append(serverOptions,
+			grpc.ChainStreamInterceptor(streamInterceptors...),
+		)
+	}
 
 	grpcServer := grpc.NewServer(serverOptions...)
 
 	// Register Position Keeping service
-	positionkeepingv1.RegisterPositionKeepingServiceServer(grpcServer, positionKeepingService)
+	pb.RegisterPositionKeepingServiceServer(grpcServer, positionKeepingService)
 
 	// Register health check service
-	healthServer := health.NewServer()
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-	healthServer.SetServingStatus("position-keeping", grpc_health_v1.HealthCheckResponse_SERVING)
+	healthServer := newHealthServer(container, logger)
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
 	// Register reflection service for debugging
@@ -139,19 +185,55 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered",
 		"services", []string{"PositionKeepingService", "Health", "Reflection"})
 
-	// Create listener
-	address := fmt.Sprintf(":%s", config.Server.Port)
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
+	// Start HTTP server for health checks and metrics
+	httpMux := http.NewServeMux()
+
+	// Create health check aggregator
+	healthCheckers := []health.Checker{
+		app.NewPgxPoolChecker(container.DBPool),
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+	healthHandler := health.NewHTTPHandler(healthAggregator)
+	healthHandler.RegisterHandlers(httpMux)
+
+	// Add Prometheus metrics endpoint if enabled
+	if config.Observability.MetricsEnabled {
+		httpMux.Handle("/metrics", promhttp.Handler())
+		logger.Info("metrics endpoint enabled", "path", "/metrics")
+	}
+
+	httpServer := &http.Server{
+		Addr:              fmt.Sprintf(":%s", config.Observability.MetricsPort),
+		Handler:           httpMux,
+		ReadTimeout:       10 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	// Start HTTP server in background
+	httpErrors := make(chan error, 1)
+	go func() {
+		logger.Info("starting HTTP server for health and metrics",
+			"address", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			httpErrors <- err
+		}
+	}()
+
+	// Create gRPC listener
+	grpcAddress := fmt.Sprintf(":%s", config.Server.Port)
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", grpcAddress)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", address, err)
+		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
 
 	// Start gRPC server in background
-	serverErrors := make(chan error, 1)
+	grpcErrors := make(chan error, 1)
 	go func() {
-		logger.Info("starting gRPC server", "address", address)
+		logger.Info("starting gRPC server", "address", grpcAddress)
 		if err := grpcServer.Serve(listener); err != nil {
-			serverErrors <- err
+			grpcErrors <- err
 		}
 	}()
 
@@ -162,20 +244,25 @@ func run(logger *slog.Logger) error {
 	select {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
-	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+	case err := <-grpcErrors:
+		return fmt.Errorf("gRPC server error: %w", err)
+	case err := <-httpErrors:
+		return fmt.Errorf("HTTP server error: %w", err)
 	}
 
 	// Graceful shutdown
-	logger.Info("shutting down server...")
-
-	// Mark service as not serving
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
-	healthServer.SetServingStatus("position-keeping", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+	logger.Info("shutting down servers...")
 
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.GracefulShutdownTimeout)
 	defer cancel()
+
+	// Shutdown HTTP server
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("HTTP server shutdown error", "error", err)
+	} else {
+		logger.Info("HTTP server stopped gracefully")
+	}
 
 	// Gracefully stop gRPC server
 	stopped := make(chan struct{})
@@ -187,7 +274,7 @@ func run(logger *slog.Logger) error {
 	// Wait for graceful stop or timeout
 	select {
 	case <-stopped:
-		logger.Info("server stopped gracefully")
+		logger.Info("gRPC server stopped gracefully")
 	case <-shutdownCtx.Done():
 		logger.Warn("graceful shutdown timeout, forcing stop")
 		grpcServer.Stop()
@@ -267,4 +354,71 @@ func (n *noOpIdempotencyService) Refresh(context.Context, idempotency.Key, strin
 
 func (n *noOpIdempotencyService) IsHeld(context.Context, idempotency.Key) (bool, error) {
 	return false, nil
+}
+
+// healthServer implements the gRPC health checking protocol
+type healthServer struct {
+	grpc_health_v1.UnimplementedHealthServer
+	container *app.Container
+	logger    *slog.Logger
+}
+
+func newHealthServer(container *app.Container, logger *slog.Logger) *healthServer {
+	return &healthServer{
+		container: container,
+		logger:    logger,
+	}
+}
+
+// Check performs a health check
+func (h *healthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
+	// Use existing PgxPoolChecker for database health check
+	checker := app.NewPgxPoolChecker(h.container.DBPool)
+	result := checker.Check(ctx)
+
+	grpcStatus := grpc_health_v1.HealthCheckResponse_SERVING
+	status := "healthy"
+	if result.Status == health.StatusUnhealthy {
+		grpcStatus = grpc_health_v1.HealthCheckResponse_NOT_SERVING
+		status = "unhealthy"
+		h.logger.Warn("health check failed: database ping failed", "error", result.Error, "response_time", result.ResponseTime)
+	}
+
+	// Record health check metric
+	healthCheckTotal.WithLabelValues(result.Name, status).Inc()
+
+	return &grpc_health_v1.HealthCheckResponse{
+		Status: grpcStatus,
+	}, nil
+}
+
+// Watch performs a streaming health check (required by interface)
+func (h *healthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, stream grpc_health_v1.Health_WatchServer) error {
+	ctx := stream.Context()
+
+	// Send initial status with timeout
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	resp, _ := h.Check(checkCtx, nil)
+	cancel()
+	if err := stream.Send(resp); err != nil {
+		return err
+	}
+
+	// Keep the stream open and periodically check health
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			resp, _ := h.Check(checkCtx, nil)
+			cancel()
+			if err := stream.Send(resp); err != nil {
+				return err
+			}
+		}
+	}
 }
