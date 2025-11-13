@@ -1,3 +1,16 @@
+// Package domain_test provides performance benchmarks for domain event operations.
+//
+// These benchmarks measure event creation and serialization performance.
+// Target metrics:
+//   - Event creation: <1 µs/op
+//   - Protobuf serialization: <500 ns/op for single events
+//   - Bulk operations: Linear scaling from 10 to 10,000 events
+//
+// Bulk event tests (10, 100, 1000, 10000) verify that event handling scales
+// linearly rather than exponentially, which is critical for high-throughput
+// transaction processing.
+//
+// Run with: go test -bench=BenchmarkEvent -benchmem -benchtime=10s
 package domain_test
 
 import (

@@ -1,3 +1,12 @@
+// Package domain_test provides performance benchmarks for Money operations.
+//
+// These benchmarks measure hot-path operations to ensure sub-microsecond performance
+// for financial calculations. Target metrics:
+//   - Money creation: <10 ns/op with 0 allocations
+//   - Arithmetic operations: <100 ns/op with minimal allocations
+//   - Currency conversions: <50 ns/op
+//
+// Run with: go test -bench=BenchmarkMoney -benchmem -benchtime=10s
 package domain_test
 
 import (

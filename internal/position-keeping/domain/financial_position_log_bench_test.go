@@ -1,3 +1,17 @@
+// Package domain_test provides performance benchmarks for FinancialPositionLog operations.
+//
+// These benchmarks measure aggregate root operations and state transitions.
+// Target metrics:
+//   - Aggregate creation: <1 µs/op
+//   - State transitions: <1 µs/op
+//   - Entry addition: <1 µs/op
+//
+// Note: BenchmarkMarkReconciled and BenchmarkMarkPosted intentionally recreate
+// the aggregate for each iteration to measure the complete operation including
+// any initialization overhead. This reflects real-world usage where aggregates
+// are typically reconstituted from persistence before state transitions.
+//
+// Run with: go test -bench=BenchmarkFinancial -benchmem -benchtime=10s
 package domain_test
 
 import (

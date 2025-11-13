@@ -115,3 +115,17 @@ func TestFixtures_ChainedOptions(t *testing.T) {
 	entries2 := log2.TransactionLogEntries
 	assert.NotEqual(t, entries1[0].Direction, entries2[0].Direction)
 }
+
+func TestNewBulkTransactionCapturedEvent_ZeroDefaultsToTen(t *testing.T) {
+	event := testfixtures.NewBulkTransactionCapturedEvent(t, 0)
+
+	assert.Equal(t, int32(10), event.TransactionCount)
+	assert.Len(t, event.LogIDs, 10)
+}
+
+func TestNewBulkTransactionCapturedEvent_NegativeDefaultsToTen(t *testing.T) {
+	event := testfixtures.NewBulkTransactionCapturedEvent(t, -5)
+
+	assert.Equal(t, int32(10), event.TransactionCount)
+	assert.Len(t, event.LogIDs, 10)
+}
