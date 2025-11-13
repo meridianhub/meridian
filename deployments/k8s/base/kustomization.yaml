@@ -14,7 +14,8 @@ labels:
 resources:
 - serviceaccount.yaml
 - configmap.yaml
-- secret.yaml
+# secret.yaml is generated from secret.yaml.example via scripts/setup-local-secrets.sh
+# and excluded from git via .gitignore. In CI, use external secret management.
 - deployment.yaml
 - service.yaml
 - role.yaml
