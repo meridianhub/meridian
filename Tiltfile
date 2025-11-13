@@ -586,7 +586,7 @@ k8s_resource(
     '9090:9090',  # gRPC API
   ],
   resource_deps=[
-    'cockroachdb',
+    'init-database',  # Ensures database and user are created before app starts
     'redis',
     'kafka-cluster',
     'keycloak',
@@ -747,6 +747,17 @@ local_resource(
   auto_init=False,  # Run manually with 'tilt trigger lint'
 )
 
+# Initialize CockroachDB database and user - runs automatically after CockroachDB is ready
+# Creates the meridian database and user required for the application
+local_resource(
+  'init-database',
+  cmd='kubectl exec cockroachdb-0 -n default -- cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS meridian; CREATE USER IF NOT EXISTS meridian; GRANT ALL ON DATABASE meridian TO meridian;"',
+  resource_deps=['cockroachdb'],
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_AUTO,
+)
+
 # Run database migrations on startup - uses Atlas to apply schema changes
 # Each service has its own business schema and audit schema
 # Migrations are applied in order:
@@ -757,7 +768,7 @@ local_resource(
 local_resource(
   'migrate-current-account',
   cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
-  resource_deps=['cockroachdb'],
+  resource_deps=['init-database'],  # Database and user must exist before migrations
   labels=['database'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,
