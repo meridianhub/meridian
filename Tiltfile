@@ -572,6 +572,12 @@ docker_build(
 # Deploy Kubernetes manifests
 k8s_yaml(kustomize('deployments/k8s/base'))
 
+# Load secret if it exists (generated locally by scripts/setup-local-secrets.sh)
+# This file is excluded from git and won't exist in CI environments
+secret_path = 'deployments/k8s/base/secret.yaml'
+if os.path.exists(secret_path):
+  k8s_yaml(secret_path)
+
 # Set resource dependencies
 k8s_resource(
   'meridian',
