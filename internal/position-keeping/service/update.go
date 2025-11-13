@@ -60,11 +60,9 @@ func (s *PositionKeepingService) UpdateFinancialPositionLog(
 		return nil, status.Errorf(codes.Internal, "failed to retrieve financial position log: %v", err)
 	}
 
-	// Check version for optimistic concurrency control
-	if req.Version != log.Version {
-		return nil, status.Errorf(codes.Aborted,
-			"version conflict: expected version %d, got version %d",
-			log.Version, req.Version)
+	// Validate request and check version
+	if err := validateUpdateRequest(req, log); err != nil {
+		return nil, err
 	}
 
 	// Track if we made any changes (for event publishing)
@@ -177,6 +175,24 @@ func (s *PositionKeepingService) checkUpdateIdempotencyAndAcquireLock(
 	}
 
 	return &key, nil, nil
+}
+
+// validateUpdateRequest validates the update request and checks version
+func validateUpdateRequest(req *positionkeepingv1.UpdateFinancialPositionLogRequest, log *domain.FinancialPositionLog) error {
+	// Check version for optimistic concurrency control
+	if req.Version != log.Version {
+		return status.Errorf(codes.Aborted,
+			"version conflict: expected version %d, got version %d",
+			log.Version, req.Version)
+	}
+
+	// Validate audit entry is provided when making changes
+	// Audit trail is required for compliance when adding entries or changing status
+	if (req.NewEntry != nil || req.StatusUpdate != nil) && req.AuditEntry == nil {
+		return status.Error(codes.InvalidArgument, "audit_entry is required when adding entries or updating status")
+	}
+
+	return nil
 }
 
 // storeUpdateIdempotencyResult stores the idempotency result for an update operation
@@ -333,21 +349,10 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			Version:       log.Version,
 		}
 		_ = s.eventPublisher.Publish(ctx, event)
-	case commonv1.TransactionStatus_TRANSACTION_STATUS_REVERSED:
-		// Use TransactionAmended for reversal since we don't have a specific event
-		event := &domain.TransactionAmended{
-			LogID:         log.LogID,
-			AccountID:     log.AccountID,
-			Reason:        "Transaction reversed: " + req.StatusUpdate.StatusReason,
-			AmendedBy:     req.AuditEntry.GetUserId(),
-			CorrelationID: "",
-			Timestamp:     time.Now().UTC(),
-			Version:       log.Version,
-		}
-		_ = s.eventPublisher.Publish(ctx, event)
 	case commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED,
-		commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING:
-		// No events for these statuses
+		commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		commonv1.TransactionStatus_TRANSACTION_STATUS_REVERSED:
+		// No events for these statuses (REVERSED cannot be set via Update operation)
 	default:
 		// No event for other statuses
 	}

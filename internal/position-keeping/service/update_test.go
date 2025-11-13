@@ -293,3 +293,64 @@ func TestUpdateFinancialPositionLog_InvalidLogID(t *testing.T) {
 	require.True(t, ok, "Expected gRPC status error")
 	assert.Equal(t, codes.InvalidArgument, st.Code(), "Expected InvalidArgument error code")
 }
+
+func TestUpdateFinancialPositionLog_MissingAuditEntry(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+
+	logID := uuid.New()
+	existingLog := &domain.FinancialPositionLog{
+		LogID:                 logID,
+		AccountID:             testAccountID,
+		TransactionLogEntries: []*domain.TransactionLogEntry{},
+		AuditTrail:            []*domain.AuditTrailEntry{},
+		StatusTracking:        domain.NewStatusTracking(),
+		CreatedAt:             time.Now().UTC().Add(-1 * time.Hour),
+		UpdatedAt:             time.Now().UTC().Add(-1 * time.Hour),
+		Version:               1,
+	}
+
+	req := &positionkeepingv1.UpdateFinancialPositionLogRequest{
+		LogId: logID.String(),
+		NewEntry: &positionkeepingv1.TransactionLogEntry{
+			EntryId:       uuid.NewString(),
+			TransactionId: uuid.NewString(),
+			AccountId:     testAccountID,
+			Amount: &commonv1.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        50,
+					Nanos:        0,
+				},
+			},
+			Direction:   commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+			Description: "Missing audit entry test",
+			Reference:   "REF-TEST",
+		},
+		// AuditEntry intentionally omitted
+		Version: 1,
+	}
+
+	// Mock repository FindByID to return existing log
+	mockRepo.On("FindByID", ctx, logID).
+		Return(existingLog, nil)
+
+	// Act
+	resp, err := svc.UpdateFinancialPositionLog(ctx, req)
+
+	// Assert
+	require.Error(t, err, "Expected error when audit entry is missing")
+	assert.Nil(t, resp, "Expected nil response on error")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.InvalidArgument, st.Code(), "Expected InvalidArgument error code")
+	assert.Contains(t, st.Message(), "audit_entry is required", "Expected error message about missing audit entry")
+
+	mockRepo.AssertExpectations(t)
+}
