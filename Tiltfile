@@ -756,7 +756,7 @@ local_resource(
   resource_deps=['cockroachdb'],
   labels=['database'],
   auto_init=True,
-  trigger_mode=TRIGGER_MODE_AUTO,
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Manual re-trigger; auto_init runs it on startup
 )
 
 # Run database migrations on startup - uses Atlas to apply schema changes
