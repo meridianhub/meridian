@@ -366,6 +366,25 @@ echo ""
 
 check_command "golangci-lint" "2.x+" "brew install golangci-lint"
 
+# Documentation Tools
+echo "═══════════════════════════════════════"
+echo " Documentation Tools"
+echo "═══════════════════════════════════════"
+echo ""
+
+if command -v pkgsite &> /dev/null || [ -f "$(go env GOPATH)/bin/pkgsite" ]; then
+    echo -e "${GREEN}✓${NC} pkgsite installed"
+    echo -e "  Run: make docs (or pkgsite -http=:6060)"
+    if ! command -v pkgsite &> /dev/null; then
+        echo -e "  ${YELLOW}Note:${NC} Add \$(go env GOPATH)/bin to PATH"
+    fi
+else
+    echo -e "${YELLOW}!${NC} pkgsite not installed (optional)"
+    echo -e "  For local Go documentation web UI"
+    echo -e "  Install: go install golang.org/x/pkgsite/cmd/pkgsite@latest"
+    echo -e "  Usage: make docs"
+fi
+
 # Git Hooks
 echo "═══════════════════════════════════════"
 echo " Git Configuration"

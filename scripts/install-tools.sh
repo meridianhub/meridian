@@ -163,6 +163,12 @@ elif [[ "$OS" == "linux" ]]; then
             echo -e "${YELLOW}Installing golangci-lint...${NC}"
             curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
         fi
+
+        # pkgsite (documentation tool)
+        if ! command -v pkgsite &> /dev/null; then
+            echo -e "${YELLOW}Installing pkgsite (Go documentation server)...${NC}"
+            go install golang.org/x/pkgsite/cmd/pkgsite@latest
+        fi
     fi
 fi
 
