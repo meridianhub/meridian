@@ -28,8 +28,8 @@ setup_secret() {
     echo "Creating $secret_file from template..."
 
     # For local dev, use the meridian user/database
-    # This matches what setup-check.sh creates in CockroachDB
-    sed 's|<REPLACE_WITH_DATABASE_URL>|postgres://meridian:meridian@cockroachdb:26257/meridian?sslmode=disable|g' \
+    # CockroachDB runs in insecure mode (no passwords), so omit password from connection string
+    sed 's|<REPLACE_WITH_DATABASE_URL>|postgres://meridian@cockroachdb:26257/meridian?sslmode=disable|g' \
         "$example_file" > "$secret_file"
 
     echo "✓ Created $secret_file"

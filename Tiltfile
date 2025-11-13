@@ -64,7 +64,7 @@ k8s_namespace = 'default'
 # Database configuration
 # SECURITY: Never commit credentials to version control
 # For local development with CockroachDB (insecure mode, no password required)
-database_url = os.getenv('DATABASE_URL', 'postgres://root@localhost:26257/defaultdb?sslmode=disable')
+database_url = os.getenv('DATABASE_URL', 'postgres://meridian@localhost:26257/meridian?sslmode=disable')
 
 # =============================================================================
 # Backing Services
@@ -586,7 +586,7 @@ k8s_resource(
     '9090:9090',  # gRPC API
   ],
   resource_deps=[
-    'cockroachdb',
+    'init-database',  # Ensures database and user are created before app starts
     'redis',
     'kafka-cluster',
     'keycloak',
@@ -747,6 +747,18 @@ local_resource(
   auto_init=False,  # Run manually with 'tilt trigger lint'
 )
 
+# Initialize CockroachDB database and user - runs automatically after CockroachDB is ready
+# Creates the meridian database and user required for the application
+# Uses dedicated script with pod readiness check and verification
+local_resource(
+  'init-database',
+  cmd='./scripts/init-database.sh',
+  resource_deps=['cockroachdb'],
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Manual re-trigger; auto_init runs it on startup
+)
+
 # Run database migrations on startup - uses Atlas to apply schema changes
 # Each service has its own business schema and audit schema
 # Migrations are applied in order:
@@ -757,7 +769,7 @@ local_resource(
 local_resource(
   'migrate-current-account',
   cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
-  resource_deps=['cockroachdb'],
+  resource_deps=['init-database'],  # Database and user must exist before migrations
   labels=['database'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,
