@@ -114,7 +114,7 @@ func run(logger *slog.Logger) error {
 
 	// Create idempotency service
 	// For now use nil (idempotency features disabled) until Redis integration is ready
-	// TODO: Wire up idempotency.NewRedisService(redisClient) when Redis is configured
+	// TODO(task-15): Wire up idempotency.NewRedisService(redisClient) when Redis is configured
 	var idempotencySvc idempotency.Service
 
 	// Create gRPC service
