@@ -128,14 +128,27 @@ func run(logger *slog.Logger) error {
 
 	// Create gRPC server with observability interceptors
 	var serverOptions []grpc.ServerOption
+
+	// Build interceptor chain
+	var unaryInterceptors []grpc.UnaryServerInterceptor
+	var streamInterceptors []grpc.StreamServerInterceptor
+
+	// Add metrics interceptor (always enabled)
+	unaryInterceptors = append(unaryInterceptors,
+		app.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
+
+	// Add tracing interceptors if configured
 	if container.Tracer != nil {
+		unaryInterceptors = append(unaryInterceptors, container.Tracer.UnaryServerInterceptor())
+		streamInterceptors = append(streamInterceptors, container.Tracer.StreamServerInterceptor())
+	}
+
+	serverOptions = append(serverOptions,
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+	)
+	if len(streamInterceptors) > 0 {
 		serverOptions = append(serverOptions,
-			grpc.ChainUnaryInterceptor(
-				container.Tracer.UnaryServerInterceptor(),
-			),
-			grpc.ChainStreamInterceptor(
-				container.Tracer.StreamServerInterceptor(),
-			),
+			grpc.ChainStreamInterceptor(streamInterceptors...),
 		)
 	}
 
@@ -173,7 +186,10 @@ func run(logger *slog.Logger) error {
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%s", config.Observability.MetricsPort),
 		Handler:           httpMux,
+		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Start HTTP server in background
@@ -288,9 +304,12 @@ func (h *healthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckR
 
 // Watch performs a streaming health check (required by interface)
 func (h *healthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, stream grpc_health_v1.Health_WatchServer) error {
-	// Send initial status
 	ctx := stream.Context()
-	resp, _ := h.Check(ctx, nil)
+
+	// Send initial status with timeout
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	resp, _ := h.Check(checkCtx, nil)
+	cancel()
 	if err := stream.Send(resp); err != nil {
 		return err
 	}
@@ -304,7 +323,7 @@ func (h *healthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, stream grpc_h
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			resp, _ := h.Check(checkCtx, nil)
 			cancel()
 			if err := stream.Send(resp); err != nil {
