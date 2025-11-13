@@ -156,6 +156,10 @@ func TestInitiateFinancialPositionLog_Success(t *testing.T) {
 	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
 		Return(nil, idempotency.ErrResultNotFound)
 
+	// Mock idempotency mark pending
+	mockIdempotency.On("MarkPending", ctx, mock.AnythingOfType("idempotency.Key"), mock.AnythingOfType("time.Duration")).
+		Return(nil)
+
 	// Mock repository create
 	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
@@ -333,6 +337,10 @@ func TestInitiateFinancialPositionLog_RepositoryError(t *testing.T) {
 	// Mock idempotency check - no previous operation
 	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
 		Return(nil, idempotency.ErrResultNotFound)
+
+	// Mock idempotency mark pending
+	mockIdempotency.On("MarkPending", ctx, mock.AnythingOfType("idempotency.Key"), mock.AnythingOfType("time.Duration")).
+		Return(nil)
 
 	// Mock repository create to fail
 	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).

@@ -26,40 +26,13 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		return nil, err
 	}
 
-	// Check idempotency if key is provided
-	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
-		idempotencyKey := idempotency.Key{
-			Namespace: "position-keeping",
-			Operation: "initiate",
-			EntityID:  req.AccountId,
-			RequestID: req.IdempotencyKey.Key,
-		}
-
-		// Check if operation was already completed
-		result, err := s.idempotency.Check(ctx, idempotencyKey)
-		if err == nil && result.Status == idempotency.StatusCompleted {
-			// Return cached result - must not retry the operation once completed
-			var cachedData struct {
-				LogID string `json:"log_id"`
-			}
-			if err := json.Unmarshal(result.Data, &cachedData); err != nil {
-				return nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
-			}
-
-			logID, err := uuid.Parse(cachedData.LogID)
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "cached idempotency response contains invalid log_id: %v", err)
-			}
-
-			log, err := s.repository.FindByID(ctx, logID)
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "failed to load cached financial position log: %v", err)
-			}
-
-			return &positionkeepingv1.InitiateFinancialPositionLogResponse{
-				Log: toProtoFinancialPositionLog(log),
-			}, nil
-		}
+	// Check idempotency and acquire lock if key provided
+	idempotencyKey, cachedResponse, err := s.checkIdempotencyAndAcquireLock(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if cachedResponse != nil {
+		return cachedResponse, nil
 	}
 
 	// Convert initial entry from proto to domain if provided
@@ -112,25 +85,23 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 	}
 
 	// Store idempotency result if key was provided
-	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
-		idempotencyKey := idempotency.Key{
-			Namespace: "position-keeping",
-			Operation: "initiate",
-			EntityID:  req.AccountId,
-			RequestID: req.IdempotencyKey.Key,
-		}
-
-		resultData, _ := json.Marshal(map[string]string{
+	if idempotencyKey != nil {
+		resultData, err := json.Marshal(map[string]string{
 			"log_id": log.LogID.String(),
 		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
+		}
 
-		_ = s.idempotency.StoreResult(ctx, idempotency.Result{
-			Key:         idempotencyKey,
+		if err := s.idempotency.StoreResult(ctx, idempotency.Result{
+			Key:         *idempotencyKey,
 			Status:      idempotency.StatusCompleted,
 			Data:        resultData,
 			CompletedAt: time.Now(),
 			TTL:         24 * time.Hour,
-		})
+		}); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to store idempotency result: %v", err)
+		}
 	}
 
 	return &positionkeepingv1.InitiateFinancialPositionLogResponse{
@@ -252,4 +223,57 @@ func protoLineageToDomain(proto *positionkeepingv1.TransactionLineage) (*domain.
 		childIDs,
 		relatedIDs,
 	)
+}
+
+// checkIdempotencyAndAcquireLock checks for completed operations and acquires a pending lock.
+// Returns the idempotency key (if provided), cached response (if exists), and any error.
+func (s *PositionKeepingService) checkIdempotencyAndAcquireLock(
+	ctx context.Context,
+	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
+) (*idempotency.Key, *positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
+	// No idempotency key provided
+	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
+		return nil, nil, nil
+	}
+
+	key := idempotency.Key{
+		Namespace: "position-keeping",
+		Operation: "initiate",
+		EntityID:  req.AccountId,
+		RequestID: req.IdempotencyKey.Key,
+	}
+
+	// Check if operation was already completed
+	result, err := s.idempotency.Check(ctx, key)
+	if err == nil && result.Status == idempotency.StatusCompleted {
+		// Return cached result - must not retry the operation once completed
+		var cachedData struct {
+			LogID string `json:"log_id"`
+		}
+		if err := json.Unmarshal(result.Data, &cachedData); err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
+		}
+
+		logID, err := uuid.Parse(cachedData.LogID)
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "cached idempotency response contains invalid log_id: %v", err)
+		}
+
+		log, err := s.repository.FindByID(ctx, logID)
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "failed to load cached financial position log: %v", err)
+		}
+
+		return &key, &positionkeepingv1.InitiateFinancialPositionLogResponse{
+			Log: toProtoFinancialPositionLog(log),
+		}, nil
+	}
+
+	// Mark operation as pending to prevent concurrent execution
+	// Use 5-minute TTL for operation lock
+	if err := s.idempotency.MarkPending(ctx, key, 5*time.Minute); err != nil {
+		return nil, nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+	}
+
+	return &key, nil, nil
 }
