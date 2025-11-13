@@ -64,7 +64,7 @@ k8s_namespace = 'default'
 # Database configuration
 # SECURITY: Never commit credentials to version control
 # For local development with CockroachDB (insecure mode, no password required)
-database_url = os.getenv('DATABASE_URL', 'postgres://root@localhost:26257/defaultdb?sslmode=disable')
+database_url = os.getenv('DATABASE_URL', 'postgres://meridian@localhost:26257/meridian?sslmode=disable')
 
 # =============================================================================
 # Backing Services
