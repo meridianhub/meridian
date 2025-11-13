@@ -15,6 +15,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/position-keeping/app"
+	"github.com/meridianhub/meridian/internal/position-keeping/interceptors"
 	"github.com/meridianhub/meridian/internal/position-keeping/service"
 	"github.com/meridianhub/meridian/pkg/platform/health"
 	"github.com/meridianhub/meridian/pkg/platform/idempotency"
@@ -95,9 +96,15 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	logger.Info("configuration loaded successfully")
+	// Override observability config with build info
+	config.Observability.ServiceVersion = Version
 
-	// Initialize dependency injection container
+	logger.Info("configuration loaded",
+		"environment", config.Observability.Environment,
+		"grpc_port", config.Server.Port,
+		"metrics_port", config.Observability.MetricsPort)
+
+	// Initialize dependency container
 	container, err := app.NewContainer(ctx, config, logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize container: %w", err)
@@ -128,24 +135,36 @@ func run(logger *slog.Logger) error {
 		idempotencySvc,
 	)
 
-	logger.Info("services created")
+	logger.Info("position keeping service initialized")
 
-	// Create gRPC server with observability interceptors
+	// Create gRPC server with interceptor chain
 	var serverOptions []grpc.ServerOption
 
-	// Build interceptor chain
+	// Build interceptor chain: metrics → tracing → auth (future) → recovery
+	// Order matters: metrics first for all requests, tracing for observability, recovery last to catch panics
 	var unaryInterceptors []grpc.UnaryServerInterceptor
 	var streamInterceptors []grpc.StreamServerInterceptor
 
-	// Add metrics interceptor (always enabled)
+	// 1. Metrics (always enabled)
 	unaryInterceptors = append(unaryInterceptors,
 		app.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
 
-	// Add tracing interceptors if configured
+	// 2. Tracing (optional if OTLP endpoint configured)
 	if container.Tracer != nil {
 		unaryInterceptors = append(unaryInterceptors, container.Tracer.UnaryServerInterceptor())
 		streamInterceptors = append(streamInterceptors, container.Tracer.StreamServerInterceptor())
 	}
+
+	// 3. Auth (JWT validation with JWKS)
+	if container.AuthInterceptor != nil {
+		unaryInterceptors = append(unaryInterceptors, container.AuthInterceptor.UnaryInterceptor())
+		streamInterceptors = append(streamInterceptors, container.AuthInterceptor.StreamInterceptor())
+		logger.Info("auth interceptor enabled in chain")
+	}
+
+	// 4. Recovery (last in chain to catch all panics)
+	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
+	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(logger))
 
 	serverOptions = append(serverOptions,
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
@@ -168,7 +187,7 @@ func run(logger *slog.Logger) error {
 	}
 	healthAggregator := health.NewAggregator(healthCheckers)
 
-	// Register services
+	// Register Position Keeping service
 	pb.RegisterPositionKeepingServiceServer(grpcServer, positionKeepingService)
 
 	// Register health check service (uses aggregator for all components)
@@ -178,7 +197,8 @@ func run(logger *slog.Logger) error {
 	// Register reflection service for debugging
 	reflection.Register(grpcServer)
 
-	logger.Info("gRPC services registered")
+	logger.Info("gRPC services registered",
+		"services", []string{"PositionKeepingService", "Health", "Reflection"})
 
 	// Start HTTP server for health checks and metrics
 	httpMux := http.NewServeMux()

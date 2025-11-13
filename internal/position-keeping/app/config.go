@@ -15,6 +15,7 @@ type Config struct {
 	Database      DatabaseConfig
 	Kafka         KafkaConfig
 	Redis         RedisConfig
+	Auth          AuthConfig
 	Observability ObservabilityConfig
 }
 
@@ -70,6 +71,18 @@ type RedisConfig struct {
 	ConnMaxIdleTime time.Duration
 }
 
+// AuthConfig holds JWT authentication configuration
+type AuthConfig struct {
+	// Enabled indicates if JWT authentication is enabled
+	Enabled bool
+	// JWKSURL is the JWKS endpoint URL for JWT validation
+	JWKSURL string
+	// JWKSCacheTTL is how long to cache JWKS keys
+	JWKSCacheTTL time.Duration
+	// JWKSRefreshTTL is the background refresh interval for JWKS
+	JWKSRefreshTTL time.Duration
+}
+
 // ObservabilityConfig holds observability configuration
 type ObservabilityConfig struct {
 	// ServiceName is the service name for tracing and metrics
@@ -97,6 +110,7 @@ func LoadConfig() (*Config, error) {
 		Database:      loadDatabaseConfig(),
 		Kafka:         loadKafkaConfig(),
 		Redis:         loadRedisConfig(),
+		Auth:          loadAuthConfig(),
 		Observability: loadObservabilityConfig(),
 	}
 
@@ -151,6 +165,18 @@ func loadRedisConfig() RedisConfig {
 		Enabled:         enabled,
 		PoolSize:        getEnvAsInt("REDIS_POOL_SIZE", 10),
 		ConnMaxIdleTime: getEnvAsDuration("REDIS_CONN_MAX_IDLE_TIME", 5*time.Minute),
+	}
+}
+
+// loadAuthConfig loads JWT authentication configuration from environment variables
+func loadAuthConfig() AuthConfig {
+	enabled := getEnvAsBool("AUTH_ENABLED", false)
+
+	return AuthConfig{
+		Enabled:        enabled,
+		JWKSURL:        getEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs"),
+		JWKSCacheTTL:   getEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour),
+		JWKSRefreshTTL: getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute),
 	}
 }
 
