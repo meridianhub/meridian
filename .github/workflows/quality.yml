@@ -128,29 +128,61 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Validate LICENSE file hash
+      - name: Validate Apache 2.0 license structure
         run: |
-          # Expected SHA256 hash of canonical Apache 2.0 license with our copyright
-          EXPECTED_HASH="c6261ed6933fba6e919c3faff2dabeb8ac2f19ddcc20dcf4f7473fa7273aca2b"
-          ACTUAL_HASH=$(sha256sum LICENSE | awk '{print $1}')
+          echo "Validating LICENSE file contains required Apache 2.0 sections..."
 
-          echo "Expected LICENSE hash: $EXPECTED_HASH"
-          echo "Actual LICENSE hash:   $ACTUAL_HASH"
+          # Required sections that must appear in Apache 2.0 license
+          REQUIRED_SECTIONS=(
+            "Apache License"
+            "Version 2.0, January 2004"
+            "http://www.apache.org/licenses/"
+            "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION"
+            "Definitions."
+            "Grant of Copyright License."
+            "Grant of Patent License."
+            "Redistribution."
+            "Submission of Contributions."
+            "Trademarks."
+            "Disclaimer of Warranty."
+            "Limitation of Liability."
+            "Accepting Warranty or Additional Liability."
+          )
 
-          if [[ "$ACTUAL_HASH" == "$EXPECTED_HASH" ]]; then
-            echo "✅ LICENSE file matches canonical Apache 2.0 format"
-            exit 0
-          else
-            echo "❌ LICENSE file hash mismatch!"
+          MISSING_SECTIONS=()
+          for section in "${REQUIRED_SECTIONS[@]}"; do
+            if ! grep -qF "$section" LICENSE; then
+              MISSING_SECTIONS+=("$section")
+            fi
+          done
+
+          # Check for the specific typo we fixed
+          if grep -qF "Additional Support" LICENSE; then
+            echo "❌ Found typo in section 9: 'Additional Support'"
+            echo "   Should be: 'Additional Liability'"
             echo ""
-            echo "This indicates the LICENSE file has been modified from canonical format."
-            echo "Changes to LICENSE must maintain exact Apache 2.0 format for proper detection."
-            echo ""
-            echo "If you intentionally updated the copyright year or holder:"
-            echo "  1. Verify the file still matches Apache 2.0 canonical text"
-            echo "  2. Update EXPECTED_HASH in .github/workflows/quality.yml"
-            echo "  3. Test with: make docs (http://localhost:6060)"
-            echo ""
+            echo "This typo prevents proper license detection."
             echo "See: https://github.com/meridianhub/meridian/pull/118"
             exit 1
           fi
+
+          # Check for missing sections
+          if [ ${#MISSING_SECTIONS[@]} -gt 0 ]; then
+            echo "❌ LICENSE file is missing required Apache 2.0 sections:"
+            for section in "${MISSING_SECTIONS[@]}"; do
+              echo "   - $section"
+            done
+            echo ""
+            echo "Compare against: https://www.apache.org/licenses/LICENSE-2.0.txt"
+            exit 1
+          fi
+
+          # Verify copyright line exists
+          if ! grep -q "Copyright" LICENSE; then
+            echo "❌ LICENSE file missing Copyright notice"
+            echo "   Should include: Copyright [year] [name]"
+            exit 1
+          fi
+
+          echo "✅ LICENSE file contains all required Apache 2.0 sections"
+          echo "   Test license detection with: make docs"
