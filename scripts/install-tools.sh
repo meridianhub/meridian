@@ -101,6 +101,13 @@ if [[ "$OS" == "macos" ]]; then
     # Code quality
     install_tool "golangci-lint" "brew install golangci-lint"
 
+    # Documentation tools
+    if ! command -v pkgsite &> /dev/null && ! [ -f "$(go env GOPATH)/bin/pkgsite" ]; then
+        echo -e "${YELLOW}Installing pkgsite (Go documentation server)...${NC}"
+        go install golang.org/x/pkgsite/cmd/pkgsite@latest
+        echo -e "${GREEN}✓${NC} pkgsite installed"
+    fi
+
 elif [[ "$OS" == "linux" ]]; then
     echo "Installing development tools for Linux..."
     echo ""
@@ -162,6 +169,12 @@ elif [[ "$OS" == "linux" ]]; then
         if ! command -v golangci-lint &> /dev/null; then
             echo -e "${YELLOW}Installing golangci-lint...${NC}"
             curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+        fi
+
+        # pkgsite (documentation tool)
+        if ! command -v pkgsite &> /dev/null; then
+            echo -e "${YELLOW}Installing pkgsite (Go documentation server)...${NC}"
+            go install golang.org/x/pkgsite/cmd/pkgsite@latest
         fi
     fi
 fi

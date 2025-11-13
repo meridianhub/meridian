@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all docs
 
 # Default target
 all: help
@@ -312,3 +312,11 @@ migrate-hash-all:
 	@atlas migrate hash --env local --config atlas.current_account.hcl
 	@atlas migrate hash --env local --config atlas.position_keeping.hcl
 	@echo "All migration checksums verified."
+
+## docs: Start local documentation server (pkgsite)
+docs:
+	@echo "Starting pkgsite documentation server..."
+	@echo "Access documentation at: http://localhost:6060/github.com/meridianhub/meridian"
+	@echo "Press Ctrl+C to stop"
+	@command -v pkgsite >/dev/null 2>&1 || { echo "Installing pkgsite..."; go install golang.org/x/pkgsite/cmd/pkgsite@latest; }
+	@pkgsite -open=false -http=:6060
