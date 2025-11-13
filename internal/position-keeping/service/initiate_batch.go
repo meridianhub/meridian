@@ -135,10 +135,19 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 
 	// Store idempotency result if key was provided
 	if idempotencyKey != nil {
+		// Build detailed results for caching with account_id and log_id
+		cachedResults := make([]map[string]string, 0, len(successfulLogs))
+		for _, log := range successfulLogs {
+			cachedResults = append(cachedResults, map[string]string{
+				"account_id": log.AccountID,
+				"log_id":     log.LogID.String(),
+			})
+		}
+
 		resultData, err := json.Marshal(map[string]interface{}{
 			"batch_id":      batchID.String(),
 			"success_count": successCount,
-			"log_ids":       logIDs,
+			"results":       cachedResults,
 		})
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
@@ -284,16 +293,13 @@ func (s *PositionKeepingService) checkBatchIdempotencyAndAcquireLock(
 		return nil, nil, nil
 	}
 
-	// Generate deterministic entity ID from batch
-	batchID := req.BatchId
-	if batchID == "" {
-		// If no batch ID provided, use first account ID as entity ID
-		if len(req.Requests) > 0 {
-			batchID = req.Requests[0].AccountId
-		} else {
-			batchID = "batch"
-		}
+	// Require batch_id when idempotency key is provided to ensure deterministic entity ID
+	if req.BatchId == "" {
+		return nil, nil, status.Error(codes.InvalidArgument, "batch_id is required when idempotency_key is provided")
 	}
+
+	// Use batch_id as deterministic entity ID
+	batchID := req.BatchId
 
 	key := idempotency.Key{
 		Namespace: "position-keeping",
@@ -307,20 +313,20 @@ func (s *PositionKeepingService) checkBatchIdempotencyAndAcquireLock(
 	if err == nil && result.Status == idempotency.StatusCompleted {
 		// Return cached result
 		var cachedData struct {
-			BatchID      string      `json:"batch_id"`
-			SuccessCount int32       `json:"success_count"`
-			LogIDs       []uuid.UUID `json:"log_ids"`
+			BatchID      string              `json:"batch_id"`
+			SuccessCount int32               `json:"success_count"`
+			Results      []map[string]string `json:"results"`
 		}
 		if err := json.Unmarshal(result.Data, &cachedData); err != nil {
 			return nil, nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
 		}
 
-		// Build response from cached data
-		// Note: We don't have individual log details in cache, so results will be minimal
-		results := make([]*positionkeepingv1.BatchInitiateResult, cachedData.SuccessCount)
-		for i := range results {
+		// Build response from cached data with full account_id information
+		results := make([]*positionkeepingv1.BatchInitiateResult, len(cachedData.Results))
+		for i, res := range cachedData.Results {
 			results[i] = &positionkeepingv1.BatchInitiateResult{
-				Success: true,
+				Success:   true,
+				AccountId: res["account_id"],
 			}
 		}
 

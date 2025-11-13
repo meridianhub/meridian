@@ -405,6 +405,39 @@ func TestInitiateFinancialPositionLogBatch_InvalidBatchID(t *testing.T) {
 	assert.Contains(t, st.Message(), "invalid batch_id")
 }
 
+// TestInitiateFinancialPositionLogBatch_IdempotencyRequiresBatchID tests that batch_id is required with idempotency_key
+func TestInitiateFinancialPositionLogBatch_IdempotencyRequiresBatchID(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+
+	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
+		Requests: []*positionkeepingv1.BatchInitiateRequest{
+			{AccountId: "ACC001"},
+		},
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.NewString(),
+		},
+		// Intentionally omit BatchId
+	}
+
+	// Act
+	resp, err := svc.InitiateFinancialPositionLogBatch(ctx, req)
+
+	// Assert
+	require.Error(t, err)
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "batch_id is required when idempotency_key is provided")
+}
+
 // TestInitiateFinancialPositionLogBatch_ConcurrentBatches tests concurrent batch processing
 func TestInitiateFinancialPositionLogBatch_ConcurrentBatches(t *testing.T) {
 	if testing.Short() {
