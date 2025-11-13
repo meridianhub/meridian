@@ -571,6 +571,7 @@ docker_build(
 
 # Deploy Kubernetes manifests
 k8s_yaml(kustomize('deployments/k8s/base'))
+k8s_yaml('deployments/k8s/base/secret.yaml')
 
 # Set resource dependencies
 k8s_resource(
