@@ -82,7 +82,8 @@ func (c *Container) initializeTracer(ctx context.Context) error {
 	c.Logger.Info("tracer initialized",
 		"service_name", tracerConfig.ServiceName,
 		"environment", tracerConfig.Environment,
-		"sampling_rate", tracerConfig.SamplingRate)
+		"sampling_rate", tracerConfig.SamplingRate,
+		"otlp_configured", tracerConfig.OTLPEndpoint != "")
 
 	return nil
 }
@@ -95,17 +96,9 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 	}
 
 	// Configure connection pool
-	// Validate connection counts fit in int32 range
-	if c.Config.Database.MaxOpenConns > 2147483647 {
-		return fmt.Errorf("%w: %d", ErrMaxOpenConnsOverflow, c.Config.Database.MaxOpenConns)
-	}
-	if c.Config.Database.MaxIdleConns > 2147483647 {
-		return fmt.Errorf("%w: %d", ErrMaxIdleConnsOverflow, c.Config.Database.MaxIdleConns)
-	}
-
-	// #nosec G115 -- overflow validated above
+	// #nosec G115 -- overflow validated in config.Validate()
 	poolConfig.MaxConns = int32(c.Config.Database.MaxOpenConns)
-	// #nosec G115 -- overflow validated above
+	// #nosec G115 -- overflow validated in config.Validate()
 	poolConfig.MinConns = int32(c.Config.Database.MaxIdleConns)
 	poolConfig.MaxConnLifetime = c.Config.Database.ConnMaxLifetime
 	poolConfig.MaxConnIdleTime = c.Config.Database.ConnMaxIdleTime
@@ -136,14 +129,14 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 func (c *Container) initializeEventPublisher() {
 	if !c.Config.Kafka.Enabled {
 		c.Logger.Info("kafka disabled, using no-op event publisher")
-		c.EventPublisher = &domain.NoOpEventPublisher{}
+		c.EventPublisher = domain.NewNoOpEventPublisher()
 		return
 	}
 
 	// For now, use no-op publisher until Kafka integration is fully wired
 	// TODO: Implement Kafka producer initialization when Kafka config is ready
 	c.Logger.Info("kafka producer not yet implemented, using no-op event publisher")
-	c.EventPublisher = &domain.NoOpEventPublisher{}
+	c.EventPublisher = domain.NewNoOpEventPublisher()
 }
 
 // initializeRepositories initializes domain repositories

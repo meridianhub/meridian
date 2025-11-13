@@ -118,7 +118,7 @@ func loadServerConfig() ServerConfig {
 // loadDatabaseConfig loads database configuration from environment variables
 func loadDatabaseConfig() DatabaseConfig {
 	return DatabaseConfig{
-		URL:                 os.Getenv("DATABASE_URL"), // Required - no default to avoid hardcoded credentials
+		URL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")), // Required - no default to avoid hardcoded credentials
 		MaxOpenConns:        getEnvAsInt("DB_MAX_OPEN_CONNS", 25),
 		MaxIdleConns:        getEnvAsInt("DB_MAX_IDLE_CONNS", 5),
 		ConnMaxLifetime:     getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
@@ -197,6 +197,15 @@ func (c *Config) Validate() error {
 
 	if c.Database.MaxIdleConns < 0 {
 		return ErrInvalidMaxIdleConns
+	}
+
+	// Validate connection counts fit in int32 range (pgxpool requirement)
+	const maxInt32 = 2147483647
+	if c.Database.MaxOpenConns > maxInt32 {
+		return fmt.Errorf("%w: %d", ErrMaxOpenConnsOverflow, c.Database.MaxOpenConns)
+	}
+	if c.Database.MaxIdleConns > maxInt32 {
+		return fmt.Errorf("%w: %d", ErrMaxIdleConnsOverflow, c.Database.MaxIdleConns)
 	}
 
 	if c.Kafka.Enabled && len(c.Kafka.Brokers) == 0 {

@@ -250,6 +250,18 @@ func TestValidate_EmptyDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_WhitespaceOnlyDatabaseURL(t *testing.T) {
+	// Test that whitespace-only DATABASE_URL is trimmed to empty and caught by validation
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "   \t\n   ")
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Error("LoadConfig() error = nil, want error for whitespace-only DATABASE_URL")
+	}
+	// Should get validation error for empty database URL after trimming
+}
+
 func TestValidate_InvalidMaxOpenConns(t *testing.T) {
 	config := &Config{
 		Server: ServerConfig{
@@ -332,6 +344,47 @@ func TestValidate_InvalidSamplingRateTooLow(t *testing.T) {
 	err := config.Validate()
 	if err == nil {
 		t.Error("Validate() error = nil, want error for sampling rate < 0")
+	}
+}
+
+func TestValidate_MaxOpenConnsOverflow(t *testing.T) {
+	config := &Config{
+		Server: ServerConfig{
+			Port: "50053",
+		},
+		Database: DatabaseConfig{
+			URL:          "postgres://localhost:5432/db",
+			MaxOpenConns: 2147483648, // Exceeds int32 max
+		},
+		Observability: ObservabilityConfig{
+			SamplingRate: 0.5,
+		},
+	}
+
+	err := config.Validate()
+	if err == nil {
+		t.Error("Validate() error = nil, want error for MaxOpenConns overflow")
+	}
+}
+
+func TestValidate_MaxIdleConnsOverflow(t *testing.T) {
+	config := &Config{
+		Server: ServerConfig{
+			Port: "50053",
+		},
+		Database: DatabaseConfig{
+			URL:          "postgres://localhost:5432/db",
+			MaxOpenConns: 10,
+			MaxIdleConns: 2147483648, // Exceeds int32 max
+		},
+		Observability: ObservabilityConfig{
+			SamplingRate: 0.5,
+		},
+	}
+
+	err := config.Validate()
+	if err == nil {
+		t.Error("Validate() error = nil, want error for MaxIdleConns overflow")
 	}
 }
 
