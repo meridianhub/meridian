@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/internal/position-keeping/app"
+	"github.com/meridianhub/meridian/pkg/platform/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -66,8 +67,15 @@ func TestHealthServer_Check_WithHealthyDatabase(t *testing.T) {
 		_ = container.Close(shutdownCtx)
 	}()
 
-	// Create health server
-	healthSrv := newHealthServer(container, logger)
+	// Create health aggregator and server
+	healthCheckers := []health.Checker{
+		app.NewPgxPoolChecker(container.DBPool),
+	}
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+	healthSrv := newHealthServer(healthAggregator, logger)
 
 	// Perform health check
 	req := &grpc_health_v1.HealthCheckRequest{}
@@ -114,7 +122,12 @@ func TestHealthServer_Check_ReturnsResponse(t *testing.T) {
 		_ = container.Close(shutdownCtx)
 	}()
 
-	healthSrv := newHealthServer(container, logger)
+	healthCheckers := []health.Checker{app.NewPgxPoolChecker(container.DBPool)}
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+	healthSrv := newHealthServer(healthAggregator, logger)
 
 	// Perform health check
 	req := &grpc_health_v1.HealthCheckRequest{}
@@ -161,7 +174,12 @@ func TestHealthServer_Watch_SendsInitialStatus(t *testing.T) {
 		_ = container.Close(shutdownCtx)
 	}()
 
-	healthSrv := newHealthServer(container, logger)
+	healthCheckers := []health.Checker{app.NewPgxPoolChecker(container.DBPool)}
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+	healthSrv := newHealthServer(healthAggregator, logger)
 
 	// Create mock stream with short-lived context
 	streamCtx, streamCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -228,7 +246,12 @@ func TestHealthServer_Watch_RespectsContext(t *testing.T) {
 		_ = container.Close(shutdownCtx)
 	}()
 
-	healthSrv := newHealthServer(container, logger)
+	healthCheckers := []health.Checker{app.NewPgxPoolChecker(container.DBPool)}
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+	healthSrv := newHealthServer(healthAggregator, logger)
 
 	// Create mock stream with context that we'll cancel
 	streamCtx, streamCancel := context.WithCancel(context.Background())

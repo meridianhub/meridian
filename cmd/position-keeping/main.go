@@ -21,7 +21,6 @@ import (
 	"github.com/meridianhub/meridian/pkg/platform/idempotency"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -120,10 +119,13 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("dependency container initialized")
 
-	// Initialize idempotency service (Redis-backed or no-op fallback)
-	idempotencySvc, err := initializeIdempotencyService(config, logger)
-	if err != nil {
-		return fmt.Errorf("failed to initialize idempotency service: %w", err)
+	// Create idempotency service
+	var idempotencySvc idempotency.Service
+	if container.RedisClient != nil {
+		idempotencySvc = idempotency.NewRedisService(container.RedisClient)
+		logger.Info("idempotency service enabled with Redis")
+	} else {
+		logger.Info("idempotency service disabled (Redis not configured)")
 	}
 
 	// Create gRPC service
@@ -175,11 +177,21 @@ func run(logger *slog.Logger) error {
 
 	grpcServer := grpc.NewServer(serverOptions...)
 
+	// Create health check aggregator (used by both gRPC and HTTP)
+	healthCheckers := []health.Checker{
+		app.NewPgxPoolChecker(container.DBPool),
+	}
+	// Add Redis health checker if Redis is enabled
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+
 	// Register Position Keeping service
 	pb.RegisterPositionKeepingServiceServer(grpcServer, positionKeepingService)
 
-	// Register health check service
-	healthServer := newHealthServer(container, logger)
+	// Register health check service (uses aggregator for all components)
+	healthServer := newHealthServer(healthAggregator, logger)
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
 	// Register reflection service for debugging
@@ -191,11 +203,7 @@ func run(logger *slog.Logger) error {
 	// Start HTTP server for health checks and metrics
 	httpMux := http.NewServeMux()
 
-	// Create health check aggregator
-	healthCheckers := []health.Checker{
-		app.NewPgxPoolChecker(container.DBPool),
-	}
-	healthAggregator := health.NewAggregator(healthCheckers)
+	// Register HTTP health handlers (using same aggregator as gRPC)
 	healthHandler := health.NewHTTPHandler(healthAggregator)
 	healthHandler.RegisterHandlers(httpMux)
 
@@ -286,109 +294,46 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
-// initializeIdempotencyService creates Redis-backed idempotency service or no-op fallback
-func initializeIdempotencyService(config *app.Config, logger *slog.Logger) (idempotency.Service, error) {
-	if !config.Redis.Enabled {
-		logger.Warn("redis disabled, using no-op idempotency service",
-			"warning", "idempotency guarantees are disabled - NOT SUITABLE FOR PRODUCTION",
-			"note", "duplicate requests may be processed multiple times")
-		return &noOpIdempotencyService{}, nil
-	}
-
-	// Create Redis client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:            config.Redis.Address,
-		Password:        config.Redis.Password,
-		DB:              config.Redis.DB,
-		PoolSize:        config.Redis.PoolSize,
-		ConnMaxIdleTime: config.Redis.ConnMaxIdleTime,
-	})
-
-	// Verify Redis connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := redisClient.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
-	}
-
-	// Create Redis-backed idempotency service
-	redisService := idempotency.NewRedisService(redisClient)
-
-	logger.Info("redis idempotency service initialized",
-		"address", config.Redis.Address,
-		"db", config.Redis.DB,
-		"pool_size", config.Redis.PoolSize)
-
-	return redisService, nil
-}
-
-// noOpIdempotencyService is a fallback that provides no idempotency guarantees
-// Used when Redis is disabled. NOT suitable for production use.
-type noOpIdempotencyService struct{}
-
-func (n *noOpIdempotencyService) Check(context.Context, idempotency.Key) (*idempotency.Result, error) {
-	return nil, idempotency.ErrResultNotFound
-}
-
-func (n *noOpIdempotencyService) MarkPending(context.Context, idempotency.Key, time.Duration) error {
-	return nil
-}
-
-func (n *noOpIdempotencyService) StoreResult(context.Context, idempotency.Result) error {
-	return nil
-}
-
-func (n *noOpIdempotencyService) Delete(context.Context, idempotency.Key) error {
-	return nil
-}
-
-func (n *noOpIdempotencyService) Acquire(context.Context, idempotency.Key, idempotency.LockOptions) error {
-	return nil
-}
-
-func (n *noOpIdempotencyService) Release(context.Context, idempotency.Key, string) error {
-	return nil
-}
-
-func (n *noOpIdempotencyService) Refresh(context.Context, idempotency.Key, string, time.Duration) error {
-	return nil
-}
-
-func (n *noOpIdempotencyService) IsHeld(context.Context, idempotency.Key) (bool, error) {
-	return false, nil
-}
-
 // healthServer implements the gRPC health checking protocol
 type healthServer struct {
 	grpc_health_v1.UnimplementedHealthServer
-	container *app.Container
-	logger    *slog.Logger
+	aggregator *health.Aggregator
+	logger     *slog.Logger
 }
 
-func newHealthServer(container *app.Container, logger *slog.Logger) *healthServer {
+func newHealthServer(aggregator *health.Aggregator, logger *slog.Logger) *healthServer {
 	return &healthServer{
-		container: container,
-		logger:    logger,
+		aggregator: aggregator,
+		logger:     logger,
 	}
 }
 
 // Check performs a health check
 func (h *healthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
-	// Use existing PgxPoolChecker for database health check
-	checker := app.NewPgxPoolChecker(h.container.DBPool)
-	result := checker.Check(ctx)
+	// Check all components using aggregator
+	report := h.aggregator.CheckAll(ctx)
 
 	grpcStatus := grpc_health_v1.HealthCheckResponse_SERVING
-	status := "healthy"
-	if result.Status == health.StatusUnhealthy {
+	overallStatus := report.OverallStatus()
+	if overallStatus == health.StatusUnhealthy || overallStatus == health.StatusDegraded {
 		grpcStatus = grpc_health_v1.HealthCheckResponse_NOT_SERVING
-		status = "unhealthy"
-		h.logger.Warn("health check failed: database ping failed", "error", result.Error, "response_time", result.ResponseTime)
+		h.logger.Warn("health check failed",
+			"status", overallStatus,
+			"checked_at", report.CheckedAt)
 	}
 
-	// Record health check metric
-	healthCheckTotal.WithLabelValues(result.Name, status).Inc()
+	// Record metrics for each component
+	for _, component := range report.Components {
+		status := "healthy"
+		if component.Status == health.StatusUnhealthy {
+			status = "unhealthy"
+			h.logger.Warn("component health check failed",
+				"component", component.Name,
+				"error", component.Error,
+				"response_time", component.ResponseTime)
+		}
+		healthCheckTotal.WithLabelValues(component.Name, status).Inc()
+	}
 
 	return &grpc_health_v1.HealthCheckResponse{
 		Status: grpcStatus,
