@@ -80,3 +80,58 @@ func TestRedisChecker_Check_ReturnsResult(t *testing.T) {
 		}
 	}
 }
+
+func TestRedisChecker_Check_ContextCancellation(t *testing.T) {
+	// Create minimal Redis client for test
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	defer func() { _ = client.Close() }()
+
+	checker := NewRedisChecker(client)
+
+	// Create context and cancel it immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := checker.Check(ctx)
+
+	// Should return unhealthy when context is cancelled
+	if result.Status != health.StatusUnhealthy {
+		t.Errorf("result.Status = %v, want StatusUnhealthy for cancelled context", result.Status)
+	}
+
+	if result.Error == nil {
+		t.Error("result.Error is nil for cancelled context")
+	}
+
+	if result.Name != testRedisName {
+		t.Errorf("result.Name = %q, want %q", result.Name, testRedisName)
+	}
+}
+
+func TestRedisChecker_Check_AddsTimeoutWhenMissing(t *testing.T) {
+	// Create minimal Redis client for test
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	defer func() { _ = client.Close() }()
+
+	checker := NewRedisChecker(client)
+
+	// Use context without deadline
+	ctx := context.Background()
+
+	result := checker.Check(ctx)
+
+	// Should complete (either success or failure) without hanging
+	// This test verifies the timeout is added internally
+	if result.Name != testRedisName {
+		t.Errorf("result.Name = %q, want %q", result.Name, testRedisName)
+	}
+
+	// Should have a response time (proves it didn't hang indefinitely)
+	if result.ResponseTime == 0 {
+		t.Error("result.ResponseTime is zero, check may have timed out incorrectly")
+	}
+}

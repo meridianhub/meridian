@@ -158,11 +158,21 @@ func run(logger *slog.Logger) error {
 
 	grpcServer := grpc.NewServer(serverOptions...)
 
+	// Create health check aggregator (used by both gRPC and HTTP)
+	healthCheckers := []health.Checker{
+		app.NewPgxPoolChecker(container.DBPool),
+	}
+	// Add Redis health checker if Redis is enabled
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+
 	// Register services
 	pb.RegisterPositionKeepingServiceServer(grpcServer, positionKeepingService)
 
-	// Register health check service
-	healthServer := newHealthServer(container, logger)
+	// Register health check service (uses aggregator for all components)
+	healthServer := newHealthServer(healthAggregator, logger)
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
 	// Register reflection service for debugging
@@ -173,15 +183,7 @@ func run(logger *slog.Logger) error {
 	// Start HTTP server for health checks and metrics
 	httpMux := http.NewServeMux()
 
-	// Create health check aggregator
-	healthCheckers := []health.Checker{
-		app.NewPgxPoolChecker(container.DBPool),
-	}
-	// Add Redis health checker if Redis is enabled
-	if container.RedisClient != nil {
-		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
-	}
-	healthAggregator := health.NewAggregator(healthCheckers)
+	// Register HTTP health handlers (using same aggregator as gRPC)
 	healthHandler := health.NewHTTPHandler(healthAggregator)
 	healthHandler.RegisterHandlers(httpMux)
 
@@ -275,33 +277,43 @@ func run(logger *slog.Logger) error {
 // healthServer implements the gRPC health checking protocol
 type healthServer struct {
 	grpc_health_v1.UnimplementedHealthServer
-	container *app.Container
-	logger    *slog.Logger
+	aggregator *health.Aggregator
+	logger     *slog.Logger
 }
 
-func newHealthServer(container *app.Container, logger *slog.Logger) *healthServer {
+func newHealthServer(aggregator *health.Aggregator, logger *slog.Logger) *healthServer {
 	return &healthServer{
-		container: container,
-		logger:    logger,
+		aggregator: aggregator,
+		logger:     logger,
 	}
 }
 
 // Check performs a health check
 func (h *healthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
-	// Use existing PgxPoolChecker for database health check
-	checker := app.NewPgxPoolChecker(h.container.DBPool)
-	result := checker.Check(ctx)
+	// Check all components using aggregator
+	report := h.aggregator.CheckAll(ctx)
 
 	grpcStatus := grpc_health_v1.HealthCheckResponse_SERVING
-	status := "healthy"
-	if result.Status == health.StatusUnhealthy {
+	overallStatus := report.OverallStatus()
+	if overallStatus == health.StatusUnhealthy || overallStatus == health.StatusDegraded {
 		grpcStatus = grpc_health_v1.HealthCheckResponse_NOT_SERVING
-		status = "unhealthy"
-		h.logger.Warn("health check failed: database ping failed", "error", result.Error, "response_time", result.ResponseTime)
+		h.logger.Warn("health check failed",
+			"status", overallStatus,
+			"checked_at", report.CheckedAt)
 	}
 
-	// Record health check metric
-	healthCheckTotal.WithLabelValues(result.Name, status).Inc()
+	// Record metrics for each component
+	for _, component := range report.Components {
+		status := "healthy"
+		if component.Status == health.StatusUnhealthy {
+			status = "unhealthy"
+			h.logger.Warn("component health check failed",
+				"component", component.Name,
+				"error", component.Error,
+				"response_time", component.ResponseTime)
+		}
+		healthCheckTotal.WithLabelValues(component.Name, status).Inc()
+	}
 
 	return &grpc_health_v1.HealthCheckResponse{
 		Status: grpcStatus,

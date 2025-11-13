@@ -33,7 +33,15 @@ func (r *RedisChecker) Name() string {
 func (r *RedisChecker) Check(ctx context.Context) health.ComponentResult {
 	start := time.Now()
 
-	err := r.client.Ping(ctx).Err()
+	// Add timeout if context doesn't have one
+	checkCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		checkCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+
+	err := r.client.Ping(checkCtx).Err()
 	responseTime := time.Since(start)
 
 	status := health.StatusHealthy
