@@ -13,6 +13,7 @@ import (
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/position-keeping/app"
+	"github.com/meridianhub/meridian/internal/position-keeping/interceptors"
 	"github.com/meridianhub/meridian/internal/position-keeping/service"
 	"github.com/meridianhub/meridian/pkg/platform/idempotency"
 	"github.com/redis/go-redis/v9"
@@ -97,20 +98,29 @@ func run(logger *slog.Logger) error {
 	// Create gRPC server with interceptor chain
 	var serverOptions []grpc.ServerOption
 
-	// Add unary interceptors: tracing → auth (future) → recovery
+	// Build interceptor chain: tracing → auth (future) → recovery
+	// Order matters: tracing first to capture all requests, recovery last to catch all panics
+	var unaryInterceptors []grpc.UnaryServerInterceptor
+	var streamInterceptors []grpc.StreamServerInterceptor
+
+	// 1. Tracing (optional if OTLP endpoint configured)
 	if container.Tracer != nil {
-		serverOptions = append(serverOptions,
-			grpc.ChainUnaryInterceptor(
-				container.Tracer.UnaryServerInterceptor(),
-				// TODO: Add auth.UnaryInterceptor() when authentication is ready
-				// TODO: Add custom recovery interceptor for panic handling
-			),
-			grpc.ChainStreamInterceptor(
-				container.Tracer.StreamServerInterceptor(),
-				// TODO: Add auth.StreamInterceptor() when authentication is ready
-			),
-		)
+		unaryInterceptors = append(unaryInterceptors, container.Tracer.UnaryServerInterceptor())
+		streamInterceptors = append(streamInterceptors, container.Tracer.StreamServerInterceptor())
 	}
+
+	// 2. Auth (TODO: Add when authentication is ready)
+	// unaryInterceptors = append(unaryInterceptors, auth.UnaryInterceptor())
+	// streamInterceptors = append(streamInterceptors, auth.StreamInterceptor())
+
+	// 3. Recovery (last in chain to catch all panics)
+	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
+	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(logger))
+
+	serverOptions = append(serverOptions,
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
+	)
 
 	grpcServer := grpc.NewServer(serverOptions...)
 
