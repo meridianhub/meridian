@@ -295,3 +295,207 @@ func TestNewTransactionLineage_StringEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestTransactionLineage_TransactionID(t *testing.T) {
+	t.Parallel()
+
+	txID := uuid.New()
+	lineage, err := NewTransactionLineage(txID, "payment", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewTransactionLineage() returned error: %v", err)
+	}
+
+	if lineage.TransactionID() != txID {
+		t.Errorf("TransactionID() = %v, want %v", lineage.TransactionID(), txID)
+	}
+}
+
+func TestTransactionLineage_ParentTransactionID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns nil when no parent", func(t *testing.T) {
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		result := lineage.ParentTransactionID()
+		if result != nil {
+			t.Errorf("ParentTransactionID() = %v, want nil", result)
+		}
+	})
+
+	t.Run("returns copy of parent ID when parent exists", func(t *testing.T) {
+		parentID := uuid.New()
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, nil, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		result := lineage.ParentTransactionID()
+		if result == nil {
+			t.Fatal("ParentTransactionID() returned nil, expected non-nil")
+		}
+		if *result != parentID {
+			t.Errorf("ParentTransactionID() = %v, want %v", *result, parentID)
+		}
+	})
+
+	t.Run("defensive copy prevents mutation", func(t *testing.T) {
+		parentID := uuid.New()
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, nil, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		// Get parent and mutate it
+		result := lineage.ParentTransactionID()
+		*result = uuid.New()
+
+		// Verify internal state unchanged
+		secondResult := lineage.ParentTransactionID()
+		if *secondResult != parentID {
+			t.Errorf("Internal parent was mutated! Expected %v, got %v", parentID, *secondResult)
+		}
+	})
+}
+
+func TestTransactionLineage_ChildTransactionIDs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns nil when no children", func(t *testing.T) {
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		result := lineage.ChildTransactionIDs()
+		if result != nil {
+			t.Errorf("ChildTransactionIDs() = %v, want nil", result)
+		}
+	})
+
+	t.Run("returns nil for empty slice", func(t *testing.T) {
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, []uuid.UUID{}, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		result := lineage.ChildTransactionIDs()
+		if result != nil {
+			t.Errorf("ChildTransactionIDs() = %v, want nil", result)
+		}
+	})
+
+	t.Run("returns copy of children slice", func(t *testing.T) {
+		child1 := uuid.New()
+		child2 := uuid.New()
+		children := []uuid.UUID{child1, child2}
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, children, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		result := lineage.ChildTransactionIDs()
+		if len(result) != 2 {
+			t.Fatalf("ChildTransactionIDs() returned %d children, want 2", len(result))
+		}
+		if result[0] != child1 || result[1] != child2 {
+			t.Errorf("ChildTransactionIDs() = %v, want %v", result, children)
+		}
+	})
+
+	t.Run("defensive copy prevents mutation", func(t *testing.T) {
+		child1 := uuid.New()
+		child2 := uuid.New()
+		children := []uuid.UUID{child1, child2}
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, children, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		// Get children and mutate them
+		result := lineage.ChildTransactionIDs()
+		result[0] = uuid.New()
+		_ = append(result, uuid.New())
+
+		// Verify internal state unchanged
+		secondResult := lineage.ChildTransactionIDs()
+		if len(secondResult) != 2 {
+			t.Errorf("Internal children slice was mutated! Expected length 2, got %d", len(secondResult))
+		}
+		if secondResult[0] != child1 || secondResult[1] != child2 {
+			t.Errorf("Internal children were mutated! Expected [%v, %v], got %v", child1, child2, secondResult)
+		}
+	})
+}
+
+func TestTransactionLineage_RelatedTransactionIDs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns nil when no related transactions", func(t *testing.T) {
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, nil)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		result := lineage.RelatedTransactionIDs()
+		if result != nil {
+			t.Errorf("RelatedTransactionIDs() = %v, want nil", result)
+		}
+	})
+
+	t.Run("returns nil for empty slice", func(t *testing.T) {
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, []uuid.UUID{})
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		result := lineage.RelatedTransactionIDs()
+		if result != nil {
+			t.Errorf("RelatedTransactionIDs() = %v, want nil", result)
+		}
+	})
+
+	t.Run("returns copy of related slice", func(t *testing.T) {
+		related1 := uuid.New()
+		related2 := uuid.New()
+		related := []uuid.UUID{related1, related2}
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, related)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		result := lineage.RelatedTransactionIDs()
+		if len(result) != 2 {
+			t.Fatalf("RelatedTransactionIDs() returned %d related, want 2", len(result))
+		}
+		if result[0] != related1 || result[1] != related2 {
+			t.Errorf("RelatedTransactionIDs() = %v, want %v", result, related)
+		}
+	})
+
+	t.Run("defensive copy prevents mutation", func(t *testing.T) {
+		related1 := uuid.New()
+		related2 := uuid.New()
+		related := []uuid.UUID{related1, related2}
+		lineage, err := NewTransactionLineage(uuid.New(), "payment", nil, nil, related)
+		if err != nil {
+			t.Fatalf("NewTransactionLineage() returned error: %v", err)
+		}
+
+		// Get related and mutate them
+		result := lineage.RelatedTransactionIDs()
+		result[0] = uuid.New()
+		_ = append(result, uuid.New())
+
+		// Verify internal state unchanged
+		secondResult := lineage.RelatedTransactionIDs()
+		if len(secondResult) != 2 {
+			t.Errorf("Internal related slice was mutated! Expected length 2, got %d", len(secondResult))
+		}
+		if secondResult[0] != related1 || secondResult[1] != related2 {
+			t.Errorf("Internal related were mutated! Expected [%v, %v], got %v", related1, related2, secondResult)
+		}
+	})
+}

@@ -471,3 +471,76 @@ func TestDomainEvent_OccurredAt(t *testing.T) {
 		})
 	}
 }
+
+// TestTransactionCaptured_AllCurrencies tests currency conversion for all supported currencies
+func TestTransactionCaptured_AllCurrencies(t *testing.T) {
+	tests := []struct {
+		name             string
+		currency         domain.Currency
+		expectedProtoCur commonv1.Currency
+	}{
+		{"USD", domain.CurrencyUSD, commonv1.Currency_CURRENCY_USD},
+		{"EUR", domain.CurrencyEUR, commonv1.Currency_CURRENCY_EUR},
+		{"CHF", domain.CurrencyCHF, commonv1.Currency_CURRENCY_CHF},
+		{"CAD", domain.CurrencyCAD, commonv1.Currency_CURRENCY_CAD},
+		{"AUD", domain.CurrencyAUD, commonv1.Currency_CURRENCY_AUD},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			money, err := domain.NewMoney(decimal.NewFromInt(100), tt.currency)
+			require.NoError(t, err)
+
+			event := &domain.TransactionCaptured{
+				LogID:         uuid.New(),
+				AccountID:     "ACC-123",
+				TransactionID: uuid.New(),
+				Amount:        money,
+				Direction:     domain.PostingDirectionDebit,
+				Source:        domain.TransactionSourceManual,
+				Timestamp:     time.Now().UTC(),
+				Version:       1,
+			}
+
+			protoEvent := event.ToProto()
+			proto, ok := protoEvent.(*eventsv1.TransactionCapturedEvent)
+			require.True(t, ok)
+			assert.Equal(t, tt.expectedProtoCur, proto.Currency)
+		})
+	}
+}
+
+// TestTransactionReconciled_AllStatuses tests reconciliation status conversion for all statuses
+func TestTransactionReconciled_AllStatuses(t *testing.T) {
+	tests := []struct {
+		name                string
+		status              domain.ReconciliationStatus
+		expectedProtoStatus string
+	}{
+		{"matched", domain.ReconciliationStatusMatched, "auto_reconciled"},
+		{"resolved", domain.ReconciliationStatusResolved, "manually_reconciled"},
+		{"mismatched", domain.ReconciliationStatusMismatched, "reconciled_with_discrepancy"},
+		{"unreconciled", domain.ReconciliationStatusUnreconciled, "unreconciled"},
+		{"unknown defaults to unreconciled", domain.ReconciliationStatus("UNKNOWN"), "unreconciled"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := &domain.TransactionReconciled{
+				LogID:                uuid.New(),
+				AccountID:            "ACC-123",
+				ReconciliationStatus: tt.status,
+				Reason:               "Test",
+				ReconciledBy:         "system",
+				CorrelationID:        "CORR-123",
+				Timestamp:            time.Now().UTC(),
+				Version:              1,
+			}
+
+			protoEvent := event.ToProto()
+			proto, ok := protoEvent.(*eventsv1.TransactionReconciledEvent)
+			require.True(t, ok)
+			assert.Equal(t, tt.expectedProtoStatus, proto.ReconciliationStatus)
+		})
+	}
+}
