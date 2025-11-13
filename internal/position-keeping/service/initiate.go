@@ -35,6 +35,11 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		return cachedResponse, nil
 	}
 
+	// Check for context cancellation after potentially slow idempotency check
+	if err := ctx.Err(); err != nil {
+		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
+	}
+
 	// Convert initial entry from proto to domain if provided
 	var initialEntry *domain.TransactionLogEntry
 	if req.InitialEntry != nil {
@@ -66,7 +71,28 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		return nil, status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
 	}
 
-	// Publish event
+	// Publish event using fire-and-forget pattern
+	//
+	// Design Decision: Event publishing does not block the main operation.
+	// The financial position log is already persisted to the database, which is the
+	// authoritative source of truth. Events provide eventual consistency and async
+	// notifications to downstream services.
+	//
+	// Trade-offs:
+	//   - Pro: Request latency is not impacted by event broker availability
+	//   - Pro: Partial failures don't cause transaction rollbacks
+	//   - Con: Events may be lost if publisher fails silently
+	//   - Con: No visibility into publishing failures at request time
+	//
+	// Future Improvements:
+	//   - Add metrics/logging in EventPublisher implementation for observability
+	//   - Consider dead letter queue for failed events
+	//   - Add retry logic with exponential backoff in EventPublisher
+	//   - Monitor event publishing success rates via instrumentation
+	//
+	// The EventPublisher interface returns errors, but we intentionally ignore them
+	// to maintain the fire-and-forget semantics. Error handling and retries should
+	// be implemented within the EventPublisher implementation itself.
 	if initialEntry != nil {
 		event := &domain.TransactionCaptured{
 			LogID:         log.LogID,
@@ -80,7 +106,6 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 			Timestamp:     initialEntry.Timestamp,
 			Version:       log.Version,
 		}
-		// Event publishing is fire-and-forget; errors are logged internally
 		_ = s.eventPublisher.Publish(ctx, event)
 	}
 

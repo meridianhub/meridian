@@ -126,10 +126,16 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "invalid end_date format: %v", err)
 			}
-			// Set to end of day
-			toDate = toDate.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+			// Set to start of next day (exclusive upper bound)
+			// This ensures records on end_date are included (< next day midnight)
+			toDate = toDate.AddDate(0, 0, 1)
 			filter.ToDate = &toDate
 		}
+	}
+
+	// Check for context cancellation before potentially expensive query
+	if err := ctx.Err(); err != nil {
+		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
 	}
 
 	// Query repository
@@ -145,8 +151,10 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 	}
 
 	// Build pagination response
+	// Note: TotalCount is set to 0 as counting all matching records would be expensive.
+	// Clients should paginate using NextPageToken until no more results are returned.
 	paginationResp := &commonv1.PaginationResponse{
-		TotalCount: int64(len(protoLogs)),
+		TotalCount: 0, // Not implemented - would require separate COUNT query
 	}
 
 	// If we got a full page, there might be more

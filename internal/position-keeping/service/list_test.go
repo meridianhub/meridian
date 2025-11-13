@@ -188,7 +188,9 @@ func TestListFinancialPositionLogs_DateRange(t *testing.T) {
 	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
 
 	fromDate := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	toDate := time.Date(2025, 1, 31, 23, 59, 59, 0, time.UTC)
+	// ToDate is start of next day (exclusive upper bound)
+	// This ensures records on end_date (2025-01-31) are included (< 2025-02-01)
+	toDate := time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)
 
 	expectedLogs := []*domain.FinancialPositionLog{
 		{
