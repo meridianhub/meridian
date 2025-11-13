@@ -101,10 +101,12 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 
 	// If there were validation failures, return early with detailed errors
 	if failureCount > 0 {
+		// Safe conversion: batch size validated to be <= MaxBatchSize (10,000)
+		totalCount := int32(len(req.Requests)) // #nosec G115
 		return &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
 			Results:      results,
 			BatchId:      batchID.String(),
-			TotalCount:   int32(len(req.Requests)),
+			TotalCount:   totalCount,
 			SuccessCount: successCount,
 			FailureCount: failureCount,
 		}, nil
@@ -117,9 +119,11 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 
 	// Publish BulkTransactionCaptured event (fire-and-forget)
 	if len(successfulLogs) > 0 {
+		// Safe conversion: successfulLogs length <= MaxBatchSize (10,000)
+		transactionCount := int32(len(successfulLogs)) // #nosec G115
 		event := &domain.BulkTransactionCaptured{
 			BatchID:          batchID,
-			TransactionCount: int32(len(successfulLogs)),
+			TransactionCount: transactionCount,
 			LogIDs:           logIDs,
 			Source:           domain.TransactionSourceImported,
 			CorrelationID:    fmt.Sprintf("batch-%s", batchID.String()),
@@ -152,10 +156,12 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 	}
 
 	// Build successful response
+	// Safe conversion: batch size validated to be <= MaxBatchSize (10,000)
+	totalCount := int32(len(req.Requests)) // #nosec G115
 	resp = &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
 		Results:      results,
 		BatchId:      batchID.String(),
-		TotalCount:   int32(len(req.Requests)),
+		TotalCount:   totalCount,
 		SuccessCount: successCount,
 		FailureCount: failureCount,
 	}
