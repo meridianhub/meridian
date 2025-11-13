@@ -121,36 +121,36 @@ jobs:
           retention-days: 7
 
   license-validation:
-    name: License Detection
+    name: License File Validation
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.3'
-
-      - name: Install licensecheck
-        run: go install github.com/google/licensecheck/cmd/licensecheck@latest
-
-      - name: Validate LICENSE file
+      - name: Validate LICENSE file hash
         run: |
-          LICENSE_TYPE=$(licensecheck LICENSE | grep -oP '(?<=: ).*')
-          echo "Detected license: $LICENSE_TYPE"
+          # Expected SHA256 hash of canonical Apache 2.0 license with our copyright
+          EXPECTED_HASH="c6261ed6933fba6e919c3faff2dabeb8ac2f19ddcc20dcf4f7473fa7273aca2b"
+          ACTUAL_HASH=$(sha256sum LICENSE | awk '{print $1}')
 
-          if [[ "$LICENSE_TYPE" == *"Apache-2.0"* ]]; then
-            echo "✅ LICENSE file correctly detected as Apache-2.0"
+          echo "Expected LICENSE hash: $EXPECTED_HASH"
+          echo "Actual LICENSE hash:   $ACTUAL_HASH"
+
+          if [[ "$ACTUAL_HASH" == "$EXPECTED_HASH" ]]; then
+            echo "✅ LICENSE file matches canonical Apache 2.0 format"
             exit 0
-          elif [[ "$LICENSE_TYPE" == *"UNKNOWN"* ]]; then
-            echo "❌ LICENSE file not recognized (detected as UNKNOWN)"
-            echo "This usually indicates the LICENSE file doesn't match canonical format"
-            echo "See: https://github.com/meridianhub/meridian/pull/118"
-            exit 1
           else
-            echo "⚠️  Unexpected license type detected: $LICENSE_TYPE"
-            echo "Expected: Apache-2.0"
+            echo "❌ LICENSE file hash mismatch!"
+            echo ""
+            echo "This indicates the LICENSE file has been modified from canonical format."
+            echo "Changes to LICENSE must maintain exact Apache 2.0 format for proper detection."
+            echo ""
+            echo "If you intentionally updated the copyright year or holder:"
+            echo "  1. Verify the file still matches Apache 2.0 canonical text"
+            echo "  2. Update EXPECTED_HASH in .github/workflows/quality.yml"
+            echo "  3. Test with: make docs (http://localhost:6060)"
+            echo ""
+            echo "See: https://github.com/meridianhub/meridian/pull/118"
             exit 1
           fi
