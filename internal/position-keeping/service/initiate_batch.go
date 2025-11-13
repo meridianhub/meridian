@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/position-keeping/domain"
@@ -84,6 +84,8 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 	}
 
 	// Count successes and failures
+	// Safe conversion: batch size validated to be <= MaxBatchSize (10,000)
+	totalCount := int32(len(req.Requests)) // #nosec G115
 	successCount := int32(0)
 	failureCount := int32(0)
 	successfulLogs := make([]*domain.FinancialPositionLog, 0, len(logs))
@@ -101,8 +103,6 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 
 	// If there were validation failures, return early with detailed errors
 	if failureCount > 0 {
-		// Safe conversion: batch size validated to be <= MaxBatchSize (10,000)
-		totalCount := int32(len(req.Requests)) // #nosec G115
 		return &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
 			Results:      results,
 			BatchId:      batchID.String(),
@@ -135,20 +135,21 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 
 	// Store idempotency result if key was provided
 	if idempotencyKey != nil {
-		// Build detailed results for caching with account_id and log_id
-		cachedResults := make([]map[string]string, 0, len(successfulLogs))
-		for _, log := range successfulLogs {
-			cachedResults = append(cachedResults, map[string]string{
-				"account_id": log.AccountID,
-				"log_id":     log.LogID.String(),
-			})
+		// Serialize the complete response for caching (including full Log proto messages)
+		// Use protojson for proper proto message serialization
+		responseProto := &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
+			Results:      results,
+			BatchId:      batchID.String(),
+			TotalCount:   totalCount,
+			SuccessCount: successCount,
+			FailureCount: failureCount,
 		}
 
-		resultData, err := json.Marshal(map[string]interface{}{
-			"batch_id":      batchID.String(),
-			"success_count": successCount,
-			"results":       cachedResults,
-		})
+		marshaler := protojson.MarshalOptions{
+			UseProtoNames:   true,
+			EmitUnpopulated: false,
+		}
+		resultData, err := marshaler.Marshal(responseProto)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
 		}
@@ -165,8 +166,6 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 	}
 
 	// Build successful response
-	// Safe conversion: batch size validated to be <= MaxBatchSize (10,000)
-	totalCount := int32(len(req.Requests)) // #nosec G115
 	resp = &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
 		Results:      results,
 		BatchId:      batchID.String(),
@@ -311,32 +310,16 @@ func (s *PositionKeepingService) checkBatchIdempotencyAndAcquireLock(
 	// Check if operation was already completed
 	result, err := s.idempotency.Check(ctx, key)
 	if err == nil && result.Status == idempotency.StatusCompleted {
-		// Return cached result
-		var cachedData struct {
-			BatchID      string              `json:"batch_id"`
-			SuccessCount int32               `json:"success_count"`
-			Results      []map[string]string `json:"results"`
+		// Return cached result - deserialize complete response with full Log data
+		cachedResponse := &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{}
+		unmarshaler := protojson.UnmarshalOptions{
+			DiscardUnknown: true,
 		}
-		if err := json.Unmarshal(result.Data, &cachedData); err != nil {
+		if err := unmarshaler.Unmarshal(result.Data, cachedResponse); err != nil {
 			return nil, nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
 		}
 
-		// Build response from cached data with full account_id information
-		results := make([]*positionkeepingv1.BatchInitiateResult, len(cachedData.Results))
-		for i, res := range cachedData.Results {
-			results[i] = &positionkeepingv1.BatchInitiateResult{
-				Success:   true,
-				AccountId: res["account_id"],
-			}
-		}
-
-		return &key, &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
-			Results:      results,
-			BatchId:      cachedData.BatchID,
-			TotalCount:   cachedData.SuccessCount,
-			SuccessCount: cachedData.SuccessCount,
-			FailureCount: 0,
-		}, nil
+		return &key, cachedResponse, nil
 	}
 
 	// Mark operation as pending

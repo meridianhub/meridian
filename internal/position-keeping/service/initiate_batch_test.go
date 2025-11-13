@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -19,6 +20,11 @@ import (
 	"github.com/meridianhub/meridian/internal/position-keeping/domain"
 	"github.com/meridianhub/meridian/internal/position-keeping/service"
 	"github.com/meridianhub/meridian/pkg/platform/idempotency"
+)
+
+var (
+	errNotFound = errors.New("not found")
+	errDBFailed = errors.New("database connection failed")
 )
 
 // TestInitiateFinancialPositionLogBatch_Success tests successful batch creation
@@ -562,4 +568,98 @@ func BenchmarkInitiateFinancialPositionLogBatch_LargeBatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = svc.InitiateFinancialPositionLogBatch(ctx, req)
 	}
+}
+
+func TestInitiateFinancialPositionLogBatch_DatabaseFailureWithIdempotencyCleanup(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+
+	batchID := uuid.New()
+	idempotencyKey := uuid.NewString()
+
+	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
+		Requests: []*positionkeepingv1.BatchInitiateRequest{
+			{AccountId: "ACC001"},
+			{AccountId: "ACC002"},
+		},
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: idempotencyKey,
+		},
+		BatchId: batchID.String(),
+	}
+
+	// Setup expectations - idempotency check returns not found (first request)
+	mockIdempotency.On("Check", mock.Anything, mock.Anything).
+		Return(nil, errNotFound)
+
+	// Mark as pending succeeds
+	mockIdempotency.On("MarkPending", mock.Anything, mock.Anything, mock.Anything).
+		Return(nil)
+
+	// Database failure - CreateBatch returns error
+	mockRepo.On("CreateBatch", mock.Anything, mock.Anything).
+		Return(errDBFailed)
+
+	// Expect idempotency key to be deleted on error
+	mockIdempotency.On("Delete", mock.Anything, mock.Anything).
+		Return(nil)
+
+	// Act
+	resp, err := svc.InitiateFinancialPositionLogBatch(ctx, req)
+
+	// Assert
+	require.Error(t, err)
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to persist batch")
+
+	// Verify idempotency key was deleted (rollback)
+	mockIdempotency.AssertCalled(t, "Delete", mock.Anything, mock.Anything)
+
+	// Verify no event was published (since batch failed)
+	assert.Empty(t, mockEventPublisher.GetPublishedEvents())
+}
+
+func TestInitiateFinancialPositionLogBatch_ContextCancellation(t *testing.T) {
+	// Arrange
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+
+	// Create a context that's already cancelled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
+		Requests: []*positionkeepingv1.BatchInitiateRequest{
+			{AccountId: "ACC001"},
+			{AccountId: "ACC002"},
+		},
+	}
+
+	// Act
+	resp, err := svc.InitiateFinancialPositionLogBatch(ctx, req)
+
+	// Assert
+	require.Error(t, err)
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.Canceled, st.Code())
+	assert.Contains(t, st.Message(), "batch processing cancelled")
+
+	// Verify no database operations were attempted
+	mockRepo.AssertNotCalled(t, "CreateBatch")
+	mockIdempotency.AssertNotCalled(t, "StoreResult")
 }
