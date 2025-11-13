@@ -62,3 +62,35 @@ func TestTransactionSource_IsValid_InvalidValue(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTransactionSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected TransactionSource
+	}{
+		{"valid manual", "MANUAL", TransactionSourceManual},
+		{"valid automated", "AUTOMATED", TransactionSourceAutomated},
+		{"valid imported", "IMPORTED", TransactionSourceImported},
+		{"valid reconciliation", "RECONCILIATION", TransactionSourceReconciliation},
+		{"valid adjustment", "ADJUSTMENT", TransactionSourceAdjustment},
+		{"valid current account", "CURRENT_ACCOUNT", TransactionSourceCurrentAccount},
+		{"valid financial accounting", "FINANCIAL_ACCOUNTING", TransactionSourceFinancialAccounting},
+		{"invalid defaults to manual", "INVALID", TransactionSourceManual},
+		{"empty defaults to manual", "", TransactionSourceManual},
+		{"lowercase defaults to manual", "manual", TransactionSourceManual},
+		{"with spaces defaults to manual", "MANUAL ", TransactionSourceManual},
+		{"dash instead of underscore defaults to manual", "CURRENT-ACCOUNT", TransactionSourceManual},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseTransactionSource(tt.input)
+			if result != tt.expected {
+				t.Errorf("Expected ParseTransactionSource(%q) to return %v, got %v", tt.input, tt.expected, result)
+			}
+		})
+	}
+}

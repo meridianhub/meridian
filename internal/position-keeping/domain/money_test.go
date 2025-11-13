@@ -264,12 +264,42 @@ func TestCurrency_DecimalPlaces(t *testing.T) {
 		{"CHF uses 2 decimal places", CurrencyCHF, 2},
 		{"CAD uses 2 decimal places", CurrencyCAD, 2},
 		{"AUD uses 2 decimal places", CurrencyAUD, 2},
+		{"Unknown currency defaults to 2 decimal places", Currency("XYZ"), 2},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.currency.DecimalPlaces(); got != tt.want {
 				t.Errorf("Currency.DecimalPlaces() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMoney_String(t *testing.T) {
+	tests := []struct {
+		name     string
+		amount   decimal.Decimal
+		currency Currency
+		expected string
+	}{
+		{"GBP with decimals", decimal.NewFromFloat(123.45), CurrencyGBP, "123.45 GBP"},
+		{"USD whole number", decimal.NewFromInt(100), CurrencyUSD, "100.00 USD"},
+		{"JPY zero decimals", decimal.NewFromInt(10000), CurrencyJPY, "10000.00 JPY"},
+		{"negative amount", decimal.NewFromFloat(-50.99), CurrencyEUR, "-50.99 EUR"},
+		{"zero amount", decimal.Zero, CurrencyGBP, "0.00 GBP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			money, err := NewMoney(tt.amount, tt.currency)
+			if err != nil {
+				t.Fatalf("Failed to create money: %v", err)
+			}
+
+			result := money.String()
+			if result != tt.expected {
+				t.Errorf("Expected String() to return %q, got %q", tt.expected, result)
 			}
 		})
 	}

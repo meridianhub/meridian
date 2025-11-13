@@ -95,3 +95,52 @@ func TestPostingDirection_Opposite_InvalidValue(t *testing.T) {
 		})
 	}
 }
+
+func TestPostingDirection_String(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		direction PostingDirection
+		expected  string
+	}{
+		{"debit", PostingDirectionDebit, "DEBIT"},
+		{"credit", PostingDirectionCredit, "CREDIT"},
+		{"empty", PostingDirection(""), ""},
+		{"invalid", PostingDirection("INVALID"), "INVALID"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.direction.String()
+			if result != tt.expected {
+				t.Errorf("Expected String() to return %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestParsePostingDirection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected PostingDirection
+	}{
+		{"valid debit", "DEBIT", PostingDirectionDebit},
+		{"valid credit", "CREDIT", PostingDirectionCredit},
+		{"invalid defaults to debit", "INVALID", PostingDirectionDebit},
+		{"empty defaults to debit", "", PostingDirectionDebit},
+		{"lowercase defaults to debit", "debit", PostingDirectionDebit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParsePostingDirection(tt.input)
+			if result != tt.expected {
+				t.Errorf("Expected ParsePostingDirection(%q) to return %v, got %v", tt.input, tt.expected, result)
+			}
+		})
+	}
+}
