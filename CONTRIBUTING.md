@@ -187,6 +187,25 @@ make proto
 make test
 ```
 
+### Browsing Code Documentation
+
+View Go package documentation locally:
+
+```bash
+# Start local documentation server
+make docs
+
+# Access at http://localhost:6060/github.com/meridianhub/meridian
+# Press Ctrl+C to stop
+```
+
+The documentation server provides a local version of pkg.go.dev for browsing:
+- All exported types, functions, and methods
+- Package-level documentation
+- Code examples
+
+See [docs/local-documentation.md](docs/local-documentation.md) for details on writing good documentation comments.
+
 ### Make Targets
 
 Common development commands:
@@ -203,6 +222,7 @@ make tidy          # Tidy go.mod
 make proto         # Generate protobuf code
 make proto-lint    # Lint protobuf files
 make docker-build  # Build Docker image
+make docs          # Start local documentation server
 make clean         # Clean build artifacts
 ```
 

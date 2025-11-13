@@ -119,3 +119,38 @@ jobs:
           name: tilt-validation-output
           path: tilt-output.txt
           retention-days: 7
+
+  license-validation:
+    name: License Detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.3'
+
+      - name: Install licensecheck
+        run: go install github.com/google/licensecheck/cmd/licensecheck@latest
+
+      - name: Validate LICENSE file
+        run: |
+          LICENSE_TYPE=$(licensecheck LICENSE | grep -oP '(?<=: ).*')
+          echo "Detected license: $LICENSE_TYPE"
+
+          if [[ "$LICENSE_TYPE" == *"Apache-2.0"* ]]; then
+            echo "✅ LICENSE file correctly detected as Apache-2.0"
+            exit 0
+          elif [[ "$LICENSE_TYPE" == *"UNKNOWN"* ]]; then
+            echo "❌ LICENSE file not recognized (detected as UNKNOWN)"
+            echo "This usually indicates the LICENSE file doesn't match canonical format"
+            echo "See: https://github.com/meridianhub/meridian/pull/118"
+            exit 1
+          else
+            echo "⚠️  Unexpected license type detected: $LICENSE_TYPE"
+            echo "Expected: Apache-2.0"
+            exit 1
+          fi
