@@ -15,11 +15,13 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/position-keeping/app"
+	"github.com/meridianhub/meridian/internal/position-keeping/interceptors"
 	"github.com/meridianhub/meridian/internal/position-keeping/service"
 	"github.com/meridianhub/meridian/pkg/platform/health"
 	"github.com/meridianhub/meridian/pkg/platform/idempotency"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -95,9 +97,15 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	logger.Info("configuration loaded successfully")
+	// Override observability config with build info
+	config.Observability.ServiceVersion = Version
 
-	// Initialize dependency injection container
+	logger.Info("configuration loaded",
+		"environment", config.Observability.Environment,
+		"grpc_port", config.Server.Port,
+		"metrics_port", config.Observability.MetricsPort)
+
+	// Initialize dependency container
 	container, err := app.NewContainer(ctx, config, logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize container: %w", err)
@@ -112,10 +120,11 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("dependency container initialized")
 
-	// Create idempotency service
-	// For now use nil (idempotency features disabled) until Redis integration is ready
-	// TODO(task-15): Wire up idempotency.NewRedisService(redisClient) when Redis is configured
-	var idempotencySvc idempotency.Service
+	// Initialize idempotency service (Redis-backed or no-op fallback)
+	idempotencySvc, err := initializeIdempotencyService(config, logger)
+	if err != nil {
+		return fmt.Errorf("failed to initialize idempotency service: %w", err)
+	}
 
 	// Create gRPC service
 	positionKeepingService := service.NewPositionKeepingService(
@@ -124,24 +133,36 @@ func run(logger *slog.Logger) error {
 		idempotencySvc,
 	)
 
-	logger.Info("services created")
+	logger.Info("position keeping service initialized")
 
-	// Create gRPC server with observability interceptors
+	// Create gRPC server with interceptor chain
 	var serverOptions []grpc.ServerOption
 
-	// Build interceptor chain
+	// Build interceptor chain: metrics → tracing → auth (future) → recovery
+	// Order matters: metrics first for all requests, tracing for observability, recovery last to catch panics
 	var unaryInterceptors []grpc.UnaryServerInterceptor
 	var streamInterceptors []grpc.StreamServerInterceptor
 
-	// Add metrics interceptor (always enabled)
+	// 1. Metrics (always enabled)
 	unaryInterceptors = append(unaryInterceptors,
 		app.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
 
-	// Add tracing interceptors if configured
+	// 2. Tracing (optional if OTLP endpoint configured)
 	if container.Tracer != nil {
 		unaryInterceptors = append(unaryInterceptors, container.Tracer.UnaryServerInterceptor())
 		streamInterceptors = append(streamInterceptors, container.Tracer.StreamServerInterceptor())
 	}
+
+	// 3. Auth (JWT validation with JWKS)
+	if container.AuthInterceptor != nil {
+		unaryInterceptors = append(unaryInterceptors, container.AuthInterceptor.UnaryInterceptor())
+		streamInterceptors = append(streamInterceptors, container.AuthInterceptor.StreamInterceptor())
+		logger.Info("auth interceptor enabled in chain")
+	}
+
+	// 4. Recovery (last in chain to catch all panics)
+	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
+	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(logger))
 
 	serverOptions = append(serverOptions,
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
@@ -154,7 +175,7 @@ func run(logger *slog.Logger) error {
 
 	grpcServer := grpc.NewServer(serverOptions...)
 
-	// Register services
+	// Register Position Keeping service
 	pb.RegisterPositionKeepingServiceServer(grpcServer, positionKeepingService)
 
 	// Register health check service
@@ -164,7 +185,8 @@ func run(logger *slog.Logger) error {
 	// Register reflection service for debugging
 	reflection.Register(grpcServer)
 
-	logger.Info("gRPC services registered")
+	logger.Info("gRPC services registered",
+		"services", []string{"PositionKeepingService", "Health", "Reflection"})
 
 	// Start HTTP server for health checks and metrics
 	httpMux := http.NewServeMux()
@@ -262,6 +284,79 @@ func run(logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+// initializeIdempotencyService creates Redis-backed idempotency service or no-op fallback
+func initializeIdempotencyService(config *app.Config, logger *slog.Logger) (idempotency.Service, error) {
+	if !config.Redis.Enabled {
+		logger.Warn("redis disabled, using no-op idempotency service",
+			"warning", "idempotency guarantees are disabled - NOT SUITABLE FOR PRODUCTION",
+			"note", "duplicate requests may be processed multiple times")
+		return &noOpIdempotencyService{}, nil
+	}
+
+	// Create Redis client
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:            config.Redis.Address,
+		Password:        config.Redis.Password,
+		DB:              config.Redis.DB,
+		PoolSize:        config.Redis.PoolSize,
+		ConnMaxIdleTime: config.Redis.ConnMaxIdleTime,
+	})
+
+	// Verify Redis connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	// Create Redis-backed idempotency service
+	redisService := idempotency.NewRedisService(redisClient)
+
+	logger.Info("redis idempotency service initialized",
+		"address", config.Redis.Address,
+		"db", config.Redis.DB,
+		"pool_size", config.Redis.PoolSize)
+
+	return redisService, nil
+}
+
+// noOpIdempotencyService is a fallback that provides no idempotency guarantees
+// Used when Redis is disabled. NOT suitable for production use.
+type noOpIdempotencyService struct{}
+
+func (n *noOpIdempotencyService) Check(context.Context, idempotency.Key) (*idempotency.Result, error) {
+	return nil, idempotency.ErrResultNotFound
+}
+
+func (n *noOpIdempotencyService) MarkPending(context.Context, idempotency.Key, time.Duration) error {
+	return nil
+}
+
+func (n *noOpIdempotencyService) StoreResult(context.Context, idempotency.Result) error {
+	return nil
+}
+
+func (n *noOpIdempotencyService) Delete(context.Context, idempotency.Key) error {
+	return nil
+}
+
+func (n *noOpIdempotencyService) Acquire(context.Context, idempotency.Key, idempotency.LockOptions) error {
+	return nil
+}
+
+func (n *noOpIdempotencyService) Release(context.Context, idempotency.Key, string) error {
+	return nil
+}
+
+func (n *noOpIdempotencyService) Refresh(context.Context, idempotency.Key, string, time.Duration) error {
+	return nil
+}
+
+func (n *noOpIdempotencyService) IsHeld(context.Context, idempotency.Key) (bool, error) {
+	return false, nil
 }
 
 // healthServer implements the gRPC health checking protocol
