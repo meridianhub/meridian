@@ -14,6 +14,7 @@ labels:
 resources:
 - serviceaccount.yaml
 - configmap.yaml
+- secret.yaml
 - deployment.yaml
 - service.yaml
 - role.yaml
