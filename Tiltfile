@@ -749,9 +749,10 @@ local_resource(
 
 # Initialize CockroachDB database and user - runs automatically after CockroachDB is ready
 # Creates the meridian database and user required for the application
+# Uses dedicated script with pod readiness check and verification
 local_resource(
   'init-database',
-  cmd='kubectl exec cockroachdb-0 -n default -- cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS meridian; CREATE USER IF NOT EXISTS meridian; GRANT ALL ON DATABASE meridian TO meridian;"',
+  cmd='./scripts/init-database.sh',
   resource_deps=['cockroachdb'],
   labels=['database'],
   auto_init=True,
