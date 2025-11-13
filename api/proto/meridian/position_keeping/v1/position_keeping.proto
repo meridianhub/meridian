@@ -184,6 +184,72 @@ message InitiateFinancialPositionLogResponse {
   FinancialPositionLog log = 1 [(buf.validate.field).required = true];
 }
 
+// BatchInitiateRequest represents a single log creation request in a batch.
+message BatchInitiateRequest {
+  // account_id is the account for which to create the log.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+
+  // initial_entry is the first transaction entry (optional).
+  TransactionLogEntry initial_entry = 2;
+
+  // transaction_lineage captures initial lineage information.
+  TransactionLineage transaction_lineage = 3;
+}
+
+// InitiateFinancialPositionLogBatchRequest creates multiple logs atomically.
+message InitiateFinancialPositionLogBatchRequest {
+  // requests are the individual log creation requests (1-10,000 items).
+  repeated BatchInitiateRequest requests = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 10000
+  }];
+
+  // idempotency_key ensures exactly-once processing for the entire batch.
+  meridian.common.v1.IdempotencyKey idempotency_key = 2;
+
+  // batch_id is an optional client-provided batch identifier for tracking.
+  string batch_id = 3 [(buf.validate.field).string.uuid = true];
+}
+
+// BatchInitiateResult contains the result for a single log creation in a batch.
+message BatchInitiateResult {
+  // success indicates whether this individual log was created successfully.
+  bool success = 1;
+
+  // log is the created log (present only if success is true).
+  FinancialPositionLog log = 2;
+
+  // error_message provides details if success is false.
+  string error_message = 3;
+
+  // account_id is the account ID from the request for easy correlation.
+  string account_id = 4;
+}
+
+// InitiateFinancialPositionLogBatchResponse returns results for all log creations.
+message InitiateFinancialPositionLogBatchResponse {
+  // results contains the outcome for each log creation request (same order as input).
+  repeated BatchInitiateResult results = 1 [(buf.validate.field).repeated.min_items = 1];
+
+  // batch_id is the batch identifier (client-provided or server-generated).
+  string batch_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // total_count is the total number of requests in the batch.
+  int32 total_count = 3;
+
+  // success_count is the number of logs successfully created.
+  int32 success_count = 4;
+
+  // failure_count is the number of logs that failed to create.
+  int32 failure_count = 5;
+}
+
 // UpdateFinancialPositionLogRequest updates an existing financial position log.
 message UpdateFinancialPositionLogRequest {
   // log_id is the identifier of the log to update.
@@ -293,6 +359,9 @@ message ListFinancialPositionLogsResponse {
 service PositionKeepingService {
   // InitiateFinancialPositionLog creates a new financial position log.
   rpc InitiateFinancialPositionLog(InitiateFinancialPositionLogRequest) returns (InitiateFinancialPositionLogResponse);
+
+  // InitiateFinancialPositionLogBatch creates multiple logs atomically in a single transaction.
+  rpc InitiateFinancialPositionLogBatch(InitiateFinancialPositionLogBatchRequest) returns (InitiateFinancialPositionLogBatchResponse);
 
   // UpdateFinancialPositionLog updates an existing financial position log.
   rpc UpdateFinancialPositionLog(UpdateFinancialPositionLogRequest) returns (UpdateFinancialPositionLogResponse);
