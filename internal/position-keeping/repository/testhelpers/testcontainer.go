@@ -24,11 +24,14 @@ package testhelpers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/internal/position-keeping/repository"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // TestContainer holds the test database container, connection pool, and repository instance.
@@ -65,14 +68,19 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 
 	ctx := context.Background()
 
-	// Create PostgreSQL container
-	// The postgres module's default wait strategy includes both log checks and connection attempts,
-	// which prevents race conditions where the container reports readiness before accepting connections.
+	// Create PostgreSQL container with explicit wait strategy
+	// Use both log-based and port-based waiting to prevent race conditions where
+	// the container reports readiness before Docker finishes port forwarding (common on macOS/Windows).
 	pgContainer, err := postgres.Run(ctx,
 		"postgres:16-alpine",
 		postgres.WithDatabase("test_position_keeping"),
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
+		testcontainers.WithWaitStrategy(
+			wait.ForAll(
+				wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
+				wait.ForListeningPort("5432/tcp"),
+			).WithDeadline(30*time.Second)),
 	)
 	require.NoError(t, err, "Failed to start PostgreSQL container")
 
