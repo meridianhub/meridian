@@ -86,7 +86,7 @@ func toProtoMoneyAmount(domainMoney domain.Money) *commonv1.MoneyAmount {
 		Amount: &money.Money{
 			CurrencyCode: domainMoney.Currency().String(),
 			Units:        units,
-			Nanos:        int32(nanos), // Safe after clamping
+			Nanos:        int32(nanos), // #nosec G115 -- Safely clamped to int32 range above
 		},
 	}
 }
