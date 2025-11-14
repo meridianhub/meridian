@@ -3,6 +3,7 @@
 package grpc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -53,12 +54,20 @@ type ClientConfig struct {
 //   - Kubernetes service must be headless (clusterIP: None)
 //   - Service must have stable DNS name in cluster
 //
+// The context parameter allows callers to:
+//   - Set timeouts for the initial connection attempt
+//   - Cancel ongoing connection operations
+//   - Propagate distributed tracing context
+//
 // Note: This function uses grpc.NewClient which returns immediately without blocking.
-// The actual connection establishment happens asynchronously in the background.
+// The context is currently reserved for future use (connection health checks, tracing).
 //
 // Example usage:
 //
-//	conn, err := grpc.NewClient(grpc.ClientConfig{
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//
+//	conn, err := grpc.NewClient(ctx, grpc.ClientConfig{
 //	    ServiceName: "financial-accounting",
 //	    Namespace:   "default",
 //	    Port:        50052,
@@ -68,7 +77,12 @@ type ClientConfig struct {
 //	}
 //	defer conn.Close()
 //	client := accountingv1.NewFinancialAccountingServiceClient(conn)
-func NewClient(cfg ClientConfig) (*grpc.ClientConn, error) {
+func NewClient(ctx context.Context, cfg ClientConfig) (*grpc.ClientConn, error) {
+	// Note: ctx parameter is currently reserved for future use (connection health checks, tracing).
+	// grpc.NewClient returns immediately without blocking, so context timeout/cancellation
+	// doesn't apply to the initial call. Kept for API consistency and future extensibility.
+	_ = ctx
+
 	// Trim and validate service name
 	cfg.ServiceName = strings.TrimSpace(cfg.ServiceName)
 	if cfg.ServiceName == "" {

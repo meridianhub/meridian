@@ -97,7 +97,61 @@ The client factory automatically:
 - Constructs DNS target: `dns:///financial-accounting.default.svc.cluster.local:50052`
 - Applies round_robin load balancing policy
 - Configures keepalive for connection health
-- Uses blocking dial to fail fast on misconfiguration
+- Non-blocking connection (grpc.NewClient returns immediately)
+
+### Integration Guidance
+
+**For New Services**: Use `pkg/platform/grpc.NewClient()` from the start.
+
+**Migrating Existing Clients**: Follow this pattern in service initialization:
+
+```go
+// Before: Direct grpc.Dial
+// conn, err := grpc.Dial("financial-accounting:50052", grpc.WithInsecure())
+
+// After: Use platform client factory
+import platformgrpc "github.com/meridianhub/meridian/pkg/platform/grpc"
+
+conn, err := platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
+    ServiceName: "financial-accounting",
+    Port:        50052,
+})
+```
+
+**Service Constants**: Define service connection configs as constants:
+
+```go
+const (
+    FinancialAccountingPort = 50052
+    PositionKeepingPort    = 50053
+    CurrentAccountPort     = 50051
+)
+```
+
+**Dependency Injection**: Create clients in main.go, inject into services:
+
+```go
+// cmd/current-account/main.go
+func main() {
+    ctx := context.Background()
+
+    // Create inter-service gRPC clients
+    posKeepingConn, err := platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
+        ServiceName: "position-keeping",
+        Port:        PositionKeepingPort,
+    })
+    if err != nil {
+        log.Fatalf("Failed to connect to position-keeping: %v", err)
+    }
+    defer posKeepingConn.Close()
+
+    posClient := positionkeepingv1.NewPositionKeepingServiceClient(posKeepingConn)
+
+    // Inject into service
+    svc := service.NewCurrentAccountService(repo, posClient, eventPub)
+    // ...
+}
+```
 
 ### Validation Criteria
 

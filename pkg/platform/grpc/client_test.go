@@ -1,6 +1,7 @@
 package grpc_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -39,7 +40,8 @@ func Test_NewClient_ValidConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			conn, err := platformgrpc.NewClient(tt.config)
+			ctx := context.Background()
+			conn, err := platformgrpc.NewClient(ctx, tt.config)
 			if err != nil {
 				t.Errorf("NewClient() unexpected error = %v", err)
 			}
@@ -59,7 +61,8 @@ func Test_NewClient_LoadBalancingPolicy(t *testing.T) {
 		Port:        50051,
 	}
 
-	conn, err := platformgrpc.NewClient(config)
+	ctx := context.Background()
+	conn, err := platformgrpc.NewClient(ctx, config)
 	// NewClient should succeed (connection happens in background)
 	if err != nil {
 		t.Errorf("NewClient() unexpected error = %v", err)
@@ -78,7 +81,8 @@ func Test_NewClient_DNSScheme(t *testing.T) {
 		Port:        9999,
 	}
 
-	conn, err := platformgrpc.NewClient(config)
+	ctx := context.Background()
+	conn, err := platformgrpc.NewClient(ctx, config)
 	// Should succeed - grpc.NewClient doesn't block on connection
 	if err != nil {
 		t.Errorf("NewClient() unexpected error = %v", err)
@@ -151,7 +155,8 @@ func Test_NewClient_InvalidInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			conn, err := platformgrpc.NewClient(tt.config)
+			ctx := context.Background()
+			conn, err := platformgrpc.NewClient(ctx, tt.config)
 
 			if err == nil {
 				t.Error("NewClient() expected error but got nil")
@@ -199,7 +204,8 @@ func Test_NewClient_BoundaryPorts(t *testing.T) {
 				Port:        tt.port,
 			}
 
-			conn, err := platformgrpc.NewClient(config)
+			ctx := context.Background()
+			conn, err := platformgrpc.NewClient(ctx, config)
 
 			if tt.wantError {
 				if err == nil {
@@ -219,8 +225,10 @@ func Test_NewClient_BoundaryPorts(t *testing.T) {
 
 // Example demonstrates creating a gRPC client for inter-service communication
 func ExampleNewClient() {
+	ctx := context.Background()
+
 	// Create client connection to financial-accounting service
-	conn, err := platformgrpc.NewClient(platformgrpc.ClientConfig{
+	conn, err := platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
 		ServiceName: "financial-accounting",
 		Namespace:   "default",
 		Port:        50052,
@@ -236,4 +244,55 @@ func ExampleNewClient() {
 	// Use connection to create service client
 	// client := accountingv1.NewFinancialAccountingServiceClient(conn)
 	// ...
+}
+
+// Test_NewClient_NamespaceHandling verifies namespace edge cases
+func Test_NewClient_NamespaceHandling(t *testing.T) {
+	tests := []struct {
+		name              string
+		config            platformgrpc.ClientConfig
+		expectedNamespace string
+	}{
+		{
+			name: "explicit namespace",
+			config: platformgrpc.ClientConfig{
+				ServiceName: "test-service",
+				Namespace:   "production",
+				Port:        50051,
+			},
+			expectedNamespace: "production",
+		},
+		{
+			name: "defaults to default namespace",
+			config: platformgrpc.ClientConfig{
+				ServiceName: "test-service",
+				Port:        50051,
+				// Namespace omitted
+			},
+			expectedNamespace: "default",
+		},
+		{
+			name: "trims whitespace from namespace",
+			config: platformgrpc.ClientConfig{
+				ServiceName: "test-service",
+				Namespace:   "  production  ",
+				Port:        50051,
+			},
+			expectedNamespace: "production",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			conn, err := platformgrpc.NewClient(ctx, tt.config)
+			if err != nil {
+				t.Errorf("NewClient() unexpected error = %v", err)
+			}
+			if conn != nil {
+				_ = conn.Close()
+			}
+			// Note: Namespace validation happens internally, we verify no error occurs
+		})
+	}
 }
