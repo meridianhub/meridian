@@ -673,10 +673,24 @@ k8s_resource(
 )
 
 # Position-Keeping Service - gRPC microservice for transaction position management
-# Note: Only service.yaml exists. Deployment, configmap, and secret manifests are not yet created.
-# This service will be fully deployable once those manifests are added to deployments/k8s/position-keeping/
+docker_build(
+  'position-keeping',
+  context='.',
+  dockerfile='cmd/position-keeping/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+)
+
+# Deploy Position-Keeping Kubernetes manifests
+k8s_yaml('deployments/k8s/position-keeping/secret.yaml')
+k8s_yaml('deployments/k8s/position-keeping/configmap.yaml')
+k8s_yaml('deployments/k8s/position-keeping/deployment.yaml')
 k8s_yaml('deployments/k8s/position-keeping/service.yaml')
 
+# Set resource dependencies for Position-Keeping
 k8s_resource(
   'position-keeping',
   port_forwards=[
