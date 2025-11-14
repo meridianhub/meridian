@@ -592,7 +592,7 @@ k8s_resource(
     'kafka-cluster',
     'keycloak',
   ],
-  labels=['app'],
+  labels=['microservices'],
   # Group RBAC and config resources under the main app
   objects=[
     'meridian:serviceaccount',
@@ -668,6 +668,38 @@ k8s_resource(
     'generate-proto',
     'cockroachdb',
     'migrate-current-account',  # Financial accounting depends on current account schema
+  ],
+  labels=['microservices'],
+)
+
+# Position-Keeping Service - gRPC microservice for transaction position management
+docker_build(
+  'position-keeping',
+  context='.',
+  dockerfile='cmd/position-keeping/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+)
+
+# Deploy Position-Keeping Kubernetes manifests
+k8s_yaml('deployments/k8s/position-keeping/secret.yaml')
+k8s_yaml('deployments/k8s/position-keeping/configmap.yaml')
+k8s_yaml('deployments/k8s/position-keeping/deployment.yaml')
+k8s_yaml('deployments/k8s/position-keeping/service.yaml')
+
+# Set resource dependencies for Position-Keeping
+k8s_resource(
+  'position-keeping',
+  port_forwards=[
+    '50053:50053',  # gRPC API
+  ],
+  resource_deps=[
+    'generate-proto',
+    'cockroachdb',
+    'migrate-position-keeping',
   ],
   labels=['microservices'],
 )
