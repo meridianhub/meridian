@@ -7,6 +7,7 @@ metadata:
     component: microservice
 spec:
   type: ClusterIP
+  clusterIP: None  # Headless service for gRPC client-side load balancing
   ports:
   - name: grpc
     port: 50051

@@ -8,6 +8,7 @@ metadata:
     tier: backend
 spec:
   type: ClusterIP
+  clusterIP: None  # Headless service for gRPC client-side load balancing
   selector:
     app: meridian
     component: ledger
