@@ -27,19 +27,26 @@ type PositionKeepingGRPCClient struct {
 // PositionKeepingClientConfig holds configuration for the PositionKeeping client
 type PositionKeepingClientConfig struct {
 	// Target is the gRPC server address (e.g., "localhost:50051" or "position-keeping:50051")
-	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing
+	//
+	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
+	// This field is maintained for backward compatibility with tests and local development.
+	// In production, prefer ServiceName-based configuration for automatic load balancing.
 	Target string
 
 	// ServiceName is the Kubernetes service name (e.g., "position-keeping")
-	// When specified, enables DNS-based client-side load balancing
+	// When specified, enables DNS-based client-side load balancing via pkg/platform/grpc.
+	// The client will connect to dns:///position-keeping.<namespace>.svc.cluster.local:<port>
+	// and use round_robin load balancing across all pod IPs.
 	ServiceName string
 
-	// Namespace is the Kubernetes namespace (defaults to "default")
-	// Only used when ServiceName is specified
+	// Namespace is the Kubernetes namespace (e.g., "default", "production")
+	// Defaults to "default" if not specified or empty.
+	// Only used when ServiceName is specified.
 	Namespace string
 
 	// Port is the service port number
-	// Only used when ServiceName is specified
+	// PositionKeeping service uses port 50053 (configured in deployments/k8s/position-keeping/service.yaml)
+	// Only used when ServiceName is specified.
 	Port int
 
 	// Timeout is the default timeout for RPC calls
