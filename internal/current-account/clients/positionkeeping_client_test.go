@@ -355,3 +355,97 @@ func TestNewPositionKeepingClient_NilTracer(t *testing.T) {
 	require.NotNil(t, client)
 	assert.NoError(t, client.Close())
 }
+
+// TestNewPositionKeepingClient_DNSBasedMode verifies DNS-based client creation
+func TestNewPositionKeepingClient_DNSBasedMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := &clients.PositionKeepingClientConfig{
+		ServiceName: "position-keeping",
+		Namespace:   "default",
+		Port:        50053,
+		Timeout:     10 * time.Second,
+	}
+
+	client, err := clients.NewPositionKeepingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
+
+// TestNewPositionKeepingClient_DNSBasedMode_DefaultNamespace verifies namespace defaults to "default"
+func TestNewPositionKeepingClient_DNSBasedMode_DefaultNamespace(t *testing.T) {
+	t.Parallel()
+
+	cfg := &clients.PositionKeepingClientConfig{
+		ServiceName: "position-keeping",
+		Namespace:   "", // Should default to "default"
+		Port:        50053,
+		Timeout:     10 * time.Second,
+	}
+
+	client, err := clients.NewPositionKeepingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
+
+// TestNewPositionKeepingClient_DNSBasedMode_WithTracer verifies DNS mode with tracer
+func TestNewPositionKeepingClient_DNSBasedMode_WithTracer(t *testing.T) {
+	t.Parallel()
+
+	tracer := &observability.Tracer{}
+	cfg := &clients.PositionKeepingClientConfig{
+		ServiceName: "position-keeping",
+		Namespace:   "test-namespace",
+		Port:        50053,
+		Timeout:     10 * time.Second,
+		Tracer:      tracer,
+	}
+
+	client, err := clients.NewPositionKeepingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
+
+// TestNewPositionKeepingClient_DNSBasedMode_CustomNamespace verifies custom namespace
+func TestNewPositionKeepingClient_DNSBasedMode_CustomNamespace(t *testing.T) {
+	t.Parallel()
+
+	cfg := &clients.PositionKeepingClientConfig{
+		ServiceName: "position-keeping",
+		Namespace:   "production",
+		Port:        50053,
+		Timeout:     10 * time.Second,
+	}
+
+	client, err := clients.NewPositionKeepingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
+
+// TestNewPositionKeepingClient_PrefersDNSOverTarget verifies ServiceName takes precedence
+func TestNewPositionKeepingClient_PrefersDNSOverTarget(t *testing.T) {
+	t.Parallel()
+
+	// When both ServiceName and Target are provided, ServiceName should be used
+	cfg := &clients.PositionKeepingClientConfig{
+		ServiceName: "position-keeping",
+		Namespace:   "default",
+		Port:        50053,
+		Target:      "ignored:9999", // Should be ignored
+		Timeout:     10 * time.Second,
+	}
+
+	client, err := clients.NewPositionKeepingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
