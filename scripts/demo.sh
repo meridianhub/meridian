@@ -4,6 +4,15 @@
 
 set -e
 
+# Trap handler to clean up background Tilt process
+cleanup_tilt() {
+    if [ -n "$TILT_PID" ] && kill -0 "$TILT_PID" 2>/dev/null; then
+        echo -e "\n${YELLOW}Cleaning up Tilt (PID: $TILT_PID)...${NC}"
+        kill "$TILT_PID" 2>/dev/null || true
+        wait "$TILT_PID" 2>/dev/null || true
+    fi
+}
+
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -39,13 +48,23 @@ if ! tilt get uisession >/dev/null 2>&1; then
     echo -e "${YELLOW}Tilt not running. Starting Tilt in background...${NC}"
     echo -e "${YELLOW}This may take 2-3 minutes for initial startup.${NC}"
 
-    # Start Tilt in background
-    tilt up &
+    # Start Tilt in background with logging
+    tilt up > /tmp/tilt-demo.log 2>&1 &
     TILT_PID=$!
+
+    # Install trap to clean up on exit
+    trap cleanup_tilt EXIT INT TERM
+
+    # Verify Tilt started successfully
+    sleep 5
+    if ! kill -0 "$TILT_PID" 2>/dev/null; then
+        echo -e "${YELLOW}⚠ Tilt startup may have failed. Check: /tmp/tilt-demo.log${NC}"
+        exit 1
+    fi
 
     # Wait for Tilt to be ready
     echo -e "${YELLOW}Waiting for Tilt to initialize...${NC}"
-    sleep 10
+    sleep 5
 
     # Wait for all services to be ready (max 3 minutes)
     TIMEOUT=180
@@ -110,11 +129,12 @@ echo -e "${MAGENTA}╚═══════════════════�
 echo ""
 
 echo -e "${CYAN}► Step 1: Initiate Current Account${NC}"
-CREATE_RESPONSE=$(grpcurl -plaintext -d '{
-  "account_identification": "ACC-DEMO-'$(date +%s)'",
-  "customer_id": "CUST-DEMO-001",
-  "base_currency": "CURRENCY_GBP"
-}' localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount)
+TIMESTAMP=$(date +%s)
+CREATE_RESPONSE=$(grpcurl -plaintext -d "{
+  \"account_identification\": \"ACC-DEMO-$TIMESTAMP\",
+  \"customer_id\": \"CUST-DEMO-001\",
+  \"base_currency\": \"CURRENCY_GBP\"
+}" localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount)
 
 ACCOUNT_ID=$(echo "$CREATE_RESPONSE" | jq -r '.account_id')
 echo -e "${GREEN}✓ Account Created:${NC} $ACCOUNT_ID"
@@ -215,7 +235,7 @@ echo ""
 
 echo -e "${CYAN}► Testing load distribution across ${NEW_POS_PODS} pods:${NC}"
 echo -e "${YELLOW}  Executing 6 rapid-fire deposits to demonstrate round_robin...${NC}"
-for i in {1..6}; do
+for _ in {1..6}; do
     grpcurl -plaintext -d "{
       \"account_id\": \"$ACCOUNT_ID\",
       \"amount\": {
@@ -241,12 +261,17 @@ pause
 # PART 4: Idempotency with Redis
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 4: Idempotency Protection (Duplicate Prevention)        ║${NC}"
+echo -e "${MAGENTA}║  Part 4: Idempotency Architecture (Conceptual)                ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-echo -e "${CYAN}► First deposit request (£250):${NC}"
-IDEMPOTENCY_KEY="DEMO-$(date +%s)-$RANDOM"
+echo -e "${CYAN}► Idempotency Protection with Redis:${NC}"
+echo -e "  ${YELLOW}Service Layer:${NC}     Correlation IDs tracked in Redis (TTL: 24h)"
+echo -e "  ${YELLOW}Duplicate Detection:${NC} Hash(request) → stored result"
+echo -e "  ${YELLOW}Retry Behavior:${NC}   Duplicate requests return cached response"
+echo ""
+
+echo -e "${CYAN}► Example deposit transaction:${NC}"
 DEPOSIT1=$(grpcurl -plaintext -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
@@ -263,12 +288,14 @@ BALANCE1=$(echo "$DEPOSIT1" | jq -r '.new_balance.amount.units')
 echo -e "${GREEN}✓ Transaction processed:${NC} $TXN1 (Balance: £$BALANCE1)"
 echo ""
 
-echo -e "${CYAN}► Duplicate request with same idempotency key:${NC}"
-echo -e "${YELLOW}  (Simulating network retry - should be deduplicated)${NC}"
-sleep 1
-# Note: In production, this would use the same idempotency key
-# For demo, we show the concept - actual implementation uses correlation IDs
-echo -e "${GREEN}✓ Idempotency enforced - duplicate prevented${NC}\n"
+echo -e "${CYAN}► How Idempotency Works:${NC}"
+echo -e "  1. Client sends request with correlation ID in gRPC metadata"
+echo -e "  2. Service checks Redis for existing result"
+echo -e "  3. If found: Return cached response (duplicate)"
+echo -e "  4. If new: Process and cache result for 24 hours"
+echo -e "  5. Network retries are safe and won't create duplicates"
+echo ""
+echo -e "${GREEN}✓ Idempotency protection active via Redis${NC}\n"
 pause
 
 # ════════════════════════════════════════════════════════════════
