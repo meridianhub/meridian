@@ -1,5 +1,19 @@
 # ADR 0010: gRPC Client-Side Load Balancing with Headless Services
 
+---
+name: adr-010-grpc-load-balancing
+description: Client-side load balancing for gRPC using Kubernetes headless services
+triggers:
+  - Configuring gRPC client connections
+  - Implementing inter-service communication
+  - Load balancing gRPC requests
+  - Scaling microservices
+instructions: |
+  Use pkg/platform/grpc.NewClient() for all inter-service gRPC connections.
+  Configure Kubernetes services as headless (clusterIP: None).
+  DNS returns all pod IPs for round_robin load balancing.
+---
+
 ## Status
 
 Accepted
@@ -92,6 +106,43 @@ Load testing confirms:
 - ✅ Scaling from 2→5 replicas automatically adds connections
 - ✅ No idle pods under sustained load
 - ✅ Pod restarts trigger reconnection to healthy pods
+
+## Security Considerations
+
+### Transport Security
+
+**Current Implementation**: Uses `insecure.NewCredentials()` for internal cluster communication.
+
+**Rationale**:
+- Internal services communicate within trusted Kubernetes cluster network
+- Network policies restrict pod-to-pod communication
+- TLS termination handled at ingress layer for external traffic
+
+**Production Recommendations**:
+
+1. **Service Mesh mTLS**: When adopting service mesh (Istio/Linkerd), enable mutual TLS
+   - Automatic certificate rotation
+   - Zero-trust security model
+   - Encrypted inter-service communication
+
+2. **Manual TLS Configuration**: If not using service mesh:
+   ```go
+   import "google.golang.org/grpc/credentials"
+
+   creds, err := credentials.NewClientTLSFromFile("ca.pem", "")
+   conn, err := grpc.NewClient(cfg, grpc.WithTransportCredentials(creds))
+   ```
+
+3. **Certificate Management**:
+   - Use cert-manager for automatic certificate provisioning
+   - Rotate certificates before expiration
+   - Monitor certificate validity in observability stack
+
+### Authentication & Authorization
+
+- gRPC interceptors handle authentication token validation
+- Authorization policies enforced at application layer
+- Consider gRPC metadata for request context propagation
 
 ## Consequences
 

@@ -3,9 +3,9 @@
 package grpc
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -13,11 +13,18 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+const (
+	// MinPort is the minimum valid port number
+	MinPort = 1
+	// MaxPort is the maximum valid port number
+	MaxPort = 65535
+)
+
 var (
 	// ErrServiceNameRequired is returned when service name is empty
 	ErrServiceNameRequired = errors.New("service name is required")
-	// ErrInvalidPort is returned when port is zero or negative
-	ErrInvalidPort = errors.New("port must be positive")
+	// ErrInvalidPort is returned when port is outside valid range
+	ErrInvalidPort = errors.New("port must be in range 1-65535")
 )
 
 // ClientConfig holds configuration for creating gRPC clients with load balancing
@@ -46,9 +53,12 @@ type ClientConfig struct {
 //   - Kubernetes service must be headless (clusterIP: None)
 //   - Service must have stable DNS name in cluster
 //
+// Note: This function uses grpc.NewClient which returns immediately without blocking.
+// The actual connection establishment happens asynchronously in the background.
+//
 // Example usage:
 //
-//	conn, err := grpc.NewClient(ctx, grpc.ClientConfig{
+//	conn, err := grpc.NewClient(grpc.ClientConfig{
 //	    ServiceName: "financial-accounting",
 //	    Namespace:   "default",
 //	    Port:        50052,
@@ -58,12 +68,15 @@ type ClientConfig struct {
 //	}
 //	defer conn.Close()
 //	client := accountingv1.NewFinancialAccountingServiceClient(conn)
-func NewClient(_ context.Context, cfg ClientConfig) (*grpc.ClientConn, error) {
-	// Validate required fields
+func NewClient(cfg ClientConfig) (*grpc.ClientConn, error) {
+	// Trim and validate service name
+	cfg.ServiceName = strings.TrimSpace(cfg.ServiceName)
 	if cfg.ServiceName == "" {
 		return nil, ErrServiceNameRequired
 	}
-	if cfg.Port <= 0 {
+
+	// Validate port range
+	if cfg.Port < MinPort || cfg.Port > MaxPort {
 		return nil, fmt.Errorf("%w: got %d", ErrInvalidPort, cfg.Port)
 	}
 
@@ -71,6 +84,7 @@ func NewClient(_ context.Context, cfg ClientConfig) (*grpc.ClientConn, error) {
 	if cfg.Namespace == "" {
 		cfg.Namespace = "default"
 	}
+	cfg.Namespace = strings.TrimSpace(cfg.Namespace)
 
 	// Construct DNS target for Kubernetes headless service
 	// Format: dns:///<service-name>.<namespace>.svc.cluster.local:<port>
