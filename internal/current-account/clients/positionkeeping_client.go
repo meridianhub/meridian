@@ -8,6 +8,7 @@ import (
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/platform/observability"
+	platformgrpc "github.com/meridianhub/meridian/pkg/platform/grpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -25,8 +26,21 @@ type PositionKeepingGRPCClient struct {
 
 // PositionKeepingClientConfig holds configuration for the PositionKeeping client
 type PositionKeepingClientConfig struct {
-	// Target is the gRPC server address (e.g., "localhost:50051" or "positionkeeping-service:443")
+	// Target is the gRPC server address (e.g., "localhost:50051" or "position-keeping:50051")
+	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing
 	Target string
+
+	// ServiceName is the Kubernetes service name (e.g., "position-keeping")
+	// When specified, enables DNS-based client-side load balancing
+	ServiceName string
+
+	// Namespace is the Kubernetes namespace (defaults to "default")
+	// Only used when ServiceName is specified
+	Namespace string
+
+	// Port is the service port number
+	// Only used when ServiceName is specified
+	Port int
 
 	// Timeout is the default timeout for RPC calls
 	// If not specified, defaults to 30 seconds
@@ -37,56 +51,91 @@ type PositionKeepingClientConfig struct {
 	Tracer *observability.Tracer
 
 	// DialOptions allows custom gRPC dial options
-	// If not specified, uses insecure credentials (suitable for internal service mesh)
+	// When using ServiceName, these options are passed to the platform gRPC factory
 	DialOptions []grpc.DialOption
 }
 
 // NewPositionKeepingClient creates a new PositionKeeping gRPC client
 //
-// Example usage:
+// Supports two connection modes:
+//
+// 1. DNS-based load balancing (recommended for Kubernetes):
+//
+//	config := &clients.PositionKeepingClientConfig{
+//	    ServiceName: "position-keeping",
+//	    Namespace:   "default",
+//	    Port:        50051,
+//	    Timeout:     30 * time.Second,
+//	    Tracer:      tracer,
+//	}
+//
+// 2. Legacy direct connection (for backward compatibility):
 //
 //	config := &clients.PositionKeepingClientConfig{
 //	    Target:  "positionkeeping-service:50051",
 //	    Timeout: 30 * time.Second,
 //	    Tracer:  tracer,
 //	}
-//	client, err := clients.NewPositionKeepingClient(config)
-//	if err != nil {
-//	    return fmt.Errorf("failed to create position keeping client: %w", err)
-//	}
-//	defer client.Close()
 func NewPositionKeepingClient(cfg *PositionKeepingClientConfig) (*PositionKeepingGRPCClient, error) {
-	if cfg.Target == "" {
-		return nil, ErrPositionKeepingTargetRequired
-	}
-
 	// Set default timeout if not specified
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
 	}
 
-	// Prepare dial options
-	dialOpts := cfg.DialOptions
-	if dialOpts == nil {
-		// Default: insecure credentials for service mesh communication
-		// In production, this would typically be secured by the service mesh (e.g., Istio, Linkerd)
-		dialOpts = []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
+	var conn *grpc.ClientConn
+	var err error
+
+	// Use platform gRPC factory when ServiceName is provided (preferred)
+	if cfg.ServiceName != "" {
+		// Prepare dial options for platform factory
+		dialOpts := cfg.DialOptions
+
+		// Add tracing interceptor if tracer is provided
+		if cfg.Tracer != nil {
+			dialOpts = append(dialOpts,
+				grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
+				grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
+			)
 		}
-	}
 
-	// Add tracing interceptor if tracer is provided
-	if cfg.Tracer != nil {
-		dialOpts = append(dialOpts,
-			grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-			grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-		)
-	}
+		// Use platform factory for DNS-based load balancing
+		conn, err = platformgrpc.NewClient(context.Background(), platformgrpc.ClientConfig{
+			ServiceName: cfg.ServiceName,
+			Namespace:   cfg.Namespace,
+			Port:        cfg.Port,
+			DialOptions: dialOpts,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gRPC connection via platform factory: %w", err)
+		}
+	} else {
+		// Fallback to legacy direct connection for backward compatibility
+		if cfg.Target == "" {
+			return nil, ErrPositionKeepingTargetRequired
+		}
 
-	// Establish connection
-	conn, err := grpc.NewClient(cfg.Target, dialOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create gRPC connection to %s: %w", cfg.Target, err)
+		// Prepare dial options
+		dialOpts := cfg.DialOptions
+		if dialOpts == nil {
+			// Default: insecure credentials for service mesh communication
+			dialOpts = []grpc.DialOption{
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			}
+		}
+
+		// Add tracing interceptor if tracer is provided
+		if cfg.Tracer != nil {
+			dialOpts = append(dialOpts,
+				grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
+				grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
+			)
+		}
+
+		// Establish connection using legacy method
+		conn, err = grpc.NewClient(cfg.Target, dialOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gRPC connection to %s: %w", cfg.Target, err)
+		}
 	}
 
 	return &PositionKeepingGRPCClient{
