@@ -851,10 +851,10 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 **Examples:**
 ```
-feat: add account reconciliation service
+feat: add position keeping batch operations
 
-Implements BIAN AccountReconciliation domain with transaction
-verification and position checking.
+Implements bulk import for transaction logs with validation
+and audit trail support.
 
 Closes #123
 ```
