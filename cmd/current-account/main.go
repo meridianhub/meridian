@@ -95,19 +95,18 @@ func run(logger *slog.Logger) error {
 	// Create repository
 	repo := persistence.NewRepository(db)
 
-	// Get external service targets from environment
-	positionKeepingTarget := getEnvOrDefault("POSITION_KEEPING_TARGET", "positionkeeping-service:50051")
-	financialAccountingTarget := getEnvOrDefault("FINANCIAL_ACCOUNTING_TARGET", "financialaccounting-service:50052")
+	// Get Kubernetes namespace from environment (defaults to "default")
+	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
 
 	logger.Info("external service configuration",
-		"position_keeping", positionKeepingTarget,
-		"financial_accounting", financialAccountingTarget)
+		"position_keeping", "position-keeping."+namespace+".svc.cluster.local:50053",
+		"financial_accounting", "financial-accounting."+namespace+".svc.cluster.local:50052",
+		"load_balancing", "DNS-based round_robin")
 
 	// Create service with external clients and capture the clients for health checking
 	currentAccountService, posKeepingClient, finAcctClient, err := createServiceWithClients(
 		repo,
-		positionKeepingTarget,
-		financialAccountingTarget,
+		namespace,
 		logger,
 		tracer,
 	)
@@ -310,18 +309,21 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 // createServiceWithClients creates the service and returns it along with the external clients
 // for use in health checking. This approach creates the clients once and shares them between
 // the service and health checker to avoid duplicate connections.
+//
+// Uses DNS-based client-side load balancing for inter-service gRPC communication.
 func createServiceWithClients(
 	repo *persistence.Repository,
-	positionKeepingTarget string,
-	financialAccountingTarget string,
+	namespace string,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
 ) (*service.Service, clients.PositionKeepingClient, clients.FinancialAccountingClient, error) {
-	// Create Position Keeping client
+	// Create Position Keeping client with DNS-based load balancing
 	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
-		Target:  positionKeepingTarget,
-		Timeout: 30 * time.Second,
-		Tracer:  tracer,
+		ServiceName: "position-keeping",
+		Namespace:   namespace,
+		Port:        50053,
+		Timeout:     30 * time.Second,
+		Tracer:      tracer,
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create position keeping client: %w", err)
@@ -335,11 +337,13 @@ func createServiceWithClients(
 		},
 	)
 
-	// Create Financial Accounting client
+	// Create Financial Accounting client with DNS-based load balancing
 	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
-		Target:  financialAccountingTarget,
-		Timeout: 30 * time.Second,
-		Tracer:  tracer,
+		ServiceName: "financial-accounting",
+		Namespace:   namespace,
+		Port:        50052,
+		Timeout:     30 * time.Second,
+		Tracer:      tracer,
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create financial accounting client: %w", err)

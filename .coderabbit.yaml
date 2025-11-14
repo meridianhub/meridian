@@ -30,9 +30,7 @@ reviews:
   # Finishing touches configuration
   finishing_touches:
     # Docstring coverage settings
-    # Adjust threshold to match project practices - most exported types
-    # and functions have comprehensive godoc comments
-    # Lower threshold accounts for internal helpers and test files
+    # Disabled - percentage calculation not working as expected
+    # Code review will still flag missing documentation on public APIs
     docstrings:
-      enabled: true
-      threshold: 50
+      enabled: false

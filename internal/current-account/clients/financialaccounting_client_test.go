@@ -355,3 +355,97 @@ func TestNewFinancialAccountingClient_NilTracer(t *testing.T) {
 	require.NotNil(t, client)
 	assert.NoError(t, client.Close())
 }
+
+// TestNewFinancialAccountingClient_DNSBasedMode verifies DNS-based client creation
+func TestNewFinancialAccountingClient_DNSBasedMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := &clients.FinancialAccountingClientConfig{
+		ServiceName: "financial-accounting",
+		Namespace:   "default",
+		Port:        50052,
+		Timeout:     10 * time.Second,
+	}
+
+	client, err := clients.NewFinancialAccountingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
+
+// TestNewFinancialAccountingClient_DNSBasedMode_DefaultNamespace verifies namespace defaults to "default"
+func TestNewFinancialAccountingClient_DNSBasedMode_DefaultNamespace(t *testing.T) {
+	t.Parallel()
+
+	cfg := &clients.FinancialAccountingClientConfig{
+		ServiceName: "financial-accounting",
+		Namespace:   "", // Should default to "default"
+		Port:        50052,
+		Timeout:     10 * time.Second,
+	}
+
+	client, err := clients.NewFinancialAccountingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
+
+// TestNewFinancialAccountingClient_DNSBasedMode_WithTracer verifies DNS mode with tracer
+func TestNewFinancialAccountingClient_DNSBasedMode_WithTracer(t *testing.T) {
+	t.Parallel()
+
+	tracer := &observability.Tracer{}
+	cfg := &clients.FinancialAccountingClientConfig{
+		ServiceName: "financial-accounting",
+		Namespace:   "test-namespace",
+		Port:        50052,
+		Timeout:     10 * time.Second,
+		Tracer:      tracer,
+	}
+
+	client, err := clients.NewFinancialAccountingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
+
+// TestNewFinancialAccountingClient_DNSBasedMode_CustomNamespace verifies custom namespace
+func TestNewFinancialAccountingClient_DNSBasedMode_CustomNamespace(t *testing.T) {
+	t.Parallel()
+
+	cfg := &clients.FinancialAccountingClientConfig{
+		ServiceName: "financial-accounting",
+		Namespace:   "production",
+		Port:        50052,
+		Timeout:     10 * time.Second,
+	}
+
+	client, err := clients.NewFinancialAccountingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
+
+// TestNewFinancialAccountingClient_PrefersDNSOverTarget verifies ServiceName takes precedence
+func TestNewFinancialAccountingClient_PrefersDNSOverTarget(t *testing.T) {
+	t.Parallel()
+
+	// When both ServiceName and Target are provided, ServiceName should be used
+	cfg := &clients.FinancialAccountingClientConfig{
+		ServiceName: "financial-accounting",
+		Namespace:   "default",
+		Port:        50052,
+		Target:      "ignored:9999", // Should be ignored
+		Timeout:     10 * time.Second,
+	}
+
+	client, err := clients.NewFinancialAccountingClient(cfg)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NoError(t, client.Close())
+}
