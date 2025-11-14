@@ -75,6 +75,46 @@ spec:
     app: financial-accounting
 ```
 
+### RBAC Requirements
+
+Client-side load balancing via DNS requires minimal RBAC permissions:
+
+**ServiceAccount**: Each service runs with the `meridian` ServiceAccount (configured in `deployments/k8s/base/serviceaccount.yaml`):
+- `automountServiceAccountToken: true` - Required for in-cluster DNS resolution
+
+**DNS Resolution**: Built into Kubernetes - no additional RBAC permissions needed:
+- DNS queries for headless services use cluster DNS (CoreDNS/kube-dns)
+- Pod can resolve `service-name.namespace.svc.cluster.local` without explicit permissions
+- DNS returns all pod IPs for headless services automatically
+
+**Current RBAC Policy** (`deployments/k8s/base/role.yaml`):
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: meridian
+rules:
+# DNS resolution requires no explicit permissions
+# CoreDNS handles service discovery transparently
+
+# Application permissions (minimal)
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "watch"]
+  resourceNames: ["meridian-config", "meridian-build-info"]
+
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+  resourceNames: ["meridian-secrets"]
+```
+
+**Key Points**:
+- DNS-based load balancing works without additional RBAC permissions
+- No need for Endpoints or Service resource access
+- Cluster DNS handles headless service resolution automatically
+- ServiceAccount token primarily used for ConfigMap/Secret access
+
 ### Client Connection Pattern
 
 ```go
