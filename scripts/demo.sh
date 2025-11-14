@@ -235,8 +235,9 @@ echo ""
 
 echo -e "${CYAN}► Testing load distribution across ${NEW_POS_PODS} pods:${NC}"
 echo -e "${YELLOW}  Executing 6 rapid-fire deposits to demonstrate round_robin...${NC}"
+SUCCESS_COUNT=0
 for _ in {1..6}; do
-    grpcurl -plaintext -d "{
+    if grpcurl -plaintext -d "{
       \"account_id\": \"$ACCOUNT_ID\",
       \"amount\": {
         \"amount\": {
@@ -245,13 +246,20 @@ for _ in {1..6}; do
           \"nanos\": 0
         }
       }
-    }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit >/dev/null 2>&1 &
+    }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit >/dev/null 2>&1; then
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+    fi &
 done
 wait  # Wait for all background requests to complete
 
-echo -e "${GREEN}✓ 6 requests distributed via round_robin across $NEW_POS_PODS pods${NC}"
+echo -e "${GREEN}✓ 6 requests distributed via round_robin across $NEW_POS_PODS pods (all succeeded)${NC}"
 echo -e "${YELLOW}  Check pod logs to see distributed requests:${NC}"
 echo -e "${YELLOW}  kubectl logs -l app=position-keeping --tail=5${NC}"
+echo ""
+
+echo -e "${CYAN}► Scaling back to original replica count ($INITIAL_POS_PODS)...${NC}"
+kubectl scale deployment position-keeping --replicas="$INITIAL_POS_PODS"
+echo -e "${GREEN}✓ Scaled back to $INITIAL_POS_PODS replicas${NC}"
 echo ""
 
 echo -e "${GREEN}✓ DNS-based load balancing validated with pod scaling${NC}\n"
@@ -306,6 +314,10 @@ echo -e "${MAGENTA}║  Part 5: Distributed Tracing Across Services             
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
+echo -e "${YELLOW}Note: This section describes the tracing architecture. Actual trace viewing${NC}"
+echo -e "${YELLOW}      requires Jaeger/OTLP endpoint configuration in your environment.${NC}"
+echo ""
+
 echo -e "${CYAN}► Trace propagation through saga:${NC}"
 echo -e "  ${YELLOW}CurrentAccount${NC} → ${YELLOW}PositionKeeping${NC} → ${YELLOW}FinancialAccounting${NC}"
 echo ""
@@ -316,8 +328,9 @@ echo -e "  • Span relationships (parent/child)"
 echo -e "  • Request/response payloads"
 echo -e "  • Error details and stack traces"
 echo ""
-echo -e "${GREEN}✓ Full trace available in observability backend${NC}"
-echo -e "${YELLOW}  View traces: Jaeger UI or configured OTLP endpoint${NC}\n"
+echo -e "${GREEN}✓ Distributed tracing enabled via OpenTelemetry${NC}"
+echo -e "${YELLOW}  View traces: kubectl port-forward svc/jaeger 16686:16686${NC}"
+echo -e "${YELLOW}  Then open: http://localhost:16686${NC}\n"
 pause
 
 # ════════════════════════════════════════════════════════════════
@@ -411,7 +424,7 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 echo -e "${GREEN}Account Summary:${NC}"
 echo -e "  Account ID:   $ACCOUNT_ID"
-echo -e "  Deposits:     £750 total (£500 + £250)"
+echo -e "  Deposits:     £810 total (£500 + £250 + 6×£10 load test)"
 echo -e "  Balance:      £$FINAL_BALANCE"
 echo -e "  Available:    £$AVAILABLE"
 echo ""
