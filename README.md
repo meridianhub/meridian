@@ -35,7 +35,6 @@ This implementation includes the following BIAN service domains:
 - **FinancialAccounting**: Double-entry general ledger with audit trail
 - **PositionKeeping**: Pre-ledger transaction log and position tracking
 - **CurrentAccount**: Customer-facing account management
-- **AccountReconciliation**: Transaction verification and reconciliation
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
 

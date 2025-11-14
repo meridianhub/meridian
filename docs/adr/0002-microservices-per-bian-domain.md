@@ -22,7 +22,7 @@ Accepted
 
 ## Context
 
-Meridian implements multiple BIAN (Banking Industry Architecture Network) service domains: FinancialAccounting, PositionKeeping, CurrentAccount, and AccountReconciliation. We need to decide whether to build a modular monolith with all domains in one deployable or separate microservices with one service per BIAN domain.
+Meridian implements multiple BIAN (Banking Industry Architecture Network) service domains: FinancialAccounting, PositionKeeping, and CurrentAccount. We need to decide whether to build a modular monolith with all domains in one deployable or separate microservices with one service per BIAN domain.
 
 BIAN service domains already define clear bounded contexts with well-defined interfaces, making them natural candidates for service boundaries.
 
@@ -54,7 +54,7 @@ Chosen option: "Microservices - One service per BIAN domain", because:
 ### Positive Consequences
 
 * Each BIAN domain can scale independently based on load
-* Failure in one domain (e.g., reconciliation) does not impact critical operations (e.g., transaction logging)
+* Failure in one domain (e.g., financial accounting) does not impact critical operations (e.g., transaction logging)
 * Teams can own and deploy individual domains independently
 * Technology choices can vary per service if needed (though we'll standardize on Go/gRPC initially)
 * Clear audit boundaries aligned with BIAN specification
