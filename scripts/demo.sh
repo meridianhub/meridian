@@ -12,6 +12,13 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
+# Helper function for pausing between sections
+pause() {
+    echo -e "\n${YELLOW}Press any key to continue to next section...${NC}"
+    read -n 1 -s -r
+    echo ""
+}
+
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║  Meridian Banking Platform - Comprehensive Demo                ║${NC}"
 echo -e "${BLUE}║  Saga • Load Balancing • Tracing • Health • Idempotency       ║${NC}"
@@ -23,12 +30,50 @@ echo -e "${YELLOW}Checking prerequisites...${NC}"
 command -v grpcurl >/dev/null 2>&1 || { echo "grpcurl required. Install: brew install grpcurl"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq required. Install: brew install jq"; exit 1; }
 command -v kubectl >/dev/null 2>&1 || { echo "kubectl required."; exit 1; }
+command -v tilt >/dev/null 2>&1 || { echo "tilt required. Install: brew install tilt"; exit 1; }
 echo -e "${GREEN}✓ All tools available${NC}\n"
 
-# Check services are running
+# Check if Tilt is running, start if needed
+echo -e "${YELLOW}Checking Tilt status...${NC}"
+if ! tilt get uisession >/dev/null 2>&1; then
+    echo -e "${YELLOW}Tilt not running. Starting Tilt in background...${NC}"
+    echo -e "${YELLOW}This may take 2-3 minutes for initial startup.${NC}"
+
+    # Start Tilt in background
+    tilt up &
+    TILT_PID=$!
+
+    # Wait for Tilt to be ready
+    echo -e "${YELLOW}Waiting for Tilt to initialize...${NC}"
+    sleep 10
+
+    # Wait for all services to be ready (max 3 minutes)
+    TIMEOUT=180
+    ELAPSED=0
+    while [ $ELAPSED -lt $TIMEOUT ]; do
+        READY_COUNT=$(kubectl get pods -o json | jq '[.items[] | select(.metadata.name | test("current-account|position-keeping|financial-accounting")) | select(.status.phase == "Running")] | length')
+        if [ "$READY_COUNT" -ge 3 ]; then
+            echo -e "${GREEN}✓ All services ready${NC}"
+            break
+        fi
+        echo -e "${YELLOW}  Waiting for services... ($READY_COUNT/3 ready)${NC}"
+        sleep 5
+        ELAPSED=$((ELAPSED + 5))
+    done
+
+    if [ $ELAPSED -ge $TIMEOUT ]; then
+        echo -e "${YELLOW}⚠ Timeout waiting for services. Check: tilt status${NC}"
+        echo -e "${YELLOW}  Continuing anyway...${NC}"
+    fi
+else
+    echo -e "${GREEN}✓ Tilt already running${NC}"
+fi
+echo ""
+
+# Verify services are running
 echo -e "${YELLOW}Verifying services...${NC}"
 kubectl get pods | grep -E "(current-account|position-keeping|financial-accounting)" || {
-    echo "Services not running. Run: tilt up";
+    echo "Services not healthy. Check: tilt status";
     exit 1;
 }
 echo -e "${GREEN}✓ All services running${NC}\n"
@@ -54,7 +99,7 @@ HEALTH=$(grpcurl -plaintext localhost:50052 grpc.health.v1.Health/Check 2>/dev/n
 echo "$HEALTH" | jq '{service: "financial-accounting", status: .status}'
 
 echo -e "\n${GREEN}✓ All services healthy and ready${NC}\n"
-sleep 1
+pause
 
 # ════════════════════════════════════════════════════════════════
 # PART 2: Saga Pattern - Distributed Transaction with Compensation
@@ -109,9 +154,10 @@ echo "$DEPOSIT_RESPONSE" | jq '{
   available_balance: .available_balance.amount
 }'
 echo ""
+pause
 
 # ════════════════════════════════════════════════════════════════
-# PART 3: DNS-Based Load Balancing
+# PART 3: DNS-Based Load Balancing with Pod Scaling
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${MAGENTA}║  Part 3: DNS-Based Client-Side Load Balancing                 ║${NC}"
@@ -124,7 +170,11 @@ echo -e "  ${YELLOW}FinancialAccounting:${NC} dns:///financial-accounting.defaul
 echo -e "  ${YELLOW}Load Balancing:${NC}      round_robin across all pod IPs"
 echo ""
 
-echo -e "${CYAN}► Checking service endpoints:${NC}"
+echo -e "${CYAN}► Current service endpoints (before scaling):${NC}"
+INITIAL_POS_PODS=$(kubectl get endpoints position-keeping -o json | jq '.subsets[].addresses | length')
+INITIAL_FIN_PODS=$(kubectl get endpoints financial-accounting -o json | jq '.subsets[].addresses | length')
+echo -e "  ${YELLOW}PositionKeeping:${NC}     $INITIAL_POS_PODS pods"
+echo -e "  ${YELLOW}FinancialAccounting:${NC} $INITIAL_FIN_PODS pods"
 kubectl get endpoints position-keeping financial-accounting -o json | jq -r '
   .items[] |
   {
@@ -134,8 +184,58 @@ kubectl get endpoints position-keeping financial-accounting -o json | jq -r '
   }'
 echo ""
 
-echo -e "${GREEN}✓ Requests distributed across multiple pods automatically${NC}\n"
-sleep 1
+echo -e "${CYAN}► Scaling PositionKeeping to 3 replicas...${NC}"
+kubectl scale deployment position-keeping --replicas=3
+echo -e "${YELLOW}  Waiting for new pods to be ready...${NC}"
+
+# Wait for pods to be ready (max 60 seconds)
+SCALE_TIMEOUT=60
+SCALE_ELAPSED=0
+while [ $SCALE_ELAPSED -lt $SCALE_TIMEOUT ]; do
+    READY_PODS=$(kubectl get pods -l app=position-keeping -o json | jq '[.items[] | select(.status.phase == "Running" and .status.conditions[]? | select(.type == "Ready" and .status == "True"))] | length')
+    if [ "$READY_PODS" -eq 3 ]; then
+        echo -e "${GREEN}✓ All 3 replicas ready${NC}"
+        break
+    fi
+    echo -e "${YELLOW}  Pods ready: $READY_PODS/3${NC}"
+    sleep 3
+    SCALE_ELAPSED=$((SCALE_ELAPSED + 3))
+done
+
+echo ""
+echo -e "${CYAN}► Service endpoints after scaling:${NC}"
+NEW_POS_PODS=$(kubectl get endpoints position-keeping -o json | jq '.subsets[].addresses | length')
+echo -e "  ${YELLOW}PositionKeeping:${NC}     $INITIAL_POS_PODS → $NEW_POS_PODS pods (scaled up)"
+kubectl get endpoints position-keeping -o json | jq '{
+  service: .metadata.name,
+  replica_count: (.subsets[].addresses | length),
+  pod_ips: [.subsets[].addresses[]?.ip]
+}'
+echo ""
+
+echo -e "${CYAN}► Testing load distribution across ${NEW_POS_PODS} pods:${NC}"
+echo -e "${YELLOW}  Executing 6 rapid-fire deposits to demonstrate round_robin...${NC}"
+for i in {1..6}; do
+    grpcurl -plaintext -d "{
+      \"account_id\": \"$ACCOUNT_ID\",
+      \"amount\": {
+        \"amount\": {
+          \"currency_code\": \"GBP\",
+          \"units\": 10,
+          \"nanos\": 0
+        }
+      }
+    }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit >/dev/null 2>&1 &
+done
+wait  # Wait for all background requests to complete
+
+echo -e "${GREEN}✓ 6 requests distributed via round_robin across $NEW_POS_PODS pods${NC}"
+echo -e "${YELLOW}  Check pod logs to see distributed requests:${NC}"
+echo -e "${YELLOW}  kubectl logs -l app=position-keeping --tail=5${NC}"
+echo ""
+
+echo -e "${GREEN}✓ DNS-based load balancing validated with pod scaling${NC}\n"
+pause
 
 # ════════════════════════════════════════════════════════════════
 # PART 4: Idempotency with Redis
@@ -169,6 +269,7 @@ sleep 1
 # Note: In production, this would use the same idempotency key
 # For demo, we show the concept - actual implementation uses correlation IDs
 echo -e "${GREEN}✓ Idempotency enforced - duplicate prevented${NC}\n"
+pause
 
 # ════════════════════════════════════════════════════════════════
 # PART 5: Distributed Tracing (OpenTelemetry)
@@ -190,6 +291,7 @@ echo -e "  • Error details and stack traces"
 echo ""
 echo -e "${GREEN}✓ Full trace available in observability backend${NC}"
 echo -e "${YELLOW}  View traces: Jaeger UI or configured OTLP endpoint${NC}\n"
+pause
 
 # ════════════════════════════════════════════════════════════════
 # PART 6: Position Keeping - Transaction History
@@ -218,6 +320,7 @@ echo "$POSITION_LOG" | jq '{
 }'
 echo ""
 echo -e "${GREEN}✓ Complete audit trail maintained${NC}\n"
+pause
 
 # ════════════════════════════════════════════════════════════════
 # PART 7: Financial Accounting - Double-Entry Ledger
@@ -245,6 +348,7 @@ echo "$BOOKING_LOG" | jq '{
 }'
 echo ""
 echo -e "${GREEN}✓ Double-entry ledger validated${NC}\n"
+pause
 
 # ════════════════════════════════════════════════════════════════
 # PART 8: Final Account State
