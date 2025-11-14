@@ -586,6 +586,7 @@ k8s_resource(
     '9090:9090',  # gRPC API
   ],
   resource_deps=[
+    'generate-proto',  # Ensures proto files are generated before building
     'init-database',  # Ensures database and user are created before app starts
     'redis',
     'kafka-cluster',
@@ -632,6 +633,7 @@ k8s_resource(
     '50051:50051',  # gRPC API
   ],
   resource_deps=[
+    'generate-proto',
     'cockroachdb',
     'migrate-current-account',
   ],
@@ -663,6 +665,7 @@ k8s_resource(
     '50052:50052',  # gRPC API
   ],
   resource_deps=[
+    'generate-proto',
     'cockroachdb',
     'migrate-current-account',  # Financial accounting depends on current account schema
   ],
@@ -733,6 +736,7 @@ local_resource(
   'test',
   cmd='make test',
   deps=['./cmd', './internal', './pkg', './go.mod'],
+  resource_deps=['generate-proto'],
   labels=['quality'],
   allow_parallel=True,
 )
@@ -745,6 +749,18 @@ local_resource(
   labels=['quality'],
   allow_parallel=True,
   auto_init=False,  # Run manually with 'tilt trigger lint'
+)
+
+# Generate protobuf files - runs once on Tilt startup
+# Ensures all *.pb.go files exist before building Go code
+# Manual re-trigger: tilt trigger generate-proto
+local_resource(
+  'generate-proto',
+  cmd='make proto',
+  labels=['build'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Manual re-trigger only; auto_init runs once on startup
+  deps=['api/proto'],
 )
 
 # Initialize CockroachDB database and user - runs automatically after CockroachDB is ready
