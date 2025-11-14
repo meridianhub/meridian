@@ -751,14 +751,15 @@ local_resource(
   auto_init=False,  # Run manually with 'tilt trigger lint'
 )
 
-# Generate protobuf files - runs automatically on Tilt startup
+# Generate protobuf files - runs once on Tilt startup
 # Ensures all *.pb.go files exist before building Go code
+# Manual re-trigger: tilt trigger generate-proto
 local_resource(
   'generate-proto',
   cmd='make proto',
   labels=['build'],
   auto_init=True,
-  trigger_mode=TRIGGER_MODE_AUTO,
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Manual re-trigger only; auto_init runs once on startup
   deps=['api/proto'],
 )
 
