@@ -41,6 +41,7 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 | [ADR-0007](0007-raw-yaml-over-helm-for-initial-development.md) | Raw YAML over Helm for Initial Development | Accepted | 2025-10-25 |
 | [ADR-0008](0008-defensive-testing-standards.md) | Defensive Testing Standards | Accepted | 2025-10-25 |
 | [ADR-0009](0009-application-level-audit-logging.md) | Application-Level Audit Logging | Proposed | 2025-11-04 |
+| [ADR-0010](0010-grpc-client-side-load-balancing.md) | gRPC Client-Side Load Balancing with Headless Services | Accepted | 2025-11-14 |
 
 ## Categories
 
@@ -57,6 +58,7 @@ For more complex ADRs, use the [template.md](template.md) file as a starting poi
 ### Development Environment & Infrastructure
 - [ADR-0006](0006-tilt-local-development.md) - Tilt for Local Kubernetes Development
 - [ADR-0007](0007-raw-yaml-over-helm-for-initial-development.md) - Raw YAML over Helm for Initial Development
+- [ADR-0010](0010-grpc-client-side-load-balancing.md) - gRPC Client-Side Load Balancing with Headless Services
 
 ### Quality & Testing
 - [ADR-0008](0008-defensive-testing-standards.md) - Defensive Testing Standards
@@ -83,7 +85,6 @@ Based on the Meridian project requirements, these ADRs may be created as impleme
 - **Idempotency Implementation** - Redis-based idempotency strategy
 - **Test Strategy for Financial Systems** - TDD approach for zero-tolerance systems
 - **Service Mesh vs API Gateway** - Cross-cutting concerns for microservices
-- **gRPC Load Balancing Strategy** - Client-side vs server-side load balancing
 - **Event Versioning Strategy** - How to handle breaking changes in Kafka events
 
 ## References

@@ -1,17 +1,17 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: current-account
+  name: position-keeping
   labels:
-    app: current-account
+    app: position-keeping
     component: microservice
 spec:
   type: ClusterIP
   clusterIP: None  # Headless service for gRPC client-side load balancing
   ports:
   - name: grpc
-    port: 50051
+    port: 50053
     targetPort: grpc
     protocol: TCP
   selector:
-    app: current-account
+    app: position-keeping
