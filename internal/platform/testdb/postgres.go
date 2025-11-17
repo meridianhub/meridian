@@ -4,6 +4,8 @@ package testdb
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +29,58 @@ type postgresConfig struct {
 func WithLogLevel(level logger.LogLevel) PostgresOption {
 	return func(cfg *postgresConfig) {
 		cfg.logLevel = level
+	}
+}
+
+// extractSchemasFromModels extracts unique schema names from models with TableName() methods.
+// It parses "schema.table" format and returns a set of schema names.
+func extractSchemasFromModels(models []interface{}) map[string]bool {
+	schemas := make(map[string]bool)
+	for _, model := range models {
+		// Check if model has TableName method
+		if tabler, ok := model.(interface{ TableName() string }); ok {
+			tableName := tabler.TableName()
+			// Extract schema from "schema.table" format using strings.Index
+			if idx := strings.Index(tableName, "."); idx > 0 {
+				schemaName := tableName[:idx]
+				schemas[schemaName] = true
+			}
+		}
+	}
+	return schemas
+}
+
+// createSchemas creates database schemas if they don't exist.
+// Schema names are validated against a strict pattern to prevent SQL injection.
+func createSchemas(t *testing.T, db *gorm.DB, schemas map[string]bool) {
+	t.Helper()
+	for schema := range schemas {
+		// Check for empty schema name
+		if len(schema) == 0 {
+			t.Fatalf("Invalid schema name: empty string")
+		}
+
+		// Validate first character: must be letter or underscore
+		first := schema[0]
+		if (first < 'a' || first > 'z') && (first < 'A' || first > 'Z') && first != '_' {
+			t.Fatalf("Invalid schema name %q: must start with a letter or underscore", schema)
+		}
+
+		// Validate schema name: only alphanumeric and underscore allowed
+		// This prevents SQL injection even though schema names come from TableName()
+		for i := 0; i < len(schema); i++ {
+			c := schema[i]
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '_' {
+				t.Fatalf("Invalid schema name %q: must contain only letters, digits, and underscores", schema)
+			}
+		}
+
+		// Use parameterized query with proper identifier quoting
+		// PostgreSQL uses double quotes for identifiers
+		sql := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS \"%s\"", schema)
+		if err := db.Exec(sql).Error; err != nil {
+			t.Fatalf("Failed to create schema %s: %v", schema, err)
+		}
 	}
 }
 
@@ -92,8 +146,13 @@ func SetupPostgres(t *testing.T, models []interface{}, opts ...PostgresOption) (
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Run migrations for provided models
+	// Create schemas and run migrations for provided models
 	if len(models) > 0 {
+		// Extract and create schemas from model table names
+		schemas := extractSchemasFromModels(models)
+		createSchemas(t, db, schemas)
+
+		// Run migrations for provided models
 		if err := db.AutoMigrate(models...); err != nil {
 			t.Fatalf("Failed to migrate database: %v", err)
 		}

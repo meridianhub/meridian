@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // FinancialBookingLogEntity represents the database persistence model
@@ -26,17 +27,17 @@ type FinancialBookingLogEntity struct {
 	IdempotencyKey string `gorm:"uniqueIndex;not null;size:255"`
 
 	// Audit fields
-	CreatedAt time.Time  `gorm:"not null"`
-	UpdatedAt time.Time  `gorm:"not null"`
-	CreatedBy string     `gorm:"size:255"`
-	UpdatedBy string     `gorm:"size:255"`
-	DeletedAt *time.Time `gorm:"index"` // Soft delete
+	CreatedAt time.Time      `gorm:"not null"`
+	UpdatedAt time.Time      `gorm:"not null"`
+	CreatedBy string         `gorm:"size:255"`
+	UpdatedBy string         `gorm:"size:255"`
+	DeletedAt gorm.DeletedAt `gorm:"index"` // Soft delete
 
 	// Version for optimistic locking
 	Version int `gorm:"not null"`
 }
 
-// TableName overrides the default table name
+// TableName overrides the default table name with schema prefix
 func (FinancialBookingLogEntity) TableName() string {
-	return "financial_booking_logs"
+	return "financial_accounting.financial_booking_logs"
 }

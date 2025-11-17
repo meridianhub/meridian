@@ -9,16 +9,18 @@ import (
 
 	"ariga.io/atlas-provider-gorm/gormschema"
 	"github.com/meridianhub/meridian/internal/domain/models"
+	fapersistence "github.com/meridianhub/meridian/internal/financial-accounting/adapters/persistence"
 )
 
 const (
-	schemaCurrentAccount  = "current_account"
-	schemaPositionKeeping = "position_keeping"
+	schemaCurrentAccount      = "current_account"
+	schemaPositionKeeping     = "position_keeping"
+	schemaFinancialAccounting = "financial_accounting"
 )
 
 func main() {
 	// Parse schema filter flag
-	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping)")
+	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping, financial_accounting)")
 	flag.Parse()
 
 	// Determine which models to load based on schema filter
@@ -39,6 +41,12 @@ func main() {
 			&models.TransactionLogEntry{},
 			&models.TransactionLineage{},
 			&models.AuditTrailEntry{},
+		}
+	case schemaFinancialAccounting:
+		// Financial accounting has its own schema for ledger and booking logs
+		modelList = []interface{}{
+			&fapersistence.FinancialBookingLogEntity{},
+			&fapersistence.LedgerPostingEntity{},
 		}
 	case "":
 		// No filter - load all models (for backward compatibility)
@@ -64,11 +72,14 @@ func main() {
 	// Prepend CREATE SCHEMA statements for all referenced schemas
 	output := stmts
 	if *schemaFilter != "" {
-		// For position_keeping, we need both schemas since transactions reference accounts
 		var schemaStmt string
-		if *schemaFilter == schemaPositionKeeping {
+		switch *schemaFilter {
+		case schemaPositionKeeping:
+			// For position_keeping, we need both schemas since transactions reference accounts
 			schemaStmt = "CREATE SCHEMA IF NOT EXISTS current_account;\nCREATE SCHEMA IF NOT EXISTS position_keeping;\n\n"
-		} else {
+		case schemaFinancialAccounting:
+			schemaStmt = "CREATE SCHEMA IF NOT EXISTS financial_accounting;\n\n"
+		default:
 			schemaStmt = fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s;\n\n", *schemaFilter)
 		}
 		output = schemaStmt + stmts

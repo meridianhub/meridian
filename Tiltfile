@@ -667,7 +667,7 @@ k8s_resource(
   resource_deps=[
     'generate-proto',
     'cockroachdb',
-    'migrate-current-account',  # Financial accounting depends on current account schema
+    'migrate-financial-accounting',  # Financial accounting has its own schema
   ],
   labels=['microservices'],
 )
@@ -808,12 +808,11 @@ local_resource(
 )
 
 # Run database migrations on startup - uses Atlas to apply schema changes
-# Each service has its own business schema and audit schema
+# Each service has its own business schema
 # Migrations are applied in order:
-# 1. current_account (customers, accounts, current_account_audit)
-# 2. position_keeping (transactions, position_keeping_audit) - depends on current_account for FKs
-# Note: Phase 1 creates empty audit tables (current work). Audit logging via GORM hooks
-#       will be implemented in Phase 2 (future PR). See ADR-0009 for rationale and implementation plan.
+# 1. current_account (customers, accounts)
+# 2. position_keeping (transactions) - depends on current_account for FKs
+# 3. financial_accounting (ledger postings, booking logs) - independent schema
 local_resource(
   'migrate-current-account',
   cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
@@ -827,6 +826,15 @@ local_resource(
   'migrate-position-keeping',
   cmd='atlas migrate apply --env local --config file://atlas.position_keeping.hcl --url "{}"'.format(database_url),
   resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+  'migrate-financial-accounting',
+  cmd='atlas migrate apply --env local --config file://atlas.financial_accounting.hcl --url "{}"'.format(database_url),
+  resource_deps=['init-database'],  # Independent schema, only needs database to exist
   labels=['database'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,
