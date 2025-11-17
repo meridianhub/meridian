@@ -5,6 +5,7 @@ package testdb
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,15 +40,10 @@ func extractSchemasFromModels(models []interface{}) map[string]bool {
 		// Check if model has TableName method
 		if tabler, ok := model.(interface{ TableName() string }); ok {
 			tableName := tabler.TableName()
-			// Extract schema from "schema.table" format
-			if len(tableName) > 0 {
-				for i := 0; i < len(tableName); i++ {
-					if tableName[i] == '.' {
-						schemaName := tableName[:i]
-						schemas[schemaName] = true
-						break
-					}
-				}
+			// Extract schema from "schema.table" format using strings.Index
+			if idx := strings.Index(tableName, "."); idx > 0 {
+				schemaName := tableName[:idx]
+				schemas[schemaName] = true
 			}
 		}
 	}

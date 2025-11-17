@@ -51,8 +51,8 @@ CREATE TABLE "financial_accounting"."ledger_postings" (
   "deleted_at" timestamptz NULL,
   PRIMARY KEY ("id")
 );
--- Create index "idx_booking_log" to table: "ledger_postings"
-CREATE INDEX "idx_booking_log" ON "financial_accounting"."ledger_postings" ("financial_booking_log_id");
+-- Create index "idx_financial_accounting_ledger_postings_booking_log_id" to table: "ledger_postings"
+CREATE INDEX "idx_financial_accounting_ledger_postings_booking_log_id" ON "financial_accounting"."ledger_postings" ("financial_booking_log_id");
 -- Create index "idx_financial_accounting_ledger_postings_account_id" to table: "ledger_postings"
 CREATE INDEX "idx_financial_accounting_ledger_postings_account_id" ON "financial_accounting"."ledger_postings" ("account_id");
 -- Create index "idx_financial_accounting_ledger_postings_correlation_id" to table: "ledger_postings"

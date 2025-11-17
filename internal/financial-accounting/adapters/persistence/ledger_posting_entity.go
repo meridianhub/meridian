@@ -13,7 +13,7 @@ type LedgerPostingEntity struct {
 	ID uuid.UUID `gorm:"type:uuid;primaryKey"`
 
 	// Foreign key to booking log
-	FinancialBookingLogID uuid.UUID `gorm:"type:uuid;not null;index:idx_booking_log;constraint:OnDelete:RESTRICT"`
+	FinancialBookingLogID uuid.UUID `gorm:"type:uuid;not null;index:idx_financial_accounting_ledger_postings_booking_log_id;constraint:OnDelete:RESTRICT"`
 
 	// Business fields
 	PostingDirection string    `gorm:"not null;size:10"`
