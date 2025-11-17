@@ -1,7 +1,5 @@
--- Drop schema named "public"
-DROP SCHEMA "public" CASCADE;
 -- Add new schema named "financial_accounting"
-CREATE SCHEMA "financial_accounting";
+CREATE SCHEMA IF NOT EXISTS "financial_accounting";
 -- Create "financial_booking_logs" table
 CREATE TABLE "financial_accounting"."financial_booking_logs" (
   "id" uuid NOT NULL,
@@ -67,3 +65,9 @@ CREATE INDEX "idx_financial_accounting_ledger_postings_deleted_at" ON "financial
 CREATE INDEX "idx_financial_accounting_ledger_postings_status" ON "financial_accounting"."ledger_postings" ("status");
 -- Create index "idx_financial_accounting_ledger_postings_value_date" to table: "ledger_postings"
 CREATE INDEX "idx_financial_accounting_ledger_postings_value_date" ON "financial_accounting"."ledger_postings" ("value_date");
+-- Add foreign key constraint from ledger_postings to financial_booking_logs
+ALTER TABLE "financial_accounting"."ledger_postings"
+  ADD CONSTRAINT "fk_ledger_postings_booking_log"
+  FOREIGN KEY ("financial_booking_log_id")
+  REFERENCES "financial_accounting"."financial_booking_logs" ("id")
+  ON DELETE RESTRICT;
