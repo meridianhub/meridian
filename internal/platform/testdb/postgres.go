@@ -55,6 +55,17 @@ func extractSchemasFromModels(models []interface{}) map[string]bool {
 func createSchemas(t *testing.T, db *gorm.DB, schemas map[string]bool) {
 	t.Helper()
 	for schema := range schemas {
+		// Check for empty schema name
+		if len(schema) == 0 {
+			t.Fatalf("Invalid schema name: empty string")
+		}
+
+		// Validate first character: must be letter or underscore
+		first := schema[0]
+		if (first < 'a' || first > 'z') && (first < 'A' || first > 'Z') && first != '_' {
+			t.Fatalf("Invalid schema name %q: must start with a letter or underscore", schema)
+		}
+
 		// Validate schema name: only alphanumeric and underscore allowed
 		// This prevents SQL injection even though schema names come from TableName()
 		for i := 0; i < len(schema); i++ {

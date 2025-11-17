@@ -2,10 +2,12 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/internal/financial-accounting/domain"
 	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/shopspring/decimal"
@@ -286,9 +288,11 @@ func TestForeignKeyConstraint_ViolationPrevented(t *testing.T) {
 	repo := NewLedgerRepository(db)
 	err := repo.SavePosting(ctx, posting)
 
-	// Should fail due to FK constraint violation
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "foreign key")
+	// Should fail due to FK constraint violation (SQLSTATE 23503)
+	require.Error(t, err)
+	var pgErr *pgconn.PgError
+	require.True(t, errors.As(err, &pgErr), "expected Postgres error, got %T: %v", err, err)
+	assert.Equal(t, "23503", pgErr.Code, "expected foreign key violation error code")
 }
 
 // TestIdempotencyKeyUniqueness verifies that duplicate idempotency keys are rejected
@@ -330,8 +334,10 @@ func TestIdempotencyKeyUniqueness(t *testing.T) {
 	}
 
 	err := db.Create(bookingLog2).Error
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate key")
+	require.Error(t, err)
+	var pgErr *pgconn.PgError
+	require.True(t, errors.As(err, &pgErr), "expected Postgres error, got %T: %v", err, err)
+	assert.Equal(t, "23505", pgErr.Code, "expected unique constraint violation error code")
 }
 
 // TestSoftDelete verifies soft delete functionality
@@ -389,7 +395,8 @@ func TestSoftDelete(t *testing.T) {
 	var entity LedgerPostingEntity
 	err = db.Unscoped().First(&entity, "id = ?", posting.ID).Error
 	require.NoError(t, err)
-	assert.NotNil(t, entity.DeletedAt)
+	assert.True(t, entity.DeletedAt.Valid, "DeletedAt should be marked valid after soft delete")
+	assert.False(t, entity.DeletedAt.Time.IsZero(), "DeletedAt timestamp should be set after soft delete")
 }
 
 // TestSchemaIsolation verifies that financial_accounting schema is isolated
@@ -466,7 +473,9 @@ func TestForeignKeyOnDeleteRestrict(t *testing.T) {
 	// Use Unscoped to bypass soft delete and trigger FK constraint
 	err := db.Unscoped().Delete(&FinancialBookingLogEntity{}, "id = ?", bookingLogID).Error
 
-	// Should fail due to ON DELETE RESTRICT
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "violates foreign key constraint")
+	// Should fail due to ON DELETE RESTRICT (SQLSTATE 23503)
+	require.Error(t, err)
+	var pgErr *pgconn.PgError
+	require.True(t, errors.As(err, &pgErr), "expected Postgres error, got %T: %v", err, err)
+	assert.Equal(t, "23503", pgErr.Code, "expected foreign key violation error code")
 }
