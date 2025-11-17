@@ -114,7 +114,7 @@ External Systems (ISO 20022)
 
 ### Implementation Strategy
 
-**Phase 1: Core ISO 20022 Adapter Infrastructure**
+#### Phase 1: Core ISO 20022 Adapter Infrastructure
 
 Create adapter framework and implement high-value message types:
 
@@ -133,12 +133,12 @@ Create adapter framework and implement high-value message types:
    - Provides: ISO 20022 status reason taxonomy
    - Supports: Acceptance, rejection, pending states
 
-**Phase 2: Extended Message Types**
+#### Phase 2: Extended Message Types
 
 4. **Account Opening (acmt.001)** - Account opening instruction
 5. **Customer Credit Transfer (pacs.008)** - FI-to-FI credit transfer
 
-**Adapter Module Structure:**
+#### Adapter Module Structure
 
 ```text
 adapters/
@@ -161,7 +161,7 @@ adapters/
     └── external_payments.go            # Port interface definition
 ```
 
-**Mapping Examples:**
+#### Mapping Examples
 
 ```go
 // Domain → ISO 20022 Currency Mapping
@@ -277,30 +277,30 @@ func mapAmount(m *money.Money) pain001.ActiveCurrencyAndAmount {
 
 ## Implementation Phases
 
-**Phase 1 (5-8 story points): Core Payment Messages**
+### Phase 1 (5-8 story points): Core Payment Messages
 - Implement pain.001 (payment initiation) adapter
 - Implement camt.053 (account reporting) adapter
 - Create XSD validation framework
 - Document mapping patterns
 
-**Phase 2 (3-5 points): Status and Error Handling**
+### Phase 2 (3-5 points): Status and Error Handling
 - Implement pacs.002 (payment status) adapter
 - Map transaction status to ISO reason codes
 - Add structured rejection reason handling
 
-**Phase 3 (5-8 points): Account Management**
+### Phase 3 (5-8 points): Account Management
 - Implement acmt.001 (account opening) adapter
 - Add party identification structures
 - Support BIC/LEI code validation
 
-**Phase 4 (Optional): Additional Standards**
+### Phase 4 (Optional): Additional Standards
 - SWIFT MT adapter (legacy format support)
 - Proprietary bank formats as needed
 - FIX protocol for securities (future)
 
 ## Notes
 
-**Migration Path from Current State:**
+### Migration Path from Current State
 
 Current internal schemas require no changes. Adapter implementation is additive:
 
@@ -310,14 +310,14 @@ Current internal schemas require no changes. Adapter implementation is additive:
 4. Configure routing to use adapter for external calls
 5. Domain services remain unchanged
 
-**Performance Considerations:**
+### Performance Considerations
 
 - Adapter serialization is one-time cost at system boundary
 - Caching compiled XSD schemas for validation
 - Streaming XML generation for large message sets
 - Monitor translation overhead, optimize hot paths if needed
 
-**Extensibility:**
+### Extensibility
 
 This pattern supports future requirements cleanly:
 
@@ -327,7 +327,7 @@ This pattern supports future requirements cleanly:
 - **JSON variants**: ISO 20022 JSON (emerging standard)
 - **Regional standards**: NACHA, BACS, etc.
 
-**Domain Model Evolution:**
+### Domain Model Evolution
 
 Internal protobuf schemas can evolve independently:
 
@@ -336,7 +336,7 @@ Internal protobuf schemas can evolve independently:
 - Versioning handled per adapter (e.g., pain.001.001.03 vs .09)
 - Multiple adapter versions can coexist for transition periods
 
-**Alternative Rejected: Why Not Align Domain Model?**
+### Alternative Rejected: Why Not Align Domain Model?
 
 Aligning internal schemas with ISO 20022 was considered and rejected because:
 
