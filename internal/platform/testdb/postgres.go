@@ -30,6 +30,39 @@ func WithLogLevel(level logger.LogLevel) PostgresOption {
 	}
 }
 
+// extractSchemasFromModels extracts unique schema names from models with TableName() methods.
+// It parses "schema.table" format and returns a set of schema names.
+func extractSchemasFromModels(models []interface{}) map[string]bool {
+	schemas := make(map[string]bool)
+	for _, model := range models {
+		// Check if model has TableName method
+		if tabler, ok := model.(interface{ TableName() string }); ok {
+			tableName := tabler.TableName()
+			// Extract schema from "schema.table" format
+			if len(tableName) > 0 {
+				for i := 0; i < len(tableName); i++ {
+					if tableName[i] == '.' {
+						schemaName := tableName[:i]
+						schemas[schemaName] = true
+						break
+					}
+				}
+			}
+		}
+	}
+	return schemas
+}
+
+// createSchemas creates database schemas if they don't exist.
+func createSchemas(t *testing.T, db *gorm.DB, schemas map[string]bool) {
+	t.Helper()
+	for schema := range schemas {
+		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS " + schema).Error; err != nil {
+			t.Fatalf("Failed to create schema %s: %v", schema, err)
+		}
+	}
+}
+
 // SetupPostgres creates a PostgreSQL testcontainer for integration testing.
 // It returns a configured GORM database connection and a cleanup function.
 //
@@ -92,8 +125,13 @@ func SetupPostgres(t *testing.T, models []interface{}, opts ...PostgresOption) (
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Run migrations for provided models
+	// Create schemas and run migrations for provided models
 	if len(models) > 0 {
+		// Extract and create schemas from model table names
+		schemas := extractSchemasFromModels(models)
+		createSchemas(t, db, schemas)
+
+		// Run migrations for provided models
 		if err := db.AutoMigrate(models...); err != nil {
 			t.Fatalf("Failed to migrate database: %v", err)
 		}
