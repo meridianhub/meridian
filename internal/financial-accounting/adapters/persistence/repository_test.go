@@ -16,10 +16,25 @@ import (
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&FinancialBookingLogEntity{},
 		&LedgerPostingEntity{},
 	})
+
+	// Manually create FK constraint since GORM AutoMigrate doesn't create them
+	// This matches the Atlas migration FK constraint
+	err := db.Exec(`
+		ALTER TABLE financial_accounting.ledger_postings
+		ADD CONSTRAINT fk_ledger_postings_booking_log
+		FOREIGN KEY (financial_booking_log_id)
+		REFERENCES financial_accounting.financial_booking_logs(id)
+		ON DELETE RESTRICT
+	`).Error
+	if err != nil {
+		t.Fatalf("Failed to create FK constraint: %v", err)
+	}
+
+	return db, cleanup
 }
 
 func TestSavePosting_Success(t *testing.T) {
@@ -447,8 +462,9 @@ func TestForeignKeyOnDeleteRestrict(t *testing.T) {
 	repo := NewLedgerRepository(db)
 	require.NoError(t, repo.SavePosting(ctx, posting))
 
-	// Try to delete booking log while posting still references it
-	err := db.Delete(&FinancialBookingLogEntity{}, "id = ?", bookingLogID).Error
+	// Try to hard delete booking log while posting still references it
+	// Use Unscoped to bypass soft delete and trigger FK constraint
+	err := db.Unscoped().Delete(&FinancialBookingLogEntity{}, "id = ?", bookingLogID).Error
 
 	// Should fail due to ON DELETE RESTRICT
 	assert.Error(t, err)

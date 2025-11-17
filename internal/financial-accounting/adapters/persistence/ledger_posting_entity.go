@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // LedgerPostingEntity represents the database persistence model for ledger postings
@@ -28,11 +29,11 @@ type LedgerPostingEntity struct {
 	CorrelationID string `gorm:"size:255;index"` // Links back to originating event
 
 	// Audit fields
-	CreatedAt time.Time  `gorm:"not null"`
-	UpdatedAt time.Time  `gorm:"not null"`
-	CreatedBy string     `gorm:"size:255"`
-	UpdatedBy string     `gorm:"size:255"`
-	DeletedAt *time.Time `gorm:"index"` // Soft delete
+	CreatedAt time.Time      `gorm:"not null"`
+	UpdatedAt time.Time      `gorm:"not null"`
+	CreatedBy string         `gorm:"size:255"`
+	UpdatedBy string         `gorm:"size:255"`
+	DeletedAt gorm.DeletedAt `gorm:"index"` // Soft delete
 }
 
 // TableName overrides the default table name with schema prefix
