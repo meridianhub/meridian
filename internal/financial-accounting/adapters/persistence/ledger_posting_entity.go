@@ -35,7 +35,7 @@ type LedgerPostingEntity struct {
 	DeletedAt *time.Time `gorm:"index"` // Soft delete
 }
 
-// TableName overrides the default table name
+// TableName overrides the default table name with schema prefix
 func (LedgerPostingEntity) TableName() string {
-	return "ledger_postings"
+	return "financial_accounting.ledger_postings"
 }
