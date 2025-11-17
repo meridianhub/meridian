@@ -4,6 +4,7 @@ package testdb
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -54,10 +55,23 @@ func extractSchemasFromModels(models []interface{}) map[string]bool {
 }
 
 // createSchemas creates database schemas if they don't exist.
+// Schema names are validated against a strict pattern to prevent SQL injection.
 func createSchemas(t *testing.T, db *gorm.DB, schemas map[string]bool) {
 	t.Helper()
 	for schema := range schemas {
-		if err := db.Exec("CREATE SCHEMA IF NOT EXISTS " + schema).Error; err != nil {
+		// Validate schema name: only alphanumeric and underscore allowed
+		// This prevents SQL injection even though schema names come from TableName()
+		for i := 0; i < len(schema); i++ {
+			c := schema[i]
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '_' {
+				t.Fatalf("Invalid schema name %q: must contain only letters, digits, and underscores", schema)
+			}
+		}
+
+		// Use parameterized query with proper identifier quoting
+		// PostgreSQL uses double quotes for identifiers
+		sql := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS \"%s\"", schema)
+		if err := db.Exec(sql).Error; err != nil {
 			t.Fatalf("Failed to create schema %s: %v", schema, err)
 		}
 	}
