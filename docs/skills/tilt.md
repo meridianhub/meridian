@@ -337,9 +337,55 @@ Tilt uses live_update to achieve ~3 second rebuilds:
 2. **Incremental Build**: Only changed packages rebuild
 3. **Hot Restart**: Service restarts without container rebuild
 
-### Resource Limits
+### Resource-Constrained Development
 
-Kafka resource limits can be adjusted in the Tiltfile (around line 208) if your machine is constrained. The 3-broker setup uses approximately 1.5GB total memory (384Mi per broker).
+For machines with 8GB RAM or less, the default 3-broker Kafka cluster (approximately 1.5GB total) may consume too much memory alongside other services. You can reduce to a single-broker configuration to save approximately 1GB of RAM.
+
+**Memory Breakdown - Default Configuration:**
+- Kafka (3 brokers): ~1.5GB (384Mi per broker)
+- CockroachDB: ~512MB
+- Redis: ~256MB
+- Keycloak: ~512MB
+- Meridian service: ~256MB
+- OS overhead: ~2GB
+- **Total: ~5GB**
+
+**Memory Breakdown - Single-Broker Configuration:**
+- Kafka (1 broker): ~512MB
+- Other services: Same as above
+- **Total: ~4GB** (saves ~1GB)
+
+**To configure single-broker Kafka, edit `Tiltfile` around line 230:**
+
+```python
+# 1. Reduce replicas from 3 to 1
+spec:
+  replicas: 1  # Changed from 3
+
+# 2. Update replication factors in environment variables
+- name: KAFKA_DEFAULT_REPLICATION_FACTOR
+  value: "1"  # Changed from "2"
+- name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+  value: "1"  # Changed from "2"
+
+# 3. Update controller quorum voters to single node
+controller.quorum.voters=1@kafka-0.kafka-headless:9093  # Remove kafka-1 and kafka-2
+
+# 4. Optionally reduce memory per broker
+resources:
+  requests:
+    memory: 256Mi  # Changed from 384Mi
+  limits:
+    memory: 384Mi  # Changed from 512Mi
+```
+
+**Trade-offs:**
+- **Production parity**: Cannot test partition replication, leader election, or broker failover
+- **Topic limitations**: Replication factor must be 1 (cannot exceed broker count)
+- **No fault tolerance**: Single point of failure for messaging layer
+- **Sufficient for**: Development, testing, and debugging application logic
+
+**Alternative**: If you need to test replication but have limited RAM, consider disabling Keycloak (if not actively developing auth features) to free up ~512MB.
 
 ### Parallel Updates
 
