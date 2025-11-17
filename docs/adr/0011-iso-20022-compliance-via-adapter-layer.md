@@ -88,7 +88,7 @@ Chosen option: **"Option 2: ISO 20022 Adapter Layer"**, because it correctly app
 
 ### Architectural Pattern
 
-```
+```text
 External Systems (ISO 20022)
         ↕
    [Adapter Layer]
@@ -140,7 +140,7 @@ Create adapter framework and implement high-value message types:
 
 **Adapter Module Structure:**
 
-```
+```text
 adapters/
 ├── iso20022/
 │   ├── payment-initiation/
@@ -222,7 +222,7 @@ func mapAmount(m *money.Money) pain001.ActiveCurrencyAndAmount {
 |------------------|-----------|-------|
 | `account_identification` (IBAN string) | `AccountIdentification/IBAN` | Direct mapping |
 | Internal account_id | `AccountIdentification/Other` | Proprietary scheme |
-| N/A (add to adapter) | `FinancialInstitutionIdentification` | BIC code for account servicer |
+| N/A (add to adapter) | `FinancialInstitutionIdentification` | BIC for account servicer |
 
 ### Transaction Codes
 
