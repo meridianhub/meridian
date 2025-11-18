@@ -2,10 +2,12 @@
 name: adr-004-event-schema-evolution
 description: Use buf breaking change detection for protobuf event schema evolution without external schema registry
 triggers:
+
   - Evolving Kafka event schemas
   - Managing BIAN specification updates
   - Ensuring backward compatibility
   - Coordinating between services via events
+
 instructions: |
   Use protobuf for all Kafka events. Run `buf breaking` in CI to prevent breaking changes.
   Follow BIAN versioning (13.0 → 14.0). No external schema registry needed - buf provides
@@ -24,7 +26,9 @@ Supersedes initial decision to use Confluent Schema Registry.
 
 ## Context
 
-Meridian uses Apache Kafka for internal coordination between BIAN service domains. Events represent domain state changes (e.g., `CurrentAccountUpdated`, `FinancialBookingLogCreated`) and must evolve as BIAN specifications update across releases (13.0 → 14.0 → 15.0).
+Meridian uses Apache Kafka for internal coordination between BIAN service domains. Events represent domain state
+changes (e.g., `CurrentAccountUpdated`, `FinancialBookingLogCreated`) and must evolve as BIAN specifications update
+across releases (13.0 → 14.0 → 15.0).
 
 ### Architectural Facts
 
@@ -37,15 +41,18 @@ Meridian uses Apache Kafka for internal coordination between BIAN service domain
 
 ### The Schema Registry Question
 
-We initially considered Confluent Schema Registry to manage event schema evolution. However, Schema Registry's primary value propositions don't align with our architecture:
+We initially considered Confluent Schema Registry to manage event schema evolution. However, Schema Registry's primary
+value propositions don't align with our architecture:
 
 **Schema Registry provides:**
+
 - Centralized schema storage and runtime discovery
 - Governance for external consumers
 - Compatibility enforcement at registration time
 - Historical schema versions for replay
 
 **Our reality:**
+
 - All consumers are internal (same git repo)
 - Compile-time validation via `buf breaking` already enforces compatibility
 - Database is source of truth (Kafka replay not needed for recovery)
@@ -59,7 +66,7 @@ Use **protobuf's native versioning** with **BIAN-aligned semantic event types** 
 
 ### Event Evolution Patterns
 
-**Pattern 1: Backward-Compatible Changes (Same Event Type)**
+### Pattern 1: Backward-Compatible Changes (Same Event Type)
 
 For minor additions that don't change semantic meaning:
 
@@ -83,7 +90,7 @@ message AccountUpdated {
   string correlation_id = 5;  // New optional field
   string updated_by = 6;      // New optional field
 }
-```
+```text
 
 **Validation:** `buf breaking --against main` ensures no breaking changes.
 
@@ -113,9 +120,10 @@ message AccountSuspended {
   google.protobuf.Timestamp suspended_until = 5;
   string suspended_by = 6;
 }
-```
+```text
 
-**Rationale:** BIAN behavior qualifiers (Initiate, Update, Suspend, Terminate) represent distinct operations. Map these to distinct event types rather than overloading a single event schema.
+**Rationale:** BIAN behavior qualifiers (Initiate, Update, Suspend, Terminate) represent distinct operations. Map these
+to distinct event types rather than overloading a single event schema.
 
 **Topic strategy:** New event type = new Kafka topic (`account-suspended`)
 
@@ -131,15 +139,20 @@ message AccountSuspended {
 **CI/CD enforcement via buf:**
 
 ```yaml
+
 # .github/workflows/proto-validation.yml
+
 - name: Lint protobuf schemas
+
   run: buf lint
 
 - name: Check for breaking changes
+
   run: buf breaking --against '.git#branch=main'
-```
+```text
 
 **Breaking changes fail the build**, forcing developers to either:
+
 1. Create a new event type (if semantically different)
 2. Make the change backward-compatible (add optional fields)
 
@@ -185,21 +198,23 @@ message AccountSuspended {
   google.protobuf.Timestamp suspended_until = 7;
   string suspended_by = 8;
 }
-```
+```text
 
 ### Step 3: Generate Go Code
 
 ```bash
 buf generate
-```
+```text
 
 ### Step 4: Validate Compatibility
 
 ```bash
 buf lint
 buf breaking --against main
+
 # ✅ No breaking changes - new file, no modifications to existing schemas
-```
+
+```text
 
 ### Step 5: Create Kafka Topic
 
@@ -209,7 +224,7 @@ kafka-topics --create \
   --partitions 3 \
   --replication-factor 3 \
   --config retention.ms=604800000  # 7 days
-```
+```text
 
 ### Step 6: Implement Producer
 
@@ -233,7 +248,7 @@ func (p *CurrentAccountPublisher) PublishSuspended(
 
     return p.producer.Publish(ctx, "account-suspended", event)
 }
-```
+```text
 
 ### Step 7: Deploy
 
@@ -264,16 +279,19 @@ func (p *CurrentAccountPublisher) PublishSuspended(
 ### Mitigations
 
 **Schema discovery:**
+
 - Document event schemas in `docs/events/event-catalog.md`
 - Generate schema documentation via `buf` plugins
 - Maintain event type registry in documentation
 
 **External integration:**
+
 - Use gRPC APIs for external consumers, not Kafka topics
 - gRPC provides schema evolution via protobuf versioning
 - External systems never directly consume internal Kafka topics
 
 **Future flexibility:**
+
 - Can add Schema Registry later if external Kafka consumers are needed
 - Protobuf messages remain unchanged; only add middleware layer
 - No architectural rework required
@@ -296,12 +314,14 @@ Consider adding Schema Registry if:
 **Approach:** Use Confluent Schema Registry for centralized governance.
 
 **Pros:**
+
 - Centralized schema storage and discovery
 - Runtime compatibility validation
 - Historical schema versions preserved
 - Multi-language support via schema ID lookup
 
 **Cons:**
+
 - Operational overhead (another stateful service)
 - Performance overhead (network calls for schema lookup)
 - Complexity for internal-only use case
@@ -314,38 +334,45 @@ Consider adding Schema Registry if:
 **Approach:** Use Avro instead of Protobuf.
 
 **Pros:**
+
 - Schema Registry's native format
 - Dynamic schema evolution
 - Compact serialization
 
 **Cons:**
+
 - Inconsistent with gRPC APIs (already using Protobuf)
 - Less efficient than Protobuf for most workloads
 - No compile-time type safety
 - Steeper learning curve
 
-**Why rejected:** We've standardized on Protobuf for gRPC APIs. Using different serialization for events would fragment tooling.
+**Why rejected:** We've standardized on Protobuf for gRPC APIs. Using different serialization for events would fragment
+tooling.
 
 ### Alternative 3: JSON with JSON Schema
 
 **Approach:** Human-readable JSON events.
 
 **Pros:**
+
 - Easy to debug (human-readable)
 - Ubiquitous tooling
 - No code generation
 
 **Cons:**
+
 - Verbose (larger messages)
 - No compile-time type safety
 - Slower serialization/deserialization
 - Inconsistent with gRPC APIs
 
-**Why rejected:** JSON's verbosity and lack of type safety make it unsuitable for high-throughput financial event streams.
+**Why rejected:** JSON's verbosity and lack of type safety make it unsuitable for high-throughput financial event
+streams.
 
 ### Chosen: Protobuf Native Versioning (No Schema Registry)
 
-**Rationale:** Balances type safety, performance, simplicity, and consistency with our gRPC APIs. Protobuf's optional fields handle 90% of evolution needs. New event types handle the remaining 10% (new BIAN behaviors).
+**Rationale:** Balances type safety, performance, simplicity, and consistency with our gRPC APIs. Protobuf's optional
+fields handle 90% of evolution needs. New event types handle the remaining 10% (new BIAN behaviors).
 
 ## Links
 
@@ -361,12 +388,14 @@ Consider adding Schema Registry if:
 ### Protobuf Evolution Best Practices
 
 **Safe changes (backward compatible):**
+
 - ✅ Add new optional fields
 - ✅ Add new message types
 - ✅ Add new enum values (with unknown handling)
 - ✅ Add new RPC methods
 
 **Breaking changes (require new event type):**
+
 - ❌ Remove existing fields
 - ❌ Change field types
 - ❌ Change field numbers
@@ -408,11 +437,13 @@ See `internal/adapters/events/*_test.go` for examples.
 Maintain a living document of all event types:
 
 ```markdown
+
 # docs/events/event-catalog.md
 
 ## Current Account Events
 
 ### AccountUpdated
+
 - **Topic:** account-updated
 - **Schema:** api/proto/events/current_account/v1/events.proto
 - **Producers:** current-account-service
@@ -420,12 +451,14 @@ Maintain a living document of all event types:
 - **BIAN Qualifier:** Update
 
 ### AccountSuspended
+
 - **Topic:** account-suspended
 - **Schema:** api/proto/events/current_account/v1/events.proto
 - **Producers:** current-account-service
 - **Consumers:** position-keeping-service, risk-management-service
 - **BIAN Qualifier:** Control (Suspend)
 - **Since:** BIAN 14.0
-```
+
+```text
 
 Update this catalog when adding new event types.

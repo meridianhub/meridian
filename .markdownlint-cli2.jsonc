@@ -31,11 +31,15 @@
 
     // MD041/first-line-heading - First line in a file should be a top-level heading
     // Disabled as some files have front matter or comments first
-    "MD041": false
+    "MD041": false,
+
+    // MD051/link-fragments - Link fragments should be valid
+    // Disabled as it has false positives with valid TOC links
+    "MD051": false
   },
 
   // Fix mode - automatically fix issues where possible
-  "fix": false,
+  "fix": true,
 
   // Globs are specified in package.json scripts or command line
   // to allow flexible usage (pre-commit hooks vs full linting)

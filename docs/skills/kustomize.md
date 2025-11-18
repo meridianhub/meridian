@@ -2,9 +2,11 @@
 name: skill-kustomize-deployments
 description: Kustomize configuration for environment-specific Kubernetes deployments
 triggers:
+
   - Deploying to different environments
   - Managing environment-specific configs
   - Understanding Kustomize overlays
+
 instructions: |
   Use Kustomize for environment-specific Kubernetes manifests.
   Base configurations in deployments/k8s/base/, overlays in deployments/k8s/overlays/.
@@ -13,13 +15,15 @@ instructions: |
 
 # Kustomize Overlays for Environment-Specific Configuration
 
-This document explains how to use Kustomize overlays to manage environment-specific Kubernetes configurations for Meridian.
+This document explains how to use Kustomize overlays to manage environment-specific Kubernetes configurations for
+Meridian.
 
 ## Overview
 
-We use Kustomize to manage Kubernetes manifests across multiple environments without duplicating configuration. The structure follows the recommended base + overlay pattern:
+We use Kustomize to manage Kubernetes manifests across multiple environments without duplicating configuration. The
+structure follows the recommended base + overlay pattern:
 
-```
+```text
 deployments/k8s/
 ├── base/                     # Common configuration for all environments
 │   ├── deployment.yaml
@@ -31,7 +35,7 @@ deployments/k8s/
     ├── dev/
     ├── staging/
     └── production/
-```
+```text
 
 ## Environment Configurations
 
@@ -102,43 +106,54 @@ High-availability configuration with strict policies:
 Generate the final Kubernetes manifests for a specific environment:
 
 ```bash
+
 # Development
+
 kubectl kustomize deployments/k8s/overlays/dev
 
 # Staging
+
 kubectl kustomize deployments/k8s/overlays/staging
 
 # Production
+
 kubectl kustomize deployments/k8s/overlays/production
-```
+```text
 
 ### Applying to Kubernetes
 
 Deploy to a specific environment:
 
 ```bash
+
 # Development
+
 kubectl apply -k deployments/k8s/overlays/dev
 
 # Staging
+
 kubectl apply -k deployments/k8s/overlays/staging
 
 # Production
+
 kubectl apply -k deployments/k8s/overlays/production
-```
+```text
 
 ### Viewing Differences
 
 Compare what will change before applying:
 
 ```bash
+
 # Show what would be applied
+
 kubectl diff -k deployments/k8s/overlays/production
 
 # Compare staging vs production
+
 diff <(kubectl kustomize deployments/k8s/overlays/staging) \
      <(kubectl kustomize deployments/k8s/overlays/production)
-```
+```text
 
 ## Customization Patterns
 
@@ -147,39 +162,54 @@ diff <(kubectl kustomize deployments/k8s/overlays/staging) \
 Each overlay uses JSON Patch operations to modify the base configuration. Common patterns:
 
 #### Changing Replicas
+
 ```yaml
 patches:
+
 - target:
+
     kind: Deployment
     name: meridian
   patch: |-
+
     - op: replace
+
       path: /spec/replicas
       value: 3
-```
+```text
 
 #### Adding Environment Variables
+
 ```yaml
 patches:
+
 - target:
+
     kind: Deployment
     name: meridian
   patch: |-
+
     - op: add
+
       path: /spec/template/spec/containers/0/env/-
       value:
         name: FEATURE_FLAG_X
         value: "true"
-```
+```text
 
 #### Changing Resource Limits
+
 ```yaml
 patches:
+
 - target:
+
     kind: Deployment
     name: meridian
   patch: |-
+
     - op: replace
+
       path: /spec/template/spec/containers/0/resources
       value:
         requests:
@@ -188,19 +218,24 @@ patches:
         limits:
           cpu: 1000m
           memory: 1Gi
-```
+```text
 
 #### Adding Annotations
+
 ```yaml
 patches:
+
 - target:
+
     kind: Deployment
     name: meridian
   patch: |-
+
     - op: add
+
       path: /spec/template/metadata/annotations/custom-annotation
       value: "custom-value"
-```
+```text
 
 ### ConfigMap Customization
 
@@ -208,12 +243,16 @@ Each environment merges ConfigMap values with the base configuration:
 
 ```yaml
 configMapGenerator:
+
 - name: meridian-config
+
   behavior: merge
   literals:
+
   - log_level=debug
   - custom_setting=value
-```
+
+```text
 
 The `behavior: merge` ensures base configuration is preserved while adding/overriding specific values.
 
@@ -224,12 +263,15 @@ The `behavior: merge` ensures base configuration is preserved while adding/overr
 The deploy workflow uses Kustomize overlays for environment-specific deployments:
 
 ```yaml
+
 - name: Deploy to staging
+
   run: kubectl apply -k deployments/k8s/overlays/staging
 
 - name: Deploy to production
+
   run: kubectl apply -k deployments/k8s/overlays/production
-```
+```text
 
 ### Tilt (Local Development)
 
@@ -239,7 +281,8 @@ Tilt automatically uses the dev overlay for local development. See `Tiltfile` fo
 
 ### 1. Never Edit Base for Environment-Specific Needs
 
-Always use overlays for environment-specific configuration. The base should contain common configuration that applies to all environments.
+Always use overlays for environment-specific configuration. The base should contain common configuration that applies
+to all environments.
 
 ### 2. Use Semantic Image Tags
 
@@ -253,7 +296,7 @@ Always test overlay builds before applying:
 
 ```bash
 kubectl kustomize deployments/k8s/overlays/production | kubectl apply --dry-run=client -f -
-```
+```text
 
 ### 4. Resource Limits
 
@@ -270,6 +313,7 @@ kubectl kustomize deployments/k8s/overlays/production | kubectl apply --dry-run=
 ### 6. Secrets Management
 
 Never store secrets in Kustomize overlays. Use:
+
 - Kubernetes Secrets with encryption at rest
 - External secret management (Vault, AWS Secrets Manager)
 - GitHub Actions secrets for CI/CD
@@ -282,28 +326,33 @@ Check the target selector matches your base resources:
 
 ```bash
 kubectl kustomize deployments/k8s/overlays/production | grep -A5 "kind: Deployment"
-```
+```text
 
 ### Patch Operation Failed
 
 Verify the path exists in the base resource:
 
 ```bash
+
 # Show the base deployment structure
+
 kubectl kustomize deployments/k8s/base | yq eval 'select(.kind == "Deployment")'
-```
+```text
 
 ### Namespace Conflicts
 
 Each overlay defines its own namespace. Ensure you're deploying to the correct namespace:
 
 ```bash
+
 # Check current context
+
 kubectl config current-context
 
 # List resources in environment namespace
+
 kubectl get all -n production
-```
+```text
 
 ### ConfigMap Merge Not Working
 
@@ -311,11 +360,15 @@ Ensure `behavior: merge` is set in the overlay's configMapGenerator:
 
 ```yaml
 configMapGenerator:
+
 - name: meridian-config
+
   behavior: merge  # Required for merging with base
   literals:
+
   - key=value
-```
+
+```text
 
 ## References
 

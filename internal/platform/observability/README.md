@@ -30,7 +30,7 @@ if err != nil {
     return fmt.Errorf("failed to initialize tracer: %w", err)
 }
 defer tracer.Shutdown(ctx)
-```
+```text
 
 ### 2. Configure gRPC Server
 
@@ -44,7 +44,7 @@ grpcServer := grpc.NewServer(
     grpc.UnaryInterceptor(tracer.UnaryServerInterceptor()),
     grpc.StreamInterceptor(tracer.StreamServerInterceptor()),
 )
-```
+```text
 
 ### 3. Trace Business Operations
 
@@ -64,7 +64,7 @@ if err := createAccount(ctx, account); err != nil {
     tracer.RecordError(ctx, err)
     return err
 }
-```
+```text
 
 ## Configuration
 
@@ -83,7 +83,9 @@ Configuration is loaded from environment variables:
 ### Example Configuration
 
 ```bash
+
 # Development
+
 export OTEL_SERVICE_NAME=current-account-service
 export OTEL_SERVICE_VERSION=1.0.0
 export OTEL_ENVIRONMENT=development
@@ -91,12 +93,13 @@ export OTEL_EXPORTER_OTLP_INSECURE=true  # Insecure connection (dev only)
 export OTEL_TRACES_SAMPLER_ARG=1.0  # Sample 100% of traces
 
 # Production
+
 export OTEL_SERVICE_NAME=current-account-service
 export OTEL_SERVICE_VERSION=1.0.0
 export OTEL_ENVIRONMENT=production
 export OTEL_EXPORTER_OTLP_INSECURE=false  # TLS enabled (prod)
 export OTEL_TRACES_SAMPLER_ARG=0.1  # Sample 10% of traces
-```
+```text
 
 ## Usage Examples
 
@@ -117,7 +120,7 @@ if err != nil {
     observability.RecordDatabaseError(span, err)
     return err
 }
-```
+```text
 
 ### Kafka Producer
 
@@ -138,7 +141,7 @@ if err != nil {
     span.RecordError(err)
     return err
 }
-```
+```text
 
 ### Kafka Consumer
 
@@ -160,7 +163,7 @@ if err != nil {
     span.RecordError(err)
     return err
 }
-```
+```text
 
 ### HTTP Client
 
@@ -183,7 +186,7 @@ if err != nil {
 }
 
 observability.RecordHTTPResponse(span, resp.StatusCode)
-```
+```text
 
 ### Business Operations
 
@@ -199,7 +202,7 @@ if err != nil {
     span.RecordError(err)
     return err
 }
-```
+```text
 
 ## Grafana Stack Integration
 
@@ -244,7 +247,7 @@ Grafana Alloy (OTLP Collector)
 Grafana Tempo (Trace Storage)
     ↓
 Grafana (Visualization)
-```
+```text
 
 ## Testing
 
@@ -252,13 +255,13 @@ Run tests:
 
 ```bash
 go test ./internal/platform/observability/...
-```
+```text
 
 Run tests with coverage:
 
 ```bash
 go test -cover ./internal/platform/observability/...
-```
+```text
 
 ## Best Practices
 

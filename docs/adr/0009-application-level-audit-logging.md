@@ -8,20 +8,23 @@
 
 **Context:**
 
-The initial migration system (PR #67) implemented a database-level audit factory pattern using PostgreSQL PL/pgSQL stored procedures and triggers. This approach encountered a critical compatibility issue with CockroachDB:
+The initial migration system (PR #67) implemented a database-level audit factory pattern using PostgreSQL PL/pgSQL
+stored procedures and triggers. This approach encountered a critical compatibility issue with CockroachDB:
 
 ```text
 pq: plpgsql not supported in user-defined functions:
 at or near "table_name": syntax error: unimplemented: this syntax
-```
+```text
 
 CockroachDB does not support PL/pgSQL procedural language features including:
+
 - `EXECUTE` for dynamic SQL
 - `DECLARE` variables and control flow
 - `FOREACH` loops
 - Trigger functions with procedural logic
 
-This incompatibility prevents the audit factory pattern from working in the local development environment (CockroachDB) while it would work in production PostgreSQL.
+This incompatibility prevents the audit factory pattern from working in the local development environment (CockroachDB)
+while it would work in production PostgreSQL.
 
 ## Decision Drivers
 
@@ -39,24 +42,28 @@ This incompatibility prevents the audit factory pattern from working in the loca
 **Approach:** Generate explicit audit tables, triggers, and functions for each service schema without dynamic SQL.
 
 **Pros:**
+
 - Database-enforced audit trail (tamper-resistant)
 - No application code changes required
 - Automatic capture of all changes
 - Works with CockroachDB (no PL/pgSQL)
 
 **Cons:**
+
 - Significant code duplication across schemas
 - CockroachDB v23.1 requires trigger functions to be written in PL/pgSQL (no alternative)
 - Harder to test trigger logic
 - Maintenance burden (3x the code for shared, current_account, position_keeping)
 
-**Verdict:** ❌ Rejected - CockroachDB requires PL/pgSQL for trigger functions, which defeats the purpose of removing PL/pgSQL dependency. Database-level triggers are not viable without PL/pgSQL support.
+**Verdict:** ❌ Rejected - CockroachDB requires PL/pgSQL for trigger functions, which defeats the purpose of removing
+PL/pgSQL dependency. Database-level triggers are not viable without PL/pgSQL support.
 
 ### Option 2: Application-Level Audit Logging (GORM Hooks)
 
 **Approach:** Implement audit logging in Go using GORM `AfterCreate`, `AfterUpdate`, `AfterDelete` hooks.
 
 **Pros:**
+
 - ✅ Works identically in CockroachDB and PostgreSQL
 - ✅ Easily testable with unit tests (mock database)
 - ✅ Single audit implementation in Go code
@@ -65,6 +72,7 @@ This incompatibility prevents the audit factory pattern from working in the loca
 - ✅ Type-safe with Go structs
 
 **Cons:**
+
 - ⚠️ Potential performance impact (additional INSERT per operation)
 - ⚠️ Not atomic with business transaction (separate INSERT)
 - ⚠️ Could be bypassed by raw SQL queries (mitigated by using GORM exclusively)
@@ -77,11 +85,13 @@ This incompatibility prevents the audit factory pattern from working in the loca
 **Approach:** Keep PL/pgSQL audit factory, document that CockroachDB is dev-only.
 
 **Pros:**
+
 - Keeps elegant audit factory pattern
 - Database-enforced audit trail in production
 - Minimal code changes
 
 **Cons:**
+
 - ❌ Development-production parity violation
 - ❌ Can't test audit behavior locally
 - ❌ Deployment complexity (two database systems)
@@ -91,7 +101,8 @@ This incompatibility prevents the audit factory pattern from working in the loca
 
 ## Decision
 
-**We will implement application-level audit logging using GORM hooks** to achieve CockroachDB compatibility while maintaining testability and development-production parity.
+**We will implement application-level audit logging using GORM hooks** to achieve CockroachDB compatibility while
+maintaining testability and development-production parity.
 
 ## Implementation Details
 
@@ -119,7 +130,7 @@ type AuditLog struct {
     NewValues     datatypes.JSON  `gorm:"type:jsonb"`
     TransactionID string          `gorm:"type:varchar(100)"`
 }
-```
+```text
 
 ### GORM Hook Pattern
 
@@ -169,7 +180,7 @@ func recordAudit(tx *gorm.DB, schema, table, op string, id uuid.UUID, old, new i
 
     return tx.Table(schema + ".audit_log").Create(&audit).Error
 }
-```
+```text
 
 ### Migration Changes
 
@@ -198,7 +209,7 @@ CREATE INDEX idx_audit_log_record_id ON current_account_audit.audit_log(record_i
 CREATE INDEX idx_audit_log_changed_at ON current_account_audit.audit_log(changed_at);
 CREATE INDEX idx_audit_log_changed_by ON current_account_audit.audit_log(changed_by);
 CREATE INDEX idx_audit_log_operation ON current_account_audit.audit_log(operation);
-```
+```text
 
 Repeat for `position_keeping_audit` schema.
 
@@ -212,7 +223,8 @@ Repeat for `position_keeping_audit` schema.
 
 ### Async Audit Strategy: Transactional Outbox Pattern
 
-**Decision for Meridian**: We will use the **Transactional Outbox Pattern** for async audit logging with guaranteed delivery.
+**Decision for Meridian**: We will use the **Transactional Outbox Pattern** for async audit logging with guaranteed
+delivery.
 
 #### How It Works
 
@@ -265,7 +277,7 @@ func processAuditOutbox(db *gorm.DB, schema string) {
         })
     }
 }
-```
+```text
 
 #### Benefits
 
@@ -288,11 +300,11 @@ func processAuditOutbox(db *gorm.DB, schema string) {
    - Reduce write amplification by excluding low-risk tables
    - Document which tables are/aren't audited and rationale
 
-2. **Optimize JSON serialization**: Only include fields that change
+1. **Optimize JSON serialization**: Only include fields that change
    - Compute diff before serialization to reduce JSONB size
    - Set maximum audit record size limits
 
-3. **Batch processing**: Worker processes outbox in batches of 100 for efficiency
+1. **Batch processing**: Worker processes outbox in batches of 100 for efficiency
 
 ### Benchmarking Plan
 
@@ -305,9 +317,10 @@ func BenchmarkAuditOutboxOverhead(b *testing.B) {
 func BenchmarkAuditWorkerThroughput(b *testing.B) {
     // Measure how fast worker processes outbox
 }
-```
+```text
 
 **Targets**:
+
 - Outbox write overhead: <5ms per operation (faster than direct audit_log write)
 - Worker throughput: >1000 records/second
 - Audit lag (p99): <500ms from business op to audit_log
@@ -317,11 +330,13 @@ func BenchmarkAuditWorkerThroughput(b *testing.B) {
 ### Audit Trail Integrity
 
 **Risk:** Application-level audit can be bypassed by:
+
 - Raw SQL queries (not using GORM)
 - Direct database access (psql, SQL clients)
 - Application crashes between business op and audit INSERT
 
 **Mitigations:**
+
 1. **Policy:** All database access MUST use GORM (enforced in code review)
 2. **Monitoring:** Alert on direct database connections in production
 3. **Transactional outbox:** Audit intent committed with business operation (atomic)
@@ -331,13 +346,15 @@ func BenchmarkAuditWorkerThroughput(b *testing.B) {
 ### Regulatory Requirements
 
 For industries requiring tamper-proof audit trails (finance, healthcare):
+
 - Consider **write-once storage** for audit tables (CockroachDB doesn't support this)
 - Implement **cryptographic signatures** on audit records
 - Export audit logs to **immutable external system** (S3 Glacier, blockchain)
 
 ## Testing Strategy
 
-The async outbox pattern requires rigorous red-green testing to prove correctness. This will take significant time but is essential for financial compliance.
+The async outbox pattern requires rigorous red-green testing to prove correctness. This will take significant time but
+is essential for financial compliance.
 
 ### Test-Driven Development Approach
 
@@ -396,7 +413,7 @@ func TestAuditOutbox_RollbackOnBusinessFailure(t *testing.T) {
     db.Table("current_account_audit.audit_outbox").Count(&count)
     assert.Equal(t, int64(0), count, "Outbox should be empty after rollback")
 }
-```
+```text
 
 #### 2. No Lost Audits: Outbox Survives Application Crashes
 
@@ -445,7 +462,7 @@ func TestAuditOutbox_SurvivesApplicationCrash(t *testing.T) {
     db.Table("current_account_audit.audit_outbox").Count(&outboxCount)
     assert.Equal(t, int64(0), outboxCount, "Outbox should be empty after processing")
 }
-```
+```text
 
 #### 3. Idempotency: Retry Doesn't Create Duplicates
 
@@ -469,7 +486,7 @@ func TestAuditWorker_IdempotentProcessing(t *testing.T) {
         Count(&count)
     assert.Equal(t, int64(1), count, "Should have exactly one audit record")
 }
-```
+```text
 
 #### 4. Complete Audit Trail: All Operations Captured
 
@@ -514,7 +531,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
     assert.Contains(t, string(audits[1].OldValues), "ACME Corp")
     assert.Contains(t, string(audits[1].NewValues), "ACME Corporation")
 }
-```
+```text
 
 #### 5. Worker Resilience: Handles Database Failures Gracefully
 
@@ -553,7 +570,7 @@ func TestAuditWorker_HandlesTemporaryDatabaseFailure(t *testing.T) {
         First(&audit).Error
     require.NoError(t, err)
 }
-```
+```text
 
 #### 6. Performance: Worker Throughput and Latency
 
@@ -600,7 +617,7 @@ func BenchmarkAuditOutboxOverhead(b *testing.B) {
         db.Create(customer) // Includes outbox write
     }
 }
-```
+```text
 
 ### Integration Tests with Testcontainers
 
@@ -623,7 +640,7 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
     // Run full audit system test against real CockroachDB
     // (Test all guarantees with real database)
 }
-```
+```text
 
 ### Test Coverage Requirements
 
@@ -633,6 +650,7 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
 - **Chaos tests**: Simulate pod kills, network partitions, database failures
 
 **Estimated Implementation Time**: 2-3 sprints
+
 - Sprint 1: Implement hooks + basic tests (atomicity, no lost audits)
 - Sprint 2: Worker implementation + resilience tests (idempotency, failures)
 - Sprint 3: Performance benchmarks + chaos testing
@@ -650,6 +668,7 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
 ### Phase 2: Implement GORM Hooks + Outbox (Sprint N+1, ~8 story points)
 
 **Test-Driven Development:**
+
 1. Write failing tests for critical guarantees (atomicity, no lost audits)
 2. Implement `AuditOutbox` struct in `internal/domain/models/audit.go`
 3. Implement GORM `AfterCreate`, `BeforeUpdate`, `AfterUpdate`, `AfterDelete` hooks
@@ -657,6 +676,7 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
 5. Refactor for clarity
 
 **Deliverables:**
+
 - GORM hooks write to `audit_outbox` table
 - Comprehensive unit tests (>90% coverage)
 - Integration tests with real CockroachDB (Testcontainers)
@@ -664,6 +684,7 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
 ### Phase 3: Implement Audit Worker (Sprint N+2, ~5 story points)
 
 **Test-Driven Development:**
+
 1. Write failing tests for worker behavior (idempotency, resilience)
 2. Implement `AuditWorker()` background goroutine
 3. Implement `processAuditOutbox()` with batch processing
@@ -671,6 +692,7 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
 5. Add Prometheus metrics for outbox depth
 
 **Deliverables:**
+
 - Background worker processes outbox → audit_log
 - Worker graceful shutdown on context cancellation
 - Monitoring and alerting for outbox lag
@@ -728,12 +750,14 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
 **Review Date:** 2025-12-04 (30 days)
 
 **Success Criteria:**
+
 - [ ] Audit logging works identically in CockroachDB and PostgreSQL
 - [ ] Performance overhead <10ms per operation
 - [ ] Unit test coverage >90% for audit logic
 - [ ] Zero missing audit records in staging for 2 weeks
 
 **Stakeholders to Consult:**
+
 - Security team (audit trail integrity)
 - Compliance team (regulatory requirements)
 - DevOps team (monitoring and alerting)

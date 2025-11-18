@@ -2,12 +2,14 @@
 name: adr-008-defensive-testing-standards
 description: Defensive testing framework for happy paths, unhappy paths, edge cases, and negative testing
 triggers:
+
   - Writing tests for new features
   - Testing financial domain logic
   - Validating input handling
   - Testing boundary conditions
   - Reviewing test coverage
   - Ensuring robustness
+
 instructions: |
   Apply defensive testing practices: test happy paths AND unhappy paths.
   Every function must test: valid inputs, invalid inputs, edge cases, and
@@ -25,7 +27,8 @@ Accepted
 
 ## Context
 
-Our financial services application handles monetary transactions, account balances, and currency operations. Bugs in these areas can lead to:
+Our financial services application handles monetary transactions, account balances, and currency operations. Bugs in
+these areas can lead to:
 
 - Financial loss or incorrect balances
 - Regulatory compliance violations
@@ -33,7 +36,8 @@ Our financial services application handles monetary transactions, account balanc
 - Silent data corruption from undetected overflows
 - Production incidents from edge cases not caught in testing
 
-Traditional "happy path only" testing is insufficient for financial domain logic. We need a systematic framework for testing beyond expected inputs.
+Traditional "happy path only" testing is insufficient for financial domain logic. We need a systematic framework for
+testing beyond expected inputs.
 
 ## Decision
 
@@ -104,7 +108,7 @@ tests := []struct {
         rationale: "Must detect arithmetic overflow",
     },
 }
-```
+```text
 
 ### Mandatory Test Categories
 
@@ -237,7 +241,7 @@ func TestMoney_NewMoney_DefensiveTests(t *testing.T) {
         })
     }
 }
-```
+```text
 
 ### Example 2: Deposit Operation Defensive Tests
 
@@ -329,7 +333,7 @@ func TestAccount_Deposit_DefensiveTests(t *testing.T) {
         })
     }
 }
-```
+```text
 
 ## Red Flags Requiring Defensive Tests
 

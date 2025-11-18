@@ -2,10 +2,12 @@
 name: skill-docker-configuration
 description: Docker setup and multi-stage build configuration for production deployments
 triggers:
+
   - Building Docker images
   - Optimizing Dockerfile
   - Debugging container issues
   - Understanding image layers
+
 instructions: |
   Multi-stage Dockerfile for Go applications with minimal runtime image.
   Uses distroless base for security. Build with docker build -t meridian .
@@ -29,27 +31,33 @@ Meridian uses a multi-stage Docker build to create minimal, secure production im
 ### Using Make
 
 ```bash
+
 # Build with default settings
+
 make docker
 
 # Build with custom version
+
 VERSION=1.0.0 make docker
-```
+```text
 
 ### Using Docker CLI
 
 ```bash
+
 # Basic build
+
 docker build -t meridian:latest .
 
 # Build with version metadata
+
 docker build \
   --build-arg VERSION=1.0.0 \
   --build-arg COMMIT=$(git rev-parse --short HEAD) \
   --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
   -t meridian:1.0.0 \
   .
-```
+```text
 
 ## Image Features
 
@@ -61,7 +69,7 @@ docker build \
    - Compiles: Static binary with CGO disabled
    - Optimizations: `-ldflags="-w -s"` for stripped, reduced size
 
-2. **Runtime Stage**
+1. **Runtime Stage**
    - Base: `gcr.io/distroless/static:nonroot`
    - Copies: Binary, CA certificates, timezone data
    - User: nonroot (UID 65532)
@@ -89,7 +97,7 @@ docker build \
 
 ```bash
 docker run -p 8080:8080 meridian:latest
-```
+```text
 
 ### With Environment Variables
 
@@ -99,16 +107,18 @@ docker run \
   -e PORT=8080 \
   -e LOG_LEVEL=info \
   meridian:latest
-```
+```text
 
 ### Health Check
 
 The image includes a health check that runs every 30 seconds:
 
 ```bash
+
 # Manual health check
+
 docker exec <container> /meridian healthcheck
-```
+```text
 
 ## Image Verification
 
@@ -116,38 +126,50 @@ docker exec <container> /meridian healthcheck
 
 ```bash
 docker images meridian:latest
+
 # Expected: 3-5MB total
-```
+
+```text
 
 ### Scan for Vulnerabilities
 
 ```bash
+
 # Using Trivy
+
 trivy image meridian:latest
 
 # Using Docker Scout
+
 docker scout cves meridian:latest
-```
+```text
 
 ### Verify Static Binary
 
 ```bash
+
 # Extract binary from image
+
 docker create --name temp meridian:latest
 docker cp temp:/meridian ./meridian-binary
 docker rm temp
 
 # Verify it's static
+
 file meridian-binary
+
 # Output: ELF 64-bit LSB executable, x86-64, statically linked
 
 # Check size
+
 ls -lh meridian-binary
+
 # Output: ~1.4M
 
 # Clean up
+
 rm meridian-binary
-```
+```text
 
 ## Dockerfile Breakdown
 
@@ -190,8 +212,11 @@ These are injected into the binary at build time via `-ldflags`.
 ### CI/CD
 
 ```yaml
+
 # Example GitHub Actions snippet
+
 - name: Build Docker image
+
   run: |
     docker build \
       --build-arg VERSION=${{ github.ref_name }} \
@@ -201,17 +226,20 @@ These are injected into the binary at build time via `-ldflags`.
       .
 
 - name: Scan image
+
   run: trivy image --exit-code 1 --severity HIGH,CRITICAL meridian:${{ github.ref_name }}
 
 - name: Push to registry
+
   run: docker push meridian:${{ github.ref_name }}
-```
+```text
 
 ## Troubleshooting
 
 ### Binary Not Found
 
 If the container fails to start with "binary not found":
+
 - Verify GOOS and GOARCH match your target platform
 - Check that the binary was copied to the correct location
 - Ensure the binary has execute permissions
@@ -219,6 +247,7 @@ If the container fails to start with "binary not found":
 ### Health Check Failures
 
 If health checks are failing:
+
 - Verify the `/meridian healthcheck` command is implemented
 - Check that the service is listening on the expected port
 - Review container logs: `docker logs <container>`
@@ -226,6 +255,7 @@ If health checks are failing:
 ### Large Image Size
 
 If the image is larger than expected:
+
 - Check .dockerignore is properly configured
 - Verify multi-stage build is working correctly
 - Use `docker history meridian:latest` to see layer sizes

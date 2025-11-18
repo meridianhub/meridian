@@ -14,7 +14,8 @@ Each BIAN service domain has its own PostgreSQL schemas for business data and au
 - **`position_keeping`**: Transaction models (BIAN Position Keeping domain)
 - **`position_keeping_audit`**: Audit logs for position_keeping service
 
-Each microservice owns both its business schema and audit schema, ensuring complete service isolation. The shared `_audit_factory` schema provides reusable audit infrastructure to eliminate duplication.
+Each microservice owns both its business schema and audit schema, ensuring complete service isolation. The shared
+`_audit_factory` schema provides reusable audit infrastructure to eliminate duplication.
 
 ### Migration Organization
 
@@ -31,9 +32,10 @@ migrations/
     ├── 20251103174231_initial.sql         # Business tables (transactions)
     ├── 20251103180000_audit_system.sql    # Initializes position_keeping_audit via factory
     └── atlas.sum
-```
+```text
 
 **Migration Application Order:**
+
 1. `shared/` - Creates `_audit_factory` schema with reusable procedures
 2. `current_account/` - Creates business + audit schemas
 3. `position_keeping/` - Creates business + audit schemas (depends on current_account for FKs)
@@ -45,12 +47,14 @@ migrations/
 Atlas generates migrations from GORM models via the `cmd/atlas-loader` utility.
 
 **Configuration files:**
+
 - `atlas.current_account.hcl` - Current Account schema config
 - `atlas.position_keeping.hcl` - Position Keeping schema config
 
 ### Manual SQL (Audit System)
 
 The audit system uses raw SQL for:
+
 - Stored procedures/functions
 - Triggers
 - Complex PostgreSQL features not supported by GORM
@@ -60,44 +64,52 @@ The audit system uses raw SQL for:
 ### Generate New Migrations
 
 **For all schemas:**
+
 ```bash
 make migrate-diff-all
-```
+```text
 
 **For specific schema:**
+
 ```bash
 make migrate-diff-current       # current_account schema
 make migrate-diff-position      # position_keeping schema
-```
+```text
 
 ### Apply Migrations
 
 **Local development (via Tilt):**
+
 ```bash
 tilt up
+
 # Migrations apply automatically in order:
+
 # 1. current_account (includes current_account_audit)
+
 # 2. position_keeping (includes position_keeping_audit)
-```
+
+```text
 
 **Manual application:**
+
 ```bash
 export DATABASE_URL="postgres://user:pass@host:5432/dbname"
 make migrate-apply-all          # Apply all schemas (each includes its audit schema)
-```
+```text
 
 ### Check Migration Status
 
 ```bash
 export DATABASE_URL="postgres://user:pass@host:5432/dbname"
 make migrate-status-all
-```
+```text
 
 ### Lint Migrations
 
 ```bash
 make migrate-lint-all
-```
+```text
 
 ## Migration Order
 
@@ -109,6 +121,7 @@ Migrations must be applied in this order due to foreign key dependencies:
 Each service migration includes both business tables and its audit schema, ensuring complete service isolation.
 
 This order is enforced in:
+
 - Tiltfile (via `resource_deps`)
 - Makefile (`migrate-apply-all` target)
 - CI/CD pipelines (see `.github/workflows/`)
@@ -120,10 +133,12 @@ This order is enforced in:
 The audit system uses a **shared factory pattern** to eliminate code duplication while maintaining service isolation:
 
 - **`_audit_factory` schema**: Contains reusable procedures (`init_service_audit()`) that create audit infrastructure
-- **Per-service audit schemas**: Each service gets its own audit schema (e.g., `current_account_audit`, `position_keeping_audit`)
+- **Per-service audit schemas**: Each service gets its own audit schema (e.g., `current_account_audit`,
+`position_keeping_audit`)
 - **Zero duplication**: All audit logic lives in one place, called by each service migration
 
 Each service audit schema includes:
+
 - **`change_log` table**: JSONB-based change tracking with indexes
 - **`log_change()` trigger function**: Captures INSERT/UPDATE/DELETE operations
 - **`enable_audit_log()` helper**: Attaches triggers to tables
@@ -131,6 +146,7 @@ Each service audit schema includes:
 - **`get_record_history()` function**: Query changes for specific records
 
 All changes are automatically logged with:
+
 - **What changed**: Table name, operation (INSERT/UPDATE/DELETE)
 - **Who changed it**: `created_by`/`updated_by` from BaseModel
 - **When changed**: Timestamp with timezone
@@ -147,13 +163,14 @@ SELECT _audit_factory.init_service_audit(
     'your_service_audit',        -- Audit schema name
     ARRAY['table1', 'table2']    -- Tables to attach triggers to
 );
-```
+```text
 
 This single call creates the entire audit infrastructure for your service.
 
 ### Service-Specific Audit
 
 Each service's audit schema is:
+
 - **Isolated**: Only accessible by the owning service
 - **Self-contained**: All triggers, functions, and views in service audit schema
 - **Independently deployable**: Service migrations call the factory
@@ -164,6 +181,7 @@ Audit triggers are automatically attached during migration via the factory.
 ### Querying Audit History
 
 **For current_account service:**
+
 ```sql
 -- Get history for a specific customer or account
 SELECT * FROM current_account_audit.get_record_history('record-uuid-here');
@@ -178,9 +196,10 @@ LIMIT 100;
 SELECT * FROM current_account_audit.change_log
 WHERE changed_by = 'user@example.com'
 ORDER BY changed_at DESC;
-```
+```text
 
 **For position_keeping service:**
+
 ```sql
 -- Get history for a specific transaction
 SELECT * FROM position_keeping_audit.get_record_history('record-uuid-here');
@@ -190,7 +209,7 @@ SELECT * FROM position_keeping_audit.change_summary
 WHERE table_full_name = 'position_keeping.transactions'
 ORDER BY changed_at DESC
 LIMIT 100;
-```
+```text
 
 ## BaseModel Fields
 
@@ -205,9 +224,11 @@ type BaseModel struct {
     UpdatedBy string     // Who last updated this record (optional until auth context available)
     DeletedAt *time.Time // Soft delete timestamp
 }
-```
+```text
 
-**Note**: `CreatedBy` and `UpdatedBy` are currently optional (nullable) fields. Once authentication/authorization context is available in the application layer, these should be populated from the current user context. The audit triggers will use these values to track who made changes.
+**Note**: `CreatedBy` and `UpdatedBy` are currently optional (nullable) fields. Once authentication/authorization
+context is available in the application layer, these should be populated from the current user context. The audit
+triggers will use these values to track who made changes.
 
 ## Schema Modifications
 
@@ -217,10 +238,12 @@ type BaseModel struct {
 2. Add `TableName()` method returning `schema.table_name`
 3. Update `cmd/atlas-loader/main.go` to include model in appropriate schema filter
 4. Generate migration:
+
    ```bash
    make migrate-diff-current  # or migrate-diff-position
-   ```
-5. Enable audit logging:
+```text
+
+1. Enable audit logging:
    - Add trigger to the service's audit migration (e.g., `migrations/current_account/YYYYMMDDHHMMSS_audit_system.sql`)
    - Or run: `SELECT current_account_audit.enable_audit_log('table_name');` (for current_account tables)
    - Or run: `SELECT position_keeping_audit.enable_audit_log('table_name');` (for position_keeping tables)
@@ -241,36 +264,44 @@ type BaseModel struct {
 **Symptom**: Atlas detects unexpected schema drift
 
 **Solution**:
+
 ```bash
+
 # Check current state
+
 make migrate-status-all
 
 # Verify checksums
+
 make migrate-hash-all
 
 # If checksums mismatch, regenerate sum files
+
 atlas migrate hash --env local --config file://atlas.current_account.hcl
-```
+```text
 
 ### Audit Triggers Not Firing
 
 **Check trigger exists:**
+
 ```sql
 SELECT schemaname, tablename, tgname, tgenabled
 FROM pg_trigger t
 JOIN pg_class c ON t.tgrelid = c.oid
 JOIN pg_namespace n ON c.relnamespace = n.oid
 WHERE tgname LIKE 'audit_%';
-```
+```text
 
 **Manually attach trigger:**
+
 ```sql
 SELECT audit.enable_audit_log('schema_name', 'table_name');
-```
+```text
 
 ### Foreign Key Constraint Errors
 
 Remember:
+
 - `position_keeping` schema references `current_account.accounts`
 - Always apply `current_account` migrations before `position_keeping`
 
@@ -295,11 +326,13 @@ Atlas migrations are forward-only. For rollbacks:
 ### Performance
 
 Audit triggers add minimal overhead:
+
 - Single INSERT per change
 - Asynchronous to business transaction
 - JSONB compression reduces storage
 
 For high-volume tables, consider:
+
 - Partitioning `audit.change_log` by timestamp
 - Archiving old audit records
 - Sampling (log every Nth change)

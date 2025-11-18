@@ -4,7 +4,8 @@ This guide explains how to run a local documentation server for browsing Go pack
 
 ## Overview
 
-Go provides a built-in documentation system that generates web-based documentation from code comments. The `pkgsite` tool creates a local version of pkg.go.dev that lets you browse your project's documentation in a web browser.
+Go provides a built-in documentation system that generates web-based documentation from code comments. The `pkgsite`
+tool creates a local version of pkg.go.dev that lets you browse your project's documentation in a web browser.
 
 ## Prerequisites
 
@@ -17,7 +18,7 @@ Install `pkgsite` using Go's package manager:
 
 ```bash
 go install golang.org/x/pkgsite/cmd/pkgsite@latest
-```
+```text
 
 This installs the `pkgsite` binary to `~/go/bin/` (or `$GOPATH/bin/`).
 
@@ -28,14 +29,18 @@ This installs the `pkgsite` binary to `~/go/bin/` (or `$GOPATH/bin/`).
 From your project root directory:
 
 ```bash
+
 # Using full path (if ~/go/bin is not in PATH)
+
 ~/go/bin/pkgsite -open=false -http=:6060
 
 # Or if ~/go/bin is in your PATH
+
 pkgsite -open=false -http=:6060
-```
+```text
 
 **Options:**
+
 - `-open=false`: Don't automatically open browser (optional)
 - `-http=:6060`: Listen on port 6060 (default is 8080)
 
@@ -43,10 +48,10 @@ pkgsite -open=false -http=:6060
 
 The first time you run `pkgsite`, it needs to load and index all packages:
 
-```
+```text
 Info: go/packages.Load(["all"]) loaded 999 packages from . in 461ms
 Info: Listening on addr http://:6060
-```
+```text
 
 This typically takes 5-30 seconds depending on project size.
 
@@ -55,10 +60,12 @@ This typically takes 5-30 seconds depending on project size.
 Once the server is running, open your browser to:
 
 **Main URLs:**
+
 - **Project homepage**: http://localhost:6060/github.com/meridianhub/meridian
 - **Server root**: http://localhost:6060/
 
 **Example package URLs:**
+
 - Current Account domain: http://localhost:6060/github.com/meridianhub/meridian/internal/current-account/domain
 - Financial Accounting service: http://localhost:6060/github.com/meridianhub/meridian/internal/financial-accounting/service
 - Position Keeping repository: http://localhost:6060/github.com/meridianhub/meridian/internal/position-keeping/repository
@@ -82,9 +89,10 @@ Go documentation is generated from comments in your code. Follow these conventio
 //   - Financial transactions (deposits, withdrawals, interest)
 //   - Account lifecycle management
 package domain
-```
+```text
 
 **Rules:**
+
 - Must start with `// Package <name>`
 - Place at the top of any `.go` file in the package
 - Use complete sentences
@@ -108,9 +116,10 @@ type CurrentAccountFacility struct {
     // Balance represents the current account balance in minor currency units
     Balance int64
 }
-```
+```text
 
 **Rules:**
+
 - First sentence appears in package index
 - Start with the type name
 - Use complete sentences
@@ -130,9 +139,10 @@ type CurrentAccountFacility struct {
 func (f *CurrentAccountFacility) Initiate(customerID string, params AccountParams) error {
     // implementation
 }
-```
+```text
 
 **Rules:**
+
 - Start with function name
 - Explain what the function does (not how)
 - Document error conditions
@@ -153,7 +163,7 @@ func Example_basicDeposit() {
     fmt.Printf("Balance: %d\n", account.Balance)
     // Output: Balance: 10000
 }
-```
+```text
 
 ## Troubleshooting
 
@@ -163,7 +173,7 @@ If port 6060 is already in use, choose a different port:
 
 ```bash
 pkgsite -http=:8080
-```
+```text
 
 ### Packages Not Showing
 
@@ -183,6 +193,7 @@ pkgsite caches documentation. To see changes:
 
 ### License Shows as "UNKNOWN"
 
+<!-- markdownlint-disable-next-line MD013 -->
 Ensure your LICENSE file matches a canonical license format. See [this commit](https://github.com/meridianhub/meridian/pull/118) for the fix we applied.
 
 ## Alternative: Command-Line Documentation
@@ -190,15 +201,19 @@ Ensure your LICENSE file matches a canonical license format. See [this commit](h
 For quick reference without the web UI, use `go doc`:
 
 ```bash
+
 # View package documentation
+
 go doc internal/current-account/domain
 
 # View specific type
+
 go doc internal/current-account/domain.CurrentAccountFacility
 
 # View specific method
+
 go doc internal/current-account/domain.CurrentAccountFacility.Initiate
-```
+```text
 
 ## Best Practices
 
@@ -221,13 +236,13 @@ Add to your `Makefile` for convenience:
 ```makefile
 .PHONY: docs
 docs: ## Start local documentation server
-	@echo "Starting pkgsite on http://localhost:6060"
-	@echo "Press Ctrl+C to stop"
-	pkgsite -open=false -http=:6060
-```
+ @echo "Starting pkgsite on http://localhost:6060"
+ @echo "Press Ctrl+C to stop"
+ pkgsite -open=false -http=:6060
+```text
 
 Then run:
 
 ```bash
 make docs
-```
+```text

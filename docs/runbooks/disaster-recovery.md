@@ -1,12 +1,15 @@
 ---
 name: disaster-recovery-runbook
-description: Procedures for recovering from complete infrastructure failures, data corruption, regional outages, or catastrophic events
+description: Procedures for recovering from complete infrastructure failures, data corruption, regional outages, or
+catastrophic events
 triggers:
+
   - Complete infrastructure failure
   - Data corruption requiring restore
   - Regional cloud outage
   - Catastrophic system failures
   - Full system recovery operations
+
 instructions: |
   Follow RTO/RPO objectives. Execute database restoration from backups.
   Rebuild infrastructure in alternate region if needed. Verify data integrity
@@ -15,9 +18,12 @@ instructions: |
 
 # Disaster Recovery Runbook
 
-**When to use this runbook**: Complete infrastructure failure, data corruption, regional outage, or catastrophic events requiring full system recovery.
+**When to use this runbook**: Complete infrastructure failure, data corruption, regional outage, or catastrophic events
+requiring full system recovery.
 
-> **⚠️ Note for Learning Environment**: This is a template runbook for the Meridian learning project. In a production deployment, you would customize this with your specific:
+> **⚠️ Note for Learning Environment**: This is a template runbook for the Meridian learning project. In a production
+deployment, you would customize this with your specific:
+>
 > - Backup locations and credentials
 > - Recovery time objectives (RTO) and recovery point objectives (RPO)
 > - Actual infrastructure provider details (AWS, GCP, Azure, on-prem)
@@ -28,7 +34,7 @@ instructions: |
 > **⚠️ Production Setup Required**: Define your actual RTO/RPO based on business requirements
 
 | Component | RTO (Recovery Time) | RPO (Data Loss) |
-|-----------|---------------------|-----------------|
+| --------- | ------------------- | --------------- |
 | **Kubernetes Cluster** | 4 hours | 0 (infrastructure as code) |
 | **Database (CockroachDB)** | 2 hours | 1 hour (hourly backups) |
 | **Application State** | 1 hour | 5 minutes (real-time replication) |
@@ -37,11 +43,13 @@ instructions: |
 ## Pre-Disaster Preparedness
 
 **Regular testing schedule:**
+
 - [ ] Monthly: Restore database from backup to staging
 - [ ] Quarterly: Full DR drill to alternate region
 - [ ] Annually: Complete infrastructure rebuild from scratch
 
 **Required access:**
+
 - [ ] Cloud provider console access (with MFA)
 - [ ] GitHub repository access
 - [ ] Backup storage credentials
@@ -57,62 +65,86 @@ instructions: |
 **Recovery steps:**
 
 1. **Assess scope** (0-15 minutes)
+
    ```bash
+
    # Check cluster status
+
    kubectl cluster-info
 
    # Check node status
+
    kubectl get nodes
 
    # If completely down, proceed to rebuild
-   ```
 
-2. **Deploy new cluster** (15-60 minutes)
+```text
+
+1. **Deploy new cluster** (15-60 minutes)
+
    ```bash
+
    # Using infrastructure as code (example: Terraform)
+
    cd infrastructure/
    terraform init
    terraform plan -out=recovery.plan
    terraform apply recovery.plan
 
    # Verify cluster
+
    kubectl get nodes
    kubectl get namespaces
-   ```
+```text
 
-3. **Restore configurations** (60-90 minutes)
+1. **Restore configurations** (60-90 minutes)
+
    ```bash
+
    # Apply base resources
+
    kubectl apply -k deployments/k8s/base/
 
    # Apply production overlay
+
    kubectl apply -k deployments/k8s/overlays/production/
 
    # Verify deployments
-   kubectl get all -n production
-   ```
 
-4. **Restore database** (90-150 minutes)
+   kubectl get all -n production
+```text
+
+1. **Restore database** (90-150 minutes)
+
    ```bash
+
    # Restore from backup (specific to backup solution)
+
    # Example using CockroachDB backup:
+
    cockroach sql --execute="RESTORE DATABASE meridian FROM 's3://backups/latest';"
 
    # Verify data integrity
-   cockroach sql --execute="SELECT COUNT(*) FROM meridian.transactions;"
-   ```
 
-5. **Verify and test** (150-180 minutes)
+   cockroach sql --execute="SELECT COUNT(*) FROM meridian.transactions;"
+```text
+
+1. **Verify and test** (150-180 minutes)
+
    ```bash
+
    # Test application endpoints
+
    curl https://api.meridian.production/health
 
    # Run smoke tests
+
    ./scripts/smoke-tests.sh production
 
    # Monitor logs
+
    stern -n production meridian --since 5m
-   ```
+```text
 
 ### Scenario 2: Database Corruption
 
@@ -121,49 +153,69 @@ instructions: |
 **Recovery steps:**
 
 1. **Stop writes immediately**
+
    ```bash
+
    # Scale application to 0
+
    kubectl scale deployment meridian -n production --replicas=0
 
    # Verify no active connections
-   cockroach sql --execute="SHOW SESSIONS;"
-   ```
 
-2. **Assess corruption scope**
+   cockroach sql --execute="SHOW SESSIONS;"
+```text
+
+1. **Assess corruption scope**
+
    ```bash
+
    # Check database consistency
+
    cockroach debug check-store /path/to/store
 
    # Identify affected tables
-   cockroach sql --execute="SELECT * FROM system.range_log WHERE info LIKE '%corruption%';"
-   ```
 
-3. **Restore from backup**
+   cockroach sql --execute="SELECT * FROM system.range_log WHERE info LIKE '%corruption%';"
+```text
+
+1. **Restore from backup**
+
    ```bash
+
    # List available backups
+
    cockroach sql --execute="SHOW BACKUPS IN 's3://backups/';"
 
    # Restore to point in time before corruption
-   cockroach sql --execute="RESTORE DATABASE meridian FROM 's3://backups/2025-10-28-00-00';"
-   ```
 
-4. **Verify data integrity**
+   cockroach sql --execute="RESTORE DATABASE meridian FROM 's3://backups/2025-10-28-00-00';"
+```text
+
+1. **Verify data integrity**
+
    ```bash
+
    # Run consistency checks
+
    cockroach sql --execute="SELECT * FROM crdb_internal.check_consistency(true, '', '');"
 
    # Validate critical data
-   cockroach sql --execute="SELECT COUNT(*) FROM meridian.accounts;"
-   ```
 
-5. **Resume operations**
+   cockroach sql --execute="SELECT COUNT(*) FROM meridian.accounts;"
+```text
+
+1. **Resume operations**
+
    ```bash
+
    # Scale application back up
+
    kubectl scale deployment meridian -n production --replicas=3
 
    # Monitor for errors
+
    kubectl logs -n production -l app=meridian --tail=100
-   ```
+```text
 
 ### Scenario 3: Regional Outage
 
@@ -172,46 +224,65 @@ instructions: |
 **Recovery steps:**
 
 1. **Activate DR region** (0-30 minutes)
+
    ```bash
+
    # Update DNS to point to DR region
+
    # (Specific to DNS provider - Route53, CloudFlare, etc.)
 
    # Example using Route53:
+
    aws route53 change-resource-record-sets \
      --hosted-zone-id Z123456 \
      --change-batch file://dns-failover.json
-   ```
+```text
 
-2. **Verify DR cluster** (30-60 minutes)
+1. **Verify DR cluster** (30-60 minutes)
+
    ```bash
+
    # Connect to DR cluster
+
    kubectl config use-context meridian-dr
 
    # Check pod status
+
    kubectl get pods -n production
 
    # Verify database replication
-   cockroach sql --execute="SHOW RANGES FROM DATABASE meridian;"
-   ```
 
-3. **Monitor switchover** (60-120 minutes)
+   cockroach sql --execute="SHOW RANGES FROM DATABASE meridian;"
+```text
+
+1. **Monitor switchover** (60-120 minutes)
+
    ```bash
+
    # Watch traffic shift
+
    kubectl top pods -n production
 
    # Check application logs
+
    stern -n production meridian
 
    # Verify no errors
-   kubectl get events -n production --sort-by='.lastTimestamp'
-   ```
 
-4. **Post-recovery actions** (when primary region recovers)
+   kubectl get events -n production --sort-by='.lastTimestamp'
+```text
+
+1. **Post-recovery actions** (when primary region recovers)
+
    ```bash
+
    # Sync data back to primary region
+
    # Re-establish replication
+
    # Plan switchback during maintenance window
-   ```
+
+```text
 
 ### Scenario 4: Ransomware / Security Breach
 
@@ -220,8 +291,11 @@ instructions: |
 **Recovery steps:**
 
 1. **Isolate immediately**
+
    ```bash
+
    # Block all egress traffic
+
    kubectl delete networkpolicy meridian -n production
    kubectl apply -f - <<EOF
    apiVersion: networking.k8s.io/v1
@@ -232,44 +306,58 @@ instructions: |
    spec:
      podSelector: {}
      policyTypes:
+
      - Ingress
      - Egress
+
    EOF
 
    # Scale to 0 to prevent spread
-   kubectl scale deployment meridian -n production --replicas=0
-   ```
 
-2. **Preserve evidence**
+   kubectl scale deployment meridian -n production --replicas=0
+```text
+
+1. **Preserve evidence**
+
    ```bash
+
    # Export all logs
+
    kubectl logs -n production --all-containers --prefix > incident-logs-$(date +%s).txt
 
    # Export pod descriptions
+
    kubectl describe pods -n production > incident-pods-$(date +%s).txt
 
    # Export network policies and RBAC
-   kubectl get networkpolicies,roles,rolebindings -n production -o yaml > incident-rbac-$(date +%s).yaml
-   ```
 
-3. **Engage security team**
+   kubectl get networkpolicies,roles,rolebindings -n production -o yaml > incident-rbac-$(date +%s).yaml
+```text
+
+1. **Engage security team**
    - Contact: security@your-domain.com
    - Escalate to CTO/CISO
    - Consider engaging external incident response firm
 
-4. **Rebuild from clean backups**
+1. **Rebuild from clean backups**
+
    ```bash
+
    # Deploy new cluster from scratch
+
    # DO NOT restore from potentially compromised backups
 
    # Use known-good infrastructure code
+
    git checkout tags/v1.0.0  # Last known good version
 
    # Deploy with fresh credentials
-   # Rotate all secrets, API keys, certificates
-   ```
 
-5. **Post-incident hardening**
+   # Rotate all secrets, API keys, certificates
+
+```text
+
+1. **Post-incident hardening**
    - Review all RBAC permissions
    - Audit all secrets and rotate
    - Review NetworkPolicies
@@ -281,26 +369,33 @@ instructions: |
 **Regular backup testing:**
 
 ```bash
+
 # Weekly: Verify backups exist
+
 aws s3 ls s3://meridian-backups/production/ --recursive | grep $(date +%Y-%m-%d)
 
 # Monthly: Restore to staging
+
 cockroach sql --database=staging --execute="RESTORE DATABASE meridian FROM 's3://backups/latest';"
 
 # Quarterly: Full DR drill
+
 # Document in: docs/runbooks/dr-drill-YYYY-MM-DD.md
-```
+
+```text
 
 ## Communication Plan
 
 ### Internal Communication
 
 **During incident:**
+
 - Engineering Team: [Slack channel]
 - Executive Team: [Email distribution list]
 - All Staff: [Status page]
 
 **Communication cadence:**
+
 - **P0**: Updates every 30 minutes
 - **P1**: Updates every hour
 - **P2**: Daily updates
@@ -310,11 +405,13 @@ cockroach sql --database=staging --execute="RESTORE DATABASE meridian FROM 's3:/
 > **⚠️ Production Setup Required**: Configure status page and customer notification process
 
 **Status page updates:**
+
 - Incident detected: "Investigating service degradation"
 - Recovery in progress: "Implementing fix, ETA: X hours"
 - Resolved: "Services restored, root cause analysis to follow"
 
 **Customer notifications:**
+
 - P0 incidents: Immediate notification
 - P1 incidents: Notification within 4 hours
 - Post-mortem: Published within 7 days
@@ -344,26 +441,33 @@ cockroach sql --database=staging --execute="RESTORE DATABASE meridian FROM 's3:/
 ## Infrastructure as Code
 
 **Critical repositories:**
+
 - Kubernetes manifests: `meridian/deployments/k8s/`
 - Terraform/infrastructure: `meridian/infrastructure/`
 - CI/CD workflows: `meridian/.github/workflows/`
 
 **Recovery from Git:**
+
 ```bash
+
 # Clone repository
+
 git clone https://github.com/your-org/meridian.git
 cd meridian
 
 # Check out last known good version
+
 git checkout tags/v1.2.0
 
 # Apply all resources
+
 kubectl apply -k deployments/k8s/overlays/production/
-```
+```text
 
 ## Testing & Drills
 
 **Monthly drill checklist:**
+
 1. [ ] Select recovery scenario
 2. [ ] Document start time
 3. [ ] Execute recovery steps
@@ -373,7 +477,8 @@ kubectl apply -k deployments/k8s/overlays/production/
 7. [ ] Update runbook with improvements
 
 **Drill report template:**
-```
+
+```text
 Date: YYYY-MM-DD
 Scenario: [Database corruption / Cluster failure / etc.]
 Start time: HH:MM
@@ -388,8 +493,10 @@ What needs improvement:
 -
 
 Action items:
+
 - [ ]
-```
+
+```text
 
 ## Emergency Contacts
 
@@ -404,6 +511,7 @@ Action items:
 | **CTO** | [Email/Phone] | - |
 
 **External contacts:**
+
 - Cloud provider support: [Support ticket system]
 - Database vendor support: [Support phone/email]
 - DNS provider: [Support contact]
@@ -414,16 +522,19 @@ Action items:
 > **⚠️ Production Setup Required**: Document your actual backup locations and access procedures
 
 **Database backups:**
+
 - Location: `s3://meridian-backups/production/database/`
 - Frequency: Hourly incremental, daily full
 - Retention: 30 days incremental, 90 days full
 
 **Configuration backups:**
+
 - Location: Git repository (GitHub)
 - Frequency: Every commit
 - Retention: Unlimited
 
 **Cluster state backups:**
+
 - Location: `s3://meridian-backups/production/etcd/`
 - Frequency: Daily
 - Retention: 7 days
@@ -431,6 +542,7 @@ Action items:
 ## Post-Disaster Review
 
 **Required within 7 days:**
+
 1. Timeline of events
 2. Root cause analysis
 3. Actual RTO vs target RTO

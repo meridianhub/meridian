@@ -4,7 +4,8 @@ This document describes how secrets are managed across different environments in
 
 ## Overview
 
-Meridian uses Kubernetes Secrets to manage sensitive configuration data such as database credentials, API keys, and certificates. Secrets are kept separate from application code and configuration to maintain security and flexibility.
+Meridian uses Kubernetes Secrets to manage sensitive configuration data such as database credentials, API keys, and
+certificates. Secrets are kept separate from application code and configuration to maintain security and flexibility.
 
 ## Development Environment (Local/Tilt)
 
@@ -13,7 +14,9 @@ Meridian uses Kubernetes Secrets to manage sensitive configuration data such as 
 For local development with Tilt, secrets are stored in YAML files:
 
 ```yaml
+
 # deployments/k8s/current-account/secret.yaml
+
 apiVersion: v1
 kind: Secret
 metadata:
@@ -21,7 +24,7 @@ metadata:
 type: Opaque
 stringData:
   DATABASE_URL: "postgres://meridian:meridian@cockroachdb:26257/meridian?sslmode=disable"
-```
+```text
 
 **⚠️ WARNING:** These secrets contain development-only credentials. **NEVER** use these credentials in production.
 
@@ -44,6 +47,7 @@ stringData:
 ### Requirements
 
 Production secrets **MUST**:
+
 - ✅ Use strong, randomly generated credentials
 - ✅ Be stored in a secure secret management system
 - ✅ **NEVER** be committed to version control
@@ -57,6 +61,7 @@ Production secrets **MUST**:
 External Secrets Operator syncs secrets from external secret management systems into Kubernetes.
 
 **Supported Backends:**
+
 - AWS Secrets Manager
 - Google Secret Manager
 - Azure Key Vault
@@ -83,27 +88,37 @@ spec:
         DATABASE_URL: |
           postgres://{{ .username }}:{{ .password }}@{{ .host }}:{{ .port }}/{{ .database }}?sslmode=require
   data:
+
   - secretKey: username
+
     remoteRef:
       key: prod/meridian/current-account/db
       property: username
+
   - secretKey: password
+
     remoteRef:
       key: prod/meridian/current-account/db
       property: password
+
   - secretKey: host
+
     remoteRef:
       key: prod/meridian/current-account/db
       property: host
+
   - secretKey: port
+
     remoteRef:
       key: prod/meridian/current-account/db
       property: port
+
   - secretKey: database
+
     remoteRef:
       key: prod/meridian/current-account/db
       property: database
-```
+```text
 
 **Installation:**
 
@@ -113,7 +128,7 @@ helm install external-secrets \
   external-secrets/external-secrets \
   -n external-secrets-system \
   --create-namespace
-```
+```text
 
 #### 2. Sealed Secrets
 
@@ -122,17 +137,21 @@ Sealed Secrets encrypts secrets so they can be safely stored in git.
 **Example:**
 
 ```bash
+
 # Create a secret
+
 kubectl create secret generic current-account-db \
   --from-literal=DATABASE_URL="postgres://..." \
   --dry-run=client -o yaml > secret.yaml
 
 # Seal it
+
 kubeseal -f secret.yaml -w sealed-secret.yaml
 
 # Commit sealed-secret.yaml to git
+
 git add sealed-secret.yaml
-```
+```text
 
 #### 3. HashiCorp Vault
 
@@ -156,10 +175,12 @@ spec:
     roleName: "current-account"
     vaultAddress: "https://vault.example.com:8200"
     objects: |
+
       - objectName: "database-url"
+
         secretPath: "secret/data/prod/current-account/database"
         secretKey: "url"
-```
+```text
 
 ## Secret Rotation
 
@@ -170,13 +191,13 @@ spec:
    - API keys: Every 30 days
    - Certificates: Automated with cert-manager
 
-2. **Zero-Downtime Rotation:**
+1. **Zero-Downtime Rotation:**
    - Use dual credentials during transition period
    - Update secrets in external system first
    - Wait for External Secrets Operator to sync
    - Restart pods to pickup new secrets
 
-3. **Emergency Rotation:**
+1. **Emergency Rotation:**
    - Compromised credentials should be rotated immediately
    - Follow incident response procedures
    - Update all dependent services
@@ -185,21 +206,26 @@ spec:
 ### Rotation Process
 
 ```bash
+
 # 1. Create new credentials in secret manager
+
 aws secretsmanager put-secret-value \
   --secret-id prod/meridian/current-account/db \
   --secret-string '{"password":"NEW_PASSWORD"}'
 
 # 2. Wait for External Secrets Operator to sync (check refreshInterval)
+
 kubectl get externalsecret current-account-db -w
 
 # 3. Restart pods to pickup new secret
+
 kubectl rollout restart deployment current-account
 
 # 4. Verify service health
+
 kubectl get pods -l app=current-account
 kubectl logs -l app=current-account --tail=50 | grep "database connection established"
-```
+```text
 
 ## Migration from Development to Production
 
@@ -217,19 +243,25 @@ kubectl logs -l app=current-account --tail=50 | grep "database connection establ
 ### Example Migration
 
 **Before (Development):**
+
 ```yaml
+
 # deployments/k8s/current-account/secret.yaml
+
 apiVersion: v1
 kind: Secret
 metadata:
   name: current-account-db
 stringData:
   DATABASE_URL: "postgres://meridian:meridian@localhost:5432/meridian"
-```
+```text
 
 **After (Production):**
+
 ```yaml
+
 # deployments/k8s/current-account/external-secret.yaml
+
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -242,16 +274,18 @@ spec:
   target:
     name: current-account-db
   data:
+
   - secretKey: DATABASE_URL
+
     remoteRef:
       key: prod/meridian/current-account/database-url
-```
+```text
 
 ## Environment-Specific Configuration
 
 Use Kustomize to manage environment-specific secrets:
 
-```
+```text
 deployments/
 ├── base/
 │   ├── deployment.yaml
@@ -266,7 +300,7 @@ deployments/
     └── production/
         ├── kustomization.yaml
         └── external-secret.yaml     # External secrets for production
-```
+```text
 
 ## Security Best Practices
 
@@ -275,17 +309,17 @@ deployments/
    - Secrets are not shared across services
    - RBAC limits who can read secrets
 
-2. **Encryption:**
+1. **Encryption:**
    - Secrets encrypted at rest in etcd
    - TLS for all database connections (`sslmode=require`)
    - Consider encrypting secrets in external systems
 
-3. **Audit Logging:**
+1. **Audit Logging:**
    - Enable Kubernetes audit logging for secret access
    - Monitor secret manager access logs
    - Alert on unusual access patterns
 
-4. **Secrets in Code:**
+1. **Secrets in Code:**
    - Never hardcode secrets in application code
    - Use environment variables from Kubernetes secrets
    - Validate secrets at startup but don't log values
@@ -295,41 +329,54 @@ deployments/
 ### Secret Not Found
 
 ```bash
+
 # Check if secret exists
+
 kubectl get secret current-account-db
 
 # Check if ExternalSecret synced
+
 kubectl get externalsecret current-account-db
 kubectl describe externalsecret current-account-db
 
 # Check logs
+
 kubectl logs -n external-secrets-system deployment/external-secrets
-```
+```text
 
 ### Connection Failures
 
 ```bash
+
 # Verify secret contains correct data
+
 kubectl get secret current-account-db -o jsonpath='{.data.DATABASE_URL}' | base64 -d
 
 # Test connection from pod
+
 kubectl exec -it deployment/current-account -- sh
+
 # Inside pod:
+
 # Check DATABASE_URL environment variable (don't log the value!)
+
 env | grep DATABASE_URL
-```
+```text
 
 ### Rotation Issues
 
 ```bash
+
 # Force External Secrets Operator to refresh
+
 kubectl annotate externalsecret current-account-db \
   force-sync=$(date +%s) --overwrite
 
 # Check secret update timestamp
+
 kubectl get secret current-account-db \
   -o jsonpath='{.metadata.creationTimestamp}'
-```
+```text
 
 ## References
 

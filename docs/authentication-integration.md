@@ -58,25 +58,27 @@ func main() {
 
     // Start server...
 }
-```
+```text
 
 ### 2. Set Environment Variables
 
 For local development (Tilt):
+
 ```bash
 export AUTH_MODE=jwks
 export JWKS_URL=http://keycloak:8080/realms/meridian/protocol/openid-connect/certs
 export JWKS_CACHE_TTL=1h
 export JWKS_REFRESH_TTL=30m
-```
+```text
 
 For production:
+
 ```bash
 export AUTH_MODE=jwks
 export JWKS_URL=https://your-auth-provider.com/.well-known/jwks.json
 export JWKS_CACHE_TTL=24h
 export JWKS_REFRESH_TTL=12h
-```
+```text
 
 ### 3. Extract User Information in Handlers
 
@@ -112,7 +114,7 @@ func (s *yourService) YourMethod(ctx context.Context, req *pb.Request) (*pb.Resp
     // Your business logic...
     return &pb.Response{}, nil
 }
-```
+```text
 
 ## Configuration
 
@@ -143,7 +145,7 @@ config := auth.Config{
     JWKSCacheTTL:   24 * time.Hour,
     JWKSRefreshTTL: 12 * time.Hour,
 }
-```
+```text
 
 #### OAuth Mode (For Service-to-Service Communication)
 
@@ -173,7 +175,7 @@ if err != nil {
 // Use token in outbound gRPC call
 md := metadata.Pairs("authorization", "Bearer "+token)
 ctx = metadata.NewOutgoingContext(ctx, md)
-```
+```text
 
 #### Disabled Mode (Testing Only)
 
@@ -183,7 +185,7 @@ Disables authentication for testing:
 config := auth.Config{
     Mode: auth.AuthModeDisabled,
 }
-```
+```text
 
 **⚠️ Never use disabled mode in production!**
 
@@ -211,7 +213,8 @@ type accountService struct {
     pb.UnimplementedAccountServiceServer
 }
 
-func (s *accountService) CreateAccount(ctx context.Context, req *pb.CreateAccountRequest) (*pb.CreateAccountResponse, error) {
+func (s *accountService) CreateAccount(ctx context.Context, req *pb.CreateAccountRequest) (*pb.CreateAccountResponse,
+error) {
     // Extract authenticated user
     userID, ok := auth.GetUserIDFromContext(ctx)
     if !ok {
@@ -297,7 +300,7 @@ func hasRole(roles []string, required string) bool {
     }
     return false
 }
-```
+```text
 
 ## Extracting User Information
 
@@ -315,7 +318,7 @@ scopes, ok := auth.GetScopesFromContext(ctx)
 
 // Get full claims object
 claims, ok := auth.GetClaimsFromContext(ctx)
-```
+```text
 
 ### Claims Structure
 
@@ -328,7 +331,7 @@ type Claims struct {
     // Standard JWT claims
     jwt.RegisteredClaims // Includes: Issuer, Subject, Audience, ExpiresAt, etc.
 }
-```
+```text
 
 ### Using Claims for Authorization
 
@@ -352,7 +355,7 @@ func (s *service) AdminOnlyMethod(ctx context.Context, req *pb.Request) (*pb.Res
     // Proceed with admin operation...
     return &pb.Response{}, nil
 }
-```
+```text
 
 ## Testing with Keycloak
 
@@ -366,12 +369,16 @@ When running `tilt up`, Keycloak is automatically configured with:
 - **Client ID**: meridian-service (public client - no secret required)
 - **JWKS Endpoint**: <http://localhost:18080/realms/meridian/protocol/openid-connect/certs>
 
-**Note**: The `meridian-service` client is configured as a **public client** for local development convenience. This allows password grant flow without requiring a client secret. In production, use confidential clients with proper secret management.
+**Note**: The `meridian-service` client is configured as a **public client** for local development convenience. This
+allows password grant flow without requiring a client secret. In production, use confidential clients with proper secret
+management.
 
 ### Getting a Test Token
 
 ```bash
+
 # Get access token for test user (no client secret needed for public client)
+
 TOKEN=$(curl -X POST 'http://localhost:18080/realms/meridian/protocol/openid-connect/token' \
   -d 'grant_type=password' \
   -d 'client_id=meridian-service' \
@@ -380,19 +387,21 @@ TOKEN=$(curl -X POST 'http://localhost:18080/realms/meridian/protocol/openid-con
   | jq -r '.access_token')
 
 echo $TOKEN
-```
+```text
 
 ### Making Authenticated gRPC Calls
 
 Using `grpcurl`:
 
 ```bash
+
 # Call with Bearer token
+
 grpcurl -H "Authorization: Bearer $TOKEN" \
   -plaintext localhost:9090 \
   meridian.v1.AccountService/CreateAccount \
   -d '{"name": "Test Account"}'
-```
+```text
 
 Using Go client:
 
@@ -409,18 +418,21 @@ ctx := metadata.NewOutgoingContext(context.Background(), md)
 resp, err := client.CreateAccount(ctx, &pb.CreateAccountRequest{
     Name: "Test Account",
 })
-```
+```text
 
 ### Decoding JWT Tokens
 
 View token contents:
 
 ```bash
+
 # Decode JWT (header.payload.signature)
+
 echo $TOKEN | cut -d. -f2 | base64 -d | jq
-```
+```text
 
 Expected claims:
+
 ```json
 {
   "sub": "user-uuid-here",
@@ -430,7 +442,7 @@ Expected claims:
   "exp": 1234571490,
   "aud": "meridian-service"
 }
-```
+```text
 
 ## Production Deployment
 
@@ -446,7 +458,7 @@ data:
   JWKS_URL: "https://your-auth-provider.com/.well-known/jwks.json"
   JWKS_CACHE_TTL: "24h"
   JWKS_REFRESH_TTL: "12h"
-```
+```text
 
 ### Kubernetes Deployment
 
@@ -459,15 +471,21 @@ spec:
   template:
     spec:
       containers:
+
       - name: service
+
         image: your-service:latest
         envFrom:
+
         - configMapRef:
+
             name: auth-config
         ports:
+
         - containerPort: 9090
+
           name: grpc
-```
+```text
 
 ### Security Best Practices
 
@@ -489,16 +507,18 @@ spec:
 **Cause**: No `Authorization` header in gRPC metadata
 
 **Solution**: Add Bearer token to metadata:
+
 ```go
 md := metadata.Pairs("authorization", "Bearer "+token)
 ctx := metadata.NewOutgoingContext(ctx, md)
-```
+```text
 
 #### "key not found"
 
 **Cause**: JWT `kid` header doesn't match any key in JWKS
 
 **Solutions**:
+
 - Verify JWKS URL is correct
 - Check if key has been rotated
 - Trigger manual refresh: restart service or wait for cache expiry
@@ -514,6 +534,7 @@ ctx := metadata.NewOutgoingContext(ctx, md)
 **Cause**: JWT signature doesn't match public key
 
 **Solutions**:
+
 - Verify JWKS URL points to correct realm/tenant
 - Check if token is from the correct issuer
 - Ensure JWKS cache hasn't served stale keys
@@ -533,7 +554,7 @@ claims, ok := auth.GetClaimsFromContext(ctx)
 if ok {
     log.Printf("Authenticated user: %s, roles: %v", claims.UserID, claims.Roles)
 }
-```
+```text
 
 ### Health Checks
 
@@ -541,33 +562,41 @@ Monitor JWKS endpoint availability:
 
 ```bash
 curl -f http://keycloak:8080/realms/meridian/protocol/openid-connect/certs
-```
+```text
 
 Check if service can fetch keys:
+
 ```bash
 kubectl logs -f deployment/your-service | grep -i jwks
-```
+```text
 
 ### Testing Authentication
 
 Test without authentication (should fail):
+
 ```bash
 grpcurl -plaintext localhost:9090 \
   meridian.v1.AccountService/CreateAccount \
   -d '{"name": "Test"}'
+
 # Expected: Code 16 (Unauthenticated)
-```
+
+```text
 
 Test with invalid token (should fail):
+
 ```bash
 grpcurl -H "Authorization: Bearer invalid-token" \
   -plaintext localhost:9090 \
   meridian.v1.AccountService/CreateAccount \
   -d '{"name": "Test"}'
+
 # Expected: Code 16 (Unauthenticated)
-```
+
+```text
 
 Test with valid token (should succeed):
+
 ```bash
 TOKEN=$(curl -X POST 'http://localhost:18080/realms/meridian/protocol/openid-connect/token' \
   -d 'grant_type=password' \
@@ -580,8 +609,10 @@ grpcurl -H "Authorization: Bearer $TOKEN" \
   -plaintext localhost:9090 \
   meridian.v1.AccountService/CreateAccount \
   -d '{"name": "Test"}'
+
 # Expected: Success
-```
+
+```text
 
 ## Additional Resources
 
@@ -594,6 +625,7 @@ grpcurl -H "Authorization: Bearer $TOKEN" \
 ## Support
 
 For issues or questions:
+
 1. Check this documentation first
 2. Review the [Security Guidelines](../SECURITY.md)
 3. Search existing GitHub issues

@@ -8,7 +8,7 @@ To install these hooks for your local repository:
 
 ```bash
 ./.githooks/install.sh
-```
+```text
 
 This will copy the hooks to your `.git/hooks/` directory.
 
@@ -53,7 +53,7 @@ If you absolutely need to skip hooks (not recommended):
 
 ```bash
 git commit --no-verify -m "your message"
-```
+```text
 
 **Warning**: This bypasses all quality checks and may break CI.
 
@@ -65,7 +65,7 @@ Check if the hook is installed and executable:
 
 ```bash
 ls -la .git/hooks/pre-commit
-```
+```text
 
 If missing, run `./.githooks/install.sh`
 
@@ -75,7 +75,7 @@ Make the hook executable:
 
 ```bash
 chmod +x .git/hooks/pre-commit
-```
+```text
 
 ### golangci-lint not found
 
@@ -84,7 +84,7 @@ The hook should auto-install, but you can manually install:
 ```bash
 curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
   | sh -s -- -b $(go env GOPATH)/bin v2.5.0
-```
+```text
 
 ## CI Integration
 

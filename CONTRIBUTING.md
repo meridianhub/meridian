@@ -19,153 +19,189 @@ Run the setup verification script to check your environment:
 
 ```bash
 ./scripts/setup-check.sh
-```
+```text
 
 If tools are missing, install them automatically (macOS/Linux):
 
 ```bash
 ./scripts/install-tools.sh
-```
+```text
 
 ### Manual Setup
 
 #### 1. Core Tools
 
 **Go 1.23+**
+
 ```bash
+
 # macOS
+
 brew install go
 
 # Linux
+
 sudo apt-get install golang-go
-```
+```text
 
 **Make and Git**
+
 ```bash
+
 # macOS (pre-installed)
+
 # Linux
+
 sudo apt-get install build-essential git
-```
+```text
 
 #### 2. Container & Kubernetes
 
 **Docker**
+
 ```bash
+
 # macOS
+
 brew install --cask docker
 
 # Linux
+
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
-```
+```text
 
 **Kubernetes Cluster**:
+
 ```bash
+
 # Option 1: Kind with ctlptl and local registry (Recommended)
+
 brew install kind
 brew install tilt-dev/tap/ctlptl
 ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Option 2: Docker Desktop
+
 # Enable Kubernetes in Docker Desktop settings
 
 # Option 3: minikube
+
 brew install minikube
 minikube start
-```
+```text
 
 **kubectl and Helm**
+
 ```bash
 brew install kubectl helm
-```
+```text
 
 **Tilt** (for local development)
+
 ```bash
 brew install tilt-dev/tap/tilt
-```
+```text
 
 #### 3. API Development Tools
 
 **buf CLI** (Protocol Buffers)
+
 ```bash
 brew install bufbuild/buf/buf
-```
+```text
 
 **protoc** (Protocol Buffer compiler)
+
 ```bash
 brew install protobuf
-```
+```text
 
 #### 4. Code Quality Tools
 
 **golangci-lint**
+
 ```bash
 brew install golangci-lint
-```
+```text
 
 #### 5. Project Setup
 
 ```bash
+
 # Clone repository
+
 git clone git@github.com:meridianhub/meridian.git
 cd meridian
 
 # Install Go dependencies
+
 go mod download
 
 # Install git hooks
+
 .githooks/install.sh
 
 # Generate protobuf code
+
 make proto
 
 # Run tests to verify setup
+
 make test
-```
+```text
 
 ## Development Workflow
 
 ### Standard Workflow
 
 1. **Create a feature branch**
+
    ```bash
    git checkout -b feature/my-feature
-   ```
+```text
 
-2. **Make changes following code standards**
+1. **Make changes following code standards**
 
-3. **Run tests and linters**
+1. **Run tests and linters**
+
    ```bash
    make test
    make lint
-   ```
+```text
 
-4. **Commit changes** (pre-commit hooks will run automatically)
+1. **Commit changes** (pre-commit hooks will run automatically)
+
    ```bash
    git add .
    git commit -m "feat: add new feature"
-   ```
+```text
 
-5. **Push and create PR**
+1. **Push and create PR**
+
    ```bash
    git push origin feature/my-feature
    gh pr create
-   ```
+```text
 
 ### Local Development with Tilt
 
 For rapid iteration with Kubernetes:
 
 ```bash
+
 # Start development environment
+
 tilt up
 
 # Edit code - changes hot-reload automatically
+
 # View logs and resources in Tilt UI: http://localhost:10350
 
 # Stop environment
+
 tilt down
-```
+```text
 
 See [docs/skills/tilt.md](docs/skills/tilt.md) for detailed Tilt usage.
 
@@ -174,32 +210,42 @@ See [docs/skills/tilt.md](docs/skills/tilt.md) for detailed Tilt usage.
 When modifying API definitions:
 
 ```bash
+
 # Lint protobuf files
+
 make proto-lint
 
 # Check for breaking changes
+
 make proto-breaking
 
 # Generate Go code
+
 make proto
 
 # Run tests to verify
+
 make test
-```
+```text
 
 ### Browsing Code Documentation
 
 View Go package documentation locally:
 
 ```bash
+
 # Start local documentation server
+
 make docs
 
 # Access at http://localhost:6060/github.com/meridianhub/meridian
+
 # Press Ctrl+C to stop
-```
+
+```text
 
 The documentation server provides a local version of pkg.go.dev for browsing:
+
 - All exported types, functions, and methods
 - Package-level documentation
 - Code examples
@@ -224,7 +270,7 @@ make proto-lint    # Lint protobuf files
 make docker-build  # Build Docker image
 make docs          # Start local documentation server
 make clean         # Clean build artifacts
-```
+```text
 
 ## Code Standards
 
@@ -238,7 +284,8 @@ make clean         # Clean build artifacts
 
 ### Immutability and Functional Programming Principles
 
-**Immutability First**: Prefer immutable data structures wherever possible. While Go lacks Java's `final` keyword, we enforce immutability through coding patterns and conventions.
+**Immutability First**: Prefer immutable data structures wherever possible. While Go lacks Java's `final` keyword, we
+enforce immutability through coding patterns and conventions.
 
 #### Immutability Guidelines
 
@@ -289,9 +336,9 @@ make clean         # Clean build artifacts
    func (m *Money) SetUnits(units int64) {
        m.Units = units  // Mutation!
    }
-   ```
+```text
 
-2. **Use Value Receivers, Not Pointer Receivers**
+1. **Use Value Receivers, Not Pointer Receivers**
    - Use value receivers for immutable types
    - Only use pointer receivers when mutation is explicitly required
    - Exception: Large structs where copying is expensive (document why)
@@ -310,9 +357,9 @@ make clean         # Clean build artifacts
    func (a *Account) SetBalance(newBalance Money) {
        a.balance = newBalance
    }
-   ```
+```text
 
-3. **Avoid Mutable Slices and Maps in Structs**
+1. **Avoid Mutable Slices and Maps in Structs**
    - Don't expose internal slices/maps directly
    - Return copies of internal collections
    - Accept parameters as values, not pointers to collections
@@ -336,9 +383,9 @@ make clean         # Clean build artifacts
        ID       string
        Postings []Posting  // Can be modified externally!
    }
-   ```
+```text
 
-4. **Constructor Functions for Complex Initialization**
+1. **Constructor Functions for Complex Initialization**
    - Use `NewX()` constructors that return fully initialized, valid instances
    - Validate inputs in constructors
    - Return errors for invalid states rather than creating invalid objects
@@ -357,9 +404,9 @@ make clean         # Clean build artifacts
            createdAt:  time.Now(),
        }, nil
    }
-   ```
+```text
 
-5. **Functional Transformations Over Mutations**
+1. **Functional Transformations Over Mutations**
    - Use `map`, `filter`, `reduce` patterns
    - Chain transformations returning new values
    - Avoid loops that mutate shared state
@@ -380,7 +427,7 @@ make clean         # Clean build artifacts
            postings[i].Amount = postings[i].Amount.Mul(feeRate)
        }
    }
-   ```
+```text
 
 #### When Mutation Is Acceptable
 
@@ -404,7 +451,7 @@ func (b *AccountBuilder) Build() Account {
     // Return immutable copy
     return b.account
 }
-```
+```text
 
 #### Code Review Checklist for Immutability
 
@@ -430,12 +477,12 @@ We follow strict TDD practices to ensure code quality, correctness, and maintain
    - Test should fail for the right reason (not compile error)
    - Verify the test fails by running it
 
-2. **Green**: Write minimal code to make the test pass
+1. **Green**: Write minimal code to make the test pass
    - Implement just enough to make the test pass
    - Don't worry about elegance yet
    - All tests must pass
 
-3. **Refactor**: Improve code quality without changing behavior
+1. **Refactor**: Improve code quality without changing behavior
    - Apply immutability principles
    - Remove duplication
    - Improve naming and structure
@@ -482,11 +529,12 @@ func (m Money) Add(other Money) Money {
     }
 }
 // Run test: STILL PASSES
-```
+```text
 
 #### TDD Best Practices
 
 1. **Write Test Names as Specifications**
+
    ```go
    // Good: Clear specification of behavior
    func TestAccount_Deposit_PositiveAmount_IncreasesBalance(t *testing.T)
@@ -494,9 +542,10 @@ func (m Money) Add(other Money) Money {
 
    // Bad: Vague test name
    func TestDeposit(t *testing.T)
-   ```
+```text
 
-2. **One Assertion Focus Per Test**
+1. **One Assertion Focus Per Test**
+
    ```go
    // Good: Single focused assertion
    func TestMoney_Add_SameCurrency_ReturnsCorrectUnits(t *testing.T) {
@@ -508,9 +557,10 @@ func (m Money) Add(other Money) Money {
        result := NewMoney("GBP", 100, 0).Add(NewMoney("GBP", 50, 0))
        assert.Equal(t, "GBP", result.Currency())
    }
-   ```
+```text
 
-3. **Test Immutability**
+1. **Test Immutability**
+
    ```go
    func TestMoney_Add_DoesNotMutateOriginal(t *testing.T) {
        m1 := NewMoney("GBP", 100, 0)
@@ -520,9 +570,10 @@ func (m Money) Add(other Money) Money {
 
        assert.Equal(t, original.Units(), m1.Units(), "original should not be mutated")
    }
-   ```
+```text
 
-4. **Write Tests Before Fixing Bugs**
+1. **Write Tests Before Fixing Bugs**
+
    ```go
    // 1. Reproduce the bug with a failing test
    func TestAccount_ConcurrentDeposits_MaintainsConsistency(t *testing.T) {
@@ -531,7 +582,7 @@ func (m Money) Add(other Money) Money {
 
    // 2. Fix the code to make test pass
    // 3. Refactor if needed
-   ```
+```text
 
 #### Test Organization
 
@@ -544,9 +595,11 @@ func (m Money) Add(other Money) Money {
 
 #### Defensive Testing: Happy Path AND Unhappy Path
 
-**Principle**: Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious inputs.
+**Principle**: Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious
+inputs.
 
-> 📖 **See [ADR-008: Defensive Testing Standards](docs/adr/0008-defensive-testing-standards.md)** for comprehensive guidelines, examples, and rationale.
+> 📖 **See [ADR-008: Defensive Testing Standards](docs/adr/0008-defensive-testing-standards.md)** for comprehensive
+guidelines, examples, and rationale.
 
 We follow **defensive testing** practices:
 
@@ -747,15 +800,17 @@ func TestAccount_Deposit_DefensiveTests(t *testing.T) {
         })
     }
 }
-```
+```text
 
 **Rationale Documentation**:
+
 - Every test case should include a `rationale` field explaining WHY this case matters
 - Document assumptions being tested ("assumes negative amounts are debts")
 - Note edge cases that caught bugs in other systems
 - Reference requirements or specifications when applicable
 
 **When to Apply Defensive Testing**:
+
 - ✅ All public APIs and domain model constructors
 - ✅ Financial calculations (money, interest, balances)
 - ✅ Currency operations (conversion, validation)
@@ -766,6 +821,7 @@ func TestAccount_Deposit_DefensiveTests(t *testing.T) {
 - ✅ Network boundaries (malformed data, timeouts)
 
 **Red Flags Requiring Unhappy Path Tests**:
+
 - Functions that accept numeric inputs (test overflow, underflow, zero, negative)
 - Functions that accept strings (test empty, whitespace, special chars, very long)
 - Functions that return errors (test every error path)
@@ -817,7 +873,7 @@ func TestAccountService_CreateAccount_ValidInput_ReturnsImmutableAccount(t *test
         })
     }
 }
-```
+```text
 
 ### Protocol Buffer Standards
 
@@ -832,15 +888,16 @@ func TestAccountService_CreateAccount_ValidInput_ReturnsImmutableAccount(t *test
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):
 
-```
+```text
 <type>: <description>
 
 [optional body]
 
 [optional footer]
-```
+```text
 
 **Types:**
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
@@ -850,67 +907,82 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 - `perf`: Performance improvements
 
 **Examples:**
-```
+
+```text
 feat: add position keeping batch operations
 
 Implements bulk import for transaction logs with validation
 and audit trail support.
 
 Closes #123
-```
+```text
 
-```
+```text
 fix: correct double-entry posting logic
 
 Ensure credit and debit postings are atomic and balanced.
-```
+```text
 
 ## Testing
 
 ### Running Tests
 
 ```bash
+
 # All tests
+
 make test
 
 # Unit tests only
+
 make test-unit
 
 # Integration tests only
+
 make test-integration
 
 # With coverage
+
 make test-coverage
 
 # Specific package
+
 go test ./internal/accounting/...
 
 # Specific test
+
 go test -run TestAccountService_CreateAccount ./internal/...
 
 # Run tests without -short flag (includes timing-sensitive tests)
+
 go test ./...
-```
+```text
 
 ### Timing-Sensitive Tests
 
-Some tests validate time-based behavior (e.g., exponential backoff, jitter, timeouts) and are sensitive to CPU scheduler variance in CI environments.
+Some tests validate time-based behavior (e.g., exponential backoff, jitter, timeouts) and are sensitive to CPU
+scheduler variance in CI environments.
 
 **Local Development:**
+
 - Run full test suite without `-short` flag: `go test ./...`
 - This includes all timing validation tests
 
 **CI Environment:**
+
 - Tests run with `-short` flag to skip timing-sensitive tests
 - Functional correctness is still validated (retry attempts, error handling, context cancellation)
 
 **Before Committing Timing-Sensitive Changes:**
+
 1. Run tests without `-short` flag locally: `go test ./...`
 2. Verify timing assertions pass consistently
 3. If tests are flaky locally, they will definitely flake in CI
 
 **Writing Timing-Sensitive Tests:**
+
 - Add `testing.Short()` guard at the start:
+
   ```go
   func TestRetryExponentialBackoff(t *testing.T) {
       if testing.Short() {
@@ -918,7 +990,8 @@ Some tests validate time-based behavior (e.g., exponential backoff, jitter, time
       }
       // ... timing assertions ...
   }
-  ```
+```text
+
 - Use generous tolerance ranges (±30% or more for CI variance)
 - Document why specific tolerance values are chosen
 - Test functional behavior separately without timing assertions
@@ -933,7 +1006,7 @@ Some tests validate time-based behavior (e.g., exponential backoff, jitter, time
 
 ### Test Organization
 
-```
+```text
 internal/
 ├── accounting/
 │   ├── service.go
@@ -942,7 +1015,7 @@ internal/
 │   └── testdata/             # Test fixtures
 │       ├── accounts.json
 │       └── transactions.json
-```
+```text
 
 ## Pull Request Process
 
@@ -968,22 +1041,28 @@ internal/
 ### PR Template
 
 ```markdown
+
 ## Summary
+
 Brief description of changes
 
 ## Motivation
+
 Why this change is needed
 
 ## Changes
+
 - Change 1
 - Change 2
 
 ## Testing
+
 How the changes were tested
 
 ## Related Issues
+
 Closes #123
-```
+```text
 
 ### Review Process
 
@@ -1010,6 +1089,7 @@ Create an Architecture Decision Record (ADR) when making decisions about:
 Use [MADR (Markdown Any Decision Records)](https://adr.github.io/madr/):
 
 ```markdown
+
 # [Short title]
 
 ## Context and Problem Statement
@@ -1034,11 +1114,13 @@ Chosen option: "option 1", because [justification]
 
 - Good, because [positive outcome]
 - Bad, because [negative outcome]
-```
+
+```text
 
 ### ADR Location
 
 Place ADRs in `docs/adr/` with numbering:
+
 - `docs/adr/0001-record-architecture-decisions.md`
 - `docs/adr/0002-microservices-per-bian-domain.md`
 - `docs/adr/0003-database-schema-migrations.md`
@@ -1052,7 +1134,8 @@ Place ADRs in `docs/adr/` with numbering:
 
 ## Code of Conduct
 
-Be respectful, professional, and collaborative. This is a learning project—questions and mistakes are opportunities for growth.
+Be respectful, professional, and collaborative. This is a learning project—questions and mistakes are opportunities for
+growth.
 
 ## License
 

@@ -1,18 +1,22 @@
 # ADR 0010: gRPC Client-Side Load Balancing with Headless Services
 
+<!-- markdownlint-disable MD003 -->
 ---
 name: adr-010-grpc-load-balancing
 description: Client-side load balancing for gRPC using Kubernetes headless services
 triggers:
-  - Configuring gRPC client connections
-  - Implementing inter-service communication
-  - Load balancing gRPC requests
-  - Scaling microservices
+
+- Configuring gRPC client connections
+- Implementing inter-service communication
+- Load balancing gRPC requests
+- Scaling microservices
+
 instructions: |
   Use pkg/platform/grpc.NewClient() for all inter-service gRPC connections.
   Configure Kubernetes services as headless (clusterIP: None).
-  DNS returns all pod IPs for round_robin load balancing.
+  DNS returns all pod IPs for round_robin load balancing
 ---
+<!-- markdownlint-enable MD003 -->
 
 ## Status
 
@@ -20,13 +24,17 @@ Accepted
 
 ## Context
 
-Meridian microservices communicate via gRPC and run as stateless pods in Kubernetes. Without proper load balancing configuration, gRPC's HTTP/2 connection reuse can cause uneven traffic distribution - all requests from one client flow through a single long-lived connection to one pod, leaving other pods idle even under high load.
+Meridian microservices communicate via gRPC and run as stateless pods in Kubernetes. Without proper load balancing
+configuration, gRPC's HTTP/2 connection reuse can cause uneven traffic distribution - all requests from one client flow
+through a single long-lived connection to one pod, leaving other pods idle even under high load.
 
 ### Problem
 
-- **Default Kubernetes behavior**: ClusterIP services use iptables/IPVS for L4 load balancing, which balances connections (not requests)
+- **Default Kubernetes behavior**: ClusterIP services use iptables/IPVS for L4 load balancing, which balances
+connections (not requests)
 - **gRPC HTTP/2 multiplexing**: Single connection carries many requests, defeating L4 load balancing
-- **Consequence**: Horizontal pod scaling doesn't improve performance - new pods receive no traffic from existing client connections
+- **Consequence**: Horizontal pod scaling doesn't improve performance - new pods receive no traffic from existing
+client connections
 
 ### Requirements
 
@@ -43,12 +51,12 @@ Implement **client-side load balancing** using:
    - DNS returns all pod IPs instead of single cluster IP
    - Clients can connect directly to individual pods
 
-2. **DNS resolver with round_robin policy**
+1. **DNS resolver with round_robin policy**
    - gRPC clients use `dns:///` scheme for service discovery
    - `{"loadBalancingPolicy":"round_robin"}` distributes requests evenly
    - DNS-based discovery automatically picks up pod changes
 
-3. **Centralized client factory** (`pkg/platform/grpc/client.go`)
+1. **Centralized client factory** (`pkg/platform/grpc/client.go`)
    - Enforces consistent configuration across services
    - Encapsulates DNS target construction
    - Provides sensible defaults (keepalive, timeout, blocking dial)
@@ -68,48 +76,60 @@ spec:
   type: ClusterIP
   clusterIP: None  # Headless for client-side load balancing
   ports:
+
   - name: grpc
+
     port: 50052
     targetPort: grpc
   selector:
     app: financial-accounting
-```
+```text
 
 ### RBAC Requirements
 
 Client-side load balancing via DNS requires minimal RBAC permissions:
 
-**ServiceAccount**: Each service runs with the `meridian` ServiceAccount (configured in `deployments/k8s/base/serviceaccount.yaml`):
+**ServiceAccount**: Each service runs with the `meridian` ServiceAccount (configured in
+`deployments/k8s/base/serviceaccount.yaml`):
+
 - `automountServiceAccountToken: true` - Required for in-cluster DNS resolution
 
 **DNS Resolution**: Built into Kubernetes - no additional RBAC permissions needed:
+
 - DNS queries for headless services use cluster DNS (CoreDNS/kube-dns)
 - Pod can resolve `service-name.namespace.svc.cluster.local` without explicit permissions
 - DNS returns all pod IPs for headless services automatically
 
 **Current RBAC Policy** (`deployments/k8s/base/role.yaml`):
+
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: meridian
 rules:
+
 # DNS resolution requires no explicit permissions
+
 # CoreDNS handles service discovery transparently
 
 # Application permissions (minimal)
+
 - apiGroups: [""]
+
   resources: ["configmaps"]
   verbs: ["get", "watch"]
   resourceNames: ["meridian-config", "meridian-build-info"]
 
 - apiGroups: [""]
+
   resources: ["secrets"]
   verbs: ["get"]
   resourceNames: ["meridian-secrets"]
-```
+```text
 
 **Key Points**:
+
 - DNS-based load balancing works without additional RBAC permissions
 - No need for Endpoints or Service resource access
 - Cluster DNS handles headless service resolution automatically
@@ -131,9 +151,10 @@ if err != nil {
 defer conn.Close()
 
 client := accountingv1.NewFinancialAccountingServiceClient(conn)
-```
+```text
 
 The client factory automatically:
+
 - Constructs DNS target: `dns:///financial-accounting.default.svc.cluster.local:50052`
 - Applies round_robin load balancing policy
 - Configures keepalive for connection health
@@ -156,7 +177,7 @@ conn, err := platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
     ServiceName: "financial-accounting",
     Port:        50052,
 })
-```
+```text
 
 **Service Constants**: Define service connection configs as constants:
 
@@ -166,7 +187,7 @@ const (
     PositionKeepingPort    = 50053
     CurrentAccountPort     = 50051
 )
-```
+```text
 
 **Dependency Injection**: Create clients in main.go, inject into services:
 
@@ -191,11 +212,12 @@ func main() {
     svc := service.NewCurrentAccountService(repo, posClient, eventPub)
     // ...
 }
-```
+```text
 
 ### Validation Criteria
 
 Load testing confirms:
+
 - ✅ Requests distribute evenly across all pods (within 5% variance)
 - ✅ Scaling from 2→5 replicas automatically adds connections
 - ✅ No idle pods under sustained load
@@ -208,6 +230,7 @@ Load testing confirms:
 **Current Implementation**: Uses `insecure.NewCredentials()` for internal cluster communication.
 
 **Rationale**:
+
 - Internal services communicate within trusted Kubernetes cluster network
 - Network policies restrict pod-to-pod communication
 - TLS termination handled at ingress layer for external traffic
@@ -219,15 +242,16 @@ Load testing confirms:
    - Zero-trust security model
    - Encrypted inter-service communication
 
-2. **Manual TLS Configuration**: If not using service mesh:
+1. **Manual TLS Configuration**: If not using service mesh:
+
    ```go
    import "google.golang.org/grpc/credentials"
 
    creds, err := credentials.NewClientTLSFromFile("ca.pem", "")
    conn, err := grpc.NewClient(cfg, grpc.WithTransportCredentials(creds))
-   ```
+```text
 
-3. **Certificate Management**:
+1. **Certificate Management**:
    - Use cert-manager for automatic certificate provisioning
    - Rotate certificates before expiration
    - Monitor certificate validity in observability stack
@@ -266,11 +290,13 @@ Load testing confirms:
 ### Service Mesh (Istio, Linkerd)
 
 **Rejected** for reference implementation due to:
+
 - Operational complexity (sidecars, control plane, upgrades)
 - Performance overhead (additional proxy hop)
 - Overkill for internal gRPC-only communication
 
 **When to reconsider**:
+
 - Need for advanced routing (weighted, canary, circuit breaking)
 - mTLS required for zero-trust security model
 - Multi-cluster or multi-region deployment
@@ -278,6 +304,7 @@ Load testing confirms:
 ### Envoy Proxy Sidecar
 
 **Rejected** as middle ground between no mesh and full mesh:
+
 - Still requires sidecar injection and configuration
 - Misses advanced Istio features while retaining operational burden
 - Client-side balancing simpler for current requirements
@@ -285,6 +312,7 @@ Load testing confirms:
 ### Server-Side Load Balancer (gRPC-LB, Envoy xDS)
 
 **Rejected** due to:
+
 - Requires separate load balancer infrastructure
 - Additional network hop and failure point
 - Complexity not justified by current scale

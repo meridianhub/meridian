@@ -4,7 +4,7 @@ This directory contains Protocol Buffer (protobuf) definitions for all Meridian 
 
 ## Directory Structure
 
-```
+```text
 api/proto/
 ├── meridian/
 │   ├── common/v1/              # Common types shared across services
@@ -15,7 +15,7 @@ api/proto/
 │       ├── financial_accounting/v1/
 │       ├── position_keeping/v1/
 │       └── current_account/v1/
-```
+```text
 
 ## Tooling
 
@@ -28,30 +28,35 @@ Meridian uses [buf](https://buf.build) for protobuf management:
 ### Available Commands
 
 ```bash
+
 # Generate Go code from proto definitions
+
 make proto
 
 # Lint proto files
+
 make proto-lint
 
 # Check for breaking changes against develop branch
+
 make proto-breaking
 
 # Install all protobuf tools
+
 make install
-```
+```text
 
 ## Code Generation
 
 Generated code is placed alongside proto definitions:
 
-```
+```text
 api/proto/meridian/common/v1/
 ├── health.proto          # Source definition
 ├── health.pb.go          # Generated protobuf code
 ├── health_grpc.pb.go     # Generated gRPC service code
 └── health.pb.validate.go # Generated validation code
-```
+```text
 
 **Note**: Generated files (`*.pb.go`) are committed to version control for reproducibility.
 
@@ -67,7 +72,7 @@ syntax = "proto3";
 package meridian.financial_accounting.v1;
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
-```
+```text
 
 ### Directory Structure
 
@@ -114,7 +119,7 @@ message CheckResponse {
   // status is the health status of the service.
   ServingStatus status = 1;
 }
-```
+```text
 
 ## Breaking Change Detection
 
@@ -122,7 +127,7 @@ Buf compares proto changes against the `develop` branch to detect breaking chang
 
 ```bash
 make proto-breaking
-```
+```text
 
 This prevents accidental API breakages before merging to develop.
 

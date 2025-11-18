@@ -6,19 +6,23 @@
 
 ## Executive Summary
 
-The current codebase violates immutability principles extensively. All domain models use mutable patterns with exported fields and pointer receivers for state modification. This audit identifies violations and proposes immutable refactoring.
+The current codebase violates immutability principles extensively. All domain models use mutable patterns with exported
+fields and pointer receivers for state modification. This audit identifies violations and proposes immutable
+refactoring.
 
 ## Critical Violations
 
 ### 1. CurrentAccount Domain (`internal/current-account/domain/account.go`)
 
 **Violations**:
+
 - ❌ **Exported Struct Fields** (lines 39-53): All fields are public, allowing external mutation
 - ❌ **Pointer Return from Constructor** (line 56): `NewCurrentAccount` returns `*CurrentAccount`
 - ❌ **Mutable Methods**: `Deposit()`, `Withdraw()`, `SetOverdraftLimit()` all use pointer receivers and mutate state
 - ❌ **Direct Field Mutation** (lines 103, 107-108, 136, 140-141): Direct assignment to fields
 
 **Example Violation**:
+
 ```go
 // CURRENT (MUTABLE)
 type CurrentAccount struct {
@@ -33,9 +37,10 @@ func (a *CurrentAccount) Deposit(amount Money) error {  // ❌ Pointer receiver
     a.UpdatedAt = time.Now()                             // ❌ Mutation
     return nil
 }
-```
+```text
 
 **Recommended Fix**:
+
 ```go
 // IMMUTABLE VERSION
 type CurrentAccount struct {
@@ -69,24 +74,27 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 // ✅ Accessors for unexported fields
 func (a CurrentAccount) Balance() Money { return a.balance }
 func (a CurrentAccount) Status() AccountStatus { return a.status }
-```
+```text
 
 ### 2. Money Type (`internal/current-account/domain/account.go:32-35`)
 
 **Violations**:
+
 - ❌ **Exported Fields**: `AmountCents`, `Currency` are public
 - ❌ **No Constructor**: Direct struct literal construction allowed
 - ❌ **No Validation**: Invalid money can be created
 
 **Current**:
+
 ```go
 type Money struct {
     AmountCents int64   // ❌ Exported
     Currency    string  // ❌ Exported
 }
-```
+```text
 
 **Recommended**:
+
 ```go
 type Money struct {
     amountCents int64   // ✅ Unexported
@@ -117,16 +125,18 @@ func (m Money) Add(other Money) (Money, error) {
 // Accessors
 func (m Money) AmountCents() int64 { return m.amountCents }
 func (m Money) Currency() string { return m.currency }
-```
+```text
 
 ### 3. LedgerPosting Domain (`internal/financial-accounting/domain/ledger_posting.go`)
 
 **Violations**:
+
 - ❌ **Exported Fields** (lines 26-36): All fields public
 - ❌ **Pointer Return** (line 46): Constructor returns `*LedgerPosting`
 - ❌ **Mutable Methods**: `Post()`, `Fail()` mutate via pointer receivers (lines 73, 84)
 
 **Current**:
+
 ```go
 type LedgerPosting struct {
     ID        uuid.UUID         // ❌ Exported
@@ -140,9 +150,10 @@ func (p *LedgerPosting) Post(result string) error {  // ❌ Pointer receiver
     p.PostingResult = result                         // ❌ Mutation
     return nil
 }
-```
+```text
 
 **Recommended**:
+
 ```go
 type LedgerPosting struct {
     id        uuid.UUID         // ✅ Unexported
@@ -169,7 +180,7 @@ func (p LedgerPosting) Post(result string) (LedgerPosting, error) {  // ✅ Valu
 func (p LedgerPosting) ID() uuid.UUID { return p.id }
 func (p LedgerPosting) Amount() Money { return p.amount }
 func (p LedgerPosting) Status() TransactionStatus { return p.status }
-```
+```text
 
 ### 4. Financial Accounting Money Type (`internal/financial-accounting/domain/money.go`)
 
@@ -185,7 +196,7 @@ type Money struct {
 func (m Money) Add(other Money) (Money, error) {  // ✅ Value receiver, returns new
     // ... implementation
 }
-```
+```text
 
 This implementation already follows immutability principles and should be the model for refactoring.
 
@@ -194,15 +205,17 @@ This implementation already follows immutability principles and should be the mo
 The mutable domain models create issues in the persistence layer:
 
 ### Current Pattern (Mutable):
+
 ```go
 func (r *Repository) GetAccount(id string) (*CurrentAccount, error) {
     var acc CurrentAccount
     err := r.db.QueryRow("SELECT ...").Scan(&acc.ID, &acc.Balance, ...)
     return &acc, err  // Returns mutable pointer
 }
-```
+```text
 
 ### Immutable Pattern:
+
 ```go
 func (r *Repository) GetAccount(id string) (CurrentAccount, error) {
     // Builder pattern for database scanning
@@ -227,16 +240,18 @@ func (b accountBuilder) Build() CurrentAccount {
         // ...
     }
 }
-```
+```text
 
 ## Impact Assessment
 
 ### Breaking Changes
+
 - **Public API**: Methods that returned pointers now return values
 - **Method Signatures**: Methods return `(T, error)` instead of `error`
 - **Repository Layer**: Must adapt to value-based domain models
 
 ### Benefits
+
 - **Thread Safety**: Immutable values are inherently thread-safe
 - **Testability**: Easier to test without side effects
 - **Reasoning**: Functions are pure, easier to understand
@@ -245,6 +260,7 @@ func (b accountBuilder) Build() CurrentAccount {
 ## Refactoring Plan
 
 ### Phase 1: Core Domain Types (This PR)
+
 1. ✅ Update `CONTRIBUTING.md` with immutability guidelines
 2. Refactor `Money` types to be immutable with accessors
 3. Refactor `CurrentAccount` domain model
@@ -252,12 +268,14 @@ func (b accountBuilder) Build() CurrentAccount {
 5. Write comprehensive tests for immutability
 
 ### Phase 2: Repository Adapters (Follow-up PR)
+
 1. Update repository interfaces to use values
 2. Implement builder patterns for database scanning
 3. Update service layers
 4. Integration tests
 
 ### Phase 3: gRPC/API Boundaries (Follow-up PR)
+
 1. Update adapters between proto and domain
 2. Ensure proto → domain conversion creates immutable instances
 3. Update all service implementations
@@ -267,6 +285,7 @@ func (b accountBuilder) Build() CurrentAccount {
 For each refactored type, write tests that verify:
 
 1. **Immutability**: Original instance unchanged after operations
+
 ```go
 func TestCurrentAccount_Deposit_DoesNotMutateOriginal(t *testing.T) {
     original := NewCurrentAccount(...)
@@ -277,9 +296,10 @@ func TestCurrentAccount_Deposit_DoesNotMutateOriginal(t *testing.T) {
     assert.Equal(t, originalBalance, original.Balance(),
         "original account balance should not be mutated")
 }
-```
+```text
 
-2. **Value Semantics**: Copy behaves correctly
+1. **Value Semantics**: Copy behaves correctly
+
 ```go
 func TestCurrentAccount_CopyIndependence(t *testing.T) {
     acc1 := NewCurrentAccount(...)
@@ -290,19 +310,21 @@ func TestCurrentAccount_CopyIndependence(t *testing.T) {
     assert.NotEqual(t, acc1.Balance(), acc2.Balance(),
         "modifying copy should not affect original")
 }
-```
+```text
 
-3. **Constructor Validation**: Invalid states prevented
+1. **Constructor Validation**: Invalid states prevented
+
 ```go
 func TestNewMoney_EmptyCurrency_ReturnsError(t *testing.T) {
     _, err := NewMoney("", 100)
     assert.Error(t, err)
 }
-```
+```text
 
 ## Files Requiring Changes
 
 ### Immediate (This PR):
+
 - `internal/current-account/domain/account.go` - Full refactor
 - `internal/current-account/domain/account_test.go` - Add immutability tests
 - `internal/financial-accounting/domain/ledger_posting.go` - Full refactor
@@ -310,6 +332,7 @@ func TestNewMoney_EmptyCurrency_ReturnsError(t *testing.T) {
 - Consider unifying Money types (two different implementations exist)
 
 ### Follow-up PRs:
+
 - All repository implementations
 - All service implementations
 - All adapter layers
@@ -324,4 +347,5 @@ func TestNewMoney_EmptyCurrency_ReturnsError(t *testing.T) {
 
 ## Conclusion
 
-The codebase requires systematic refactoring to enforce immutability. The financial-accounting Money type demonstrates the target pattern. This audit provides the foundation for red-green-refactor TDD approach to implement these changes.
+The codebase requires systematic refactoring to enforce immutability. The financial-accounting Money type demonstrates
+the target pattern. This audit provides the foundation for red-green-refactor TDD approach to implement these changes.
