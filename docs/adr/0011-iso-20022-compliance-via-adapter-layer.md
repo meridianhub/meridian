@@ -114,7 +114,7 @@ External Systems (ISO 20022)
 
 ### Implementation Strategy
 
-#### Phase 1: Core ISO 20022 Adapter Infrastructure
+### Phase 1: Core ISO 20022 Adapter Infrastructure
 
 Create adapter framework and implement high-value message types:
 
@@ -133,7 +133,7 @@ Create adapter framework and implement high-value message types:
    - Provides: ISO 20022 status reason taxonomy
    - Supports: Acceptance, rejection, pending states
 
-#### Phase 2: Extended Message Types
+### Phase 2: Extended Message Types
 
 4. **Account Opening (acmt.001)** - Account opening instruction
 5. **Customer Credit Transfer (pacs.008)** - FI-to-FI credit transfer
@@ -277,23 +277,23 @@ func mapAmount(m *money.Money) pain001.ActiveCurrencyAndAmount {
 
 ## Implementation Phases
 
-### Phase 1 (5-8 story points): Core Payment Messages
+#### Phase 1 (5-8 story points): Core Payment Messages
 - Implement pain.001 (payment initiation) adapter
 - Implement camt.053 (account reporting) adapter
 - Create XSD validation framework
 - Document mapping patterns
 
-### Phase 2 (3-5 points): Status and Error Handling
+#### Phase 2 (3-5 points): Status and Error Handling
 - Implement pacs.002 (payment status) adapter
 - Map transaction status to ISO reason codes
 - Add structured rejection reason handling
 
-### Phase 3 (5-8 points): Account Management
+#### Phase 3 (5-8 points): Account Management
 - Implement acmt.001 (account opening) adapter
 - Add party identification structures
 - Support BIC/LEI code validation
 
-### Phase 4 (Optional): Additional Standards
+#### Phase 4 (Optional): Additional Standards
 - SWIFT MT adapter (legacy format support)
 - Proprietary bank formats as needed
 - FIX protocol for securities (future)
