@@ -29,15 +29,14 @@ This guide covers using Tilt for fast Kubernetes development with Meridian.
      # Install ctlptl first: brew install tilt-dev/tap/ctlptl
 
      ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
-
-```text
+     ```
 
      Or without registry: `kind create cluster`
 
    - Minikube: `minikube start`
    - Colima: `colima start --kubernetes`
 
-1. **Tilt**: Install from https://tilt.dev/
+1. **Tilt**: Install from <https://tilt.dev/>
 
    ```bash
 
@@ -48,20 +47,19 @@ This guide covers using Tilt for fast Kubernetes development with Meridian.
    # Linux
 
    curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
-```
+   ```
 
 1. **kubectl**: Kubernetes CLI
 
    ```bash
    brew install kubectl
-
-```text
+   ```
 
 1. **Helm**: Package manager for Kubernetes
 
    ```bash
    brew install helm
-```
+   ```
 
 ## Quick Start
 

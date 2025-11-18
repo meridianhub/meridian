@@ -241,10 +241,9 @@ triggers will use these values to track who made changes.
 
    ```bash
    make migrate-diff-current  # or migrate-diff-position
+   ```
 
-```text
-
-1. Enable audit logging:
+5. Enable audit logging:
    - Add trigger to the service's audit migration (e.g., `migrations/current_account/YYYYMMDDHHMMSS_audit_system.sql`)
    - Or run: `SELECT current_account_audit.enable_audit_log('table_name');` (for current_account tables)
    - Or run: `SELECT position_keeping_audit.enable_audit_log('table_name');` (for position_keeping tables)
