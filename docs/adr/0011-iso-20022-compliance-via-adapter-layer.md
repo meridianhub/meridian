@@ -24,26 +24,30 @@ Accepted
 
 ## Context
 
-Meridian implements BIAN service domains using protobuf-based internal schemas for gRPC inter-service communication. External systems (payment networks, correspondent banks, regulatory reporting) require ISO 20022 message formats for interoperability and compliance.
+Meridian implements BIAN service domains using protobuf-based internal schemas for gRPC inter-service communication.
+External systems (payment networks, correspondent banks, regulatory reporting) require ISO 20022 message formats for
+interoperability and compliance.
 
-ISO 20022 is the international standard for financial messaging, mandated by many payment networks (SEPA, SWIFT, Faster Payments) and regulatory frameworks. Supporting ISO 20022 is essential for:
+ISO 20022 is the international standard for financial messaging, mandated by many payment networks (SEPA, SWIFT,
+Faster Payments) and regulatory frameworks. Supporting ISO 20022 is essential for:
 
 - Integration with external payment networks and clearing systems
 - Regulatory compliance for cross-border payments
 - Interoperability with correspondent banking partners
 - Future-proofing against evolving industry standards
 
-The architectural challenge: how to support ISO 20022 external interfaces without compromising internal domain model simplicity and BIAN alignment.
+The architectural challenge: how to support ISO 20022 external interfaces without compromising internal domain model
+simplicity and BIAN alignment.
 
 ## Decision Drivers
 
-* **Separation of Concerns**: Domain logic should not depend on external message formats
-* **Hexagonal Architecture**: External protocols belong in adapter layer, not domain
-* **BIAN Fidelity**: Internal schemas must faithfully represent BIAN service domain semantics
-* **Multiple Standards**: Platform must support ISO 20022, SWIFT MT, and proprietary formats simultaneously
-* **Domain Model Stability**: Changes to external standards should not require domain model changes
-* **Regulatory Compliance**: External interfaces must conform to ISO 20022 specifications precisely
-* **Maintainability**: Translation logic should be isolated and testable
+- **Separation of Concerns**: Domain logic should not depend on external message formats
+- **Hexagonal Architecture**: External protocols belong in adapter layer, not domain
+- **BIAN Fidelity**: Internal schemas must faithfully represent BIAN service domain semantics
+- **Multiple Standards**: Platform must support ISO 20022, SWIFT MT, and proprietary formats simultaneously
+- **Domain Model Stability**: Changes to external standards should not require domain model changes
+- **Regulatory Compliance**: External interfaces must conform to ISO 20022 specifications precisely
+- **Maintainability**: Translation logic should be isolated and testable
 
 ## Considered Options
 
@@ -51,40 +55,41 @@ The architectural challenge: how to support ISO 20022 external interfaces withou
 
 Modify internal protobuf schemas to match ISO 20022 data structures and naming conventions.
 
-* Good, because ensures direct mapping to external format
-* Good, because reduces translation complexity at boundaries
-* Bad, because couples domain model to external standard
-* Bad, because ISO 20022 verbosity pollutes internal schemas
-* Bad, because prevents supporting multiple external standards cleanly
-* Bad, because breaks BIAN semantic alignment
-* Bad, because external standard evolution forces domain changes
+- Good, because ensures direct mapping to external format
+- Good, because reduces translation complexity at boundaries
+- Bad, because couples domain model to external standard
+- Bad, because ISO 20022 verbosity pollutes internal schemas
+- Bad, because prevents supporting multiple external standards cleanly
+- Bad, because breaks BIAN semantic alignment
+- Bad, because external standard evolution forces domain changes
 
 ### Option 2: ISO 20022 Adapter Layer (Hexagonal Architecture)
 
 Keep internal protobuf schemas BIAN-aligned, implement ISO 20022 compliance via dedicated adapter layer.
 
-* Good, because domain model remains simple and BIAN-focused
-* Good, because follows hexagonal architecture principles (ports and adapters)
-* Good, because allows supporting multiple external standards independently
-* Good, because isolates translation logic for testing and maintenance
-* Good, because external standard changes don't impact domain
-* Good, because enables parallel adapter implementations (XML, JSON, etc.)
-* Bad, because requires maintaining translation mappings
-* Bad, because adds one layer of indirection for external calls
+- Good, because domain model remains simple and BIAN-focused
+- Good, because follows hexagonal architecture principles (ports and adapters)
+- Good, because allows supporting multiple external standards independently
+- Good, because isolates translation logic for testing and maintenance
+- Good, because external standard changes don't impact domain
+- Good, because enables parallel adapter implementations (XML, JSON, etc.)
+- Bad, because requires maintaining translation mappings
+- Bad, because adds one layer of indirection for external calls
 
 ### Option 3: Parallel Schema Sets
 
 Maintain separate internal and external schema sets with no shared types.
 
-* Good, because complete independence between internal and external
-* Bad, because creates significant duplication
-* Bad, because synchronization burden between schema sets
-* Bad, because translation errors harder to catch at compile time
-* Bad, because violates DRY principle excessively
+- Good, because complete independence between internal and external
+- Bad, because creates significant duplication
+- Bad, because synchronization burden between schema sets
+- Bad, because translation errors harder to catch at compile time
+- Bad, because violates DRY principle excessively
 
 ## Decision Outcome
 
-Chosen option: **"Option 2: ISO 20022 Adapter Layer"**, because it correctly applies hexagonal architecture to maintain clean domain boundaries while supporting external compliance requirements.
+Chosen option: **"Option 2: ISO 20022 Adapter Layer"**, because it correctly applies hexagonal architecture to
+maintain clean domain boundaries while supporting external compliance requirements.
 
 ### Architectural Pattern
 
@@ -135,8 +140,8 @@ Create adapter framework and implement high-value message types:
 
 ### Phase 2: Extended Message Types
 
-4. **Account Opening (acmt.001)** - Account opening instruction
-5. **Customer Credit Transfer (pacs.008)** - FI-to-FI credit transfer
+1. **Account Opening (acmt.001)** - Account opening instruction
+2. **Customer Credit Transfer (pacs.008)** - FI-to-FI credit transfer
 
 #### Adapter Module Structure
 
@@ -188,22 +193,22 @@ func mapAmount(m *money.Money) pain001.ActiveCurrencyAndAmount {
 
 ### Positive Consequences
 
-* Domain model remains clean, BIAN-aligned, and stable
-* ISO 20022 compliance proven via adapter implementation
-* Multiple external standards supported without domain pollution
-* Translation logic isolated for testing and maintenance
-* External standard evolution handled in adapter layer only
-* Enables A/B testing different message format versions
-* Facilitates compliance validation (adapter outputs testable against XSD)
-* Clear architectural boundaries simplify onboarding and reasoning
+- Domain model remains clean, BIAN-aligned, and stable
+- ISO 20022 compliance proven via adapter implementation
+- Multiple external standards supported without domain pollution
+- Translation logic isolated for testing and maintenance
+- External standard evolution handled in adapter layer only
+- Enables A/B testing different message format versions
+- Facilitates compliance validation (adapter outputs testable against XSD)
+- Clear architectural boundaries simplify onboarding and reasoning
 
 ### Negative Consequences
 
-* Translation layer adds runtime overhead (mitigated by one-time serialization cost)
-* Mapping logic must be maintained separately from domain model
-* Potential for translation bugs between domain and external format
-* Requires discipline to keep domain pure and resist leaking external concerns
-* Documentation needed to explain domain ↔ ISO 20022 mappings
+- Translation layer adds runtime overhead (mitigated by one-time serialization cost)
+- Mapping logic must be maintained separately from domain model
+- Potential for translation bugs between domain and external format
+- Requires discipline to keep domain pure and resist leaking external concerns
+- Documentation needed to explain domain ↔ ISO 20022 mappings
 
 ## Compliance Mapping Documentation
 
@@ -269,31 +274,35 @@ func mapAmount(m *money.Money) pain001.ActiveCurrencyAndAmount {
 
 ## Links
 
-* [ISO 20022 Official Website](https://www.iso20022.org/)
-* [ISO 20022 Message Definitions](https://www.iso20022.org/iso-20022-message-definitions)
-* [SWIFT ISO 20022 Resources](https://www.swift.com/standards/iso-20022)
-* [Related: ADR-0004 Event Schema Evolution](./0004-event-schema-evolution.md) - Schema evolution principles
-* [Related: ADR-0005 Adapter Pattern Layer Translation](./0005-adapter-pattern-layer-translation.md) - Adapter pattern guidance
+- [ISO 20022 Official Website](https://www.iso20022.org/)
+- [ISO 20022 Message Definitions](https://www.iso20022.org/iso-20022-message-definitions)
+- [SWIFT ISO 20022 Resources](https://www.swift.com/standards/iso-20022)
+- [Related: ADR-0004 Event Schema Evolution](./0004-event-schema-evolution.md) - Schema evolution principles
+- [Related: ADR-0005 Adapter Pattern Layer Translation](./0005-adapter-pattern-layer-translation.md) - Adapter pattern guidance
 
 ## Implementation Phases
 
-#### Phase 1 (5-8 story points): Core Payment Messages
+### Phase 1 (5-8 story points): Core Payment Messages
+
 - Implement pain.001 (payment initiation) adapter
 - Implement camt.053 (account reporting) adapter
 - Create XSD validation framework
 - Document mapping patterns
 
-#### Phase 2 (3-5 points): Status and Error Handling
+### Phase 2 (3-5 points): Status and Error Handling
+
 - Implement pacs.002 (payment status) adapter
 - Map transaction status to ISO reason codes
 - Add structured rejection reason handling
 
-#### Phase 3 (5-8 points): Account Management
+### Phase 3 (5-8 points): Account Management
+
 - Implement acmt.001 (account opening) adapter
 - Add party identification structures
 - Support BIC/LEI code validation
 
-#### Phase 4 (Optional): Additional Standards
+### Phase 4 (Optional): Additional Standards
+
 - SWIFT MT adapter (legacy format support)
 - Proprietary bank formats as needed
 - FIX protocol for securities (future)
