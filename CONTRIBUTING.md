@@ -125,6 +125,28 @@ brew install protobuf
 brew install golangci-lint
 ```
 
+#### markdownlint-cli2 (Documentation Linting)
+
+```bash
+npm install
+```
+
+Markdown linting is enforced via:
+
+- **Pre-commit hooks**: Automatically validates staged `.md` files before commit
+- **GitHub Actions**: CI pipeline validates all markdown files in PRs
+
+**Configuration**: `.markdownlint-cli2.jsonc` defines the linting rules (120 char line length, inline HTML allowed, etc.)
+
+**Manual usage**:
+
+```bash
+npm run lint:md        # Check all markdown files
+npm run lint:md:fix    # Auto-fix markdown issues
+```
+
+The pre-commit hook will prevent commits with markdown errors and suggest fixes.
+
 #### 5. Project Setup
 
 ```bash
@@ -159,8 +181,7 @@ make test
 
    ```bash
    git checkout -b feature/my-feature
-
-```text
+   ```
 
 1. **Make changes following code standards**
 
@@ -169,22 +190,28 @@ make test
    ```bash
    make test
    make lint
-```
+   npm run lint:md     # Lint markdown files (also runs in pre-commit hook)
+   ```
 
 1. **Commit changes** (pre-commit hooks will run automatically)
+
+   Pre-commit hooks automatically validate:
+   - Go code formatting (gofumpt)
+   - Go code quality (golangci-lint)
+   - Protocol buffers (buf lint)
+   - Markdown files (markdownlint-cli2)
 
    ```bash
    git add .
    git commit -m "feat: add new feature"
-
-```text
+   ```
 
 1. **Push and create PR**
 
    ```bash
    git push origin feature/my-feature
    gh pr create
-```
+   ```
 
 ### Local Development with Tilt
 
@@ -340,7 +367,7 @@ enforce immutability through coding patterns and conventions.
        m.Units = units  // Mutation!
    }
 
-```text
+   ```
 
 1. **Use Value Receivers, Not Pointer Receivers**
    - Use value receivers for immutable types
@@ -361,7 +388,7 @@ enforce immutability through coding patterns and conventions.
    func (a *Account) SetBalance(newBalance Money) {
        a.balance = newBalance
    }
-```
+   ```
 
 1. **Avoid Mutable Slices and Maps in Structs**
    - Don't expose internal slices/maps directly
@@ -388,7 +415,7 @@ enforce immutability through coding patterns and conventions.
        Postings []Posting  // Can be modified externally!
    }
 
-```text
+   ```
 
 1. **Constructor Functions for Complex Initialization**
    - Use `NewX()` constructors that return fully initialized, valid instances
@@ -409,7 +436,7 @@ enforce immutability through coding patterns and conventions.
            createdAt:  time.Now(),
        }, nil
    }
-```
+   ```
 
 1. **Functional Transformations Over Mutations**
    - Use `map`, `filter`, `reduce` patterns
@@ -433,7 +460,7 @@ enforce immutability through coding patterns and conventions.
        }
    }
 
-```text
+   ```
 
 #### When Mutation Is Acceptable
 
@@ -549,7 +576,7 @@ func (m Money) Add(other Money) Money {
    // Bad: Vague test name
    func TestDeposit(t *testing.T)
 
-```text
+   ```
 
 1. **One Assertion Focus Per Test**
 
@@ -564,7 +591,7 @@ func (m Money) Add(other Money) Money {
        result := NewMoney("GBP", 100, 0).Add(NewMoney("GBP", 50, 0))
        assert.Equal(t, "GBP", result.Currency())
    }
-```
+   ```
 
 1. **Test Immutability**
 
@@ -578,7 +605,7 @@ func (m Money) Add(other Money) Money {
        assert.Equal(t, original.Units(), m1.Units(), "original should not be mutated")
    }
 
-```text
+   ```
 
 1. **Write Tests Before Fixing Bugs**
 
@@ -590,7 +617,7 @@ func (m Money) Add(other Money) Money {
 
    // 2. Fix the code to make test pass
    // 3. Refactor if needed
-```
+   ```
 
 #### Test Organization
 
@@ -1000,7 +1027,7 @@ scheduler variance in CI environments.
       // ... timing assertions ...
   }
 
-```text
+  ```
 
 - Use generous tolerance ranges (±30% or more for CI variance)
 - Document why specific tolerance values are chosen
@@ -1017,7 +1044,6 @@ scheduler variance in CI environments.
 ### Test Organization
 
 ```text
-
 internal/
 ├── accounting/
 │   ├── service.go
@@ -1026,7 +1052,6 @@ internal/
 │   └── testdata/             # Test fixtures
 │       ├── accounts.json
 │       └── transactions.json
-
 ```
 
 ## Pull Request Process

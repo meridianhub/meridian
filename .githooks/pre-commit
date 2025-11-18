@@ -78,8 +78,8 @@ if [ -n "$STAGED_MD_FILES" ]; then
     if [ -f "package.json" ] && command -v npm &> /dev/null; then
         # Run markdownlint-cli2 via npm on staged markdown files
         echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
-        # Use array to safely handle filenames with spaces
-        MD_FILES_ARRAY=($STAGED_MD_FILES)
+        # Use mapfile to safely handle filenames with spaces and special characters
+        mapfile -t MD_FILES_ARRAY <<< "$STAGED_MD_FILES"
         if npm run --silent lint:md -- "${MD_FILES_ARRAY[@]}" 2>/dev/null || npx --yes markdownlint-cli2 "${MD_FILES_ARRAY[@]}"; then
             echo -e "${GREEN}✓${NC} markdownlint passed"
         else
@@ -91,8 +91,8 @@ if [ -n "$STAGED_MD_FILES" ]; then
     elif command -v npx &> /dev/null; then
         # Fallback to npx if package.json not present
         echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
-        # Use array to safely handle filenames with spaces
-        MD_FILES_ARRAY=($STAGED_MD_FILES)
+        # Use mapfile to safely handle filenames with spaces and special characters
+        mapfile -t MD_FILES_ARRAY <<< "$STAGED_MD_FILES"
         if npx --yes markdownlint-cli2 "${MD_FILES_ARRAY[@]}"; then
             echo -e "${GREEN}✓${NC} markdownlint passed"
         else
