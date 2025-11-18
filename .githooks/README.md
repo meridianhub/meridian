@@ -19,12 +19,18 @@ This will copy the hooks to your `.git/hooks/` directory.
 Runs before each commit to ensure code quality:
 
 #### Proto File Validation
+
 1. **buf lint**: Validates proto file style and correctness
 2. **buf breaking**: Checks for breaking schema changes against develop branch
 
+#### Markdown File Validation
+
+3. **markdownlint-cli2**: Validates markdown file formatting and style
+
 #### Go File Validation
-3. **gofumpt**: Formats all staged Go files with stricter formatting rules
-4. **golangci-lint**: Lints all staged Go files against project standards
+
+4. **gofumpt**: Formats all staged Go files with stricter formatting rules
+5. **golangci-lint**: Lints all staged Go files against project standards
 
 If any check fails, the commit will be blocked. Fix the issues and try again.
 
@@ -33,9 +39,13 @@ If any check fails, the commit will be blocked. Fix the issues and try again.
 ## Automatic Tool Installation
 
 The pre-commit hook will automatically install missing tools:
+
 - `buf` - via `go install` (for proto validation)
+- `markdownlint-cli2` - via `npx` (for markdown linting)
 - `gofumpt` - via `go install` (for Go formatting)
 - `golangci-lint v2.5.0` - via official install script (for Go linting)
+
+**Note**: Markdown linting requires Node.js and npm to be installed.
 
 ## Skipping Hooks (Emergency Only)
 
@@ -75,8 +85,10 @@ curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/insta
 ## CI Integration
 
 These hooks run the same checks as our GitHub Actions CI:
-- `.github/workflows/lint.yml` - Matches Go linting checks
+
 - `.github/workflows/proto.yml` - Matches proto validation checks
+- `.github/workflows/markdown.yml` - Matches markdown linting checks
+- `.github/workflows/quality.yml` - Matches Go linting checks
 - Ensures commits that pass locally will pass CI
 
 ## Schema Evolution Workflow

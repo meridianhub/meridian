@@ -1,0 +1,46 @@
+// markdownlint-cli2 configuration
+// See https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+{
+  "config": {
+    // Default state for all rules
+    "default": true,
+
+    // MD013/line-length - Line length
+    // Relaxed to 120 characters (default is 80)
+    "MD013": {
+      "line_length": 120,
+      "heading_line_length": 120,
+      "code_block_line_length": 120,
+      "code_blocks": true,
+      "tables": false,
+      "headings": true,
+      "headers": true,
+      "strict": false,
+      "stern": false
+    },
+
+    // MD024/no-duplicate-heading - Multiple headings with the same content
+    // Allow duplicate headings in different sections
+    "MD024": {
+      "siblings_only": true
+    },
+
+    // MD033/no-inline-html - Inline HTML
+    // Allow inline HTML (common in READMEs for badges, tables, etc.)
+    "MD033": false,
+
+    // MD041/first-line-heading - First line in a file should be a top-level heading
+    // Disabled as some files have front matter or comments first
+    "MD041": false
+  },
+
+  // Fix mode - automatically fix issues where possible
+  "fix": false,
+
+  // Globs are specified in package.json scripts or command line
+  // to allow flexible usage (pre-commit hooks vs full linting)
+  "ignores": [
+    "**/node_modules/**",
+    "**/.git/**"
+  ]
+}

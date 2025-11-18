@@ -18,9 +18,10 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 # Get list of staged files
 STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
 STAGED_PROTO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.proto$' || true)
+STAGED_MD_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.md$' || true)
 
-if [ -z "$STAGED_GO_FILES" ] && [ -z "$STAGED_PROTO_FILES" ]; then
-    echo -e "${GREEN}✓${NC} No Go or proto files to check"
+if [ -z "$STAGED_GO_FILES" ] && [ -z "$STAGED_PROTO_FILES" ] && [ -z "$STAGED_MD_FILES" ]; then
+    echo -e "${GREEN}✓${NC} No Go, proto, or markdown files to check"
     exit 0
 fi
 
@@ -69,13 +70,42 @@ if [ -n "$STAGED_PROTO_FILES" ]; then
 fi
 
 # ============================================================================
+# MARKDOWN FILE CHECKS
+# ============================================================================
+
+if [ -n "$STAGED_MD_FILES" ]; then
+    # Check if markdownlint-cli2 is available (via npm/npx)
+    if ! command -v npx &> /dev/null; then
+        echo -e "${YELLOW}⚠${NC}  npx not found, skipping markdown linting"
+        echo -e "${YELLOW}   Install Node.js and npm to enable markdown linting${NC}"
+    else
+        # Run markdownlint-cli2 on staged markdown files
+        echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
+        if npx --yes markdownlint-cli2 $STAGED_MD_FILES; then
+            echo -e "${GREEN}✓${NC} markdownlint passed"
+        else
+            echo -e "${RED}✗${NC} markdownlint failed"
+            echo -e "${RED}Please fix markdown style issues above before committing${NC}"
+            echo -e "${YELLOW}Tip:${NC} Run 'npx markdownlint-cli2 --fix $STAGED_MD_FILES' to auto-fix some issues"
+            exit 1
+        fi
+    fi
+fi
+
+# ============================================================================
 # GO FILE CHECKS
 # ============================================================================
 
 if [ -z "$STAGED_GO_FILES" ]; then
     echo -e "${GREEN}✓${NC} No Go files to check"
-    echo -e "${GREEN}✓${NC} All pre-commit checks passed"
-    exit 0
+    if [ -z "$STAGED_PROTO_FILES" ] && [ -z "$STAGED_MD_FILES" ]; then
+        echo -e "${GREEN}✓${NC} All pre-commit checks passed"
+        exit 0
+    else
+        # If we had proto or markdown files, we already checked them
+        echo -e "${GREEN}✓${NC} All pre-commit checks passed"
+        exit 0
+    fi
 fi
 
 # Check if gofumpt is installed
