@@ -29,7 +29,7 @@ meridian/
 │   └── adr/               # Architecture Decision Records
 ├── internal/              # Private application code
 └── pkg/                   # Public library code
-```text
+```
 
 ## BIAN Service Domains
 
@@ -97,12 +97,12 @@ ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 # 4. Start development environment
 
 tilt up
-```text
+```
 
 **Access services**:
 
-- Tilt UI: http://localhost:10350
-- Meridian API: http://localhost:8080
+- Tilt UI: <http://localhost:10350>
+- Meridian API: <http://localhost:8080>
 - Meridian gRPC: localhost:9090
 
 For detailed development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -116,7 +116,7 @@ make proto         # Generate protobuf code
 make build         # Build the project
 make test          # Run tests
 make lint          # Run linters
-```text
+```
 
 **Local development**: Use `tilt up` for hot-reload Kubernetes development ([Tilt guide](docs/skills/tilt.md))
 

@@ -26,7 +26,7 @@ Add these roles to your Keycloak realm:
 - auditor
 - service
 
-```text
+```
 
 ### 2. Create Test Users
 
@@ -67,7 +67,7 @@ http.Handle("/admin/config", adminMiddleware.Handler(configHandler))
 // Protect an endpoint requiring operator or admin
 opsMiddleware := auth.NewHTTPAuthorizationMiddleware(auth.RoleOperator, auth.RoleAdmin)
 http.Handle("/ops/deploy", opsMiddleware.Handler(deployHandler))
-```text
+```
 
 #### gRPC Interceptor Example
 
@@ -79,7 +79,7 @@ import "github.com/meridianhub/meridian/internal/platform/auth"
 server := grpc.NewServer(
     grpc.UnaryInterceptor(auth.RequireRoleUnary(auth.RoleAdmin)),
 )
-```text
+```
 
 #### Resource-Level Authorization
 
@@ -104,7 +104,7 @@ func (s *AuditService) QueryAuditLogs(ctx context.Context, req *pb.QueryRequest)
     // Proceed with query
     ...
 }
-```text
+```
 
 ### 4. Manual Testing with curl
 
@@ -127,7 +127,7 @@ AUDITOR_TOKEN=$(curl -X POST http://localhost:8080/realms/meridian/protocol/open
   -d "username=auditor@example.com" \
   -d "password=auditor123" \
   -d "grant_type=password" | jq -r '.access_token')
-```text
+```
 
 #### Test Endpoints
 
@@ -153,7 +153,7 @@ curl -H "Authorization: Bearer $AUDITOR_TOKEN" \
 curl -X POST -H "Authorization: Bearer $AUDITOR_TOKEN" \
   -d '{"name":"Test Account"}' \
   http://localhost:8081/api/accounts
-```text
+```
 
 ### 5. Testing with grpcurl
 
@@ -170,7 +170,7 @@ grpcurl -H "authorization: Bearer $ADMIN_TOKEN" \
 grpcurl -H "authorization: Bearer $AUDITOR_TOKEN" \
   localhost:9090 \
   meridian.v1.ConfigService/UpdateSystemConfig
-```text
+```
 
 ## Permission Matrix
 
@@ -222,7 +222,7 @@ logger.DebugContext(ctx, "Authorization check", map[string]interface{}{
     "required_role": auth.RoleAdmin.String(),
     "has_role": auth.HasAnyRole(claims, auth.RoleAdmin),
 })
-```text
+```
 
 ## Integration with Existing Services
 
@@ -241,7 +241,7 @@ http.Handle("/admin/endpoint",
         ),
     ),
 )
-```text
+```
 
 ## Best Practices
 

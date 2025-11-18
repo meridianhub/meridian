@@ -39,7 +39,7 @@ make docker
 # Build with custom version
 
 VERSION=1.0.0 make docker
-```text
+```
 
 ### Using Docker CLI
 
@@ -57,7 +57,7 @@ docker build \
   --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
   -t meridian:1.0.0 \
   .
-```text
+```
 
 ## Image Features
 
@@ -97,7 +97,7 @@ docker build \
 
 ```bash
 docker run -p 8080:8080 meridian:latest
-```text
+```
 
 ### With Environment Variables
 
@@ -107,7 +107,7 @@ docker run \
   -e PORT=8080 \
   -e LOG_LEVEL=info \
   meridian:latest
-```text
+```
 
 ### Health Check
 
@@ -118,7 +118,7 @@ The image includes a health check that runs every 30 seconds:
 # Manual health check
 
 docker exec <container> /meridian healthcheck
-```text
+```
 
 ## Image Verification
 
@@ -129,7 +129,7 @@ docker images meridian:latest
 
 # Expected: 3-5MB total
 
-```text
+```
 
 ### Scan for Vulnerabilities
 
@@ -142,7 +142,7 @@ trivy image meridian:latest
 # Using Docker Scout
 
 docker scout cves meridian:latest
-```text
+```
 
 ### Verify Static Binary
 
@@ -169,7 +169,7 @@ ls -lh meridian-binary
 # Clean up
 
 rm meridian-binary
-```text
+```
 
 ## Dockerfile Breakdown
 
@@ -232,7 +232,7 @@ These are injected into the binary at build time via `-ldflags`.
 - name: Push to registry
 
   run: docker push meridian:${{ github.ref_name }}
-```text
+```
 
 ## Troubleshooting
 

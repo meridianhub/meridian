@@ -145,7 +145,7 @@ services/
 │   └── ...
 └── current-account-service/
     └── ...
-```text
+```
 
 ### Shared Platform Services
 
@@ -158,7 +158,7 @@ platform/
 ├── auth/            # JWT validation, authorization
 ├── observability/   # OpenTelemetry, logging, metrics
 └── idempotency/     # Redis-based idempotency keys
-```text
+```
 
 ### Inter-Service Communication
 

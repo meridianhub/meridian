@@ -18,7 +18,7 @@ Install `pkgsite` using Go's package manager:
 
 ```bash
 go install golang.org/x/pkgsite/cmd/pkgsite@latest
-```text
+```
 
 This installs the `pkgsite` binary to `~/go/bin/` (or `$GOPATH/bin/`).
 
@@ -37,7 +37,7 @@ From your project root directory:
 # Or if ~/go/bin is in your PATH
 
 pkgsite -open=false -http=:6060
-```text
+```
 
 **Options:**
 
@@ -51,7 +51,7 @@ The first time you run `pkgsite`, it needs to load and index all packages:
 ```text
 Info: go/packages.Load(["all"]) loaded 999 packages from . in 461ms
 Info: Listening on addr http://:6060
-```text
+```
 
 This typically takes 5-30 seconds depending on project size.
 
@@ -61,14 +61,14 @@ Once the server is running, open your browser to:
 
 **Main URLs:**
 
-- **Project homepage**: http://localhost:6060/github.com/meridianhub/meridian
-- **Server root**: http://localhost:6060/
+- **Project homepage**: <http://localhost:6060/github.com/meridianhub/meridian>
+- **Server root**: <http://localhost:6060/>
 
 **Example package URLs:**
 
-- Current Account domain: http://localhost:6060/github.com/meridianhub/meridian/internal/current-account/domain
-- Financial Accounting service: http://localhost:6060/github.com/meridianhub/meridian/internal/financial-accounting/service
-- Position Keeping repository: http://localhost:6060/github.com/meridianhub/meridian/internal/position-keeping/repository
+- Current Account domain: <http://localhost:6060/github.com/meridianhub/meridian/internal/current-account/domain>
+- Financial Accounting service: <http://localhost:6060/github.com/meridianhub/meridian/internal/financial-accounting/service>
+- Position Keeping repository: <http://localhost:6060/github.com/meridianhub/meridian/internal/position-keeping/repository>
 
 ### Stop the Server
 
@@ -89,7 +89,7 @@ Go documentation is generated from comments in your code. Follow these conventio
 //   - Financial transactions (deposits, withdrawals, interest)
 //   - Account lifecycle management
 package domain
-```text
+```
 
 **Rules:**
 
@@ -116,7 +116,7 @@ type CurrentAccountFacility struct {
     // Balance represents the current account balance in minor currency units
     Balance int64
 }
-```text
+```
 
 **Rules:**
 
@@ -139,7 +139,7 @@ type CurrentAccountFacility struct {
 func (f *CurrentAccountFacility) Initiate(customerID string, params AccountParams) error {
     // implementation
 }
-```text
+```
 
 **Rules:**
 
@@ -163,7 +163,7 @@ func Example_basicDeposit() {
     fmt.Printf("Balance: %d\n", account.Balance)
     // Output: Balance: 10000
 }
-```text
+```
 
 ## Troubleshooting
 
@@ -173,7 +173,7 @@ If port 6060 is already in use, choose a different port:
 
 ```bash
 pkgsite -http=:8080
-```text
+```
 
 ### Packages Not Showing
 
@@ -213,7 +213,7 @@ go doc internal/current-account/domain.CurrentAccountFacility
 # View specific method
 
 go doc internal/current-account/domain.CurrentAccountFacility.Initiate
-```text
+```
 
 ## Best Practices
 
@@ -239,10 +239,10 @@ docs: ## Start local documentation server
  @echo "Starting pkgsite on http://localhost:6060"
  @echo "Press Ctrl+C to stop"
  pkgsite -open=false -http=:6060
-```text
+```
 
 Then run:
 
 ```bash
 make docs
-```text
+```

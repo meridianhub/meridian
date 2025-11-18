@@ -110,7 +110,7 @@ The implementation requires these dependencies:
 ```text
 github.com/sony/gobreaker v2.3.0  // Circuit breaker
 github.com/cenkalti/backoff/v4    // Retry with exponential backoff (already in go.mod)
-```text
+```
 
 ## Key Design Decisions
 

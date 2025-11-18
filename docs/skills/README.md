@@ -41,7 +41,7 @@ instructions: |
   Quick summary of how to use this skill.
   Key commands and workflows.
 ---
-```text
+```
 
 **Required fields**:
 
@@ -121,7 +121,7 @@ instructions: |
 # Skill Title
 
 Content starts here...
-```text
+```
 
 ### Skills Not Loading
 

@@ -14,7 +14,7 @@ stored procedures and triggers. This approach encountered a critical compatibili
 ```text
 pq: plpgsql not supported in user-defined functions:
 at or near "table_name": syntax error: unimplemented: this syntax
-```text
+```
 
 CockroachDB does not support PL/pgSQL procedural language features including:
 
@@ -130,7 +130,7 @@ type AuditLog struct {
     NewValues     datatypes.JSON  `gorm:"type:jsonb"`
     TransactionID string          `gorm:"type:varchar(100)"`
 }
-```text
+```
 
 ### GORM Hook Pattern
 
@@ -180,7 +180,7 @@ func recordAudit(tx *gorm.DB, schema, table, op string, id uuid.UUID, old, new i
 
     return tx.Table(schema + ".audit_log").Create(&audit).Error
 }
-```text
+```
 
 ### Migration Changes
 
@@ -209,7 +209,7 @@ CREATE INDEX idx_audit_log_record_id ON current_account_audit.audit_log(record_i
 CREATE INDEX idx_audit_log_changed_at ON current_account_audit.audit_log(changed_at);
 CREATE INDEX idx_audit_log_changed_by ON current_account_audit.audit_log(changed_by);
 CREATE INDEX idx_audit_log_operation ON current_account_audit.audit_log(operation);
-```text
+```
 
 Repeat for `position_keeping_audit` schema.
 
@@ -277,7 +277,7 @@ func processAuditOutbox(db *gorm.DB, schema string) {
         })
     }
 }
-```text
+```
 
 #### Benefits
 
@@ -317,7 +317,7 @@ func BenchmarkAuditOutboxOverhead(b *testing.B) {
 func BenchmarkAuditWorkerThroughput(b *testing.B) {
     // Measure how fast worker processes outbox
 }
-```text
+```
 
 **Targets**:
 
@@ -413,7 +413,7 @@ func TestAuditOutbox_RollbackOnBusinessFailure(t *testing.T) {
     db.Table("current_account_audit.audit_outbox").Count(&count)
     assert.Equal(t, int64(0), count, "Outbox should be empty after rollback")
 }
-```text
+```
 
 #### 2. No Lost Audits: Outbox Survives Application Crashes
 
@@ -462,7 +462,7 @@ func TestAuditOutbox_SurvivesApplicationCrash(t *testing.T) {
     db.Table("current_account_audit.audit_outbox").Count(&outboxCount)
     assert.Equal(t, int64(0), outboxCount, "Outbox should be empty after processing")
 }
-```text
+```
 
 #### 3. Idempotency: Retry Doesn't Create Duplicates
 
@@ -486,7 +486,7 @@ func TestAuditWorker_IdempotentProcessing(t *testing.T) {
         Count(&count)
     assert.Equal(t, int64(1), count, "Should have exactly one audit record")
 }
-```text
+```
 
 #### 4. Complete Audit Trail: All Operations Captured
 
@@ -531,7 +531,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
     assert.Contains(t, string(audits[1].OldValues), "ACME Corp")
     assert.Contains(t, string(audits[1].NewValues), "ACME Corporation")
 }
-```text
+```
 
 #### 5. Worker Resilience: Handles Database Failures Gracefully
 
@@ -570,7 +570,7 @@ func TestAuditWorker_HandlesTemporaryDatabaseFailure(t *testing.T) {
         First(&audit).Error
     require.NoError(t, err)
 }
-```text
+```
 
 #### 6. Performance: Worker Throughput and Latency
 
@@ -617,7 +617,7 @@ func BenchmarkAuditOutboxOverhead(b *testing.B) {
         db.Create(customer) // Includes outbox write
     }
 }
-```text
+```
 
 ### Integration Tests with Testcontainers
 
@@ -640,7 +640,7 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
     // Run full audit system test against real CockroachDB
     // (Test all guarantees with real database)
 }
-```text
+```
 
 ### Test Coverage Requirements
 

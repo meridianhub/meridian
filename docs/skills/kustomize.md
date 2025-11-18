@@ -35,7 +35,7 @@ deployments/k8s/
     ├── dev/
     ├── staging/
     └── production/
-```text
+```
 
 ## Environment Configurations
 
@@ -118,7 +118,7 @@ kubectl kustomize deployments/k8s/overlays/staging
 # Production
 
 kubectl kustomize deployments/k8s/overlays/production
-```text
+```
 
 ### Applying to Kubernetes
 
@@ -137,7 +137,7 @@ kubectl apply -k deployments/k8s/overlays/staging
 # Production
 
 kubectl apply -k deployments/k8s/overlays/production
-```text
+```
 
 ### Viewing Differences
 
@@ -153,7 +153,7 @@ kubectl diff -k deployments/k8s/overlays/production
 
 diff <(kubectl kustomize deployments/k8s/overlays/staging) \
      <(kubectl kustomize deployments/k8s/overlays/production)
-```text
+```
 
 ## Customization Patterns
 
@@ -176,7 +176,7 @@ patches:
 
       path: /spec/replicas
       value: 3
-```text
+```
 
 #### Adding Environment Variables
 
@@ -195,7 +195,7 @@ patches:
       value:
         name: FEATURE_FLAG_X
         value: "true"
-```text
+```
 
 #### Changing Resource Limits
 
@@ -218,7 +218,7 @@ patches:
         limits:
           cpu: 1000m
           memory: 1Gi
-```text
+```
 
 #### Adding Annotations
 
@@ -235,7 +235,7 @@ patches:
 
       path: /spec/template/metadata/annotations/custom-annotation
       value: "custom-value"
-```text
+```
 
 ### ConfigMap Customization
 
@@ -252,7 +252,7 @@ configMapGenerator:
   - log_level=debug
   - custom_setting=value
 
-```text
+```
 
 The `behavior: merge` ensures base configuration is preserved while adding/overriding specific values.
 
@@ -271,7 +271,7 @@ The deploy workflow uses Kustomize overlays for environment-specific deployments
 - name: Deploy to production
 
   run: kubectl apply -k deployments/k8s/overlays/production
-```text
+```
 
 ### Tilt (Local Development)
 
@@ -296,7 +296,7 @@ Always test overlay builds before applying:
 
 ```bash
 kubectl kustomize deployments/k8s/overlays/production | kubectl apply --dry-run=client -f -
-```text
+```
 
 ### 4. Resource Limits
 
@@ -326,7 +326,7 @@ Check the target selector matches your base resources:
 
 ```bash
 kubectl kustomize deployments/k8s/overlays/production | grep -A5 "kind: Deployment"
-```text
+```
 
 ### Patch Operation Failed
 
@@ -337,7 +337,7 @@ Verify the path exists in the base resource:
 # Show the base deployment structure
 
 kubectl kustomize deployments/k8s/base | yq eval 'select(.kind == "Deployment")'
-```text
+```
 
 ### Namespace Conflicts
 
@@ -352,7 +352,7 @@ kubectl config current-context
 # List resources in environment namespace
 
 kubectl get all -n production
-```text
+```
 
 ### ConfigMap Merge Not Working
 
@@ -368,7 +368,7 @@ configMapGenerator:
 
   - key=value
 
-```text
+```
 
 ## References
 

@@ -77,7 +77,7 @@ prevent drift.
 │   - Kafka (Protobuf events)           │
 │   - gRPC (API responses)              │
 └───────────────────────────────────────┘
-```text
+```
 
 ## Implementation
 
@@ -115,7 +115,7 @@ func (s *BookingLogService) CreateBooking(ctx context.Context, booking *Financia
     // Save via interface
     return s.repo.Save(ctx, booking)
 }
-```text
+```
 
 ### Persistence Adapter (Infrastructure Implementation)
 
@@ -211,7 +211,7 @@ func (r *BookingLogRepository) toDomain(e *BookingLogEntity) *domain.FinancialBo
     }
     // Note: Audit fields (CreatedAt, UpdatedBy) are NOT mapped to domain
 }
-```text
+```
 
 ### Event Publisher Adapter
 
@@ -276,7 +276,7 @@ func getCausationID(ctx context.Context) string {
     }
     return ""
 }
-```text
+```
 
 ### gRPC Service Adapter
 
@@ -341,7 +341,7 @@ func (s *BookingLogServiceServer) toResponse(d *domain.FinancialBookingLog) *pb.
         Status:          string(d.Status),
     }
 }
-```text
+```
 
 ## BIAN Evolution Support
 
@@ -350,9 +350,9 @@ changes.
 
 ### Scenario: BIAN Adds New Behavior Qualifier
 
-**BIAN 13.0 → 14.0 adds "Suspend" to Current Account**
+#### BIAN 13.0 → 14.0 adds "Suspend" to Current Account
 
-**Step 1: Update domain model (business logic)**
+#### Step 1: Update domain model (business logic)
 
 ```go
 // internal/domain/current_account.go
@@ -389,9 +389,9 @@ func (a *CurrentAccount) Suspend(reason string, until time.Time, by string) erro
     a.SuspendedBy = by
     return nil
 }
-```text
+```
 
-**Step 2: Update persistence adapter (database mapping)**
+#### Step 2: Update persistence adapter (database mapping)
 
 ```go
 // internal/adapters/persistence/current_account_repository.go
@@ -444,9 +444,9 @@ func (r *CurrentAccountRepository) toDomain(e *CurrentAccountEntity) *domain.Cur
 
     return account
 }
-```text
+```
 
-**Step 3: Update event adapter (new event type per ADR-0004)**
+#### Step 3: Update event adapter (new event type per ADR-0004)
 
 ```go
 // internal/adapters/events/current_account_publisher.go
@@ -468,14 +468,14 @@ func (p *CurrentAccountPublisher) PublishSuspended(
 
     return p.producer.Publish(ctx, "account-suspended", event)
 }
-```text
+```
 
 **Key Insight:** Domain model changes once, adapters translate to infrastructure needs. Each layer evolves at its own
 pace.
 
 ### Benefits for BIAN Adoption
 
-**1. Independent layer evolution**
+#### 1. Independent layer evolution
 
 ```text
 Domain:      BIAN 14.0 (updated immediately)
@@ -483,24 +483,24 @@ Domain:      BIAN 14.0 (updated immediately)
 Persistence: BIAN 13.0 schema + new nullable columns (gradual migration)
              ↓
 Events:      New event type with BIAN 14.0 semantics (backward compatible)
-```text
+```
 
-**2. Backward compatibility**
+#### 2. Backward compatibility
 
 Old consumers (BIAN 13.0) continue working:
 
-- Database: Nullable columns don't break existing queries
-- Events: New event type on new topic (old consumers unaffected)
-- Domain: New behavior qualifiers only used by v14 clients
+* Database: Nullable columns don't break existing queries
+* Events: New event type on new topic (old consumers unaffected)
+* Domain: New behavior qualifiers only used by v14 clients
 
-**3. Gradual rollout**
+#### 3. Gradual rollout
 
 ```text
 Week 1: Update CurrentAccount domain (BIAN 14.0)
 Week 2: Deploy database migration (add suspension columns)
 Week 3: Deploy new event type (account-suspended topic)
 Week 4+: Consuming services adopt BIAN 14.0 independently
-```text
+```
 
 **Without adapters:** Single BIAN upgrade would require coordinated deployment across all services, risking production
 disruption.
@@ -555,7 +555,7 @@ func TestBookingLogRepository_RoundTrip(t *testing.T) {
     assert.Equal(t, original.ValueDate.Unix(), restored.ValueDate.Unix())
     assert.Equal(t, original.Status, restored.Status)
 }
-```text
+```
 
 ### 2. Field Coverage Tests
 
@@ -584,7 +584,7 @@ func extractFieldNames(t reflect.Type) []string {
     }
     return names
 }
-```text
+```
 
 ### 3. Contract Tests (Against Real Infrastructure)
 
@@ -618,7 +618,7 @@ func TestBookingLogRepository_Integration(t *testing.T) {
     assert.NoError(t, err)
     assert.Equal(t, booking.ControlRecordID, retrieved.ControlRecordID)
 }
-```text
+```
 
 ### 4. Mutation Tests
 
@@ -635,11 +635,11 @@ func TestBookingLogAdapter_ImmutableDomain(t *testing.T) {
     // Original should be unchanged
     assert.Equal(t, domain.BookingStatusPending, original.Status)
 }
-```text
+```
 
 ## Best Practices
 
-### DO:
+### DO
 
 ✅ **Keep adapters thin** - Only translation logic, no business rules
 ✅ **Test round-trips** - Ensure no data loss during translation
@@ -648,7 +648,7 @@ func TestBookingLogAdapter_ImmutableDomain(t *testing.T) {
 ✅ **Document mapping decisions** - Comment why certain fields are not mapped
 ✅ **Use compile-time checks** - `var _ DomainInterface = (*Adapter)(nil)`
 
-### DON'T:
+### DON'T
 
 ❌ **Don't put business logic in adapters** - That belongs in domain
 ❌ **Don't make adapters bidirectional** - Separate `toEntity` and `toDomain`
@@ -658,14 +658,14 @@ func TestBookingLogAdapter_ImmutableDomain(t *testing.T) {
 
 ## When to Use This Pattern
 
-### Use adapters when:
+### Use adapters when
 
 * Translating between domain and infrastructure (database, messaging, API)
 * Different layers have different concerns (audit fields, event metadata)
 * Versioning requirements differ per layer
 * You need testable boundaries
 
-### Don't use adapters when:
+### Don't use adapters when
 
 * Layers have identical structure (consider if separation is needed)
 * Performance is critical and zero-copy is required (rare)
@@ -681,7 +681,7 @@ type BookingLog struct {
     ID        uuid.UUID `gorm:"primaryKey" json:"id" proto:"id,1"`
     CreatedBy string    `gorm:"size:255" json:"-" proto:"-"`  // Leaks into domain
 }
-```text
+```
 
 **Problems:**
 
@@ -695,7 +695,7 @@ type BookingLog struct {
 func (b *BookingLog) Save() error {
     return db.Save(b).Error  // Domain knows about database
 }
-```text
+```
 
 **Problems:**
 

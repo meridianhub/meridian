@@ -67,7 +67,7 @@ kubectl logs -n production -l app=meridian --tail=100
 # Check resource usage
 
 kubectl top pods -n production
-```text
+```
 
 **Initial severity assessment:**
 
@@ -92,7 +92,7 @@ kubectl scale deployment meridian -n production --replicas=0
 # Review NetworkPolicy violations
 
 kubectl describe networkpolicy meridian -n production
-```text
+```
 
 **For service degradation:**
 
@@ -109,7 +109,7 @@ kubectl rollout undo deployment/meridian -n production
 # Scale up if needed
 
 kubectl scale deployment meridian -n production --replicas=3
-```text
+```
 
 ### 3. Investigation (10-30 minutes)
 
@@ -128,7 +128,7 @@ gh api repos/{owner}/meridian/code-scanning/alerts
 # GitHub Actions workflow runs
 
 gh run list --workflow=security.yml --limit 5
-```text
+```
 
 **Gather evidence:**
 
@@ -156,7 +156,7 @@ go mod tidy
 
 docker build -t meridian:hotfix-$(date +%s) .
 kubectl set image deployment/meridian meridian=meridian:hotfix-$(date +%s) -n production
-```text
+```
 
 **For configuration issues:**
 
@@ -169,7 +169,7 @@ kubectl edit configmap meridian-config -n production
 # Restart pods to pick up changes
 
 kubectl rollout restart deployment/meridian -n production
-```text
+```
 
 ### 5. Recovery (60-120 minutes)
 
@@ -192,7 +192,7 @@ curl -I https://meridian.production.svc.cluster.local:8080/health
 # Check metrics
 
 kubectl top pods -n production
-```text
+```
 
 **Validation checklist:**
 
@@ -220,7 +220,7 @@ kubectl top pods -n production
 > **⚠️ Production Setup Required**: Configure these with your actual contact details
 
 - **On-Call Engineer**: [PagerDuty rotation link]
-- **Security Team**: security@your-domain.com
+- **Security Team**: <security@your-domain.com>
 - **Engineering Manager**: [Contact details]
 - **CTO/Escalation**: [Contact details]
 
@@ -241,7 +241,7 @@ kubectl scale deployment meridian -n production --replicas=5
 # Check for resource leaks
 
 kubectl top pods -n production --sort-by=cpu
-```text
+```
 
 ### Scenario: Database Connection Failures
 
@@ -262,7 +262,7 @@ kubectl describe networkpolicy meridian -n production | grep -A5 "cockroachdb"
 # Test connectivity
 
 kubectl exec -it <meridian-pod> -n production -- nc -zv cockroachdb 26257
-```text
+```
 
 ### Scenario: Security Scan Blocking Deployment
 
@@ -284,7 +284,7 @@ gh run view <run-id> --log | grep -i "critical\|high"
 
 # DO NOT bypass security scans in production
 
-```text
+```
 
 ## Monitoring & Dashboards
 
@@ -308,7 +308,7 @@ kubectl rollout undo deployment/meridian -n production
 # Verify rollback
 
 kubectl rollout status deployment/meridian -n production
-```text
+```
 
 **Rollback to specific revision:**
 
@@ -321,7 +321,7 @@ kubectl rollout history deployment/meridian -n production
 # Rollback to specific revision
 
 kubectl rollout undo deployment/meridian -n production --to-revision=5
-```text
+```
 
 ## Decision Trees
 
@@ -339,7 +339,7 @@ User data exposed?
 Vulnerability actively exploited?
 ├── Yes → P0, containment phase
 └── No → P1-P2, investigation phase
-```text
+```
 
 ### Should I rollback?
 
@@ -349,7 +349,7 @@ Production affected?
 │   ├── Is fix quick (< 10 min)? → Fix forward
 │   └── Is fix complex? → Rollback
 └── No → Investigate before action
-```text
+```
 
 ## Tools & Commands Reference
 
@@ -360,7 +360,7 @@ alias kgp='kubectl get pods -n production'
 alias kd='kubectl describe -n production'
 alias kl='kubectl logs -n production'
 alias ke='kubectl get events -n production --sort-by=.lastTimestamp'
-```text
+```
 
 **Useful one-liners:**
 
@@ -377,7 +377,7 @@ kubectl get pods -n production -o wide
 # Export all resources for backup
 
 kubectl get all -n production -o yaml > production-backup.yaml
-```text
+```
 
 ## Emergency Contacts
 

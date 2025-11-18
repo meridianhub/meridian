@@ -51,7 +51,7 @@ triggers:
 instructions: |
   Quick guidance on applying this knowledge
 ---
-```text
+```
 
 See [docs/skills/README.md](skills/README.md) for:
 

@@ -15,7 +15,7 @@ api/proto/
 │       ├── financial_accounting/v1/
 │       ├── position_keeping/v1/
 │       └── current_account/v1/
-```text
+```
 
 ## Tooling
 
@@ -44,7 +44,7 @@ make proto-breaking
 # Install all protobuf tools
 
 make install
-```text
+```
 
 ## Code Generation
 
@@ -56,7 +56,7 @@ api/proto/meridian/common/v1/
 ├── health.pb.go          # Generated protobuf code
 ├── health_grpc.pb.go     # Generated gRPC service code
 └── health.pb.validate.go # Generated validation code
-```text
+```
 
 **Note**: Generated files (`*.pb.go`) are committed to version control for reproducibility.
 
@@ -72,7 +72,7 @@ syntax = "proto3";
 package meridian.financial_accounting.v1;
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
-```text
+```
 
 ### Directory Structure
 
@@ -119,7 +119,7 @@ message CheckResponse {
   // status is the health status of the service.
   ServingStatus status = 1;
 }
-```text
+```
 
 ## Breaking Change Detection
 
@@ -127,7 +127,7 @@ Buf compares proto changes against the `develop` branch to detect breaking chang
 
 ```bash
 make proto-breaking
-```text
+```
 
 This prevents accidental API breakages before merging to develop.
 

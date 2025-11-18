@@ -152,7 +152,7 @@ services/financial-accounting-service/
 └── migrations/                         # Generated migrations from entities
     ├── 20250125120000_initial.sql
     └── atlas.sum                       # Migration checksums
-```text
+```
 
 ### Database Entity as Source of Truth for Persistence
 
@@ -197,7 +197,7 @@ type BookingLogEntity struct {
 func (BookingLogEntity) TableName() string {
     return "financial_booking_logs"
 }
-```text
+```
 
 **Corresponding domain model (internal/domain/booking_log.go) - NO persistence tags:**
 
@@ -241,7 +241,7 @@ func (b *FinancialBookingLog) Post() error {
     b.Status = BookingStatusPosted
     return nil
 }
-```text
+```
 
 ### Atlas Configuration
 
@@ -273,7 +273,7 @@ env "gorm" {
     dir = "file://migrations"
   }
 }
-```text
+```
 
 ### Workflow
 
@@ -285,7 +285,7 @@ type BookingLogEntity struct {
     // ... existing fields
     NarrativeText string `gorm:"type:text"` // New field for audit trail
 }
-```text
+```
 
 **2. Generate Migration:**
 
@@ -296,7 +296,7 @@ type BookingLogEntity struct {
 atlas migrate diff add_narrative \
   --env gorm \
   --to "gorm://internal/adapters/persistence"
-```text
+```
 
 **Generated migration (migrations/20250125120000_add_narrative.sql):**
 
@@ -304,7 +304,7 @@ atlas migrate diff add_narrative \
 -- Add column "narrative_text" to table: "financial_booking_logs"
 ALTER TABLE "financial_booking_logs"
   ADD COLUMN "narrative_text" text;
-```text
+```
 
 **Note:** Domain model does NOT need to change if this is purely an audit/persistence concern. See
 [ADR-0005](0005-adapter-pattern-layer-translation.md) for adapter patterns.
@@ -318,7 +318,7 @@ ALTER TABLE "financial_booking_logs"
 atlas migrate lint \
   --env gorm \
   --latest 1
-```text
+```
 
 **4. Test Migration:**
 
@@ -329,7 +329,7 @@ atlas migrate lint \
 atlas migrate test \
   --env gorm \
   --dev-url "docker://postgres/15/test"
-```text
+```
 
 **5. Apply Migration:**
 
@@ -340,7 +340,7 @@ atlas migrate test \
 atlas migrate apply \
   --env gorm \
   --url "$PROD_DATABASE_URL"
-```text
+```
 
 ### CI/CD Integration
 
@@ -394,7 +394,7 @@ jobs:
           atlas migrate apply \
             --env gorm \
             --url "${{ secrets.DATABASE_URL }}"
-```text
+```
 
 ### Immutability Principle
 
@@ -414,7 +414,7 @@ For complex changes, write SQL manually:
 # Create empty migration file
 
 atlas migrate new complex_data_migration --env gorm
-```text
+```
 
 Edit the generated file with custom SQL, then Atlas manages it like any other migration.
 

@@ -28,7 +28,7 @@ Fast health check that verifies the Kafka cluster is properly configured and ope
 # Or via Tilt
 
 tilt trigger kafka-health
-```text
+```
 
 **Expected runtime:** ~10-15 seconds
 
@@ -65,7 +65,7 @@ Comprehensive failover test that simulates broker failure and verifies cluster r
 # Or via Tilt
 
 tilt trigger kafka-failover
-```text
+```
 
 **Expected runtime:** ~60-90 seconds
 
@@ -162,7 +162,7 @@ local_resource(
   labels=['messaging'],
   auto_init=False,  # Manual trigger
 )
-```text
+```
 
 ### Test script conventions
 

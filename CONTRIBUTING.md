@@ -19,19 +19,19 @@ Run the setup verification script to check your environment:
 
 ```bash
 ./scripts/setup-check.sh
-```text
+```
 
 If tools are missing, install them automatically (macOS/Linux):
 
 ```bash
 ./scripts/install-tools.sh
-```text
+```
 
 ### Manual Setup
 
 #### 1. Core Tools
 
-**Go 1.23+**
+#### Go 1.23+
 
 ```bash
 
@@ -42,9 +42,9 @@ brew install go
 # Linux
 
 sudo apt-get install golang-go
-```text
+```
 
-**Make and Git**
+#### Make and Git
 
 ```bash
 
@@ -53,11 +53,11 @@ sudo apt-get install golang-go
 # Linux
 
 sudo apt-get install build-essential git
-```text
+```
 
 #### 2. Container & Kubernetes
 
-**Docker**
+#### Docker
 
 ```bash
 
@@ -69,9 +69,9 @@ brew install --cask docker
 
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
-```text
+```
 
-**Kubernetes Cluster**:
+#### Kubernetes Cluster
 
 ```bash
 
@@ -89,41 +89,41 @@ ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 brew install minikube
 minikube start
-```text
+```
 
-**kubectl and Helm**
+#### kubectl and Helm
 
 ```bash
 brew install kubectl helm
-```text
+```
 
-**Tilt** (for local development)
+#### Tilt (for local development)
 
 ```bash
 brew install tilt-dev/tap/tilt
-```text
+```
 
 #### 3. API Development Tools
 
-**buf CLI** (Protocol Buffers)
+#### buf CLI (Protocol Buffers)
 
 ```bash
 brew install bufbuild/buf/buf
-```text
+```
 
-**protoc** (Protocol Buffer compiler)
+#### protoc (Protocol Buffer compiler)
 
 ```bash
 brew install protobuf
-```text
+```
 
 #### 4. Code Quality Tools
 
-**golangci-lint**
+#### golangci-lint
 
 ```bash
 brew install golangci-lint
-```text
+```
 
 #### 5. Project Setup
 
@@ -149,7 +149,7 @@ make proto
 # Run tests to verify setup
 
 make test
-```text
+```
 
 ## Development Workflow
 
@@ -159,6 +159,7 @@ make test
 
    ```bash
    git checkout -b feature/my-feature
+
 ```text
 
 1. **Make changes following code standards**
@@ -168,13 +169,14 @@ make test
    ```bash
    make test
    make lint
-```text
+```
 
 1. **Commit changes** (pre-commit hooks will run automatically)
 
    ```bash
    git add .
    git commit -m "feat: add new feature"
+
 ```text
 
 1. **Push and create PR**
@@ -182,7 +184,7 @@ make test
    ```bash
    git push origin feature/my-feature
    gh pr create
-```text
+```
 
 ### Local Development with Tilt
 
@@ -201,7 +203,7 @@ tilt up
 # Stop environment
 
 tilt down
-```text
+```
 
 See [docs/skills/tilt.md](docs/skills/tilt.md) for detailed Tilt usage.
 
@@ -226,7 +228,7 @@ make proto
 # Run tests to verify
 
 make test
-```text
+```
 
 ### Browsing Code Documentation
 
@@ -242,7 +244,7 @@ make docs
 
 # Press Ctrl+C to stop
 
-```text
+```
 
 The documentation server provides a local version of pkg.go.dev for browsing:
 
@@ -270,7 +272,7 @@ make proto-lint    # Lint protobuf files
 make docker-build  # Build Docker image
 make docs          # Start local documentation server
 make clean         # Clean build artifacts
-```text
+```
 
 ## Code Standards
 
@@ -284,7 +286,8 @@ make clean         # Clean build artifacts
 
 ### Immutability and Functional Programming Principles
 
-**Immutability First**: Prefer immutable data structures wherever possible. While Go lacks Java's `final` keyword, we
+#### Immutability First Prefer immutable data structures wherever possible. While Go lacks Java's `final` keyword, we
+
 enforce immutability through coding patterns and conventions.
 
 #### Immutability Guidelines
@@ -336,6 +339,7 @@ enforce immutability through coding patterns and conventions.
    func (m *Money) SetUnits(units int64) {
        m.Units = units  // Mutation!
    }
+
 ```text
 
 1. **Use Value Receivers, Not Pointer Receivers**
@@ -357,7 +361,7 @@ enforce immutability through coding patterns and conventions.
    func (a *Account) SetBalance(newBalance Money) {
        a.balance = newBalance
    }
-```text
+```
 
 1. **Avoid Mutable Slices and Maps in Structs**
    - Don't expose internal slices/maps directly
@@ -383,6 +387,7 @@ enforce immutability through coding patterns and conventions.
        ID       string
        Postings []Posting  // Can be modified externally!
    }
+
 ```text
 
 1. **Constructor Functions for Complex Initialization**
@@ -404,7 +409,7 @@ enforce immutability through coding patterns and conventions.
            createdAt:  time.Now(),
        }, nil
    }
-```text
+```
 
 1. **Functional Transformations Over Mutations**
    - Use `map`, `filter`, `reduce` patterns
@@ -427,6 +432,7 @@ enforce immutability through coding patterns and conventions.
            postings[i].Amount = postings[i].Amount.Mul(feeRate)
        }
    }
+
 ```text
 
 #### When Mutation Is Acceptable
@@ -451,7 +457,7 @@ func (b *AccountBuilder) Build() Account {
     // Return immutable copy
     return b.account
 }
-```text
+```
 
 #### Code Review Checklist for Immutability
 
@@ -464,13 +470,13 @@ func (b *AccountBuilder) Build() Account {
 
 ### Testing Standards
 
-**Test-Driven Development (TDD)**: All production code must be developed using the Red-Green-Refactor cycle.
+#### Test-Driven Development (TDD) All production code must be developed using the Red-Green-Refactor cycle
 
 #### Red-Green-Refactor Methodology
 
 We follow strict TDD practices to ensure code quality, correctness, and maintainability.
 
-**The Cycle:**
+#### The Cycle
 
 1. **Red**: Write a failing test first
    - Define the expected behavior before implementation
@@ -488,7 +494,7 @@ We follow strict TDD practices to ensure code quality, correctness, and maintain
    - Improve naming and structure
    - All tests must still pass
 
-**Example TDD Workflow:**
+#### Example TDD Workflow
 
 ```go
 // Step 1 (RED): Write failing test
@@ -529,7 +535,7 @@ func (m Money) Add(other Money) Money {
     }
 }
 // Run test: STILL PASSES
-```text
+```
 
 #### TDD Best Practices
 
@@ -542,6 +548,7 @@ func (m Money) Add(other Money) Money {
 
    // Bad: Vague test name
    func TestDeposit(t *testing.T)
+
 ```text
 
 1. **One Assertion Focus Per Test**
@@ -557,7 +564,7 @@ func (m Money) Add(other Money) Money {
        result := NewMoney("GBP", 100, 0).Add(NewMoney("GBP", 50, 0))
        assert.Equal(t, "GBP", result.Currency())
    }
-```text
+```
 
 1. **Test Immutability**
 
@@ -570,6 +577,7 @@ func (m Money) Add(other Money) Money {
 
        assert.Equal(t, original.Units(), m1.Units(), "original should not be mutated")
    }
+
 ```text
 
 1. **Write Tests Before Fixing Bugs**
@@ -582,7 +590,7 @@ func (m Money) Add(other Money) Money {
 
    // 2. Fix the code to make test pass
    // 3. Refactor if needed
-```text
+```
 
 #### Test Organization
 
@@ -595,7 +603,8 @@ func (m Money) Add(other Money) Money {
 
 #### Defensive Testing: Happy Path AND Unhappy Path
 
-**Principle**: Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious
+#### Principle Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious
+
 inputs.
 
 > 📖 **See [ADR-008: Defensive Testing Standards](docs/adr/0008-defensive-testing-standards.md)** for comprehensive
@@ -608,13 +617,13 @@ We follow **defensive testing** practices:
 3. **Edge Case Testing**: Test boundary conditions and extreme values
 4. **Negative Testing**: Test with values that should never occur
 
-**Key Testing Frameworks:**
+#### Key Testing Frameworks
 
 - **Boundary Value Analysis**: Test at the edges of valid input ranges
 - **Error Path Coverage**: Every error condition must have a test
 - **Defensive Programming Verification**: Validate assumptions don't silently fail
 
-**Examples of Defensive Test Cases:**
+#### Examples of Defensive Test Cases
 
 ```go
 func TestMoney_NewMoney_DefensiveTests(t *testing.T) {
@@ -800,16 +809,16 @@ func TestAccount_Deposit_DefensiveTests(t *testing.T) {
         })
     }
 }
-```text
+```
 
-**Rationale Documentation**:
+#### Rationale Documentation
 
 - Every test case should include a `rationale` field explaining WHY this case matters
 - Document assumptions being tested ("assumes negative amounts are debts")
 - Note edge cases that caught bugs in other systems
 - Reference requirements or specifications when applicable
 
-**When to Apply Defensive Testing**:
+#### When to Apply Defensive Testing
 
 - ✅ All public APIs and domain model constructors
 - ✅ Financial calculations (money, interest, balances)
@@ -820,7 +829,7 @@ func TestAccount_Deposit_DefensiveTests(t *testing.T) {
 - ✅ Concurrent operations (race conditions, deadlocks)
 - ✅ Network boundaries (malformed data, timeouts)
 
-**Red Flags Requiring Unhappy Path Tests**:
+#### Red Flags Requiring Unhappy Path Tests
 
 - Functions that accept numeric inputs (test overflow, underflow, zero, negative)
 - Functions that accept strings (test empty, whitespace, special chars, very long)
@@ -873,7 +882,7 @@ func TestAccountService_CreateAccount_ValidInput_ReturnsImmutableAccount(t *test
         })
     }
 }
-```text
+```
 
 ### Protocol Buffer Standards
 
@@ -894,9 +903,9 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 [optional body]
 
 [optional footer]
-```text
+```
 
-**Types:**
+#### Types
 
 - `feat`: New feature
 - `fix`: Bug fix
@@ -915,13 +924,13 @@ Implements bulk import for transaction logs with validation
 and audit trail support.
 
 Closes #123
-```text
+```
 
 ```text
 fix: correct double-entry posting logic
 
 Ensure credit and debit postings are atomic and balanced.
-```text
+```
 
 ## Testing
 
@@ -956,7 +965,7 @@ go test -run TestAccountService_CreateAccount ./internal/...
 # Run tests without -short flag (includes timing-sensitive tests)
 
 go test ./...
-```text
+```
 
 ### Timing-Sensitive Tests
 
@@ -990,6 +999,7 @@ scheduler variance in CI environments.
       }
       // ... timing assertions ...
   }
+
 ```text
 
 - Use generous tolerance ranges (±30% or more for CI variance)
@@ -1007,6 +1017,7 @@ scheduler variance in CI environments.
 ### Test Organization
 
 ```text
+
 internal/
 ├── accounting/
 │   ├── service.go
@@ -1015,7 +1026,8 @@ internal/
 │   └── testdata/             # Test fixtures
 │       ├── accounts.json
 │       └── transactions.json
-```text
+
+```
 
 ## Pull Request Process
 
@@ -1062,7 +1074,7 @@ How the changes were tested
 ## Related Issues
 
 Closes #123
-```text
+```
 
 ### Review Process
 
@@ -1115,7 +1127,7 @@ Chosen option: "option 1", because [justification]
 - Good, because [positive outcome]
 - Bad, because [negative outcome]
 
-```text
+```
 
 ### ADR Location
 

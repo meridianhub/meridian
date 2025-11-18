@@ -165,7 +165,7 @@ meridian/
 └── scripts/
     ├── setup-check.sh              # Verify dev environment
     └── install-tools.sh            # Install Tilt and dependencies
-```text
+```
 
 ### Tiltfile Configuration
 
@@ -198,7 +198,7 @@ docker_build(
     restart_container(),
   ],
 )
-```text
+```
 
 **Result:** Edit Go file → 2-3 seconds → changes live
 
@@ -213,7 +213,7 @@ k8s_resource(
     'kafka-cluster',   # Wait for Kafka cluster (3 brokers)
   ],
 )
-```text
+```
 
 Ensures services start in correct order, waits for health checks.
 
@@ -234,7 +234,7 @@ spec:
   # ... (matches production pattern)
 
 ''')
-```text
+```
 
 **Kafka** (3-broker StatefulSet with KRaft):
 
@@ -254,7 +254,7 @@ spec:
   # ... (KRaft quorum configuration)
 
 '''))
-```text
+```
 
 **Redis** (standard deployment):
 
@@ -268,7 +268,7 @@ metadata:
 # ... (production-like config)
 
 ''')
-```text
+```
 
 #### 4. Development Helpers
 
@@ -282,7 +282,7 @@ local_resource(
   labels=['tests'],
   allow_parallel=True,  # Runs while services start
 )
-```text
+```
 
 **On-demand linting:**
 
@@ -294,7 +294,7 @@ local_resource(
   labels=['quality'],
   auto_init=False,  # Run manually: 'tilt trigger lint'
 )
-```text
+```
 
 #### 5. Resource Organization
 
@@ -303,7 +303,7 @@ k8s_resource('meridian', labels=['app'])
 k8s_resource('cockroachdb', labels=['database'])
 k8s_resource('redis', labels=['cache'])
 k8s_resource('kafka-cluster', labels=['messaging'])
-```text
+```
 
 **Tilt UI groups by label:**
 
@@ -321,7 +321,7 @@ k8s_resource('kafka-cluster', labels=['messaging'])
 ├─ quality ──────────────────┤
 │ ○ lint (manual)            │
 └────────────────────────────┘
-```text
+```
 
 #### 6. Port Forwarding
 
@@ -337,7 +337,7 @@ k8s_resource(
 k8s_resource('cockroachdb', port_forwards='26257:26257')
 k8s_resource('redis', port_forwards='6379:6379')
 k8s_resource('kafka-cluster', port_forwards='9092:9092')  # Forwards to kafka-0
-```text
+```
 
 **Automatic** - no manual `kubectl port-forward` needed!
 
@@ -365,7 +365,7 @@ ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 # Verify cluster is ready
 
 kubectl cluster-info
-```text
+```
 
 #### Daily Development
 
@@ -420,7 +420,7 @@ tilt trigger lint
 # Stop everything (clean shutdown)
 
 tilt down
-```text
+```
 
 **Time from code change to running: ~2-3 seconds** 🚀
 
@@ -432,13 +432,13 @@ Tilt watches files and only syncs changes:
 
 ```python
 sync('./internal', '/app/internal')  # Only changed files sync
-```text
+```
 
 #### Incremental Builds
 
 ```python
 run('go build -o meridian ./cmd/meridian')
-```text
+```
 
 Go compiler caches unchanged packages → fast rebuilds.
 
@@ -446,7 +446,7 @@ Go compiler caches unchanged packages → fast rebuilds.
 
 ```python
 update_settings(max_parallel_updates=3)
-```text
+```
 
 Up to 3 resources build simultaneously.
 
@@ -454,7 +454,7 @@ Up to 3 resources build simultaneously.
 
 ```python
 run(..., trigger=['./cmd', './internal', './pkg'])
-```text
+```
 
 Only rebuild when relevant directories change.
 
@@ -481,7 +481,7 @@ tilt ci
 # Test specific resources
 
 tilt ci meridian test
-```text
+```
 
 Useful for pre-merge integration tests in GitHub Actions.
 
@@ -537,7 +537,7 @@ docker-compose ps     →     kubectl get pods
 docker-compose restart →    tilt restart <resource>
 volumes: ./code       →     live_update (smarter sync)
 depends_on            →     resource_deps (with health checks)
-```text
+```
 
 **Key difference:** Tilt uses real Kubernetes, not just Docker containers.
 
@@ -584,7 +584,7 @@ ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 # Start development
 
 tilt up
-```text
+```
 
 ## Local Kubernetes with Kind + ctlptl
 
@@ -617,7 +617,7 @@ ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # - Optimizes for development workflows
 
-```text
+```
 
 ### Cluster Management
 
@@ -635,23 +635,23 @@ ctlptl delete cluster kind-meridian-local
 
 kubectl config use-context kind-meridian-local
 kubectl get nodes
-```text
+```
 
 ### Why Not Docker Desktop Kubernetes?
 
 Docker Desktop Kubernetes works but:
 
-- Slower to start/restart
-- Less reproducible across team
-- No registry integration
-- Harder to reset to clean state
-- Kind + ctlptl is more predictable
+* Slower to start/restart
+* Less reproducible across team
+* No registry integration
+* Harder to reset to clean state
+* Kind + ctlptl is more predictable
 
 **Recommendation**: Use Kind + ctlptl for local development, Docker Desktop K8s as fallback option.
 
 ## When to Use Tilt vs Other Tools
 
-### Use Tilt when:
+### Use Tilt when
 
 * ✅ Production runs on Kubernetes
 * ✅ Multiple microservices with dependencies
@@ -659,7 +659,7 @@ Docker Desktop Kubernetes works but:
 * ✅ Team comfortable with or learning Kubernetes
 * ✅ Want production parity in dev
 
-### Use Docker Compose when:
+### Use Docker Compose when
 
 * ✅ Production uses Docker Compose (rare)
 * ✅ Simple 2-3 service stacks
@@ -667,13 +667,13 @@ Docker Desktop Kubernetes works but:
 * ✅ Rapid prototyping / throwaway projects
 * ✅ K8s features not needed
 
-### Use Manual kubectl when:
+### Use Manual kubectl when
 
 * ✅ Debugging K8s-specific issues
 * ✅ One-off testing of K8s features
 * ❌ Not for daily development (too slow)
 
-### Use Skaffold when:
+### Use Skaffold when
 
 * ✅ Need CI/CD integration (Skaffold is more pipeline-focused)
 * ✅ GKE deployment (tight integration)
@@ -717,7 +717,7 @@ services:
 
     # Problem: Only waits for start, not readiness
 
-```text
+```
 
 **Rejected because:**
 
@@ -795,7 +795,7 @@ Tilt can connect to remote K8s clusters:
 # Tiltfile
 
 allow_k8s_contexts(['gke_my-project_us-central1_my-cluster'])
-```text
+```
 
 Enables cloud-based development if local resources are limited.
 

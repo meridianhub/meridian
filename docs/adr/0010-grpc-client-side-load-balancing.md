@@ -83,7 +83,7 @@ spec:
     targetPort: grpc
   selector:
     app: financial-accounting
-```text
+```
 
 ### RBAC Requirements
 
@@ -126,7 +126,7 @@ rules:
   resources: ["secrets"]
   verbs: ["get"]
   resourceNames: ["meridian-secrets"]
-```text
+```
 
 **Key Points**:
 
@@ -151,7 +151,7 @@ if err != nil {
 defer conn.Close()
 
 client := accountingv1.NewFinancialAccountingServiceClient(conn)
-```text
+```
 
 The client factory automatically:
 
@@ -177,7 +177,7 @@ conn, err := platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
     ServiceName: "financial-accounting",
     Port:        50052,
 })
-```text
+```
 
 **Service Constants**: Define service connection configs as constants:
 
@@ -187,7 +187,7 @@ const (
     PositionKeepingPort    = 50053
     CurrentAccountPort     = 50051
 )
-```text
+```
 
 **Dependency Injection**: Create clients in main.go, inject into services:
 
@@ -212,7 +212,7 @@ func main() {
     svc := service.NewCurrentAccountService(repo, posClient, eventPub)
     // ...
 }
-```text
+```
 
 ### Validation Criteria
 
@@ -249,6 +249,7 @@ Load testing confirms:
 
    creds, err := credentials.NewClientTLSFromFile("ca.pem", "")
    conn, err := grpc.NewClient(cfg, grpc.WithTransportCredentials(creds))
+
 ```text
 
 1. **Certificate Management**:

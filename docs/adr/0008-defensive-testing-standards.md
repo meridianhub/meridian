@@ -108,7 +108,7 @@ tests := []struct {
         rationale: "Must detect arithmetic overflow",
     },
 }
-```text
+```
 
 ### Mandatory Test Categories
 
@@ -241,7 +241,7 @@ func TestMoney_NewMoney_DefensiveTests(t *testing.T) {
         })
     }
 }
-```text
+```
 
 ### Example 2: Deposit Operation Defensive Tests
 
@@ -333,7 +333,7 @@ func TestAccount_Deposit_DefensiveTests(t *testing.T) {
         })
     }
 }
-```text
+```
 
 ## Red Flags Requiring Defensive Tests
 

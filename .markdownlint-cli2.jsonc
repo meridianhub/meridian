@@ -14,7 +14,6 @@
       "code_blocks": true,
       "tables": false,
       "headings": true,
-      "headers": true,
       "strict": false,
       "stern": false
     },
@@ -35,7 +34,11 @@
 
     // MD051/link-fragments - Link fragments should be valid
     // Disabled as it has false positives with valid TOC links
-    "MD051": false
+    "MD051": false,
+
+    // MD060/table-column-style - Table column formatting
+    // Disabled as table formatting styles vary and are cosmetic only
+    "MD060": false
   },
 
   // Fix mode - automatically fix issues where possible

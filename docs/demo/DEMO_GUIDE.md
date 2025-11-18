@@ -16,7 +16,7 @@ Demonstrates event-driven microservices with Kafka for CurrentAccount and Financ
 └─────────────────┘  financial-accounting.      └─────────────────────────┘
                          postings
                      LedgerPosting
-```text
+```
 
 ## Event Flow
 
@@ -45,19 +45,19 @@ Demonstrates event-driven microservices with Kafka for CurrentAccount and Financ
 ```bash
 brew install grpcurl jq kubectl
 tilt up  # Ensure all services running
-```text
+```
 
 ### Quick Demo (5 minutes)
 
 ```bash
 ./scripts/demo.sh
-```text
+```
 
 ### Watch Kafka Events (separate terminal)
 
 ```bash
 ./scripts/kafka-watch.sh
-```text
+```
 
 ### Manual Step-by-Step
 
@@ -69,7 +69,7 @@ grpcurl -plaintext -d '{
   "product_service_type": {"type": "STANDARD_CURRENT_ACCOUNT"},
   "account_currency": "GBP"
 }' localhost:9091 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount
-```text
+```
 
 #### 2. Execute Deposit
 
@@ -78,7 +78,7 @@ grpcurl -plaintext -d '{
   "current_account_facility_reference": "ACC-123",
   "amount": {"currency": "GBP", "units": 100}
 }' localhost:9091 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit
-```text
+```
 
 #### 3. Check Ledger
 
@@ -86,7 +86,7 @@ grpcurl -plaintext -d '{
 grpcurl -plaintext -d '{
   "account_reference": "ACC-123"
 }' localhost:9092 meridian.financial_accounting.v1.FinancialAccountingService/ListLedgerPostings
-```text
+```
 
 ## Integration Tests
 
@@ -94,7 +94,7 @@ Run automated tests:
 
 ```bash
 go test ./test/integration/... -v
-```text
+```
 
 Tests validate:
 
@@ -135,7 +135,7 @@ Tests validate:
 ```bash
 kubectl get pods  # Check all running
 tilt logs meridian  # Check app logs
-```text
+```
 
 **Kafka events not flowing:**
 
@@ -145,14 +145,14 @@ kubectl logs kafka-0                 # Check broker 0 logs
 kubectl logs kafka-1                 # Check broker 1 logs
 kubectl logs kafka-2                 # Check broker 2 logs
 ./scripts/kafka-watch.sh             # Monitor topics
-```text
+```
 
 **gRPC connection refused:**
 
 ```bash
 kubectl port-forward service/meridian 9091:9091  # CurrentAccount
 kubectl port-forward service/meridian 9092:9092  # FinancialAccounting
-```text
+```
 
 ## Testing Kafka Failover
 
@@ -177,7 +177,7 @@ kubectl exec kafka-0 -- kafka-topics --describe --topic current-account.deposits
 kubectl exec kafka-0 -- kafka-console-producer --topic current-account.deposits --bootstrap-server localhost:9092
 kubectl exec kafka-0 -- kafka-console-consumer --topic current-account.deposits --from-beginning --bootstrap-server
 localhost:9092
-```text
+```
 
 **Expected Behavior:**
 

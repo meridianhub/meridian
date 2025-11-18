@@ -17,7 +17,7 @@
           │ gRPC: 9091        │                         │ gRPC: 9092         │
           │ DB: current_acct  │                         │ DB: financial_acct │
           └───────────────────┘                         └────────────────────┘
-```text
+```
 
 ## Service Details
 
@@ -127,7 +127,7 @@
 ```text
 User → CurrentAccount gRPC
 Request: ExecuteDeposit(account_id: "ACC-123", amount: £100)
-```text
+```
 
 **T1**: CurrentAccount processes synchronously
 
@@ -140,7 +140,7 @@ CurrentAccount Service:
 4. Publish to Kafka: current-account.deposits
 5. Return response: deposit_ref="DEP-456"
 
-```text
+```
 
 **T2**: Kafka propagates event (~milliseconds)
 
@@ -150,7 +150,7 @@ Message: ExecuteDepositRequest {
   account_id: "ACC-123"
   amount: {currency: "GBP", units: 100}
 }
-```text
+```
 
 **T3**: FinancialAccounting consumes asynchronously
 
@@ -164,7 +164,7 @@ FinancialAccounting Service:
 3. Save to database
 4. Publish to Kafka: financial-accounting.postings
 
-```text
+```
 
 **T4**: CurrentAccount receives confirmation
 
@@ -175,7 +175,7 @@ CurrentAccount Service (consumer):
 2. Update account status: "pending_posting" → "posted"
 3. Save to database
 
-```text
+```
 
 **T5**: Eventual consistency achieved
 
@@ -272,7 +272,7 @@ message ExecuteDepositRequest {
   string current_account_facility_reference = 1;
   Money amount = 2;
 }
-```text
+```
 
 ### Schema Evolution
 

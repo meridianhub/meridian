@@ -95,7 +95,7 @@ deployment, you would customize this with your specific:
 
    kubectl get nodes
    kubectl get namespaces
-```text
+```
 
 1. **Restore configurations** (60-90 minutes)
 
@@ -112,6 +112,7 @@ deployment, you would customize this with your specific:
    # Verify deployments
 
    kubectl get all -n production
+
 ```text
 
 1. **Restore database** (90-150 minutes)
@@ -127,7 +128,7 @@ deployment, you would customize this with your specific:
    # Verify data integrity
 
    cockroach sql --execute="SELECT COUNT(*) FROM meridian.transactions;"
-```text
+```
 
 1. **Verify and test** (150-180 minutes)
 
@@ -144,6 +145,7 @@ deployment, you would customize this with your specific:
    # Monitor logs
 
    stern -n production meridian --since 5m
+
 ```text
 
 ### Scenario 2: Database Corruption
@@ -163,7 +165,7 @@ deployment, you would customize this with your specific:
    # Verify no active connections
 
    cockroach sql --execute="SHOW SESSIONS;"
-```text
+```
 
 1. **Assess corruption scope**
 
@@ -176,6 +178,7 @@ deployment, you would customize this with your specific:
    # Identify affected tables
 
    cockroach sql --execute="SELECT * FROM system.range_log WHERE info LIKE '%corruption%';"
+
 ```text
 
 1. **Restore from backup**
@@ -189,7 +192,7 @@ deployment, you would customize this with your specific:
    # Restore to point in time before corruption
 
    cockroach sql --execute="RESTORE DATABASE meridian FROM 's3://backups/2025-10-28-00-00';"
-```text
+```
 
 1. **Verify data integrity**
 
@@ -202,6 +205,7 @@ deployment, you would customize this with your specific:
    # Validate critical data
 
    cockroach sql --execute="SELECT COUNT(*) FROM meridian.accounts;"
+
 ```text
 
 1. **Resume operations**
@@ -215,7 +219,7 @@ deployment, you would customize this with your specific:
    # Monitor for errors
 
    kubectl logs -n production -l app=meridian --tail=100
-```text
+```
 
 ### Scenario 3: Regional Outage
 
@@ -236,6 +240,7 @@ deployment, you would customize this with your specific:
    aws route53 change-resource-record-sets \
      --hosted-zone-id Z123456 \
      --change-batch file://dns-failover.json
+
 ```text
 
 1. **Verify DR cluster** (30-60 minutes)
@@ -253,7 +258,7 @@ deployment, you would customize this with your specific:
    # Verify database replication
 
    cockroach sql --execute="SHOW RANGES FROM DATABASE meridian;"
-```text
+```
 
 1. **Monitor switchover** (60-120 minutes)
 
@@ -270,6 +275,7 @@ deployment, you would customize this with your specific:
    # Verify no errors
 
    kubectl get events -n production --sort-by='.lastTimestamp'
+
 ```text
 
 1. **Post-recovery actions** (when primary region recovers)
@@ -282,7 +288,7 @@ deployment, you would customize this with your specific:
 
    # Plan switchback during maintenance window
 
-```text
+```
 
 ### Scenario 4: Ransomware / Security Breach
 
@@ -315,6 +321,7 @@ deployment, you would customize this with your specific:
    # Scale to 0 to prevent spread
 
    kubectl scale deployment meridian -n production --replicas=0
+
 ```text
 
 1. **Preserve evidence**
@@ -332,10 +339,10 @@ deployment, you would customize this with your specific:
    # Export network policies and RBAC
 
    kubectl get networkpolicies,roles,rolebindings -n production -o yaml > incident-rbac-$(date +%s).yaml
-```text
+```
 
 1. **Engage security team**
-   - Contact: security@your-domain.com
+   - Contact: <security@your-domain.com>
    - Escalate to CTO/CISO
    - Consider engaging external incident response firm
 
@@ -382,7 +389,7 @@ cockroach sql --database=staging --execute="RESTORE DATABASE meridian FROM 's3:/
 
 # Document in: docs/runbooks/dr-drill-YYYY-MM-DD.md
 
-```text
+```
 
 ## Communication Plan
 
@@ -462,7 +469,7 @@ git checkout tags/v1.2.0
 # Apply all resources
 
 kubectl apply -k deployments/k8s/overlays/production/
-```text
+```
 
 ## Testing & Drills
 
@@ -496,7 +503,7 @@ Action items:
 
 - [ ]
 
-```text
+```
 
 ## Emergency Contacts
 
@@ -507,7 +514,7 @@ Action items:
 | **On-Call Engineer** | [PagerDuty] | [Phone] |
 | **Database Admin** | [Email/Phone] | [Email/Phone] |
 | **Infrastructure Lead** | [Email/Phone] | [Email/Phone] |
-| **Security Team** | security@your-domain.com | [Phone] |
+| **Security Team** | <security@your-domain.com> | [Phone] |
 | **CTO** | [Email/Phone] | - |
 
 **External contacts:**

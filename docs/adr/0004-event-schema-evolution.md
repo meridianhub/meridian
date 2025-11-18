@@ -90,13 +90,13 @@ message AccountUpdated {
   string correlation_id = 5;  // New optional field
   string updated_by = 6;      // New optional field
 }
-```text
+```
 
 **Validation:** `buf breaking --against main` ensures no breaking changes.
 
 **Consumer behavior:** Old consumers automatically ignore new fields (protobuf feature).
 
-**Pattern 2: New BIAN Behavior Qualifier (New Event Type)**
+### Pattern 2: New BIAN Behavior Qualifier (New Event Type)
 
 For new BIAN operations with distinct semantics:
 
@@ -120,7 +120,7 @@ message AccountSuspended {
   google.protobuf.Timestamp suspended_until = 5;
   string suspended_by = 6;
 }
-```text
+```
 
 **Rationale:** BIAN behavior qualifiers (Initiate, Update, Suspend, Terminate) represent distinct operations. Map these
 to distinct event types rather than overloading a single event schema.
@@ -149,7 +149,7 @@ to distinct event types rather than overloading a single event schema.
 - name: Check for breaking changes
 
   run: buf breaking --against '.git#branch=main'
-```text
+```
 
 **Breaking changes fail the build**, forcing developers to either:
 
@@ -160,13 +160,13 @@ to distinct event types rather than overloading a single event schema.
 
 ## Decision Drivers
 
-* ✅ **Simplicity** - No Schema Registry to operate; protobuf native capabilities are sufficient
-* ✅ **Performance** - No external schema lookup; no network dependency for serialization
-* ✅ **BIAN semantic alignment** - New behavior qualifiers naturally map to new event types
-* ✅ **Database-centric architecture** - Persistent layer is source of truth; Kafka is ephemeral
-* ✅ **Monorepo benefits** - Shared `api/proto/` enables compile-time validation across services
-* ✅ **High throughput** - Minimize latency by eliminating Schema Registry network calls
-* ✅ **Operational simplicity** - One less stateful service to manage, monitor, and backup
+- ✅ **Simplicity** - No Schema Registry to operate; protobuf native capabilities are sufficient
+- ✅ **Performance** - No external schema lookup; no network dependency for serialization
+- ✅ **BIAN semantic alignment** - New behavior qualifiers naturally map to new event types
+- ✅ **Database-centric architecture** - Persistent layer is source of truth; Kafka is ephemeral
+- ✅ **Monorepo benefits** - Shared `api/proto/` enables compile-time validation across services
+- ✅ **High throughput** - Minimize latency by eliminating Schema Registry network calls
+- ✅ **Operational simplicity** - One less stateful service to manage, monitor, and backup
 
 ## Example Workflow: BIAN Evolution
 
@@ -198,13 +198,13 @@ message AccountSuspended {
   google.protobuf.Timestamp suspended_until = 7;
   string suspended_by = 8;
 }
-```text
+```
 
 ### Step 3: Generate Go Code
 
 ```bash
 buf generate
-```text
+```
 
 ### Step 4: Validate Compatibility
 
@@ -214,7 +214,7 @@ buf breaking --against main
 
 # ✅ No breaking changes - new file, no modifications to existing schemas
 
-```text
+```
 
 ### Step 5: Create Kafka Topic
 
@@ -224,7 +224,7 @@ kafka-topics --create \
   --partitions 3 \
   --replication-factor 3 \
   --config retention.ms=604800000  # 7 days
-```text
+```
 
 ### Step 6: Implement Producer
 
@@ -248,7 +248,7 @@ func (p *CurrentAccountPublisher) PublishSuspended(
 
     return p.producer.Publish(ctx, "account-suspended", event)
 }
-```text
+```
 
 ### Step 7: Deploy
 
@@ -261,20 +261,20 @@ func (p *CurrentAccountPublisher) PublishSuspended(
 
 ### Positive
 
-* ✅ **Simpler operations** - No Schema Registry service to deploy, monitor, backup
-* ✅ **Compile-time safety** - `buf breaking` catches incompatibilities before deployment
-* ✅ **Better performance** - No schema registry lookup overhead (~0.01-100ms depending on cache)
-* ✅ **BIAN semantic alignment** - Event taxonomy matches BIAN behavior qualifiers
-* ✅ **Database-centric** - Leverages persistent layer as authoritative source
-* ✅ **Monorepo benefits** - All services have access to latest proto definitions
-* ✅ **Reduced complexity** - Fewer moving parts in production environment
+- ✅ **Simpler operations** - No Schema Registry service to deploy, monitor, backup
+- ✅ **Compile-time safety** - `buf breaking` catches incompatibilities before deployment
+- ✅ **Better performance** - No schema registry lookup overhead (~0.01-100ms depending on cache)
+- ✅ **BIAN semantic alignment** - Event taxonomy matches BIAN behavior qualifiers
+- ✅ **Database-centric** - Leverages persistent layer as authoritative source
+- ✅ **Monorepo benefits** - All services have access to latest proto definitions
+- ✅ **Reduced complexity** - Fewer moving parts in production environment
 
 ### Negative
 
-* ❌ **No centralized schema registry** - Cannot discover schemas at runtime (not needed for internal use)
-* ❌ **Monorepo coupling** - Services must share `api/proto/` directory (acceptable for internal services)
-* ❌ **No polyglot runtime support** - External consumers would need proto file access (mitigated: use gRPC APIs)
-* ❌ **Manual topic creation** - Must explicitly create new topics for new event types (automation possible)
+- ❌ **No centralized schema registry** - Cannot discover schemas at runtime (not needed for internal use)
+- ❌ **Monorepo coupling** - Services must share `api/proto/` directory (acceptable for internal services)
+- ❌ **No polyglot runtime support** - External consumers would need proto file access (mitigated: use gRPC APIs)
+- ❌ **Manual topic creation** - Must explicitly create new topics for new event types (automation possible)
 
 ### Mitigations
 
@@ -376,12 +376,12 @@ fields handle 90% of evolution needs. New event types handle the remaining 10% (
 
 ## Links
 
-* [ADR-0005: Adapter Pattern for Layer Translation](./0005-adapter-pattern-layer-translation.md)
-* [ADR-0006: Schema Management with Adapters](./0006-schema-management-adapters.md)
-* [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
-* [buf CLI Documentation](https://buf.build/docs/)
-* [BIAN Service Landscape 13.0.0](https://bian.org/servicelandscape-13-0-0/)
-* [BIAN Semantic APIs](https://bian.org/semantic-apis/)
+- [ADR-0005: Adapter Pattern for Layer Translation](./0005-adapter-pattern-layer-translation.md)
+- [ADR-0006: Schema Management with Adapters](./0006-schema-management-adapters.md)
+- [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
+- [buf CLI Documentation](https://buf.build/docs/)
+- [BIAN Service Landscape 13.0.0](https://bian.org/servicelandscape-13-0-0/)
+- [BIAN Semantic APIs](https://bian.org/semantic-apis/)
 
 ## Notes
 
@@ -459,6 +459,6 @@ Maintain a living document of all event types:
 - **BIAN Qualifier:** Control (Suspend)
 - **Since:** BIAN 14.0
 
-```text
+```
 
 Update this catalog when adding new event types.

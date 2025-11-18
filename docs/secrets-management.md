@@ -24,7 +24,7 @@ metadata:
 type: Opaque
 stringData:
   DATABASE_URL: "postgres://meridian:meridian@cockroachdb:26257/meridian?sslmode=disable"
-```text
+```
 
 **⚠️ WARNING:** These secrets contain development-only credentials. **NEVER** use these credentials in production.
 
@@ -118,7 +118,7 @@ spec:
     remoteRef:
       key: prod/meridian/current-account/db
       property: database
-```text
+```
 
 **Installation:**
 
@@ -128,7 +128,7 @@ helm install external-secrets \
   external-secrets/external-secrets \
   -n external-secrets-system \
   --create-namespace
-```text
+```
 
 #### 2. Sealed Secrets
 
@@ -151,7 +151,7 @@ kubeseal -f secret.yaml -w sealed-secret.yaml
 # Commit sealed-secret.yaml to git
 
 git add sealed-secret.yaml
-```text
+```
 
 #### 3. HashiCorp Vault
 
@@ -180,7 +180,7 @@ spec:
 
         secretPath: "secret/data/prod/current-account/database"
         secretKey: "url"
-```text
+```
 
 ## Secret Rotation
 
@@ -225,7 +225,7 @@ kubectl rollout restart deployment current-account
 
 kubectl get pods -l app=current-account
 kubectl logs -l app=current-account --tail=50 | grep "database connection established"
-```text
+```
 
 ## Migration from Development to Production
 
@@ -254,7 +254,7 @@ metadata:
   name: current-account-db
 stringData:
   DATABASE_URL: "postgres://meridian:meridian@localhost:5432/meridian"
-```text
+```
 
 **After (Production):**
 
@@ -279,7 +279,7 @@ spec:
 
     remoteRef:
       key: prod/meridian/current-account/database-url
-```text
+```
 
 ## Environment-Specific Configuration
 
@@ -300,7 +300,7 @@ deployments/
     └── production/
         ├── kustomization.yaml
         └── external-secret.yaml     # External secrets for production
-```text
+```
 
 ## Security Best Practices
 
@@ -342,7 +342,7 @@ kubectl describe externalsecret current-account-db
 # Check logs
 
 kubectl logs -n external-secrets-system deployment/external-secrets
-```text
+```
 
 ### Connection Failures
 
@@ -361,7 +361,7 @@ kubectl exec -it deployment/current-account -- sh
 # Check DATABASE_URL environment variable (don't log the value!)
 
 env | grep DATABASE_URL
-```text
+```
 
 ### Rotation Issues
 
@@ -376,7 +376,7 @@ kubectl annotate externalsecret current-account-db \
 
 kubectl get secret current-account-db \
   -o jsonpath='{.metadata.creationTimestamp}'
-```text
+```
 
 ## References
 

@@ -29,7 +29,7 @@ adr new "Title of Decision"
 # Link ADRs (when one supersedes another)
 
 adr link <source> "Supersedes" <target>
-```text
+```
 
 For more complex ADRs, use the [template.md](template.md) file as a starting point, which follows the MADR (Markdown
 Architectural Decision Records) format.

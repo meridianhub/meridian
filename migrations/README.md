@@ -32,7 +32,7 @@ migrations/
     ├── 20251103174231_initial.sql         # Business tables (transactions)
     ├── 20251103180000_audit_system.sql    # Initializes position_keeping_audit via factory
     └── atlas.sum
-```text
+```
 
 **Migration Application Order:**
 
@@ -67,14 +67,14 @@ The audit system uses raw SQL for:
 
 ```bash
 make migrate-diff-all
-```text
+```
 
 **For specific schema:**
 
 ```bash
 make migrate-diff-current       # current_account schema
 make migrate-diff-position      # position_keeping schema
-```text
+```
 
 ### Apply Migrations
 
@@ -89,27 +89,27 @@ tilt up
 
 # 2. position_keeping (includes position_keeping_audit)
 
-```text
+```
 
 **Manual application:**
 
 ```bash
 export DATABASE_URL="postgres://user:pass@host:5432/dbname"
 make migrate-apply-all          # Apply all schemas (each includes its audit schema)
-```text
+```
 
 ### Check Migration Status
 
 ```bash
 export DATABASE_URL="postgres://user:pass@host:5432/dbname"
 make migrate-status-all
-```text
+```
 
 ### Lint Migrations
 
 ```bash
 make migrate-lint-all
-```text
+```
 
 ## Migration Order
 
@@ -163,7 +163,7 @@ SELECT _audit_factory.init_service_audit(
     'your_service_audit',        -- Audit schema name
     ARRAY['table1', 'table2']    -- Tables to attach triggers to
 );
-```text
+```
 
 This single call creates the entire audit infrastructure for your service.
 
@@ -196,7 +196,7 @@ LIMIT 100;
 SELECT * FROM current_account_audit.change_log
 WHERE changed_by = 'user@example.com'
 ORDER BY changed_at DESC;
-```text
+```
 
 **For position_keeping service:**
 
@@ -209,7 +209,7 @@ SELECT * FROM position_keeping_audit.change_summary
 WHERE table_full_name = 'position_keeping.transactions'
 ORDER BY changed_at DESC
 LIMIT 100;
-```text
+```
 
 ## BaseModel Fields
 
@@ -224,7 +224,7 @@ type BaseModel struct {
     UpdatedBy string     // Who last updated this record (optional until auth context available)
     DeletedAt *time.Time // Soft delete timestamp
 }
-```text
+```
 
 **Note**: `CreatedBy` and `UpdatedBy` are currently optional (nullable) fields. Once authentication/authorization
 context is available in the application layer, these should be populated from the current user context. The audit
@@ -241,6 +241,7 @@ triggers will use these values to track who made changes.
 
    ```bash
    make migrate-diff-current  # or migrate-diff-position
+
 ```text
 
 1. Enable audit logging:
@@ -278,7 +279,7 @@ make migrate-hash-all
 # If checksums mismatch, regenerate sum files
 
 atlas migrate hash --env local --config file://atlas.current_account.hcl
-```text
+```
 
 ### Audit Triggers Not Firing
 
@@ -290,13 +291,13 @@ FROM pg_trigger t
 JOIN pg_class c ON t.tgrelid = c.oid
 JOIN pg_namespace n ON c.relnamespace = n.oid
 WHERE tgname LIKE 'audit_%';
-```text
+```
 
 **Manually attach trigger:**
 
 ```sql
 SELECT audit.enable_audit_log('schema_name', 'table_name');
-```text
+```
 
 ### Foreign Key Constraint Errors
 

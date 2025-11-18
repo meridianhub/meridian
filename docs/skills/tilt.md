@@ -48,19 +48,20 @@ This guide covers using Tilt for fast Kubernetes development with Meridian.
    # Linux
 
    curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
-```text
+```
 
 1. **kubectl**: Kubernetes CLI
 
    ```bash
    brew install kubectl
+
 ```text
 
 1. **Helm**: Package manager for Kubernetes
 
    ```bash
    brew install helm
-```text
+```
 
 ## Quick Start
 
@@ -71,7 +72,7 @@ This guide covers using Tilt for fast Kubernetes development with Meridian.
 # From repository root
 
 tilt up
-```text
+```
 
 Tilt will:
 
@@ -84,8 +85,8 @@ Tilt will:
 
 Once all resources are green in the Tilt UI:
 
-- **Tilt UI**: http://localhost:10350
-- **Meridian HTTP API**: http://localhost:8080
+- **Tilt UI**: <http://localhost:10350>
+- **Meridian HTTP API**: <http://localhost:8080>
 - **Meridian gRPC API**: localhost:9090
 - **CockroachDB SQL**: localhost:26257
 - **Redis**: localhost:6379
@@ -111,7 +112,7 @@ vim internal/server/server.go
 
 # 4. Shows logs in real-time
 
-```text
+```
 
 ### 4. Run Tests
 
@@ -122,7 +123,7 @@ Tests run automatically on file changes:
 # Manually trigger tests in Tilt UI or:
 
 tilt trigger test
-```text
+```
 
 ### 5. Run Linters
 
@@ -133,7 +134,7 @@ Linters are available but don't run automatically:
 # Trigger linting manually
 
 tilt trigger lint
-```text
+```
 
 ## Resource Labels
 
@@ -161,12 +162,12 @@ cockroach sql --insecure --host=localhost:26257
 # Or via kubectl
 
 kubectl exec -it cockroachdb-0 -- cockroach sql --insecure
-```text
+```
 
 **Features**:
 
 - 10Gi persistent volume for data
-- Admin UI available at http://localhost:8080 (when port-forwarded)
+- Admin UI available at <http://localhost:8080> (when port-forwarded)
 - No authentication required (insecure mode)
 
 ### Redis
@@ -182,7 +183,7 @@ redis-cli -h localhost -p 6379
 # Or via kubectl
 
 kubectl exec -it deployment/redis -- redis-cli
-```text
+```
 
 **Features**:
 
@@ -209,7 +210,7 @@ kafka-topics.sh --bootstrap-server localhost:9092 \
 
 kafka-console-consumer.sh --bootstrap-server localhost:9092 \
   --topic test --from-beginning
-```text
+```
 
 **Features**:
 
@@ -236,7 +237,7 @@ tilt up --stream
 # Start specific resources only
 
 tilt up meridian redis
-```text
+```
 
 ### Manage Resources
 
@@ -257,7 +258,7 @@ tilt enable kafka
 # Restart resource
 
 tilt restart meridian
-```text
+```
 
 ### View Logs
 
@@ -271,7 +272,7 @@ tilt logs meridian
 
 # Navigate to http://localhost:10350
 
-```text
+```
 
 ### Stop Development
 
@@ -285,7 +286,7 @@ tilt down
 
 # Just press Ctrl+C to exit Tilt
 
-```text
+```
 
 ## Troubleshooting
 
@@ -296,7 +297,7 @@ Check Kubernetes cluster is running:
 ```bash
 kubectl cluster-info
 kubectl get nodes
-```text
+```
 
 ### Slow Builds
 
@@ -305,7 +306,7 @@ Clear Tilt build cache:
 ```bash
 tilt down
 tilt up --clear-build-cache
-```text
+```
 
 ### Port Already in Use
 
@@ -321,7 +322,7 @@ lsof -i :9090
 # Kill process using port
 
 kill -9 <PID>
-```text
+```
 
 ### Database Connection Issues
 
@@ -330,7 +331,7 @@ Verify CockroachDB is ready:
 ```bash
 kubectl get pods -l app=cockroachdb
 kubectl logs statefulset/cockroachdb
-```text
+```
 
 ### Kafka Not Connecting
 
@@ -341,7 +342,7 @@ kubectl get pods -l app=kafka
 kubectl logs kafka-0
 kubectl logs kafka-1
 kubectl logs kafka-2
-```text
+```
 
 All 3 brokers must be running for the cluster to be healthy.
 
@@ -366,7 +367,7 @@ ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 # Restart Tilt
 
 tilt up
-```text
+```
 
 **Symptom**: "Error: registry 'ctlptl-registry' not found"
 
@@ -383,7 +384,7 @@ docker ps | grep ctlptl-registry
 # If not found, recreate cluster with correct command
 
 ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
-```text
+```
 
 **Note**: The local registry is only used when the Kubernetes context is `kind-meridian-local`. Other contexts
 (docker-desktop, minikube) will use the default registry.
@@ -402,7 +403,7 @@ ctlptl create cluster kind --registry=my-custom-registry --name=kind-meridian-lo
 
 export TILT_REGISTRY_NAME=my-custom-registry
 tilt up
-```text
+```
 
 The Tiltfile will automatically validate that the registry exists and provide helpful error messages if it's not found.
 
@@ -467,7 +468,7 @@ resources:
     memory: 256Mi  # Changed from 384Mi
   limits:
     memory: 384Mi  # Changed from 512Mi
-```text
+```
 
 **Trade-offs:**
 
@@ -485,7 +486,7 @@ Tilt builds up to 3 resources in parallel by default. Adjust in `Tiltfile`:
 
 ```python
 update_settings(max_parallel_updates=5)
-```text
+```
 
 ## Advanced Usage
 
@@ -496,7 +497,7 @@ Set environment variable before running Tilt:
 ```bash
 export DOCKER_REGISTRY=my-registry.com/myorg
 tilt up
-```text
+```
 
 ### Multiple Kubernetes Contexts
 
@@ -504,7 +505,7 @@ Add your context to allowed list in `Tiltfile`:
 
 ```python
 allow_k8s_contexts(['my-context'])
-```text
+```
 
 ### Debug Mode
 
@@ -519,7 +520,7 @@ k8s_resource(
     '2345:2345',  # Delve debugger
   ],
 )
-```text
+```
 
 Then attach your debugger to `localhost:2345`.
 
@@ -536,7 +537,7 @@ tilt ci
 # Run specific resources only
 
 tilt ci meridian
-```text
+```
 
 This is useful for integration testing in CI pipelines.
 

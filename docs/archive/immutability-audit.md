@@ -37,7 +37,7 @@ func (a *CurrentAccount) Deposit(amount Money) error {  // ❌ Pointer receiver
     a.UpdatedAt = time.Now()                             // ❌ Mutation
     return nil
 }
-```text
+```
 
 **Recommended Fix**:
 
@@ -74,7 +74,7 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 // ✅ Accessors for unexported fields
 func (a CurrentAccount) Balance() Money { return a.balance }
 func (a CurrentAccount) Status() AccountStatus { return a.status }
-```text
+```
 
 ### 2. Money Type (`internal/current-account/domain/account.go:32-35`)
 
@@ -91,7 +91,7 @@ type Money struct {
     AmountCents int64   // ❌ Exported
     Currency    string  // ❌ Exported
 }
-```text
+```
 
 **Recommended**:
 
@@ -125,7 +125,7 @@ func (m Money) Add(other Money) (Money, error) {
 // Accessors
 func (m Money) AmountCents() int64 { return m.amountCents }
 func (m Money) Currency() string { return m.currency }
-```text
+```
 
 ### 3. LedgerPosting Domain (`internal/financial-accounting/domain/ledger_posting.go`)
 
@@ -150,7 +150,7 @@ func (p *LedgerPosting) Post(result string) error {  // ❌ Pointer receiver
     p.PostingResult = result                         // ❌ Mutation
     return nil
 }
-```text
+```
 
 **Recommended**:
 
@@ -180,7 +180,7 @@ func (p LedgerPosting) Post(result string) (LedgerPosting, error) {  // ✅ Valu
 func (p LedgerPosting) ID() uuid.UUID { return p.id }
 func (p LedgerPosting) Amount() Money { return p.amount }
 func (p LedgerPosting) Status() TransactionStatus { return p.status }
-```text
+```
 
 ### 4. Financial Accounting Money Type (`internal/financial-accounting/domain/money.go`)
 
@@ -196,7 +196,7 @@ type Money struct {
 func (m Money) Add(other Money) (Money, error) {  // ✅ Value receiver, returns new
     // ... implementation
 }
-```text
+```
 
 This implementation already follows immutability principles and should be the model for refactoring.
 
@@ -204,7 +204,7 @@ This implementation already follows immutability principles and should be the mo
 
 The mutable domain models create issues in the persistence layer:
 
-### Current Pattern (Mutable):
+### Current Pattern (Mutable)
 
 ```go
 func (r *Repository) GetAccount(id string) (*CurrentAccount, error) {
@@ -212,9 +212,9 @@ func (r *Repository) GetAccount(id string) (*CurrentAccount, error) {
     err := r.db.QueryRow("SELECT ...").Scan(&acc.ID, &acc.Balance, ...)
     return &acc, err  // Returns mutable pointer
 }
-```text
+```
 
-### Immutable Pattern:
+### Immutable Pattern
 
 ```go
 func (r *Repository) GetAccount(id string) (CurrentAccount, error) {
@@ -240,7 +240,7 @@ func (b accountBuilder) Build() CurrentAccount {
         // ...
     }
 }
-```text
+```
 
 ## Impact Assessment
 
@@ -296,7 +296,7 @@ func TestCurrentAccount_Deposit_DoesNotMutateOriginal(t *testing.T) {
     assert.Equal(t, originalBalance, original.Balance(),
         "original account balance should not be mutated")
 }
-```text
+```
 
 1. **Value Semantics**: Copy behaves correctly
 
@@ -310,7 +310,7 @@ func TestCurrentAccount_CopyIndependence(t *testing.T) {
     assert.NotEqual(t, acc1.Balance(), acc2.Balance(),
         "modifying copy should not affect original")
 }
-```text
+```
 
 1. **Constructor Validation**: Invalid states prevented
 
@@ -319,11 +319,11 @@ func TestNewMoney_EmptyCurrency_ReturnsError(t *testing.T) {
     _, err := NewMoney("", 100)
     assert.Error(t, err)
 }
-```text
+```
 
 ## Files Requiring Changes
 
-### Immediate (This PR):
+### Immediate (This PR)
 
 - `internal/current-account/domain/account.go` - Full refactor
 - `internal/current-account/domain/account_test.go` - Add immutability tests
@@ -331,7 +331,7 @@ func TestNewMoney_EmptyCurrency_ReturnsError(t *testing.T) {
 - `internal/financial-accounting/domain/ledger_posting_test.go` - Add immutability tests
 - Consider unifying Money types (two different implementations exist)
 
-### Follow-up PRs:
+### Follow-up PRs
 
 - All repository implementations
 - All service implementations

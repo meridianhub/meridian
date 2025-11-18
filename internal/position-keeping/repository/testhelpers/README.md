@@ -37,7 +37,7 @@ func TestMyRepository(t *testing.T) {
         "SELECT COUNT(*) FROM position_keeping.financial_position_logs").Scan(&count)
     require.NoError(t, err)
 }
-```text
+```
 
 ## Architecture
 
@@ -49,7 +49,7 @@ type TestContainer struct {
     Pool      *pgxpool.Pool                 // Database connection pool
     Repo      *repository.PostgresRepository // Repository instance
 }
-```text
+```
 
 ### Test Flow
 
@@ -108,6 +108,7 @@ deleted.
    ```go
    tc := testhelpers.SetupTestContainer(t)
    defer tc.Cleanup(t)
+
 ```text
 
 1. **Run tests in parallel** (when safe):
@@ -118,7 +119,7 @@ deleted.
        tc := testhelpers.SetupTestContainer(t)
        defer tc.Cleanup(t)
    }
-```text
+```
 
 1. **Cache test data creation**:
 
@@ -131,6 +132,7 @@ deleted.
        }
        return testLog
    }
+
 ```text
 
 ## Examples
@@ -151,7 +153,7 @@ func TestCreate(t *testing.T) {
     require.NoError(t, err)
     assert.Equal(t, log.LogID, retrieved.LogID)
 }
-```text
+```
 
 ### Batch Operation Test
 
@@ -168,7 +170,7 @@ func TestCreateBatch(t *testing.T) {
     err := tc.Repo.CreateBatch(context.Background(), logs)
     require.NoError(t, err)
 }
-```text
+```
 
 ### Direct SQL Test
 
@@ -192,7 +194,7 @@ func TestCustomQuery(t *testing.T) {
     require.NoError(t, err)
     assert.Equal(t, "PENDING", status)
 }
-```text
+```
 
 ### Benchmark Test
 
@@ -208,7 +210,7 @@ func BenchmarkCreate(b *testing.B) {
         _ = tc.Repo.Create(context.Background(), log)
     }
 }
-```text
+```
 
 ## Troubleshooting
 
@@ -221,7 +223,7 @@ func BenchmarkCreate(b *testing.B) {
 ```bash
 docker ps
 docker system df
-```text
+```
 
 ### Schema Load Fails
 
@@ -243,7 +245,7 @@ docker system df
 ```go
 tc := testhelpers.SetupTestContainer(t)
 defer tc.Cleanup(t)  // CRITICAL - must use defer
-```text
+```
 
 ### Slow Tests
 
@@ -278,7 +280,7 @@ func TestOldWay(t *testing.T) {
     repo := repository.NewPostgresRepository(pool)
     // ... test code ...
 }
-```text
+```
 
 ### After
 
@@ -289,7 +291,7 @@ func TestNewWay(t *testing.T) {
 
     // ... test code using tc.Repo ...
 }
-```text
+```
 
 **Benefits**:
 

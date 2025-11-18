@@ -37,7 +37,7 @@ make proto                   # Regenerate Go code
 
 .githooks/install.sh         # One-time setup
 git commit                   # Hooks run automatically
-```text
+```
 
 ## Table of Contents
 
@@ -77,7 +77,7 @@ Need to change a proto schema?
 │      └─ Do you need a new event type?
 │
 └─ Unsure? → Ask in #engineering channel
-```text
+```
 
 ## Pattern 1: Backward-Compatible Changes
 
@@ -96,7 +96,7 @@ message AccountUpdated {
   string account_id = 3;
   string account_status = 4;
 }
-```text
+```
 
 **After:**
 
@@ -111,7 +111,7 @@ message AccountUpdated {
   string correlation_id = 5;  // Trace request across services
   string causation_id = 6;    // Event that caused this event
 }
-```text
+```
 
 ### Validation Steps
 
@@ -142,7 +142,7 @@ git commit -m "feat: Add correlation_id and causation_id to AccountUpdated event
 
 # Pre-commit hooks run buf-lint and buf-breaking automatically
 
-```text
+```
 
 ### What Happens
 
@@ -184,7 +184,7 @@ message AccountSuspended {
   google.protobuf.Timestamp suspended_until = 7;
   string suspended_by = 8;
 }
-```text
+```
 
 ### Implementation Steps
 
@@ -220,7 +220,7 @@ vim internal/adapters/events/current_account_publisher.go
 git add api/proto/events/current_account/v1/events.proto
 git add internal/adapters/events/current_account_publisher.go
 git commit -m "feat: Add AccountSuspended event for BIAN 14.0 Suspend operation"
-```text
+```
 
 ### Topic Strategy
 
@@ -245,7 +245,7 @@ ls -la .git/hooks/pre-commit
 
 # buf will be installed automatically by the hook if needed
 
-```text
+```
 
 ### Daily Workflow
 
@@ -284,7 +284,7 @@ git commit -m "feat: Add AccountSuspended event"
 
 # - Run golangci-lint on Go files
 
-```text
+```
 
 ### Bypassing Git Hooks (Emergency Only)
 
@@ -298,7 +298,7 @@ git commit --no-verify -m "hotfix: Critical production fix"
 
 make proto-lint
 make proto-breaking
-```text
+```
 
 ## CI/CD Integration
 
@@ -322,7 +322,7 @@ jobs:
     - Validate directory structure
     - Check for v1 proto files
 
-```text
+```
 
 ### What Triggers CI Failures
 
@@ -365,7 +365,7 @@ make proto-breaking
 git add api/proto/
 git commit -m "fix: Resolve buf lint errors"
 git push
-```text
+```
 
 ## Common Scenarios
 
@@ -386,7 +386,7 @@ message AccountUpdated {
   // New observability field
   string trace_id = 5;  // OpenTelemetry trace ID
 }
-```text
+```
 
 **Impact**: None. Old consumers ignore `trace_id`. New consumers read it.
 
@@ -406,7 +406,7 @@ message AccountUpdated {
   // BIAN 14.0 addition
   string account_classification = 5;  // personal, business, etc.
 }
-```text
+```
 
 **Impact**: None. Optional field, backward compatible.
 
@@ -428,7 +428,7 @@ message AccountFrozen {
   string frozen_by = 7;
   bool requires_investigation = 8;
 }
-```text
+```
 
 **Implementation**:
 
@@ -456,7 +456,7 @@ message AccountUpdated {
 
   string old_field = 5 [deprecated = true];  // Don't use, will remove in v2
 }
-```text
+```
 
 1. **Stop populating** (intermediate step):
 
@@ -467,7 +467,7 @@ event := &eventspb.AccountUpdated{
     // ... other fields
     // OldField: "",  // Intentionally not set
 }
-```text
+```
 
 1. **Create v2 event** (if truly breaking):
 
@@ -476,7 +476,7 @@ event := &eventspb.AccountUpdated{
 message AccountUpdated {
   // New schema without old_field
 }
-```text
+```
 
 ### Scenario 5: Changing Field Type (BREAKING)
 
@@ -495,7 +495,7 @@ message AccountUpdated {
   string account_balance = 4 [deprecated = true];  // Use account_balance_cents instead
   int64 account_balance_cents = 5;                 // New field with proper type
 }
-```text
+```
 
 **Migration**:
 
@@ -515,7 +515,7 @@ message AccountUpdated {
 ```bash
 git fetch origin develop:develop
 make proto-breaking
-```text
+```
 
 ### buf-lint reports style errors
 
@@ -533,7 +533,7 @@ message AccountUpdated {
   string event_id = 1;       // Correct
   string account_id = 2;     // Correct
 }
-```text
+```
 
 ```protobuf
 // ❌ Wrong: Missing package declaration
@@ -551,7 +551,7 @@ option go_package = "github.com/meridianhub/meridian/api/proto/events/current_ac
 message AccountUpdated {
   string event_id = 1;
 }
-```text
+```
 
 ### Git hooks fail
 
@@ -562,13 +562,13 @@ git commit --no-verify -m "test commit"
 
 # Remember to run validation manually afterward!
 
-```text
+```
 
 **Reinstall hooks**:
 
 ```bash
 .githooks/install.sh
-```text
+```
 
 ### Generated Go code has compilation errors
 
@@ -586,7 +586,7 @@ make proto
 # Verify
 
 go build ./...
-```text
+```
 
 ### CI workflow doesn't detect my changes
 
@@ -601,7 +601,7 @@ on:
     branches: [develop, main]
   pull_request:
     branches: [develop, main]
-```text
+```
 
 **Solution**: Create PR targeting `develop` or `main`.
 

@@ -46,7 +46,7 @@ User Request
 [Step 3: Save Account] → CurrentAccount Database
     ↓
 Success Response
-```text
+```
 
 **Compensation Order** (LIFO):
 
@@ -68,14 +68,14 @@ rate(saga_failures_total{service="current-account"}[5m]) > 0.1
 # Compensation failures
 
 saga_compensation_failures_total{service="current-account"} > 0
-```text
+```
 
 **Log Queries** (Loki/CloudWatch):
 
 ```logql
 {service="current-account"} |= "saga failed"
 {service="current-account"} |= "compensation failed"
-```text
+```
 
 ### 2. User Reports
 
@@ -103,7 +103,7 @@ kubectl logs -n production deployment/current-account | grep "saga failed"
 
 #   correlation_id=abc-def-ghi error="step post_ledger failed: timeout"
 
-```text
+```
 
 **Key fields to extract:**
 
@@ -130,7 +130,7 @@ WHERE account_id = 'ACC-123';
 SELECT * FROM transaction_history
 WHERE account_id = 'ACC-123'
 ORDER BY created_at DESC LIMIT 10;
-```text
+```
 
 #### Check PositionKeeping Service
 
@@ -145,7 +145,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 # Check if there's a compensating DEBIT entry
 
-```text
+```
 
 #### Check FinancialAccounting Service
 
@@ -160,7 +160,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 # Check if there's a compensating DEBIT posting
 
-```text
+```
 
 ### Step 2: Trace Full Saga Execution
 
@@ -179,7 +179,7 @@ kubectl logs -n production deployment/financialaccounting | grep "correlation_id
 # CurrentAccount logs
 
 kubectl logs -n production deployment/current-account | grep "correlation_id=abc-def-ghi"
-```text
+```
 
 **What to look for:**
 
@@ -196,7 +196,7 @@ kubectl logs -n production deployment/current-account | grep "correlation_id=abc
 
 ```text
 failed_step=log_position completed_steps=0 compensated_steps=0
-```text
+```
 
 **State:**
 
@@ -214,7 +214,7 @@ failed_step=log_position completed_steps=0 compensated_steps=0
 
 ```text
 failed_step=post_ledger completed_steps=1 compensated_steps=1
-```text
+```
 
 **Expected State:**
 
@@ -234,7 +234,7 @@ failed_step=post_ledger completed_steps=1 compensated_steps=1
 
 #   2. DEBIT (compensation with COMP-TXN-456 ID)
 
-```text
+```
 
 **Action:** Verify compensation occurred. If compensation succeeded, no manual action needed.
 
@@ -246,7 +246,7 @@ failed_step=post_ledger completed_steps=1 compensated_steps=1
 
 ```text
 failed_step=save_account completed_steps=2 compensated_steps=2
-```text
+```
 
 **Expected State:**
 
@@ -262,7 +262,7 @@ failed_step=save_account completed_steps=2 compensated_steps=2
 
 # All entries should have matching CREDIT/DEBIT pairs
 
-```text
+```
 
 **Action:** None if compensation succeeded. User can retry deposit.
 
@@ -275,7 +275,7 @@ failed_step=save_account completed_steps=2 compensated_steps=2
 ```text
 failed_step=post_ledger completed_steps=1 compensated_steps=0
 compensation failed: timeout
-```text
+```
 
 **Inconsistent State:**
 
@@ -313,6 +313,7 @@ compensation failed: timeout
      -H "Content-Type: application/json" \
      -d @compensation.json \
      "https://api.positionkeeping/v1/logs/ACC-123/entries"
+
 ```text
 
 1. **Verify net balance is zero:**
@@ -325,7 +326,7 @@ compensation failed: timeout
 
    # Verify: sum(CREDIT) - sum(DEBIT) = 0
 
-```text
+```
 
 1. **Document in incident log:**
    - Correlation ID
@@ -358,6 +359,7 @@ compensation failed: timeout
    # FinancialAccounting
 
    curl "https://api.financialaccounting/v1/postings?idempotency_key=TXN-456"
+
 ```text
 
 1. **Determine actual state:**
@@ -382,8 +384,10 @@ Escalate to on-call engineer if:
 ### Escalation Information to Provide
 
 ```text
+
 Saga Failure Escalation Report
 ==============================
+
 Correlation ID: abc-def-ghi
 Account ID: ACC-123
 Transaction ID: TXN-456
@@ -405,7 +409,8 @@ Manual Recovery Attempted:
 - [ ] Customer notified
 
 Escalating because: Unable to reach PositionKeeping service to complete compensation
-```text
+
+```
 
 ## Prevention
 
@@ -430,7 +435,7 @@ Set up alerts for:
   for: 1m
   annotations:
     summary: "Saga compensation failed - manual intervention required"
-```text
+```
 
 ### 2. Circuit Breaker Tuning
 
@@ -441,7 +446,7 @@ Monitor circuit breaker states:
 # Check if circuit breakers are frequently opening
 
 kubectl logs deployment/current-account | grep "circuit breaker opened"
-```text
+```
 
 If circuit breakers open frequently:
 
@@ -468,7 +473,7 @@ Schedule periodic reconciliation jobs:
 # Run daily at 2 AM
 
 0 2 * * * /usr/local/bin/reconciliation-job --mode=verify
-```text
+```
 
 ## Testing Compensation
 
@@ -491,7 +496,7 @@ kubectl logs deployment/current-account | grep "compensation completed"
 
 # Run verification queries from "Step 1: Verify Current State"
 
-```text
+```
 
 ## Post-Incident Actions
 

@@ -69,7 +69,7 @@ Meridian follows defense-in-depth security principles:
 FROM gcr.io/distroless/static:nonroot
 COPY --from=builder --chown=nonroot:nonroot /app/meridian /meridian
 USER nonroot:nonroot
-```text
+```
 
 - Non-root user (UID 65532) at build time
 - Files owned by non-root user
@@ -87,7 +87,7 @@ securityContext:
   fsGroup: 65532
   seccompProfile:
     type: RuntimeDefault
-```text
+```
 
 Container-level security context:
 
@@ -102,7 +102,7 @@ securityContext:
 
     - ALL
 
-```text
+```
 
 ### Read-Only Filesystem
 
@@ -119,7 +119,7 @@ volumes:
 - name: tmp
 
   emptyDir: {}
-```text
+```
 
 This prevents:
 
@@ -156,7 +156,7 @@ kind: ServiceAccount
 metadata:
   name: meridian
 automountServiceAccountToken: true  # Required for API access
-```text
+```
 
 ### Pod Security Standards
 
@@ -202,7 +202,7 @@ strategy:
   rollingUpdate:
     maxUnavailable: 0  # Always maintain minimum capacity
     maxSurge: 1        # One extra pod during updates
-```text
+```
 
 ### TLS/HTTPS
 
@@ -295,7 +295,7 @@ type: Opaque
 data:
   database-url: <base64-encoded>
   api-key: <base64-encoded>
-```text
+```
 
 ### Best Practices
 

@@ -32,7 +32,7 @@ THEN:
   - Connection pool recovers
   - Subsequent requests succeed
 
-```text
+```
 
 **Test Approach**:
 
@@ -53,7 +53,7 @@ THEN:
   - Service eventually connects when database becomes available
   - No crashes or panics
 
-```text
+```
 
 #### Scenario: Slow Database Queries
 
@@ -67,7 +67,7 @@ THEN:
   - Error messages are informative
   - System remains responsive for other operations
 
-```text
+```
 
 ### 2. Kafka Event Publishing Resilience
 
@@ -83,7 +83,7 @@ THEN:
   - Transaction can be retried
   - No event loss or duplication
 
-```text
+```
 
 **Test Approach**:
 
@@ -103,7 +103,7 @@ THEN:
   - System logs error clearly
   - Health check reflects Kafka status
 
-```text
+```
 
 ### 3. gRPC Service Resilience
 
@@ -120,7 +120,7 @@ THEN:
   - Memory usage stays bounded
   - Database connection pool not exhausted
 
-```text
+```
 
 **Test Approach**:
 
@@ -141,7 +141,7 @@ THEN:
   - Other requests not affected
   - Attack attempts logged
 
-```text
+```
 
 ### 4. Container/Network Failures
 
@@ -158,7 +158,7 @@ THEN:
   - Kafka connections closed cleanly
   - No data loss
 
-```text
+```
 
 #### Scenario: Network Partition
 
@@ -172,7 +172,7 @@ THEN:
   - Recovery happens when network restored
   - No permanent state corruption
 
-```text
+```
 
 ## Implementation Approach
 
@@ -246,7 +246,7 @@ func TestChaos_DatabaseConnectionLoss(t *testing.T) {
     assert.NoError(t, err)
     assert.Equal(t, log.LogID, retrieved.LogID)
 }
-```text
+```
 
 ### Option 2: Chaos Mesh Integration
 
@@ -295,7 +295,7 @@ internal/position-keeping/
 │   └── service_chaos_test.go                # gRPC chaos tests (future)
 └── app/
     └── resilience_test.go                   # Full-stack chaos (future)
-```text
+```
 
 ### Test Naming Convention
 
@@ -304,7 +304,7 @@ TestChaos_<Component>_<FailureType>
 TestChaos_Database_ConnectionLoss
 TestChaos_Kafka_BrokerUnavailable
 TestChaos_Service_HighConcurrency
-```text
+```
 
 ## Metrics & Observability
 
@@ -341,7 +341,7 @@ TestChaos_Service_HighConcurrency
   # Only on develop/main, not all PRs (too resource-intensive)
 
   if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
-```text
+```
 
 ### Build Tags
 
@@ -353,7 +353,7 @@ package repository
 
 // Chaos tests are only run when explicitly requested
 // due to longer execution time and resource requirements
-```text
+```
 
 ## Next Steps
 

@@ -38,7 +38,7 @@ Fail                              91.7%
 Cancel                            91.7%
 Money operations                  100%
 All domain events                 100%
-```text
+```
 
 **Analysis**: Domain layer has comprehensive test coverage with all critical business logic paths tested. The slightly
 lower coverage on state transition methods (83-93%) is due to defensive error handling code that's difficult to trigger
@@ -94,7 +94,7 @@ toProtoPostingDirection           100%
 toProtoStatusTracking             100%
 toProtoMoneyAmount                95%+
 toProtoFinancialPositionLog       75%+
-```text
+```
 
 **Analysis**: Service layer has comprehensive adapter tests covering all proto conversion paths, including edge cases
 (nil values, zero amounts, negative amounts, currency-specific decimal places). gRPC service methods have good coverage
@@ -132,7 +132,7 @@ initializeTracer                  23.1%  (observability setup)
 initializeDatabase                70.6%  (connection initialization)
 initializeEventPublisher          0.0%   (Kafka initialization)
 initializeRepositories            0.0%   (factory methods)
-```text
+```
 
 **Analysis**: Infrastructure initialization code has lower coverage, which is acceptable as these are primarily
 wiring/setup code paths that are validated through integration tests.
@@ -190,7 +190,7 @@ wiring/setup code paths that are validated through integration tests.
 
 ```yaml
 go test -short -v -race -coverprofile=coverage.out -covermode=atomic ./...
-```text
+```
 
 **Coverage Processing**:
 
@@ -253,10 +253,10 @@ go test -short -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
 ### Recent Improvements (PR #115)
 
-| Area | Before | After | Change |
-|------|--------|-------|--------|
-| Service Layer | 63.5% | 75.4% | +11.9% |
-| Overall | ~70% | 81.2% | +11.2% |
+| Area          | Before | After | Change  |
+| ------------- | ------ | ----- | ------- |
+| Service Layer | 63.5%  | 75.4% | +11.9%  |
+| Overall       | ~70%   | 81.2% | +11.2%  |
 
 **Deliverables**:
 
@@ -268,7 +268,7 @@ go test -short -v -race -coverprofile=coverage.out -covermode=atomic ./...
 ### Target Progress
 
 | Layer | Current | Target | Status |
-|-------|---------|--------|--------|
+| ------- | ------- | ------ | ------ |
 | Domain | 96.1% | 95% | ✅ **Exceeds** |
 | Repository | 79.1% | 75% | ✅ **Exceeds** |
 | Service | 71.9% | 75% | 🟡 Close |
@@ -306,32 +306,32 @@ go test -short -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
 ```bash
 go test ./internal/position-keeping/...
-```text
+```
 
 ### With Coverage
 
 ```bash
 go test -coverprofile=coverage.out ./internal/position-keeping/...
 go tool cover -html=coverage.out
-```text
+```
 
 ### Integration Tests Only
 
 ```bash
 go test -run TestPostgresRepository ./internal/position-keeping/repository/...
-```text
+```
 
 ### Performance Benchmarks
 
 ```bash
 go test -bench=. -benchmem ./internal/position-keeping/repository/...
-```text
+```
 
 ### Specific Package
 
 ```bash
 go test -v -cover ./internal/position-keeping/domain/...
-```text
+```
 
 ## Test Data Management
 

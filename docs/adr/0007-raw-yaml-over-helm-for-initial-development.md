@@ -34,7 +34,7 @@ Helm is primarily a templating engine that allows:
 
 ```text
 Same Helm Chart + Different Values Files = Different Environments
-```text
+```
 
 The benefits are:
 
@@ -171,7 +171,7 @@ spec:
           limits:
             memory: 512Mi
 '''))
-```text
+```
 
 **Benefits**: Direct visibility, easy to modify, clear what's deployed
 
@@ -187,7 +187,7 @@ helm_remote(
   repo_url='https://charts.bitnami.com/bitnami',
   values=['deployments/helm/redis-values-local.yaml']
 )
-```text
+```
 
 ```yaml
 
@@ -198,7 +198,7 @@ replica:
 resources:
   limits:
     memory: 512Mi
-```text
+```
 
 **Benefits**: Environment abstraction, versioning, community support
 **Costs**: Additional file, template indirection, chart maintenance
