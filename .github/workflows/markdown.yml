@@ -34,7 +34,7 @@ jobs:
         id: markdown-lint
 
       - name: Comment on PR if linting issues found
-        if: failure() && github.event_name == 'pull_request'
+        if: steps.markdown-lint.outcome == 'failure' && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |

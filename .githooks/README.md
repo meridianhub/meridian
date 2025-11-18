@@ -25,12 +25,12 @@ Runs before each commit to ensure code quality:
 
 #### Markdown File Validation
 
-3. **markdownlint-cli2**: Validates markdown file formatting and style
+1. **markdownlint-cli2**: Validates markdown file formatting and style
 
 #### Go File Validation
 
-4. **gofumpt**: Formats all staged Go files with stricter formatting rules
-5. **golangci-lint**: Lints all staged Go files against project standards
+1. **gofumpt**: Formats all staged Go files with stricter formatting rules
+2. **golangci-lint**: Lints all staged Go files against project standards
 
 If any check fails, the commit will be blocked. Fix the issues and try again.
 
@@ -62,6 +62,7 @@ git commit --no-verify -m "your message"
 ### Hook not running
 
 Check if the hook is installed and executable:
+
 ```bash
 ls -la .git/hooks/pre-commit
 ```
@@ -71,6 +72,7 @@ If missing, run `./.githooks/install.sh`
 ### Permission denied
 
 Make the hook executable:
+
 ```bash
 chmod +x .git/hooks/pre-commit
 ```
@@ -78,8 +80,10 @@ chmod +x .git/hooks/pre-commit
 ### golangci-lint not found
 
 The hook should auto-install, but you can manually install:
+
 ```bash
-curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.5.0
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+  | sh -s -- -b $(go env GOPATH)/bin v2.5.0
 ```
 
 ## CI Integration
@@ -94,6 +98,7 @@ These hooks run the same checks as our GitHub Actions CI:
 ## Schema Evolution Workflow
 
 When modifying proto files, the hook will:
+
 1. Check style with `buf lint`
 2. Verify compatibility with `buf breaking --against develop`
 3. Block commit if breaking changes detected

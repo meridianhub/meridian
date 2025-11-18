@@ -74,21 +74,36 @@ fi
 # ============================================================================
 
 if [ -n "$STAGED_MD_FILES" ]; then
-    # Check if markdownlint-cli2 is available (via npm/npx)
-    if ! command -v npx &> /dev/null; then
-        echo -e "${YELLOW}⚠${NC}  npx not found, skipping markdown linting"
-        echo -e "${YELLOW}   Install Node.js and npm to enable markdown linting${NC}"
-    else
-        # Run markdownlint-cli2 on staged markdown files
+    # Check if npm is available and package.json exists
+    if [ -f "package.json" ] && command -v npm &> /dev/null; then
+        # Run markdownlint-cli2 via npm on staged markdown files
         echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
-        if npx --yes markdownlint-cli2 $STAGED_MD_FILES; then
+        # Use array to safely handle filenames with spaces
+        MD_FILES_ARRAY=($STAGED_MD_FILES)
+        if npm run --silent lint:md -- "${MD_FILES_ARRAY[@]}" 2>/dev/null || npx --yes markdownlint-cli2 "${MD_FILES_ARRAY[@]}"; then
             echo -e "${GREEN}✓${NC} markdownlint passed"
         else
             echo -e "${RED}✗${NC} markdownlint failed"
             echo -e "${RED}Please fix markdown style issues above before committing${NC}"
-            echo -e "${YELLOW}Tip:${NC} Run 'npx markdownlint-cli2 --fix $STAGED_MD_FILES' to auto-fix some issues"
+            echo -e "${YELLOW}Tip:${NC} Run 'npm run lint:md:fix' to auto-fix some issues"
             exit 1
         fi
+    elif command -v npx &> /dev/null; then
+        # Fallback to npx if package.json not present
+        echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
+        # Use array to safely handle filenames with spaces
+        MD_FILES_ARRAY=($STAGED_MD_FILES)
+        if npx --yes markdownlint-cli2 "${MD_FILES_ARRAY[@]}"; then
+            echo -e "${GREEN}✓${NC} markdownlint passed"
+        else
+            echo -e "${RED}✗${NC} markdownlint failed"
+            echo -e "${RED}Please fix markdown style issues above before committing${NC}"
+            echo -e "${YELLOW}Tip:${NC} Run 'npx markdownlint-cli2 --fix' followed by the filename to auto-fix issues"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}⚠${NC}  npx not found, skipping markdown linting"
+        echo -e "${YELLOW}   Install Node.js and npm to enable markdown linting${NC}"
     fi
 fi
 
@@ -98,14 +113,8 @@ fi
 
 if [ -z "$STAGED_GO_FILES" ]; then
     echo -e "${GREEN}✓${NC} No Go files to check"
-    if [ -z "$STAGED_PROTO_FILES" ] && [ -z "$STAGED_MD_FILES" ]; then
-        echo -e "${GREEN}✓${NC} All pre-commit checks passed"
-        exit 0
-    else
-        # If we had proto or markdown files, we already checked them
-        echo -e "${GREEN}✓${NC} All pre-commit checks passed"
-        exit 0
-    fi
+    echo -e "${GREEN}✓${NC} All pre-commit checks passed"
+    exit 0
 fi
 
 # Check if gofumpt is installed
