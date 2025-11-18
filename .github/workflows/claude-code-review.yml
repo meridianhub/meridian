@@ -19,7 +19,7 @@ jobs:
     #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
 
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # Fail entire job after 15 minutes to prevent indefinite hanging
+    timeout-minutes: 30  # Increased to accommodate wait times for tests (8m) + build (10m) + linting (5m) + review time
     permissions:
       contents: read
       pull-requests: read
