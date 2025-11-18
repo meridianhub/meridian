@@ -313,9 +313,10 @@ make clean         # Clean build artifacts
 
 ### Immutability and Functional Programming Principles
 
-#### Immutability First Prefer immutable data structures wherever possible. While Go lacks Java's `final` keyword, we
+#### Immutability First
 
-enforce immutability through coding patterns and conventions.
+Prefer immutable data structures wherever possible. While Go lacks Java's `final` keyword, we enforce immutability
+through coding patterns and conventions.
 
 #### Immutability Guidelines
 
@@ -497,7 +498,9 @@ func (b *AccountBuilder) Build() Account {
 
 ### Testing Standards
 
-#### Test-Driven Development (TDD) All production code must be developed using the Red-Green-Refactor cycle
+#### Test-Driven Development (TDD)
+
+All production code must be developed using the Red-Green-Refactor cycle.
 
 #### Red-Green-Refactor Methodology
 
@@ -630,9 +633,9 @@ func (m Money) Add(other Money) Money {
 
 #### Defensive Testing: Happy Path AND Unhappy Path
 
-#### Principle Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious
+#### Principle
 
-inputs.
+Test not only the expected behavior but also how the system handles unexpected, invalid, or malicious inputs.
 
 > 📖 **See [ADR-008: Defensive Testing Standards](docs/adr/0008-defensive-testing-standards.md)** for comprehensive
 guidelines, examples, and rationale.
