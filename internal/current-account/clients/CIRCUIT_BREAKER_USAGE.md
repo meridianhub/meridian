@@ -4,7 +4,9 @@ This document describes how to use the circuit breaker implementation in the Cur
 
 ## Overview
 
-The circuit breaker pattern protects services from cascading failures by monitoring downstream service calls and preventing requests when a service is unhealthy. The implementation uses the sony/gobreaker library with context support and comprehensive logging.
+The circuit breaker pattern protects services from cascading failures by monitoring downstream service calls and
+preventing requests when a service is unhealthy. The implementation uses the sony/gobreaker library with context support
+and comprehensive logging.
 
 ## Circuit Breaker States
 
@@ -214,6 +216,7 @@ if err != nil {
 ## Testing
 
 The circuit breaker includes comprehensive tests covering:
+
 - State transitions (closed → open → half-open → closed)
 - Threshold-based tripping
 - Context cancellation and timeout

@@ -2,7 +2,8 @@
 
 ## Reporting a Vulnerability
 
-We take the security of Meridian seriously. If you discover a security vulnerability, please report it privately through one of the following channels:
+We take the security of Meridian seriously. If you discover a security vulnerability, please report it privately
+through one of the following channels:
 
 ### GitHub Security Advisories (Recommended)
 

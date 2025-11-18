@@ -1,6 +1,7 @@
 # Meridian Demo Guide
 
 ## Overview
+
 Demonstrates event-driven microservices with Kafka for CurrentAccount and FinancialAccounting BIAN domains.
 
 ## Architecture
@@ -40,17 +41,20 @@ Demonstrates event-driven microservices with Kafka for CurrentAccount and Financ
 ## Running the Demo
 
 ### Prerequisites
+
 ```bash
 brew install grpcurl jq kubectl
 tilt up  # Ensure all services running
 ```
 
 ### Quick Demo (5 minutes)
+
 ```bash
 ./scripts/demo.sh
 ```
 
 ### Watch Kafka Events (separate terminal)
+
 ```bash
 ./scripts/kafka-watch.sh
 ```
@@ -58,6 +62,7 @@ tilt up  # Ensure all services running
 ### Manual Step-by-Step
 
 #### 1. Create Account
+
 ```bash
 grpcurl -plaintext -d '{
   "customer_reference": "CUST-001",
@@ -67,6 +72,7 @@ grpcurl -plaintext -d '{
 ```
 
 #### 2. Execute Deposit
+
 ```bash
 grpcurl -plaintext -d '{
   "current_account_facility_reference": "ACC-123",
@@ -75,6 +81,7 @@ grpcurl -plaintext -d '{
 ```
 
 #### 3. Check Ledger
+
 ```bash
 grpcurl -plaintext -d '{
   "account_reference": "ACC-123"
@@ -84,11 +91,13 @@ grpcurl -plaintext -d '{
 ## Integration Tests
 
 Run automated tests:
+
 ```bash
 go test ./test/integration/... -v
 ```
 
 Tests validate:
+
 - Account creation
 - Deposit execution
 - Kafka event propagation
@@ -99,18 +108,21 @@ Tests validate:
 ## Technical Deep Dives
 
 ### Why Proto in Kafka?
+
 - Type safety across service boundaries
 - Buf validates schema compatibility in CI
 - Smaller message size vs JSON
 - Industry standard (Uber, Netflix, Confluent)
 
 ### Why Separate Services?
+
 - Independent scaling (deposits vs ledger posting)
 - Database per service (no shared DB anti-pattern)
 - Failure isolation
 - BIAN alignment (one service per domain)
 
 ### Eventual Consistency Approach
+
 - Account updates immediately in CurrentAccount DB
 - Ledger posting happens asynchronously
 - Status updated when confirmed
@@ -119,12 +131,14 @@ Tests validate:
 ## Troubleshooting
 
 **Services not responding:**
+
 ```bash
 kubectl get pods  # Check all running
 tilt logs meridian  # Check app logs
 ```
 
 **Kafka events not flowing:**
+
 ```bash
 kubectl get pods -l app=kafka        # Verify all 3 brokers are running
 kubectl logs kafka-0                 # Check broker 0 logs
@@ -134,6 +148,7 @@ kubectl logs kafka-2                 # Check broker 2 logs
 ```
 
 **gRPC connection refused:**
+
 ```bash
 kubectl port-forward service/meridian 9091:9091  # CurrentAccount
 kubectl port-forward service/meridian 9092:9092  # FinancialAccounting
@@ -144,21 +159,28 @@ kubectl port-forward service/meridian 9092:9092  # FinancialAccounting
 The 3-broker Kafka cluster enables testing of high availability scenarios:
 
 ```bash
+
 # View partition distribution across brokers
+
 kubectl exec kafka-0 -- kafka-topics --describe --topic current-account.deposits --bootstrap-server localhost:9092
 
 # Kill a broker to test failover
+
 kubectl delete pod kafka-1
 
 # Verify leadership transfers automatically
+
 kubectl exec kafka-0 -- kafka-topics --describe --topic current-account.deposits --bootstrap-server localhost:9092
 
 # Produce/consume messages to verify data persists
+
 kubectl exec kafka-0 -- kafka-console-producer --topic current-account.deposits --bootstrap-server localhost:9092
-kubectl exec kafka-0 -- kafka-console-consumer --topic current-account.deposits --from-beginning --bootstrap-server localhost:9092
+kubectl exec kafka-0 -- kafka-console-consumer --topic current-account.deposits --from-beginning --bootstrap-server
+localhost:9092
 ```
 
 **Expected Behavior:**
+
 - Topics have replicas on 2 brokers (replication factor 2)
 - Killing 1 broker triggers partition leader election
 - Messages remain available (no data loss)

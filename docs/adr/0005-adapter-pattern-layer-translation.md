@@ -2,10 +2,12 @@
 name: adr-005-adapter-pattern-layer-translation
 description: Use adapter pattern to translate between domain, persistence, and event representations
 triggers:
+
   - Translating between domain and database models
   - Converting domain objects to Kafka events
   - Mapping gRPC requests to domain models
   - Handling layer separation
+
 instructions: |
   Create dedicated adapter layers for translation: domain ↔ persistence, domain ↔ events,
   domain ↔ API. Keep business logic in domain layer only. Adapters are pure translation
@@ -24,13 +26,16 @@ Implements the separated concerns architecture from [ADR-0004](0004-separated-sc
 
 ## Context
 
-With three distinct representations of our domain model (domain, persistence, events), we need a strategy for translating between these layers without:
+With three distinct representations of our domain model (domain, persistence, events), we need a strategy for
+translating between these layers without:
+
 * Duplicating business logic
 * Losing data during translation
 * Creating tight coupling between layers
 * Making versioning difficult
 
-The **Adapter Pattern** (from Hexagonal Architecture / Ports & Adapters) provides explicit boundaries between the domain and infrastructure concerns.
+The **Adapter Pattern** (from Hexagonal Architecture / Ports & Adapters) provides explicit boundaries between the
+domain and infrastructure concerns.
 
 ## Decision Drivers
 
@@ -44,11 +49,12 @@ The **Adapter Pattern** (from Hexagonal Architecture / Ports & Adapters) provide
 
 ## Decision Outcome
 
-Implement **explicit adapter functions** for translating between layers, with **automated compatibility testing** to prevent drift.
+Implement **explicit adapter functions** for translating between layers, with **automated compatibility testing** to
+prevent drift.
 
 ### Architecture
 
-```
+```text
 ┌─────────────────────────────────────┐
 │   Domain Layer                      │
 │   (Pure business logic)             │
@@ -155,7 +161,8 @@ func (r *BookingLogRepository) FindByID(ctx context.Context, id uuid.UUID) (*dom
 }
 
 // FindByControlRecordID - Implements domain port
-func (r *BookingLogRepository) FindByControlRecordID(ctx context.Context, recordID string) (*domain.FinancialBookingLog, error) {
+func (r *BookingLogRepository) FindByControlRecordID(ctx context.Context, recordID string)
+(*domain.FinancialBookingLog, error) {
     var entity BookingLogEntity
     err := r.db.WithContext(ctx).First(&entity, "control_record_id = ?", recordID).Error
     if err != nil {
@@ -235,7 +242,8 @@ func (p *BookingLogPublisher) PublishCreated(ctx context.Context, booking *domai
 }
 
 // toCreatedEvent: Domain → Kafka Event
-func (p *BookingLogPublisher) toCreatedEvent(ctx context.Context, d *domain.FinancialBookingLog) *eventspb.FinancialBookingLogCreated {
+func (p *BookingLogPublisher) toCreatedEvent(ctx context.Context, d *domain.FinancialBookingLog)
+*eventspb.FinancialBookingLogCreated {
     return &eventspb.FinancialBookingLogCreated{
         // Event metadata (infrastructure concern)
         EventId:       uuid.New().String(),
@@ -337,13 +345,15 @@ func (s *BookingLogServiceServer) toResponse(d *domain.FinancialBookingLog) *pb.
 
 ## BIAN Evolution Support
 
-The adapter pattern provides critical flexibility for adopting new BIAN releases without coordinated infrastructure changes.
+The adapter pattern provides critical flexibility for adopting new BIAN releases without coordinated infrastructure
+changes.
 
 ### Scenario: BIAN Adds New Behavior Qualifier
 
-**BIAN 13.0 → 14.0 adds "Suspend" to Current Account**
+#### BIAN 13.0 → 14.0 adds "Suspend" to Current Account
 
-**Step 1: Update domain model (business logic)**
+#### Step 1: Update domain model (business logic)
+
 ```go
 // internal/domain/current_account.go
 
@@ -381,7 +391,8 @@ func (a *CurrentAccount) Suspend(reason string, until time.Time, by string) erro
 }
 ```
 
-**Step 2: Update persistence adapter (database mapping)**
+#### Step 2: Update persistence adapter (database mapping)
+
 ```go
 // internal/adapters/persistence/current_account_repository.go
 
@@ -435,7 +446,8 @@ func (r *CurrentAccountRepository) toDomain(e *CurrentAccountEntity) *domain.Cur
 }
 ```
 
-**Step 3: Update event adapter (new event type per ADR-0004)**
+#### Step 3: Update event adapter (new event type per ADR-0004)
+
 ```go
 // internal/adapters/events/current_account_publisher.go
 
@@ -458,12 +470,14 @@ func (p *CurrentAccountPublisher) PublishSuspended(
 }
 ```
 
-**Key Insight:** Domain model changes once, adapters translate to infrastructure needs. Each layer evolves at its own pace.
+**Key Insight:** Domain model changes once, adapters translate to infrastructure needs. Each layer evolves at its own
+pace.
 
 ### Benefits for BIAN Adoption
 
-**1. Independent layer evolution**
-```
+#### 1. Independent layer evolution
+
+```text
 Domain:      BIAN 14.0 (updated immediately)
              ↓
 Persistence: BIAN 13.0 schema + new nullable columns (gradual migration)
@@ -471,23 +485,25 @@ Persistence: BIAN 13.0 schema + new nullable columns (gradual migration)
 Events:      New event type with BIAN 14.0 semantics (backward compatible)
 ```
 
-**2. Backward compatibility**
+#### 2. Backward compatibility
 
 Old consumers (BIAN 13.0) continue working:
-- Database: Nullable columns don't break existing queries
-- Events: New event type on new topic (old consumers unaffected)
-- Domain: New behavior qualifiers only used by v14 clients
 
-**3. Gradual rollout**
+* Database: Nullable columns don't break existing queries
+* Events: New event type on new topic (old consumers unaffected)
+* Domain: New behavior qualifiers only used by v14 clients
 
-```
+#### 3. Gradual rollout
+
+```text
 Week 1: Update CurrentAccount domain (BIAN 14.0)
 Week 2: Deploy database migration (add suspension columns)
 Week 3: Deploy new event type (account-suspended topic)
 Week 4+: Consuming services adopt BIAN 14.0 independently
 ```
 
-**Without adapters:** Single BIAN upgrade would require coordinated deployment across all services, risking production disruption.
+**Without adapters:** Single BIAN upgrade would require coordinated deployment across all services, risking production
+disruption.
 
 **With adapters:** Each layer upgrades independently, minimizing risk and enabling continuous delivery.
 
@@ -623,7 +639,7 @@ func TestBookingLogAdapter_ImmutableDomain(t *testing.T) {
 
 ## Best Practices
 
-### DO:
+### DO
 
 ✅ **Keep adapters thin** - Only translation logic, no business rules
 ✅ **Test round-trips** - Ensure no data loss during translation
@@ -632,7 +648,7 @@ func TestBookingLogAdapter_ImmutableDomain(t *testing.T) {
 ✅ **Document mapping decisions** - Comment why certain fields are not mapped
 ✅ **Use compile-time checks** - `var _ DomainInterface = (*Adapter)(nil)`
 
-### DON'T:
+### DON'T
 
 ❌ **Don't put business logic in adapters** - That belongs in domain
 ❌ **Don't make adapters bidirectional** - Separate `toEntity` and `toDomain`
@@ -642,14 +658,14 @@ func TestBookingLogAdapter_ImmutableDomain(t *testing.T) {
 
 ## When to Use This Pattern
 
-### Use adapters when:
+### Use adapters when
 
 * Translating between domain and infrastructure (database, messaging, API)
 * Different layers have different concerns (audit fields, event metadata)
 * Versioning requirements differ per layer
 * You need testable boundaries
 
-### Don't use adapters when:
+### Don't use adapters when
 
 * Layers have identical structure (consider if separation is needed)
 * Performance is critical and zero-copy is required (rare)
@@ -668,6 +684,7 @@ type BookingLog struct {
 ```
 
 **Problems:**
+
 * ❌ Infrastructure concerns leak into domain
 * ❌ Can't version layers independently
 * ❌ Tight coupling
@@ -681,6 +698,7 @@ func (b *BookingLog) Save() error {
 ```
 
 **Problems:**
+
 * ❌ Domain depends on database
 * ❌ Hard to test without database
 * ❌ Not CQRS-friendly
@@ -688,6 +706,7 @@ func (b *BookingLog) Save() error {
 ### Chosen: Adapter Pattern (Hexagonal Architecture)
 
 **Benefits:**
+
 * ✅ Clear boundaries
 * ✅ Testable without infrastructure
 * ✅ Layers evolve independently

@@ -2,10 +2,12 @@
 name: adr-006-tilt-local-development
 description: Use Tilt for fast local Kubernetes development with live reload and dependency management
 triggers:
+
   - Setting up local development environment
   - Debugging microservices locally
   - Rapid iteration on code changes
   - Managing local service dependencies
+
 instructions: |
   Use Tilt for local dev. Tiltfile defines all services and dependencies. Tilt provides
   live reload (<5s feedback), logs aggregation, and status UI. Matches production K8s
@@ -23,6 +25,7 @@ Accepted
 ## Context
 
 Developers need a fast, productive local development environment for building microservices. The environment should:
+
 * Support rapid iteration cycles (< 5 second feedback loop)
 * Match production deployment patterns (Kubernetes)
 * Handle complex service dependencies (CockroachDB, Redis, Kafka)
@@ -30,6 +33,7 @@ Developers need a fast, productive local development environment for building mi
 * Be easy to onboard new team members (< 5 minutes to running system)
 
 The project deploys to **Kubernetes in production**, using:
+
 * Kubernetes manifests in `deployments/k8s/base/`
 * Kustomize for environment-specific overlays
 * StatefulSets for stateful services (CockroachDB, Kafka)
@@ -83,18 +87,20 @@ Chosen option: **"Tilt"**, because:
 * ❌ **Complexity for simple projects**: Overkill if not using K8s in production
 
 **Mitigation:**
-- Use **Kind + ctlptl** for fast, reproducible local clusters
-- Provide comprehensive onboarding docs ([docs/skills/tilt.md](../skills/tilt.md))
-- Include setup automation scripts (`scripts/setup-check.sh`, `scripts/install-tools.sh`)
-- Single command cluster creation with local registry: `ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local`
-- Tiltfile comments explain each section
-- Startup banner shows all service URLs
+
+* Use **Kind + ctlptl** for fast, reproducible local clusters
+* Provide comprehensive onboarding docs ([docs/skills/tilt.md](../skills/tilt.md))
+* Include setup automation scripts (`scripts/setup-check.sh`, `scripts/install-tools.sh`)
+* Single command cluster creation with local registry: `ctlptl create cluster kind --registry=ctlptl-registry
+--name=kind-meridian-local`
+* Tiltfile comments explain each section
+* Startup banner shows all service URLs
 
 ## Pros and Cons of the Options
 
 ### Tilt - Kubernetes development environment
 
-https://tilt.dev/
+<https://tilt.dev/>
 
 * Good, because **production parity** - same K8s manifests in dev and prod
 * Good, because **fast live reload** - incremental builds in 2-3 seconds
@@ -110,7 +116,7 @@ https://tilt.dev/
 
 ### Docker Compose - Multi-container orchestration
 
-https://docs.docker.com/compose/
+<https://docs.docker.com/compose/>
 
 * Good, because **simple** - easy YAML, low learning curve
 * Good, because **lightweight** - no K8s overhead, just Docker daemon
@@ -134,7 +140,7 @@ https://docs.docker.com/compose/
 
 ### Skaffold - Alternative K8s dev tool
 
-https://skaffold.dev/
+<https://skaffold.dev/>
 
 * Good, because **Kubernetes-native** - production parity like Tilt
 * Good, because **Google-backed** - well-maintained, integrated with GKE
@@ -148,7 +154,7 @@ https://skaffold.dev/
 
 ### Project Structure
 
-```
+```text
 meridian/
 ├── Tiltfile                        # Tilt configuration (Python DSL)
 ├── deployments/
@@ -173,18 +179,22 @@ docker_build(
   context='.',
   dockerfile='Dockerfile',
   live_update=[
+
     # Sync Go source files instantly
+
     sync('./cmd', '/app/cmd'),
     sync('./internal', '/app/internal'),
     sync('./pkg', '/app/pkg'),
 
     # Incremental rebuild (2-3 seconds)
+
     run(
       'cd /app && go build -o meridian ./cmd/meridian',
       trigger=['./cmd', './internal', './pkg'],
     ),
 
     # Restart service (no container rebuild)
+
     restart_container(),
   ],
 )
@@ -210,6 +220,7 @@ Ensures services start in correct order, waits for health checks.
 #### 3. Backing Services
 
 **CockroachDB** (StatefulSet with persistent storage):
+
 ```python
 k8s_yaml('''
 apiVersion: apps/v1
@@ -219,13 +230,18 @@ metadata:
 spec:
   serviceName: cockroachdb
   replicas: 1
+
   # ... (matches production pattern)
+
 ''')
 ```
 
 **Kafka** (3-broker StatefulSet with KRaft):
+
 ```python
+
 # Multi-broker Kafka cluster (no Zookeeper - uses KRaft consensus)
+
 k8s_yaml(blob('''
 apiVersion: apps/v1
 kind: StatefulSet
@@ -234,24 +250,30 @@ metadata:
 spec:
   serviceName: kafka-headless
   replicas: 3  # Minimum for quorum
+
   # ... (KRaft quorum configuration)
+
 '''))
 ```
 
 **Redis** (standard deployment):
+
 ```python
 k8s_yaml('''
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redis
+
 # ... (production-like config)
+
 ''')
 ```
 
 #### 4. Development Helpers
 
 **Automatic testing:**
+
 ```python
 local_resource(
   'test',
@@ -263,6 +285,7 @@ local_resource(
 ```
 
 **On-demand linting:**
+
 ```python
 local_resource(
   'lint',
@@ -283,7 +306,8 @@ k8s_resource('kafka-cluster', labels=['messaging'])
 ```
 
 **Tilt UI groups by label:**
-```
+
+```text
 ┌─ app ──────────────────────┐
 │ ✓ meridian                 │
 ├─ database ─────────────────┤
@@ -317,60 +341,84 @@ k8s_resource('kafka-cluster', port_forwards='9092:9092')  # Forwards to kafka-0
 
 **Automatic** - no manual `kubectl port-forward` needed!
 
-**Note:** Port forwarding connects to kafka-0 (first broker). All 3 brokers (kafka-0, kafka-1, kafka-2) are accessible within the cluster via the headless service.
+**Note:** Port forwarding connects to kafka-0 (first broker). All 3 brokers (kafka-0, kafka-1, kafka-2) are accessible
+within the cluster via the headless service.
 
 ### Developer Workflow
 
 #### Initial Setup (One-Time)
 
 ```bash
+
 # 1. Verify prerequisites
+
 ./scripts/setup-check.sh
 
 # 2. Install missing tools (if needed)
+
 ./scripts/install-tools.sh
 
 # 3. Create local Kubernetes cluster with local registry (recommended: Kind with ctlptl)
+
 ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Verify cluster is ready
+
 kubectl cluster-info
 ```
 
 #### Daily Development
 
 ```bash
+
 # Start everything
+
 tilt up
 
 # Tilt UI opens at: http://localhost:10350
+
 # Wait for all resources to be green (ready)
+
 # Services available at:
+
 #   - Meridian API:  http://localhost:8080
+
 #   - Meridian gRPC: localhost:9090
+
 #   - CockroachDB:   localhost:26257
+
 #   - Redis:         localhost:6379
+
 #   - Kafka Cluster: localhost:9092 (3 brokers: kafka-0, kafka-1, kafka-2)
 
 # Make code changes
+
 vim internal/domain/booking_log.go
 
 # Changes automatically:
+
 #   1. Sync to container (instant)
+
 #   2. Rebuild binary (2-3 seconds)
+
 #   3. Restart service
+
 #   4. Logs appear in Tilt UI
 
 # View logs for specific service
+
 tilt logs meridian
 
 # Run tests manually (auto-runs on file changes)
+
 tilt trigger test
 
 # Run linters on-demand
+
 tilt trigger lint
 
 # Stop everything (clean shutdown)
+
 tilt down
 ```
 
@@ -381,6 +429,7 @@ tilt down
 #### File Watching
 
 Tilt watches files and only syncs changes:
+
 ```python
 sync('./internal', '/app/internal')  # Only changed files sync
 ```
@@ -390,6 +439,7 @@ sync('./internal', '/app/internal')  # Only changed files sync
 ```python
 run('go build -o meridian ./cmd/meridian')
 ```
+
 Go compiler caches unchanged packages → fast rebuilds.
 
 #### Parallel Operations
@@ -397,6 +447,7 @@ Go compiler caches unchanged packages → fast rebuilds.
 ```python
 update_settings(max_parallel_updates=3)
 ```
+
 Up to 3 resources build simultaneously.
 
 #### Smart Triggers
@@ -404,6 +455,7 @@ Up to 3 resources build simultaneously.
 ```python
 run(..., trigger=['./cmd', './internal', './pkg'])
 ```
+
 Only rebuild when relevant directories change.
 
 ### Troubleshooting
@@ -421,10 +473,13 @@ See comprehensive troubleshooting guide in [docs/skills/tilt.md](../skills/tilt.
 Tilt can run in CI for integration testing:
 
 ```bash
+
 # Non-interactive mode
+
 tilt ci
 
 # Test specific resources
+
 tilt ci meridian test
 ```
 
@@ -459,6 +514,7 @@ Useful for pre-merge integration tests in GitHub Actions.
 ### For Developers New to Kubernetes
 
 **Learning path:**
+
 1. Read [CONTRIBUTING.md](../../CONTRIBUTING.md) - Prerequisites section
 2. Run `./scripts/setup-check.sh` - Verify environment
 3. Follow [docs/skills/tilt.md](../skills/tilt.md) - Quick start guide
@@ -470,7 +526,8 @@ Useful for pre-merge integration tests in GitHub Actions.
 ### For Developers Familiar with Docker Compose
 
 **Mental model shift:**
-```
+
+```text
 Docker Compose              Tilt + Kubernetes
 --------------              -----------------
 docker-compose.yml    →     Tiltfile + K8s manifests
@@ -489,27 +546,43 @@ depends_on            →     resource_deps (with health checks)
 Provided scripts make onboarding easy:
 
 ```bash
+
 # Check if environment is ready
+
 ./scripts/setup-check.sh
+
 # Output:
+
 # ✓ Go 1.25.3 installed
+
 # ✓ Docker running
+
 # ✓ kubectl installed
+
 # ✓ kind installed
+
 # ✓ ctlptl installed
+
 # ✓ Tilt v0.33.1 installed
+
 # ✗ Kubernetes cluster not accessible
+
 #
+
 # ACTION REQUIRED: Create a local cluster
+
 # ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Install missing tools
+
 ./scripts/install-tools.sh
 
 # Create Kind cluster with local registry
+
 ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # Start development
+
 tilt up
 ```
 
@@ -529,26 +602,37 @@ We use **Kind (Kubernetes in Docker)** with **ctlptl (Cattle Patrol)** for local
 ### Cluster Creation
 
 ```bash
+
 # Create cluster optimized for Tilt with local registry
+
 ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
 # This automatically:
+
 # - Creates a Kind cluster
+
 # - Sets up local registry (for faster image pushes)
+
 # - Configures port mappings
+
 # - Optimizes for development workflows
+
 ```
 
 ### Cluster Management
 
 ```bash
+
 # List clusters
+
 ctlptl get clusters
 
 # Delete cluster
+
 ctlptl delete cluster kind-meridian-local
 
 # Verify cluster is working
+
 kubectl config use-context kind-meridian-local
 kubectl get nodes
 ```
@@ -556,17 +640,18 @@ kubectl get nodes
 ### Why Not Docker Desktop Kubernetes?
 
 Docker Desktop Kubernetes works but:
-- Slower to start/restart
-- Less reproducible across team
-- No registry integration
-- Harder to reset to clean state
-- Kind + ctlptl is more predictable
+
+* Slower to start/restart
+* Less reproducible across team
+* No registry integration
+* Harder to reset to clean state
+* Kind + ctlptl is more predictable
 
 **Recommendation**: Use Kind + ctlptl for local development, Docker Desktop K8s as fallback option.
 
 ## When to Use Tilt vs Other Tools
 
-### Use Tilt when:
+### Use Tilt when
 
 * ✅ Production runs on Kubernetes
 * ✅ Multiple microservices with dependencies
@@ -574,7 +659,7 @@ Docker Desktop Kubernetes works but:
 * ✅ Team comfortable with or learning Kubernetes
 * ✅ Want production parity in dev
 
-### Use Docker Compose when:
+### Use Docker Compose when
 
 * ✅ Production uses Docker Compose (rare)
 * ✅ Simple 2-3 service stacks
@@ -582,13 +667,13 @@ Docker Desktop Kubernetes works but:
 * ✅ Rapid prototyping / throwaway projects
 * ✅ K8s features not needed
 
-### Use Manual kubectl when:
+### Use Manual kubectl when
 
 * ✅ Debugging K8s-specific issues
 * ✅ One-off testing of K8s features
 * ❌ Not for daily development (too slow)
 
-### Use Skaffold when:
+### Use Skaffold when
 
 * ✅ Need CI/CD integration (Skaffold is more pipeline-focused)
 * ✅ GKE deployment (tight integration)
@@ -601,29 +686,41 @@ Docker Desktop Kubernetes works but:
 **Evaluated docker-compose.yml approach:**
 
 ```yaml
+
 # docker-compose.yml
+
 version: '3.8'
 services:
   cockroachdb:
     image: cockroachdb/cockroach:v23.1.11
     command: start-single-node --insecure
     ports:
+
       - "26257:26257"
+
     # Problem: Not a StatefulSet, different from prod
 
   meridian:
     build: .
     volumes:
+
       - ./cmd:/app/cmd
       - ./internal:/app/internal
+
     # Problem: Full rebuild on changes (30-60s)
+
     # Problem: No K8s readiness probes
+
     depends_on:
+
       - cockroachdb
+
     # Problem: Only waits for start, not readiness
+
 ```
 
 **Rejected because:**
+
 * ❌ **No production parity** - Prod uses K8s, Compose is completely different
 * ❌ **Slow feedback** - Full container rebuilds take 30-60 seconds
 * ❌ **Different networking** - No K8s Services, different DNS
@@ -633,6 +730,7 @@ services:
 ### Why Not Skaffold?
 
 Skaffold is excellent but:
+
 * Less polished developer experience (no unified UI)
 * More pipeline-focused, less dev-focused
 * Slower hot reload compared to Tilt
@@ -656,6 +754,7 @@ Both are valid choices; Tilt won on developer experience.
 ### Resource Usage
 
 **Typical local development resource usage:**
+
 * Kubernetes control plane: ~1GB RAM
 * CockroachDB: ~1-2GB RAM
 * Kafka cluster (3 brokers): ~1.5GB RAM
@@ -666,9 +765,12 @@ Both are valid choices; Tilt won on developer experience.
 **Minimum recommended:** 12GB RAM (may experience swapping with multiple applications)
 **Comfortable development:** 16GB RAM (recommended for daily use)
 
-**Note on Kafka**: Multi-broker setup uses ~1.5GB total (384Mi per broker × 3) compared to previous single-broker ~512MB. The increased resource usage enables realistic testing of partition replication, leader election, and failover scenarios.
+**Note on Kafka**: Multi-broker setup uses ~1.5GB total (384Mi per broker × 3) compared to previous single-broker
+~512MB. The increased resource usage enables realistic testing of partition replication, leader election, and failover
+scenarios.
 
 **For 8GB RAM machines**: The 3-broker setup may cause resource pressure. Options:
+
 1. Close unnecessary applications (IDEs, browsers, etc.)
 2. Use Colima instead of Docker Desktop (lighter overhead)
 3. Modify Tiltfile for single-broker mode (see Tiltfile comments around line 208)
@@ -676,10 +778,12 @@ Both are valid choices; Tilt won on developer experience.
 ### Startup Time
 
 **Cold start** (nothing cached):
+
 * First `tilt up`: ~2-3 minutes (downloads images, builds service)
 * Subsequent starts: ~30-60 seconds (uses cached images)
 
 **Warm start** (Tilt already running):
+
 * Code change → live: ~2-3 seconds
 
 ### Cloud Development
@@ -687,7 +791,9 @@ Both are valid choices; Tilt won on developer experience.
 Tilt can connect to remote K8s clusters:
 
 ```python
+
 # Tiltfile
+
 allow_k8s_contexts(['gke_my-project_us-central1_my-cluster'])
 ```
 
@@ -696,6 +802,7 @@ Enables cloud-based development if local resources are limited.
 ### Future Enhancements
 
 Potential additions to Tiltfile:
+
 * **Delve debugger** integration (port 2345)
 * **Prometheus + Grafana** for local observability
 * **Jaeger** for distributed tracing

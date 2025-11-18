@@ -2,9 +2,12 @@
 
 ## Purpose
 
-Meridian is a professional software project focused on building a modern banking platform. This Code of Conduct establishes expectations for participation in our community to foster productive technical collaboration.
+Meridian is a professional software project focused on building a modern banking platform. This Code of Conduct
+establishes expectations for participation in our community to foster productive technical collaboration.
 
-As a learning project, we welcome questions and view mistakes as opportunities for growth and improvement. This is an environment where developers can explore banking platform architecture, ask clarifying questions, and learn from both successes and failures.
+As a learning project, we welcome questions and view mistakes as opportunities for growth and improvement. This is an
+environment where developers can explore banking platform architecture, ask clarifying questions, and learn from both
+successes and failures.
 
 ## Our Standards
 
@@ -46,7 +49,8 @@ If you experience or witness unacceptable behavior:
    - Project communication channels (marked private)
    - Email to repository administrators
 
-**Note**: For security vulnerabilities or security-related concerns, please follow the procedures outlined in [SECURITY.md](SECURITY.md) instead.
+**Note**: For security vulnerabilities or security-related concerns, please follow the procedures outlined in
+[SECURITY.md](SECURITY.md) instead.
 
 ### Response
 
@@ -68,7 +72,8 @@ Depending on the severity and context, consequences may include:
 
 ## Attribution
 
-This Code of Conduct is adapted from professional open source projects and tailored for technical collaboration in software engineering.
+This Code of Conduct is adapted from professional open source projects and tailored for technical collaboration in
+software engineering.
 
 ## Questions
 

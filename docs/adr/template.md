@@ -1,10 +1,13 @@
 ---
 name: adr-[NNN]-[brief-slug]  # Example: adr-007-event-sourcing-pattern (use zero-padded number)
-description: [One sentence, ~50-80 chars describing the decision]  # Example: Use event sourcing for audit trail with event store as source of truth
+description: [One sentence, ~50-80 chars describing the decision] # Example: Use event sourcing for audit trail with
+event store as source of truth
 triggers:
+
   - [Specific scenario when to reference this]  # Example: Implementing event-driven workflows
   - [Another trigger scenario]  # Example: Designing systems requiring complete audit history
   - [Additional trigger if needed]  # Example: Building temporal query capabilities
+
 instructions: |
   [2-3 sentences of actionable guidance. Focus on the "what" and "why" of applying
   this decision, not the full rationale (that's in the ADR body below). Be specific

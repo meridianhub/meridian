@@ -2,10 +2,12 @@
 name: adr-003-database-schema-migrations
 description: Use Atlas for database schema migrations with versioned, declarative migrations per service
 triggers:
+
   - Setting up database migrations
   - Managing schema evolution
   - Deploying database changes
   - Handling schema drift
+
 instructions: |
   Use Atlas for declarative schema migrations. Each service has own migrations directory.
   Migrations run automatically on service startup. Atlas generates SQL from desired state,
@@ -20,13 +22,16 @@ Date: 2025-10-25 (Revised: 2025-10-25)
 
 Accepted
 
-Supersedes aspects of initial unified schema approach. See [ADR-0005](0005-adapter-pattern-layer-translation.md) for layer separation details.
+Supersedes aspects of initial unified schema approach. See [ADR-0005](0005-adapter-pattern-layer-translation.md) for
+layer separation details.
 
 ## Context
 
-Each BIAN service domain requires database schema management with versioned migrations. The persistence layer must evolve safely across deployments without manual SQL execution or schema drift between environments.
+Each BIAN service domain requires database schema management with versioned migrations. The persistence layer must
+evolve safely across deployments without manual SQL execution or schema drift between environments.
 
 Financial services require:
+
 * Immutable migration history (once applied, migrations cannot be modified)
 * Rollback capability for failed deployments
 * Schema validation and safety checks
@@ -78,7 +83,8 @@ Chosen option: **"Atlas"**, because:
 * CLI tool integrates with Go build pipeline
 * **Can still write manual migrations** when needed (hybrid approach)
 * **Schema diffing**: Compare environments to detect drift
-* **Separation of concerns**: Database entities can include audit fields, indexes, and optimizations without polluting domain models
+* **Separation of concerns**: Database entities can include audit fields, indexes, and optimizations without polluting
+domain models
 
 ### Negative Consequences
 
@@ -91,7 +97,7 @@ Chosen option: **"Atlas"**, because:
 
 ### Atlas - Modern schema-as-code tool
 
-https://atlasgo.io/
+<https://atlasgo.io/>
 
 * Good, because **auto-generates migrations from Go structs** (GORM, Ent, SQLBoiler)
 * Good, because **schema linting prevents dangerous changes**
@@ -107,7 +113,7 @@ https://atlasgo.io/
 
 ### golang-migrate - Go-native migration library
 
-https://github.com/golang-migrate/migrate
+<https://github.com/golang-migrate/migrate>
 
 * Good, because Go-native with no external dependencies
 * Good, because simple and proven
@@ -120,7 +126,7 @@ https://github.com/golang-migrate/migrate
 
 ### Flyway - Industry-standard migration tool
 
-https://flywaydb.org/
+<https://flywaydb.org/>
 
 * Good, because industry standard with 10+ years of maturity
 * Good, because team has existing Flyway experience
@@ -133,7 +139,7 @@ https://flywaydb.org/
 
 ### Project Structure
 
-```
+```text
 services/financial-accounting-service/
 ├── atlas.hcl                           # Atlas configuration
 ├── internal/
@@ -151,6 +157,7 @@ services/financial-accounting-service/
 ### Database Entity as Source of Truth for Persistence
 
 **internal/adapters/persistence/booking_log_entity.go:**
+
 ```go
 package persistence
 
@@ -193,6 +200,7 @@ func (BookingLogEntity) TableName() string {
 ```
 
 **Corresponding domain model (internal/domain/booking_log.go) - NO persistence tags:**
+
 ```go
 package domain
 
@@ -238,6 +246,7 @@ func (b *FinancialBookingLog) Post() error {
 ### Atlas Configuration
 
 **atlas.hcl:**
+
 ```hcl
 env "local" {
   src = "file://internal/adapters/persistence"  # Database entities, not domain models
@@ -269,6 +278,7 @@ env "gorm" {
 ### Workflow
 
 **1. Modify Database Entity:**
+
 ```go
 // Add new field to persistence model
 type BookingLogEntity struct {
@@ -278,41 +288,55 @@ type BookingLogEntity struct {
 ```
 
 **2. Generate Migration:**
+
 ```bash
+
 # Atlas inspects database entities and generates migration
+
 atlas migrate diff add_narrative \
   --env gorm \
   --to "gorm://internal/adapters/persistence"
 ```
 
 **Generated migration (migrations/20250125120000_add_narrative.sql):**
+
 ```sql
 -- Add column "narrative_text" to table: "financial_booking_logs"
 ALTER TABLE "financial_booking_logs"
   ADD COLUMN "narrative_text" text;
 ```
 
-**Note:** Domain model does NOT need to change if this is purely an audit/persistence concern. See [ADR-0005](0005-adapter-pattern-layer-translation.md) for adapter patterns.
+**Note:** Domain model does NOT need to change if this is purely an audit/persistence concern. See
+[ADR-0005](0005-adapter-pattern-layer-translation.md) for adapter patterns.
 
 **3. Lint Migration:**
+
 ```bash
+
 # Catch dangerous changes before deployment
+
 atlas migrate lint \
   --env gorm \
   --latest 1
 ```
 
 **4. Test Migration:**
+
 ```bash
+
 # Validate on test database
+
 atlas migrate test \
   --env gorm \
   --dev-url "docker://postgres/15/test"
 ```
 
 **5. Apply Migration:**
+
 ```bash
+
 # Deploy to production
+
 atlas migrate apply \
   --env gorm \
   --url "$PROD_DATABASE_URL"
@@ -321,12 +345,14 @@ atlas migrate apply \
 ### CI/CD Integration
 
 **.github/workflows/migrate.yml:**
+
 ```yaml
 name: Database Migrations
 
 on:
   pull_request:
     paths:
+
       - 'internal/adapters/persistence/**'
       - 'migrations/**'
 
@@ -334,19 +360,23 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     steps:
+
       - uses: actions/checkout@v3
 
       - name: Install Atlas
+
         run: |
           curl -sSf https://atlasgo.sh | sh
 
       - name: Lint migrations
+
         run: |
           atlas migrate lint \
             --env gorm \
             --latest 1
 
       - name: Test migrations
+
         run: |
           atlas migrate test \
             --env gorm \
@@ -357,7 +387,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+
       - name: Apply migrations
+
         run: |
           atlas migrate apply \
             --env gorm \
@@ -367,6 +399,7 @@ jobs:
 ### Immutability Principle
 
 Atlas maintains Flyway-style immutability:
+
 * Once a migration is applied, it MUST NOT be modified
 * `atlas.sum` file contains checksums (like Flyway)
 * If a migration has an error, create a new migration to fix it
@@ -377,7 +410,9 @@ Atlas maintains Flyway-style immutability:
 For complex changes, write SQL manually:
 
 ```bash
+
 # Create empty migration file
+
 atlas migrate new complex_data_migration --env gorm
 ```
 
@@ -397,6 +432,7 @@ Edit the generated file with custom SQL, then Atlas manages it like any other mi
 ### Migration to Atlas from golang-migrate
 
 If migrating from golang-migrate:
+
 * Atlas can import existing golang-migrate files
 * Maintain migration history (no need to replay all migrations)
 * Continue using immutability principles

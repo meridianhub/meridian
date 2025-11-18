@@ -71,7 +71,7 @@ if err := createAccount(ctx, account); err != nil {
 Configuration is loaded from environment variables:
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| ---------- | ----------- | ------- |
 | `OTEL_SERVICE_NAME` | Service name (required) | - |
 | `OTEL_SERVICE_VERSION` | Service version | `unknown` |
 | `OTEL_ENVIRONMENT` | Environment (dev, staging, prod) | `development` |
@@ -83,7 +83,9 @@ Configuration is loaded from environment variables:
 ### Example Configuration
 
 ```bash
+
 # Development
+
 export OTEL_SERVICE_NAME=current-account-service
 export OTEL_SERVICE_VERSION=1.0.0
 export OTEL_ENVIRONMENT=development
@@ -91,6 +93,7 @@ export OTEL_EXPORTER_OTLP_INSECURE=true  # Insecure connection (dev only)
 export OTEL_TRACES_SAMPLER_ARG=1.0  # Sample 100% of traces
 
 # Production
+
 export OTEL_SERVICE_NAME=current-account-service
 export OTEL_SERVICE_VERSION=1.0.0
 export OTEL_ENVIRONMENT=production

@@ -2,9 +2,11 @@
 name: adr-007-raw-yaml-over-helm-for-initial-development
 description: Use raw Kubernetes YAML instead of Helm charts during initial development phase
 triggers:
+
   - Setting up local infrastructure services
   - Creating Kubernetes manifests for backing services
   - Evaluating Helm adoption timeline
+
 instructions: |
   Use raw Kubernetes YAML for all infrastructure services in Tiltfile (CockroachDB, Redis,
   Kafka, Zookeeper). Defer Helm adoption until service topology stabilizes and
@@ -21,18 +23,21 @@ Accepted
 
 ## Context
 
-Meridian uses Kubernetes for deployment and Tilt for local development. The project needs to define backing services (CockroachDB, Redis, Kafka, Zookeeper) for local development.
+Meridian uses Kubernetes for deployment and Tilt for local development. The project needs to define backing services
+(CockroachDB, Redis, Kafka, Zookeeper) for local development.
 
 **The question:** Should we use Helm charts or raw Kubernetes YAML for defining these services in the Tiltfile?
 
 ### Helm's Value Proposition
 
 Helm is primarily a templating engine that allows:
-```
+
+```text
 Same Helm Chart + Different Values Files = Different Environments
 ```
 
 The benefits are:
+
 - **Environment parity**: Same chart for local/staging/prod with different values
 - **Dependency management**: Charts can depend on other charts
 - **Versioning**: Chart versions track configuration changes
@@ -41,6 +46,7 @@ The benefits are:
 ### The Complexity Tax
 
 Using Helm introduces additional abstraction layers:
+
 1. Application code
 2. Container (Docker)
 3. Kubernetes primitives (Pods, Services, Deployments)
@@ -49,6 +55,7 @@ Using Helm introduces additional abstraction layers:
 6. Tilt (orchestrating everything)
 
 When debugging a failing pod, you must reason through all six layers:
+
 - Is my code wrong?
 - Is the Dockerfile wrong?
 - Is the Kubernetes YAML wrong?
@@ -57,6 +64,7 @@ When debugging a failing pod, you must reason through all six layers:
 - Is Tilt configured properly?
 
 This is particularly challenging when:
+
 - Bootstrapping a new project with evolving infrastructure requirements
 - Debugging service connectivity issues
 - Rapidly iterating on infrastructure setup
@@ -66,11 +74,15 @@ This is particularly challenging when:
 
 **For initial development, use raw Kubernetes YAML instead of Helm charts:**
 
-1. **Use raw YAML for all backing services**: CockroachDB, Redis, Kafka, and Zookeeper are all defined as inline YAML in the Tiltfile
+1. **Use raw YAML for all backing services**: CockroachDB, Redis, Kafka, and Zookeeper are all defined as inline YAML
+in the Tiltfile
 2. **Keep configurations simple**: Single-node deployments with minimal but complete configuration
-3. **Defer Helm migration**: Plan to migrate to Helm charts once service topology stabilizes and multi-environment deployment becomes necessary
+3. **Defer Helm migration**: Plan to migrate to Helm charts once service topology stabilizes and multi-environment
+deployment becomes necessary
 
-This is a **conscious architectural decision**, not an oversight. We are explicitly choosing transparency and iteration velocity over environment abstraction during the bootstrap phase, prioritizing rapid development over premature optimization.
+This is a **conscious architectural decision**, not an oversight. We are explicitly choosing transparency and iteration
+velocity over environment abstraction during the bootstrap phase, prioritizing rapid development over premature
+optimization.
 
 ## Decision Drivers
 
@@ -108,25 +120,27 @@ When service topology stabilizes, migrate to Helm:
    - Networking (NodePort vs LoadBalancer)
    - Secrets (dev vs prod credentials)
 
-2. **Create Helm charts**: Package stable service definitions
+1. **Create Helm charts**: Package stable service definitions
    - `charts/meridian/` - Main application chart
    - `charts/backing-services/` - Infrastructure services chart
 
-3. **Multi-environment values**:
+1. **Multi-environment values**:
    - `values-local.yaml` - Minimal resources, NodePort
    - `values-stage.yaml` - Moderate resources, cloud storage
    - `values-prod.yaml` - HA, multiple replicas, production secrets
 
-4. **Update Tiltfile**: Replace raw YAML with `helm_remote()` calls
+1. **Update Tiltfile**: Replace raw YAML with `helm_remote()` calls
 
-5. **Production deployment**: Use Helm for staging and production environments
+1. **Production deployment**: Use Helm for staging and production environments
 
 ## Examples
 
 ### Current Approach (Raw YAML)
 
 ```python
+
 # Tiltfile
+
 k8s_yaml(blob('''
 apiVersion: v1
 kind: Service
@@ -134,7 +148,9 @@ metadata:
   name: redis
 spec:
   ports:
+
   - port: 6379
+
   selector:
     app: redis
 ---
@@ -147,7 +163,9 @@ spec:
   template:
     spec:
       containers:
+
       - name: redis
+
         image: redis:7-alpine
         resources:
           limits:
@@ -160,7 +178,9 @@ spec:
 ### Future Helm Approach
 
 ```python
+
 # Tiltfile
+
 helm_remote(
   'redis',
   repo_name='bitnami',
@@ -170,7 +190,9 @@ helm_remote(
 ```
 
 ```yaml
+
 # deployments/helm/redis-values-local.yaml
+
 replica:
   replicaCount: 1
 resources:

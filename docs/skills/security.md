@@ -2,10 +2,12 @@
 name: skill-security-practices
 description: Security scanning, vulnerability management, and security best practices
 triggers:
+
   - Running security scans
   - Fixing vulnerabilities
   - Understanding security tools
   - Configuring security workflows
+
 instructions: |
   Use gosec for Go code scanning, Trivy for container and dependency scanning.
   Generate SBOMs for supply chain security. Run security checks in CI/CD.
@@ -16,7 +18,9 @@ instructions: |
 
 This document outlines the security measures implemented in Meridian to ensure production-grade security and compliance.
 
-> **⚠️ Note for Learning Environment**: This is a comprehensive security architecture guide for the Meridian learning project. When deploying to production, you should customize the following with your organization's specific details:
+> **⚠️ Note for Learning Environment**: This is a comprehensive security architecture guide for the Meridian learning
+project. When deploying to production, you should customize the following with your organization's specific details:
+>
 > - Contact information and escalation procedures
 > - Monitoring and alerting integrations
 > - Backup locations and credentials
@@ -74,6 +78,7 @@ USER nonroot:nonroot
 ### Container Security Contexts
 
 Pod-level security context:
+
 ```yaml
 securityContext:
   runAsNonRoot: true
@@ -85,6 +90,7 @@ securityContext:
 ```
 
 Container-level security context:
+
 ```yaml
 securityContext:
   allowPrivilegeEscalation: false
@@ -93,7 +99,9 @@ securityContext:
   runAsUser: 65532
   capabilities:
     drop:
+
     - ALL
+
 ```
 
 ### Read-Only Filesystem
@@ -102,14 +110,19 @@ The container runs with a read-only root filesystem. Writable directories are mo
 
 ```yaml
 volumeMounts:
+
 - name: tmp
+
   mountPath: /tmp
 volumes:
+
 - name: tmp
+
   emptyDir: {}
 ```
 
 This prevents:
+
 - Runtime file modification
 - Malware persistence
 - Unauthorized file writes
@@ -121,6 +134,7 @@ This prevents:
 Meridian uses least-privilege RBAC policies:
 
 **Role** (`deployments/k8s/base/role.yaml`):
+
 - **Read-only pod information**: For health checks and metadata
 - **Read ConfigMaps**: `meridian-config`, `meridian-build-info` (configuration reload)
 - **Read Secrets**: `meridian-secrets` only (credentials)
@@ -128,12 +142,14 @@ Meridian uses least-privilege RBAC policies:
 - **Namespace scoped**: No cluster-wide access
 
 **RoleBinding** (`deployments/k8s/base/rolebinding.yaml`):
+
 - Binds the Role to the `meridian` ServiceAccount
 - Enforced per namespace (dev/staging/production)
 
 ### Service Account
 
 Dedicated ServiceAccount with minimal permissions:
+
 ```yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -162,11 +178,13 @@ Meridian meets the **Restricted** Pod Security Standard:
 Production environment enforces strict network policies (`deployments/k8s/overlays/production/networkpolicy.yaml`):
 
 **Ingress Rules**:
+
 - Allow HTTP/gRPC from within cluster (ports 8080, 9090)
 - Allow metrics scraping from monitoring namespace (port 8080)
 - **Default deny** all other ingress
 
 **Egress Rules**:
+
 - Allow DNS resolution (kube-system namespace, UDP 53)
 - Allow database connections (CockroachDB port 26257)
 - Allow Kafka connections (port 9092)
@@ -177,6 +195,7 @@ Production environment enforces strict network policies (`deployments/k8s/overla
 ### Zero-Downtime Deployments
 
 Production rolling update strategy:
+
 ```yaml
 strategy:
   type: RollingUpdate
@@ -207,6 +226,7 @@ strategy:
 ### Audit Logging
 
 Kubernetes audit logs capture:
+
 - All API server requests
 - RBAC decisions
 - Secret access attempts
@@ -236,22 +256,26 @@ GitHub Actions workflow (`.github/workflows/security.yml`) runs:
 ### Vulnerability Response
 
 **Critical/High Severity**:
+
 1. CI pipeline fails immediately
 2. SARIF results uploaded to GitHub Security tab
 3. Security team notified via Slack (future)
 4. Patch within 24 hours
 
 **Medium Severity**:
+
 1. Logged but does not block deployment
 2. Fix within 1 week
 
 **Low Severity**:
+
 1. Tracked in backlog
 2. Fix in next sprint
 
 ### SBOM (Software Bill of Materials)
 
 Generated with Syft in SPDX-JSON format:
+
 - Lists all dependencies and versions
 - Stored as build artifact (90-day retention)
 - Used for vulnerability tracking and compliance
@@ -261,6 +285,7 @@ Generated with Syft in SPDX-JSON format:
 ### Current Approach
 
 Secrets stored as Kubernetes Secrets:
+
 ```yaml
 apiVersion: v1
 kind: Secret
@@ -317,6 +342,7 @@ data:
 ### Security Standards
 
 Meridian is designed to meet:
+
 - **OWASP Top 10**: Web application security risks
 - **CIS Kubernetes Benchmark**: Container orchestration hardening
 - **NIST Cybersecurity Framework**: Risk management
@@ -324,6 +350,7 @@ Meridian is designed to meet:
 ### Audit Trail
 
 All security-relevant events are logged:
+
 - Authentication attempts
 - Authorization failures
 - Secret access

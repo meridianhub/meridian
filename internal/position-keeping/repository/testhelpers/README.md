@@ -1,6 +1,7 @@
 # Repository Test Helpers
 
-This package provides reusable testcontainers infrastructure for PostgreSQL integration tests in the position-keeping repository layer.
+This package provides reusable testcontainers infrastructure for PostgreSQL integration tests in the position-keeping
+repository layer.
 
 ## Overview
 
@@ -81,7 +82,8 @@ The test database includes the complete position-keeping schema:
 
 ### Cascade Deletes
 
-All related tables use `ON DELETE CASCADE` to automatically clean up child records when a financial_position_log is deleted.
+All related tables use `ON DELETE CASCADE` to automatically clean up child records when a financial_position_log is
+deleted.
 
 ## Container Configuration
 
@@ -102,21 +104,25 @@ All related tables use `ON DELETE CASCADE` to automatically clean up child recor
 ### Best Practices
 
 1. **Use defer for cleanup**:
+
    ```go
    tc := testhelpers.SetupTestContainer(t)
    defer tc.Cleanup(t)
-   ```
 
-2. **Run tests in parallel** (when safe):
+```text
+
+1. **Run tests in parallel** (when safe):
+
    ```go
    func TestConcurrentOperations(t *testing.T) {
        t.Parallel()
        tc := testhelpers.SetupTestContainer(t)
        defer tc.Cleanup(t)
    }
-   ```
+```
 
-3. **Cache test data creation**:
+1. **Cache test data creation**:
+
    ```go
    var testLog *domain.FinancialPositionLog
 
@@ -126,7 +132,8 @@ All related tables use `ON DELETE CASCADE` to automatically clean up child recor
        }
        return testLog
    }
-   ```
+
+```text
 
 ## Examples
 
@@ -212,6 +219,7 @@ func BenchmarkCreate(b *testing.B) {
 **Problem**: Timeout waiting for database
 
 **Solution**: Check Docker is running and has resources:
+
 ```bash
 docker ps
 docker system df
@@ -222,6 +230,7 @@ docker system df
 **Problem**: Foreign key constraint errors
 
 **Solution**: Ensure tables are created in correct order:
+
 1. financial_position_logs (parent)
 2. transaction_log_entries (child)
 3. transaction_lineages (child)
@@ -232,6 +241,7 @@ docker system df
 **Problem**: Too many open connections
 
 **Solution**: Ensure `Cleanup()` is called with defer:
+
 ```go
 tc := testhelpers.SetupTestContainer(t)
 defer tc.Cleanup(t)  // CRITICAL - must use defer
@@ -242,6 +252,7 @@ defer tc.Cleanup(t)  // CRITICAL - must use defer
 **Problem**: Tests taking too long
 
 **Solutions**:
+
 - Run tests in parallel: `t.Parallel()`
 - Use fewer containers: Share container across subtests with `t.Run()`
 - Cache test data: Create complex aggregates once, reuse them
@@ -283,6 +294,7 @@ func TestNewWay(t *testing.T) {
 ```
 
 **Benefits**:
+
 - 90% less boilerplate
 - Consistent schema across tests
 - Better error handling

@@ -2,6 +2,7 @@
 name: skill-schema-evolution
 description: Protobuf schema evolution workflow with buf breaking change detection and BIAN patterns
 triggers:
+
   - Evolving protobuf schemas
   - Adding fields to proto definitions
   - Creating new event types
@@ -10,6 +11,7 @@ triggers:
   - Pre-commit hook failures for proto
   - buf breaking change errors
   - Deciding between backward-compatible changes vs new event types
+
 instructions: |
   Follow ADR-0004 for protobuf native versioning. Use Pattern 1 (add optional fields) for
   backward-compatible changes. Use Pattern 2 (new event type) for new BIAN behavior qualifiers.
@@ -24,12 +26,15 @@ This guide explains how to safely evolve protobuf schemas in Meridian following 
 ## Quick Reference
 
 ```bash
+
 # Local validation (before commit)
+
 make proto-lint              # Check style
 make proto-breaking          # Check compatibility against develop
 make proto                   # Regenerate Go code
 
 # With git hooks (recommended)
+
 .githooks/install.sh         # One-time setup
 git commit                   # Hooks run automatically
 ```
@@ -56,7 +61,7 @@ Protobuf schemas need evolution when:
 
 ## Decision Tree
 
-```
+```text
 Need to change a proto schema?
 │
 ├─ Is this a NEW operation/behavior?
@@ -81,6 +86,7 @@ Use when adding **optional fields** to existing messages.
 ### Example: Adding Correlation Tracking
 
 **Before:**
+
 ```protobuf
 // api/proto/events/current_account/v1/events.proto
 
@@ -93,6 +99,7 @@ message AccountUpdated {
 ```
 
 **After:**
+
 ```protobuf
 message AccountUpdated {
   string event_id = 1;
@@ -109,23 +116,32 @@ message AccountUpdated {
 ### Validation Steps
 
 ```bash
+
 # 1. Make your changes to .proto files
+
 vim api/proto/events/current_account/v1/events.proto
 
 # 2. Validate style
+
 make proto-lint
 
 # 3. Check for breaking changes
+
 make proto-breaking
+
 # ✅ Output: "No breaking changes detected"
 
 # 4. Regenerate Go code
+
 make proto
 
 # 5. Commit
+
 git add api/proto/events/current_account/v1/events.proto
 git commit -m "feat: Add correlation_id and causation_id to AccountUpdated event"
+
 # Pre-commit hooks run buf-lint and buf-breaking automatically
+
 ```
 
 ### What Happens
@@ -142,6 +158,7 @@ Use when adding **new BIAN operations** or **semantically distinct events**.
 ### Example: BIAN 14.0 Adds "Suspend" Operation
 
 **New file or add to existing:**
+
 ```protobuf
 // api/proto/events/current_account/v1/events.proto
 
@@ -172,17 +189,22 @@ message AccountSuspended {
 ### Implementation Steps
 
 ```bash
+
 # 1. Add new message to proto file
+
 vim api/proto/events/current_account/v1/events.proto
 
 # 2. Validate (new messages can't break existing schemas)
+
 make proto-lint
 make proto-breaking  # ✅ Passes
 
 # 3. Generate Go code
+
 make proto
 
 # 4. Create Kafka topic
+
 kubectl exec -it kafka-0 -- kafka-topics --create \
   --topic account-suspended \
   --partitions 3 \
@@ -190,9 +212,11 @@ kubectl exec -it kafka-0 -- kafka-topics --create \
   --config retention.ms=604800000  # 7 days
 
 # 5. Implement producer
+
 vim internal/adapters/events/current_account_publisher.go
 
 # 6. Commit
+
 git add api/proto/events/current_account/v1/events.proto
 git add internal/adapters/events/current_account_publisher.go
 git commit -m "feat: Add AccountSuspended event for BIAN 14.0 Suspend operation"
@@ -210,50 +234,68 @@ git commit -m "feat: Add AccountSuspended event for BIAN 14.0 Suspend operation"
 ### Initial Setup
 
 ```bash
+
 # Install git hooks (one-time)
+
 .githooks/install.sh
 
 # Verify installation
+
 ls -la .git/hooks/pre-commit
 
 # buf will be installed automatically by the hook if needed
+
 ```
 
 ### Daily Workflow
 
 ```bash
+
 # 1. Create feature branch
+
 git checkout -b feature/add-account-suspension
 
 # 2. Make schema changes
+
 vim api/proto/events/current_account/v1/events.proto
 
 # 3. Validate locally
+
 make proto-lint        # Check style
 make proto-breaking    # Check compatibility
 make proto             # Regenerate Go code
 
 # 4. Run tests
+
 make test
 
 # 5. Commit (git hooks run automatically)
+
 git add .
 git commit -m "feat: Add AccountSuspended event"
 
 # Git hook will:
+
 # - Run buf lint on proto files
+
 # - Run buf breaking against develop
+
 # - Run gofumpt on Go files
+
 # - Run golangci-lint on Go files
+
 ```
 
 ### Bypassing Git Hooks (Emergency Only)
 
 ```bash
+
 # Skip hooks for emergency hotfix (NOT RECOMMENDED)
+
 git commit --no-verify -m "hotfix: Critical production fix"
 
 # You MUST run validation after:
+
 make proto-lint
 make proto-breaking
 ```
@@ -267,48 +309,59 @@ The `.github/workflows/proto.yml` workflow runs on every PR and push to `develop
 ```yaml
 jobs:
   proto-lint:
+
     - Run buf lint
 
   proto-breaking:
+
     - Run buf breaking --against develop
     - Comment on PR if breaking changes detected
 
   proto-validate:
+
     - Validate directory structure
     - Check for v1 proto files
+
 ```
 
 ### What Triggers CI Failures
 
 **buf-lint failures:**
+
 - Missing package declaration
 - Improper field naming (must be snake_case)
 - Missing comments on public messages
 - Incorrect import paths
 
 **buf-breaking failures:**
+
 - Removed fields
 - Changed field types
 - Changed field numbers
 - Renamed fields (wire-incompatible)
 
 **proto-validate failures:**
+
 - Missing `api/proto/meridian` directory
 - No v1 proto files found
 
 ### Fixing CI Failures
 
 ```bash
+
 # 1. Pull latest develop
+
 git fetch origin develop:develop
 
 # 2. Run validation locally
+
 make proto-lint
 make proto-breaking
 
 # 3. Fix issues in proto files
 
 # 4. Push updated branch
+
 git add api/proto/
 git commit -m "fix: Resolve buf lint errors"
 git push
@@ -378,6 +431,7 @@ message AccountFrozen {
 ```
 
 **Implementation**:
+
 1. Add message to proto file
 2. Create new Kafka topic: `account-frozen`
 3. Implement producer in `internal/adapters/events/`
@@ -392,6 +446,7 @@ message AccountFrozen {
 **Solutions (in order of preference)**:
 
 1. **Mark as deprecated** (best for now):
+
 ```protobuf
 message AccountUpdated {
   string event_id = 1;
@@ -403,7 +458,8 @@ message AccountUpdated {
 }
 ```
 
-2. **Stop populating** (intermediate step):
+1. **Stop populating** (intermediate step):
+
 ```go
 // Stop setting old_field, but keep it in schema
 event := &eventspb.AccountUpdated{
@@ -413,7 +469,8 @@ event := &eventspb.AccountUpdated{
 }
 ```
 
-3. **Create v2 event** (if truly breaking):
+1. **Create v2 event** (if truly breaking):
+
 ```protobuf
 // api/proto/events/current_account/v2/events.proto
 message AccountUpdated {
@@ -441,6 +498,7 @@ message AccountUpdated {
 ```
 
 **Migration**:
+
 1. Deploy with both fields populated
 2. Update consumers to read `account_balance_cents`
 3. After all consumers updated, stop populating `account_balance`
@@ -453,6 +511,7 @@ message AccountUpdated {
 **Cause**: Local develop branch is stale.
 
 **Fix**:
+
 ```bash
 git fetch origin develop:develop
 make proto-breaking
@@ -497,12 +556,16 @@ message AccountUpdated {
 ### Git hooks fail
 
 **Skip hook temporarily for debugging**:
+
 ```bash
 git commit --no-verify -m "test commit"
+
 # Remember to run validation manually afterward!
+
 ```
 
 **Reinstall hooks**:
+
 ```bash
 .githooks/install.sh
 ```
@@ -512,20 +575,27 @@ git commit --no-verify -m "test commit"
 **Cause**: Stale generated code.
 
 **Fix**:
+
 ```bash
+
 # Clean and regenerate
+
 rm -rf api/proto/*/v*/*.pb.go
 make proto
 
 # Verify
+
 go build ./...
 ```
 
 ### CI workflow doesn't detect my changes
 
 **Check trigger conditions**:
+
 ```yaml
+
 # proto.yml only runs on these branches
+
 on:
   push:
     branches: [develop, main]
@@ -559,11 +629,13 @@ on:
 ## Additional Resources
 
 ### Related Skills
+
 - [Tilt Development](./tilt.md) - Local Kubernetes development with fast iteration
 - [Docker Configuration](./docker.md) - Container builds and multi-stage Dockerfiles
 - [Security Scanning](./security.md) - Vulnerability detection and compliance
 
 ### Documentation
+
 - [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md)
 - [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
 - [buf CLI Documentation](https://buf.build/docs/)

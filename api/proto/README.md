@@ -4,7 +4,7 @@ This directory contains Protocol Buffer (protobuf) definitions for all Meridian 
 
 ## Directory Structure
 
-```
+```text
 api/proto/
 ├── meridian/
 │   ├── common/v1/              # Common types shared across services
@@ -28,16 +28,21 @@ Meridian uses [buf](https://buf.build) for protobuf management:
 ### Available Commands
 
 ```bash
+
 # Generate Go code from proto definitions
+
 make proto
 
 # Lint proto files
+
 make proto-lint
 
 # Check for breaking changes against develop branch
+
 make proto-breaking
 
 # Install all protobuf tools
+
 make install
 ```
 
@@ -45,7 +50,7 @@ make install
 
 Generated code is placed alongside proto definitions:
 
-```
+```text
 api/proto/meridian/common/v1/
 ├── health.proto          # Source definition
 ├── health.pb.go          # Generated protobuf code

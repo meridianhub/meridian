@@ -2,9 +2,11 @@
 name: adr-001-record-architecture-decisions
 description: Use Architecture Decision Records (ADRs) to document all architectural choices in the project
 triggers:
+
   - Starting documentation for a new project
   - Establishing architectural documentation standards
   - Understanding why ADRs exist in this project
+
 instructions: |
   Use ADRs for all significant architectural decisions. Store in docs/adr/ with
   sequential numbering. Include context, decision, and consequences. Keep ADRs
@@ -21,7 +23,8 @@ Accepted
 
 ## Context
 
-We need to record the architectural decisions made on this project. Meridian is a production-grade open banking ledger implementing BIAN standards, and documenting our architectural choices is critical for:
+We need to record the architectural decisions made on this project. Meridian is a production-grade open banking ledger
+implementing BIAN standards, and documenting our architectural choices is critical for:
 
 - Maintaining consistency across the codebase
 - Onboarding new contributors
@@ -38,13 +41,13 @@ See Michael Nygard's article, linked above. For a lightweight ADR toolset, see N
 
 ### Positive Consequences
 
-* Clear documentation of why decisions were made
-* Reduces context switching when revisiting past choices
-* AI assistants (like Claude Code) can reference ADRs for better context
-* New team members understand the rationale behind the architecture
+- Clear documentation of why decisions were made
+- Reduces context switching when revisiting past choices
+- AI assistants (like Claude Code) can reference ADRs for better context
+- New team members understand the rationale behind the architecture
 
 ### Negative Consequences
 
-* Requires discipline to keep ADRs up to date
-* Additional overhead when making architectural changes
-* Risk of ADRs becoming stale if not maintained
+- Requires discipline to keep ADRs up to date
+- Additional overhead when making architectural changes
+- Risk of ADRs becoming stale if not maintained

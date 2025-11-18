@@ -2,10 +2,12 @@
 name: adr-002-microservices-per-bian-domain
 description: One microservice per BIAN domain for independent scaling, deployment, and failure isolation
 triggers:
+
   - Designing service boundaries
   - Deciding between microservices vs monolith
   - Planning service deployment architecture
   - Discussing BIAN domain implementation
+
 instructions: |
   Create one service per BIAN domain (FinancialAccounting, PositionKeeping, CurrentAccount).
   Each service independently deployable with own database. Use gRPC for sync communication,
@@ -22,13 +24,17 @@ Accepted
 
 ## Context
 
-Meridian implements multiple BIAN (Banking Industry Architecture Network) service domains: FinancialAccounting, PositionKeeping, and CurrentAccount. We need to decide whether to build a modular monolith with all domains in one deployable or separate microservices with one service per BIAN domain.
+Meridian implements multiple BIAN (Banking Industry Architecture Network) service domains: FinancialAccounting,
+PositionKeeping, and CurrentAccount. We need to decide whether to build a modular monolith with all domains in one
+deployable or separate microservices with one service per BIAN domain.
 
-BIAN service domains already define clear bounded contexts with well-defined interfaces, making them natural candidates for service boundaries.
+BIAN service domains already define clear bounded contexts with well-defined interfaces, making them natural candidates
+for service boundaries.
 
 ## Decision Drivers
 
-* BIAN domains have distinct scaling requirements (CurrentAccount serves high-volume customer operations, FinancialAccounting handles periodic ledger posting)
+* BIAN domains have distinct scaling requirements (CurrentAccount serves high-volume customer operations,
+FinancialAccounting handles periodic ledger posting)
 * Failure isolation is critical for financial services (one domain failing should not cascade)
 * Independent deployment cycles per domain enable faster iteration
 * Team ownership can align with BIAN domain boundaries
@@ -72,7 +78,8 @@ Chosen option: "Microservices - One service per BIAN domain", because:
 
 ### Microservices - One Service per BIAN Domain
 
-One deployable service for each BIAN domain: financial-accounting-service, position-keeping-service, current-account-service, etc.
+One deployable service for each BIAN domain: financial-accounting-service, position-keeping-service,
+current-account-service, etc.
 
 * Good, because BIAN domains already define bounded contexts with clear interfaces
 * Good, because enables independent scaling (CurrentAccount may need 10x instances vs FinancialAccounting)
@@ -85,7 +92,8 @@ One deployable service for each BIAN domain: financial-accounting-service, posit
 
 ### Modular Monolith - Single Deployable
 
-All BIAN domains in one binary with internal module boundaries (internal/financial-accounting/, internal/position-keeping/, etc.)
+All BIAN domains in one binary with internal module boundaries (internal/financial-accounting/,
+internal/position-keeping/, etc.)
 
 * Good, because simpler deployment (one binary)
 * Good, because ACID transactions across all domains
@@ -121,7 +129,7 @@ Core domains (FinancialAccounting, PositionKeeping) in monolith, customer-facing
 
 Each BIAN domain service will follow this structure:
 
-```
+```text
 services/
 ├── financial-accounting-service/
 │   ├── cmd/server/main.go
@@ -143,7 +151,7 @@ services/
 
 Common platform services (database, Kafka, auth, observability) will be in:
 
-```
+```text
 platform/
 ├── database/        # Connection pooling, transaction management
 ├── kafka/           # Producer/consumer utilities with protobuf serialization
