@@ -49,6 +49,8 @@
   "ignores": [
     "**/node_modules/**",
     "**/.git/**",
-    ".taskmaster/**"
+    ".taskmaster/**",
+    "docs/architecture/**",
+    "docs/adr/**"
   ]
 }
