@@ -130,6 +130,9 @@ message FinancialBookingLogPostedEvent {
   int32 posting_count = 2 [(buf.validate.field).int32 = {gte: 0}];
 
   // total_debits is the sum of all debit postings (must be positive or zero)
+  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
+  // validation. Service layer must enforce this constraint.
+  // See README "Money Field Validation Limitations"
   google.type.Money total_debits = 3 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
@@ -140,6 +143,9 @@ message FinancialBookingLogPostedEvent {
   ];
 
   // total_credits is the sum of all credit postings (must be positive or zero)
+  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
+  // validation. Service layer must enforce this constraint.
+  // See README "Money Field Validation Limitations"
   google.type.Money total_credits = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
@@ -242,6 +248,9 @@ message LedgerPostingCapturedEvent {
   }];
 
   // posting_amount is the monetary amount being posted (must be positive)
+  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
+  // validation. Service layer must enforce this constraint.
+  // See README "Money Field Validation Limitations"
   google.type.Money posting_amount = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
@@ -302,6 +311,9 @@ message LedgerPostingAmendedEvent {
   }];
 
   // previous_amount was the amount before amendment (must be positive)
+  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
+  // validation. Service layer must enforce this constraint.
+  // See README "Money Field Validation Limitations"
   google.type.Money previous_amount = 3 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
@@ -312,6 +324,9 @@ message LedgerPostingAmendedEvent {
   ];
 
   // new_amount is the amount after amendment (must be positive)
+  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
+  // validation. Service layer must enforce this constraint.
+  // See README "Money Field Validation Limitations"
   google.type.Money new_amount = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
@@ -454,6 +469,9 @@ message BalanceValidationFailedEvent {
   }];
 
   // total_debits is the sum of all debit postings (must be non-negative)
+  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
+  // validation. Service layer must enforce this constraint.
+  // See README "Money Field Validation Limitations"
   google.type.Money total_debits = 2 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
@@ -464,6 +482,9 @@ message BalanceValidationFailedEvent {
   ];
 
   // total_credits is the sum of all credit postings (must be non-negative)
+  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
+  // validation. Service layer must enforce this constraint.
+  // See README "Money Field Validation Limitations"
   google.type.Money total_credits = 3 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
@@ -474,6 +495,8 @@ message BalanceValidationFailedEvent {
   ];
 
   // variance is the difference between debits and credits (can be negative)
+  // Positive variance = debits > credits
+  // Negative variance = credits > debits
   google.type.Money variance = 4 [(buf.validate.field).required = true];
 
   // reason explains the validation failure
