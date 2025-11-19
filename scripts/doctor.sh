@@ -147,17 +147,60 @@ get_version() {
     echo "$version"
 }
 
+# Helper function to get install command based on platform
+get_install_cmd() {
+    local tool=$1
+
+    case "$OS-$tool" in
+        macos-go) echo "brew install go" ;;
+        macos-git) echo "brew install git" ;;
+        macos-docker) echo "brew install --cask docker" ;;
+        macos-kubectl) echo "brew install kubectl" ;;
+        macos-helm) echo "brew install helm" ;;
+        macos-kind) echo "brew install kind" ;;
+        macos-ctlptl) echo "brew install tilt-dev/tap/ctlptl" ;;
+        macos-tilt) echo "brew install tilt-dev/tap/tilt" ;;
+        macos-buf) echo "brew install bufbuild/buf/buf" ;;
+        macos-protoc) echo "brew install protobuf" ;;
+        macos-golangci-lint) echo "brew install golangci-lint" ;;
+        macos-node) echo "brew install node" ;;
+
+        linux-go) echo "sudo ${PKG_MANAGER} install -y golang-go" ;;
+        linux-git) echo "sudo ${PKG_MANAGER} install -y git" ;;
+        linux-docker) echo "curl -fsSL https://get.docker.com | sh" ;;
+        linux-kubectl) echo "sudo snap install kubectl --classic" ;;
+        linux-helm) echo "curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash" ;;
+        linux-kind) echo "GO111MODULE=on go install sigs.k8s.io/kind@latest" ;;
+        linux-ctlptl) echo "GO111MODULE=on go install github.com/tilt-dev/ctlptl/cmd/ctlptl@latest" ;;
+        linux-tilt) echo "curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash" ;;
+        linux-buf) echo "GO111MODULE=on go install github.com/bufbuild/buf/cmd/buf@latest" ;;
+        linux-protoc) echo "sudo ${PKG_MANAGER} install -y protobuf-compiler" ;;
+        linux-golangci-lint) echo "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b \$(go env GOPATH)/bin" ;;
+        linux-node) echo "sudo ${PKG_MANAGER} install -y nodejs npm" ;;
+
+        *) echo "" ;;  # Unknown combination
+    esac
+}
+
 # Helper function to install tool
 install_tool() {
     local tool=$1
-    local install_cmd=$2
 
     if [ "$FIX_MODE" = false ]; then
         return 1
     fi
 
+    local install_cmd
+    install_cmd=$(get_install_cmd "$tool")
+
+    if [ -z "$install_cmd" ]; then
+        echo -e "${RED}✗${NC} Cannot install $tool - unsupported platform"
+        return 1
+    fi
+
     echo -e "${YELLOW}Installing $tool...${NC}"
-    if eval "$install_cmd" &> /dev/null; then
+    # Direct execution without eval - safer than eval
+    if bash -c "$install_cmd" &> /dev/null; then
         echo -e "${GREEN}✓${NC} $tool installed successfully"
         return 0
     else
@@ -170,7 +213,6 @@ install_tool() {
 check_tool() {
     local cmd=$1
     local required_version=$2
-    local install_hint=$3
 
     if command -v "$cmd" &> /dev/null; then
         local version
@@ -187,10 +229,17 @@ check_tool() {
         echo -e "${RED}✗${NC} $cmd ${RED}(not found)${NC}"
 
         if [ "$FIX_MODE" = true ]; then
-            install_tool "$cmd" "$install_hint"
+            install_tool "$cmd"
             return $?
         else
-            echo -e "  ${YELLOW}Fix:${NC} $install_hint"
+            # Show platform-appropriate fix suggestion
+            local install_cmd
+            install_cmd=$(get_install_cmd "$cmd")
+            if [ -n "$install_cmd" ]; then
+                echo -e "  ${YELLOW}Fix:${NC} $install_cmd"
+            else
+                echo -e "  ${YELLOW}Fix:${NC} Install $cmd for your platform"
+            fi
             ALL_CHECKS_PASSED=false
             return 1
         fi
@@ -236,8 +285,31 @@ check_go_environment() {
         echo -e "${GREEN}✓${NC} Go environment properly configured"
         if [ "$VERBOSE" = true ]; then
             echo -e "  GOROOT: $GOROOT_OUTPUT"
+            # Check GOPATH with error handling
+            if GOPATH_OUTPUT=$(go env GOPATH 2>&1); then
+                echo -e "  GOPATH: $GOPATH_OUTPUT"
+            fi
         fi
         return 0
+    fi
+}
+
+# Check Docker daemon
+check_docker_daemon() {
+    if ! command -v docker &> /dev/null; then
+        return 1  # Docker not installed, will be caught by tool check
+    fi
+
+    echo "Checking Docker daemon..."
+
+    if docker info &> /dev/null; then
+        echo -e "${GREEN}✓${NC} Docker daemon running"
+        return 0
+    else
+        echo -e "${RED}✗${NC} Docker daemon not running"
+        echo -e "  ${YELLOW}Fix:${NC} Start Docker Desktop"
+        ALL_CHECKS_PASSED=false
+        return 1
     fi
 }
 
@@ -248,17 +320,33 @@ check_k8s_cluster() {
     local current_context
     current_context=$(kubectl config current-context 2>/dev/null || echo "none")
 
-    # Check if pointing to remote cluster
+    # Check if pointing to remote cluster by inspecting cluster server URL
     local is_remote_cluster=false
-    if echo "$current_context" | grep -q "arn:aws:eks\|\.eks\.\|gke_\|aks-"; then
+    local cluster_server
+    cluster_server=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo "")
+
+    # Remote if server is external (not localhost/127.0.0.1) or context name suggests remote
+    if echo "$cluster_server" | grep -qv "localhost\|127.0.0.1\|0.0.0.0" || \
+       echo "$current_context" | grep -q "arn:aws:eks\|\.eks\.\|gke_\|aks-"; then
         is_remote_cluster=true
     fi
 
     # Quick network check for remote clusters
     local network_available=true
     if [ "$is_remote_cluster" = true ]; then
-        if ! timeout 2 nc -z 8.8.8.8 53 2>/dev/null && ! timeout 2 host google.com >/dev/null 2>&1; then
-            network_available=false
+        # Use curl as primary check (more reliable cross-platform)
+        if command -v curl &> /dev/null; then
+            if ! timeout 2 curl -sI https://google.com &>/dev/null; then
+                network_available=false
+            fi
+        # Fallback to nc and host if curl not available
+        elif command -v nc &> /dev/null && command -v host &> /dev/null; then
+            if ! timeout 2 nc -z 8.8.8.8 53 2>/dev/null && ! timeout 2 host google.com >/dev/null 2>&1; then
+                network_available=false
+            fi
+        else
+            # Cannot verify network, assume available to avoid false negatives
+            network_available=true
         fi
     fi
 
@@ -282,11 +370,11 @@ check_k8s_cluster() {
         echo -e "  Current context: $current_context"
 
         if [ "$FIX_MODE" = true ] && [ "$is_remote_cluster" = false ]; then
-            # Try to create local cluster
+            # Try to create local cluster with registry
             if command -v ctlptl &> /dev/null && command -v kind &> /dev/null && docker info &> /dev/null 2>&1; then
                 if ! kubectl config get-contexts kind-meridian-local &> /dev/null; then
-                    echo -e "${BLUE}Creating Kind cluster 'kind-meridian-local'...${NC}"
-                    if ctlptl create cluster kind --name=kind-meridian-local; then
+                    echo -e "${BLUE}Creating Kind cluster 'kind-meridian-local' with local registry...${NC}"
+                    if ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local; then
                         echo -e "${GREEN}✓${NC} Kind cluster created successfully!"
                         return 0
                     else
@@ -295,7 +383,7 @@ check_k8s_cluster() {
                 fi
             fi
         else
-            echo -e "  ${YELLOW}Fix:${NC} ctlptl create cluster kind --name=kind-meridian-local"
+            echo -e "  ${YELLOW}Fix:${NC} ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local"
         fi
 
         ALL_CHECKS_PASSED=false
@@ -313,11 +401,17 @@ check_npm_dependencies() {
         return 1  # npm not installed, will be caught by tool check
     fi
 
-    if [ -d "node_modules" ] && npm list markdownlint-cli2 &> /dev/null; then
+    # Check if all dependencies are installed (not just one specific package)
+    if [ -d "node_modules" ] && npm list --depth=0 &> /dev/null; then
         echo -e "${GREEN}✓${NC} Node.js dependencies installed"
+        if [ "$VERBOSE" = true ]; then
+            local dep_count
+            dep_count=$(npm list --depth=0 --json 2>/dev/null | grep -c "\"version\":" || echo "unknown")
+            echo -e "  Packages: $dep_count"
+        fi
         return 0
     else
-        echo -e "${YELLOW}⚠${NC}  Node.js dependencies not installed"
+        echo -e "${YELLOW}⚠${NC}  Node.js dependencies not installed or incomplete"
 
         if [ "$FIX_MODE" = true ]; then
             echo -e "${YELLOW}Installing Node.js dependencies...${NC}"
@@ -362,7 +456,12 @@ check_git_hooks() {
             echo -e "${GREEN}✓${NC} Git hooks installed successfully"
             return 0
         else
-            echo -e "  ${YELLOW}Fix:${NC} .githooks/install.sh"
+            # Suggest install script if it exists, otherwise give direct command
+            if [ -f ".githooks/install.sh" ]; then
+                echo -e "  ${YELLOW}Fix:${NC} .githooks/install.sh"
+            else
+                echo -e "  ${YELLOW}Fix:${NC} cp $source_hook $installed_hook && chmod +x $installed_hook"
+            fi
             ALL_CHECKS_PASSED=false
             return 1
         fi
@@ -393,7 +492,12 @@ check_git_hooks() {
             echo -e "${GREEN}✓${NC} Git hook updated"
             return 0
         else
-            echo -e "  ${YELLOW}Fix:${NC} .githooks/install.sh"
+            # Suggest install script if it exists, otherwise give direct command
+            if [ -f ".githooks/install.sh" ]; then
+                echo -e "  ${YELLOW}Fix:${NC} .githooks/install.sh"
+            else
+                echo -e "  ${YELLOW}Fix:${NC} cp $source_hook $installed_hook && chmod +x $installed_hook"
+            fi
             ALL_CHECKS_PASSED=false
             return 1
         fi
@@ -412,14 +516,14 @@ echo " Core Development Tools"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "go" "1.23+" "brew install go"
+check_tool "go" "1.23+"
 check_go_environment
 echo ""
 
-check_tool "make" "" "pre-installed on macOS/Linux"
+check_tool "make" ""
 echo ""
 
-check_tool "git" "2.x+" "brew install git"
+check_tool "git" "2.x+"
 echo ""
 
 # Container & Orchestration
@@ -428,22 +532,25 @@ echo " Container & Orchestration"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "docker" "20.x+" "brew install --cask docker"
+check_tool "docker" "20.x+"
 echo ""
 
-check_tool "kubectl" "1.28+" "brew install kubectl"
+check_docker_daemon
 echo ""
 
-check_tool "helm" "3.x+" "brew install helm"
+check_tool "kubectl" "1.28+"
 echo ""
 
-check_tool "kind" "" "brew install kind"
+check_tool "helm" "3.x+"
 echo ""
 
-check_tool "ctlptl" "" "brew install tilt-dev/tap/ctlptl"
+check_tool "kind" ""
 echo ""
 
-check_tool "tilt" "0.30+" "brew install tilt-dev/tap/tilt"
+check_tool "ctlptl" ""
+echo ""
+
+check_tool "tilt" "0.30+"
 echo ""
 
 check_k8s_cluster
@@ -455,10 +562,10 @@ echo " API Development Tools"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "buf" "1.x+" "brew install bufbuild/buf/buf"
+check_tool "buf" "1.x+"
 echo ""
 
-check_tool "protoc" "3.x+" "brew install protobuf"
+check_tool "protoc" "3.x+"
 echo ""
 
 # Code Quality
@@ -467,7 +574,7 @@ echo " Code Quality & Linting"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "golangci-lint" "2.x+" "brew install golangci-lint"
+check_tool "golangci-lint" "2.x+"
 echo ""
 
 # Node.js
@@ -476,10 +583,10 @@ echo " Node.js & npm"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "node" "20+" "brew install node"
+check_tool "node" "20+"
 echo ""
 
-check_tool "npm" "10+" "brew install node"
+check_tool "npm" "10+"
 echo ""
 
 check_npm_dependencies
