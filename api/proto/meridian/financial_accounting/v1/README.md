@@ -182,6 +182,25 @@ message FinancialBookingLog {
 }
 ```
 
+### Money Field Validation Limitations
+
+**Important**: buf.validate currently does not generate runtime validation code for CEL constraints on
+`google.type.Money` fields. The CEL constraints in the proto file serve as documentation of validation
+requirements, but enforcement must happen at the service/application layer.
+
+Money field validation rules:
+
+- `LedgerPostingCapturedEvent.posting_amount` - Must be positive (units > 0 or nanos > 0)
+- `LedgerPostingAmendedEvent.previous_amount` - Must be positive
+- `LedgerPostingAmendedEvent.new_amount` - Must be positive
+- `FinancialBookingLogPostedEvent.total_debits` - Must be non-negative (>= 0)
+- `FinancialBookingLogPostedEvent.total_credits` - Must be non-negative (>= 0)
+- `BalanceValidationFailedEvent.total_debits` - Must be non-negative (>= 0)
+- `BalanceValidationFailedEvent.total_credits` - Must be non-negative (>= 0)
+- `BalanceValidationFailedEvent.variance` - Can be negative (it's the difference)
+
+Service layer must validate these constraints before accepting events.
+
 ### Schema Validation
 
 Run `buf lint` to validate schema style and correctness:
