@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/internal/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/pkg/platform/idempotency"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // DomainEvent is a marker interface for all financial accounting domain events.
@@ -112,6 +115,46 @@ func NewFinancialAccountingService(
 	}
 }
 
+// RetrieveLedgerPosting retrieves a specific ledger posting by ID.
+//
+// This method implements subtask 9.3 - simple retrieve operation.
+//
+// gRPC Error Codes:
+//   - codes.InvalidArgument: Invalid posting ID format
+//   - codes.NotFound: Posting does not exist
+//   - codes.Internal: Database or system errors
+//
+// Example:
+//
+//	req := &financialaccountingv1.RetrieveLedgerPostingRequest{
+//	    Id: "550e8400-e29b-41d4-a716-446655440000",
+//	}
+//	resp, err := service.RetrieveLedgerPosting(ctx, req)
+func (s *FinancialAccountingService) RetrieveLedgerPosting(
+	ctx context.Context,
+	req *financialaccountingv1.RetrieveLedgerPostingRequest,
+) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
+	// Parse and validate posting ID
+	postingID, err := parseUUID(req.GetId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid posting id: %v", err)
+	}
+
+	// Retrieve from repository
+	posting, err := s.repository.GetPosting(ctx, postingID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrPostingNotFound) {
+			return nil, status.Errorf(codes.NotFound, "ledger posting not found: %s", postingID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve ledger posting: %v", err)
+	}
+
+	// Convert to protobuf and return
+	return &financialaccountingv1.RetrieveLedgerPostingResponse{
+		LedgerPosting: toProtoLedgerPosting(posting),
+	}, nil
+}
+
 // Method implementations will be added in subsequent subtasks:
 //
 // Subtask 9.2 - gRPC method implementations with full workflow:
@@ -119,9 +162,6 @@ func NewFinancialAccountingService(
 //   - UpdateFinancialBookingLog: Updates booking log status and rules
 //   - RetrieveFinancialBookingLog: Retrieves booking log by ID
 //   - CaptureLedgerPosting: Creates posting with validation and events
-//
-// Subtask 9.3 - Retrieve operations:
-//   - RetrieveLedgerPosting: Retrieves posting by ID
 //
 // Subtask 9.5 - List operations:
 //   - ListFinancialBookingLogs: Lists booking logs with filtering/pagination
