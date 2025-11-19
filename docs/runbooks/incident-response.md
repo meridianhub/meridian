@@ -19,8 +19,8 @@ instructions: |
 
 **When to use this runbook**: Active security incident, service degradation, or production outage.
 
-> **⚠️ Note for Learning Environment**: This is a template runbook for the Meridian learning project. In a production
-deployment, you would customize this with your specific:
+> **⚠️ Customization Note**: This is a template runbook for Meridian. In a production deployment, you should customize
+this with your specific:
 >
 > - Contact details and escalation paths
 > - Monitoring dashboards and log locations
