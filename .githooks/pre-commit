@@ -74,17 +74,17 @@ fi
 # ============================================================================
 
 if [ -n "$STAGED_MD_FILES" ]; then
+    # Convert newline-separated list to array, filtering empty lines (done once)
+    MD_FILES_ARRAY=()
+    while IFS= read -r file; do
+        [[ -n "$file" ]] && MD_FILES_ARRAY+=("$file")
+    done <<< "$STAGED_MD_FILES"
+
     # Check if npm is available and package.json exists
     if [ -f "package.json" ] && command -v npm &> /dev/null; then
         # Run markdownlint-cli2 via npm on staged markdown files
         echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
-        # Convert newline-separated list to array, filtering empty lines
-        MD_FILES_ARRAY=()
-        while IFS= read -r file; do
-            [[ -n "$file" ]] && MD_FILES_ARRAY+=("$file")
-        done <<< "$STAGED_MD_FILES"
 
-        # Try npm script first
         if npm run --silent lint:md -- "${MD_FILES_ARRAY[@]}"; then
             echo -e "${GREEN}✓${NC} markdownlint passed"
         else
@@ -97,18 +97,13 @@ if [ -n "$STAGED_MD_FILES" ]; then
         # Fallback to npx if package.json not present
         # Note: Run 'npm install' once for optimal performance (avoids package download on each commit)
         echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
-        # Convert newline-separated list to array, filtering empty lines
-        MD_FILES_ARRAY=()
-        while IFS= read -r file; do
-            [[ -n "$file" ]] && MD_FILES_ARRAY+=("$file")
-        done <<< "$STAGED_MD_FILES"
 
         if npx --yes markdownlint-cli2 "${MD_FILES_ARRAY[@]}"; then
             echo -e "${GREEN}✓${NC} markdownlint passed"
         else
             echo -e "${RED}✗${NC} markdownlint failed"
             echo -e "${RED}Please fix markdown style issues above before committing${NC}"
-            echo -e "${YELLOW}Tip:${NC} Run 'npx markdownlint-cli2 --fix' followed by the filename to auto-fix issues"
+            echo -e "${YELLOW}Tip:${NC} Run 'npx markdownlint-cli2 --fix <filename>' to auto-fix issues"
             exit 1
         fi
     else

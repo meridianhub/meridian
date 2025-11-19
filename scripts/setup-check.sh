@@ -67,6 +67,12 @@ check_command() {
             git)
                 version=$(git --version | awk '{print $3}')
                 ;;
+            node)
+                version=$(node --version | sed 's/v//')
+                ;;
+            npm)
+                version=$(npm --version)
+                ;;
             *)
                 version="unknown"
                 ;;
