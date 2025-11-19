@@ -12,6 +12,13 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	// DefaultPageSize is the default number of results returned per page
+	DefaultPageSize = 50
+	// MaxPageSize is the maximum number of results allowed per page
+	MaxPageSize = 1000
+)
+
 var decimalHundred = decimal.NewFromInt(100)
 
 // decimalFromCents converts cents (int64) to decimal amount
@@ -209,15 +216,21 @@ type ListBookingLogsResult struct {
 	TotalCount    int64
 }
 
-// ListBookingLogs lists booking logs with optional filtering and pagination
+// ListBookingLogs lists booking logs with optional filtering and pagination.
+//
+// LIMITATION: Page token parsing is not yet implemented. Pagination currently
+// uses OFFSET-based queries which may show inconsistent results if data changes
+// between requests. This is suitable for small to medium datasets but should be
+// replaced with cursor-based pagination for production use with large datasets.
+// See TODO comments in implementation for cursor-based pagination work.
 func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBookingLogsParams) (*ListBookingLogsResult, error) {
 	// Set default page size if not specified
 	pageSize := params.PageSize
 	if pageSize == 0 {
-		pageSize = 50
+		pageSize = DefaultPageSize
 	}
-	if pageSize > 1000 {
-		pageSize = 1000
+	if pageSize > MaxPageSize {
+		pageSize = MaxPageSize
 	}
 
 	// Build base query
@@ -281,9 +294,13 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 	}, nil
 }
 
-// toBookingLogDomain converts database entity to domain model
+// toBookingLogDomain converts database entity to domain model.
+// Note: postings field is unexported and initialized empty.
+// Postings are loaded separately to avoid N+1 queries.
 func toBookingLogDomain(entity *FinancialBookingLogEntity) *domain.FinancialBookingLog {
-	return &domain.FinancialBookingLog{
+	// We need to use NewFinancialBookingLog and then update fields since postings is unexported
+	// However, NewFinancialBookingLog creates a new ID, so we reconstruct manually
+	log := domain.FinancialBookingLog{
 		ID:                      entity.ID,
 		FinancialAccountType:    entity.FinancialAccountType,
 		ProductServiceReference: entity.ProductServiceReference,
@@ -293,8 +310,9 @@ func toBookingLogDomain(entity *FinancialBookingLogEntity) *domain.FinancialBook
 		Status:                  domain.TransactionStatus(entity.Status),
 		CreatedAt:               entity.CreatedAt,
 		UpdatedAt:               entity.UpdatedAt,
-		Postings:                make([]*domain.LedgerPosting, 0), // Postings loaded separately
+		// postings initialized as empty slice (loaded separately)
 	}
+	return &log
 }
 
 // ListPostingsParams contains parameters for listing ledger postings
@@ -334,15 +352,21 @@ type ListPostingsResult struct {
 	TotalCount    int64
 }
 
-// ListPostings lists ledger postings with optional filtering and pagination
+// ListPostings lists ledger postings with optional filtering and pagination.
+//
+// LIMITATION: Page token parsing is not yet implemented. Pagination currently
+// uses OFFSET-based queries which may show inconsistent results if data changes
+// between requests. This is suitable for small to medium datasets but should be
+// replaced with cursor-based pagination for production use with large datasets.
+// See TODO comments in implementation for cursor-based pagination work.
 func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostingsParams) (*ListPostingsResult, error) {
 	// Set default page size if not specified
 	pageSize := params.PageSize
 	if pageSize == 0 {
-		pageSize = 50
+		pageSize = DefaultPageSize
 	}
-	if pageSize > 1000 {
-		pageSize = 1000
+	if pageSize > MaxPageSize {
+		pageSize = MaxPageSize
 	}
 
 	// Build base query

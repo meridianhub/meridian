@@ -465,8 +465,21 @@ func (s *FinancialAccountingService) ListLedgerPostings(
 		params.ValueDateTo = &valueDateTo
 	}
 
+	// Validate date range if both dates provided
+	if req.ValueDateFrom != nil && req.ValueDateTo != nil {
+		from := req.ValueDateFrom.AsTime()
+		to := req.ValueDateTo.AsTime()
+		if from.After(to) {
+			return nil, status.Error(codes.InvalidArgument, "value_date_from must be before or equal to value_date_to")
+		}
+	}
+
 	// Apply currency filter if provided
 	if req.Currency != "" {
+		// Validate currency code format (must be 3 uppercase letters per ISO 4217)
+		if !isValidCurrencyCode(req.Currency) {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid currency code: %s (must be 3 uppercase letters)", req.Currency)
+		}
 		params.Currency = req.Currency
 	}
 
@@ -600,6 +613,20 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 	return &financialaccountingv1.UpdateLedgerPostingResponse{
 		LedgerPosting: toProtoLedgerPosting(posting),
 	}, nil
+}
+
+// isValidCurrencyCode validates that a currency code matches ISO 4217 format.
+// Valid codes are exactly 3 uppercase letters (e.g., USD, GBP, EUR).
+func isValidCurrencyCode(code string) bool {
+	if len(code) != 3 {
+		return false
+	}
+	for _, r := range code {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 // Method implementations to be added in subsequent subtasks:

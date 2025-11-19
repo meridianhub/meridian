@@ -174,9 +174,10 @@ func toProtoFinancialBookingLog(log *domain.FinancialBookingLog) *financialaccou
 		return nil
 	}
 
-	// Convert postings to protobuf
-	protoPostings := make([]*financialaccountingv1.LedgerPosting, len(log.Postings))
-	for i, posting := range log.Postings {
+	// Convert postings to protobuf (using defensive copy method)
+	postings := log.Postings()
+	protoPostings := make([]*financialaccountingv1.LedgerPosting, len(postings))
+	for i, posting := range postings {
 		protoPostings[i] = toProtoLedgerPosting(posting)
 	}
 

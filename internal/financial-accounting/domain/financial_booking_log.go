@@ -45,9 +45,21 @@ type FinancialBookingLog struct {
 	// UpdatedAt is when this booking log was last modified
 	UpdatedAt time.Time
 
-	// Postings contains all ledger postings for this log
+	// postings contains all ledger postings for this log (unexported for immutability)
 	// NOTE: Loaded separately via repository to avoid N+1 queries
-	Postings []*LedgerPosting
+	// Access via Postings() method which returns a defensive copy
+	postings []*LedgerPosting
+}
+
+// Postings returns a defensive copy of the postings slice.
+// This prevents external mutation per CONTRIBUTING.md immutability guidelines.
+func (l FinancialBookingLog) Postings() []*LedgerPosting {
+	if l.postings == nil {
+		return []*LedgerPosting{}
+	}
+	result := make([]*LedgerPosting, len(l.postings))
+	copy(result, l.postings)
+	return result
 }
 
 // NewFinancialBookingLog creates a new booking log in PENDING status.
@@ -74,37 +86,78 @@ func NewFinancialBookingLog(
 		Status:                  TransactionStatusPending,
 		CreatedAt:               now,
 		UpdatedAt:               now,
-		Postings:                make([]*LedgerPosting, 0),
+		postings:                make([]*LedgerPosting, 0),
 	}
 }
 
-// UpdateStatus transitions the booking log to a new status.
+// WithStatus returns a new booking log with updated status.
 //
 // Status transitions are validated at the service layer:
 //   - PENDING → POSTED (when debits == credits)
 //   - PENDING → FAILED (validation errors)
 //   - PENDING → CANCELLED (business cancellation)
 //   - Terminal states (POSTED, FAILED, CANCELLED) cannot transition
-func (l *FinancialBookingLog) UpdateStatus(newStatus TransactionStatus) {
-	l.Status = newStatus
-	l.UpdatedAt = time.Now().UTC()
+//
+// Returns a new instance following immutability guidelines per CONTRIBUTING.md.
+func (l FinancialBookingLog) WithStatus(newStatus TransactionStatus) FinancialBookingLog {
+	return FinancialBookingLog{
+		ID:                      l.ID,
+		FinancialAccountType:    l.FinancialAccountType,
+		ProductServiceReference: l.ProductServiceReference,
+		BusinessUnitReference:   l.BusinessUnitReference,
+		ChartOfAccountsRules:    l.ChartOfAccountsRules,
+		BaseCurrency:            l.BaseCurrency,
+		Status:                  newStatus,
+		CreatedAt:               l.CreatedAt,
+		UpdatedAt:               time.Now().UTC(),
+		postings:                l.postings,
+	}
 }
 
-// UpdateChartOfAccountsRules updates the accounting rules.
+// WithChartOfAccountsRules returns a new booking log with updated accounting rules.
 //
 // Can only be updated while in PENDING status.
 // Service layer enforces this constraint.
-func (l *FinancialBookingLog) UpdateChartOfAccountsRules(rules string) {
-	l.ChartOfAccountsRules = rules
-	l.UpdatedAt = time.Now().UTC()
+//
+// Returns a new instance following immutability guidelines per CONTRIBUTING.md.
+func (l FinancialBookingLog) WithChartOfAccountsRules(rules string) FinancialBookingLog {
+	return FinancialBookingLog{
+		ID:                      l.ID,
+		FinancialAccountType:    l.FinancialAccountType,
+		ProductServiceReference: l.ProductServiceReference,
+		BusinessUnitReference:   l.BusinessUnitReference,
+		ChartOfAccountsRules:    rules,
+		BaseCurrency:            l.BaseCurrency,
+		Status:                  l.Status,
+		CreatedAt:               l.CreatedAt,
+		UpdatedAt:               time.Now().UTC(),
+		postings:                l.postings,
+	}
 }
 
-// AddPosting adds a ledger posting to this booking log.
+// WithPosting returns a new booking log with an additional posting.
 //
 // This is typically called when loading from the repository.
 // New postings are created via CaptureLedgerPosting service method.
-func (l *FinancialBookingLog) AddPosting(posting *LedgerPosting) {
-	l.Postings = append(l.Postings, posting)
+//
+// Returns a new instance following immutability guidelines per CONTRIBUTING.md.
+func (l FinancialBookingLog) WithPosting(posting *LedgerPosting) FinancialBookingLog {
+	newPostings := make([]*LedgerPosting, len(l.postings)+1)
+	copy(newPostings, l.postings)
+	newPostings[len(l.postings)] = posting
+
+	return FinancialBookingLog{
+		ID:                      l.ID,
+		FinancialAccountType:    l.FinancialAccountType,
+		ProductServiceReference: l.ProductServiceReference,
+		BusinessUnitReference:   l.BusinessUnitReference,
+		ChartOfAccountsRules:    l.ChartOfAccountsRules,
+		BaseCurrency:            l.BaseCurrency,
+		Status:                  l.Status,
+		CreatedAt:               l.CreatedAt,
+		UpdatedAt:               l.UpdatedAt,
+		postings:                newPostings,
+	}
 }
 
 // IsTerminal returns true if the status is terminal (cannot transition).
