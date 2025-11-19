@@ -87,9 +87,7 @@ message FinancialBookingLogUpdatedEvent {
   string chart_of_accounts_rules = 4;
 
   // reason explains why the update occurred
-  string reason = 5 [(buf.validate.field).string = {
-    max_len: 500
-  }];
+  string reason = 5 [(buf.validate.field).string = {max_len: 500}];
 
   // updated_by identifies who made the update
   string updated_by = 6 [(buf.validate.field).string = {
@@ -156,9 +154,7 @@ message FinancialBookingLogPostedEvent {
   ];
 
   // reason provides context for posting
-  string reason = 5 [(buf.validate.field).string = {
-    max_len: 500
-  }];
+  string reason = 5 [(buf.validate.field).string = {max_len: 500}];
 
   // posted_by identifies who posted the booking log
   string posted_by = 6 [(buf.validate.field).string = {
@@ -383,9 +379,7 @@ message LedgerPostingPostedEvent {
   }];
 
   // posting_result describes the outcome of the posting operation
-  string posting_result = 3 [(buf.validate.field).string = {
-    max_len: 1000
-  }];
+  string posting_result = 3 [(buf.validate.field).string = {max_len: 1000}];
 
   // posted_by identifies who posted the transaction
   string posted_by = 4 [(buf.validate.field).string = {

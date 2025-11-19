@@ -48,20 +48,20 @@ message CurrentAccountFacility {
   // IBAN format: 2 letter country code + 2 check digits + up to 30 alphanumeric characters.
   string account_identification = 2 [(buf.validate.field).string = {
     min_len: 1
-    max_len: 34  // IBAN max length
-    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"  // IBAN format validation
+    max_len: 34 // IBAN max length
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$" // IBAN format validation
   }];
 
   // account_status is the current lifecycle state of the account
   AccountStatus account_status = 3 [(buf.validate.field).enum = {
     defined_only: true
-    not_in: [0]  // Prevent UNSPECIFIED in requests
+    not_in: [0] /* Prevent UNSPECIFIED in requests */
   }];
 
   // base_currency is the primary currency for this account
   meridian.common.v1.Currency base_currency = 4 [(buf.validate.field).enum = {
     defined_only: true
-    not_in: [0]  // Prevent UNSPECIFIED currency
+    not_in: [0] /* Prevent UNSPECIFIED currency */
   }];
 
   // created_at is when the account facility was created
@@ -137,7 +137,7 @@ message AccountTransaction {
   // direction is whether this is a debit or credit
   meridian.common.v1.PostingDirection direction = 3 [(buf.validate.field).enum = {
     defined_only: true
-    not_in: [0]  // Prevent UNSPECIFIED
+    not_in: [0] /* Prevent UNSPECIFIED */
   }];
 
   // amount is the transaction amount
@@ -146,13 +146,11 @@ message AccountTransaction {
   // status is the current transaction status
   meridian.common.v1.TransactionStatus status = 5 [(buf.validate.field).enum = {
     defined_only: true
-    not_in: [0]  // Prevent UNSPECIFIED
+    not_in: [0] /* Prevent UNSPECIFIED */
   }];
 
   // description is a human-readable transaction description
-  string description = 6 [(buf.validate.field).string = {
-    max_len: 500
-  }];
+  string description = 6 [(buf.validate.field).string = {max_len: 500}];
 
   // reference is an external reference or payment reference (alphanumeric with hyphens, underscores, slashes).
   string reference = 7 [(buf.validate.field).string = {
@@ -226,14 +224,10 @@ message ExecuteDepositRequest {
   meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
 
   // description is optional deposit description
-  string description = 3 [(buf.validate.field).string = {
-    max_len: 500
-  }];
+  string description = 3 [(buf.validate.field).string = {max_len: 500}];
 
   // reference is optional reference
-  string reference = 4 [(buf.validate.field).string = {
-    max_len: 100
-  }];
+  string reference = 4 [(buf.validate.field).string = {max_len: 100}];
 }
 
 // Response for deposit execution

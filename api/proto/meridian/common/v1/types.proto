@@ -83,14 +83,10 @@ message MoneyAmount {
 // DateRange represents a period between two dates.
 message DateRange {
   // start_date is the beginning of the period (inclusive) in YYYY-MM-DD format.
-  string start_date = 1 [(buf.validate.field).string = {
-    pattern: "^\\d{4}-\\d{2}-\\d{2}$"
-  }];
+  string start_date = 1 [(buf.validate.field).string = {pattern: "^\\d{4}-\\d{2}-\\d{2}$"}];
 
   // end_date is the end of the period (inclusive) in YYYY-MM-DD format.
-  string end_date = 2 [(buf.validate.field).string = {
-    pattern: "^\\d{4}-\\d{2}-\\d{2}$"
-  }];
+  string end_date = 2 [(buf.validate.field).string = {pattern: "^\\d{4}-\\d{2}-\\d{2}$"}];
 }
 
 // IdempotencyKey ensures exactly-once processing of requests.
@@ -99,13 +95,13 @@ message IdempotencyKey {
   string key = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
-    pattern: "^[a-zA-Z0-9_-]+$"  // Alphanumeric, hyphens, underscores only for safe key storage
+    pattern: "^[a-zA-Z0-9_-]+$" // Alphanumeric, hyphens, underscores only for safe key storage
   }];
 
   // ttl_seconds is how long the key should be valid (optional).
   int32 ttl_seconds = 2 [(buf.validate.field).int32 = {
     gte: 0
-    lte: 86400  // Max 24 hours
+    lte: 86400 // Max 24 hours
   }];
 }
 

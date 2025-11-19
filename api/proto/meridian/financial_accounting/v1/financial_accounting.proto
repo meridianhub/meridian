@@ -37,9 +37,7 @@ message FinancialBookingLog {
   }];
 
   // chart_of_accounts_rules defines the accounting rules to apply.
-  string chart_of_accounts_rules = 5 [(buf.validate.field).string = {
-    min_len: 1
-  }];
+  string chart_of_accounts_rules = 5 [(buf.validate.field).string = {min_len: 1}];
 
   // base_currency is the currency for this booking log.
   meridian.common.v1.Currency base_currency = 6 [(buf.validate.field).enum = {
@@ -107,9 +105,7 @@ message LedgerPosting {
   google.protobuf.Timestamp value_date = 6 [(buf.validate.field).required = true];
 
   // posting_result describes the outcome of the posting operation.
-  string posting_result = 7 [(buf.validate.field).string = {
-    max_len: 1000
-  }];
+  string posting_result = 7 [(buf.validate.field).string = {max_len: 1000}];
 
   // created_at is when this posting was created.
   google.protobuf.Timestamp created_at = 8 [(buf.validate.field).required = true];
@@ -142,9 +138,7 @@ message InitiateFinancialBookingLogRequest {
   }];
 
   // chart_of_accounts_rules defines accounting rules.
-  string chart_of_accounts_rules = 4 [(buf.validate.field).string = {
-    min_len: 1
-  }];
+  string chart_of_accounts_rules = 4 [(buf.validate.field).string = {min_len: 1}];
 
   // base_currency is the currency for transactions.
   meridian.common.v1.Currency base_currency = 5 [(buf.validate.field).enum = {
@@ -281,9 +275,7 @@ message UpdateLedgerPostingRequest {
 
   // posting_result describes the outcome of the posting operation.
   // If empty, the existing result is preserved (optional update).
-  string posting_result = 3 [(buf.validate.field).string = {
-    max_len: 1000
-  }];
+  string posting_result = 3 [(buf.validate.field).string = {max_len: 1000}];
 }
 
 // UpdateLedgerPostingResponse returns the updated posting.
@@ -317,9 +309,7 @@ message ListFinancialBookingLogsRequest {
   meridian.common.v1.Pagination pagination = 1;
 
   // status filters by transaction status.
-  meridian.common.v1.TransactionStatus status = 2 [(buf.validate.field).enum = {
-    defined_only: true
-  }];
+  meridian.common.v1.TransactionStatus status = 2 [(buf.validate.field).enum = {defined_only: true}];
 
   // business_unit_reference filters by business unit.
   string business_unit_reference = 3;
