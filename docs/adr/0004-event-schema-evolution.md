@@ -24,6 +24,8 @@ Accepted
 
 Supersedes initial decision to use Confluent Schema Registry.
 
+Amended: 2025-11-19 - Added event topic naming convention, outbox pattern, and idempotency pattern
+
 ## Context
 
 Meridian uses Apache Kafka for internal coordination between BIAN service domains. Events represent domain state
@@ -462,3 +464,573 @@ Maintain a living document of all event types:
 ```
 
 Update this catalog when adding new event types.
+
+## Amendment: Event Topic Naming Convention (2025-11-19)
+
+### Context
+
+The original ADR mentioned "one topic per event type" with examples like `account-updated` and `account-suspended`, but didn't specify a formal naming convention. As we scaled to 26+ events across 3 services, we needed an explicit convention to prevent naming collisions and support versioning.
+
+**Problems without formal convention:**
+
+- Namespace collision risk (e.g., `transaction-failed` could come from CurrentAccount or PositionKeeping)
+- Unclear version management (where does version info go?)
+- Inconsistent naming across services
+
+### Decision
+
+Adopt **`<service>.<event-name>.<version>`** topic naming convention.
+
+**Examples:**
+
+```text
+current-account.account-created.v1
+current-account.transaction-initiated.v1
+current-account.account-transaction-failed.v1
+
+position-keeping.transaction-recorded.v1
+position-keeping.position-updated.v1
+position-keeping.transaction-failed.v1
+
+financial-accounting.posting-captured.v1
+financial-accounting.booking-log-created.v1
+```
+
+**Rationale:**
+
+- **Namespace isolation**: Service prefix prevents collisions
+- **Explicit versioning**: Version suffix enables backward-compatible evolution
+- **Discovery**: Easy to filter by service (`current-account.*`) or pattern
+- **BIAN alignment**: Service name matches BIAN domain
+
+### Alternatives Considered
+
+#### 1. Flat Naming (Original ADR Examples)
+
+```text
+account-updated
+account-suspended
+transaction-failed
+```
+
+**Pros:**
+
+- Simpler, shorter names
+- Less typing
+
+**Cons:**
+
+- **Namespace collision**: `transaction-failed` ambiguous (which service?)
+- **No versioning**: Where does version go? `transaction-failed-v2`?
+- **Filtering**: Can't filter by service in Kafka tools
+
+**Why rejected:** Namespace collisions and no clear versioning path.
+
+#### 2. Hierarchical Topic Structure
+
+```text
+meridian/current-account/account-created/v1
+meridian/position-keeping/transaction-recorded/v1
+```
+
+**Pros:**
+
+- Even more explicit hierarchy
+- Organization-level namespace
+
+**Cons:**
+
+- **Kafka doesn't support `/` in topic names** (must use `.` or `-`)
+- Overly verbose for internal-only events
+- Harder to type and reference
+
+**Why rejected:** Kafka limitation and unnecessary complexity for internal events.
+
+#### 3. Version in Event Message (Not Topic)
+
+Keep topic names flat, embed version in event payload:
+
+```protobuf
+message AccountCreated {
+  string version = 1;  // "v1"
+  ...
+}
+```
+
+**Pros:**
+
+- Simpler topic names
+- Version travels with message
+
+**Cons:**
+
+- **Consumer complexity**: Must inspect message to know version
+- **Topic retention**: Can't have different retention per version
+- **Kafka tools**: Can't filter by version in Kafka UI/CLI
+
+**Why rejected:** Versioning needs to be visible at topic level for operational clarity.
+
+### Implementation
+
+**Topic creation pattern:**
+
+```bash
+kafka-topics --create \
+  --topic current-account.account-created.v1 \
+  --partitions 3 \
+  --replication-factor 3 \
+  --config retention.ms=604800000  # 7 days
+```
+
+**Producer code:**
+
+```go
+func (p *EventPublisher) PublishAccountCreated(ctx context.Context, event *pb.AccountCreatedEvent) error {
+    return p.producer.Publish(ctx, "current-account.account-created.v1", event)
+}
+```
+
+**Consumer subscription:**
+
+```go
+consumer.Subscribe([]string{
+    "current-account.account-created.v1",
+    "current-account.account-updated.v1",
+})
+```
+
+**Versioning strategy:**
+
+- **v1 → v2**: Create new topic `current-account.account-created.v2`
+- **Consumers**: Subscribe to both v1 and v2 during migration
+- **Producers**: Publish to v2 only after all consumers support it
+- **Deprecation**: Delete v1 topic after migration complete (30 days)
+
+### Consequences
+
+**Positive:**
+
+- ✅ No namespace collisions across services
+- ✅ Explicit versioning enables blue-green event migrations
+- ✅ Easy discovery and filtering in Kafka tools
+- ✅ Self-documenting topic names
+
+**Negative:**
+
+- ❌ Longer topic names (vs flat naming)
+- ❌ Version migration requires new topic creation
+
+**Mitigations:**
+
+- **Length**: Acceptable trade-off for clarity (max 50 chars)
+- **Migration**: Automate topic creation in deployment scripts
+
+### References
+
+- [Event-Driven Architecture](../architecture/event-driven-architecture.md#topic-naming)
+- [CurrentAccount Events Proto](../../api/proto/meridian/events/v1/current_account_events.proto)
+
+---
+
+## Amendment: Outbox Pattern for Reliable Event Publishing (2025-11-19)
+
+### Context
+
+The original ADR focused on event schema evolution but didn't address **reliable event publishing**. We need to guarantee that domain events are published exactly once when state changes are persisted to the database.
+
+**Problem:** Dual-write problem
+
+```go
+// ❌ Unsafe: Database and Kafka are separate transactions
+db.Insert(account)         // Transaction 1
+kafka.Publish(event)       // Transaction 2 - what if this fails?
+```
+
+**Failure scenarios:**
+
+- Database succeeds, Kafka fails → State changed but no event published
+- Kafka succeeds, database fails → Event published but state unchanged
+- Process crashes between operations → Inconsistent state
+
+### Decision
+
+Use **transactional outbox pattern** for at-least-once event delivery guarantees.
+
+**Pattern:**
+
+1. Write domain event to `outbox` table in **same transaction** as business data
+2. Background process polls outbox table and publishes to Kafka
+3. Mark event as published after successful Kafka acknowledgment
+4. Consumers use idempotency keys to handle duplicates
+
+**Implementation:**
+
+```sql
+-- Outbox table (per service database)
+CREATE TABLE outbox (
+    id UUID PRIMARY KEY,
+    aggregate_type VARCHAR(100) NOT NULL,
+    aggregate_id VARCHAR(100) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    event_payload JSONB NOT NULL,
+    topic_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    published_at TIMESTAMP,
+    retry_count INT NOT NULL DEFAULT 0,
+    INDEX idx_unpublished (published_at, created_at) WHERE published_at IS NULL
+);
+```
+
+**Producer code:**
+
+```go
+func (s *AccountService) CreateAccount(ctx context.Context, req *pb.CreateAccountRequest) error {
+    return s.db.RunInTransaction(ctx, func(tx *sql.Tx) error {
+        // Step 1: Insert account
+        account := &domain.Account{...}
+        if err := s.repo.Insert(tx, account); err != nil {
+            return err
+        }
+
+        // Step 2: Insert event to outbox (same transaction)
+        event := &events.AccountCreatedEvent{
+            EventId:   uuid.New().String(),
+            AccountId: account.ID,
+            ...
+        }
+        if err := s.outbox.Insert(tx, event); err != nil {
+            return err
+        }
+
+        return nil  // Commit transaction atomically
+    })
+}
+```
+
+**Outbox publisher (background process):**
+
+```go
+func (p *OutboxPublisher) Run(ctx context.Context) {
+    ticker := time.NewTicker(100 * time.Millisecond)
+    for {
+        select {
+        case <-ticker.C:
+            events := p.outbox.FetchUnpublished(limit=100)
+            for _, event := range events {
+                if err := p.kafka.Publish(event.Topic, event.Payload); err != nil {
+                    p.outbox.IncrementRetry(event.ID)
+                    continue
+                }
+                p.outbox.MarkPublished(event.ID, time.Now())
+            }
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+### Alternatives Considered
+
+#### 1. Direct Kafka Publish (Dual Write)
+
+**Approach:** Publish to Kafka directly after database commit.
+
+**Pros:**
+
+- Simpler code
+- Lower latency
+
+**Cons:**
+
+- **Not transactional**: Database and Kafka are separate operations
+- **Failure modes**: Publish can fail after DB commit
+- **Inconsistency**: State and events can diverge
+
+**Why rejected:** Unacceptable for financial transactions where state-event consistency is critical.
+
+#### 2. Kafka Transaction API
+
+**Approach:** Use Kafka's transactional producer API.
+
+**Pros:**
+
+- Exactly-once semantics within Kafka
+- Built-in transaction support
+
+**Cons:**
+
+- **Database not included**: Kafka transactions only cover Kafka operations
+- **Complex**: Requires transaction coordinator, more moving parts
+- **Performance**: Higher latency due to transaction protocol
+
+**Why rejected:** Kafka transactions don't solve the dual-write problem (database + Kafka).
+
+#### 3. Change Data Capture (CDC)
+
+**Approach:** Use Debezium to stream database changes to Kafka.
+
+**Pros:**
+
+- Zero application code changes
+- Guaranteed delivery (database is source of truth)
+- Works for legacy systems
+
+**Cons:**
+
+- **Operational complexity**: Debezium, Kafka Connect, schema registry
+- **Event structure**: CDC events are table-centric, not domain-event-centric
+- **Transformation**: Need to transform CDC events to domain events
+- **Coupling**: Events coupled to database schema
+
+**Why rejected:** Operational overhead and table-centric events don't align with BIAN domain events.
+
+### Implementation Guidelines
+
+**Polling strategy:**
+
+- Frequency: 100ms (10 events/sec per service minimum)
+- Batch size: 100 events per poll
+- Retry: Exponential backoff (1s, 2s, 4s, 8s, max 60s)
+- Dead letter: Move to DLQ after 10 retries
+
+**Outbox cleanup:**
+
+- Retention: 7 days (matches Kafka retention)
+- Cleanup: Daily cron job to delete old published events
+- Monitoring: Alert if outbox grows beyond threshold (1000 unpublished events)
+
+**Idempotency:**
+
+- Consumers must use `event_id` for deduplication (see Idempotency Amendment)
+- At-least-once delivery guarantees may cause duplicates
+- Outbox publisher may retry on transient Kafka failures
+
+### Consequences
+
+**Positive:**
+
+- ✅ Transactional consistency: Events always match database state
+- ✅ At-least-once delivery: Events guaranteed to be published
+- ✅ Resilience: Survives Kafka outages (events queued in outbox)
+- ✅ Debugging: Outbox table provides audit trail
+
+**Negative:**
+
+- ❌ Additional table: Outbox table adds storage overhead
+- ❌ Latency: 100ms delay before event published (vs direct publish)
+- ❌ Duplicates: Consumers must handle at-least-once semantics
+
+**Mitigations:**
+
+- **Storage**: Outbox cleanup after 7 days (auto-vacuuming)
+- **Latency**: 100ms acceptable for event-driven coordination
+- **Duplicates**: Idempotency pattern (see next amendment)
+
+### References
+
+- [Event-Driven Architecture: Outbox Pattern](../architecture/event-driven-architecture.md#outbox-pattern)
+- [Saga Orchestration](0002-microservices-per-bian-domain.md#amendment-saga-orchestration-pattern-2025-11-19)
+
+---
+
+## Amendment: Idempotency Pattern for Event Consumers (2025-11-19)
+
+### Context
+
+With the Outbox Pattern providing at-least-once delivery, consumers must handle duplicate events gracefully. Kafka's at-least-once semantics mean the same event may be delivered multiple times during retries, rebalancing, or failures.
+
+**Problem: Duplicate processing**
+
+```text
+Publisher fails after Kafka ack but before marking outbox → Retries → Duplicate event
+Consumer crashes after processing but before committing offset → Reprocesses event
+```
+
+**Without idempotency:**
+
+```go
+func HandleAccountCreated(event *events.AccountCreatedEvent) {
+    balance.Credit(event.Amount)  // ❌ Duplicate = double credit!
+}
+```
+
+### Decision
+
+Implement **event_id-based idempotency** for all event consumers using Redis or database deduplication.
+
+**Pattern:**
+
+1. Check if `event_id` already processed before handling event
+2. Process event only if `event_id` not seen
+3. Store `event_id` with TTL matching event retention (7 days)
+
+**Implementation (Redis):**
+
+```go
+func (c *EventConsumer) HandleAccountCreated(ctx context.Context, event *events.AccountCreatedEvent) error {
+    // Step 1: Check if already processed
+    key := fmt.Sprintf("event:processed:%s", event.EventId)
+    exists, err := c.redis.Exists(ctx, key).Result()
+    if err != nil {
+        return fmt.Errorf("redis check failed: %w", err)
+    }
+    if exists {
+        c.logger.Debug("Event already processed", "event_id", event.EventId)
+        return nil  // Idempotent: skip duplicate
+    }
+
+    // Step 2: Process event
+    if err := c.accountService.CreateAccount(ctx, event); err != nil {
+        return fmt.Errorf("failed to create account: %w", err)
+    }
+
+    // Step 3: Mark as processed (TTL = 7 days)
+    if err := c.redis.Set(ctx, key, "1", 7*24*time.Hour).Err(); err != nil {
+        return fmt.Errorf("failed to mark processed: %w", err)
+    }
+
+    return nil
+}
+```
+
+**Implementation (Database):**
+
+```sql
+CREATE TABLE processed_events (
+    event_id UUID PRIMARY KEY,
+    event_type VARCHAR(100) NOT NULL,
+    processed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    INDEX idx_processed_at (processed_at)
+);
+
+-- Cleanup old events (daily cron)
+DELETE FROM processed_events WHERE processed_at < NOW() - INTERVAL '7 days';
+```
+
+### Alternatives Considered
+
+#### 1. Exactly-Once Kafka Semantics
+
+**Approach:** Use Kafka's exactly-once transactional producers and consumers.
+
+**Pros:**
+
+- Built-in deduplication
+- No application-level idempotency needed
+
+**Cons:**
+
+- **Performance**: Higher latency (~100ms overhead)
+- **Complexity**: Requires transactional coordinator, more config
+- **Limited scope**: Only works within Kafka (doesn't cover database operations)
+- **Operational**: More failure modes to monitor
+
+**Why rejected:** Performance overhead and limited scope don't justify complexity for our use case.
+
+#### 2. Kafka Consumer Offset Management
+
+**Approach:** Only commit offset after successful processing.
+
+**Pros:**
+
+- No external storage needed
+- Kafka native
+
+**Cons:**
+
+- **Not idempotent**: Rebalancing or crashes still cause reprocessing
+- **Unsafe**: Process → crash → offset not committed → reprocess
+- **No guarantee**: At-least-once semantics still apply
+
+**Why rejected:** Doesn't solve the fundamental duplicate problem.
+
+#### 3. Database Unique Constraint on Event ID
+
+**Approach:** Use database unique constraint to prevent duplicate processing.
+
+**Pros:**
+
+- Transactional with business data
+- No external dependencies
+
+**Cons:**
+
+- **Coupling**: Event deduplication coupled to business tables
+- **Schema**: Requires event_id column in all tables
+- **Cleanup**: Hard to clean up old event IDs
+
+**Why rejected:** Couples deduplication to business schema; Redis provides better separation of concerns.
+
+### Implementation Guidelines
+
+**Storage choice:**
+
+- **Redis**: Preferred for high throughput (O(1) lookups, TTL built-in)
+- **Database**: Alternative if Redis unavailable (add index on event_id)
+
+**TTL strategy:**
+
+- Match Kafka retention: 7 days
+- Rationale: Event won't be replayed after 7 days (purged from Kafka)
+
+**Error handling:**
+
+- Redis failure → Log warning, process anyway (risk: potential duplicate)
+- Database failure → Return error, retry later (safer but impacts availability)
+
+**Monitoring:**
+
+- Track duplicate events: `event.duplicate.count`
+- Alert if duplicate rate > 5% (indicates producer retry issues)
+
+**Testing:**
+
+```go
+func TestIdempotency(t *testing.T) {
+    event := &events.AccountCreatedEvent{EventId: "test-123", ...}
+
+    // First processing
+    err := consumer.HandleAccountCreated(ctx, event)
+    assert.NoError(t, err)
+    assert.Equal(t, 1, accountRepo.Count())
+
+    // Second processing (duplicate)
+    err = consumer.HandleAccountCreated(ctx, event)
+    assert.NoError(t, err)
+    assert.Equal(t, 1, accountRepo.Count())  // Still 1, not 2!
+}
+```
+
+### Consequences
+
+**Positive:**
+
+- ✅ Safe at-least-once semantics: Duplicates handled gracefully
+- ✅ Simple pattern: Check → Process → Mark
+- ✅ Observability: Track duplicate rates in metrics
+- ✅ Performance: Redis provides fast lookups (sub-millisecond)
+
+**Negative:**
+
+- ❌ External dependency: Requires Redis or database
+- ❌ Storage: Stores event IDs for 7 days
+- ❌ Failure mode: Redis failure risks duplicate processing
+
+**Mitigations:**
+
+- **Redis HA**: Deploy Redis with replication (3 replicas)
+- **Storage**: Auto-cleanup with TTL (low overhead)
+- **Failure**: Log duplicates as warnings (business logic should be retry-safe anyway)
+
+### Related Patterns
+
+- **Outbox Pattern**: Guarantees at-least-once delivery (this pattern handles the duplicates)
+- **Event Sourcing**: Can use event_id as aggregate version for optimistic locking
+- **Circuit Breaker**: Protect against Redis cascading failures
+
+### References
+
+- [Event-Driven Architecture: Idempotent Consumers](../architecture/event-driven-architecture.md#idempotent-consumers)
+- [Outbox Pattern Amendment](#amendment-outbox-pattern-for-reliable-event-publishing-2025-11-19)
+- [CurrentAccount API Contract: Idempotency](../architecture/api-contracts/current-account-contract.md#idempotency)
