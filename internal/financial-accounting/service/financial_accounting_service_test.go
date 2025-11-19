@@ -54,6 +54,84 @@ func TestFinancialAccountingService_ImplementsInterface(_ *testing.T) {
 	var _ financialaccountingv1.FinancialAccountingServiceServer = service
 }
 
+// TestNewFinancialAccountingService_DefensiveTests verifies nil dependency validation per ADR-0008.
+// Rationale: Financial services must validate all dependencies to prevent runtime panics
+// that could cause service outages or data corruption.
+func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
+	tests := []struct {
+		name           string
+		repository     *persistence.LedgerRepository
+		eventPub       EventPublisher
+		idempotencySvc idempotency.Service
+		shouldPanic    bool
+		rationale      string
+	}{
+		// Happy path - covered by TestNewFinancialAccountingService
+		{
+			name:           "valid dependencies",
+			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
+			eventPub:       &mockEventPublisher{},
+			idempotencySvc: &mockIdempotencyService{},
+			shouldPanic:    false,
+			rationale:      "Standard valid initialization with all dependencies",
+		},
+
+		// Unhappy paths - nil dependencies (ADR-0008 mandatory tests)
+		{
+			name:           "nil repository",
+			repository:     nil,
+			eventPub:       &mockEventPublisher{},
+			idempotencySvc: &mockIdempotencyService{},
+			shouldPanic:    true,
+			rationale:      "Repository is essential - nil would cause panic on first use",
+		},
+		{
+			name:           "nil event publisher",
+			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
+			eventPub:       nil,
+			idempotencySvc: &mockIdempotencyService{},
+			shouldPanic:    true,
+			rationale:      "Event publisher is essential - nil would cause panic when publishing events",
+		},
+		{
+			name:           "nil idempotency service",
+			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
+			eventPub:       &mockEventPublisher{},
+			idempotencySvc: nil,
+			shouldPanic:    true,
+			rationale:      "Idempotency service is essential - nil would cause panic on idempotent operations",
+		},
+
+		// Edge case - multiple nil dependencies
+		{
+			name:           "all dependencies nil",
+			repository:     nil,
+			eventPub:       nil,
+			idempotencySvc: nil,
+			shouldPanic:    true,
+			rationale:      "Should panic on first nil check (repository)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.shouldPanic {
+				assert.Panics(t, func() {
+					NewFinancialAccountingService(tt.repository, tt.eventPub, tt.idempotencySvc)
+				}, tt.rationale)
+			} else {
+				assert.NotPanics(t, func() {
+					service := NewFinancialAccountingService(tt.repository, tt.eventPub, tt.idempotencySvc)
+					assert.NotNil(t, service, tt.rationale)
+					assert.NotNil(t, service.repository, "Repository should be injected")
+					assert.NotNil(t, service.eventPublisher, "Event publisher should be injected")
+					assert.NotNil(t, service.idempotency, "Idempotency service should be injected")
+				}, tt.rationale)
+			}
+		})
+	}
+}
+
 // mockIdempotencyService is a test double for idempotency.Service
 type mockIdempotencyService struct{}
 

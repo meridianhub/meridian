@@ -73,13 +73,15 @@ type FinancialAccountingService struct {
 // NewFinancialAccountingService creates a new FinancialAccountingService with dependency injection.
 //
 // Dependencies:
-//   - repository: Persistence layer for ledger postings and booking logs
-//   - eventPublisher: Publishes domain events to Kafka
-//   - idempotencySvc: Ensures exactly-once processing of idempotent operations
+//   - repository: Persistence layer for ledger postings and booking logs (must not be nil)
+//   - eventPublisher: Publishes domain events to Kafka (must not be nil)
+//   - idempotencySvc: Ensures exactly-once processing of idempotent operations (must not be nil)
 //
 // The returned service embeds UnimplementedFinancialAccountingServiceServer, which provides
 // default "Unimplemented" responses for all gRPC methods. Methods will be implemented incrementally
 // in subsequent subtasks (9.2, 9.3, 9.4, 9.5).
+//
+// Panics if any dependency is nil (defensive programming per ADR-0008).
 //
 // Example usage:
 //
@@ -93,6 +95,16 @@ func NewFinancialAccountingService(
 	eventPublisher EventPublisher,
 	idempotencySvc idempotency.Service,
 ) *FinancialAccountingService {
+	if repository == nil {
+		panic("financial accounting service: repository cannot be nil")
+	}
+	if eventPublisher == nil {
+		panic("financial accounting service: event publisher cannot be nil")
+	}
+	if idempotencySvc == nil {
+		panic("financial accounting service: idempotency service cannot be nil")
+	}
+
 	return &FinancialAccountingService{
 		repository:     repository,
 		eventPublisher: eventPublisher,
