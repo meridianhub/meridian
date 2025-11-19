@@ -105,7 +105,7 @@ coverage: test
 	@open $(COVERAGE_DIR)/coverage.html 2>/dev/null || xdg-open $(COVERAGE_DIR)/coverage.html 2>/dev/null || echo "Please open $(COVERAGE_DIR)/coverage.html manually"
 
 ## lint: Run golangci-lint and validate Tiltfile
-lint: validate-tilt
+lint: validate-tilt validate-semconv
 	@echo "Running golangci-lint..."
 	@which $(GOLANGCI_LINT) > /dev/null || (echo "golangci-lint not installed. Run 'make install'"; exit 1)
 	$(GOLANGCI_LINT) run --timeout 5m ./...
@@ -113,6 +113,10 @@ lint: validate-tilt
 ## validate-tilt: Validate Tiltfile configuration
 validate-tilt:
 	@./scripts/validate-tiltfile.sh Tiltfile
+
+## validate-semconv: Validate OpenTelemetry semantic convention versions are consistent
+validate-semconv:
+	@./scripts/validate-semconv-versions.sh
 
 ## fmt: Format Go code
 fmt:

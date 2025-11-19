@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -42,7 +43,7 @@ type DatabaseSpanOptions struct {
 //	}
 func StartDatabaseSpan(ctx context.Context, tracer *Tracer, opts DatabaseSpanOptions) (context.Context, trace.Span) {
 	attrs := []attribute.KeyValue{
-		semconv.DBSystemKey.String(opts.System),
+		semconv.DBSystemNameKey.String(opts.System),
 		semconv.DBOperationNameKey.String(opts.Operation),
 	}
 
@@ -112,15 +113,14 @@ type KafkaSpanOptions struct {
 //	}
 func StartKafkaProducerSpan(ctx context.Context, tracer *Tracer, opts KafkaSpanOptions) (context.Context, trace.Span) {
 	attrs := []attribute.KeyValue{
-		semconv.MessagingSystemKafka,
-		semconv.MessagingOperationTypePublish,
+		semconv.MessagingSystemKey.String("kafka"),
+		semconv.MessagingOperationTypeKey.String("publish"),
 		semconv.MessagingDestinationNameKey.String(opts.Topic),
 	}
 
 	if opts.Partition >= 0 {
-		// Note: messaging.kafka.destination.partition is not yet standardized in OTel semantic conventions v1.27.0
-		// Using custom attribute until officially added to semconv
-		attrs = append(attrs, attribute.Int("messaging.kafka.destination.partition", int(opts.Partition)))
+		// Use standard messaging.destination.partition.id attribute (available in v1.37.0+)
+		attrs = append(attrs, semconv.MessagingDestinationPartitionIDKey.String(fmt.Sprintf("%d", opts.Partition)))
 	}
 
 	if opts.Key != "" {
@@ -158,9 +158,8 @@ func StartKafkaConsumerSpan(ctx context.Context, tracer *Tracer, opts KafkaSpanO
 	}
 
 	if opts.Partition >= 0 {
-		// Note: messaging.kafka.destination.partition is not yet standardized in OTel semantic conventions v1.27.0
-		// Using custom attribute until officially added to semconv
-		attrs = append(attrs, attribute.Int("messaging.kafka.destination.partition", int(opts.Partition)))
+		// Use standard messaging.destination.partition.id attribute (available in v1.37.0+)
+		attrs = append(attrs, semconv.MessagingDestinationPartitionIDKey.String(fmt.Sprintf("%d", opts.Partition)))
 	}
 
 	if opts.Offset >= 0 {

@@ -809,10 +809,10 @@ local_resource(
 
 # Run database migrations on startup - uses Atlas to apply schema changes
 # Each service has its own business schema
-# Migrations are applied in order:
-# 1. current_account (customers, accounts)
-# 2. position_keeping (transactions) - depends on current_account for FKs
-# 3. financial_accounting (ledger postings, booking logs) - independent schema
+# Migrations execute in parallel where possible:
+# - Parallel: current_account + financial_accounting (both depend only on init-database)
+# - Sequential: position_keeping waits for current_account (requires Account FK reference)
+# This minimizes total migration time while respecting schema dependencies
 local_resource(
   'migrate-current-account',
   cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
