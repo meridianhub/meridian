@@ -16,6 +16,6 @@ echo "║  Forwarding to doctor script...                          ║"
 echo "║                                                          ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
-sleep 2
+sleep 1
 
 exec "$SCRIPT_DIR/doctor.sh" --fix "$@"

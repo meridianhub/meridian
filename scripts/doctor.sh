@@ -80,18 +80,27 @@ elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     OS="linux"
 fi
 
-# Determine package manager
+# Determine package manager (validated to prevent command injection)
 if [[ "$OS" == "macos" ]]; then
     PKG_MANAGER="brew"
 elif [[ "$OS" == "linux" ]]; then
     if command -v apt-get &> /dev/null; then
-        PKG_MANAGER="apt"
+        PKG_MANAGER="apt-get"
     elif command -v yum &> /dev/null; then
         PKG_MANAGER="yum"
     else
         PKG_MANAGER="unknown"
     fi
 fi
+
+# Validate PKG_MANAGER to prevent command injection
+case "$PKG_MANAGER" in
+    brew|apt-get|yum|unknown) ;;  # Valid values
+    *)
+        echo -e "${RED}Error: Invalid package manager detected${NC}"
+        exit 1
+        ;;
+esac
 
 # Helper function to get tool version
 get_version() {
@@ -272,14 +281,26 @@ check_go_environment() {
                 echo -e "  ${YELLOW}Fix:${NC} go clean -modcache"
             fi
         else
-            echo -e "  ${YELLOW}Fix:${NC} brew reinstall go"
+            local reinstall_cmd
+            reinstall_cmd=$(get_install_cmd "go")
+            if [ -n "$reinstall_cmd" ]; then
+                echo -e "  ${YELLOW}Fix:${NC} $reinstall_cmd"
+            else
+                echo -e "  ${YELLOW}Fix:${NC} Reinstall Go for your platform"
+            fi
         fi
         ALL_CHECKS_PASSED=false
         return 1
     elif [ ! -d "$GOROOT_OUTPUT" ]; then
         echo -e "${RED}✗${NC} GOROOT directory does not exist"
         echo -e "  Expected: $GOROOT_OUTPUT"
-        echo -e "  ${YELLOW}Fix:${NC} brew reinstall go"
+        local reinstall_cmd
+        reinstall_cmd=$(get_install_cmd "go")
+        if [ -n "$reinstall_cmd" ]; then
+            echo -e "  ${YELLOW}Fix:${NC} $reinstall_cmd"
+        else
+            echo -e "  ${YELLOW}Fix:${NC} Reinstall Go for your platform"
+        fi
         ALL_CHECKS_PASSED=false
         return 1
     else
@@ -335,15 +356,38 @@ check_k8s_cluster() {
     # Quick network check for remote clusters
     local network_available=true
     if [ "$is_remote_cluster" = true ]; then
+        # Check if timeout command is available (not default on macOS)
+        local has_timeout=false
+        if command -v timeout &> /dev/null; then
+            has_timeout=true
+        elif command -v gtimeout &> /dev/null; then
+            # GNU timeout on macOS (from coreutils)
+            alias timeout=gtimeout
+            has_timeout=true
+        fi
+
         # Use curl as primary check (more reliable cross-platform)
         if command -v curl &> /dev/null; then
-            if ! timeout 2 curl -sI --fail https://google.com &>/dev/null; then
-                network_available=false
+            if [ "$has_timeout" = true ]; then
+                if ! timeout 2 curl -sI --fail https://google.com &>/dev/null; then
+                    network_available=false
+                fi
+            else
+                if ! curl -sI --fail --max-time 2 https://google.com &>/dev/null; then
+                    network_available=false
+                fi
             fi
         # Fallback to nc and host if curl not available
         elif command -v nc &> /dev/null && command -v host &> /dev/null; then
-            if ! timeout 2 nc -z 8.8.8.8 53 2>/dev/null || ! timeout 2 host google.com >/dev/null 2>&1; then
-                network_available=false
+            if [ "$has_timeout" = true ]; then
+                if ! timeout 2 nc -z 8.8.8.8 53 2>/dev/null || ! timeout 2 host google.com >/dev/null 2>&1; then
+                    network_available=false
+                fi
+            else
+                # Without timeout, just try the checks (may hang briefly)
+                if ! nc -z -w 2 8.8.8.8 53 2>/dev/null || ! host -W 2 google.com >/dev/null 2>&1; then
+                    network_available=false
+                fi
             fi
         else
             # Cannot verify network, assume available to avoid false negatives
@@ -352,12 +396,23 @@ check_k8s_cluster() {
     fi
 
     # Try to connect to cluster
-    local timeout_duration=5
+    local cluster_timeout=5
     if [ "$network_available" = false ]; then
-        timeout_duration=2
+        cluster_timeout=2
     fi
 
-    if timeout "$timeout_duration" kubectl cluster-info &>/dev/null; then
+    # Check timeout availability for kubectl check
+    local kubectl_check_cmd
+    if command -v timeout &> /dev/null; then
+        kubectl_check_cmd="timeout $cluster_timeout kubectl cluster-info"
+    elif command -v gtimeout &> /dev/null; then
+        kubectl_check_cmd="gtimeout $cluster_timeout kubectl cluster-info"
+    else
+        # No timeout available, just run kubectl directly
+        kubectl_check_cmd="kubectl cluster-info"
+    fi
+
+    if $kubectl_check_cmd &>/dev/null; then
         echo -e "${GREEN}✓${NC} Kubernetes cluster accessible"
         if [ "$VERBOSE" = true ]; then
             local nodes
