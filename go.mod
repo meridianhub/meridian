@@ -25,7 +25,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.38.0
 	go.opentelemetry.io/otel/sdk v1.38.0
 	go.opentelemetry.io/otel/trace v1.38.0
-	google.golang.org/genproto v0.0.0-20251022142026-3a174f9686a8
+	google.golang.org/genproto v0.0.0-20251111163417-95abcf5c77ba
 	google.golang.org/grpc v1.75.1
 	google.golang.org/protobuf v1.36.10
 	gorm.io/datatypes v1.2.6
@@ -59,7 +59,7 @@ require (
 	cloud.google.com/go/iam v1.5.3 // indirect
 	cloud.google.com/go/longrunning v0.7.0 // indirect
 	cloud.google.com/go/monitoring v1.24.3 // indirect
-	cloud.google.com/go/spanner v1.86.0 // indirect
+	cloud.google.com/go/spanner v1.86.1 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
@@ -153,8 +153,8 @@ require (
 	golang.org/x/text v0.30.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/api v0.247.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20251014184007-4626949a642f // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251014184007-4626949a642f // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20251103181224-f26f9409b101 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251103181224-f26f9409b101 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/driver/mysql v1.5.7 // indirect
 	gorm.io/driver/sqlserver v1.6.0 // indirect

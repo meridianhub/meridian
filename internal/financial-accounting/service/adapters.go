@@ -15,14 +15,18 @@ import (
 )
 
 var (
-	// ErrEmptyUUID is returned when UUID string is empty
-	ErrEmptyUUID = errors.New("UUID string is empty")
+	// ErrEmptyUUID is returned when a UUID string is empty.
+	// This error is wrapped in InvalidArgument gRPC status codes.
+	ErrEmptyUUID = errors.New("UUID cannot be empty")
 
 	// ErrNilMoney is returned when proto money is nil
 	ErrNilMoney = errors.New("money cannot be nil")
 )
 
-// parseUUID parses a string as a UUID, returning an error if invalid.
+// parseUUID parses and validates a UUID string.
+//
+// Returns ErrEmptyUUID if the string is empty.
+// Returns an error if the UUID format is invalid.
 func parseUUID(s string) (uuid.UUID, error) {
 	if s == "" {
 		return uuid.Nil, ErrEmptyUUID
@@ -56,24 +60,26 @@ func fromProtoMoney(protoMoney *money.Money) (domain.Money, error) {
 	return domain.NewMoney(amount, currency)
 }
 
-// toProtoMoney converts domain Money to protobuf Money.
-func toProtoMoney(domainMoney domain.Money) *money.Money {
-	// Convert decimal to units and nanos
-	// For example: 123.456789 GBP -> units: 123, nanos: 456789000
-	amount := domainMoney.Amount()
+// toProtoMoney converts domain Money to protobuf google.type.Money.
+// Preserves full decimal precision up to 9 decimal places (nanosecond precision).
+func toProtoMoney(m domain.Money) *money.Money {
+	// Convert decimal amount to units and nanos
+	// For example: 123.456789 USD -> units: 123, nanos: 456789000
+	amount := m.Amount()
 	units := amount.IntPart()
 	fraction := amount.Sub(amount.Truncate(0))
-	nanos := fraction.Mul(decimal.NewFromInt(1000000000)).IntPart()
+	nanos := fraction.Mul(decimal.NewFromInt(1_000_000_000)).IntPart()
 
 	// Clamp nanos to int32 range to prevent overflow
-	if nanos > 999999999 {
-		nanos = 999999999
-	} else if nanos < -999999999 {
-		nanos = -999999999
+	// This handles edge cases with extreme precision
+	if nanos > 999_999_999 {
+		nanos = 999_999_999
+	} else if nanos < -999_999_999 {
+		nanos = -999_999_999
 	}
 
 	return &money.Money{
-		CurrencyCode: domainMoney.Currency().String(),
+		CurrencyCode: string(m.Currency()),
 		Units:        units,
 		Nanos:        int32(nanos), // #nosec G115 -- Safely clamped to int32 range above
 	}
@@ -143,7 +149,7 @@ func toProtoTransactionStatus(status domain.TransactionStatus) commonv1.Transact
 	}
 }
 
-// toProtoLedgerPosting converts domain LedgerPosting to protobuf.
+// toProtoLedgerPosting converts a domain LedgerPosting to protobuf.
 func toProtoLedgerPosting(posting *domain.LedgerPosting) *financialaccountingv1.LedgerPosting {
 	if posting == nil {
 		return nil
