@@ -384,7 +384,7 @@ if [ -f "package.json" ]; then
         echo -e "${YELLOW}⚠${NC}  markdownlint-cli2 not installed"
         echo -e "  This is required for markdown linting in pre-commit hooks"
         echo -e "  Install: npm install"
-        MISSING_TOOLS=true
+        ALL_CHECKS_PASSED=false
     fi
 else
     echo -e "${YELLOW}⚠${NC}  package.json not found"
