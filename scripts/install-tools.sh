@@ -191,6 +191,21 @@ echo " Installation Complete"
 echo "═══════════════════════════════════════"
 echo ""
 
+# Install Node.js dependencies if package.json exists
+if [ -f "package.json" ] && command -v npm &> /dev/null; then
+    echo -e "${YELLOW}Installing Node.js dependencies...${NC}"
+    echo ""
+
+    if npm install; then
+        echo -e "${GREEN}✓${NC} Node.js dependencies installed successfully"
+        echo ""
+    else
+        echo -e "${RED}✗${NC} Failed to install Node.js dependencies"
+        echo "  You can try manually later: npm install"
+        echo ""
+    fi
+fi
+
 # Create Kind cluster if ctlptl and kind are installed and Docker is running
 if command -v ctlptl &> /dev/null && command -v kind &> /dev/null; then
     echo -e "${YELLOW}Setting up local Kubernetes cluster...${NC}"
@@ -224,9 +239,8 @@ fi
 echo "Next steps:"
 echo "  1. Verify installation: ./scripts/setup-check.sh"
 echo "  2. Clone the repository and run: go mod download"
-echo "  3. Install Node.js dependencies: npm install"
-echo "  4. Install git hooks: .githooks/install.sh"
-echo "  5. Start developing: tilt up"
+echo "  3. Install git hooks: .githooks/install.sh"
+echo "  4. Start developing: tilt up"
 echo ""
 echo -e "${BLUE}Tip:${NC} Your local cluster is ready! Just run ${BLUE}tilt up${NC} to start developing"
 echo ""
