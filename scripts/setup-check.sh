@@ -366,6 +366,31 @@ echo ""
 
 check_command "golangci-lint" "2.x+" "brew install golangci-lint"
 
+# Node.js & npm (for markdown linting)
+echo "═══════════════════════════════════════"
+echo " Node.js & npm"
+echo "═══════════════════════════════════════"
+echo ""
+
+check_command "node" "18+" "brew install node"
+check_command "npm" "9+" "brew install node"
+
+# Check if markdownlint-cli2 is installed
+if [ -f "package.json" ]; then
+    if [ -d "node_modules" ] && npm list markdownlint-cli2 &> /dev/null; then
+        echo -e "${GREEN}✓${NC} markdownlint-cli2 installed"
+        echo -e "  Run: npm run lint:md"
+    else
+        echo -e "${YELLOW}⚠${NC}  markdownlint-cli2 not installed"
+        echo -e "  This is required for markdown linting in pre-commit hooks"
+        echo -e "  Install: npm install"
+        MISSING_TOOLS=true
+    fi
+else
+    echo -e "${YELLOW}⚠${NC}  package.json not found"
+    echo -e "  Cannot verify markdownlint-cli2 installation"
+fi
+
 # Documentation Tools
 echo "═══════════════════════════════════════"
 echo " Documentation Tools"
