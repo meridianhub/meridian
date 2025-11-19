@@ -84,8 +84,8 @@ if [ -n "$STAGED_MD_FILES" ]; then
             [[ -n "$file" ]] && MD_FILES_ARRAY+=("$file")
         done <<< "$STAGED_MD_FILES"
 
-        # Try npm script first, preserve error output
-        if npm run --silent lint:md -- "${MD_FILES_ARRAY[@]}" 2>&1; then
+        # Try npm script first
+        if npm run --silent lint:md -- "${MD_FILES_ARRAY[@]}"; then
             echo -e "${GREEN}✓${NC} markdownlint passed"
         else
             echo -e "${RED}✗${NC} markdownlint failed"

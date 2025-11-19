@@ -372,8 +372,8 @@ echo " Node.js & npm"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_command "node" "18+" "brew install node"
-check_command "npm" "9+" "brew install node"
+check_command "node" "20+" "brew install node"
+check_command "npm" "10+" "brew install node"
 
 # Check if markdownlint-cli2 is installed
 if [ -f "package.json" ]; then
