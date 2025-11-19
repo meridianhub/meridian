@@ -8,20 +8,39 @@ import (
 	"github.com/meridianhub/meridian/pkg/platform/idempotency"
 )
 
-// EventPublisher defines the interface for publishing domain events.
-// Events are published to Kafka following the event-sourced architecture pattern.
+// DomainEvent is a marker interface for all financial accounting domain events.
+// Concrete event types will be defined in domain/events.go in subsequent subtasks.
+//
+// Event types to be implemented (subtask 9.2+):
+//   - LedgerPostingCapturedEvent
+//   - LedgerPostingAmendedEvent
+//   - LedgerPostingPostedEvent
+//   - LedgerPostingRejectedEvent
+//   - FinancialBookingLogInitiatedEvent
+//   - FinancialBookingLogUpdatedEvent
+//   - FinancialBookingLogPostedEvent
+//   - FinancialBookingLogClosedEvent
+//   - BalanceValidationFailedEvent
+type DomainEvent interface {
+	// EventType returns the type identifier for this event
+	EventType() string
+}
+
+// EventPublisher defines the interface for publishing domain events to the messaging infrastructure.
+// Events are published to Kafka following ADR-0004 (Event Schema Evolution Strategy).
+//
+// Implementation will be provided by adapters/messaging package following the pattern
+// from position-keeping/adapters/messaging/kafka_event_publisher.go
 type EventPublisher interface {
-	// PublishLedgerPostingCaptured publishes a LedgerPostingCapturedEvent
-	// PublishLedgerPostingAmended publishes a LedgerPostingAmendedEvent
-	// PublishLedgerPostingPosted publishes a LedgerPostingPostedEvent
-	// PublishLedgerPostingRejected publishes a LedgerPostingRejectedEvent
-	// PublishFinancialBookingLogInitiated publishes a FinancialBookingLogInitiatedEvent
-	// PublishFinancialBookingLogUpdated publishes a FinancialBookingLogUpdatedEvent
-	// PublishFinancialBookingLogPosted publishes a FinancialBookingLogPostedEvent
-	// PublishFinancialBookingLogClosed publishes a FinancialBookingLogClosedEvent
-	// PublishBalanceValidationFailed publishes a BalanceValidationFailedEvent
-	//
-	// Implementation will be provided by adapters/messaging package
+	// Publish publishes a single domain event to the appropriate Kafka topic.
+	// The topic is determined based on the event type (one topic per event type per ADR-0004).
+	// Returns an error if publishing fails.
+	Publish(ctx context.Context, event DomainEvent) error
+
+	// PublishBatch publishes multiple domain events as a batch for efficiency.
+	// All events should succeed or fail together (transactional semantics where possible).
+	// Returns an error if any event in the batch fails to publish.
+	PublishBatch(ctx context.Context, events []DomainEvent) error
 }
 
 // FinancialAccountingService implements the gRPC service for Financial Accounting operations.
@@ -58,6 +77,10 @@ type FinancialAccountingService struct {
 //   - eventPublisher: Publishes domain events to Kafka
 //   - idempotencySvc: Ensures exactly-once processing of idempotent operations
 //
+// The returned service embeds UnimplementedFinancialAccountingServiceServer, which provides
+// default "Unimplemented" responses for all gRPC methods. Methods will be implemented incrementally
+// in subsequent subtasks (9.2, 9.3, 9.4, 9.5).
+//
 // Example usage:
 //
 //	repo := persistence.NewLedgerRepository(db)
@@ -77,160 +100,19 @@ func NewFinancialAccountingService(
 	}
 }
 
-// InitiateFinancialBookingLog creates a new financial booking log.
+// Method implementations will be added in subsequent subtasks:
 //
-// This operation:
-// - Validates the request using buf.validate generated validators
-// - Checks idempotency to prevent duplicate creation
-// - Creates a new financial booking log in pending status
-// - Publishes a FinancialBookingLogInitiatedEvent
+// Subtask 9.2 - gRPC method implementations with full workflow:
+//   - InitiateFinancialBookingLog: Creates new booking log with idempotency
+//   - UpdateFinancialBookingLog: Updates booking log status and rules
+//   - RetrieveFinancialBookingLog: Retrieves booking log by ID
+//   - CaptureLedgerPosting: Creates posting with validation and events
 //
-// Returns:
-//   - InvalidArgument: If request validation fails
-//   - AlreadyExists: If idempotency key already processed
-//   - Internal: For unexpected errors
+// Subtask 9.3 - Retrieve operations:
+//   - RetrieveLedgerPosting: Retrieves posting by ID
 //
-// Implementation: Subtask 9.2+
-func (s *FinancialAccountingService) InitiateFinancialBookingLog(
-	_ context.Context,
-	_ *financialaccountingv1.InitiateFinancialBookingLogRequest,
-) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
-	// TODO: Implement in subtask 9.2+
-	return nil, nil
-}
-
-// UpdateFinancialBookingLog updates an existing booking log.
+// Subtask 9.5 - List operations:
+//   - ListFinancialBookingLogs: Lists booking logs with filtering/pagination
 //
-// Updateable fields:
-//   - status: Current lifecycle state (with transition validation)
-//   - chart_of_accounts_rules: Accounting rules (optional)
-//
-// Immutable fields:
-//   - financial_account_type
-//   - product_service_reference
-//   - business_unit_reference
-//   - base_currency
-//
-// This operation:
-// - Retrieves the existing booking log
-// - Validates status transitions (e.g., POSTED is terminal)
-// - Updates mutable fields
-// - Publishes a FinancialBookingLogUpdatedEvent
-//
-// Returns:
-//   - InvalidArgument: If request validation fails or invalid status transition
-//   - NotFound: If booking log doesn't exist
-//   - Internal: For unexpected errors
-//
-// Implementation: Subtask 9.2+
-func (s *FinancialAccountingService) UpdateFinancialBookingLog(
-	_ context.Context,
-	_ *financialaccountingv1.UpdateFinancialBookingLogRequest,
-) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
-	// TODO: Implement in subtask 9.2+
-	return nil, nil
-}
-
-// RetrieveFinancialBookingLog retrieves a specific booking log by ID.
-//
-// This operation:
-// - Validates the booking log ID
-// - Retrieves from repository
-// - Converts domain model to protobuf using adapters (ADR-0005)
-//
-// Returns:
-//   - InvalidArgument: If ID is invalid
-//   - NotFound: If booking log doesn't exist
-//   - Internal: For unexpected errors
-//
-// Implementation: Subtask 9.2+
-func (s *FinancialAccountingService) RetrieveFinancialBookingLog(
-	_ context.Context,
-	_ *financialaccountingv1.RetrieveFinancialBookingLogRequest,
-) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
-	// TODO: Implement in subtask 9.2+
-	return nil, nil
-}
-
-// ListFinancialBookingLogs lists booking logs with optional filtering and pagination.
-//
-// Filtering options:
-//   - status: Filter by transaction status
-//   - business_unit_reference: Filter by business unit
-//
-// Pagination:
-//   - Default page_size: 50 items
-//   - Maximum page_size: 1000 items
-//   - page_token: Opaque token for next page
-//
-// This operation:
-// - Validates pagination parameters
-// - Applies filters
-// - Retrieves page of results
-// - Returns pagination metadata for next page
-//
-// Returns:
-//   - InvalidArgument: If pagination parameters invalid
-//   - Internal: For unexpected errors
-//
-// Implementation: Subtask 9.5
-func (s *FinancialAccountingService) ListFinancialBookingLogs(
-	_ context.Context,
-	_ *financialaccountingv1.ListFinancialBookingLogsRequest,
-) (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
-	// TODO: Implement in subtask 9.5
-	return nil, nil
-}
-
-// CaptureLedgerPosting creates a new ledger posting for a booking log.
-//
-// Double-entry bookkeeping semantics:
-//   - Individual postings created separately (not balanced pairs)
-//   - Balance validation (debits = credits) occurs before posting
-//   - Booking log can only transition to POSTED when balanced
-//
-// This operation implements the complete workflow:
-//  1. Idempotency check (return existing if duplicate)
-//  2. Validate booking log exists and is not in terminal state
-//  3. Validate chart of accounts (account_id exists in rules)
-//  4. Create domain LedgerPosting entity
-//  5. Persist to database transactionally
-//  6. Publish LedgerPostingCapturedEvent
-//  7. Return created posting
-//
-// Returns:
-//   - InvalidArgument: If request validation fails or chart of accounts invalid
-//   - NotFound: If booking log doesn't exist
-//   - FailedPrecondition: If booking log in terminal state
-//   - AlreadyExists: If idempotency key already processed
-//   - Internal: For unexpected errors
-//
-// Implementation: Subtask 9.2
-func (s *FinancialAccountingService) CaptureLedgerPosting(
-	_ context.Context,
-	_ *financialaccountingv1.CaptureLedgerPostingRequest,
-) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
-	// TODO: Implement in subtask 9.2
-	return nil, nil
-}
-
-// RetrieveLedgerPosting retrieves a specific posting by ID.
-//
-// This operation:
-// - Validates the posting ID
-// - Retrieves from repository
-// - Converts domain model to protobuf using adapters (ADR-0005)
-//
-// Returns:
-//   - InvalidArgument: If ID is invalid
-//   - NotFound: If posting doesn't exist
-//   - Internal: For unexpected errors
-//
-// Implementation: Subtask 9.3
-func (s *FinancialAccountingService) RetrieveLedgerPosting(
-	_ context.Context,
-	_ *financialaccountingv1.RetrieveLedgerPostingRequest,
-) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
-	// TODO: Implement in subtask 9.3
-	return nil, nil
-}
+// Until implemented, the embedded UnimplementedFinancialAccountingServiceServer
+// will return codes.Unimplemented for all RPC calls.

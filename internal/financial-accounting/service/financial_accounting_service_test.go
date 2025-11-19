@@ -15,6 +15,14 @@ import (
 // mockEventPublisher is a test double for EventPublisher
 type mockEventPublisher struct{}
 
+func (m *mockEventPublisher) Publish(_ context.Context, _ DomainEvent) error {
+	return nil
+}
+
+func (m *mockEventPublisher) PublishBatch(_ context.Context, _ []DomainEvent) error {
+	return nil
+}
+
 // TestNewFinancialAccountingService verifies the constructor creates a valid service instance.
 func TestNewFinancialAccountingService(t *testing.T) {
 	// Arrange
