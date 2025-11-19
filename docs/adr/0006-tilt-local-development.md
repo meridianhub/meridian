@@ -90,7 +90,7 @@ Chosen option: **"Tilt"**, because:
 
 * Use **Kind + ctlptl** for fast, reproducible local clusters
 * Provide comprehensive onboarding docs ([docs/skills/tilt.md](../skills/tilt.md))
-* Include setup automation scripts (`scripts/setup-check.sh`, `scripts/install-tools.sh`)
+* Include setup automation script (`scripts/doctor.sh`)
 * Single command cluster creation with local registry: `ctlptl create cluster kind --registry=ctlptl-registry
 --name=kind-meridian-local`
 * Tiltfile comments explain each section
@@ -163,8 +163,7 @@ meridian/
 │   ├── tilt.md                     # Tilt usage guide
 │   └── docker.md                   # Docker troubleshooting
 └── scripts/
-    ├── setup-check.sh              # Verify dev environment
-    └── install-tools.sh            # Install Tilt and dependencies
+    └── doctor.sh                   # Unified setup/verification script
 ```
 
 ### Tiltfile Configuration
@@ -350,13 +349,9 @@ within the cluster via the headless service.
 
 ```bash
 
-# 1. Verify prerequisites
+# 1. Verify prerequisites and auto-fix issues
 
-./scripts/setup-check.sh
-
-# 2. Install missing tools (if needed)
-
-./scripts/install-tools.sh
+./scripts/doctor.sh --fix
 
 # 3. Create local Kubernetes cluster with local registry (recommended: Kind with ctlptl)
 
@@ -516,7 +511,7 @@ Useful for pre-merge integration tests in GitHub Actions.
 **Learning path:**
 
 1. Read [CONTRIBUTING.md](../../CONTRIBUTING.md) - Prerequisites section
-2. Run `./scripts/setup-check.sh` - Verify environment
+2. Run `./scripts/doctor.sh` - Verify environment
 3. Follow [docs/skills/tilt.md](../skills/tilt.md) - Quick start guide
 4. Watch Tilt UI to understand resource dependencies
 5. Learn basic kubectl commands (`get pods`, `logs`, `describe`)
@@ -549,7 +544,7 @@ Provided scripts make onboarding easy:
 
 # Check if environment is ready
 
-./scripts/setup-check.sh
+./scripts/doctor.sh
 
 # Output:
 
@@ -573,9 +568,9 @@ Provided scripts make onboarding easy:
 
 # ctlptl create cluster kind --registry=ctlptl-registry --name=kind-meridian-local
 
-# Install missing tools
+# Auto-fix all issues
 
-./scripts/install-tools.sh
+./scripts/doctor.sh --fix
 
 # Create Kind cluster with local registry
 

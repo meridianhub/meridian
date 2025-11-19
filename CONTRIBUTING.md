@@ -15,33 +15,36 @@ Thank you for your interest in contributing to Meridian! This guide will help yo
 
 ### Quick Setup (Recommended)
 
-**⚡ The fastest way to get started** is using our automated setup scripts:
+**⚡ The fastest way to get started** is using our unified doctor script:
 
-1. **Check your environment** - See what's installed and what's missing:
+1. **Check your environment** - See what's working and what needs fixing:
 
    ```bash
-   ./scripts/setup-check.sh
+   ./scripts/doctor.sh
    ```
 
-2. **Install missing tools** - Automatically install everything (macOS/Linux):
+2. **Automatically fix all issues** - Install missing tools and configure everything:
 
    ```bash
-   ./scripts/install-tools.sh
+   ./scripts/doctor.sh --fix
    ```
 
-3. **Install project dependencies**:
+3. **Install Go dependencies**:
 
    ```bash
-   npm install          # Install markdownlint-cli2 and other Node.js tools
    go mod download      # Install Go dependencies
    ```
 
-This will set up:
+The doctor script will automatically set up:
 
 - Go, Docker, Kubernetes tools (kubectl, helm, kind, tilt)
 - API development tools (buf, protoc)
 - Code quality tools (golangci-lint, markdownlint-cli2)
+- Node.js dependencies (npm install)
+- Git hooks (pre-commit)
 - Local Kubernetes cluster (kind-meridian-local)
+
+**Note**: The script is idempotent - safe to run multiple times. It will skip what's already working and fix what's broken.
 
 ### Manual Setup (Alternative)
 
@@ -146,7 +149,7 @@ brew install golangci-lint
 
 #### markdownlint-cli2 (Documentation Linting)
 
-**Note**: Node.js and markdownlint-cli2 are automatically installed by `./scripts/install-tools.sh` (see [Quick Setup](#quick-setup-recommended)).
+**Note**: Node.js and markdownlint-cli2 are automatically installed by `./scripts/doctor.sh --fix` (see [Quick Setup](#quick-setup-recommended)).
 
 For manual installation:
 
