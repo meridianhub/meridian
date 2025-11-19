@@ -35,7 +35,14 @@ type LedgerPosting struct {
 	CreatedAt             time.Time
 }
 
-// NewLedgerPosting creates a new ledger posting with validation
+// NewLedgerPosting creates a new ledger posting with validation.
+//
+// Follows BIAN Financial Accounting specification for double-entry bookkeeping:
+//   - Amount must be positive (BIAN CurrencyAndAmount: "A zero amount is considered a positive amount")
+//   - Direction (DEBIT/CREDIT) indicates the accounting meaning, not mathematical sign
+//   - Reversals/corrections use opposite direction with positive amounts, not negative amounts
+//
+// Reference: BIAN v13.0.0 FinancialAccounting.yaml CurrencyAndAmount schema
 func NewLedgerPosting(
 	bookingLogID uuid.UUID,
 	direction PostingDirection,
@@ -48,6 +55,7 @@ func NewLedgerPosting(
 		return nil, ErrInvalidBookingLogID
 	}
 
+	// BIAN requirement: amounts must be positive (zero is considered positive)
 	if !amount.IsPositive() {
 		return nil, ErrInvalidPostingAmount
 	}

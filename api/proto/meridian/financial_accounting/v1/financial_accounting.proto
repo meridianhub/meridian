@@ -259,6 +259,39 @@ message CaptureLedgerPostingResponse {
   LedgerPosting ledger_posting = 1 [(buf.validate.field).required = true];
 }
 
+// UpdateLedgerPostingRequest updates an existing ledger posting.
+//
+// Update Semantics:
+// - Only status and posting_result can be modified after creation
+// - Amount, direction, and account_id are immutable once created
+// - Status transitions follow domain rules (e.g., POSTED is terminal)
+// - Empty posting_result preserves existing value
+message UpdateLedgerPostingRequest {
+  // id is the posting to update.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // status is the new status to set.
+  meridian.common.v1.TransactionStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // posting_result describes the outcome of the posting operation.
+  // If empty, the existing result is preserved (optional update).
+  string posting_result = 3 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+}
+
+// UpdateLedgerPostingResponse returns the updated posting.
+message UpdateLedgerPostingResponse {
+  // ledger_posting is the updated posting.
+  LedgerPosting ledger_posting = 1 [(buf.validate.field).required = true];
+}
+
 // RetrieveLedgerPostingRequest retrieves a specific posting.
 message RetrieveLedgerPostingRequest {
   // id is the posting to retrieve.
@@ -317,6 +350,9 @@ service FinancialAccountingService {
 
   // CaptureLedgerPosting creates a new ledger posting.
   rpc CaptureLedgerPosting(CaptureLedgerPostingRequest) returns (CaptureLedgerPostingResponse);
+
+  // UpdateLedgerPosting updates an existing ledger posting.
+  rpc UpdateLedgerPosting(UpdateLedgerPostingRequest) returns (UpdateLedgerPostingResponse);
 
   // RetrieveLedgerPosting retrieves a specific posting.
   rpc RetrieveLedgerPosting(RetrieveLedgerPostingRequest) returns (RetrieveLedgerPostingResponse);
