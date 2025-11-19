@@ -48,6 +48,7 @@
   // to allow flexible usage (pre-commit hooks vs full linting)
   "ignores": [
     "**/node_modules/**",
-    "**/.git/**"
+    "**/.git/**",
+    ".taskmaster/**"
   ]
 }
