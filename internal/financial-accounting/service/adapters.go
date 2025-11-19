@@ -13,9 +13,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// decimalHundred is used for converting between decimal and cents
-var decimalHundred = decimal.NewFromInt(100)
-
 // ErrEmptyUUID is returned when a UUID string is empty.
 // This error is wrapped in InvalidArgument gRPC status codes.
 var ErrEmptyUUID = errors.New("UUID cannot be empty")
@@ -81,19 +78,26 @@ func toProtoTransactionStatus(status domain.TransactionStatus) commonv1.Transact
 }
 
 // toProtoMoney converts domain Money to protobuf google.type.Money.
+// Preserves full decimal precision up to 9 decimal places (nanosecond precision).
 func toProtoMoney(m domain.Money) *money.Money {
-	// Get amount in smallest units (cents)
-	cents := m.Amount().Mul(decimalHundred).IntPart()
+	// Convert decimal amount to units and nanos
+	// For example: 123.456789 USD -> units: 123, nanos: 456789000
+	amount := m.Amount()
+	units := amount.IntPart()
+	fraction := amount.Sub(amount.Truncate(0))
+	nanos := fraction.Mul(decimal.NewFromInt(1_000_000_000)).IntPart()
 
-	// Split into units (dollars) and nanos (fractional cents)
-	units := cents / 100
-	// Safe conversion: cents % 100 is always -99 to 99, preserving sign for negative amounts
-	centsPart := int32(cents % 100) // #nosec G115 -- Modulo operation guarantees -99 to 99 range, always safe for int32
-	nanos := centsPart * 10_000_000 // Convert cents to nanos (1 cent = 10M nanos)
+	// Clamp nanos to int32 range to prevent overflow
+	// This handles edge cases with extreme precision
+	if nanos > 999_999_999 {
+		nanos = 999_999_999
+	} else if nanos < -999_999_999 {
+		nanos = -999_999_999
+	}
 
 	return &money.Money{
 		CurrencyCode: string(m.Currency()),
 		Units:        units,
-		Nanos:        nanos,
+		Nanos:        int32(nanos), // #nosec G115 -- Safely clamped to int32 range above
 	}
 }
