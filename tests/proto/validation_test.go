@@ -1,6 +1,8 @@
 package proto_test
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"buf.build/go/protovalidate"
@@ -10,19 +12,25 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// createValidator creates a protovalidate validator for testing.
-func createValidator(t *testing.T) protovalidate.Validator {
-	t.Helper()
-	validator, err := protovalidate.New()
+// testValidator is the shared validator instance for all validation tests.
+// It is created once in TestMain to avoid expensive repeated initialization.
+// Validator creation costs ~524μs (see BenchmarkValidatorCreation).
+var testValidator protovalidate.Validator
+
+// TestMain initializes the shared validator before running tests.
+// This follows the recommended pattern from production code (see deposit_consumer.go:44-46).
+func TestMain(m *testing.M) {
+	var err error
+	testValidator, err = protovalidate.New()
 	if err != nil {
-		t.Fatalf("failed to create validator: %v", err)
+		panic(fmt.Sprintf("failed to create validator: %v", err))
 	}
-	return validator
+	os.Exit(m.Run())
 }
 
 // TestErrorMessageValidation verifies Error message validation constraints.
 func TestErrorMessageValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid error message
 	validErr := &commonv1.Error{
@@ -45,7 +53,7 @@ func TestErrorMessageValidation(t *testing.T) {
 
 // TestFieldViolationValidation verifies FieldViolation validation constraints.
 func TestFieldViolationValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid field violation
 	validViolation := &commonv1.FieldViolation{
@@ -77,7 +85,7 @@ func TestFieldViolationValidation(t *testing.T) {
 
 // TestRetryInfoValidation verifies RetryInfo validation constraints.
 func TestRetryInfoValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid retry info
 	validRetry := &commonv1.RetryInfo{
@@ -109,7 +117,7 @@ func TestRetryInfoValidation(t *testing.T) {
 
 // TestIdempotencyKeyValidation verifies IdempotencyKey validation constraints.
 func TestIdempotencyKeyValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid idempotency key
 	validKey := &commonv1.IdempotencyKey{
@@ -159,7 +167,7 @@ func TestIdempotencyKeyValidation(t *testing.T) {
 
 // TestDateRangeValidation verifies DateRange validation constraints.
 func TestDateRangeValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid date range
 	validRange := &commonv1.DateRange{
@@ -191,7 +199,7 @@ func TestDateRangeValidation(t *testing.T) {
 
 // TestPaginationValidation verifies Pagination validation constraints.
 func TestPaginationValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid pagination
 	validPagination := &commonv1.Pagination{
@@ -223,7 +231,7 @@ func TestPaginationValidation(t *testing.T) {
 
 // TestCaptureLedgerPostingRequestValidation verifies CaptureLedgerPostingRequest validation constraints.
 func TestCaptureLedgerPostingRequestValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 	now := timestamppb.Now()
 
 	// Valid request
@@ -294,7 +302,7 @@ func TestCaptureLedgerPostingRequestValidation(t *testing.T) {
 
 // TestRetrieveLedgerPostingRequestValidation verifies RetrieveLedgerPostingRequest validation constraints.
 func TestRetrieveLedgerPostingRequestValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid request
 	validReq := &financialaccountingv1.RetrieveLedgerPostingRequest{
@@ -315,7 +323,7 @@ func TestRetrieveLedgerPostingRequestValidation(t *testing.T) {
 
 // TestUpdateLedgerPostingRequestValidation verifies UpdateLedgerPostingRequest validation constraints.
 func TestUpdateLedgerPostingRequestValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid request
 	validReq := &financialaccountingv1.UpdateLedgerPostingRequest{
@@ -347,7 +355,7 @@ func TestUpdateLedgerPostingRequestValidation(t *testing.T) {
 
 // TestPostingDirectionEnumValidation verifies PostingDirection enum constraints.
 func TestPostingDirectionEnumValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 	now := timestamppb.Now()
 
 	// Valid: DEBIT direction
@@ -384,7 +392,7 @@ func TestPostingDirectionEnumValidation(t *testing.T) {
 
 // TestTransactionStatusEnumValidation verifies TransactionStatus enum constraints.
 func TestTransactionStatusEnumValidation(t *testing.T) {
-	validator := createValidator(t)
+	validator := testValidator
 
 	// Valid status
 	validReq := &financialaccountingv1.UpdateLedgerPostingRequest{
