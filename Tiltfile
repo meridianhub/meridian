@@ -809,10 +809,10 @@ local_resource(
 
 # Run database migrations on startup - uses Atlas to apply schema changes
 # Each service has its own business schema
-# Migrations are applied in order:
-# 1. current_account (customers, accounts)
-# 2. position_keeping (transactions) - depends on current_account for FKs
-# 3. financial_accounting (ledger postings, booking logs) - independent schema
+# Migrations execute in parallel where possible:
+# - Parallel: current_account + financial_accounting (both depend only on init-database)
+# - Sequential: position_keeping waits for current_account (requires Account FK reference)
+# This minimizes total migration time while respecting schema dependencies
 local_resource(
   'migrate-current-account',
   cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
@@ -914,14 +914,18 @@ Tilt UI                    → http://localhost:10350
 Hot reload: Edit Go code and see changes in ~3 seconds
 
 Database Migrations:
-  • Migrations run automatically on startup (2 resources):
+  • Migrations run automatically on startup (3 resources):
     1. current_account (customers, accounts, current_account_audit)
-    2. position_keeping (transactions, position_keeping_audit)
+    2. financial_accounting (general_ledger, financial_accounting_audit)
+    3. position_keeping (transactions, position_keeping_audit)
+  • Parallel execution: current_account + financial_accounting run together after init-database
+  • Sequential dependency: position_keeping waits for current_account (Account FK)
   • Each service has its own audit schema for isolation
   • Phase 1: Empty audit tables created (current work)
   • Phase 2: GORM hooks for audit logging (future PR, see ADR-0009)
   • Manual triggers:
     - tilt trigger migrate-current-account
+    - tilt trigger migrate-financial-accounting
     - tilt trigger migrate-position-keeping
   • Check status:
     - make migrate-status-all (requires DATABASE_URL env var)

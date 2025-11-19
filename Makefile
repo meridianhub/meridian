@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all docs
 
 # Default target
 all: help
@@ -42,7 +42,7 @@ help:
 	@echo "Available targets:"
 	@echo "  make build             - Compile all Go services"
 	@echo "  make test              - Run tests with coverage"
-	@echo "  make lint              - Run golangci-lint and validate Tiltfile"
+	@echo "  make lint              - Run golangci-lint, validate Tiltfile, and validate semconv versions"
 	@echo "  make validate-tilt     - Validate Tiltfile configuration"
 	@echo "  make fmt               - Format Go code"
 	@echo "  make clean             - Remove build artifacts"
@@ -105,7 +105,7 @@ coverage: test
 	@open $(COVERAGE_DIR)/coverage.html 2>/dev/null || xdg-open $(COVERAGE_DIR)/coverage.html 2>/dev/null || echo "Please open $(COVERAGE_DIR)/coverage.html manually"
 
 ## lint: Run golangci-lint and validate Tiltfile
-lint: validate-tilt
+lint: validate-tilt validate-semconv
 	@echo "Running golangci-lint..."
 	@which $(GOLANGCI_LINT) > /dev/null || (echo "golangci-lint not installed. Run 'make install'"; exit 1)
 	$(GOLANGCI_LINT) run --timeout 5m ./...
@@ -113,6 +113,10 @@ lint: validate-tilt
 ## validate-tilt: Validate Tiltfile configuration
 validate-tilt:
 	@./scripts/validate-tiltfile.sh Tiltfile
+
+## validate-semconv: Validate OpenTelemetry semantic convention versions are consistent
+validate-semconv:
+	@./scripts/validate-semconv-versions.sh
 
 ## fmt: Format Go code
 fmt:
