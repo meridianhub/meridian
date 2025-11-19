@@ -167,3 +167,60 @@ func toProtoLedgerPosting(posting *domain.LedgerPosting) *financialaccountingv1.
 		Status:                toProtoTransactionStatus(posting.Status),
 	}
 }
+
+// toProtoFinancialBookingLog converts a domain FinancialBookingLog to protobuf.
+func toProtoFinancialBookingLog(log *domain.FinancialBookingLog) *financialaccountingv1.FinancialBookingLog {
+	if log == nil {
+		return nil
+	}
+
+	// Convert postings to protobuf (using defensive copy method)
+	postings := log.Postings()
+	protoPostings := make([]*financialaccountingv1.LedgerPosting, len(postings))
+	for i, posting := range postings {
+		protoPostings[i] = toProtoLedgerPosting(posting)
+	}
+
+	return &financialaccountingv1.FinancialBookingLog{
+		Id:                      log.ID.String(),
+		FinancialAccountType:    toProtoAccountType(log.FinancialAccountType),
+		ProductServiceReference: log.ProductServiceReference,
+		BusinessUnitReference:   log.BusinessUnitReference,
+		ChartOfAccountsRules:    log.ChartOfAccountsRules,
+		BaseCurrency:            toProtoCurrency(log.BaseCurrency),
+		Status:                  toProtoTransactionStatus(log.Status),
+		CreatedAt:               timestamppb.New(log.CreatedAt),
+		UpdatedAt:               timestamppb.New(log.UpdatedAt),
+		Postings:                protoPostings,
+	}
+}
+
+// toProtoAccountType converts domain account type string to protobuf enum.
+func toProtoAccountType(_ string) commonv1.AccountType {
+	// Map string to enum - implementation depends on AccountType enum values
+	// For now, return UNSPECIFIED - this will be implemented when AccountType enum is defined
+	// TODO: Implement proper mapping once AccountType enum values are defined
+	return commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED
+}
+
+// toProtoCurrency converts domain Currency to protobuf enum.
+func toProtoCurrency(currency domain.Currency) commonv1.Currency {
+	switch currency {
+	case domain.CurrencyGBP:
+		return commonv1.Currency_CURRENCY_GBP
+	case domain.CurrencyUSD:
+		return commonv1.Currency_CURRENCY_USD
+	case domain.CurrencyEUR:
+		return commonv1.Currency_CURRENCY_EUR
+	case domain.CurrencyJPY:
+		return commonv1.Currency_CURRENCY_JPY
+	case domain.CurrencyCHF:
+		return commonv1.Currency_CURRENCY_CHF
+	case domain.CurrencyCAD:
+		return commonv1.Currency_CURRENCY_CAD
+	case domain.CurrencyAUD:
+		return commonv1.Currency_CURRENCY_AUD
+	default:
+		return commonv1.Currency_CURRENCY_UNSPECIFIED
+	}
+}
