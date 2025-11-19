@@ -37,6 +37,7 @@ Thank you for your interest in contributing to Meridian! This guide will help yo
    ```
 
 This will set up:
+
 - Go, Docker, Kubernetes tools (kubectl, helm, kind, tilt)
 - API development tools (buf, protoc)
 - Code quality tools (golangci-lint, markdownlint-cli2)
@@ -44,7 +45,8 @@ This will set up:
 
 ### Manual Setup (Alternative)
 
-**Note**: For faster setup, use the [automated scripts above](#quick-setup-recommended). Manual installation is only needed for custom setups or unsupported platforms.
+**Note**: For faster setup, use the [automated scripts above](#quick-setup-recommended). Manual installation is only
+needed for custom setups or unsupported platforms.
 
 #### 1. Core Tools
 
