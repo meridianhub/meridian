@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"buf.build/go/protovalidate"
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/internal/financial-accounting/service"
@@ -27,6 +28,7 @@ var (
 type DepositConsumer struct {
 	consumer       *kafka.ProtoConsumer
 	postingService *service.PostingService
+	validator      protovalidate.Validator
 }
 
 // NewDepositConsumer creates a Kafka consumer for DepositEvent messages.
@@ -39,8 +41,14 @@ type DepositConsumer struct {
 //
 // Returns an error if the consumer cannot be initialized.
 func NewDepositConsumer(config kafka.ConsumerConfig, postingService *service.PostingService) (*DepositConsumer, error) {
+	validator, err := protovalidate.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create validator: %w", err)
+	}
+
 	dc := &DepositConsumer{
 		postingService: postingService,
+		validator:      validator,
 	}
 
 	// Message factory creates new DepositEvent instances for deserialization
@@ -66,7 +74,7 @@ func NewDepositConsumer(config kafka.ConsumerConfig, postingService *service.Pos
 // the PostingService format and creating double-entry ledger postings.
 func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *eventsv1.DepositEvent) error {
 	// Validate proto message
-	if err := event.ValidateAll(); err != nil {
+	if err := dc.validator.Validate(event); err != nil {
 		return fmt.Errorf("invalid deposit event: %w", err)
 	}
 
