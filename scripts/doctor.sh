@@ -208,8 +208,11 @@ install_tool() {
     fi
 
     echo -e "${YELLOW}Installing $tool...${NC}"
-    # Execute install command (safer than eval, but still requires bash -c for complex commands)
-    # Note: install_cmd comes from get_install_cmd() which uses only predefined safe commands
+    # Security model: sh -c is safe here because:
+    # 1. install_cmd comes exclusively from get_install_cmd() with hardcoded commands
+    # 2. PKG_MANAGER is validated against whitelist (brew|apt-get|yum|unknown) at startup
+    # 3. Tool name ($tool) comes from controlled check_tool() calls, not user input
+    # 4. No user-supplied data flows into install_cmd construction
     if sh -c "$install_cmd" &> /dev/null; then
         echo -e "${GREEN}✓${NC} $tool installed successfully"
         return 0
