@@ -334,6 +334,65 @@ message ListFinancialBookingLogsResponse {
   meridian.common.v1.PaginationResponse pagination = 2;
 }
 
+// ListLedgerPostingsRequest lists ledger postings with filtering and pagination.
+//
+// Supports filtering by:
+// - BookingLogID: Filter postings for a specific booking log
+// - AccountCode: Filter by account identifier
+// - PostingDirection: Filter by DEBIT or CREDIT
+// - Date range: Filter by value date (from/to)
+// - Currency: Filter by currency code
+//
+// Pagination: If pagination is not provided, the service will apply
+// default limits (typically 50 items) to prevent unbounded queries.
+message ListLedgerPostingsRequest {
+  // pagination controls page size and position.
+  // If not provided, service applies default page_size=50, max=1000.
+  meridian.common.v1.Pagination pagination = 1;
+
+  // financial_booking_log_id filters by parent booking log.
+  string financial_booking_log_id = 2 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // account_id filters by account identifier.
+  string account_id = 3 [(buf.validate.field).string = {
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // posting_direction filters by debit or credit.
+  meridian.common.v1.PostingDirection posting_direction = 4 [(buf.validate.field).enum = {
+    defined_only: true
+  }];
+
+  // value_date_from filters postings on or after this date.
+  google.protobuf.Timestamp value_date_from = 5;
+
+  // value_date_to filters postings on or before this date.
+  google.protobuf.Timestamp value_date_to = 6;
+
+  // currency filters by currency code (from posting_amount).
+  string currency = 7 [(buf.validate.field).string = {
+    max_len: 3
+    pattern: "^[A-Z]{0,3}$"
+  }];
+
+  // status filters by transaction status.
+  meridian.common.v1.TransactionStatus status = 8 [(buf.validate.field).enum = {
+    defined_only: true
+  }];
+}
+
+// ListLedgerPostingsResponse returns a page of ledger postings.
+message ListLedgerPostingsResponse {
+  // ledger_postings is the list of postings.
+  repeated LedgerPosting ledger_postings = 1;
+
+  // pagination contains pagination metadata.
+  meridian.common.v1.PaginationResponse pagination = 2;
+}
+
 // FinancialAccountingService provides the BIAN Financial Accounting service interface.
 service FinancialAccountingService {
   // InitiateFinancialBookingLog creates a new financial booking log.
@@ -356,4 +415,7 @@ service FinancialAccountingService {
 
   // RetrieveLedgerPosting retrieves a specific posting.
   rpc RetrieveLedgerPosting(RetrieveLedgerPostingRequest) returns (RetrieveLedgerPostingResponse);
+
+  // ListLedgerPostings lists ledger postings with optional filtering.
+  rpc ListLedgerPostings(ListLedgerPostingsRequest) returns (ListLedgerPostingsResponse);
 }
