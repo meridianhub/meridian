@@ -99,6 +99,32 @@ func (r *LedgerRepository) GetPostingsByBookingLogID(ctx context.Context, bookin
 	return postings, nil
 }
 
+// UpdatePosting updates an existing ledger posting
+func (r *LedgerRepository) UpdatePosting(ctx context.Context, posting *domain.LedgerPosting) error {
+	entity, err := toPostingEntity(posting)
+	if err != nil {
+		return err
+	}
+
+	result := r.db.WithContext(ctx).
+		Model(&LedgerPostingEntity{}).
+		Where("id = ?", entity.ID).
+		Updates(map[string]interface{}{
+			"status":         entity.Status,
+			"posting_result": entity.PostingResult,
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrPostingNotFound
+	}
+
+	return nil
+}
+
 // toPostingEntity converts domain model to database entity
 func toPostingEntity(posting *domain.LedgerPosting) (LedgerPostingEntity, error) {
 	// Convert decimal amount to cents (multiply by 100)
