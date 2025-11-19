@@ -101,6 +101,9 @@ if [[ "$OS" == "macos" ]]; then
     # Code quality
     install_tool "golangci-lint" "brew install golangci-lint"
 
+    # Node.js for documentation linting
+    install_tool "node" "brew install node"
+
     # Documentation tools
     if ! command -v pkgsite &> /dev/null && ! [ -f "$(go env GOPATH)/bin/pkgsite" ]; then
         echo -e "${YELLOW}Installing pkgsite (Go documentation server)...${NC}"
@@ -171,6 +174,9 @@ elif [[ "$OS" == "linux" ]]; then
             curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
         fi
 
+        # Node.js for documentation linting
+        install_tool "node" "sudo apt-get install -y nodejs npm"
+
         # pkgsite (documentation tool)
         if ! command -v pkgsite &> /dev/null; then
             echo -e "${YELLOW}Installing pkgsite (Go documentation server)...${NC}"
@@ -218,8 +224,9 @@ fi
 echo "Next steps:"
 echo "  1. Verify installation: ./scripts/setup-check.sh"
 echo "  2. Clone the repository and run: go mod download"
-echo "  3. Install git hooks: .githooks/install.sh"
-echo "  4. Start developing: tilt up"
+echo "  3. Install Node.js dependencies: npm install"
+echo "  4. Install git hooks: .githooks/install.sh"
+echo "  5. Start developing: tilt up"
 echo ""
 echo -e "${BLUE}Tip:${NC} Your local cluster is ready! Just run ${BLUE}tilt up${NC} to start developing"
 echo ""

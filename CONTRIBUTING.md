@@ -13,21 +13,40 @@ Thank you for your interest in contributing to Meridian! This guide will help yo
 
 ## Development Environment Setup
 
-### Quick Setup
+### Quick Setup (Recommended)
 
-Run the setup verification script to check your environment:
+**⚡ The fastest way to get started** is using our automated setup scripts:
 
-```bash
-./scripts/setup-check.sh
-```
+1. **Check your environment** - See what's installed and what's missing:
 
-If tools are missing, install them automatically (macOS/Linux):
+   ```bash
+   ./scripts/setup-check.sh
+   ```
 
-```bash
-./scripts/install-tools.sh
-```
+2. **Install missing tools** - Automatically install everything (macOS/Linux):
 
-### Manual Setup
+   ```bash
+   ./scripts/install-tools.sh
+   ```
+
+3. **Install project dependencies**:
+
+   ```bash
+   npm install          # Install markdownlint-cli2 and other Node.js tools
+   go mod download      # Install Go dependencies
+   ```
+
+This will set up:
+
+- Go, Docker, Kubernetes tools (kubectl, helm, kind, tilt)
+- API development tools (buf, protoc)
+- Code quality tools (golangci-lint, markdownlint-cli2)
+- Local Kubernetes cluster (kind-meridian-local)
+
+### Manual Setup (Alternative)
+
+**Note**: For faster setup, use the [automated scripts above](#quick-setup-recommended). Manual installation is only
+needed for custom setups or unsupported platforms.
 
 #### 1. Core Tools
 
@@ -127,9 +146,21 @@ brew install golangci-lint
 
 #### markdownlint-cli2 (Documentation Linting)
 
+**Note**: Node.js and markdownlint-cli2 are automatically installed by `./scripts/install-tools.sh` (see [Quick Setup](#quick-setup-recommended)).
+
+For manual installation:
+
 ```bash
-npm install
+brew install node      # macOS (if not already installed)
+npm install           # Install markdownlint-cli2 from package.json
 ```
+
+**Important**: Run `npm install` once after cloning the repository to install markdownlint-cli2 locally. This ensures
+optimal performance during pre-commit checks (without this, the hook will use `npx` which downloads the package on each
+commit).
+
+**Version strategy**: We use `markdownlint-cli2 ^0.19.0` to stay current with the latest features and fixes. While
+CodeRabbit uses 0.18.1, the markdown rules are stable and compatible across minor versions.
 
 Markdown linting is enforced via:
 
