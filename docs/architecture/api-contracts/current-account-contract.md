@@ -255,13 +255,13 @@ message ExecuteDepositResponse {
 
 **Behavioral Semantics:**
 
-This operation orchestrates a deposit transaction across three services:
+This operation orchestrates a deposit transaction following the saga orchestration pattern defined in ADR-002:
 
-1. **CurrentAccount**: Validates account status and generates transaction ID
-2. **PositionKeeping**: Records transaction in financial position log
-3. **FinancialAccounting**: Creates double-entry ledger postings (debit: cash, credit: customer account)
+1. **CurrentAccount**: Validates account status, generates transaction ID, and acts as saga orchestrator
+2. **FinancialAccounting**: Validates and creates double-entry ledger postings (debit: cash, credit: customer account), then publishes `PostingsCapturedEvent`
+3. **PositionKeeping**: Consumes `PostingsCapturedEvent` asynchronously and records transaction in financial position log
 
-The operation follows a saga pattern with compensation support. If any downstream service fails, the transaction is marked as FAILED and compensation operations may be triggered.
+The operation follows a saga orchestration pattern with CurrentAccount as the orchestrator. CurrentAccount synchronously calls FinancialAccounting, which handles validation and event publication. PositionKeeping operates asynchronously via event consumption, ensuring loose coupling and independent scalability. If FinancialAccounting fails, the transaction is marked as FAILED and compensation operations may be triggered.
 
 **Preconditions:**
 
@@ -275,8 +275,9 @@ The operation follows a saga pattern with compensation support. If any downstrea
 **Postconditions (Success):**
 
 - New transaction created with status TRANSACTION_STATUS_COMPLETED
-- Transaction recorded in PositionKeeping service with status POSTED
 - Double-entry postings created in FinancialAccounting service
+- `PostingsCapturedEvent` published to event stream (for PositionKeeping consumption)
+- Transaction will be recorded in PositionKeeping service asynchronously after event consumption (eventual consistency)
 - Account balance increased by deposit amount
 - Available balance increased by deposit amount
 - Account `updated_at` timestamp updated
@@ -305,7 +306,6 @@ The operation follows a saga pattern with compensation support. If any downstrea
 | `FAILED_PRECONDITION` | Account status not ACTIVE | Details include current status | Retry after status change |
 | `INVALID_ARGUMENT` | Negative or zero amount | Details explain validation | Do not retry (fix request) |
 | `INVALID_ARGUMENT` | Currency mismatch | Details show expected vs actual | Do not retry (fix request) |
-| `UNAVAILABLE` | PositionKeeping service unavailable | Circuit breaker details | Retry with exponential backoff |
 | `UNAVAILABLE` | FinancialAccounting service unavailable | Circuit breaker details | Retry with exponential backoff |
 | `DEADLINE_EXCEEDED` | Downstream timeout | Timeout duration | Retry with longer timeout |
 | `INTERNAL` | Unexpected error | Stack trace in logs only | Retry up to 3 times |
@@ -331,45 +331,54 @@ Maximum retry attempts: 3 with 100ms exponential backoff.
 
 **Saga Orchestration:**
 
-ExecuteDeposit implements a saga pattern with the following steps:
+ExecuteDeposit implements a saga orchestration pattern (per ADR-002) with the following steps:
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant CurrentAccount
-    participant PositionKeeping
     participant FinancialAccounting
+    participant EventStream
+    participant PositionKeeping
 
     Client->>CurrentAccount: ExecuteDeposit
     CurrentAccount->>CurrentAccount: Validate account status
     CurrentAccount->>CurrentAccount: Generate transaction_id
 
-    CurrentAccount->>PositionKeeping: UpdateFinancialPositionLog
-    alt PositionKeeping Success
-        PositionKeeping-->>CurrentAccount: Log updated
-        CurrentAccount->>FinancialAccounting: CaptureLedgerPosting (debit)
-        CurrentAccount->>FinancialAccounting: CaptureLedgerPosting (credit)
-        alt FinancialAccounting Success
-            FinancialAccounting-->>CurrentAccount: Postings created
-            CurrentAccount->>CurrentAccount: Update balance
-            CurrentAccount-->>Client: ExecuteDepositResponse (COMPLETED)
-        else FinancialAccounting Failure
-            CurrentAccount->>PositionKeeping: Compensate (mark FAILED)
-            CurrentAccount-->>Client: Error (UNAVAILABLE)
-        end
-    else PositionKeeping Failure
+    CurrentAccount->>FinancialAccounting: CaptureLedgerPosting (debit)
+    CurrentAccount->>FinancialAccounting: CaptureLedgerPosting (credit)
+    alt FinancialAccounting Success
+        FinancialAccounting-->>CurrentAccount: Postings created
+        CurrentAccount->>CurrentAccount: Update balance
+        FinancialAccounting->>EventStream: Publish PostingsCapturedEvent
+        CurrentAccount-->>Client: ExecuteDepositResponse (COMPLETED)
+
+        Note over EventStream,PositionKeeping: Asynchronous (eventual consistency)
+        EventStream->>PositionKeeping: PostingsCapturedEvent
+        PositionKeeping->>PositionKeeping: Update financial position log
+    else FinancialAccounting Failure
+        FinancialAccounting-->>CurrentAccount: Error
         CurrentAccount-->>Client: Error (UNAVAILABLE)
     end
 ```text
 
 **Compensation Operations:**
 
-If FinancialAccounting fails after PositionKeeping succeeds:
+If FinancialAccounting fails during the synchronous saga:
 
-1. Update PositionKeeping log status to FAILED with failure reason
-2. Return error to client
+1. Transaction is marked as FAILED with failure reason
+2. Error is returned to client immediately
 3. Transaction remains in FAILED state (visible in history)
-4. Client may retry, creating a new transaction
+4. No `PostingsCapturedEvent` is published (PositionKeeping never sees the transaction)
+5. Client may retry, creating a new transaction
+
+If PositionKeeping fails asynchronously after consuming `PostingsCapturedEvent`:
+
+1. PositionKeeping's event consumer retries with exponential backoff (per ADR-004 idempotency pattern)
+2. Dead letter queue captures permanently failed events after max retries
+3. CurrentAccount and FinancialAccounting remain consistent (transaction COMPLETED, postings captured)
+4. Operations team alerted to investigate PositionKeeping failure
+5. Manual reconciliation may be required if DLQ processing fails
 
 **Examples:**
 
@@ -692,33 +701,46 @@ The CurrentAccount service implements saga compensation for failed multi-service
 
 ### ExecuteDeposit Compensation
 
-#### Scenario 1: PositionKeeping fails
+The saga orchestration pattern (per ADR-002) defines two failure scenarios:
 
-- No compensation needed (no state changes occurred)
-- Return error immediately to client
-- Client may retry entire operation
+#### Scenario 1: FinancialAccounting fails (synchronous saga failure)
 
-#### Scenario 2: FinancialAccounting fails after PositionKeeping succeeds
-
-- Compensation: Update PositionKeeping transaction status to FAILED
-- Mark transaction as TRANSACTION_STATUS_FAILED in CurrentAccount
+- No compensation needed (no state changes in downstream services)
+- Transaction marked as TRANSACTION_STATUS_FAILED in CurrentAccount
+- No `PostingsCapturedEvent` published (PositionKeeping never sees transaction)
+- Error returned immediately to client
 - Log failure reason in audit trail
-- Client receives error, may retry with new transaction
+- Client may retry with new transaction
 
-#### Scenario 3: Balance update fails after both services succeed
+#### Scenario 2: PositionKeeping fails asynchronously (eventual consistency failure)
 
+- FinancialAccounting succeeded (postings captured, event published)
+- CurrentAccount shows transaction as COMPLETED
+- PositionKeeping's event consumer fails to process `PostingsCapturedEvent`
+- Compensation steps:
+  1. Event consumer retries with exponential backoff (per ADR-004)
+  2. After max retries, event moves to dead letter queue (DLQ)
+  3. Operations team alerted to investigate DLQ
+  4. Manual reconciliation triggered if needed
+  5. CurrentAccount and FinancialAccounting remain consistent (no rollback)
+
+#### Scenario 3: Balance update fails after FinancialAccounting succeeds
+
+- FinancialAccounting succeeded, `PostingsCapturedEvent` published
+- CurrentAccount fails to update local balance cache
 - Compensation: Trigger async reconciliation job
 - Alert operations team
-- Transaction remains in PositionKeeping/FinancialAccounting (posted)
 - Balance will be corrected by reconciliation (within 15 minutes)
+- Transaction remains COMPLETED in FinancialAccounting
 
 ### Idempotent Compensation
 
 Compensation operations are idempotent:
 
 - Marking transaction as FAILED can be called multiple times safely
-- Updating PositionKeeping status is idempotent (uses transaction_id as key)
+- Event consumer uses idempotency pattern (event_id deduplication per ADR-004)
 - Audit log entries include correlation IDs for deduplication
+- Reconciliation jobs track completion state to prevent duplicate processing
 
 ## Future Enhancements
 
