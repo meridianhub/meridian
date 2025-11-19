@@ -154,6 +154,12 @@ data:
         wal:
           path: /tmp/tempo/wal
 
+    metrics_generator:
+      storage:
+        path: /tmp/tempo/generator/wal
+        remote_write:
+          - url: http://prometheus:9090/api/v1/write
+
     overrides:
       defaults:
         metrics_generator:
