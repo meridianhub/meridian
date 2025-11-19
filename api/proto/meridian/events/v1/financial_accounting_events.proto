@@ -227,8 +227,15 @@ message LedgerPostingCapturedEvent {
     not_in: [0]
   }];
 
-  // posting_amount is the monetary amount being posted
-  google.type.Money posting_amount = 4 [(buf.validate.field).required = true];
+  // posting_amount is the monetary amount being posted (must be positive)
+  google.type.Money posting_amount = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "positive_posting_amount"
+      message: "posting amount must be greater than zero"
+      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+    }
+  ];
 
   // account_id identifies the account being posted to
   string account_id = 5 [(buf.validate.field).string = {

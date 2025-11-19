@@ -229,3 +229,467 @@ func TestFinancialBookingLogClosedEvent_Serialization(t *testing.T) {
 		t.Errorf("ClosedBy mismatch: got %v, want %v", decoded.ClosedBy, event.ClosedBy)
 	}
 }
+
+// Defensive Tests - ADR-0008 Compliance
+
+func TestLedgerPostingAmendedEvent_Serialization(t *testing.T) {
+	event := &eventsv1.LedgerPostingAmendedEvent{
+		PostingId:    "posting-123",
+		BookingLogId: "booking-log-456",
+		PreviousAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        100,
+			Nanos:        0,
+		},
+		NewAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        150,
+			Nanos:        0,
+		},
+		Reason:        "Correction after reconciliation",
+		AmendedBy:     "user-789",
+		CorrelationId: "correlation-abc",
+		CausationId:   "causation-def",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       2,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event: %v", err)
+	}
+
+	decoded := &eventsv1.LedgerPostingAmendedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event: %v", err)
+	}
+
+	if decoded.PostingId != event.PostingId {
+		t.Errorf("PostingId mismatch: got %v, want %v", decoded.PostingId, event.PostingId)
+	}
+	if decoded.NewAmount.Units != event.NewAmount.Units {
+		t.Errorf("NewAmount.Units mismatch: got %v, want %v", decoded.NewAmount.Units, event.NewAmount.Units)
+	}
+}
+
+func TestLedgerPostingRejectedEvent_Serialization(t *testing.T) {
+	event := &eventsv1.LedgerPostingRejectedEvent{
+		PostingId:     "posting-123",
+		BookingLogId:  "booking-log-456",
+		Reason:        "Account does not exist",
+		RejectedBy:    "system",
+		CorrelationId: "correlation-abc",
+		CausationId:   "causation-def",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event: %v", err)
+	}
+
+	decoded := &eventsv1.LedgerPostingRejectedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event: %v", err)
+	}
+
+	if decoded.PostingId != event.PostingId {
+		t.Errorf("PostingId mismatch: got %v, want %v", decoded.PostingId, event.PostingId)
+	}
+	if decoded.Reason != event.Reason {
+		t.Errorf("Reason mismatch: got %v, want %v", decoded.Reason, event.Reason)
+	}
+}
+
+// Boundary and Edge Case Tests
+
+func TestFinancialBookingLogInitiatedEvent_EmptyFields(t *testing.T) {
+	// Test that empty strings serialize/deserialize correctly
+	event := &eventsv1.FinancialBookingLogInitiatedEvent{
+		BookingLogId:            "",
+		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		ProductServiceReference: "",
+		BusinessUnitReference:   "",
+		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		CorrelationId:           "",
+		CausationId:             "",
+		Timestamp:               timestamppb.New(time.Now()),
+		Version:                 1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with empty fields: %v", err)
+	}
+
+	decoded := &eventsv1.FinancialBookingLogInitiatedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with empty fields: %v", err)
+	}
+
+	if decoded.BookingLogId != "" {
+		t.Errorf("Expected empty BookingLogId, got %v", decoded.BookingLogId)
+	}
+}
+
+func TestFinancialBookingLogInitiatedEvent_MaxLengthFields(t *testing.T) {
+	// Test 255 character limit (boundary test)
+	maxLengthString := string(make([]byte, 255))
+	for i := range maxLengthString {
+		maxLengthString = maxLengthString[:i] + "a" + maxLengthString[i+1:]
+	}
+
+	event := &eventsv1.FinancialBookingLogInitiatedEvent{
+		BookingLogId:            maxLengthString,
+		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		ProductServiceReference: maxLengthString,
+		BusinessUnitReference:   maxLengthString,
+		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		CorrelationId:           maxLengthString,
+		CausationId:             maxLengthString,
+		Timestamp:               timestamppb.New(time.Now()),
+		Version:                 1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with max length fields: %v", err)
+	}
+
+	decoded := &eventsv1.FinancialBookingLogInitiatedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with max length fields: %v", err)
+	}
+
+	if len(decoded.BookingLogId) != 255 {
+		t.Errorf("Expected BookingLogId length 255, got %v", len(decoded.BookingLogId))
+	}
+}
+
+func TestFinancialBookingLogInitiatedEvent_UnspecifiedEnum(t *testing.T) {
+	// Test that UNSPECIFIED enum values serialize/deserialize
+	event := &eventsv1.FinancialBookingLogInitiatedEvent{
+		BookingLogId:            "booking-log-123",
+		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED,
+		ProductServiceReference: "product-456",
+		BusinessUnitReference:   "bu-789",
+		BaseCurrency:            commonv1.Currency_CURRENCY_UNSPECIFIED,
+		CorrelationId:           "correlation-abc",
+		CausationId:             "causation-def",
+		Timestamp:               timestamppb.New(time.Now()),
+		Version:                 1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with unspecified enums: %v", err)
+	}
+
+	decoded := &eventsv1.FinancialBookingLogInitiatedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with unspecified enums: %v", err)
+	}
+
+	if decoded.FinancialAccountType != commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED {
+		t.Errorf("Expected ACCOUNT_TYPE_UNSPECIFIED, got %v", decoded.FinancialAccountType)
+	}
+	if decoded.BaseCurrency != commonv1.Currency_CURRENCY_UNSPECIFIED {
+		t.Errorf("Expected CURRENCY_UNSPECIFIED, got %v", decoded.BaseCurrency)
+	}
+}
+
+func TestFinancialBookingLogInitiatedEvent_ZeroVersion(t *testing.T) {
+	// Test that version 0 serializes/deserializes (edge case)
+	event := &eventsv1.FinancialBookingLogInitiatedEvent{
+		BookingLogId:            "booking-log-123",
+		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		ProductServiceReference: "product-456",
+		BusinessUnitReference:   "bu-789",
+		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		CorrelationId:           "correlation-abc",
+		CausationId:             "causation-def",
+		Timestamp:               timestamppb.New(time.Now()),
+		Version:                 0,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with zero version: %v", err)
+	}
+
+	decoded := &eventsv1.FinancialBookingLogInitiatedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with zero version: %v", err)
+	}
+
+	if decoded.Version != 0 {
+		t.Errorf("Expected version 0, got %v", decoded.Version)
+	}
+}
+
+func TestFinancialBookingLogInitiatedEvent_NegativeVersion(t *testing.T) {
+	// Test that negative version serializes/deserializes (invalid but should not crash)
+	event := &eventsv1.FinancialBookingLogInitiatedEvent{
+		BookingLogId:            "booking-log-123",
+		FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_DEBIT,
+		ProductServiceReference: "product-456",
+		BusinessUnitReference:   "bu-789",
+		BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+		CorrelationId:           "correlation-abc",
+		CausationId:             "causation-def",
+		Timestamp:               timestamppb.New(time.Now()),
+		Version:                 -1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with negative version: %v", err)
+	}
+
+	decoded := &eventsv1.FinancialBookingLogInitiatedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with negative version: %v", err)
+	}
+
+	if decoded.Version != -1 {
+		t.Errorf("Expected version -1, got %v", decoded.Version)
+	}
+}
+
+func TestLedgerPostingCapturedEvent_ZeroMoney(t *testing.T) {
+	// Test zero amount (boundary case - technically invalid but should serialize)
+	event := &eventsv1.LedgerPostingCapturedEvent{
+		PostingId:        "posting-123",
+		BookingLogId:     "booking-log-456",
+		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        0,
+			Nanos:        0,
+		},
+		AccountId:     "account-789",
+		ValueDate:     timestamppb.New(time.Now()),
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		CorrelationId: "correlation-xyz",
+		CausationId:   "causation-abc",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with zero amount: %v", err)
+	}
+
+	decoded := &eventsv1.LedgerPostingCapturedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with zero amount: %v", err)
+	}
+
+	if decoded.PostingAmount.Units != 0 {
+		t.Errorf("Expected 0 units, got %v", decoded.PostingAmount.Units)
+	}
+}
+
+func TestLedgerPostingCapturedEvent_NegativeMoney(t *testing.T) {
+	// Test negative amount (invalid but should serialize)
+	event := &eventsv1.LedgerPostingCapturedEvent{
+		PostingId:        "posting-123",
+		BookingLogId:     "booking-log-456",
+		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        -100,
+			Nanos:        0,
+		},
+		AccountId:     "account-789",
+		ValueDate:     timestamppb.New(time.Now()),
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		CorrelationId: "correlation-xyz",
+		CausationId:   "causation-abc",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with negative amount: %v", err)
+	}
+
+	decoded := &eventsv1.LedgerPostingCapturedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with negative amount: %v", err)
+	}
+
+	if decoded.PostingAmount.Units != -100 {
+		t.Errorf("Expected -100 units, got %v", decoded.PostingAmount.Units)
+	}
+}
+
+func TestLedgerPostingCapturedEvent_MaxInt64Amount(t *testing.T) {
+	// Test maximum int64 value (boundary case)
+	event := &eventsv1.LedgerPostingCapturedEvent{
+		PostingId:        "posting-123",
+		BookingLogId:     "booking-log-456",
+		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        9223372036854775807, // max int64
+			Nanos:        999999999,           // max nanos
+		},
+		AccountId:     "account-789",
+		ValueDate:     timestamppb.New(time.Now()),
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		CorrelationId: "correlation-xyz",
+		CausationId:   "causation-abc",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with max int64: %v", err)
+	}
+
+	decoded := &eventsv1.LedgerPostingCapturedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with max int64: %v", err)
+	}
+
+	if decoded.PostingAmount.Units != 9223372036854775807 {
+		t.Errorf("Expected max int64, got %v", decoded.PostingAmount.Units)
+	}
+}
+
+func TestLedgerPostingCapturedEvent_InvalidAccountIdPattern(t *testing.T) {
+	// Test account_id with characters outside allowed pattern (should still serialize)
+	event := &eventsv1.LedgerPostingCapturedEvent{
+		PostingId:        "posting-123",
+		BookingLogId:     "booking-log-456",
+		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        100,
+			Nanos:        0,
+		},
+		AccountId:     "account@#$%",
+		ValueDate:     timestamppb.New(time.Now()),
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		CorrelationId: "correlation-xyz",
+		CausationId:   "causation-abc",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with invalid account_id: %v", err)
+	}
+
+	decoded := &eventsv1.LedgerPostingCapturedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with invalid account_id: %v", err)
+	}
+
+	if decoded.AccountId != "account@#$%" {
+		t.Errorf("AccountId mismatch: got %v, want %v", decoded.AccountId, "account@#$%")
+	}
+}
+
+func TestFinancialBookingLogClosedEvent_MaxLengthReason(t *testing.T) {
+	// Test 500 character reason (max length boundary)
+	maxReason := string(make([]byte, 500))
+	for i := range maxReason {
+		maxReason = maxReason[:i] + "x" + maxReason[i+1:]
+	}
+
+	event := &eventsv1.FinancialBookingLogClosedEvent{
+		BookingLogId:  "booking-log-123",
+		Reason:        maxReason,
+		ClosedBy:      "admin-456",
+		CorrelationId: "correlation-abc",
+		CausationId:   "causation-def",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with max length reason: %v", err)
+	}
+
+	decoded := &eventsv1.FinancialBookingLogClosedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with max length reason: %v", err)
+	}
+
+	if len(decoded.Reason) != 500 {
+		t.Errorf("Expected reason length 500, got %v", len(decoded.Reason))
+	}
+}
+
+func TestFinancialBookingLogClosedEvent_WhitespaceFields(t *testing.T) {
+	// Test whitespace-only fields (technically invalid but should serialize)
+	event := &eventsv1.FinancialBookingLogClosedEvent{
+		BookingLogId:  "   ",
+		Reason:        "   ",
+		ClosedBy:      "   ",
+		CorrelationId: "   ",
+		CausationId:   "   ",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with whitespace fields: %v", err)
+	}
+
+	decoded := &eventsv1.FinancialBookingLogClosedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with whitespace fields: %v", err)
+	}
+
+	if decoded.BookingLogId != "   " {
+		t.Errorf("Expected whitespace BookingLogId, got %q", decoded.BookingLogId)
+	}
+}
+
+func TestBalanceValidationFailedEvent_NegativePostingCount(t *testing.T) {
+	// Test with negative posting count in parent context (edge case)
+	event := &eventsv1.FinancialBookingLogPostedEvent{
+		BookingLogId: "booking-log-123",
+		PostingCount: -1,
+		TotalDebits: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        500,
+			Nanos:        0,
+		},
+		TotalCredits: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        500,
+			Nanos:        0,
+		},
+		Reason:        "Test negative count",
+		PostedBy:      "user-123",
+		CorrelationId: "correlation-abc",
+		CausationId:   "causation-def",
+		Timestamp:     timestamppb.New(time.Now()),
+		Version:       1,
+	}
+
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal event with negative posting count: %v", err)
+	}
+
+	decoded := &eventsv1.FinancialBookingLogPostedEvent{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("Failed to unmarshal event with negative posting count: %v", err)
+	}
+
+	if decoded.PostingCount != -1 {
+		t.Errorf("Expected posting count -1, got %v", decoded.PostingCount)
+	}
+}
