@@ -5,9 +5,9 @@
 Meridian is a professional software project focused on building a modern banking platform. This Code of Conduct
 establishes expectations for participation in our community to foster productive technical collaboration.
 
-As a learning project, we welcome questions and view mistakes as opportunities for growth and improvement. This is an
-environment where developers can explore banking platform architecture, ask clarifying questions, and learn from both
-successes and failures.
+As an open source project, we welcome questions and value diverse perspectives. This is an environment where developers
+collaborate on banking platform architecture, ask clarifying questions, and continuously improve through feedback and
+iteration.
 
 ## Our Standards
 

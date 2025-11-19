@@ -1,7 +1,6 @@
 # Meridian - BIAN-Compliant Open Banking Ledger
 
-A learning-focused reference implementation of an open banking ledger following BIAN (Banking Industry Architecture
-Network) standards.
+An open source, cloud-native core banking engine following BIAN (Banking Industry Architecture Network) standards.
 
 **What it demonstrates:**
 
@@ -12,8 +11,11 @@ Network) standards.
 - Event-driven architecture with Kafka
 - Kubernetes-native deployment
 
-**Note**: This is a learning tool, not production-ready software. It's designed as an architectural reference for
-building BIAN-compliant banking systems.
+**Features**:
+
+- Production-grade architecture patterns for financial systems
+- Comprehensive API design with Protocol Buffers
+- Distributed transaction handling and event-driven workflows
 
 ## Project Structure
 
@@ -158,7 +160,7 @@ For setup and development issues, see:
 
 ## Contributing
 
-Contributions welcome! This is a learning project - questions and mistakes are opportunities for growth.
+Contributions welcome! We value collaboration and view questions and feedback as opportunities for continuous improvement.
 
 **Quick start**:
 
@@ -194,6 +196,6 @@ Apache License 2.0 - See LICENSE file for details.
 
 ## Disclaimer
 
-This software is for educational and reference purposes only. It is not audited, tested, or designed for production use
-in financial systems. Do not use this code in production environments without thorough review, testing, and compliance
-verification.
+This software is provided "as-is" under the Apache License 2.0. Before deploying in production environments, ensure
+thorough security audits, compliance verification, and testing appropriate for your regulatory requirements and risk
+profile.

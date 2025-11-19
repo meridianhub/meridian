@@ -1208,8 +1208,8 @@ Place ADRs in `docs/adr/` with numbering:
 
 ## Code of Conduct
 
-Be respectful, professional, and collaborative. This is a learning project—questions and mistakes are opportunities for
-growth.
+Be respectful, professional, and collaborative. We value diverse perspectives and view questions and feedback as
+opportunities for continuous improvement.
 
 ## License
 

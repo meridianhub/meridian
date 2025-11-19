@@ -21,8 +21,8 @@ instructions: |
 **When to use this runbook**: Complete infrastructure failure, data corruption, regional outage, or catastrophic events
 requiring full system recovery.
 
-> **⚠️ Note for Learning Environment**: This is a template runbook for the Meridian learning project. In a production
-deployment, you would customize this with your specific:
+> **⚠️ Customization Note**: This is a template runbook for Meridian. In a production deployment, you should customize
+this with your specific:
 >
 > - Backup locations and credentials
 > - Recovery time objectives (RTO) and recovery point objectives (RPO)
