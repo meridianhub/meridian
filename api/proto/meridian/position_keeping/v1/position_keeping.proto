@@ -29,7 +29,7 @@ message TransactionLogEntry {
   // direction indicates whether this is a debit or credit posting.
   meridian.common.v1.PostingDirection direction = 5 [(buf.validate.field).enum = {
     defined_only: true
-    not_in: [0]  // Disallow UNSPECIFIED
+    not_in: [0] /* Disallow UNSPECIFIED */
   }];
 
   // timestamp is when this transaction occurred.
@@ -95,7 +95,7 @@ message AuditTrailEntry {
 
   // ip_address is the IP address from which the action was performed (IPv4 or IPv6).
   string ip_address = 6 [(buf.validate.field).string = {
-    max_len: 45  // IPv6 max: 45 chars
+    max_len: 45 // IPv6 max: 45 chars
     ip: true
   }];
 
@@ -108,7 +108,7 @@ message StatusTracking {
   // current_status is the current status of the transaction.
   meridian.common.v1.TransactionStatus current_status = 1 [(buf.validate.field).enum = {
     defined_only: true
-    not_in: [0]  // Disallow UNSPECIFIED
+    not_in: [0] /* Disallow UNSPECIFIED */
   }];
 
   // previous_status is the previous status before the current one.
@@ -306,7 +306,7 @@ message BulkImportTransactionsRequest {
   // entries are the transaction entries to import.
   repeated TransactionLogEntry entries = 2 [(buf.validate.field).repeated = {
     min_items: 1
-    max_items: 1000  // Limit bulk imports
+    max_items: 1000 // Limit bulk imports
   }];
 
   // audit_entry is an audit trail entry for this bulk import (required for compliance).

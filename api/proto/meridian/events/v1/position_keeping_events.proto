@@ -13,9 +13,7 @@ option go_package = "github.com/meridianhub/meridian/api/proto/meridian/events/v
 // recorded in the system (draft state).
 message TransactionCapturedEvent {
   // log_id uniquely identifies the financial position log
-  string log_id = 1 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string log_id = 1 [(buf.validate.field).string = {uuid: true}];
 
   // account_id identifies the account this transaction affects
   string account_id = 2 [(buf.validate.field).string = {
@@ -24,9 +22,7 @@ message TransactionCapturedEvent {
   }];
 
   // transaction_id identifies the transaction being captured
-  string transaction_id = 3 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string transaction_id = 3 [(buf.validate.field).string = {uuid: true}];
 
   // amount_cents is the transaction amount in cents (or smallest currency unit)
   int64 amount_cents = 4 [(buf.validate.field).int64 = {gt: 0}];
@@ -39,23 +35,30 @@ message TransactionCapturedEvent {
 
   // direction indicates debit or credit
   string direction = 6 [(buf.validate.field).string = {
-    in: ["DEBIT", "CREDIT"]
+    in: [
+      "DEBIT",
+      "CREDIT"
+    ]
   }];
 
   // source indicates where the transaction originated
   string source = 7 [(buf.validate.field).string = {
-    in: ["MANUAL", "AUTOMATED", "IMPORTED", "RECONCILIATION", "ADJUSTMENT", "CURRENT_ACCOUNT", "FINANCIAL_ACCOUNTING"]
+    in: [
+      "MANUAL",
+      "AUTOMATED",
+      "IMPORTED",
+      "RECONCILIATION",
+      "ADJUSTMENT",
+      "CURRENT_ACCOUNT",
+      "FINANCIAL_ACCOUNTING"
+    ]
   }];
 
   // description provides human-readable context
-  string description = 8 [(buf.validate.field).string = {
-    max_len: 500
-  }];
+  string description = 8 [(buf.validate.field).string = {max_len: 500}];
 
   // reference is an external reference identifier
-  string reference = 9 [(buf.validate.field).string = {
-    max_len: 100
-  }];
+  string reference = 9 [(buf.validate.field).string = {max_len: 100}];
 
   // correlation_id links related events across services
   string correlation_id = 10 [(buf.validate.field).string = {
@@ -74,9 +77,7 @@ message TransactionCapturedEvent {
 // Published when a reconciled transaction is amended before posting.
 message TransactionAmendedEvent {
   // log_id uniquely identifies the financial position log being amended
-  string log_id = 1 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string log_id = 1 [(buf.validate.field).string = {uuid: true}];
 
   // account_id identifies the account this transaction affects
   string account_id = 2 [(buf.validate.field).string = {
@@ -113,9 +114,7 @@ message TransactionAmendedEvent {
 // against external records. Published when reconciliation is complete.
 message TransactionReconciledEvent {
   // log_id uniquely identifies the financial position log
-  string log_id = 1 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string log_id = 1 [(buf.validate.field).string = {uuid: true}];
 
   // account_id identifies the account this transaction affects
   string account_id = 2 [(buf.validate.field).string = {
@@ -125,13 +124,16 @@ message TransactionReconciledEvent {
 
   // reconciliation_status indicates the reconciliation outcome
   string reconciliation_status = 3 [(buf.validate.field).string = {
-    in: ["unreconciled", "auto_reconciled", "manually_reconciled", "reconciled_with_discrepancy"]
+    in: [
+      "unreconciled",
+      "auto_reconciled",
+      "manually_reconciled",
+      "reconciled_with_discrepancy"
+    ]
   }];
 
   // reason provides context for the reconciliation
-  string reason = 4 [(buf.validate.field).string = {
-    max_len: 500
-  }];
+  string reason = 4 [(buf.validate.field).string = {max_len: 500}];
 
   // reconciled_by identifies who performed reconciliation
   string reconciled_by = 5 [(buf.validate.field).string = {
@@ -156,9 +158,7 @@ message TransactionReconciledEvent {
 // general ledger. This is a final state - no further modifications are allowed.
 message TransactionPostedEvent {
   // log_id uniquely identifies the financial position log
-  string log_id = 1 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string log_id = 1 [(buf.validate.field).string = {uuid: true}];
 
   // account_id identifies the account this transaction affects
   string account_id = 2 [(buf.validate.field).string = {
@@ -173,9 +173,7 @@ message TransactionPostedEvent {
   }];
 
   // reason provides context for posting
-  string reason = 4 [(buf.validate.field).string = {
-    max_len: 500
-  }];
+  string reason = 4 [(buf.validate.field).string = {max_len: 500}];
 
   // posted_by identifies who posted the transaction
   string posted_by = 5 [(buf.validate.field).string = {
@@ -200,9 +198,7 @@ message TransactionPostedEvent {
 // validation or processing. Terminal state.
 message TransactionRejectedEvent {
   // log_id uniquely identifies the financial position log
-  string log_id = 1 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string log_id = 1 [(buf.validate.field).string = {uuid: true}];
 
   // account_id identifies the account this transaction affects
   string account_id = 2 [(buf.validate.field).string = {
@@ -239,9 +235,7 @@ message TransactionRejectedEvent {
 // Published when technical failures occur.
 message TransactionFailedEvent {
   // log_id uniquely identifies the financial position log
-  string log_id = 1 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string log_id = 1 [(buf.validate.field).string = {uuid: true}];
 
   // account_id identifies the account this transaction affects
   string account_id = 2 [(buf.validate.field).string = {
@@ -256,9 +250,7 @@ message TransactionFailedEvent {
   }];
 
   // error_code provides a machine-readable error identifier
-  string error_code = 4 [(buf.validate.field).string = {
-    max_len: 50
-  }];
+  string error_code = 4 [(buf.validate.field).string = {max_len: 50}];
 
   // correlation_id links related events across services
   string correlation_id = 5 [(buf.validate.field).string = {
@@ -277,9 +269,7 @@ message TransactionFailedEvent {
 // Published when a transaction is cancelled before posting.
 message TransactionCancelledEvent {
   // log_id uniquely identifies the financial position log
-  string log_id = 1 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string log_id = 1 [(buf.validate.field).string = {uuid: true}];
 
   // account_id identifies the account this transaction affects
   string account_id = 2 [(buf.validate.field).string = {
@@ -316,9 +306,7 @@ message TransactionCancelledEvent {
 // in a single batch operation. Useful for bulk imports or batch reconciliation.
 message BulkTransactionCapturedEvent {
   // batch_id uniquely identifies this batch operation
-  string batch_id = 1 [(buf.validate.field).string = {
-    uuid: true
-  }];
+  string batch_id = 1 [(buf.validate.field).string = {uuid: true}];
 
   // transaction_count is the number of transactions in this batch
   int32 transaction_count = 2 [(buf.validate.field).int32 = {gte: 1}];
@@ -331,7 +319,15 @@ message BulkTransactionCapturedEvent {
 
   // source indicates where the bulk operation originated
   string source = 4 [(buf.validate.field).string = {
-    in: ["MANUAL", "AUTOMATED", "IMPORTED", "RECONCILIATION", "ADJUSTMENT", "CURRENT_ACCOUNT", "FINANCIAL_ACCOUNTING"]
+    in: [
+      "MANUAL",
+      "AUTOMATED",
+      "IMPORTED",
+      "RECONCILIATION",
+      "ADJUSTMENT",
+      "CURRENT_ACCOUNT",
+      "FINANCIAL_ACCOUNTING"
+    ]
   }];
 
   // correlation_id links related events across services
@@ -344,7 +340,5 @@ message BulkTransactionCapturedEvent {
   google.protobuf.Timestamp timestamp = 6 [(buf.validate.field).required = true];
 
   // version supports optimistic concurrency control
-  int64 version = 7 [(buf.validate.field).int64 = {
-    gte: 1
-  }];
+  int64 version = 7 [(buf.validate.field).int64 = {gte: 1}];
 }

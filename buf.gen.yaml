@@ -13,8 +13,5 @@ plugins:
     opt:
       - paths=source_relative
 
-  # buf-validate Go plugin - generates .pb.validate.go files
-  - remote: buf.build/bufbuild/validate-go:v1.2.1
-    out: api/proto
-    opt:
-      - paths=source_relative
+  # Note: buf-validate uses runtime validation via github.com/bufbuild/protovalidate-go
+  # No code generation plugin needed - validation happens at runtime

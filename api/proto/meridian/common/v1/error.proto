@@ -109,6 +109,6 @@ message RetryInfo {
   // retry_delay_seconds suggests how long to wait before retrying.
   int32 retry_delay_seconds = 2 [(buf.validate.field).int32 = {
     gte: 0
-    lte: 3600  // Max 1 hour
+    lte: 3600 // Max 1 hour
   }];
 }

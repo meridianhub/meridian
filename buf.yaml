@@ -6,18 +6,27 @@ deps:
   - buf.build/googleapis/googleapis
 lint:
   use:
-    - STANDARD
-    - COMMENTS
+    # Core categories for comprehensive linting
+    - MINIMAL        # Minimal set of critical rules (package checks)
+    - BASIC          # Basic proto style (field casing, enum zero values, etc.)
+    - STANDARD       # Standard buf lint rules (includes BASIC + additional rules)
+    - COMMENTS       # Comment formatting and requirements for all proto elements
+    - UNARY_RPC      # Enforce unary RPC patterns (no streaming)
   except:
+    # Development exceptions - will be removed for production
     - PACKAGE_VERSION_SUFFIX  # Allow packages without version suffix during initial development
+  # Strict enforcement of naming conventions and proto style
   enum_zero_value_suffix: _UNSPECIFIED
   rpc_allow_same_request_response: false
   rpc_allow_google_protobuf_empty_requests: true
   rpc_allow_google_protobuf_empty_responses: true
   service_suffix: Service
+
 breaking:
   use:
-    - FILE
+    - FILE           # File-level breaking change detection
+    - WIRE_JSON      # Wire and JSON compatibility
+    - WIRE           # Wire-level compatibility only
   except:
     - EXTENSION_MESSAGE_NO_DELETE  # Allow during initial development
   ignore_unstable_packages: true
