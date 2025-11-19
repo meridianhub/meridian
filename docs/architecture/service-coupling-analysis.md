@@ -282,69 +282,387 @@ Per [ADR-0002](../adr/0002-microservices-per-bian-domain.md), Meridian implement
 | No cross-service internal imports | PASS | Zero domain-to-domain internal imports |
 | Platform code separation | FAIL | 17 internal/platform imports (should be pkg/platform) |
 
-## Recommendations
+## Prioritized Remediation Plan
 
-### Priority 1: Refactor Platform Code (MEDIUM Effort)
+This section provides actionable remediation steps with specific file paths, effort estimates, and dependencies.
+All items are categorized by priority based on their impact on service independence and architectural health.
 
-**Issue:** Services import `internal/platform/*` packages, violating Go's internal package semantics.
+### Priority Legend
+
+- **P0 - Critical**: Breaks service independence and violates BIAN domain boundaries
+- **P1 - High**: Architectural debt that increases technical risk and maintenance burden
+- **P2 - Medium**: Code organization issues that affect code clarity and maintenance
+
+### P0 - Critical (Breaks Service Independence)
+
+**Status:** Currently, no P0 violations exist in the codebase. All services properly respect BIAN domain
+boundaries with zero cross-service internal imports detected.
+
+**Prevention:** The absence of P0 violations demonstrates proper architectural discipline. To maintain this:
+
+- Enable CI gates (see P1-1 below) to prevent future violations
+- Require architectural review for any new service dependencies
+- Maintain strict separation between `internal/` packages across services
+
+### P1 - High (Architectural Debt)
+
+#### P1-1: Migrate Platform Code from internal/platform to pkg/platform
+
+**Problem:** Services import `internal/platform/*` packages, violating Go's internal package semantics.
+The `internal/` directory is meant for code that should not be imported by other modules, but our services
+need shared platform utilities.
+
+**Impact:**
+
+- Violates Go module semantics (15 files affected across 3 services)
+- Prevents platform code reuse by external tools or future services
+- Creates confusion about which code is truly internal vs shared
+
+**Affected Files (15 total):**
+
+**Observability (7 files):**
+
+- `cmd/current-account/main.go:18`
+- `cmd/financial-accounting/main.go:17`
+- `internal/current-account/service/grpc_service.go:22`
+- `internal/current-account/clients/financialaccounting_client.go:10`
+- `internal/current-account/clients/positionkeeping_client.go:10`
+- `internal/current-account/clients/financialaccounting_client_test.go:8`
+- `internal/current-account/clients/positionkeeping_client_test.go:8`
+- `internal/position-keeping/app/container.go:10`
+
+**Kafka (2 files):**
+
+- `internal/position-keeping/adapters/messaging/kafka_event_publisher_test.go:9`
+- `internal/financial-accounting/adapters/messaging/deposit_consumer.go:12`
+- `internal/financial-accounting/adapters/messaging/deposit_consumer_test.go:12`
+
+**TestDB (4 files):**
+
+- `internal/current-account/adapters/persistence/repository_test.go:10`
+- `internal/current-account/service/grpc_service_test.go:12`
+- `internal/financial-accounting/adapters/persistence/repository_test.go:12`
+- `internal/financial-accounting/service/posting_service_test.go:11`
+- `internal/financial-accounting/adapters/messaging/deposit_consumer_test.go:13`
+
+**Auth (1 file):**
+
+- `internal/position-keeping/app/container.go:9`
 
 **Solution:**
 
-1. Move platform packages from `internal/platform/` to `pkg/platform/`:
-   - `pkg/platform/observability`
-   - `pkg/platform/kafka`
-   - `pkg/platform/testdb`
-   - `pkg/platform/auth`
+**Step 1: Create pkg/platform structure** (1 story point)
 
-2. Update import paths in all services (17 files affected)
+```bash
+mkdir -p pkg/platform/{observability,kafka,testdb,auth}
+```
+
+**Step 2: Move platform packages** (2 story points)
+
+- Move `internal/platform/observability` → `pkg/platform/observability`
+- Move `internal/platform/kafka` → `pkg/platform/kafka`
+- Move `internal/platform/testdb` → `pkg/platform/testdb`
+- Move `internal/platform/auth` → `pkg/platform/auth`
+- Preserve git history using `git mv`
+
+**Step 3: Update import paths** (2 story points)
+
+```bash
+# Automated with find/replace
+find ./cmd ./internal -name "*.go" -exec sed -i '' \
+  's|github.com/meridianhub/meridian/internal/platform|github.com/meridianhub/meridian/pkg/platform|g' {} \;
+```
+
+**Step 4: Verify with tests** (1 story point)
+
+```bash
+# Run all tests to ensure no regressions
+make test
+
+# Run coupling analysis to verify fix
+./scripts/analyze-coupling.sh | jq '.violations[] | select(.type == "internal-platform-import")'
+# Should return empty
+```
 
 **Effort Estimate:** 5 story points (1-2 days)
 
-**Risk:** Low - Mechanical refactoring with automated tooling support
+**Dependencies:** None - can be done independently
 
-### Priority 2: Reduce Current Account Instability (LOW Effort)
+**Risk:** Low - Mechanical refactoring with automated tooling support. No business logic changes.
 
-**Issue:** Current Account has instability score of 1.00 (fully dependent, no dependents)
+**Alignment:**
+
+- **ADR-0002:** Supports proper platform code separation for microservices
+- **ADR-0005:** Platform adapters remain reusable across services
+
+**Related Tasks:** Foundation for all future platform work
+
+---
+
+#### P1-2: Reduce Current Account Service Instability
+
+**Problem:** Current Account service has an instability score of 1.00 (I=Ce/(Ca+Ce) = 2/(0+2) = 1.00),
+indicating it depends on two services (position-keeping, financial-accounting) but has zero services
+depending on it.
+
+**Impact:**
+
+- High change propagation risk - changes in dependencies ripple here
+- Service acts as orchestration layer without its own dependents
+- Distance from main sequence (D=0.50) indicates room for architectural improvement
+
+**Why This Matters:**
+This is expected for an orchestration service but indicates architectural fragility. The service is vulnerable
+to changes in both position-keeping and financial-accounting.
+
+**Affected Components:**
+
+- `internal/current-account/clients/positionkeeping_client.go` (depends on position-keeping)
+- `internal/current-account/clients/financialaccounting_client.go` (depends on financial-accounting)
+- `internal/current-account/clients/resilient_client.go` (circuit breaker - partial mitigation)
 
 **Solution Options:**
 
-1. Extract shared orchestration patterns to interfaces
-2. Introduce anti-corruption layer for external service calls
-3. Add resilience patterns (already has resilient_client.go)
+**Option A: Enhance Anti-Corruption Layer** (Recommended - 3 story points)
 
-**Effort Estimate:** 3 story points (abstraction improvements)
+```go
+// Add abstraction layer between current-account and dependencies
 
-**Risk:** Low - Existing resilient client pattern already addresses main concern
+// Define domain-level interfaces (not proto-coupled)
+type PositionReader interface {
+    GetBalance(ctx context.Context, accountID string) (Balance, error)
+}
 
-### Priority 3: Document Communication Contracts (LOW Effort)
+type JournalWriter interface {
+    RecordEntry(ctx context.Context, entry JournalEntry) error
+}
 
-**Issue:** Proto dependencies are safe but not explicitly documented in service README files.
+// Implement adapters that translate to gRPC
+type PositionKeepingAdapter struct {
+    client pb.PositionKeepingServiceClient
+}
+
+func (a *PositionKeepingAdapter) GetBalance(ctx context.Context, accountID string) (Balance, error) {
+    // Translate domain request → proto → domain response
+    // Insulates current-account from proto changes in position-keeping
+}
+```
+
+**Option B: Extract Orchestration Patterns** (5 story points)
+
+- Create shared `pkg/orchestration` package with Saga patterns
+- Move orchestration logic out of current-account
+- Benefits future services that need similar patterns
+
+**Option C: Accept Current State** (0 story points)
+
+- Instability is expected for orchestration services
+- Existing `resilient_client.go` already mitigates cascade failures
+- No action needed unless change frequency becomes problematic
+
+**Effort Estimate:** 3 story points (Option A recommended)
+
+**Dependencies:** None - orthogonal to other remediation items
+
+**Risk:** Medium - Requires careful testing of service interactions
+
+**Alignment:**
+
+- **ADR-0002:** Maintains service independence through abstraction
+- **ADR-0005:** Anti-corruption layer follows adapter pattern
+
+**Related Tasks:** Consider in future architecture reviews
+
+---
+
+### P2 - Medium (Code Organization)
+
+#### P2-1: Document Inter-Service Communication Contracts
+
+**Problem:** Proto dependencies are architecturally sound but not explicitly documented in service-level
+documentation. Developers need to read code to understand service dependencies.
+
+**Impact:**
+
+- Onboarding friction for new developers
+- Difficult to visualize system architecture
+- Risk of undocumented breaking changes
 
 **Solution:**
 
-1. Add DEPENDENCIES.md to each service documenting:
-   - Upstream services (what this service calls)
-   - Downstream services (who calls this service)
-   - Event subscriptions
-   - Event publications
+Create `DEPENDENCIES.md` in each service directory documenting:
 
-**Effort Estimate:** 2 story points (documentation)
+**Template:**
 
-**Risk:** None - Documentation only
+```markdown
+# Service Dependencies
 
-### Priority 4: Implement Coupling Gates (MEDIUM Effort)
+## Upstream Services (What We Call)
 
-**Issue:** No automated prevention of future coupling violations.
+### position-keeping
+- **Protocol:** gRPC
+- **Proto:** `api/proto/meridian/position_keeping/v1`
+- **Usage:** Balance queries for account operations
+- **Files:** `internal/current-account/clients/positionkeeping_client.go`
+
+## Downstream Services (Who Calls Us)
+
+None - current-account is an orchestration service with no direct dependents.
+
+## Event Publications
+
+None - current-account does not publish domain events.
+
+## Event Subscriptions
+
+None - current-account operates synchronously via gRPC.
+```
+
+**Files to Create:**
+
+- `cmd/current-account/DEPENDENCIES.md`
+- `cmd/position-keeping/DEPENDENCIES.md`
+- `cmd/financial-accounting/DEPENDENCIES.md`
+
+**Effort Estimate:** 2 story points (1 file per service × 3 services)
+
+**Dependencies:** None - pure documentation
+
+**Risk:** None - documentation only
+
+**Alignment:**
+
+- **ADR-0002:** Documents microservices communication patterns
+- General best practice for microservices architectures
+
+**Related Tasks:** Update during onboarding documentation refresh
+
+---
+
+#### P2-2: Implement Automated Coupling Gates in CI
+
+**Problem:** No automated prevention of future coupling violations. Developers can accidentally introduce
+cross-service imports without immediate feedback.
+
+**Impact:**
+
+- Risk of architectural drift over time
+- Coupling violations only caught in code review (if at all)
+- No historical tracking of coupling metrics
 
 **Solution:**
 
-1. Add `scripts/analyze-coupling.sh` to CI pipeline
-2. Fail builds on new cross-service internal imports
-3. Allow platform imports only from `pkg/platform/`
+**Step 1: Add CI script** (1 story point)
 
-**Effort Estimate:** 3 story points (CI integration)
+```yaml
+# .github/workflows/coupling-check.yml
+name: Service Coupling Analysis
+
+on: [pull_request]
+
+jobs:
+  coupling-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run coupling analysis
+        run: ./scripts/analyze-coupling.sh > coupling-report.json
+      - name: Check for violations
+        run: |
+          VIOLATIONS=$(jq '.violations | length' coupling-report.json)
+          if [ "$VIOLATIONS" -gt 0 ]; then
+            echo "❌ Found $VIOLATIONS coupling violations"
+            jq '.violations[]' coupling-report.json
+            exit 1
+          fi
+          echo "✅ No coupling violations detected"
+      - name: Upload coupling metrics
+        uses: actions/upload-artifact@v3
+        with:
+          name: coupling-metrics
+          path: coupling-report.json
+```
+
+**Step 2: Add pre-commit hook** (1 story point)
+
+```bash
+# .git/hooks/pre-commit
+#!/bin/bash
+./scripts/analyze-coupling.sh > /tmp/coupling-report.json
+VIOLATIONS=$(jq '.violations | length' /tmp/coupling-report.json)
+if [ "$VIOLATIONS" -gt 0 ]; then
+  echo "⚠️  Warning: $VIOLATIONS coupling violations detected"
+  echo "Run './scripts/analyze-coupling.sh' for details"
+  # Non-blocking warning (change to 'exit 1' for blocking)
+fi
+```
+
+**Step 3: Add coupling metrics dashboard** (1 story point)
+
+- Store coupling metrics history in Git
+- Track instability trends over time
+- Visualize in README or docs site
+
+**Effort Estimate:** 3 story points
+
+**Dependencies:**
+
+- Should be implemented after P1-1 (platform migration) to avoid false positives
+- Requires P1-1 completion first
 
 **Risk:** Low - Scripts already exist, just need CI integration
+
+**Alignment:**
+
+- **ADR-0002:** Enforces microservices boundaries automatically
+- Continuous architecture validation
+
+**Related Tasks:** Part of broader CI/CD improvements
+
+---
+
+### Summary Table
+
+| ID | Priority | Description | Effort (SP) | Risk | Dependencies |
+|----|----------|-------------|-------------|------|--------------|
+| P1-1 | High | Migrate internal/platform to pkg/platform | 5 | Low | None |
+| P1-2 | High | Reduce current-account instability | 3 | Medium | None |
+| P2-1 | Medium | Document service dependencies | 2 | None | None |
+| P2-2 | Medium | Implement CI coupling gates | 3 | Low | P1-1 |
+
+**Total Effort:** 13 story points (approximately 2-3 weeks for one developer)
+
+**Recommended Execution Order:**
+
+1. **P1-1** (Week 1) - Platform migration unblocks everything else
+2. **P2-2** (Week 1-2) - CI gates prevent regression after P1-1
+3. **P2-1** (Week 2) - Documentation can happen in parallel
+4. **P1-2** (Week 3) - Architectural improvement, consider in next sprint
+
+---
+
+### Maintenance and Monitoring
+
+After implementing remediation items:
+
+**Continuous Monitoring:**
+
+- Run `./scripts/analyze-coupling.sh` weekly to track metrics
+- Review coupling metrics in sprint retrospectives
+- Alert on instability score changes > 0.2
+
+**Quarterly Review:**
+
+- Reassess service boundaries and communication patterns
+- Evaluate new coupling patterns from feature development
+- Update this remediation plan with new findings
+
+**Success Criteria:**
+
+- Zero `internal-platform-import` violations (tracked in CI)
+- All services maintain I < 0.8 (instability score)
+- Service dependency graph matches BIAN architecture
+- < 5 minutes for new developers to understand service dependencies (via DEPENDENCIES.md)
 
 ## Testing Strategy
 
