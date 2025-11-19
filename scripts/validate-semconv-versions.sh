@@ -16,7 +16,7 @@ echo "Validating OpenTelemetry semantic convention versions..."
 # Find all semconv import versions in Go files
 SEMCONV_VERSIONS=$(grep -r "go.opentelemetry.io/otel/semconv/v1\." --include="*.go" . 2>/dev/null | \
   grep -oE "semconv/v1\.[0-9]+" | \
-  sort -u || true)
+  sort -u) || SEMCONV_VERSIONS=""
 
 # Count unique versions
 VERSION_COUNT=$(echo "$SEMCONV_VERSIONS" | grep -v "^$" | wc -l | tr -d ' ')
@@ -33,7 +33,7 @@ if [ "$VERSION_COUNT" -eq 1 ]; then
   # List files using this version for transparency
   echo ""
   echo "Files using $VERSION:"
-  grep -r "go.opentelemetry.io/otel/$VERSION" --include="*.go" . 2>/dev/null | \
+  grep -rF "go.opentelemetry.io/otel/$VERSION" --include="*.go" . 2>/dev/null | \
     cut -d: -f1 | \
     sort -u | \
     sed 's/^/  - /'
@@ -54,7 +54,7 @@ echo "Files by version:"
 for version in $SEMCONV_VERSIONS; do
   echo ""
   echo "  $version:"
-  grep -r "go.opentelemetry.io/otel/$version" --include="*.go" . 2>/dev/null | \
+  grep -rF "go.opentelemetry.io/otel/$version" --include="*.go" . 2>/dev/null | \
     cut -d: -f1 | \
     sort -u | \
     sed 's/^/    - /'

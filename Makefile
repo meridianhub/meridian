@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all docs
 
 # Default target
 all: help
@@ -42,7 +42,7 @@ help:
 	@echo "Available targets:"
 	@echo "  make build             - Compile all Go services"
 	@echo "  make test              - Run tests with coverage"
-	@echo "  make lint              - Run golangci-lint and validate Tiltfile"
+	@echo "  make lint              - Run golangci-lint, validate Tiltfile, and validate semconv versions"
 	@echo "  make validate-tilt     - Validate Tiltfile configuration"
 	@echo "  make fmt               - Format Go code"
 	@echo "  make clean             - Remove build artifacts"

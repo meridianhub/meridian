@@ -152,8 +152,8 @@ func StartKafkaProducerSpan(ctx context.Context, tracer *Tracer, opts KafkaSpanO
 //	}
 func StartKafkaConsumerSpan(ctx context.Context, tracer *Tracer, opts KafkaSpanOptions) (context.Context, trace.Span) {
 	attrs := []attribute.KeyValue{
-		semconv.MessagingSystemKafka,
-		semconv.MessagingOperationTypeReceive,
+		semconv.MessagingSystemKey.String("kafka"),
+		semconv.MessagingOperationTypeKey.String("receive"),
 		semconv.MessagingDestinationNameKey.String(opts.Topic),
 	}
 
