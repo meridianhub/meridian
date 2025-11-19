@@ -131,6 +131,13 @@ brew install golangci-lint
 npm install
 ```
 
+**Important**: Run `npm install` once after cloning the repository to install markdownlint-cli2 locally. This ensures
+optimal performance during pre-commit checks (without this, the hook will use `npx` which downloads the package on each
+commit).
+
+**Version strategy**: We use `markdownlint-cli2 ^0.19.0` to stay current with the latest features and fixes. While
+CodeRabbit uses 0.18.1, the markdown rules are stable and compatible across minor versions.
+
 Markdown linting is enforced via:
 
 - **Pre-commit hooks**: Automatically validates staged `.md` files before commit

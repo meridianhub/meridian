@@ -78,9 +78,14 @@ if [ -n "$STAGED_MD_FILES" ]; then
     if [ -f "package.json" ] && command -v npm &> /dev/null; then
         # Run markdownlint-cli2 via npm on staged markdown files
         echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
-        # Use mapfile to safely handle filenames with spaces and special characters
-        mapfile -t MD_FILES_ARRAY <<< "$STAGED_MD_FILES"
-        if npm run --silent lint:md -- "${MD_FILES_ARRAY[@]}" 2>/dev/null || npx --yes markdownlint-cli2 "${MD_FILES_ARRAY[@]}"; then
+        # Convert newline-separated list to array, filtering empty lines
+        MD_FILES_ARRAY=()
+        while IFS= read -r file; do
+            [[ -n "$file" ]] && MD_FILES_ARRAY+=("$file")
+        done <<< "$STAGED_MD_FILES"
+
+        # Try npm script first, preserve error output
+        if npm run --silent lint:md -- "${MD_FILES_ARRAY[@]}" 2>&1; then
             echo -e "${GREEN}✓${NC} markdownlint passed"
         else
             echo -e "${RED}✗${NC} markdownlint failed"
@@ -90,9 +95,14 @@ if [ -n "$STAGED_MD_FILES" ]; then
         fi
     elif command -v npx &> /dev/null; then
         # Fallback to npx if package.json not present
+        # Note: Run 'npm install' once for optimal performance (avoids package download on each commit)
         echo -e "${YELLOW}→${NC} Running markdownlint on markdown files..."
-        # Use mapfile to safely handle filenames with spaces and special characters
-        mapfile -t MD_FILES_ARRAY <<< "$STAGED_MD_FILES"
+        # Convert newline-separated list to array, filtering empty lines
+        MD_FILES_ARRAY=()
+        while IFS= read -r file; do
+            [[ -n "$file" ]] && MD_FILES_ARRAY+=("$file")
+        done <<< "$STAGED_MD_FILES"
+
         if npx --yes markdownlint-cli2 "${MD_FILES_ARRAY[@]}"; then
             echo -e "${GREEN}✓${NC} markdownlint passed"
         else
