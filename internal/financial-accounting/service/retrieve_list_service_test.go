@@ -224,6 +224,32 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 			},
 			rationale: "Empty optional fields should be handled correctly",
 		},
+		{
+			name: "posting with negative amount",
+			setup: func(db *gorm.DB) uuid.UUID {
+				postingID := uuid.New()
+				entity := persistence.LedgerPostingEntity{
+					ID:                    postingID,
+					FinancialBookingLogID: uuid.New(),
+					PostingDirection:      "CREDIT",
+					AmountCents:           -15050, // -$150.50
+					Currency:              "USD",
+					AccountID:             "ACC-789",
+					ValueDate:             time.Now().UTC(),
+					Status:                "POSTED",
+					CreatedAt:             time.Now().UTC(),
+				}
+				db.Create(&entity)
+				return postingID
+			},
+			validate: func(t *testing.T, posting *financialaccountingv1.LedgerPosting) {
+				assert.NotNil(t, posting.PostingAmount)
+				// For -15050 cents (-$150.50): units=-150, nanos=-500000000
+				assert.Equal(t, int64(-150), posting.PostingAmount.Units, "Negative units should be correct")
+				assert.Equal(t, int32(-500000000), posting.PostingAmount.Nanos, "Negative nanos should match fractional cents")
+			},
+			rationale: "Negative amounts (credits) should preserve sign in both units and nanos",
+		},
 	}
 
 	for _, tt := range tests {

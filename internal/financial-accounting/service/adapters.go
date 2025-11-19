@@ -13,13 +13,12 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var (
-	// ErrEmptyUUID is returned when a UUID string is empty
-	ErrEmptyUUID = errors.New("UUID cannot be empty")
+// decimalHundred is used for converting between decimal and cents
+var decimalHundred = decimal.NewFromInt(100)
 
-	// decimalHundred is used for converting between decimal and cents
-	decimalHundred = decimal.NewFromInt(100)
-)
+// ErrEmptyUUID is returned when a UUID string is empty.
+// This error is wrapped in InvalidArgument gRPC status codes.
+var ErrEmptyUUID = errors.New("UUID cannot be empty")
 
 // parseUUID parses and validates a UUID string.
 //
@@ -88,8 +87,8 @@ func toProtoMoney(m domain.Money) *money.Money {
 
 	// Split into units (dollars) and nanos (fractional cents)
 	units := cents / 100
-	// Safe conversion: cents % 100 is always 0-99, so multiplying by 10M fits in int32
-	centsPart := int32(cents % 100) // #nosec G115 -- Modulo operation guarantees 0-99 range, always safe for int32
+	// Safe conversion: cents % 100 is always -99 to 99, preserving sign for negative amounts
+	centsPart := int32(cents % 100) // #nosec G115 -- Modulo operation guarantees -99 to 99 range, always safe for int32
 	nanos := centsPart * 10_000_000 // Convert cents to nanos (1 cent = 10M nanos)
 
 	return &money.Money{
