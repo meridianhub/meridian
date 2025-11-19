@@ -1,6 +1,7 @@
 # Financial Accounting Service - Protocol Buffer Schemas
 
-This directory contains the Protocol Buffer definitions for the Financial Accounting service, following the BIAN (Banking Industry Architecture Network) Financial Accounting service domain.
+This directory contains the Protocol Buffer definitions for the Financial Accounting service, following the BIAN
+(Banking Industry Architecture Network) Financial Accounting service domain.
 
 ## Schema Structure
 
@@ -21,9 +22,11 @@ The FinancialAccountingService provides gRPC APIs for managing financial booking
 
 #### FinancialBookingLog
 
-Represents the BIAN Financial Booking Log aggregate root. Maintains records of financial transactions and their processing status.
+Represents the BIAN Financial Booking Log aggregate root. Maintains records of financial transactions and their
+processing status.
 
 Key fields:
+
 - `id` - Unique identifier
 - `financial_account_type` - Type of account (debit, credit, vostro, nostro, current, savings)
 - `product_service_reference` - Financial product identifier
@@ -38,6 +41,7 @@ Key fields:
 Represents a single posting operation in double-entry bookkeeping.
 
 Key fields:
+
 - `id` - Unique identifier
 - `financial_booking_log_id` - Parent booking log reference
 - `posting_direction` - Debit or credit
@@ -50,6 +54,7 @@ Key fields:
 ### Double-Entry Bookkeeping Semantics
 
 Individual postings are created separately (not as balanced pairs). Balance validation occurs at the service layer:
+
 - Booking log can only transition to POSTED status when total debits equal total credits
 - Service layer validates balance before posting
 - Consider using batch operations for balanced posting pairs
@@ -83,6 +88,7 @@ Event schemas follow the event-sourced architecture pattern, with events publish
 ### Event Metadata
 
 All events include standard metadata fields:
+
 - `correlation_id` - Links related events across services
 - `causation_id` - Identifies the event or command that caused this event
 - `timestamp` - When the event was created
@@ -90,7 +96,8 @@ All events include standard metadata fields:
 
 ## Schema Evolution Strategy
 
-Following ADR-0004 (Event Schema Evolution Strategy), this service uses **manual schema definition** with **buf tooling** for validation:
+Following ADR-0004 (Event Schema Evolution Strategy), this service uses **manual schema definition** with
+**buf tooling** for validation:
 
 ### Evolution Patterns
 
@@ -123,6 +130,7 @@ message FinancialBookingLogSuspendedEvent {
 ### Kafka Topic Strategy
 
 One topic per event type for internal coordination events:
+
 - `financial-booking-log-initiated`
 - `financial-booking-log-posted`
 - `financial-booking-log-closed`
@@ -141,6 +149,7 @@ buf breaking --against ../../meridian-main
 ```
 
 Breaking changes include:
+
 - Removing fields
 - Changing field types
 - Changing field numbers
@@ -190,6 +199,7 @@ buf generate
 ```
 
 Generated files:
+
 - `*.pb.go` - Protocol buffer Go code
 - `*_grpc.pb.go` - gRPC service stubs
 - `*.pb.validate.go` - Field validation code
@@ -205,6 +215,7 @@ go test ./api/proto/meridian/events/v1/... -run TestFinancial
 ```
 
 Tests verify:
+
 - Event marshaling/unmarshaling
 - Field preservation across serialization
 - Type correctness
@@ -215,6 +226,7 @@ Tests verify:
 ### Adapter Pattern (ADR-0005)
 
 Use adapter classes to translate between:
+
 1. **Domain Layer** - Pure business logic with domain entities
 2. **API Layer** - Protocol buffer messages for external communication
 3. **Persistence Layer** - Database entities
