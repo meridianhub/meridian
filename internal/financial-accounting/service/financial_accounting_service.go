@@ -146,7 +146,8 @@ func (s *FinancialAccountingService) RetrieveLedgerPosting(
 		if errors.Is(err, persistence.ErrPostingNotFound) {
 			return nil, status.Errorf(codes.NotFound, "ledger posting not found: %s", postingID)
 		}
-		return nil, status.Errorf(codes.Internal, "failed to retrieve ledger posting: %v", err)
+		// Don't expose internal errors to clients (security best practice)
+		return nil, status.Error(codes.Internal, "failed to retrieve ledger posting")
 	}
 
 	// Convert to protobuf and return

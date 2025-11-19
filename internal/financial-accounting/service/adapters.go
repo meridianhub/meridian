@@ -88,7 +88,9 @@ func toProtoMoney(m domain.Money) *money.Money {
 
 	// Split into units (dollars) and nanos (fractional cents)
 	units := cents / 100
-	nanos := int32((cents % 100) * 10_000_000) // Convert cents to nanos (1 cent = 10M nanos)
+	// Safe conversion: cents % 100 is always 0-99, so multiplying by 10M fits in int32
+	centsPart := int32(cents % 100)
+	nanos := centsPart * 10_000_000 // Convert cents to nanos (1 cent = 10M nanos)
 
 	return &money.Money{
 		CurrencyCode: string(m.Currency()),
