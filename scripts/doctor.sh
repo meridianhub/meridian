@@ -170,10 +170,10 @@ get_install_cmd() {
         linux-docker) echo "curl -fsSL https://get.docker.com | sh" ;;
         linux-kubectl) echo "sudo snap install kubectl --classic" ;;
         linux-helm) echo "curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash" ;;
-        linux-kind) echo "GO111MODULE=on go install sigs.k8s.io/kind@latest" ;;
-        linux-ctlptl) echo "GO111MODULE=on go install github.com/tilt-dev/ctlptl/cmd/ctlptl@latest" ;;
+        linux-kind) echo "go install sigs.k8s.io/kind@latest" ;;
+        linux-ctlptl) echo "go install github.com/tilt-dev/ctlptl/cmd/ctlptl@latest" ;;
         linux-tilt) echo "curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash" ;;
-        linux-buf) echo "GO111MODULE=on go install github.com/bufbuild/buf/cmd/buf@latest" ;;
+        linux-buf) echo "go install github.com/bufbuild/buf/cmd/buf@latest" ;;
         linux-protoc) echo "sudo ${PKG_MANAGER} install -y protobuf-compiler" ;;
         linux-golangci-lint) echo "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b \$(go env GOPATH)/bin" ;;
         linux-node) echo "sudo ${PKG_MANAGER} install -y nodejs npm" ;;
@@ -199,8 +199,9 @@ install_tool() {
     fi
 
     echo -e "${YELLOW}Installing $tool...${NC}"
-    # Direct execution without eval - safer than eval
-    if bash -c "$install_cmd" &> /dev/null; then
+    # Execute install command (safer than eval, but still requires bash -c for complex commands)
+    # Note: install_cmd comes from get_install_cmd() which uses only predefined safe commands
+    if sh -c "$install_cmd" &> /dev/null; then
         echo -e "${GREEN}✓${NC} $tool installed successfully"
         return 0
     else
@@ -336,12 +337,12 @@ check_k8s_cluster() {
     if [ "$is_remote_cluster" = true ]; then
         # Use curl as primary check (more reliable cross-platform)
         if command -v curl &> /dev/null; then
-            if ! timeout 2 curl -sI https://google.com &>/dev/null; then
+            if ! timeout 2 curl -sI --fail https://google.com &>/dev/null; then
                 network_available=false
             fi
         # Fallback to nc and host if curl not available
         elif command -v nc &> /dev/null && command -v host &> /dev/null; then
-            if ! timeout 2 nc -z 8.8.8.8 53 2>/dev/null && ! timeout 2 host google.com >/dev/null 2>&1; then
+            if ! timeout 2 nc -z 8.8.8.8 53 2>/dev/null || ! timeout 2 host google.com >/dev/null 2>&1; then
                 network_available=false
             fi
         else
