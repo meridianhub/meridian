@@ -30,6 +30,11 @@ allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desk
 # Configuration
 # =============================================================================
 
+# Fast startup mode - skip tests on initial load for faster development iteration
+# Set TILT_FAST_STARTUP=true to skip automatic test execution
+# Tests can still be manually triggered via 'tilt trigger test'
+fast_startup = os.getenv('TILT_FAST_STARTUP', 'false').lower() == 'true'
+
 # Detect and use local registry if available (created by ctlptl)
 # This speeds up image builds by avoiding remote registry pushes
 if k8s_context() == 'kind-meridian-local':
@@ -764,6 +769,7 @@ k8s_resource(
 # =============================================================================
 
 # Run tests on file changes
+# In fast startup mode, tests are disabled on initial load but can be manually triggered
 local_resource(
   'test',
   cmd='make test',
@@ -771,6 +777,7 @@ local_resource(
   resource_deps=['generate-proto'],
   labels=['quality'],
   allow_parallel=True,
+  auto_init=False if fast_startup else True,  # Skip on startup in fast mode
 )
 
 # Run linters on file changes
@@ -878,11 +885,16 @@ local_resource(
 # Tilt UI settings
 update_settings(max_parallel_updates=3, k8s_upsert_timeout_secs=60)
 
+fast_startup_msg = """
+⚡ FAST STARTUP MODE ENABLED
+   Tests skipped on initial load (trigger manually: 'tilt trigger test')
+""" if fast_startup else ""
+
 print("""
 ========================================
 🚀 Meridian Development Environment
 ========================================
-
+{}
 Services:
   • Meridian API           → http://localhost:8080
   • Meridian gRPC          → localhost:9090
@@ -934,5 +946,10 @@ Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker
   kubectl exec kafka-0 -- kafka-topics --describe --topic <topic> --bootstrap-server localhost:9092
 
+Fast Startup Mode:
+  • Enable: export TILT_FAST_STARTUP=true && tilt up
+  • Skips automatic test execution on startup for faster iteration
+  • Manually trigger tests: tilt trigger test
+
 ========================================
-""")
+""".format(fast_startup_msg))
