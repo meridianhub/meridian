@@ -34,6 +34,19 @@ enum TransactionStatus {
   TRANSACTION_STATUS_REVERSED = 4;
 }
 
+// LienStatus defines the lifecycle state of a fund reservation (lien)
+// A lien is a hold placed on funds to reserve them for a pending payment
+enum LienStatus {
+  // LIEN_STATUS_UNSPECIFIED is the default value and should not be used
+  LIEN_STATUS_UNSPECIFIED = 0;
+  // LIEN_STATUS_ACTIVE means the funds are currently reserved
+  LIEN_STATUS_ACTIVE = 1;
+  // LIEN_STATUS_EXECUTED means the lien was converted to an actual debit
+  LIEN_STATUS_EXECUTED = 2;
+  // LIEN_STATUS_TERMINATED means the lien was released without execution
+  LIEN_STATUS_TERMINATED = 3;
+}
+
 // CurrentAccountFacility represents a BIAN-compliant current account facility
 // Task 5.1: Define CurrentAccountFacility message with account identification and status management
 message CurrentAccountFacility {
@@ -181,6 +194,46 @@ message TransactionHistory {
   google.protobuf.Timestamp last_updated = 4;
 }
 
+// Lien represents a fund reservation (hold) on an account
+// Used by Payment Order to reserve funds before executing external payments
+// Invariant: Available Balance = Current Balance - Sum(Active Liens)
+message Lien {
+  // lien_id is the unique identifier for this lien
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // account_id is the account this lien belongs to
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the reserved amount
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // status is the current lien lifecycle state
+  LienStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // payment_order_reference is the Payment Order that created this lien
+  string payment_order_reference = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // created_at is when the lien was created
+  google.protobuf.Timestamp created_at = 6 [(buf.validate.field).required = true];
+
+  // updated_at is when the lien was last modified
+  google.protobuf.Timestamp updated_at = 7 [(buf.validate.field).required = true];
+}
+
 // Request to initiate a new current account
 message InitiateCurrentAccountRequest {
   // customer_id is the customer who owns this account
@@ -263,6 +316,100 @@ message RetrieveCurrentAccountResponse {
   CurrentAccountFacility facility = 1;
 }
 
+// Request to initiate a lien (reserve funds) on an account
+// BQ: Initiate - Creates a new fund reservation
+message InitiateLienRequest {
+  // account_id is the account to place the lien on
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the amount to reserve
+  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+
+  // payment_order_reference identifies the Payment Order creating this lien
+  string payment_order_reference = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// Response for initiating a lien
+message InitiateLienResponse {
+  // lien is the created lien with ACTIVE status
+  Lien lien = 1 [(buf.validate.field).required = true];
+
+  // available_balance is the updated available balance after reservation
+  meridian.common.v1.MoneyAmount available_balance = 2 [(buf.validate.field).required = true];
+}
+
+// Request to execute a lien (convert reservation to actual debit)
+// BQ: Execute - Atomically converts lien to debit and removes reservation
+message ExecuteLienRequest {
+  // lien_id is the lien to execute
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// Response for executing a lien
+message ExecuteLienResponse {
+  // lien is the executed lien with EXECUTED status
+  Lien lien = 1 [(buf.validate.field).required = true];
+
+  // new_balance is the account balance after the debit
+  meridian.common.v1.MoneyAmount new_balance = 2 [(buf.validate.field).required = true];
+
+  // available_balance is the updated available balance
+  meridian.common.v1.MoneyAmount available_balance = 3 [(buf.validate.field).required = true];
+
+  // transaction_id is the debit transaction created
+  string transaction_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+}
+
+// Request to terminate a lien (release reserved funds)
+// BQ: Terminate - Releases the reservation without executing
+message TerminateLienRequest {
+  // lien_id is the lien to terminate
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// Response for terminating a lien
+message TerminateLienResponse {
+  // lien is the terminated lien with TERMINATED status
+  Lien lien = 1 [(buf.validate.field).required = true];
+
+  // available_balance is the updated available balance after release
+  meridian.common.v1.MoneyAmount available_balance = 2 [(buf.validate.field).required = true];
+}
+
+// Request to retrieve a lien
+message RetrieveLienRequest {
+  // lien_id is the lien to retrieve
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// Response for retrieving a lien
+message RetrieveLienResponse {
+  // lien is the requested lien
+  Lien lien = 1 [(buf.validate.field).required = true];
+}
+
 // CurrentAccountService provides BIAN-compliant current account operations
 service CurrentAccountService {
   // InitiateCurrentAccount creates a new current account facility
@@ -273,4 +420,19 @@ service CurrentAccountService {
 
   // RetrieveCurrentAccount gets current account details
   rpc RetrieveCurrentAccount(RetrieveCurrentAccountRequest) returns (RetrieveCurrentAccountResponse);
+
+  // InitiateLien creates a fund reservation on an account
+  // Used by Payment Order to reserve funds before external payment execution
+  rpc InitiateLien(InitiateLienRequest) returns (InitiateLienResponse);
+
+  // ExecuteLien converts a reservation to an actual debit atomically
+  // Called when the external payment is confirmed as settled
+  rpc ExecuteLien(ExecuteLienRequest) returns (ExecuteLienResponse);
+
+  // TerminateLien releases a reservation without executing
+  // Called when the external payment fails or is cancelled
+  rpc TerminateLien(TerminateLienRequest) returns (TerminateLienResponse);
+
+  // RetrieveLien gets lien details
+  rpc RetrieveLien(RetrieveLienRequest) returns (RetrieveLienResponse);
 }
