@@ -1,0 +1,203 @@
+syntax = "proto3";
+
+package meridian.payment_order.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1;paymentorderv1";
+
+// PaymentOrderStatus defines the lifecycle state of a payment order in the saga.
+enum PaymentOrderStatus {
+  // PAYMENT_ORDER_STATUS_UNSPECIFIED means the status is unknown.
+  PAYMENT_ORDER_STATUS_UNSPECIFIED = 0;
+  // PAYMENT_ORDER_STATUS_INITIATED means the payment order has been created and validated.
+  PAYMENT_ORDER_STATUS_INITIATED = 1;
+  // PAYMENT_ORDER_STATUS_RESERVED means funds have been reserved via a lien on the debtor account.
+  PAYMENT_ORDER_STATUS_RESERVED = 2;
+  // PAYMENT_ORDER_STATUS_EXECUTING means the payment has been sent to the external gateway.
+  PAYMENT_ORDER_STATUS_EXECUTING = 3;
+  // PAYMENT_ORDER_STATUS_COMPLETED means the payment has been settled and funds transferred.
+  PAYMENT_ORDER_STATUS_COMPLETED = 4;
+  // PAYMENT_ORDER_STATUS_FAILED means the payment failed at some stage of the saga.
+  PAYMENT_ORDER_STATUS_FAILED = 5;
+}
+
+// GatewayStatus represents the status returned by an external payment gateway.
+enum GatewayStatus {
+  // GATEWAY_STATUS_UNSPECIFIED means the status is unknown.
+  GATEWAY_STATUS_UNSPECIFIED = 0;
+  // GATEWAY_STATUS_SETTLED means the gateway has confirmed the payment was successful.
+  GATEWAY_STATUS_SETTLED = 1;
+  // GATEWAY_STATUS_REJECTED means the gateway has rejected the payment.
+  GATEWAY_STATUS_REJECTED = 2;
+  // GATEWAY_STATUS_PENDING means the gateway is still processing the payment.
+  GATEWAY_STATUS_PENDING = 3;
+}
+
+// PaymentOrder represents the BIAN Payment Order control record.
+// It acts as the saga orchestrator for money movement, coordinating
+// across CurrentAccount (reservations) and FinancialAccounting (ledger booking).
+message PaymentOrder {
+  // payment_order_id is the unique identifier for this payment order.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // debtor_account_id is the internal account ID from which funds are debited.
+  string debtor_account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // creditor_reference is the external account identifier (IBAN or other standard).
+  // IBAN format: 2 letter country code + 2 check digits + up to 30 alphanumeric characters.
+  string creditor_reference = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 34
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
+  }];
+
+  // amount is the payment amount (must be positive).
+  meridian.common.v1.MoneyAmount amount = 4 [(buf.validate.field).required = true];
+
+  // status is the current state in the payment saga lifecycle.
+  PaymentOrderStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // lien_id references the reservation created in CurrentAccount (populated after RESERVED).
+  string lien_id = 6 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // gateway_reference_id is the external ID from the payment gateway (populated after EXECUTING).
+  string gateway_reference_id = 7 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // correlation_id is used for distributed tracing and request correlation.
+  string correlation_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // idempotency_key ensures exactly-once processing of this payment order.
+  string idempotency_key = 9 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // failure_reason describes why the payment failed (populated only if status is FAILED).
+  string failure_reason = 10 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+
+  // created_at is when this payment order was initiated.
+  google.protobuf.Timestamp created_at = 11;
+
+  // updated_at is when this payment order was last modified.
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+// InitiatePaymentOrderRequest creates a new payment order (BQ: Initiate).
+message InitiatePaymentOrderRequest {
+  // debtor_account_id is the internal account to debit.
+  string debtor_account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // creditor_reference is the external account to credit (IBAN format).
+  string creditor_reference = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 34
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
+  }];
+
+  // amount is the payment amount (must be positive).
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
+
+  // correlation_id is optional for distributed tracing (generated if not provided).
+  string correlation_id = 5 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+}
+
+// InitiatePaymentOrderResponse returns the created payment order.
+message InitiatePaymentOrderResponse {
+  // payment_order is the newly created payment order.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// RetrievePaymentOrderRequest gets payment order details by ID.
+message RetrievePaymentOrderRequest {
+  // payment_order_id is the unique identifier of the payment order to retrieve.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrievePaymentOrderResponse returns the requested payment order.
+message RetrievePaymentOrderResponse {
+  // payment_order is the retrieved payment order.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// UpdatePaymentOrderRequest handles asynchronous gateway callbacks (BQ: Update).
+// This is typically called from the webhook HTTP adapter when the gateway
+// reports the final status of a payment.
+message UpdatePaymentOrderRequest {
+  // gateway_reference_id is the external ID from the payment gateway.
+  // Used to look up the corresponding payment order.
+  string gateway_reference_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // gateway_status is the status reported by the payment gateway.
+  GatewayStatus gateway_status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // gateway_message is optional details from the gateway (e.g., rejection reason).
+  string gateway_message = 3 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+}
+
+// UpdatePaymentOrderResponse returns the updated payment order.
+message UpdatePaymentOrderResponse {
+  // payment_order is the updated payment order.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// PaymentOrderService provides BIAN-compliant payment order operations.
+// This service acts as the saga orchestrator for money movement,
+// coordinating funds reservation, gateway execution, and ledger booking.
+service PaymentOrderService {
+  // InitiatePaymentOrder creates a new payment order and begins the saga.
+  // The saga flow: INITIATED → RESERVED → EXECUTING → COMPLETED/FAILED
+  rpc InitiatePaymentOrder(InitiatePaymentOrderRequest) returns (InitiatePaymentOrderResponse);
+
+  // RetrievePaymentOrder gets payment order details by ID.
+  rpc RetrievePaymentOrder(RetrievePaymentOrderRequest) returns (RetrievePaymentOrderResponse);
+
+  // UpdatePaymentOrder handles asynchronous gateway callbacks.
+  // Called when the external gateway reports the final payment status.
+  rpc UpdatePaymentOrder(UpdatePaymentOrderRequest) returns (UpdatePaymentOrderResponse);
+}
