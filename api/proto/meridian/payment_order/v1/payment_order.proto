@@ -22,6 +22,10 @@ enum PaymentOrderStatus {
   PAYMENT_ORDER_STATUS_COMPLETED = 4;
   // PAYMENT_ORDER_STATUS_FAILED means the payment failed at some stage of the saga.
   PAYMENT_ORDER_STATUS_FAILED = 5;
+  // PAYMENT_ORDER_STATUS_CANCELLED means the payment was cancelled before completion.
+  PAYMENT_ORDER_STATUS_CANCELLED = 6;
+  // PAYMENT_ORDER_STATUS_REVERSED means the payment was reversed after completion (compensation).
+  PAYMENT_ORDER_STATUS_REVERSED = 7;
 }
 
 // GatewayStatus represents the status returned by an external payment gateway.
@@ -101,10 +105,106 @@ message PaymentOrder {
   }];
 
   // created_at is when this payment order was initiated.
-  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp created_at = 11 [(buf.validate.field).required = true];
 
   // updated_at is when this payment order was last modified.
-  google.protobuf.Timestamp updated_at = 12;
+  google.protobuf.Timestamp updated_at = 12 [(buf.validate.field).required = true];
+
+  // version is for optimistic locking.
+  int32 version = 13 [(buf.validate.field).int32 = {gte: 0}];
+}
+
+// PaymentOrderInitiated is published when a payment order is created.
+message PaymentOrderInitiated {
+  // payment_order_id is the unique identifier for this payment order.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // debtor_account_id is the internal account ID from which funds are debited.
+  string debtor_account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // amount is the payment amount.
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // correlation_id is used for distributed tracing.
+  string correlation_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp is when the event occurred.
+  google.protobuf.Timestamp timestamp = 5 [(buf.validate.field).required = true];
+}
+
+// PaymentOrderCompleted is published when a payment order is successfully settled.
+message PaymentOrderCompleted {
+  // payment_order_id is the unique identifier for this payment order.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // debtor_account_id is the internal account ID from which funds were debited.
+  string debtor_account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // amount is the payment amount.
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // gateway_reference_id is the external ID from the payment gateway.
+  string gateway_reference_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // correlation_id is used for distributed tracing.
+  string correlation_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp is when the event occurred.
+  google.protobuf.Timestamp timestamp = 6 [(buf.validate.field).required = true];
+}
+
+// PaymentOrderFailed is published when a payment order fails at any stage.
+message PaymentOrderFailed {
+  // payment_order_id is the unique identifier for this payment order.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // debtor_account_id is the internal account ID.
+  string debtor_account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // amount is the payment amount.
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // failure_reason describes why the payment failed.
+  string failure_reason = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // correlation_id is used for distributed tracing.
+  string correlation_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp is when the event occurred.
+  google.protobuf.Timestamp timestamp = 6 [(buf.validate.field).required = true];
 }
 
 // InitiatePaymentOrderRequest creates a new payment order (BQ: Initiate).
