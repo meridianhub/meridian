@@ -225,6 +225,7 @@ message Lien {
   string payment_order_reference = 5 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
+    pattern: "^[a-zA-Z0-9_/-]+$"
   }];
 
   // created_at is when the lien was created
@@ -333,6 +334,7 @@ message InitiateLienRequest {
   string payment_order_reference = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
+    pattern: "^[a-zA-Z0-9_/-]+$"
   }];
 }
 
@@ -371,6 +373,7 @@ message ExecuteLienResponse {
   string transaction_id = 4 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
   }];
 }
 
@@ -383,6 +386,9 @@ message TerminateLienRequest {
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
+
+  // reason is an optional explanation for termination (for audit trail)
+  string reason = 2 [(buf.validate.field).string = {max_len: 500}];
 }
 
 // Response for terminating a lien
