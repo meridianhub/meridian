@@ -133,7 +133,10 @@ func (r *LienRepository) Update(lien *domain.Lien) error {
 	return nil
 }
 
-// SumActiveAmountByAccountID returns the total amount of active liens for an account
+// SumActiveAmountByAccountID returns the total amount of active liens for an account in cents.
+// Note: This assumes all liens for an account share the same currency as the account.
+// Currency validation is enforced at the service layer when creating liens (InitiateLien).
+// If multi-currency support is needed in the future, this should return map[string]int64.
 func (r *LienRepository) SumActiveAmountByAccountID(accountID uuid.UUID) (int64, error) {
 	var totalCents int64
 	result := r.db.Model(&LienEntity{}).

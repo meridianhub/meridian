@@ -89,6 +89,17 @@ func TestLien_Execute_FromTerminated_Fails(t *testing.T) {
 	assert.ErrorIs(t, err, ErrLienNotActive)
 }
 
+func TestLien_Execute_Expired_Fails(t *testing.T) {
+	lien := createTestLien(t, LienStatusActive)
+	past := time.Now().Add(-1 * time.Hour)
+	lien.ExpiresAt = &past
+
+	err := lien.Execute()
+
+	assert.ErrorIs(t, err, ErrLienExpired)
+	assert.Equal(t, LienStatusActive, lien.Status) // Status unchanged
+}
+
 func TestLien_Terminate_FromActive(t *testing.T) {
 	lien := createTestLien(t, LienStatusActive)
 
@@ -199,7 +210,7 @@ func TestLien_CanExecute(t *testing.T) {
 
 	t.Run("terminated", func(t *testing.T) {
 		lien := createTestLien(t, LienStatusTerminated)
-		assert.False(t, lien.CanTerminate())
+		assert.False(t, lien.CanExecute())
 	})
 }
 

@@ -22,8 +22,8 @@ type LienEntity struct {
 	// Lifecycle state
 	Status string `gorm:"not null;size:20;index:idx_liens_account_status;check:status IN ('ACTIVE','EXECUTED','TERMINATED')"`
 
-	// Reference to the payment order that created this lien
-	PaymentOrderReference string `gorm:"not null;size:255;index:idx_liens_payment_order"`
+	// Reference to the payment order that created this lien (unique - each payment order has at most one lien)
+	PaymentOrderReference string `gorm:"not null;size:255;uniqueIndex:idx_liens_payment_order"`
 
 	// Reason for termination (only set when status is TERMINATED)
 	TerminationReason string `gorm:"size:1000"`

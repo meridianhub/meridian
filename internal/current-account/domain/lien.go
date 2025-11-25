@@ -65,6 +65,7 @@ func NewLien(accountID uuid.UUID, amount Money, paymentOrderReference string, ex
 // Execute transitions the lien to EXECUTED status (terminal state)
 // This is called when the payment has been successfully submitted and the funds should be debited.
 // Idempotent: Returns nil if already executed.
+// Returns ErrLienExpired if the lien has passed its expiration time.
 func (l *Lien) Execute() error {
 	if l.Status == LienStatusExecuted {
 		return nil // Idempotent
@@ -72,6 +73,10 @@ func (l *Lien) Execute() error {
 
 	if l.Status != LienStatusActive {
 		return ErrLienNotActive
+	}
+
+	if l.IsExpired() {
+		return ErrLienExpired
 	}
 
 	l.Status = LienStatusExecuted
