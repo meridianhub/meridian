@@ -239,9 +239,34 @@ RETURNS BIGINT AS $$
 $$ LANGUAGE SQL STABLE;
 ```
 
+### Concurrent Lien Creation
+
+When multiple Payment Orders attempt to reserve funds simultaneously, the combined amount may exceed available
+balance. The service layer handles this with atomic check-and-reserve:
+
+```sql
+-- Atomic check-and-reserve with row-level locking
+BEGIN;
+SELECT current_balance_cents,
+       (SELECT COALESCE(SUM(amount_cents), 0) FROM liens
+        WHERE account_id = $1 AND status = 'ACTIVE') as reserved
+FROM accounts
+WHERE account_id = $1
+FOR UPDATE;  -- Row-level lock prevents concurrent modifications
+
+-- Application checks: current_balance - reserved >= requested_amount
+-- If sufficient: INSERT INTO liens ...
+COMMIT;
+```
+
+The `FOR UPDATE` lock is held only for the duration of the balance check and lien insertion (milliseconds),
+not the entire saga duration. This provides atomicity without the blocking issues of pessimistic locking.
+
 ### Idempotency
 
-The `InitiateLienRequest` includes an `IdempotencyKey` to ensure exactly-once semantics:
+All lien operations must be idempotent for safe saga retries.
+
+**InitiateLien**: Uses `IdempotencyKey` to ensure exactly-once creation:
 
 ```go
 func (s *LienService) InitiateLien(ctx context.Context, req *InitiateLienRequest) (*Lien, error) {
@@ -249,10 +274,34 @@ func (s *LienService) InitiateLien(ctx context.Context, req *InitiateLienRequest
     if existing, found := s.idempotencyCache.Get(req.IdempotencyKey); found {
         return existing.(*Lien), nil
     }
-
     // Proceed with lien creation...
 }
 ```
+
+**ExecuteLien**: Idempotent by `lien_id` - calling ExecuteLien on an already-executed lien returns success
+with the same response. This is critical when the saga orchestrator retries after a timeout:
+
+```go
+func (s *LienService) ExecuteLien(ctx context.Context, req *ExecuteLienRequest) (*ExecuteLienResponse, error) {
+    lien, err := s.repo.FindByID(ctx, req.LienId)
+    if err != nil {
+        return nil, err
+    }
+
+    // Idempotent: return success if already executed
+    if lien.Status == LienStatusExecuted {
+        return &ExecuteLienResponse{
+            Lien:             lien,
+            TransactionId:    lien.TransactionId,  // Previously created
+            AvailableBalance: s.getAvailableBalance(ctx, lien.AccountId),
+        }, nil
+    }
+
+    // Proceed with execution...
+}
+```
+
+**TerminateLien**: Similarly idempotent - terminating an already-terminated lien returns success.
 
 ## Positive Consequences
 
@@ -320,7 +369,8 @@ if err := paymentGateway.Submit(order); err != nil {
 ## Links
 
 - [ADR-0005: Adapter Pattern for Layer Translation](0005-adapter-pattern-layer-translation.md)
-- [BIAN v13 Current Account Service Domain](https://bian.org/servicelandscape-13-0-0/views/view_9024.html)
+- [BIAN v13 Current Account Service Domain](https://bian.org/semantic-apis/current-account/) - Defines the
+  CurrentAccountFacility control record and associated behavior qualifiers
 - [Saga Pattern (Microsoft)](https://docs.microsoft.com/en-us/azure/architecture/reference-architectures/saga/saga)
 - [GitHub Issue #7: Payment Order Service](https://github.com/meridianhub/meridian/issues/7)
 - [PR #153: Add Lien Control Record to CurrentAccount proto](https://github.com/meridianhub/meridian/pull/153)
@@ -338,7 +388,8 @@ message Lien {
 }
 ```
 
-A background job would terminate expired liens and alert on potential orphaned payment orders.
+A background job would terminate expired liens and alert on potential orphaned payment orders. This enhancement
+is tracked for future implementation as part of the Payment Order service development.
 
 ### Monitoring Requirements
 
