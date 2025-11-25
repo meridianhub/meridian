@@ -65,68 +65,59 @@ patterns and BIAN's Current Account service domain.
 
 ### Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        Payment Order Saga                                │
-│                     (Saga Orchestrator Pattern)                          │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-          ┌─────────────────────────┼─────────────────────────┐
-          │                         │                         │
-          ▼                         ▼                         ▼
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ CurrentAccount  │     │ Payment Gateway │     │   Financial     │
-│    Service      │     │    Adapter      │     │   Accounting    │
-│                 │     │                 │     │                 │
-│ • InitiateLien  │     │ • Submit        │     │ • Post Journal  │
-│ • ExecuteLien   │     │ • Query Status  │     │   Entry         │
-│ • TerminateLien │     │ • Cancel        │     │                 │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+```mermaid
+flowchart TB
+    subgraph Orchestrator["Payment Order Saga<br/>(Saga Orchestrator Pattern)"]
+        PO[Payment Order]
+    end
 
-Saga Flow:
-1. InitiateLien(account, amount) → Lien(ACTIVE)
-2. Submit to Payment Gateway → External Payment
-3a. Success: ExecuteLien(lien_id) → Lien(EXECUTED), Transaction created
-3b. Failure: TerminateLien(lien_id, reason) → Lien(TERMINATED), Funds released
+    subgraph Services
+        CA[CurrentAccount Service<br/>• InitiateLien<br/>• ExecuteLien<br/>• TerminateLien]
+        PG[Payment Gateway Adapter<br/>• Submit<br/>• Query Status<br/>• Cancel]
+        FA[Financial Accounting<br/>• Post Journal Entry]
+    end
+
+    PO --> CA
+    PO --> PG
+    PO --> FA
 ```
+
+**Saga Flow:**
+
+1. `InitiateLien(account, amount)` → Lien(ACTIVE)
+2. Submit to Payment Gateway → External Payment
+3. Success: `ExecuteLien(lien_id)` → Lien(EXECUTED), Transaction created
+4. Failure: `TerminateLien(lien_id, reason)` → Lien(TERMINATED), Funds released
 
 ### Lien State Machine
 
-```text
-                    ┌───────────────────┐
-                    │                   │
-     InitiateLien   │      ACTIVE       │
-    ─────────────►  │                   │
-                    │  Funds Reserved   │
-                    └─────────┬─────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              │                               │
-              ▼                               ▼
-    ┌─────────────────┐             ┌─────────────────┐
-    │                 │             │                 │
-    │    EXECUTED     │             │   TERMINATED    │
-    │                 │             │                 │
-    │  Funds Debited  │             │ Funds Released  │
-    │                 │             │                 │
-    └─────────────────┘             └─────────────────┘
-         (Terminal)                      (Terminal)
+```mermaid
+stateDiagram-v2
+    [*] --> ACTIVE : InitiateLien
+
+    ACTIVE --> EXECUTED : ExecuteLien
+    ACTIVE --> TERMINATED : TerminateLien
+
+    EXECUTED --> [*]
+    TERMINATED --> [*]
+
+    note right of ACTIVE : Funds Reserved
+    note right of EXECUTED : Funds Debited (Terminal)
+    note right of TERMINATED : Funds Released (Terminal)
 ```
 
 ### Balance Invariant
 
-```text
-Available Balance = Current Balance - Sum(Active Liens)
+**Formula:** `Available Balance = Current Balance - Sum(Active Liens)`
 
-Example:
-  Current Balance:  £1,000.00
-  Active Lien 1:    £200.00 (Payment Order PO-001)
-  Active Lien 2:    £150.00 (Payment Order PO-002)
-  ─────────────────────────────────────────────────
-  Available Balance: £650.00
+| Component | Amount | Reference |
+|-----------|--------|-----------|
+| Current Balance | £1,000.00 | |
+| Active Lien 1 | -£200.00 | Payment Order PO-001 |
+| Active Lien 2 | -£150.00 | Payment Order PO-002 |
+| **Available Balance** | **£650.00** | |
 
-New payment request for £700.00 would be rejected (insufficient available balance)
-```
+A new payment request for £700.00 would be rejected (insufficient available balance).
 
 ## Implementation
 
