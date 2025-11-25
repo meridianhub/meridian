@@ -26,9 +26,13 @@ const (
 	LienStatusTerminated LienStatus = "TERMINATED" // Reservation released (terminal)
 )
 
-// Lien represents a fund reservation on an account
+// Lien represents a fund reservation on an account.
 // Liens are used by the Payment Order saga to reserve funds before executing external payments.
 // Invariant: Available Balance = Current Balance - Sum(Active Liens)
+//
+// Note: Fields are exported for persistence layer access. State transitions should only be
+// performed via Execute() and Terminate() methods which enforce the state machine invariants.
+// The Version field is a persistence concern exposed here for optimistic locking support.
 type Lien struct {
 	ID                    uuid.UUID
 	AccountID             uuid.UUID

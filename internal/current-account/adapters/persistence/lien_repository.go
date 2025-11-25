@@ -3,6 +3,7 @@ package persistence
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
@@ -11,8 +12,9 @@ import (
 
 // Lien repository errors
 var (
-	ErrLienNotFound        = errors.New("lien not found")
-	ErrLienVersionConflict = errors.New("version conflict: lien was modified by another transaction")
+	ErrLienNotFound             = errors.New("lien not found")
+	ErrLienVersionConflict      = errors.New("version conflict: lien was modified by another transaction")
+	ErrLienCurrencyInconsistent = errors.New("active liens have inconsistent currencies")
 )
 
 // LienRepository provides persistence operations for liens
@@ -68,10 +70,14 @@ func (r *LienRepository) FindByAccountID(accountID uuid.UUID) ([]*domain.Lien, e
 	return liens, nil
 }
 
-// FindActiveByAccountID retrieves all active liens for an account
+// FindActiveByAccountID retrieves all active non-expired liens for an account.
+// Liens with status ACTIVE but past their expires_at are excluded.
 func (r *LienRepository) FindActiveByAccountID(accountID uuid.UUID) ([]*domain.Lien, error) {
 	var entities []LienEntity
-	result := r.db.Where("account_id = ? AND status = ?", accountID, string(domain.LienStatusActive)).Find(&entities)
+	result := r.db.Where(
+		"account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+		accountID, string(domain.LienStatusActive), time.Now(),
+	).Find(&entities)
 
 	if result.Error != nil {
 		return nil, result.Error
@@ -133,14 +139,31 @@ func (r *LienRepository) Update(lien *domain.Lien) error {
 	return nil
 }
 
-// SumActiveAmountByAccountID returns the total amount of active liens for an account in cents.
-// Note: This assumes all liens for an account share the same currency as the account.
+// SumActiveAmountByAccountID returns the total amount of active non-expired liens for an account in cents.
+// Returns ErrLienCurrencyInconsistent if liens with different currencies exist (indicates data corruption).
 // Currency validation is enforced at the service layer when creating liens (InitiateLien).
-// If multi-currency support is needed in the future, this should return map[string]int64.
 func (r *LienRepository) SumActiveAmountByAccountID(accountID uuid.UUID) (int64, error) {
+	// First, check for currency consistency (defensive check for data corruption)
+	var currencyCount int64
+	countResult := r.db.Model(&LienEntity{}).
+		Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+			accountID, string(domain.LienStatusActive), time.Now()).
+		Select("COUNT(DISTINCT currency)").
+		Scan(&currencyCount)
+
+	if countResult.Error != nil {
+		return 0, countResult.Error
+	}
+
+	if currencyCount > 1 {
+		return 0, ErrLienCurrencyInconsistent
+	}
+
+	// Sum active non-expired liens
 	var totalCents int64
 	result := r.db.Model(&LienEntity{}).
-		Where("account_id = ? AND status = ?", accountID, string(domain.LienStatusActive)).
+		Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+			accountID, string(domain.LienStatusActive), time.Now()).
 		Select("COALESCE(SUM(amount_cents), 0)").
 		Scan(&totalCents)
 

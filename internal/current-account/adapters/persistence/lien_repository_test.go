@@ -121,6 +121,34 @@ func TestLienRepository_FindActiveByAccountID(t *testing.T) {
 	assert.Equal(t, activeLien.ID, liens[0].ID)
 }
 
+func TestLienRepository_FindActiveByAccountID_ExcludesExpired(t *testing.T) {
+	db, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	accountID := uuid.New()
+	amount, err := domain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	// Create active lien without expiration
+	activeLien, err := domain.NewLien(accountID, amount, "PO-001", nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(activeLien))
+
+	// Create active lien with past expiration (should be excluded)
+	past := time.Now().Add(-1 * time.Hour)
+	expiredLien, err := domain.NewLien(accountID, amount, "PO-002", &past)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(expiredLien))
+
+	// Only non-expired active lien should be returned
+	liens, err := repo.FindActiveByAccountID(accountID)
+	require.NoError(t, err)
+
+	assert.Len(t, liens, 1)
+	assert.Equal(t, activeLien.ID, liens[0].ID)
+}
+
 func TestLienRepository_FindByPaymentOrderReference(t *testing.T) {
 	db, cleanup := setupLienTestDB(t)
 	defer cleanup()
@@ -262,11 +290,67 @@ func TestLienRepository_SumActiveAmountByAccountID(t *testing.T) {
 	require.NoError(t, lien3.Execute())
 	require.NoError(t, repo.Update(lien3))
 
-	// Sum should only include active liens
+	// Sum should only include active non-expired liens
 	total, err := repo.SumActiveAmountByAccountID(accountID)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(35000), total) // £200 + £150 = £350
+}
+
+func TestLienRepository_SumActiveAmountByAccountID_ExcludesExpired(t *testing.T) {
+	db, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	accountID := uuid.New()
+
+	// Create active lien
+	amount1, _ := domain.NewMoney("GBP", 20000)
+	lien1, _ := domain.NewLien(accountID, amount1, "PO-001", nil)
+	require.NoError(t, repo.Create(lien1))
+
+	// Create expired active lien (should not be counted)
+	past := time.Now().Add(-1 * time.Hour)
+	amount2, _ := domain.NewMoney("GBP", 15000)
+	lien2, _ := domain.NewLien(accountID, amount2, "PO-002", &past)
+	require.NoError(t, repo.Create(lien2))
+
+	// Sum should only include non-expired active liens
+	total, err := repo.SumActiveAmountByAccountID(accountID)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(20000), total) // Only £200, expired lien excluded
+}
+
+func TestLienRepository_SumActiveAmountByAccountID_CurrencyInconsistency(t *testing.T) {
+	db, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	accountID := uuid.New()
+
+	// Create active lien in GBP
+	amount1, _ := domain.NewMoney("GBP", 20000)
+	lien1, _ := domain.NewLien(accountID, amount1, "PO-001", nil)
+	require.NoError(t, repo.Create(lien1))
+
+	// Manually insert lien with different currency (simulating data corruption)
+	corruptedEntity := &LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             accountID,
+		AmountCents:           15000,
+		Currency:              "EUR", // Different currency - data corruption
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-CORRUPT",
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+	require.NoError(t, db.Create(corruptedEntity).Error)
+
+	// Sum should return currency inconsistency error
+	_, err := repo.SumActiveAmountByAccountID(accountID)
+	assert.ErrorIs(t, err, ErrLienCurrencyInconsistent)
 }
 
 func TestLienRepository_SumActiveAmountByAccountID_NoLiens(t *testing.T) {
