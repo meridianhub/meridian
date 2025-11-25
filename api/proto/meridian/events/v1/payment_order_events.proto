@@ -30,10 +30,11 @@ message PaymentOrderInitiatedEvent {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // creditor_reference is the external account identifier (IBAN).
+  // creditor_reference is the external account identifier (IBAN format).
   string creditor_reference = 4 [(buf.validate.field).string = {
     min_len: 1
     max_len: 34
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
   }];
 
   // amount is the payment amount.
@@ -339,46 +340,49 @@ message PaymentOrderCancelledEvent {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
+  // amount is the payment amount (included for complete audit record).
+  meridian.common.v1.MoneyAmount amount = 4 [(buf.validate.field).required = true];
+
   // cancellation_reason explains why the payment was cancelled.
-  string cancellation_reason = 4 [(buf.validate.field).string = {
+  string cancellation_reason = 5 [(buf.validate.field).string = {
     min_len: 1
     max_len: 500
   }];
 
   // cancelled_by identifies who cancelled the payment.
-  string cancelled_by = 5 [(buf.validate.field).string = {
+  string cancelled_by = 6 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
   }];
 
   // lien_id references the reservation to be released (if applicable).
-  string lien_id = 6 [(buf.validate.field).string = {
+  string lien_id = 7 [(buf.validate.field).string = {
     max_len: 100
   }];
 
   // correlation_id links related events across services
-  string correlation_id = 7 [(buf.validate.field).string = {
+  string correlation_id = 8 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
 
   // causation_id identifies the event or command that caused this event
-  string causation_id = 8 [(buf.validate.field).string = {
+  string causation_id = 9 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
 
   // timestamp when the event was created
-  google.protobuf.Timestamp timestamp = 9 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp timestamp = 10 [(buf.validate.field).required = true];
 
   // version is the aggregate version for optimistic locking
-  int64 version = 10 [(buf.validate.field).int64 = {gte: 1}];
+  int64 version = 11 [(buf.validate.field).int64 = {gte: 1}];
 
   // idempotency_key for deduplication (optional)
-  string idempotency_key = 11 [(buf.validate.field).string = {
+  string idempotency_key = 12 [(buf.validate.field).string = {
     max_len: 255
   }];
 
   // metadata for tracing and debugging
-  map<string, string> metadata = 12;
+  map<string, string> metadata = 13;
 }
