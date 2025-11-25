@@ -225,11 +225,22 @@ message RetrievePaymentOrderResponse {
 // UpdatePaymentOrderRequest handles asynchronous gateway callbacks (BQ: Update).
 // This is typically called from the webhook HTTP adapter when the gateway
 // reports the final status of a payment.
+//
+// Lookup Strategy:
+// The service uses payment_order_id if provided, otherwise falls back to
+// gateway_reference_id lookup. At least one must be provided.
+//
+// Race Condition Handling:
+// If a webhook arrives before the EXECUTING state is persisted (race condition),
+// the service should:
+// 1. If payment_order_id provided: Look up directly and process
+// 2. If only gateway_reference_id: Return 404/retry-after, webhook will be redelivered
+// The idempotency_key ensures safe reprocessing when the webhook is retried.
 message UpdatePaymentOrderRequest {
   // gateway_reference_id is the external ID from the payment gateway.
-  // Used to look up the corresponding payment order.
+  // Used to look up the corresponding payment order when payment_order_id is not available.
+  // Optional if payment_order_id is provided.
   string gateway_reference_id = 1 [(buf.validate.field).string = {
-    min_len: 1
     max_len: 255
   }];
 
@@ -244,8 +255,9 @@ message UpdatePaymentOrderRequest {
     max_len: 1000
   }];
 
-  // payment_order_id is optional for direct lookup when available.
+  // payment_order_id is the preferred lookup method when available.
   // This avoids race conditions if webhook arrives before EXECUTING state is persisted.
+  // Either payment_order_id or gateway_reference_id must be provided (enforced at service layer).
   string payment_order_id = 4 [(buf.validate.field).string = {
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]*$"
@@ -293,6 +305,33 @@ message CancelPaymentOrderRequest {
 message CancelPaymentOrderResponse {
   // payment_order is the cancelled payment order with status CANCELLED.
   PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// ListPaymentOrdersRequest lists payment orders with filtering and pagination.
+message ListPaymentOrdersRequest {
+  // debtor_account_id filters by the internal account from which funds are debited.
+  string debtor_account_id = 1 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // status filters by payment order status. Empty means all statuses.
+  repeated PaymentOrderStatus status = 2;
+
+  // date_range filters by created_at timestamp.
+  meridian.common.v1.DateRange date_range = 3;
+
+  // pagination controls the page size and cursor.
+  meridian.common.v1.Pagination pagination = 4;
+}
+
+// ListPaymentOrdersResponse returns a paginated list of payment orders.
+message ListPaymentOrdersResponse {
+  // payment_orders is the list of payment orders matching the filter criteria.
+  repeated PaymentOrder payment_orders = 1;
+
+  // pagination contains the next page token and total count.
+  meridian.common.v1.PaginationResponse pagination = 2;
 }
 
 // PaymentOrderService provides BIAN-compliant payment order operations.
@@ -344,4 +383,8 @@ service PaymentOrderService {
   // Only valid for INITIATED or RESERVED states. EXECUTING payments cannot be cancelled.
   // If status is RESERVED, compensation will release the lien on the debtor account.
   rpc CancelPaymentOrder(CancelPaymentOrderRequest) returns (CancelPaymentOrderResponse);
+
+  // ListPaymentOrders returns a paginated list of payment orders with optional filtering.
+  // Supports filtering by debtor_account_id, status, and date range.
+  rpc ListPaymentOrders(ListPaymentOrdersRequest) returns (ListPaymentOrdersResponse);
 }
