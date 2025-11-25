@@ -112,99 +112,20 @@ message PaymentOrder {
 
   // version is for optimistic locking.
   int32 version = 13 [(buf.validate.field).int32 = {gte: 0}];
-}
 
-// PaymentOrderInitiated is published when a payment order is created.
-message PaymentOrderInitiated {
-  // payment_order_id is the unique identifier for this payment order.
-  string payment_order_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-  }];
-
-  // debtor_account_id is the internal account ID from which funds are debited.
-  string debtor_account_id = 2 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-  }];
-
-  // amount is the payment amount.
-  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
-
-  // correlation_id is used for distributed tracing.
-  string correlation_id = 4 [(buf.validate.field).string = {
-    min_len: 1
+  // ledger_booking_id references the FinancialAccounting booking log (populated after COMPLETED).
+  string ledger_booking_id = 14 [(buf.validate.field).string = {
     max_len: 255
   }];
 
-  // timestamp is when the event occurred.
-  google.protobuf.Timestamp timestamp = 5 [(buf.validate.field).required = true];
-}
+  // reserved_at is when funds were reserved via lien.
+  google.protobuf.Timestamp reserved_at = 15;
 
-// PaymentOrderCompleted is published when a payment order is successfully settled.
-message PaymentOrderCompleted {
-  // payment_order_id is the unique identifier for this payment order.
-  string payment_order_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-  }];
+  // executing_at is when the payment was sent to the gateway.
+  google.protobuf.Timestamp executing_at = 16;
 
-  // debtor_account_id is the internal account ID from which funds were debited.
-  string debtor_account_id = 2 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-  }];
-
-  // amount is the payment amount.
-  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
-
-  // gateway_reference_id is the external ID from the payment gateway.
-  string gateway_reference_id = 4 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
-
-  // correlation_id is used for distributed tracing.
-  string correlation_id = 5 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
-
-  // timestamp is when the event occurred.
-  google.protobuf.Timestamp timestamp = 6 [(buf.validate.field).required = true];
-}
-
-// PaymentOrderFailed is published when a payment order fails at any stage.
-message PaymentOrderFailed {
-  // payment_order_id is the unique identifier for this payment order.
-  string payment_order_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-  }];
-
-  // debtor_account_id is the internal account ID.
-  string debtor_account_id = 2 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-  }];
-
-  // amount is the payment amount.
-  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
-
-  // failure_reason describes why the payment failed.
-  string failure_reason = 4 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 1000
-  }];
-
-  // correlation_id is used for distributed tracing.
-  string correlation_id = 5 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
-
-  // timestamp is when the event occurred.
-  google.protobuf.Timestamp timestamp = 6 [(buf.validate.field).required = true];
+  // completed_at is when the payment was settled.
+  google.protobuf.Timestamp completed_at = 17;
 }
 
 // InitiatePaymentOrderRequest creates a new payment order (BQ: Initiate).
@@ -278,6 +199,17 @@ message UpdatePaymentOrderRequest {
   string gateway_message = 3 [(buf.validate.field).string = {
     max_len: 1000
   }];
+
+  // payment_order_id is optional for direct lookup when available.
+  // This avoids race conditions if webhook arrives before EXECUTING state is persisted.
+  string payment_order_id = 4 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // idempotency_key ensures exactly-once processing of webhook callbacks.
+  // Webhooks can be delivered multiple times, so this is required.
+  meridian.common.v1.IdempotencyKey idempotency_key = 5 [(buf.validate.field).required = true];
 }
 
 // UpdatePaymentOrderResponse returns the updated payment order.
