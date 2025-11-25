@@ -51,6 +51,8 @@ Architectural Decision Records) format.
 | [ADR-0009](0009-application-level-audit-logging.md) | Application-Level Audit Logging | Proposed | 2025-11-04 |
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0010](0010-grpc-client-side-load-balancing.md) | gRPC Client-Side Load Balancing with Headless Services | Accepted | 2025-11-14 |
+| [ADR-0011](0011-iso-20022-compliance-via-adapter-layer.md) | ISO 20022 Compliance via Adapter Layer | Accepted | 2025-11-14 |
+| [ADR-0012](0012-lien-based-fund-reservation.md) | Lien-Based Fund Reservation for Payment Order Saga | Accepted | 2025-11-25 |
 
 ## Categories
 
@@ -65,12 +67,14 @@ Architectural Decision Records) format.
 - [ADR-0004](0004-event-schema-evolution.md) - Event Schema Evolution with Protobuf and Buf
 - [ADR-0005](0005-adapter-pattern-layer-translation.md) - Adapter Pattern for Layer Translation
 - [ADR-0009](0009-application-level-audit-logging.md) - Application-Level Audit Logging
+- [ADR-0012](0012-lien-based-fund-reservation.md) - Lien-Based Fund Reservation for Payment Order Saga
 
 ### Development Environment & Infrastructure
 
 - [ADR-0006](0006-tilt-local-development.md) - Tilt for Local Kubernetes Development
 - [ADR-0007](0007-raw-yaml-over-helm-for-initial-development.md) - Raw YAML over Helm for Initial Development
 - [ADR-0010](0010-grpc-client-side-load-balancing.md) - gRPC Client-Side Load Balancing with Headless Services
+- [ADR-0011](0011-iso-20022-compliance-via-adapter-layer.md) - ISO 20022 Compliance via Adapter Layer
 
 ### Quality & Testing
 
