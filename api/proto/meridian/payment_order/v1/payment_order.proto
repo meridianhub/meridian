@@ -9,22 +9,49 @@ import "meridian/common/v1/types.proto";
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1;paymentorderv1";
 
 // PaymentOrderStatus defines the lifecycle state of a payment order in the saga.
+//
+// State Machine:
+//   INITIATED → RESERVED → EXECUTING → COMPLETED (happy path)
+//
+// Failure transitions (from any non-terminal state):
+//   INITIATED → FAILED (validation failure, account not found)
+//   RESERVED  → FAILED (gateway rejection, timeout) - triggers lien release
+//   EXECUTING → FAILED (gateway rejection) - triggers lien release
+//
+// Cancellation (user/system initiated before completion):
+//   INITIATED → CANCELLED (no compensation needed)
+//   RESERVED  → CANCELLED (triggers lien release)
+//   EXECUTING → not cancellable (must wait for gateway response)
+//
+// Reversal (post-completion compensation):
+//   COMPLETED → REVERSED (triggers compensating ledger entries)
+//
+// Terminal states: COMPLETED, FAILED, CANCELLED, REVERSED
 enum PaymentOrderStatus {
   // PAYMENT_ORDER_STATUS_UNSPECIFIED means the status is unknown.
   PAYMENT_ORDER_STATUS_UNSPECIFIED = 0;
   // PAYMENT_ORDER_STATUS_INITIATED means the payment order has been created and validated.
+  // Next: RESERVED (on lien success), FAILED (on validation error), CANCELLED (on user request)
   PAYMENT_ORDER_STATUS_INITIATED = 1;
   // PAYMENT_ORDER_STATUS_RESERVED means funds have been reserved via a lien on the debtor account.
+  // Next: EXECUTING (on gateway send), FAILED (on error), CANCELLED (on user request)
   PAYMENT_ORDER_STATUS_RESERVED = 2;
   // PAYMENT_ORDER_STATUS_EXECUTING means the payment has been sent to the external gateway.
+  // Next: COMPLETED (on gateway success), FAILED (on gateway rejection)
+  // Note: Cannot be cancelled - must wait for gateway response
   PAYMENT_ORDER_STATUS_EXECUTING = 3;
   // PAYMENT_ORDER_STATUS_COMPLETED means the payment has been settled and funds transferred.
+  // Terminal state. Can transition to REVERSED for post-completion compensation.
   PAYMENT_ORDER_STATUS_COMPLETED = 4;
   // PAYMENT_ORDER_STATUS_FAILED means the payment failed at some stage of the saga.
+  // Terminal state. Compensation (lien release) is triggered automatically.
   PAYMENT_ORDER_STATUS_FAILED = 5;
   // PAYMENT_ORDER_STATUS_CANCELLED means the payment was cancelled before completion.
+  // Terminal state. Different from FAILED: CANCELLED is intentional, FAILED is due to error.
+  // Compensation (lien release) is triggered if status was RESERVED.
   PAYMENT_ORDER_STATUS_CANCELLED = 6;
   // PAYMENT_ORDER_STATUS_REVERSED means the payment was reversed after completion (compensation).
+  // Terminal state. Used for post-completion corrections (e.g., refunds, chargebacks).
   PAYMENT_ORDER_STATUS_REVERSED = 7;
 }
 
@@ -66,17 +93,11 @@ message PaymentOrder {
     pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
   }];
 
-  // amount is the payment amount (must be positive).
-  // NOTE: CEL validation on nested google.type.Money requires service layer enforcement.
+  // amount is the payment amount.
+  // NOTE: Amount must be positive (> 0). This is enforced at the service layer
+  // since CEL validation on MoneyAmount wrapper types is not supported.
   // See README "Money Field Validation Limitations"
-  meridian.common.v1.MoneyAmount amount = 4 [
-    (buf.validate.field).required = true,
-    (buf.validate.field).cel = {
-      id: "positive_payment_amount"
-      message: "payment amount must be greater than zero"
-      expression: "this.amount.units > 0 || (this.amount.units == 0 && this.amount.nanos > 0)"
-    }
-  ];
+  meridian.common.v1.MoneyAmount amount = 4 [(buf.validate.field).required = true];
 
   // status is the current state in the payment saga lifecycle.
   PaymentOrderStatus status = 5 [(buf.validate.field).enum = {
@@ -164,17 +185,11 @@ message InitiatePaymentOrderRequest {
     pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
   }];
 
-  // amount is the payment amount (must be positive).
-  // NOTE: CEL validation on nested google.type.Money requires service layer enforcement.
+  // amount is the payment amount.
+  // NOTE: Amount must be positive (> 0). This is enforced at the service layer
+  // since CEL validation on MoneyAmount wrapper types is not supported.
   // See README "Money Field Validation Limitations"
-  meridian.common.v1.MoneyAmount amount = 3 [
-    (buf.validate.field).required = true,
-    (buf.validate.field).cel = {
-      id: "positive_payment_amount_request"
-      message: "payment amount must be greater than zero"
-      expression: "this.amount.units > 0 || (this.amount.units == 0 && this.amount.nanos > 0)"
-    }
-  ];
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
 
   // idempotency_key ensures exactly-once processing.
   meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
@@ -250,6 +265,36 @@ message UpdatePaymentOrderResponse {
 // PaymentOrderService provides BIAN-compliant payment order operations.
 // This service acts as the saga orchestrator for money movement,
 // coordinating funds reservation, gateway execution, and ledger booking.
+//
+// State Machine:
+// The service manages a payment order through the following states:
+//   INITIATED → RESERVED → EXECUTING → COMPLETED (happy path)
+//
+// Each state transition is atomic and triggers the next saga step:
+//   1. InitiatePaymentOrder: Creates order in INITIATED state
+//   2. Saga worker reserves funds → transitions to RESERVED
+//   3. Saga worker sends to gateway → transitions to EXECUTING
+//   4. UpdatePaymentOrder (webhook): Gateway callback → COMPLETED or FAILED
+//
+// Idempotency:
+// All mutating operations require an idempotency_key to ensure exactly-once
+// processing. The service stores idempotency keys with their responses and
+// returns cached responses for duplicate requests within the TTL window.
+//
+// - InitiatePaymentOrder: Client-provided idempotency_key prevents duplicate
+//   payment creation. Same key returns the existing payment order.
+// - UpdatePaymentOrder: Webhook idempotency_key prevents duplicate processing
+//   of gateway callbacks (webhooks may be delivered multiple times).
+//
+// Correlation and Causation:
+// - correlation_id: Links all events across services for a single user request
+// - causation_id: Identifies the specific event that caused a state change
+//
+// Error Handling:
+// Failures at any stage trigger automatic compensation:
+// - INITIATED → FAILED: No compensation needed (no funds reserved)
+// - RESERVED/EXECUTING → FAILED: Lien is automatically released
+// - COMPLETED → REVERSED: Compensating ledger entries are created
 service PaymentOrderService {
   // InitiatePaymentOrder creates a new payment order and begins the saga.
   // The saga flow: INITIATED → RESERVED → EXECUTING → COMPLETED/FAILED
