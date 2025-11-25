@@ -163,13 +163,16 @@ message PaymentOrder {
   // cancelled_at is when the payment was cancelled.
   google.protobuf.Timestamp cancelled_at = 19;
 
+  // reversed_at is when the payment was reversed (post-completion compensation).
+  google.protobuf.Timestamp reversed_at = 20;
+
   // causation_id identifies the event or command that caused the last state change.
-  string causation_id = 20 [(buf.validate.field).string = {
+  string causation_id = 21 [(buf.validate.field).string = {
     max_len: 255
   }];
 
   // error_code provides a machine-readable error identifier (populated only if status is FAILED).
-  string error_code = 21 [(buf.validate.field).string = {
+  string error_code = 22 [(buf.validate.field).string = {
     max_len: 50
   }];
 }

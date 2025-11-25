@@ -386,3 +386,80 @@ message PaymentOrderCancelledEvent {
   // metadata for tracing and debugging
   map<string, string> metadata = 13;
 }
+
+// PaymentOrderReversedEvent is published when a completed payment order is reversed.
+// This is used for post-completion compensation (e.g., refunds, chargebacks).
+// Triggers compensating ledger entries in FinancialAccounting.
+message PaymentOrderReversedEvent {
+  // event_id uniquely identifies this event instance
+  string event_id = 1 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // payment_order_id is the unique identifier for this payment order.
+  string payment_order_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // debtor_account_id is the internal account ID that was originally debited.
+  string debtor_account_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the original payment amount being reversed.
+  meridian.common.v1.MoneyAmount amount = 4 [(buf.validate.field).required = true];
+
+  // reversal_reason explains why the payment was reversed.
+  string reversal_reason = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // reversed_by identifies who initiated the reversal.
+  string reversed_by = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // original_ledger_booking_id references the original FinancialAccounting booking.
+  string original_ledger_booking_id = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // compensating_ledger_booking_id references the new compensating booking.
+  string compensating_ledger_booking_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 9 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 10 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 11 [(buf.validate.field).required = true];
+
+  // version is the aggregate version for optimistic locking
+  int64 version = 12 [(buf.validate.field).int64 = {gte: 1}];
+
+  // idempotency_key for deduplication (optional)
+  string idempotency_key = 13 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // metadata for tracing and debugging
+  map<string, string> metadata = 14;
+}
