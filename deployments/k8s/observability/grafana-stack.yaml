@@ -2,11 +2,18 @@
 # Grafana Observability Stack - Development Configuration
 #
 # This configuration is optimized for local development with Tilt.
+#
+# Storage Limits (prevent disk exhaustion during extended Tilt sessions):
+#   - Tempo:      2Gi storage, 1h block retention
+#   - Loki:       2Gi storage, 24h retention
+#   - Prometheus: 3Gi storage, 24h retention (or 2GB size limit)
+#   - Total:      ~7Gi maximum for observability data
+#
 # For production deployments, add security hardening:
 #   - Set securityContext.runAsNonRoot: true
 #   - Set securityContext.allowPrivilegeEscalation: false
 #   - Set securityContext.runAsUser to non-root UID
-#   - Add resource limits and requests
+#   - Use persistent volumes instead of emptyDir
 #   - Use secrets for sensitive configuration
 ---
 # Grafana Alloy - OpenTelemetry Collector
@@ -229,7 +236,8 @@ spec:
         configMap:
           name: tempo-config
       - name: storage
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: 2Gi
 ---
 # Grafana Loki - Log Aggregation
 apiVersion: v1
@@ -267,7 +275,7 @@ data:
             period: 24h
 
     limits_config:
-      retention_period: 168h
+      retention_period: 24h
 ---
 apiVersion: v1
 kind: Service
@@ -323,7 +331,8 @@ spec:
         configMap:
           name: loki-config
       - name: storage
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: 2Gi
 ---
 # Prometheus - Metrics Collection and Storage
 apiVersion: v1
@@ -408,7 +417,8 @@ spec:
         args:
         - --config.file=/etc/prometheus/prometheus.yml
         - --storage.tsdb.path=/prometheus
-        - --storage.tsdb.retention.time=7d
+        - --storage.tsdb.retention.time=24h
+        - --storage.tsdb.retention.size=2GB
         - --web.enable-remote-write-receiver
         ports:
         - containerPort: 9090
@@ -430,7 +440,8 @@ spec:
         configMap:
           name: prometheus-config
       - name: storage
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: 3Gi
 ---
 # Grafana - Visualization and Dashboards
 apiVersion: v1

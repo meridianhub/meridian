@@ -230,7 +230,15 @@ spec:
 # 4. Verify leadership transfer: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
 # 5. Produce/consume messages to verify data persists
 #
-# Resource Usage: ~1.5GB total (512MB per broker)
+# Resource Usage: ~1.5GB RAM total (512MB per broker)
+#
+# Storage Limits (prevent disk exhaustion):
+# - 512MB per topic partition (log.retention.bytes=536870912)
+# - 128MB segment size (log.segment.bytes=134217728)
+# - 24h time-based retention
+# - Log cleanup runs every 60 seconds
+# - LZ4 compression enabled (~50% reduction)
+# - Estimated max: ~1.5GB per broker for active topics
 #
 # Resource-Constrained Development (8GB RAM machines):
 # For machines with limited RAM, you can reduce to single-broker mode by:
@@ -360,10 +368,14 @@ spec:
           socket.receive.buffer.bytes=102400
           socket.request.max.bytes=104857600
 
-          # Log Retention
-          log.retention.hours=168
-          log.segment.bytes=1073741824
-          log.retention.check.interval.ms=300000
+          # Log Retention (aggressive for local dev to prevent disk exhaustion)
+          log.retention.hours=24
+          log.retention.bytes=536870912
+          log.segment.bytes=134217728
+          log.retention.check.interval.ms=60000
+          log.cleanup.policy=delete
+          log.cleaner.enable=true
+          compression.type=lz4
           EOF
 
           # Format KRaft storage if not already formatted
@@ -950,6 +962,13 @@ Fast Startup Mode:
   • Enable: export TILT_FAST_STARTUP=true && tilt up
   • Skips automatic test execution on startup for faster iteration
   • Manually trigger tests: tilt trigger test
+
+Storage Limits (prevent disk exhaustion):
+  • Observability stack: ~7Gi max (Tempo 2Gi, Loki 2Gi, Prometheus 3Gi)
+  • Kafka: ~1.5Gi per broker (512MB/partition, 24h retention)
+  • Docker daemon logs: Configure in ~/.docker/daemon.json:
+    {{"log-driver": "json-file", "log-opts": {{"max-size": "10m", "max-file": "3"}}}}
+  • Kind cluster: Restart Kind to reclaim emptyDir space
 
 ========================================
 """.format(fast_startup_msg))
