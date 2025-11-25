@@ -212,10 +212,15 @@ message Lien {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // amount is the reserved amount
+  // amount is the reserved amount (must be positive, validated at service layer)
   meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
 
   // status is the current lien lifecycle state
+  // State transitions:
+  //   ACTIVE → EXECUTED (via ExecuteLien - idempotent)
+  //   ACTIVE → TERMINATED (via TerminateLien)
+  //   EXECUTED → no further transitions allowed
+  //   TERMINATED → no further transitions allowed
   LienStatus status = 4 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
@@ -331,11 +336,15 @@ message InitiateLienRequest {
   meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
 
   // payment_order_reference identifies the Payment Order creating this lien
+  // Forward slash allowed for hierarchical Payment Order references
   string payment_order_reference = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
     pattern: "^[a-zA-Z0-9_/-]+$"
   }];
+
+  // idempotency_key ensures exactly-once lien creation for retry scenarios
+  meridian.common.v1.IdempotencyKey idempotency_key = 4;
 }
 
 // Response for initiating a lien
