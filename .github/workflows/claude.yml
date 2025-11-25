@@ -62,6 +62,7 @@ jobs:
             Read CONTRIBUTING.md in the repository root for full development guidelines.
 
           # Customize Claude's behavior
+          # Using Opus 4.5 for higher quality responses
           claude_args: |
             --max-input-tokens 50000
-            --model claude-sonnet-4-5
+            --model claude-opus-4-5-20251101
