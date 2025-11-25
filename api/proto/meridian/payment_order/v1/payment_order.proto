@@ -262,6 +262,39 @@ message UpdatePaymentOrderResponse {
   PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
 }
 
+// CancelPaymentOrderRequest cancels a payment order before completion (BQ: Control).
+// Can only be called when status is INITIATED or RESERVED. EXECUTING payments
+// cannot be cancelled as they must wait for the gateway response.
+message CancelPaymentOrderRequest {
+  // payment_order_id is the unique identifier of the payment order to cancel.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // cancellation_reason explains why the payment is being cancelled.
+  string cancellation_reason = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // cancelled_by identifies who is requesting the cancellation.
+  string cancelled_by = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // idempotency_key ensures exactly-once processing of cancellation.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
+}
+
+// CancelPaymentOrderResponse returns the cancelled payment order.
+message CancelPaymentOrderResponse {
+  // payment_order is the cancelled payment order with status CANCELLED.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
 // PaymentOrderService provides BIAN-compliant payment order operations.
 // This service acts as the saga orchestrator for money movement,
 // coordinating funds reservation, gateway execution, and ledger booking.
@@ -306,4 +339,9 @@ service PaymentOrderService {
   // UpdatePaymentOrder handles asynchronous gateway callbacks.
   // Called when the external gateway reports the final payment status.
   rpc UpdatePaymentOrder(UpdatePaymentOrderRequest) returns (UpdatePaymentOrderResponse);
+
+  // CancelPaymentOrder cancels a payment order before completion.
+  // Only valid for INITIATED or RESERVED states. EXECUTING payments cannot be cancelled.
+  // If status is RESERVED, compensation will release the lien on the debtor account.
+  rpc CancelPaymentOrder(CancelPaymentOrderRequest) returns (CancelPaymentOrderResponse);
 }
