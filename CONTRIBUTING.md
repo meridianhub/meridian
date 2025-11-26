@@ -2,8 +2,15 @@
 
 Thank you for your interest in contributing to Meridian! This guide will help you get started with development.
 
+## Contributor License Agreement
+
+All contributions to this project require agreement to our [Contributor License Agreement](CLA.md). By submitting a
+pull request, you confirm that you have read and agree to the terms of the CLA, which assigns copyright and
+intellectual property rights to the Project Owner.
+
 ## Table of Contents
 
+- [Contributor License Agreement](#contributor-license-agreement)
 - [Development Environment Setup](#development-environment-setup)
 - [Development Workflow](#development-workflow)
 - [Code Standards](#code-standards)
