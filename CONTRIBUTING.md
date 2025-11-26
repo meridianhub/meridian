@@ -1220,5 +1220,5 @@ opportunities for continuous improvement.
 
 ## License
 
-By contributing, you agree to the terms of the [Contributor License Agreement](CLA.md). Your contributions will be
-licensed to the public under the Apache License 2.0.
+By contributing, you agree to the [Contributor License Agreement](CLA.md), which assigns copyright to the project
+maintainer while your contribution remains publicly available under the Apache License 2.0.
