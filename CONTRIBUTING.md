@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Meridian! This guide will help yo
 
 All contributions to this project require agreement to our [Contributor License Agreement](CLA.md). By submitting a
 pull request, you confirm that you have read and agree to the terms of the CLA, which assigns copyright and
-intellectual property rights to the Project Owner.
+intellectual property rights to the copyright holder.
 
 ## Table of Contents
 
@@ -1220,5 +1220,5 @@ opportunities for continuous improvement.
 
 ## License
 
-By contributing, you agree to the [Contributor License Agreement](CLA.md), which assigns copyright to the project
-maintainer while your contribution remains publicly available under the Apache License 2.0.
+By contributing, you agree to the [Contributor License Agreement](CLA.md), which assigns copyright to the copyright
+holder while your contribution remains publicly available under the Apache License 2.0.
