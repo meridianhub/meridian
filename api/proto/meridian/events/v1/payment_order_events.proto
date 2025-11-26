@@ -5,6 +5,7 @@ package meridian.events.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "meridian/common/v1/types.proto";
+import "meridian/payment_order/v1/payment_order.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/events/v1;eventsv1";
 
@@ -282,8 +283,10 @@ message PaymentOrderFailedEvent {
   }];
 
   // failed_at_status indicates which saga stage the failure occurred.
-  string failed_at_status = 7 [(buf.validate.field).string = {
-    in: ["INITIATED", "RESERVED", "EXECUTING"]
+  // Only non-terminal states are valid: INITIATED, RESERVED, or EXECUTING.
+  meridian.payment_order.v1.PaymentOrderStatus failed_at_status = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    in: [1, 2, 3]
   }];
 
   // lien_id references the reservation to be released (if applicable).
@@ -390,6 +393,9 @@ message PaymentOrderCancelledEvent {
 // PaymentOrderReversedEvent is published when a completed payment order is reversed.
 // This is used for post-completion compensation (e.g., refunds, chargebacks).
 // Triggers compensating ledger entries in FinancialAccounting.
+//
+// Note: The corresponding ReversePaymentOrder RPC will be added in a future PR.
+// Currently, reversals may be triggered internally or via external systems.
 message PaymentOrderReversedEvent {
   // event_id uniquely identifies this event instance
   string event_id = 1 [(buf.validate.field).string = {
