@@ -30,7 +30,7 @@ func NewLienRepository(db *gorm.DB) *LienRepository {
 // Create inserts a new lien
 func (r *LienRepository) Create(lien *domain.Lien) error {
 	entity := toLienEntity(lien)
-	return r.db.Create(&entity).Error
+	return r.db.Create(entity).Error
 }
 
 // FindByID retrieves a lien by its UUID
@@ -143,11 +143,14 @@ func (r *LienRepository) Update(lien *domain.Lien) error {
 // Returns ErrLienCurrencyInconsistent if liens with different currencies exist (indicates data corruption).
 // Currency validation is enforced at the service layer when creating liens (InitiateLien).
 func (r *LienRepository) SumActiveAmountByAccountID(accountID uuid.UUID) (int64, error) {
+	// Capture timestamp once to ensure consistency between the two queries
+	now := time.Now()
+
 	// First, check for currency consistency (defensive check for data corruption)
 	var currencyCount int64
 	countResult := r.db.Model(&LienEntity{}).
 		Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
-			accountID, string(domain.LienStatusActive), time.Now()).
+			accountID, string(domain.LienStatusActive), now).
 		Select("COUNT(DISTINCT currency)").
 		Scan(&currencyCount)
 
@@ -163,7 +166,7 @@ func (r *LienRepository) SumActiveAmountByAccountID(accountID uuid.UUID) (int64,
 	var totalCents int64
 	result := r.db.Model(&LienEntity{}).
 		Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
-			accountID, string(domain.LienStatusActive), time.Now()).
+			accountID, string(domain.LienStatusActive), now).
 		Select("COALESCE(SUM(amount_cents), 0)").
 		Scan(&totalCents)
 
