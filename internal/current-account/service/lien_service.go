@@ -229,7 +229,7 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		return nil, status.Errorf(codes.InvalidArgument, "invalid lien ID: %v", err)
 	}
 
-	// Retrieve lien
+	// First, check for idempotency without locking (read-only check)
 	lien, err := s.lienRepo.FindByID(lienID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
@@ -240,47 +240,42 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		return nil, status.Errorf(codes.Internal, "failed to retrieve lien: %v", err)
 	}
 
-	// Check if already executed (idempotent)
+	// Check if already executed (idempotent) - no transaction needed for read-only
 	if lien.Status == domain.LienStatusExecuted {
-		s.logger.Info("lien already executed (idempotent)",
-			"lien_id", lien.ID.String())
-
-		// Retrieve account for response
-		account, err := s.repo.FindByUUID(lien.AccountID)
+		s.logger.Info("lien already executed (idempotent)", "lien_id", lien.ID.String())
+		resp, err := s.buildExecuteLienIdempotentResponse(lien)
 		if err != nil {
 			operationStatus = opStatusRetrieveAccountFailed
-			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+			return nil, err
 		}
-
-		availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
-		return &pb.ExecuteLienResponse{
-			Lien:             toLienProto(lien),
-			NewBalance:       toMoneyAmount(account.Balance),
-			AvailableBalance: toMoneyAmount(availableMoney),
-			TransactionId:    fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8]),
-		}, nil
-	}
-
-	// Validate lien can be executed (basic check before acquiring locks)
-	if !lien.CanExecute() {
-		operationStatus = opStatusInvalidLienStatus
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"lien cannot be executed: status=%s, expired=%v", lien.Status, lien.IsExpired())
+		return resp, nil
 	}
 
 	// Execute atomically in a transaction with pessimistic locking to prevent race conditions.
-	// We need to:
-	// 1. Lock the account to prevent concurrent modifications
-	// 2. Debit the account balance
-	// 3. Update the lien status
-	// All must succeed or fail together.
+	// We lock both the lien and account to prevent concurrent execute/terminate operations.
 	var account *domain.CurrentAccount
 	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
 		txLienRepo := s.lienRepo.WithTx(tx)
 
-		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
+		// Retrieve lien with FOR UPDATE lock to prevent concurrent modifications
 		var txErr error
+		lien, txErr = txLienRepo.FindByIDForUpdate(lienID)
+		if txErr != nil {
+			return txErr
+		}
+
+		// Re-check if already executed (could have been executed by concurrent request)
+		if lien.Status == domain.LienStatusExecuted {
+			return nil // Will be handled as idempotent response
+		}
+
+		// Validate lien can be executed
+		if !lien.CanExecute() {
+			return errTxInvalidLienStatus
+		}
+
+		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
 		account, txErr = txRepo.FindByUUIDForUpdate(lien.AccountID)
 		if txErr != nil {
 			return fmt.Errorf("%w: %w", errTxSaveAccount, txErr)
@@ -312,12 +307,18 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 	if txErr != nil {
 		// Determine which operation failed for proper error reporting
 		switch {
+		case errors.Is(txErr, persistence.ErrLienNotFound):
+			operationStatus = opStatusLienNotFound
+			return nil, status.Errorf(codes.NotFound, "lien not found: %s", req.LienId)
 		case errors.Is(txErr, persistence.ErrLienVersionConflict):
 			operationStatus = opStatusVersionConflict
 			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
 		case errors.Is(txErr, persistence.ErrVersionConflict):
 			operationStatus = opStatusVersionConflict
 			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
+		case errors.Is(txErr, errTxInvalidLienStatus):
+			operationStatus = opStatusInvalidLienStatus
+			return nil, status.Errorf(codes.FailedPrecondition, "lien cannot be executed: status=%s, expired=%v", lien.Status, lien.IsExpired())
 		case errors.Is(txErr, errTxSaveAccount):
 			operationStatus = opStatusSaveAccountFailed
 			return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
@@ -336,8 +337,18 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		}
 	}
 
-	transactionID := fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8])
+	// Handle case where lien was already executed by concurrent request
+	if account == nil {
+		s.logger.Info("lien executed by concurrent request (idempotent)", "lien_id", lien.ID.String())
+		resp, err := s.buildExecuteLienIdempotentResponse(lien)
+		if err != nil {
+			operationStatus = opStatusRetrieveAccountFailed
+			return nil, err
+		}
+		return resp, nil
+	}
 
+	transactionID := fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8])
 	s.logger.Info("lien executed",
 		"lien_id", lien.ID.String(),
 		"account_id", account.AccountID,
@@ -577,6 +588,22 @@ func mapLienStatusToProto(status domain.LienStatus) pb.LienStatus {
 	default:
 		return pb.LienStatus_LIEN_STATUS_UNSPECIFIED
 	}
+}
+
+// buildExecuteLienIdempotentResponse builds an idempotent response for an already-executed lien.
+func (s *Service) buildExecuteLienIdempotentResponse(lien *domain.Lien) (*pb.ExecuteLienResponse, error) {
+	account, err := s.repo.FindByUUID(lien.AccountID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
+	return &pb.ExecuteLienResponse{
+		Lien:             toLienProto(lien),
+		NewBalance:       toMoneyAmount(account.Balance),
+		AvailableBalance: toMoneyAmount(availableMoney),
+		TransactionId:    fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8]),
+	}, nil
 }
 
 // checkLienIdempotency checks if a lien with the given PaymentOrderReference already exists.
