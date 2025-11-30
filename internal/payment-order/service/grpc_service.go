@@ -229,6 +229,10 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		}
 	}
 
+	// Convert to proto BEFORE starting the async goroutine to avoid data race
+	// The saga may modify po while toProto reads from it
+	responseProto := toProto(po)
+
 	// Start saga orchestration asynchronously
 	// The saga runs in the background after returning the response
 	// nolint:contextcheck // Intentionally using background context for async saga orchestration
@@ -241,7 +245,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	}()
 
 	return &pb.InitiatePaymentOrderResponse{
-		PaymentOrder: toProto(po),
+		PaymentOrder: responseProto,
 	}, nil
 }
 
