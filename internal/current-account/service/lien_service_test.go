@@ -163,6 +163,43 @@ func TestInitiateLien_CurrencyMismatch(t *testing.T) {
 	require.Contains(t, st.Message(), "currency")
 }
 
+func TestInitiateLien_Idempotent(t *testing.T) {
+	db, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := NewService(repo, lienRepo)
+
+	// Create account with £1000 balance
+	createTestAccountWithBalance(t, repo, "ACC-LIEN-IDEMP", 100000)
+
+	req := &pb.InitiateLienRequest{
+		AccountId: "ACC-LIEN-IDEMP",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        500,
+				Nanos:        0,
+			},
+		},
+		PaymentOrderReference: "PO-IDEMPOTENT-123",
+	}
+
+	// First call creates the lien
+	resp1, err := svc.InitiateLien(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp1.Lien)
+	lienID := resp1.Lien.LienId
+
+	// Second call with same PaymentOrderReference should return the existing lien
+	resp2, err := svc.InitiateLien(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp2.Lien)
+	require.Equal(t, lienID, resp2.Lien.LienId, "idempotent call should return same lien")
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_ACTIVE, resp2.Lien.Status)
+}
+
 func TestExecuteLien_Success(t *testing.T) {
 	db, cleanup := setupLienTestDB(t)
 	defer cleanup()

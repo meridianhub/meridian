@@ -28,6 +28,9 @@ var (
 	ErrLienAmountNotPositive = errors.New("lien amount must be positive")
 	ErrAmountRequired        = errors.New("amount is required")
 	ErrAmountOverflow        = errors.New("amount too large: would overflow")
+	// Transaction operation errors for error detection
+	errTxSaveAccount = errors.New("save_account")
+	errTxUpdateLien  = errors.New("update_lien")
 )
 
 // Lien operation status constants for metrics
@@ -67,6 +70,34 @@ func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (
 	if s.lienRepo == nil {
 		operationStatus = opStatusLienRepoNil
 		return nil, status.Error(codes.FailedPrecondition, "lien operations not configured")
+	}
+
+	// Check for idempotency using PaymentOrderReference
+	if req.PaymentOrderReference != "" {
+		existingLien, err := s.lienRepo.FindByPaymentOrderReference(req.PaymentOrderReference)
+		if err == nil && existingLien != nil {
+			// Lien already exists - return idempotent response
+			s.logger.Info("lien already exists (idempotent)",
+				"lien_id", existingLien.ID.String(),
+				"payment_order_ref", req.PaymentOrderReference)
+
+			// Retrieve account for available balance calculation
+			account, acctErr := s.repo.FindByUUID(existingLien.AccountID)
+			if acctErr != nil {
+				s.logger.Error("failed to retrieve account for idempotent response", "error", acctErr)
+				return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, nil
+			}
+			availableMoney := s.calculateAvailableBalance(existingLien.AccountID, account.Balance)
+			return &pb.InitiateLienResponse{
+				Lien:             toLienProto(existingLien),
+				AvailableBalance: toMoneyAmount(availableMoney),
+			}, nil
+		}
+		// If ErrLienNotFound, continue with creation. Other errors should fail.
+		if err != nil && !errors.Is(err, persistence.ErrLienNotFound) {
+			operationStatus = opStatusRetrieveFailed
+			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+		}
 	}
 
 	// Retrieve account
@@ -248,28 +279,24 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 
 		// Update lien status first (lighter operation)
 		if err := txLienRepo.Update(lien); err != nil {
-			if errors.Is(err, persistence.ErrLienVersionConflict) {
-				return fmt.Errorf("version_conflict: %w", err)
-			}
-			return fmt.Errorf("update_lien: %w", err)
+			return fmt.Errorf("%w: %w", errTxUpdateLien, err)
 		}
 
 		// Save account (heavier operation with balance)
 		if err := txRepo.Save(account); err != nil {
-			return fmt.Errorf("save_account: %w", err)
+			return fmt.Errorf("%w: %w", errTxSaveAccount, err)
 		}
 
 		return nil
 	})
 
 	if txErr != nil {
+		// Determine which operation failed for proper error reporting
 		if errors.Is(txErr, persistence.ErrLienVersionConflict) {
 			operationStatus = opStatusVersionConflict
 			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
 		}
-		// Determine which operation failed for proper error reporting
-		errStr := txErr.Error()
-		if len(errStr) > 12 && errStr[:12] == "save_account" {
+		if errors.Is(txErr, errTxSaveAccount) {
 			operationStatus = opStatusSaveAccountFailed
 		} else {
 			operationStatus = opStatusUpdateLienFailed
