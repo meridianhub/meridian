@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Lien repository errors
@@ -43,6 +44,25 @@ func (r *LienRepository) Create(lien *domain.Lien) error {
 func (r *LienRepository) FindByID(id uuid.UUID) (*domain.Lien, error) {
 	var entity LienEntity
 	result := r.db.Where("id = ?", id).First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrLienNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toLienDomain(&entity)
+}
+
+// FindByIDForUpdate retrieves a lien by its UUID with a pessimistic lock.
+// Use this within a transaction when you need to prevent concurrent modifications.
+func (r *LienRepository) FindByIDForUpdate(id uuid.UUID) (*domain.Lien, error) {
+	var entity LienEntity
+	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", id).
+		First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrLienNotFound

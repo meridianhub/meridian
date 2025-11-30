@@ -39,7 +39,12 @@ var (
 	errTxDomainError       = errors.New("domain_error")
 	errTxExecuteFailed     = errors.New("execute_failed")
 	errTxWithdrawFailed    = errors.New("withdraw_failed")
+	errTxTerminateFailed   = errors.New("terminate_failed")
+	errTxInvalidLienStatus = errors.New("invalid_lien_status")
 )
+
+// Default termination reason when none provided
+const defaultTerminationReason = "Terminated via API"
 
 // Lien operation status constants for metrics
 const (
@@ -369,7 +374,7 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 		return nil, status.Errorf(codes.InvalidArgument, "invalid lien ID: %v", err)
 	}
 
-	// Retrieve lien
+	// First, check for idempotency without locking (read-only check)
 	lien, err := s.lienRepo.FindByID(lienID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
@@ -380,7 +385,7 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 		return nil, status.Errorf(codes.Internal, "failed to retrieve lien: %v", err)
 	}
 
-	// Check if already terminated (idempotent)
+	// Check if already terminated (idempotent) - no transaction needed for read-only
 	if lien.Status == domain.LienStatusTerminated {
 		s.logger.Info("lien already terminated (idempotent)",
 			"lien_id", lien.ID.String())
@@ -398,36 +403,78 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 		}, nil
 	}
 
-	// Validate lien can be terminated
-	if !lien.CanTerminate() {
-		operationStatus = opStatusInvalidLienStatus
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"lien cannot be terminated: status=%s", lien.Status)
-	}
-
-	// Terminate lien (domain logic)
+	// Determine termination reason
 	reason := req.Reason
 	if reason == "" {
-		reason = "Terminated via API"
-	}
-	if err := lien.Terminate(reason); err != nil {
-		operationStatus = opStatusTerminateFailed
-		return nil, status.Errorf(codes.FailedPrecondition, "failed to terminate lien: %v", err)
+		reason = defaultTerminationReason
 	}
 
-	// Update lien status
-	if err := s.lienRepo.Update(lien); err != nil {
-		if errors.Is(err, persistence.ErrLienVersionConflict) {
+	// Terminate atomically in a transaction with pessimistic locking to prevent race conditions.
+	// Without FOR UPDATE, concurrent TerminateLien calls could both pass CanTerminate() checks.
+	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+		txLienRepo := s.lienRepo.WithTx(tx)
+
+		// Retrieve lien with FOR UPDATE lock to prevent concurrent modifications
+		lien, err = txLienRepo.FindByIDForUpdate(lienID)
+		if err != nil {
+			return err
+		}
+
+		// Re-check if already terminated (could have been terminated by concurrent request)
+		if lien.Status == domain.LienStatusTerminated {
+			return nil // Will be handled as idempotent response
+		}
+
+		// Validate lien can be terminated
+		if !lien.CanTerminate() {
+			return errTxInvalidLienStatus
+		}
+
+		// Terminate lien (domain logic)
+		if err := lien.Terminate(reason); err != nil {
+			return fmt.Errorf("%w: %w", errTxTerminateFailed, err)
+		}
+
+		// Update lien status
+		if err := txLienRepo.Update(lien); err != nil {
+			return fmt.Errorf("%w: %w", errTxUpdateLien, err)
+		}
+
+		return nil
+	})
+
+	if txErr != nil {
+		switch {
+		case errors.Is(txErr, persistence.ErrLienNotFound):
+			operationStatus = opStatusLienNotFound
+			return nil, status.Errorf(codes.NotFound, "lien not found: %s", req.LienId)
+		case errors.Is(txErr, persistence.ErrLienVersionConflict):
 			operationStatus = opStatusVersionConflict
 			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
+		case errors.Is(txErr, errTxInvalidLienStatus):
+			operationStatus = opStatusInvalidLienStatus
+			return nil, status.Errorf(codes.FailedPrecondition, "lien cannot be terminated: status=%s", lien.Status)
+		case errors.Is(txErr, errTxTerminateFailed):
+			operationStatus = opStatusTerminateFailed
+			return nil, status.Errorf(codes.FailedPrecondition, "failed to terminate lien: %v", txErr)
+		case errors.Is(txErr, errTxUpdateLien):
+			operationStatus = opStatusUpdateFailed
+			return nil, status.Errorf(codes.Internal, "failed to update lien: %v", txErr)
+		default:
+			operationStatus = opStatusRetrieveFailed
+			return nil, status.Errorf(codes.Internal, "failed to terminate lien: %v", txErr)
 		}
-		operationStatus = opStatusUpdateFailed
-		return nil, status.Errorf(codes.Internal, "failed to update lien: %v", err)
 	}
 
-	s.logger.Info("lien terminated",
-		"lien_id", lien.ID.String(),
-		"reason", reason)
+	// Handle case where lien was already terminated by concurrent request
+	if lien.Status == domain.LienStatusTerminated && lien.TerminationReason != reason {
+		s.logger.Info("lien terminated by concurrent request (idempotent)",
+			"lien_id", lien.ID.String())
+	} else {
+		s.logger.Info("lien terminated",
+			"lien_id", lien.ID.String(),
+			"reason", reason)
+	}
 
 	// Calculate new available balance (funds released)
 	account, err := s.repo.FindByUUID(lien.AccountID)
