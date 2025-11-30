@@ -35,7 +35,7 @@ type CurrentAccountEntity struct {
 	DeletedAt *time.Time `gorm:"index"`
 }
 
-// TableName overrides the default table name
+// TableName overrides the default table name with schema prefix
 func (CurrentAccountEntity) TableName() string {
-	return "current_accounts"
+	return "current_account.accounts"
 }
