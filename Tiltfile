@@ -589,11 +589,27 @@ docker_build(
 # Deploy Kubernetes manifests
 k8s_yaml(kustomize('deployments/k8s/base'))
 
-# Load secret if it exists (generated locally by scripts/setup-local-secrets.sh)
-# This file is excluded from git and won't exist in CI environments
+# Meridian DB Secret - for local development only
+# Uses the same CockroachDB credentials as other services
+# NOTE: Production deployments must use External Secrets Operator or Sealed Secrets
 secret_path = 'deployments/k8s/base/secret.yaml'
 if os.path.exists(secret_path):
+  # Load custom secret if manually created via scripts/setup-local-secrets.sh
   k8s_yaml(secret_path)
+else:
+  # Generate default development secret (consistent with current-account, financial-accounting, position-keeping)
+  k8s_yaml(blob('''
+apiVersion: v1
+kind: Secret
+metadata:
+  name: meridian-db
+  labels:
+    app: meridian
+type: Opaque
+stringData:
+  # Local development connection string - CockroachDB in insecure mode
+  DATABASE_URL: "postgres://meridian@cockroachdb:26257/meridian?sslmode=disable"
+'''))
 
 # Set resource dependencies
 k8s_resource(
