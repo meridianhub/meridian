@@ -1,0 +1,520 @@
+package persistence
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/google/uuid"
+	cadomain "github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/meridianhub/meridian/internal/payment-order/domain"
+	"github.com/meridianhub/meridian/internal/platform/testdb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+func setupTestDB(t *testing.T) (*gorm.DB, func()) {
+	t.Helper()
+	return testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}})
+}
+
+func TestPaymentOrderRepository_Create(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+
+	err = repo.Create(po)
+	require.NoError(t, err)
+
+	// Verify payment order was saved
+	retrieved, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, po.ID, retrieved.ID)
+	assert.Equal(t, "acc-123", retrieved.DebtorAccountID)
+	assert.Equal(t, "creditor-ref", retrieved.CreditorReference)
+	assert.Equal(t, int64(10000), retrieved.Amount.AmountCents())
+	assert.Equal(t, "GBP", retrieved.Amount.Currency())
+	assert.Equal(t, domain.PaymentOrderStatusInitiated, retrieved.Status)
+	assert.Equal(t, "idem-key-001", retrieved.IdempotencyKey)
+	assert.Equal(t, "corr-001", retrieved.CorrelationID)
+}
+
+func TestPaymentOrderRepository_FindByID_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	_, err := repo.FindByID(uuid.New())
+	assert.ErrorIs(t, err, ErrPaymentOrderNotFound)
+}
+
+func TestPaymentOrderRepository_FindByIdempotencyKey(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"unique-idem-key",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	retrieved, err := repo.FindByIdempotencyKey("unique-idem-key")
+	require.NoError(t, err)
+
+	assert.Equal(t, po.ID, retrieved.ID)
+}
+
+func TestPaymentOrderRepository_FindByIdempotencyKey_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	_, err := repo.FindByIdempotencyKey("nonexistent-key")
+	assert.ErrorIs(t, err, ErrPaymentOrderNotFound)
+}
+
+func TestPaymentOrderRepository_FindByGatewayReferenceID(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Reserve and execute to set gateway reference
+	require.NoError(t, po.Reserve("lien-123"))
+	require.NoError(t, repo.Update(po))
+
+	require.NoError(t, po.Execute("gateway-ref-001"))
+	require.NoError(t, repo.Update(po))
+
+	retrieved, err := repo.FindByGatewayReferenceID("gateway-ref-001")
+	require.NoError(t, err)
+
+	assert.Equal(t, po.ID, retrieved.ID)
+	assert.Equal(t, "gateway-ref-001", retrieved.GatewayReferenceID)
+}
+
+func TestPaymentOrderRepository_FindByGatewayReferenceID_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	_, err := repo.FindByGatewayReferenceID("nonexistent-gateway-ref")
+	assert.ErrorIs(t, err, ErrPaymentOrderNotFound)
+}
+
+func TestPaymentOrderRepository_Update_Reserve(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Reserve the payment order
+	require.NoError(t, po.Reserve("lien-123"))
+	require.NoError(t, repo.Update(po))
+
+	// Verify status was updated
+	retrieved, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusReserved, retrieved.Status)
+	assert.Equal(t, "lien-123", retrieved.LienID)
+	assert.NotNil(t, retrieved.ReservedAt)
+	assert.Equal(t, 2, retrieved.Version)
+}
+
+func TestPaymentOrderRepository_Update_Execute(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Progress through states
+	require.NoError(t, po.Reserve("lien-123"))
+	require.NoError(t, repo.Update(po))
+
+	require.NoError(t, po.Execute("gateway-ref-001"))
+	require.NoError(t, repo.Update(po))
+
+	// Verify
+	retrieved, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusExecuting, retrieved.Status)
+	assert.Equal(t, "gateway-ref-001", retrieved.GatewayReferenceID)
+	assert.NotNil(t, retrieved.ExecutingAt)
+	assert.Equal(t, 3, retrieved.Version)
+}
+
+func TestPaymentOrderRepository_Update_Complete(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Progress through states
+	require.NoError(t, po.Reserve("lien-123"))
+	require.NoError(t, repo.Update(po))
+
+	require.NoError(t, po.Execute("gateway-ref-001"))
+	require.NoError(t, repo.Update(po))
+
+	require.NoError(t, po.Complete("ledger-booking-001"))
+	require.NoError(t, repo.Update(po))
+
+	// Verify
+	retrieved, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusCompleted, retrieved.Status)
+	assert.Equal(t, "ledger-booking-001", retrieved.LedgerBookingID)
+	assert.NotNil(t, retrieved.CompletedAt)
+	assert.Equal(t, 4, retrieved.Version)
+}
+
+func TestPaymentOrderRepository_Update_Fail(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Fail the payment order
+	require.NoError(t, po.Fail("Insufficient funds", "INSUFFICIENT_FUNDS"))
+	require.NoError(t, repo.Update(po))
+
+	// Verify
+	retrieved, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusFailed, retrieved.Status)
+	assert.Equal(t, "Insufficient funds", retrieved.FailureReason)
+	assert.Equal(t, "INSUFFICIENT_FUNDS", retrieved.ErrorCode)
+	assert.NotNil(t, retrieved.FailedAt)
+	assert.Equal(t, 2, retrieved.Version)
+}
+
+func TestPaymentOrderRepository_Update_Cancel(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Cancel the payment order
+	require.NoError(t, po.Cancel("User cancelled"))
+	require.NoError(t, repo.Update(po))
+
+	// Verify
+	retrieved, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusCancelled, retrieved.Status)
+	assert.Equal(t, "User cancelled", retrieved.FailureReason)
+	assert.NotNil(t, retrieved.CancelledAt)
+	assert.Equal(t, 2, retrieved.Version)
+}
+
+func TestPaymentOrderRepository_Update_Reverse(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Progress to completed
+	require.NoError(t, po.Reserve("lien-123"))
+	require.NoError(t, repo.Update(po))
+
+	require.NoError(t, po.Execute("gateway-ref-001"))
+	require.NoError(t, repo.Update(po))
+
+	require.NoError(t, po.Complete("ledger-booking-001"))
+	require.NoError(t, repo.Update(po))
+
+	// Reverse the payment order
+	require.NoError(t, po.Reverse("Chargeback requested"))
+	require.NoError(t, repo.Update(po))
+
+	// Verify
+	retrieved, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusReversed, retrieved.Status)
+	assert.Equal(t, "Chargeback requested", retrieved.FailureReason)
+	assert.NotNil(t, retrieved.ReversedAt)
+	assert.Equal(t, 5, retrieved.Version)
+}
+
+func TestPaymentOrderRepository_OptimisticLocking(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	// Create initial payment order
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Load same payment order twice (simulating concurrent access)
+	po1, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	po2, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	// First update succeeds
+	require.NoError(t, po1.Reserve("lien-123"))
+	require.NoError(t, repo.Update(po1))
+
+	// Second update fails due to version conflict
+	require.NoError(t, po2.Fail("Should fail", "TEST_ERROR"))
+	err = repo.Update(po2)
+	assert.ErrorIs(t, err, ErrPaymentOrderVersionConflict)
+
+	// Verify first transaction's changes persisted
+	final, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusReserved, final.Status)
+	assert.Equal(t, 2, final.Version)
+}
+
+func TestPaymentOrderRepository_IdempotencyKeyUniqueness(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	// Create first payment order
+	po1, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"same-idem-key",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po1))
+
+	// Create second payment order with same idempotency key should fail
+	po2, err := domain.NewPaymentOrder(
+		"acc-456",
+		"different-creditor",
+		amount,
+		"same-idem-key", // Same key
+		"corr-002",
+	)
+	require.NoError(t, err)
+
+	err = repo.Create(po2)
+	assert.Error(t, err) // Should fail due to unique constraint
+}
+
+func TestPaymentOrderRepository_Update_NonExistent_ReturnsError(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	// Create a payment order in memory but don't save it
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("acc-123", "creditor-ref", amount, "idem-key", "corr-001")
+
+	// Try to update non-existent payment order
+	err := repo.Update(po)
+
+	// Should fail with version conflict (no rows affected)
+	assert.True(t, errors.Is(err, ErrPaymentOrderVersionConflict))
+}
+
+// Defensive tests for toDomain error handling
+
+func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
+	entity := &PaymentOrderEntity{
+		ID:                uuid.New(),
+		DebtorAccountID:   "acc-123",
+		CreditorReference: "creditor-ref",
+		AmountCents:       10000,
+		Currency:          "", // Invalid: empty currency
+		Status:            "INITIATED",
+		IdempotencyKey:    "idem-key",
+		CorrelationID:     "corr-001",
+		Version:           1,
+	}
+
+	_, err := toDomain(entity)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database")
+}
+
+func TestPaymentOrderRepository_FindByID_CorruptedData_ReturnsError(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	// Manually insert corrupted data (empty currency)
+	corruptedEntity := &PaymentOrderEntity{
+		ID:                uuid.New(),
+		DebtorAccountID:   "acc-123",
+		CreditorReference: "creditor-ref",
+		AmountCents:       10000,
+		Currency:          "", // Corrupted
+		Status:            "INITIATED",
+		IdempotencyKey:    "corrupt-idem-key",
+		CorrelationID:     "corr-001",
+		Version:           1,
+	}
+	require.NoError(t, db.Create(corruptedEntity).Error)
+
+	_, err := repo.FindByID(corruptedEntity.ID)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database")
+}
+
+func TestPaymentOrderRepository_CausationID(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Set causation ID
+	po.SetCausationID("event-123")
+	require.NoError(t, repo.Update(po))
+
+	// Verify
+	retrieved, err := repo.FindByID(po.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, "event-123", retrieved.CausationID)
+}
