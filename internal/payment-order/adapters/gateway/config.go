@@ -2,13 +2,18 @@ package gateway
 
 import "time"
 
-// Config holds configuration for production payment gateway connections.
+// Config holds configuration for payment gateway connections.
+// Note: Timeout, MaxRetries, and RetryBackoff are defined for the real gateway
+// implementation (to be added). The mock gateway does not use these values.
 type Config struct {
 	// Timeout is the maximum duration to wait for a gateway response.
+	// Used by real gateway implementation (not mock).
 	Timeout time.Duration
 	// MaxRetries is the maximum number of retry attempts for transient failures.
+	// Used by real gateway implementation (not mock).
 	MaxRetries int
 	// RetryBackoff is the initial backoff duration between retries.
+	// Used by real gateway implementation (not mock).
 	RetryBackoff time.Duration
 	// UseMock enables the mock gateway instead of a real implementation.
 	UseMock bool
@@ -28,8 +33,9 @@ func DefaultConfig() Config {
 }
 
 // New creates a PaymentGateway based on the provided configuration.
-// If UseMock is true, returns a MockGateway; otherwise returns nil
-// (real gateway implementation to be added later).
+// If UseMock is true, returns a MockGateway with the provided MockConfig.
+// Otherwise, returns a MockGateway with default config as a fallback
+// until the real gateway implementation is added.
 func New(config Config) PaymentGateway {
 	if config.UseMock {
 		return NewMockGateway(config.MockConfig)

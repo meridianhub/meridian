@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,9 +40,11 @@ func DefaultMockGatewayConfig() MockGatewayConfig {
 }
 
 // MockGateway is a test implementation of PaymentGateway with configurable behaviors.
+// It is safe for concurrent use.
 type MockGateway struct {
 	config MockGatewayConfig
 	rng    *rand.Rand
+	mu     sync.Mutex
 }
 
 // NewMockGateway creates a new MockGateway with the given configuration.
@@ -67,6 +70,13 @@ func NewMockGatewayWithSeed(config MockGatewayConfig, seed uint64) *MockGateway 
 
 // SendPayment simulates sending a payment to an external gateway.
 func (g *MockGateway) SendPayment(ctx context.Context, req PaymentRequest) (PaymentResponse, error) {
+	// Fast path: check context cancellation immediately
+	select {
+	case <-ctx.Done():
+		return PaymentResponse{}, ctx.Err()
+	default:
+	}
+
 	// Simulate latency
 	if g.config.Latency > 0 {
 		select {
@@ -76,9 +86,14 @@ func (g *MockGateway) SendPayment(ctx context.Context, req PaymentRequest) (Paym
 		}
 	}
 
-	// Check for timeout
-	if g.config.TimeoutRate > 0 && g.rng.Float64() < g.config.TimeoutRate {
-		return PaymentResponse{}, ErrGatewayTimeout
+	// Check for timeout (protected by mutex for thread safety)
+	if g.config.TimeoutRate > 0 {
+		g.mu.Lock()
+		shouldTimeout := g.rng.Float64() < g.config.TimeoutRate
+		g.mu.Unlock()
+		if shouldTimeout {
+			return PaymentResponse{}, ErrGatewayTimeout
+		}
 	}
 
 	// Check for deterministic failures (amounts ending in 99 cents)
@@ -90,13 +105,18 @@ func (g *MockGateway) SendPayment(ctx context.Context, req PaymentRequest) (Paym
 		}, nil
 	}
 
-	// Check for random failures
-	if g.config.FailureRate > 0 && g.rng.Float64() < g.config.FailureRate {
-		return PaymentResponse{
-			GatewayReferenceID: generateGatewayReferenceID(),
-			Status:             StatusRejected,
-			Message:            "random rejection",
-		}, nil
+	// Check for random failures (protected by mutex for thread safety)
+	if g.config.FailureRate > 0 {
+		g.mu.Lock()
+		shouldFail := g.rng.Float64() < g.config.FailureRate
+		g.mu.Unlock()
+		if shouldFail {
+			return PaymentResponse{
+				GatewayReferenceID: generateGatewayReferenceID(),
+				Status:             StatusRejected,
+				Message:            "random rejection",
+			}, nil
+		}
 	}
 
 	// Success case
