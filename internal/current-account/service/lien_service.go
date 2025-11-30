@@ -144,7 +144,11 @@ func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (
 
 	// Calculate new available balance after this lien
 	newAvailableBalance := availableBalance - lienAmount.AmountCents()
-	availableMoney, _ := domain.NewMoney(account.Balance.Currency(), newAvailableBalance)
+	availableMoney, err := domain.NewMoney(account.Balance.Currency(), newAvailableBalance)
+	if err != nil {
+		// This should never happen if validation passed - log and return without available balance
+		s.logger.Error("failed to create available balance money", "error", err)
+	}
 
 	return &pb.InitiateLienResponse{
 		Lien:             toLienProto(lien),
@@ -196,9 +200,15 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 		}
 
-		activeLiensTotal, _ := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
+		activeLiensTotal, sumErr := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
+		if sumErr != nil {
+			s.logger.Error("failed to sum active liens for idempotent response", "error", sumErr)
+		}
 		availableBalance := account.Balance.AmountCents() - activeLiensTotal
-		availableMoney, _ := domain.NewMoney(account.Balance.Currency(), availableBalance)
+		availableMoney, moneyErr := domain.NewMoney(account.Balance.Currency(), availableBalance)
+		if moneyErr != nil {
+			s.logger.Error("failed to create available balance for idempotent response", "error", moneyErr)
+		}
 
 		return &pb.ExecuteLienResponse{
 			Lien:             toLienProto(lien),
@@ -259,9 +269,15 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		"transaction_id", transactionID)
 
 	// Calculate new available balance
-	activeLiensTotal, _ := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
+	activeLiensTotal, sumErr := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
+	if sumErr != nil {
+		s.logger.Error("failed to sum active liens for response", "error", sumErr)
+	}
 	availableBalance := account.Balance.AmountCents() - activeLiensTotal
-	availableMoney, _ := domain.NewMoney(account.Balance.Currency(), availableBalance)
+	availableMoney, moneyErr := domain.NewMoney(account.Balance.Currency(), availableBalance)
+	if moneyErr != nil {
+		s.logger.Error("failed to create available balance for response", "error", moneyErr)
+	}
 
 	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
@@ -308,11 +324,21 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 		s.logger.Info("lien already terminated (idempotent)",
 			"lien_id", lien.ID.String())
 
-		// Calculate available balance
-		activeLiensTotal, _ := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
-		account, _ := s.repo.FindByUUID(lien.AccountID)
+		// Calculate available balance - errors logged but don't fail idempotent response
+		activeLiensTotal, sumErr := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
+		if sumErr != nil {
+			s.logger.Error("failed to sum active liens for idempotent response", "error", sumErr)
+		}
+		account, acctErr := s.repo.FindByUUID(lien.AccountID)
+		if acctErr != nil {
+			s.logger.Error("failed to find account for idempotent response", "error", acctErr)
+			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
+		}
 		availableBalance := account.Balance.AmountCents() - activeLiensTotal
-		availableMoney, _ := domain.NewMoney(account.Balance.Currency(), availableBalance)
+		availableMoney, moneyErr := domain.NewMoney(account.Balance.Currency(), availableBalance)
+		if moneyErr != nil {
+			s.logger.Error("failed to create available balance for idempotent response", "error", moneyErr)
+		}
 
 		return &pb.TerminateLienResponse{
 			Lien:             toLienProto(lien),
@@ -358,9 +384,15 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	activeLiensTotal, _ := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
+	activeLiensTotal, sumErr := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
+	if sumErr != nil {
+		s.logger.Error("failed to sum active liens for response", "error", sumErr)
+	}
 	availableBalance := account.Balance.AmountCents() - activeLiensTotal
-	availableMoney, _ := domain.NewMoney(account.Balance.Currency(), availableBalance)
+	availableMoney, moneyErr := domain.NewMoney(account.Balance.Currency(), availableBalance)
+	if moneyErr != nil {
+		s.logger.Error("failed to create available balance for response", "error", moneyErr)
+	}
 
 	return &pb.TerminateLienResponse{
 		Lien:             toLienProto(lien),
