@@ -244,7 +244,15 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		return nil, status.Errorf(codes.FailedPrecondition, "failed to debit account: %v", err)
 	}
 
-	// Update lien status
+	// Save account first - this is the critical operation
+	// If this fails, no state has changed. If lien update fails after,
+	// the next idempotent retry will complete the lien status update.
+	if err := s.repo.Save(account); err != nil {
+		operationStatus = opStatusSaveAccountFailed
+		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
+	}
+
+	// Update lien status (after account is safely persisted)
 	if err := s.lienRepo.Update(lien); err != nil {
 		if errors.Is(err, persistence.ErrLienVersionConflict) {
 			operationStatus = opStatusVersionConflict
@@ -252,12 +260,6 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		}
 		operationStatus = opStatusUpdateLienFailed
 		return nil, status.Errorf(codes.Internal, "failed to update lien: %v", err)
-	}
-
-	// Save account
-	if err := s.repo.Save(account); err != nil {
-		operationStatus = opStatusSaveAccountFailed
-		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
 	}
 
 	transactionID := fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8])
@@ -445,15 +447,18 @@ func (s *Service) protoToMoney(amount *commonpb.MoneyAmount) (domain.Money, erro
 		return domain.Money{}, ErrAmountRequired
 	}
 
-	// Validate overflow
+	// Validate units won't overflow when multiplied by 100
 	if amount.Amount.Units > math.MaxInt64/100 || amount.Amount.Units < math.MinInt64/100 {
 		return domain.Money{}, ErrAmountOverflow
 	}
 
 	// Convert to cents
+	// unitsCents is safe due to overflow check above
 	unitsCents := amount.Amount.Units * 100
-	nanosCents := (amount.Amount.Nanos + 5000000) / 10000000
 
+	// nanosCents is at most 99 (nanos range 0-999999999, divided by 10000000)
+	// Adding to unitsCents is safe since we checked unitsCents won't overflow
+	nanosCents := (amount.Amount.Nanos + 5000000) / 10000000
 	totalCents := unitsCents + int64(nanosCents)
 
 	return domain.NewMoney(amount.Amount.CurrencyCode, totalCents)
