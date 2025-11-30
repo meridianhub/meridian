@@ -58,7 +58,7 @@ type PaymentOrderEntity struct {
 	ReversedAt  *time.Time
 }
 
-// TableName overrides the default table name
+// TableName overrides the default table name with schema prefix
 func (PaymentOrderEntity) TableName() string {
-	return "payment_orders"
+	return "payment_order.payment_orders"
 }

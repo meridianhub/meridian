@@ -518,3 +518,102 @@ func TestPaymentOrderRepository_CausationID(t *testing.T) {
 
 	assert.Equal(t, "event-123", retrieved.CausationID)
 }
+
+func TestPaymentOrderRepository_FindByDebtorAccountID(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	// Create two payment orders for same account
+	po1, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref-1",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po1))
+
+	po2, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref-2",
+		amount,
+		"idem-key-002",
+		"corr-002",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po2))
+
+	// Create payment order for different account
+	po3, err := domain.NewPaymentOrder(
+		"acc-456",
+		"creditor-ref-3",
+		amount,
+		"idem-key-003",
+		"corr-003",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po3))
+
+	// Find by debtor account ID
+	paymentOrders, err := repo.FindByDebtorAccountID("acc-123")
+	require.NoError(t, err)
+
+	assert.Len(t, paymentOrders, 2)
+}
+
+func TestPaymentOrderRepository_FindByDebtorAccountID_Empty(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	// Find for non-existent account
+	paymentOrders, err := repo.FindByDebtorAccountID("nonexistent-acc")
+	require.NoError(t, err)
+
+	assert.Len(t, paymentOrders, 0)
+}
+
+func TestPaymentOrderRepository_FindByDebtorAccountID_CorruptedData_ReturnsError(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	// Create valid payment order
+	po, err := domain.NewPaymentOrder(
+		"acc-123",
+		"creditor-ref",
+		amount,
+		"idem-key-001",
+		"corr-001",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(po))
+
+	// Manually insert corrupted data for same account
+	corruptedEntity := &PaymentOrderEntity{
+		ID:                uuid.New(),
+		DebtorAccountID:   "acc-123",
+		CreditorReference: "creditor-ref",
+		AmountCents:       10000,
+		Currency:          "", // Corrupted
+		Status:            "INITIATED",
+		IdempotencyKey:    "corrupt-idem-key",
+		CorrelationID:     "corr-001",
+		Version:           1,
+	}
+	require.NoError(t, db.Create(corruptedEntity).Error)
+
+	_, err = repo.FindByDebtorAccountID("acc-123")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database")
+}

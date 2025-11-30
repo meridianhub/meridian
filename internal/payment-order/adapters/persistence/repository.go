@@ -16,10 +16,24 @@ var (
 	ErrPaymentOrderVersionConflict = errors.New("version conflict: payment order was modified by another transaction")
 )
 
+// Repository defines the contract for payment order persistence.
+// This interface enables mocking in service-layer tests.
+type Repository interface {
+	Create(po *domain.PaymentOrder) error
+	FindByID(id uuid.UUID) (*domain.PaymentOrder, error)
+	FindByIdempotencyKey(key string) (*domain.PaymentOrder, error)
+	FindByGatewayReferenceID(gatewayRefID string) (*domain.PaymentOrder, error)
+	FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error)
+	Update(po *domain.PaymentOrder) error
+}
+
 // PaymentOrderRepository provides persistence operations for payment orders
 type PaymentOrderRepository struct {
 	db *gorm.DB
 }
+
+// Compile-time interface compliance check
+var _ Repository = (*PaymentOrderRepository)(nil)
 
 // NewPaymentOrderRepository creates a new payment order repository
 func NewPaymentOrderRepository(db *gorm.DB) *PaymentOrderRepository {
@@ -78,6 +92,27 @@ func (r *PaymentOrderRepository) FindByGatewayReferenceID(gatewayRefID string) (
 	}
 
 	return toDomain(&entity)
+}
+
+// FindByDebtorAccountID retrieves all payment orders for a debtor account
+func (r *PaymentOrderRepository) FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error) {
+	var entities []PaymentOrderEntity
+	result := r.db.Where("debtor_account_id = ?", accountID).Find(&entities)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	paymentOrders := make([]*domain.PaymentOrder, 0, len(entities))
+	for i := range entities {
+		po, err := toDomain(&entities[i])
+		if err != nil {
+			return nil, err
+		}
+		paymentOrders = append(paymentOrders, po)
+	}
+
+	return paymentOrders, nil
 }
 
 // Update updates an existing payment order with optimistic locking
