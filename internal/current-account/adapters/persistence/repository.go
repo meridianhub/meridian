@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Repository errors
@@ -24,6 +26,18 @@ type Repository struct {
 // NewRepository creates a new account repository
 func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
+}
+
+// DB returns the underlying database connection for transaction support.
+// Use this to wrap multiple repository operations in a single transaction.
+func (r *Repository) DB() *gorm.DB {
+	return r.db
+}
+
+// WithTx returns a new Repository that uses the provided transaction.
+// This enables multiple repository operations within a single transaction.
+func (r *Repository) WithTx(tx *gorm.DB) *Repository {
+	return &Repository{db: tx}
 }
 
 // Save creates or updates an account with optimistic locking
@@ -101,10 +115,64 @@ func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) 
 	return toDomain(&entity)
 }
 
+// FindByIDForUpdate retrieves an account by its account ID with a pessimistic lock.
+// Use this within a transaction when you need to prevent concurrent modifications.
+func (r *Repository) FindByIDForUpdate(accountID string) (*domain.CurrentAccount, error) {
+	var entity CurrentAccountEntity
+	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("account_id = ? AND deleted_at IS NULL", accountID).
+		First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrAccountNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toDomain(&entity)
+}
+
 // FindByIBAN retrieves an account by its IBAN
 func (r *Repository) FindByIBAN(iban string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
 	result := r.db.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrAccountNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toDomain(&entity)
+}
+
+// FindByUUID retrieves an account by its internal UUID
+func (r *Repository) FindByUUID(id uuid.UUID) (*domain.CurrentAccount, error) {
+	var entity CurrentAccountEntity
+	result := r.db.Where("id = ? AND deleted_at IS NULL", id).First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrAccountNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toDomain(&entity)
+}
+
+// FindByUUIDForUpdate retrieves an account by its internal UUID with a pessimistic lock.
+// Use this within a transaction when you need to prevent concurrent modifications.
+func (r *Repository) FindByUUIDForUpdate(id uuid.UUID) (*domain.CurrentAccount, error) {
+	var entity CurrentAccountEntity
+	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrAccountNotFound
