@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Repository errors
@@ -102,6 +103,25 @@ func (r *Repository) Save(account *domain.CurrentAccount) error {
 func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
 	result := r.db.Where("account_id = ? AND deleted_at IS NULL", accountID).First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrAccountNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toDomain(&entity)
+}
+
+// FindByIDForUpdate retrieves an account by its account ID with a pessimistic lock.
+// Use this within a transaction when you need to prevent concurrent modifications.
+func (r *Repository) FindByIDForUpdate(accountID string) (*domain.CurrentAccount, error) {
+	var entity CurrentAccountEntity
+	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("account_id = ? AND deleted_at IS NULL", accountID).
+		First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrAccountNotFound

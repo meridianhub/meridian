@@ -29,8 +29,14 @@ var (
 	ErrAmountRequired        = errors.New("amount is required")
 	ErrAmountOverflow        = errors.New("amount too large: would overflow")
 	// Transaction operation errors for error detection
-	errTxSaveAccount = errors.New("save_account")
-	errTxUpdateLien  = errors.New("update_lien")
+	errTxSaveAccount       = errors.New("save_account")
+	errTxUpdateLien        = errors.New("update_lien")
+	errTxSaveLien          = errors.New("save_lien")
+	errTxAccountNotActive  = errors.New("account_not_active")
+	errTxCurrencyMismatch  = errors.New("currency_mismatch")
+	errTxSumLiensFailed    = errors.New("sum_liens_failed")
+	errTxInsufficientFunds = errors.New("insufficient_funds")
+	errTxDomainError       = errors.New("domain_error")
 )
 
 // Lien operation status constants for metrics
@@ -73,51 +79,14 @@ func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (
 	}
 
 	// Check for idempotency using PaymentOrderReference
-	if req.PaymentOrderReference != "" {
-		existingLien, err := s.lienRepo.FindByPaymentOrderReference(req.PaymentOrderReference)
-		if err == nil && existingLien != nil {
-			// Lien already exists - return idempotent response
-			s.logger.Info("lien already exists (idempotent)",
-				"lien_id", existingLien.ID.String(),
-				"payment_order_ref", req.PaymentOrderReference)
-
-			// Retrieve account for available balance calculation
-			account, acctErr := s.repo.FindByUUID(existingLien.AccountID)
-			if acctErr != nil {
-				s.logger.Error("failed to retrieve account for idempotent response", "error", acctErr)
-				return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, nil
-			}
-			availableMoney := s.calculateAvailableBalance(existingLien.AccountID, account.Balance)
-			return &pb.InitiateLienResponse{
-				Lien:             toLienProto(existingLien),
-				AvailableBalance: toMoneyAmount(availableMoney),
-			}, nil
-		}
-		// If ErrLienNotFound, continue with creation. Other errors should fail.
-		if err != nil && !errors.Is(err, persistence.ErrLienNotFound) {
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
-		}
-	}
-
-	// Retrieve account
-	account, err := s.repo.FindByID(req.AccountId)
-	if err != nil {
-		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-		}
+	if idempotentResp, found, err := s.checkLienIdempotency(req.PaymentOrderReference); err != nil {
 		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+		return nil, err
+	} else if found {
+		return idempotentResp, nil
 	}
 
-	// Validate account is active
-	if account.Status != domain.AccountStatusActive {
-		operationStatus = opStatusAccountNotActive
-		return nil, status.Errorf(codes.FailedPrecondition, "account is not active: %s", account.Status)
-	}
-
-	// Convert and validate amount
+	// Convert and validate amount first (before transaction)
 	lienAmount, err := s.protoToMoney(req.Amount)
 	if err != nil {
 		operationStatus = opStatusInvalidAmount
@@ -129,43 +98,87 @@ func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (
 		return nil, status.Error(codes.InvalidArgument, "lien amount must be positive")
 	}
 
-	// Validate currency matches account
-	if lienAmount.Currency() != account.Balance.Currency() {
-		operationStatus = opStatusCurrencyMismatch
-		return nil, status.Errorf(codes.InvalidArgument,
-			"lien currency (%s) must match account currency (%s)",
-			lienAmount.Currency(), account.Balance.Currency())
-	}
+	// Use a transaction with pessimistic locking to prevent race conditions.
+	// Without FOR UPDATE, concurrent InitiateLien calls could both check available
+	// balance, see sufficient funds, and both create liens - resulting in over-reservation.
+	var lien *domain.Lien
+	var account *domain.CurrentAccount
+	var availableBalance int64
 
-	// Calculate available balance
-	activeLiensTotal, err := s.lienRepo.SumActiveAmountByAccountID(account.ID)
-	if err != nil {
-		operationStatus = opStatusSumLiensFailed
-		return nil, status.Errorf(codes.Internal, "failed to calculate active liens: %v", err)
-	}
+	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+		txRepo := s.repo.WithTx(tx)
+		txLienRepo := s.lienRepo.WithTx(tx)
 
-	// Available = Current Balance - Active Liens
-	availableBalance := account.Balance.AmountCents() - activeLiensTotal
+		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
+		var txErr error
+		account, txErr = txRepo.FindByIDForUpdate(req.AccountId)
+		if txErr != nil {
+			return txErr
+		}
 
-	// Check sufficient funds
-	if lienAmount.AmountCents() > availableBalance {
-		operationStatus = opStatusInsufficientFunds
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"insufficient available balance: requested %d cents, available %d cents",
-			lienAmount.AmountCents(), availableBalance)
-	}
+		// Validate account is active
+		if account.Status != domain.AccountStatusActive {
+			return errTxAccountNotActive
+		}
 
-	// Create lien domain object
-	lien, err := domain.NewLien(account.ID, lienAmount, req.PaymentOrderReference, nil)
-	if err != nil {
-		operationStatus = opStatusDomainError
-		return nil, status.Errorf(codes.InvalidArgument, "failed to create lien: %v", err)
-	}
+		// Validate currency matches account
+		if lienAmount.Currency() != account.Balance.Currency() {
+			return errTxCurrencyMismatch
+		}
 
-	// Persist lien
-	if err := s.lienRepo.Create(lien); err != nil {
-		operationStatus = opStatusSaveFailed
-		return nil, status.Errorf(codes.Internal, "failed to save lien: %v", err)
+		// Calculate available balance (within the lock)
+		activeLiensTotal, err := txLienRepo.SumActiveAmountByAccountID(account.ID)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errTxSumLiensFailed, err)
+		}
+
+		// Available = Current Balance - Active Liens
+		availableBalance = account.Balance.AmountCents() - activeLiensTotal
+
+		// Check sufficient funds
+		if lienAmount.AmountCents() > availableBalance {
+			return errTxInsufficientFunds
+		}
+
+		// Create lien domain object
+		lien, err = domain.NewLien(account.ID, lienAmount, req.PaymentOrderReference, nil)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errTxDomainError, err)
+		}
+
+		// Persist lien (within the transaction)
+		if err := txLienRepo.Create(lien); err != nil {
+			return fmt.Errorf("%w: %w", errTxSaveLien, err)
+		}
+
+		return nil
+	})
+
+	// Handle transaction errors with appropriate status codes
+	if txErr != nil {
+		switch {
+		case errors.Is(txErr, persistence.ErrAccountNotFound):
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+		case errors.Is(txErr, errTxAccountNotActive):
+			operationStatus = opStatusAccountNotActive
+			return nil, status.Errorf(codes.FailedPrecondition, "account is not active")
+		case errors.Is(txErr, errTxCurrencyMismatch):
+			operationStatus = opStatusCurrencyMismatch
+			return nil, status.Errorf(codes.InvalidArgument, "lien currency must match account currency")
+		case errors.Is(txErr, errTxInsufficientFunds):
+			operationStatus = opStatusInsufficientFunds
+			return nil, status.Errorf(codes.FailedPrecondition, "insufficient available balance")
+		case errors.Is(txErr, errTxDomainError):
+			operationStatus = opStatusDomainError
+			return nil, status.Errorf(codes.InvalidArgument, "failed to create lien: %v", txErr)
+		case errors.Is(txErr, errTxSaveLien):
+			operationStatus = opStatusSaveFailed
+			return nil, status.Errorf(codes.Internal, "failed to save lien: %v", txErr)
+		default:
+			operationStatus = opStatusRetrieveFailed
+			return nil, status.Errorf(codes.Internal, "failed to create lien: %v", txErr)
+		}
 	}
 
 	s.logger.Info("lien created",
@@ -503,6 +516,40 @@ func mapLienStatusToProto(status domain.LienStatus) pb.LienStatus {
 	default:
 		return pb.LienStatus_LIEN_STATUS_UNSPECIFIED
 	}
+}
+
+// checkLienIdempotency checks if a lien with the given PaymentOrderReference already exists.
+// Returns (response, true) if idempotent response should be returned, (nil, false) otherwise.
+// Returns error status if a non-recoverable error occurs.
+func (s *Service) checkLienIdempotency(paymentOrderRef string) (*pb.InitiateLienResponse, bool, error) {
+	if paymentOrderRef == "" {
+		return nil, false, nil
+	}
+
+	existingLien, err := s.lienRepo.FindByPaymentOrderReference(paymentOrderRef)
+	if err != nil {
+		if errors.Is(err, persistence.ErrLienNotFound) {
+			return nil, false, nil // Not found - continue with creation
+		}
+		return nil, false, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+	}
+
+	// Lien already exists - return idempotent response
+	s.logger.Info("lien already exists (idempotent)",
+		"lien_id", existingLien.ID.String(),
+		"payment_order_ref", paymentOrderRef)
+
+	// Retrieve account for available balance calculation
+	account, acctErr := s.repo.FindByUUID(existingLien.AccountID)
+	if acctErr != nil {
+		s.logger.Error("failed to retrieve account for idempotent response", "error", acctErr)
+		return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, true, nil
+	}
+	availableMoney := s.calculateAvailableBalance(existingLien.AccountID, account.Balance)
+	return &pb.InitiateLienResponse{
+		Lien:             toLienProto(existingLien),
+		AvailableBalance: toMoneyAmount(availableMoney),
+	}, true, nil
 }
 
 // calculateAvailableBalance calculates available balance with active liens.
