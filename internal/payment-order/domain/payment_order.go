@@ -24,6 +24,7 @@ var (
 	ErrMissingLienID                 = errors.New("lien ID is required for Reserve transition")
 	ErrMissingGatewayReferenceID     = errors.New("gateway reference ID is required for Execute transition")
 	ErrMissingFailureReason          = errors.New("failure reason is required for Fail transition")
+	ErrMissingReversalReason         = errors.New("reversal reason is required for Reverse transition")
 )
 
 // PaymentOrderStatus represents the lifecycle state of a payment order in the saga.
@@ -176,6 +177,7 @@ func (p *PaymentOrder) Execute(gatewayReferenceID string) error {
 
 // Complete transitions the payment order from EXECUTING to COMPLETED.
 // This is called when the gateway confirms the payment was successful.
+// The ledgerBookingID is optional - it may be empty if ledger booking is performed asynchronously.
 // Returns ErrInvalidPaymentOrderTransition if not in EXECUTING state.
 func (p *PaymentOrder) Complete(ledgerBookingID string) error {
 	if p.Status != PaymentOrderStatusExecuting {
@@ -242,9 +244,15 @@ func (p *PaymentOrder) Cancel(reason string) error {
 
 // Reverse transitions the payment order from COMPLETED to REVERSED.
 // This is used for post-completion compensation (e.g., refunds, chargebacks).
+// Requires a reason for audit purposes.
 // Idempotent: Returns nil if already reversed.
+// Returns ErrMissingReversalReason if reason is empty.
 // Returns ErrInvalidPaymentOrderTransition if not in COMPLETED state.
 func (p *PaymentOrder) Reverse(reason string) error {
+	if reason == "" {
+		return ErrMissingReversalReason
+	}
+
 	// Idempotent: already reversed
 	if p.Status == PaymentOrderStatusReversed {
 		return nil
@@ -292,7 +300,19 @@ func (p *PaymentOrder) CanReverse() bool {
 }
 
 // RequiresLienRelease returns true if the payment order has a lien that needs to be released.
-// This is true when failing or cancelling from RESERVED or EXECUTING states.
+// This is true when the order is in RESERVED or EXECUTING states with an active lien.
+//
+// IMPORTANT: This method checks the current status. Call this BEFORE transitioning to
+// FAILED or CANCELLED to determine if lien compensation is needed. After the transition,
+// the status changes and this will return false.
+//
+// Usage pattern:
+//
+//	needsRelease := po.RequiresLienRelease()
+//	po.Fail(reason, errorCode)
+//	if needsRelease {
+//	    // trigger lien release compensation
+//	}
 func (p *PaymentOrder) RequiresLienRelease() bool {
 	return p.LienID != "" && (p.Status == PaymentOrderStatusReserved || p.Status == PaymentOrderStatusExecuting)
 }

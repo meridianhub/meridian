@@ -386,6 +386,15 @@ func TestPaymentOrder_Reverse_FromCancelled_Fails(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidPaymentOrderTransition)
 }
 
+func TestPaymentOrder_Reverse_MissingReason_Fails(t *testing.T) {
+	po := createTestPaymentOrder(t, PaymentOrderStatusCompleted)
+
+	err := po.Reverse("")
+
+	assert.ErrorIs(t, err, ErrMissingReversalReason)
+	assert.Equal(t, PaymentOrderStatusCompleted, po.Status)
+}
+
 func TestPaymentOrder_IsTerminal(t *testing.T) {
 	tests := []struct {
 		status   PaymentOrderStatus
