@@ -18,12 +18,18 @@ var (
 )
 
 // MockGatewayConfig configures the behavior of the mock gateway for testing.
+//
+// Deterministic Failure Convention:
+// When DeterministicFailures is enabled, amounts ending in 99 cents (e.g., £10.99, £1.99)
+// will always be rejected. This provides a predictable way to test failure handling
+// without relying on random behavior.
 type MockGatewayConfig struct {
 	// Latency is the simulated network latency for each request.
 	Latency time.Duration
 	// FailureRate is the probability (0.0-1.0) of random failures.
 	FailureRate float64
 	// DeterministicFailures enables failure for amounts ending in 99 cents.
+	// Use this for predictable test scenarios (e.g., £10.99 will always fail).
 	DeterministicFailures bool
 	// TimeoutRate is the probability (0.0-1.0) of timeout errors.
 	TimeoutRate float64
@@ -86,17 +92,7 @@ func (g *MockGateway) SendPayment(ctx context.Context, req PaymentRequest) (Paym
 		}
 	}
 
-	// Check for timeout (protected by mutex for thread safety)
-	if g.config.TimeoutRate > 0 {
-		g.mu.Lock()
-		shouldTimeout := g.rng.Float64() < g.config.TimeoutRate
-		g.mu.Unlock()
-		if shouldTimeout {
-			return PaymentResponse{}, ErrGatewayTimeout
-		}
-	}
-
-	// Check for deterministic failures (amounts ending in 99 cents)
+	// Check for deterministic failures first (no RNG needed)
 	if g.config.DeterministicFailures && req.Amount.AmountCents()%100 == 99 {
 		return PaymentResponse{
 			GatewayReferenceID: generateGatewayReferenceID(),
@@ -105,18 +101,29 @@ func (g *MockGateway) SendPayment(ctx context.Context, req PaymentRequest) (Paym
 		}, nil
 	}
 
-	// Check for random failures (protected by mutex for thread safety)
-	if g.config.FailureRate > 0 {
+	// Batch RNG checks under a single lock for efficiency
+	var shouldTimeout, shouldFail bool
+	if g.config.TimeoutRate > 0 || g.config.FailureRate > 0 {
 		g.mu.Lock()
-		shouldFail := g.rng.Float64() < g.config.FailureRate
-		g.mu.Unlock()
-		if shouldFail {
-			return PaymentResponse{
-				GatewayReferenceID: generateGatewayReferenceID(),
-				Status:             StatusRejected,
-				Message:            "random rejection",
-			}, nil
+		if g.config.TimeoutRate > 0 {
+			shouldTimeout = g.rng.Float64() < g.config.TimeoutRate
 		}
+		if g.config.FailureRate > 0 && !shouldTimeout {
+			shouldFail = g.rng.Float64() < g.config.FailureRate
+		}
+		g.mu.Unlock()
+	}
+
+	if shouldTimeout {
+		return PaymentResponse{}, ErrGatewayTimeout
+	}
+
+	if shouldFail {
+		return PaymentResponse{
+			GatewayReferenceID: generateGatewayReferenceID(),
+			Status:             StatusRejected,
+			Message:            "random rejection",
+		}, nil
 	}
 
 	// Success case

@@ -3,6 +3,7 @@ package gateway_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -189,4 +190,29 @@ func TestMockGateway_GatewayReferenceID_Unique(t *testing.T) {
 
 func TestMockGateway_ImplementsInterface(_ *testing.T) {
 	var _ gateway.PaymentGateway = (*gateway.MockGateway)(nil)
+}
+
+func TestMockGateway_ConcurrentSendPayment(t *testing.T) {
+	config := gateway.MockGatewayConfig{
+		FailureRate: 0.5,
+	}
+	gw := gateway.NewMockGatewayWithSeed(config, 12345)
+
+	const goroutines = 100
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			req := createTestPaymentRequest(t, 10000)
+			resp, err := gw.SendPayment(context.Background(), req)
+			// Should not panic or return unexpected errors
+			require.NoError(t, err)
+			assert.NotEmpty(t, resp.GatewayReferenceID)
+			assert.Contains(t, []gateway.Status{gateway.StatusAccepted, gateway.StatusRejected}, resp.Status)
+		}()
+	}
+
+	wg.Wait()
 }
