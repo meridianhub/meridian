@@ -92,8 +92,9 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("database connection established")
 
-	// Create repository
+	// Create repositories
 	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
 
 	// Get Kubernetes namespace from environment (defaults to "default")
 	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
@@ -106,6 +107,7 @@ func run(logger *slog.Logger) error {
 	// Create service with external clients and capture the clients for health checking
 	currentAccountService, posKeepingClient, finAcctClient, err := createServiceWithClients(
 		repo,
+		lienRepo,
 		namespace,
 		logger,
 		tracer,
@@ -313,6 +315,7 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 // Uses DNS-based client-side load balancing for inter-service gRPC communication.
 func createServiceWithClients(
 	repo *persistence.Repository,
+	lienRepo *persistence.LienRepository,
 	namespace string,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
@@ -360,6 +363,7 @@ func createServiceWithClients(
 	// Create service with the pre-created clients
 	svc, err := service.NewServiceWithExistingClients(
 		repo,
+		lienRepo,
 		resilientPosKeepingClient,
 		resilientFinAcctClient,
 		logger,
