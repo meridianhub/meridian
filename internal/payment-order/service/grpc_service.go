@@ -237,6 +237,18 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	// The saga runs in the background after returning the response
 	// nolint:contextcheck // Intentionally using background context for async saga orchestration
 	go func() {
+		// Recover from panics to prevent silent goroutine termination
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("panic in payment saga orchestration",
+					"panic", r,
+					"payment_order_id", po.ID.String(),
+					"correlation_id", correlationID)
+				// Attempt to fail the payment order so it doesn't remain in limbo
+				failCtx := context.Background()
+				s.failPaymentOrder(failCtx, po, "internal panic during saga orchestration", "INTERNAL_ERROR")
+			}
+		}()
 		sagaCtx := context.Background()
 		if s.tracer != nil {
 			sagaCtx = observability.WithCorrelationID(sagaCtx, correlationID)
