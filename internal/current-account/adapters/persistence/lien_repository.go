@@ -27,6 +27,12 @@ func NewLienRepository(db *gorm.DB) *LienRepository {
 	return &LienRepository{db: db}
 }
 
+// WithTx returns a new LienRepository that uses the provided transaction.
+// This enables multiple repository operations within a single transaction.
+func (r *LienRepository) WithTx(tx *gorm.DB) *LienRepository {
+	return &LienRepository{db: tx}
+}
+
 // Create inserts a new lien
 func (r *LienRepository) Create(lien *domain.Lien) error {
 	entity := toLienEntity(lien)

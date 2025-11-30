@@ -27,6 +27,18 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// DB returns the underlying database connection for transaction support.
+// Use this to wrap multiple repository operations in a single transaction.
+func (r *Repository) DB() *gorm.DB {
+	return r.db
+}
+
+// WithTx returns a new Repository that uses the provided transaction.
+// This enables multiple repository operations within a single transaction.
+func (r *Repository) WithTx(tx *gorm.DB) *Repository {
+	return &Repository{db: tx}
+}
+
 // Save creates or updates an account with optimistic locking
 func (r *Repository) Save(account *domain.CurrentAccount) error {
 	entity := toEntity(account)

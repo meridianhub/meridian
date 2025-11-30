@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 // Lien-specific errors
@@ -200,16 +201,7 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 		}
 
-		activeLiensTotal, sumErr := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
-		if sumErr != nil {
-			s.logger.Error("failed to sum active liens for idempotent response", "error", sumErr)
-		}
-		availableBalance := account.Balance.AmountCents() - activeLiensTotal
-		availableMoney, moneyErr := domain.NewMoney(account.Balance.Currency(), availableBalance)
-		if moneyErr != nil {
-			s.logger.Error("failed to create available balance for idempotent response", "error", moneyErr)
-		}
-
+		availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
 		return &pb.ExecuteLienResponse{
 			Lien:             toLienProto(lien),
 			NewBalance:       toMoneyAmount(account.Balance),
@@ -244,22 +236,45 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		return nil, status.Errorf(codes.FailedPrecondition, "failed to debit account: %v", err)
 	}
 
-	// Save account first - this is the critical operation
-	// If this fails, no state has changed. If lien update fails after,
-	// the next idempotent retry will complete the lien status update.
-	if err := s.repo.Save(account); err != nil {
-		operationStatus = opStatusSaveAccountFailed
-		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
-	}
+	// Execute both updates atomically in a transaction to prevent double-debit on retry.
+	// If we updated lien first and account save failed, retry would see EXECUTED lien
+	// and return idempotent success without debiting - funds would never be debited.
+	// If we updated account first and lien update failed, retry would see ACTIVE lien
+	// and debit again - resulting in double-debit.
+	// Using a transaction ensures both succeed or both fail together.
+	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+		txRepo := s.repo.WithTx(tx)
+		txLienRepo := s.lienRepo.WithTx(tx)
 
-	// Update lien status (after account is safely persisted)
-	if err := s.lienRepo.Update(lien); err != nil {
-		if errors.Is(err, persistence.ErrLienVersionConflict) {
+		// Update lien status first (lighter operation)
+		if err := txLienRepo.Update(lien); err != nil {
+			if errors.Is(err, persistence.ErrLienVersionConflict) {
+				return fmt.Errorf("version_conflict: %w", err)
+			}
+			return fmt.Errorf("update_lien: %w", err)
+		}
+
+		// Save account (heavier operation with balance)
+		if err := txRepo.Save(account); err != nil {
+			return fmt.Errorf("save_account: %w", err)
+		}
+
+		return nil
+	})
+
+	if txErr != nil {
+		if errors.Is(txErr, persistence.ErrLienVersionConflict) {
 			operationStatus = opStatusVersionConflict
 			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
 		}
-		operationStatus = opStatusUpdateLienFailed
-		return nil, status.Errorf(codes.Internal, "failed to update lien: %v", err)
+		// Determine which operation failed for proper error reporting
+		errStr := txErr.Error()
+		if len(errStr) > 12 && errStr[:12] == "save_account" {
+			operationStatus = opStatusSaveAccountFailed
+		} else {
+			operationStatus = opStatusUpdateLienFailed
+		}
+		return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
 	}
 
 	transactionID := fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8])
@@ -270,17 +285,7 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		"amount_cents", lien.Amount.AmountCents(),
 		"transaction_id", transactionID)
 
-	// Calculate new available balance
-	activeLiensTotal, sumErr := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
-	if sumErr != nil {
-		s.logger.Error("failed to sum active liens for response", "error", sumErr)
-	}
-	availableBalance := account.Balance.AmountCents() - activeLiensTotal
-	availableMoney, moneyErr := domain.NewMoney(account.Balance.Currency(), availableBalance)
-	if moneyErr != nil {
-		s.logger.Error("failed to create available balance for response", "error", moneyErr)
-	}
-
+	availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
 	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
 		NewBalance:       toMoneyAmount(account.Balance),
@@ -327,21 +332,12 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 			"lien_id", lien.ID.String())
 
 		// Calculate available balance - errors logged but don't fail idempotent response
-		activeLiensTotal, sumErr := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
-		if sumErr != nil {
-			s.logger.Error("failed to sum active liens for idempotent response", "error", sumErr)
-		}
 		account, acctErr := s.repo.FindByUUID(lien.AccountID)
 		if acctErr != nil {
 			s.logger.Error("failed to find account for idempotent response", "error", acctErr)
 			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
 		}
-		availableBalance := account.Balance.AmountCents() - activeLiensTotal
-		availableMoney, moneyErr := domain.NewMoney(account.Balance.Currency(), availableBalance)
-		if moneyErr != nil {
-			s.logger.Error("failed to create available balance for idempotent response", "error", moneyErr)
-		}
-
+		availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
 		return &pb.TerminateLienResponse{
 			Lien:             toLienProto(lien),
 			AvailableBalance: toMoneyAmount(availableMoney),
@@ -386,16 +382,7 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	activeLiensTotal, sumErr := s.lienRepo.SumActiveAmountByAccountID(lien.AccountID)
-	if sumErr != nil {
-		s.logger.Error("failed to sum active liens for response", "error", sumErr)
-	}
-	availableBalance := account.Balance.AmountCents() - activeLiensTotal
-	availableMoney, moneyErr := domain.NewMoney(account.Balance.Currency(), availableBalance)
-	if moneyErr != nil {
-		s.logger.Error("failed to create available balance for response", "error", moneyErr)
-	}
-
+	availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
 	return &pb.TerminateLienResponse{
 		Lien:             toLienProto(lien),
 		AvailableBalance: toMoneyAmount(availableMoney),
@@ -489,4 +476,21 @@ func mapLienStatusToProto(status domain.LienStatus) pb.LienStatus {
 	default:
 		return pb.LienStatus_LIEN_STATUS_UNSPECIFIED
 	}
+}
+
+// calculateAvailableBalance calculates available balance with active liens.
+// Logs errors but returns best-effort values since primary operations already succeeded.
+func (s *Service) calculateAvailableBalance(accountID uuid.UUID, currentBalance domain.Money) domain.Money {
+	activeLiensTotal, err := s.lienRepo.SumActiveAmountByAccountID(accountID)
+	if err != nil {
+		s.logger.Error("failed to sum active liens for response", "error", err)
+		return currentBalance // Best effort: return current balance if liens can't be summed
+	}
+	availableBalance := currentBalance.AmountCents() - activeLiensTotal
+	availableMoney, err := domain.NewMoney(currentBalance.Currency(), availableBalance)
+	if err != nil {
+		s.logger.Error("failed to create available balance for response", "error", err)
+		return currentBalance // Best effort
+	}
+	return availableMoney
 }
