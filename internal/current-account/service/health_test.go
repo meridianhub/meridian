@@ -10,25 +10,23 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
+	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/meridianhub/meridian/pkg/platform/health"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 func setupTestRepository(t *testing.T) *persistence.Repository {
 	t.Helper()
 
-	// Create in-memory SQLite database for testing
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{
+		&persistence.CurrentAccountEntity{},
+	})
 
-	// Migrate schema
-	err = db.AutoMigrate(&persistence.CurrentAccountEntity{})
-	require.NoError(t, err)
+	// Register cleanup to run when test completes
+	t.Cleanup(cleanup)
 
 	return persistence.NewRepository(db)
 }

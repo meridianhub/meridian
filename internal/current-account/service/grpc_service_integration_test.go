@@ -13,15 +13,14 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 // Test sentinel errors
@@ -221,23 +220,9 @@ func (m *mockFinancialAccountingClient) Close() error {
 
 func setupIntegrationTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
+	return testdb.SetupPostgres(t, []interface{}{
+		&persistence.CurrentAccountEntity{},
 	})
-	require.NoError(t, err, "Failed to open test database")
-
-	// Run migrations
-	err = db.AutoMigrate(&persistence.CurrentAccountEntity{})
-	require.NoError(t, err, "Failed to migrate database")
-
-	cleanup := func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			_ = sqlDB.Close()
-		}
-	}
-
-	return db, cleanup
 }
 
 func createTestAccount(t *testing.T, repo *persistence.Repository, accountID string) *domain.CurrentAccount {
