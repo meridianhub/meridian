@@ -45,18 +45,23 @@ type MockGateway struct {
 }
 
 // NewMockGateway creates a new MockGateway with the given configuration.
+// Uses math/rand for reproducible test scenarios (not crypto operations).
 func NewMockGateway(config MockGatewayConfig) *MockGateway {
+	now := time.Now().UnixNano()
 	return &MockGateway{
 		config: config,
-		rng:    rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()>>32))),
+		// #nosec G404 -- This is a mock for testing, not for cryptographic purposes
+		rng: rand.New(rand.NewPCG(uint64(now), uint64(now>>32))), // #nosec G115
 	}
 }
 
 // NewMockGatewayWithSeed creates a new MockGateway with a seeded random for deterministic testing.
+// Uses math/rand for reproducible test scenarios (not crypto operations).
 func NewMockGatewayWithSeed(config MockGatewayConfig, seed uint64) *MockGateway {
 	return &MockGateway{
 		config: config,
-		rng:    rand.New(rand.NewPCG(seed, seed>>32)),
+		// #nosec G404 -- This is a mock for testing, not for cryptographic purposes
+		rng: rand.New(rand.NewPCG(seed, seed>>32)),
 	}
 }
 
