@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,6 +47,7 @@ const (
 	TopicPaymentOrderExecuting = "payment-order.executing.v1"
 	TopicPaymentOrderCompleted = "payment-order.completed.v1"
 	TopicPaymentOrderFailed    = "payment-order.failed.v1"
+	TopicPaymentOrderCancelled = "payment-order.cancelled.v1"
 )
 
 // CurrentAccountClient defines the interface for communicating with the CurrentAccount service
@@ -142,8 +144,14 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		s.logger.Info("generated correlation ID", "correlation_id", correlationID)
 	}
 
-	// Get idempotency key
-	idempotencyKey := req.IdempotencyKey.Key
+	// Get idempotency key (required)
+	var idempotencyKey string
+	if req.IdempotencyKey != nil {
+		idempotencyKey = req.IdempotencyKey.Key
+	}
+	if idempotencyKey == "" {
+		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
+	}
 
 	// Check for existing payment order with same idempotency key (idempotent)
 	existingPO, err := s.repo.FindByIdempotencyKey(idempotencyKey)
@@ -441,6 +449,9 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 
 // failPaymentOrder handles payment order failure with proper state transition and event publishing.
 func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder, reason string, errorCode string) {
+	// Capture original status before transitioning (for event)
+	failedAtStatus := po.Status
+
 	// Check if lien needs to be released before transitioning
 	needsLienRelease := po.RequiresLienRelease()
 	lienID := po.LienID
@@ -483,7 +494,7 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 			Amount:          toMoneyAmount(po.Amount),
 			FailureReason:   reason,
 			ErrorCode:       errorCode,
-			FailedAtStatus:  mapStatusToProto(po.Status),
+			FailedAtStatus:  mapStatusToProto(failedAtStatus),
 			LienId:          lienID,
 			CorrelationId:   po.CorrelationID,
 			CausationId:     po.ID.String(),
@@ -579,6 +590,11 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		}
 
 		// Execute lien (convert reservation to actual debit)
+		// TODO: ExecuteLien failure creates state inconsistency - payment order is COMPLETED
+		// but lien remains active. Consider:
+		// 1. Implement async retry mechanism with idempotent lien execution
+		// 2. Add LienExecutionStatus field to PaymentOrder for reconciliation
+		// 3. Use transactional outbox pattern to ensure eventual consistency
 		if s.currentAccountClient != nil && po.LienID != "" {
 			_, execErr := s.currentAccountClient.ExecuteLien(ctx, &currentaccountv1.ExecuteLienRequest{
 				LienId: po.LienID,
@@ -586,6 +602,7 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 			if execErr != nil {
 				s.logger.Error("failed to execute lien", "error", execErr, "lien_id", po.LienID)
 				// Continue - the payment is still complete, lien execution can be retried
+				// via reconciliation process or manual intervention
 			}
 		}
 
@@ -704,7 +721,7 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 			Version:            int64(po.Version),
 			IdempotencyKey:     po.IdempotencyKey,
 		}
-		if err := s.kafkaProducer.Publish(ctx, "payment-order.cancelled.v1", po.ID.String(), event); err != nil {
+		if err := s.kafkaProducer.Publish(ctx, TopicPaymentOrderCancelled, po.ID.String(), event); err != nil {
 			s.logger.Error("failed to publish PaymentOrderCancelled event", "error", err)
 		}
 	}
@@ -726,22 +743,71 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 		return nil, status.Error(codes.InvalidArgument, "debtor_account_id is required for listing")
 	}
 
+	// TODO: Implement repository-level pagination for better performance with large datasets
 	paymentOrders, err := s.repo.FindByDebtorAccountID(req.DebtorAccountId)
 	if err != nil {
 		s.logger.Error("failed to list payment orders", "error", err)
 		return nil, status.Error(codes.Internal, "failed to list payment orders")
 	}
 
-	// Convert to proto
-	protoOrders := make([]*pb.PaymentOrder, 0, len(paymentOrders))
-	for _, po := range paymentOrders {
+	totalCount := len(paymentOrders)
+
+	// Apply in-memory pagination
+	const defaultPageSize = 50
+	const maxPageSize = 1000
+
+	pageSize := defaultPageSize
+	if req.Pagination != nil && req.Pagination.PageSize > 0 {
+		pageSize = int(req.Pagination.PageSize)
+		if pageSize > maxPageSize {
+			pageSize = maxPageSize
+		}
+	}
+
+	// Parse page token (offset-based for simplicity)
+	offset := 0
+	if req.Pagination != nil && req.Pagination.PageToken != "" {
+		parsedOffset, parseErr := strconv.Atoi(req.Pagination.PageToken)
+		if parseErr != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid page_token")
+		}
+		offset = parsedOffset
+	}
+
+	// Apply pagination bounds
+	if offset >= totalCount {
+		// Return empty page if offset is beyond results
+		return &pb.ListPaymentOrdersResponse{
+			PaymentOrders: []*pb.PaymentOrder{},
+			Pagination: &commonpb.PaginationResponse{
+				TotalCount: int64(totalCount),
+			},
+		}, nil
+	}
+
+	end := offset + pageSize
+	if end > totalCount {
+		end = totalCount
+	}
+
+	// Convert paginated slice to proto
+	paginatedOrders := paymentOrders[offset:end]
+	protoOrders := make([]*pb.PaymentOrder, 0, len(paginatedOrders))
+	for _, po := range paginatedOrders {
 		protoOrders = append(protoOrders, toProto(po))
+	}
+
+	// Build next page token if more results exist
+	var nextPageToken string
+	if end < totalCount {
+		nextPageToken = strconv.Itoa(end)
 	}
 
 	return &pb.ListPaymentOrdersResponse{
 		PaymentOrders: protoOrders,
 		Pagination: &commonpb.PaginationResponse{
-			TotalCount: int64(len(protoOrders)),
+			NextPageToken: nextPageToken,
+			TotalCount:    int64(totalCount),
 		},
 	}, nil
 }
