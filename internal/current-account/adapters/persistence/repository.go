@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
 	"gorm.io/gorm"
 )
@@ -105,6 +106,22 @@ func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) 
 func (r *Repository) FindByIBAN(iban string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
 	result := r.db.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrAccountNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toDomain(&entity)
+}
+
+// FindByUUID retrieves an account by its internal UUID
+func (r *Repository) FindByUUID(id uuid.UUID) (*domain.CurrentAccount, error) {
+	var entity CurrentAccountEntity
+	result := r.db.Where("id = ? AND deleted_at IS NULL", id).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrAccountNotFound

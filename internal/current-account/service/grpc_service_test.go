@@ -36,7 +36,7 @@ func TestInitiateCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
@@ -71,7 +71,7 @@ func TestExecuteDeposit(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -126,7 +126,7 @@ func TestExecuteDepositAccountNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	req := &pb.ExecuteDepositRequest{
 		AccountId: "ACC-NONEXISTENT",
@@ -159,7 +159,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -200,7 +200,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -237,7 +237,7 @@ func TestRetrieveCurrentAccountNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	req := &pb.RetrieveCurrentAccountRequest{
 		AccountId: "ACC-NONEXISTENT",
@@ -286,7 +286,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	// Create GBP account
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -331,7 +331,7 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
@@ -425,7 +425,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
@@ -490,7 +490,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")

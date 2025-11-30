@@ -46,6 +46,7 @@ const (
 type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
 	repo             *persistence.Repository
+	lienRepo         *persistence.LienRepository
 	posKeepingClient clients.PositionKeepingClient
 	finAcctClient    clients.FinancialAccountingClient
 	logger           *slog.Logger
@@ -55,6 +56,7 @@ type Service struct {
 // Config contains configuration for creating a new Service with external clients
 type Config struct {
 	Repository                *persistence.Repository
+	LienRepository            *persistence.LienRepository
 	PositionKeepingTarget     string // e.g., "positionkeeping-service:50051"
 	FinancialAccountingTarget string // e.g., "financialaccounting-service:50052"
 	Logger                    *slog.Logger
@@ -63,13 +65,14 @@ type Config struct {
 
 // NewService creates a new current account service with minimal dependencies.
 // This is primarily used for testing. For production use, prefer NewServiceWithClients.
-func NewService(repo *persistence.Repository) *Service {
+func NewService(repo *persistence.Repository, lienRepo *persistence.LienRepository) *Service {
 	if repo == nil {
 		panic("repository cannot be nil")
 	}
 	return &Service{
-		repo:   repo,
-		logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		repo:     repo,
+		lienRepo: lienRepo,
+		logger:   slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}
 }
 
@@ -78,6 +81,7 @@ func NewService(repo *persistence.Repository) *Service {
 // (e.g., health checkers) to avoid creating duplicate connections.
 func NewServiceWithExistingClients(
 	repo *persistence.Repository,
+	lienRepo *persistence.LienRepository,
 	posKeepingClient clients.PositionKeepingClient,
 	finAcctClient clients.FinancialAccountingClient,
 	logger *slog.Logger,
@@ -94,6 +98,7 @@ func NewServiceWithExistingClients(
 
 	return &Service{
 		repo:             repo,
+		lienRepo:         lienRepo,
 		posKeepingClient: posKeepingClient,
 		finAcctClient:    finAcctClient,
 		logger:           logger,
@@ -160,6 +165,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 
 	return &Service{
 		repo:             config.Repository,
+		lienRepo:         config.LienRepository,
 		posKeepingClient: resilientPosKeepingClient,
 		finAcctClient:    resilientFinAcctClient,
 		logger:           logger,
