@@ -166,6 +166,25 @@ func (r *Repository) FindByUUID(id uuid.UUID) (*domain.CurrentAccount, error) {
 	return toDomain(&entity)
 }
 
+// FindByUUIDForUpdate retrieves an account by its internal UUID with a pessimistic lock.
+// Use this within a transaction when you need to prevent concurrent modifications.
+func (r *Repository) FindByUUIDForUpdate(id uuid.UUID) (*domain.CurrentAccount, error) {
+	var entity CurrentAccountEntity
+	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrAccountNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toDomain(&entity)
+}
+
 // FindByCustomerID retrieves all accounts for a customer
 func (r *Repository) FindByCustomerID(customerID string) ([]*domain.CurrentAccount, error) {
 	var entities []CurrentAccountEntity

@@ -37,6 +37,8 @@ var (
 	errTxSumLiensFailed    = errors.New("sum_liens_failed")
 	errTxInsufficientFunds = errors.New("insufficient_funds")
 	errTxDomainError       = errors.New("domain_error")
+	errTxExecuteFailed     = errors.New("execute_failed")
+	errTxWithdrawFailed    = errors.New("withdraw_failed")
 )
 
 // Lien operation status constants for metrics
@@ -254,48 +256,47 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 		}, nil
 	}
 
-	// Validate lien can be executed
+	// Validate lien can be executed (basic check before acquiring locks)
 	if !lien.CanExecute() {
 		operationStatus = opStatusInvalidLienStatus
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"lien cannot be executed: status=%s, expired=%v", lien.Status, lien.IsExpired())
 	}
 
-	// Retrieve account
-	account, err := s.repo.FindByUUID(lien.AccountID)
-	if err != nil {
-		operationStatus = opStatusRetrieveAccountFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
-	}
-
-	// Execute lien (domain logic)
-	if err := lien.Execute(); err != nil {
-		operationStatus = opStatusExecuteFailed
-		return nil, status.Errorf(codes.FailedPrecondition, "failed to execute lien: %v", err)
-	}
-
-	// Debit the account
-	if err := account.Withdraw(lien.Amount); err != nil {
-		operationStatus = opStatusWithdrawFailed
-		return nil, status.Errorf(codes.FailedPrecondition, "failed to debit account: %v", err)
-	}
-
-	// Execute both updates atomically in a transaction to prevent double-debit on retry.
-	// If we updated lien first and account save failed, retry would see EXECUTED lien
-	// and return idempotent success without debiting - funds would never be debited.
-	// If we updated account first and lien update failed, retry would see ACTIVE lien
-	// and debit again - resulting in double-debit.
-	// Using a transaction ensures both succeed or both fail together.
+	// Execute atomically in a transaction with pessimistic locking to prevent race conditions.
+	// We need to:
+	// 1. Lock the account to prevent concurrent modifications
+	// 2. Debit the account balance
+	// 3. Update the lien status
+	// All must succeed or fail together.
+	var account *domain.CurrentAccount
 	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
 		txLienRepo := s.lienRepo.WithTx(tx)
 
-		// Update lien status first (lighter operation)
+		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
+		var txErr error
+		account, txErr = txRepo.FindByUUIDForUpdate(lien.AccountID)
+		if txErr != nil {
+			return fmt.Errorf("%w: %w", errTxSaveAccount, txErr)
+		}
+
+		// Execute lien (domain logic - marks status as executed)
+		if err := lien.Execute(); err != nil {
+			return fmt.Errorf("%w: %w", errTxExecuteFailed, err)
+		}
+
+		// Debit the account
+		if err := account.Withdraw(lien.Amount); err != nil {
+			return fmt.Errorf("%w: %w", errTxWithdrawFailed, err)
+		}
+
+		// Update lien status
 		if err := txLienRepo.Update(lien); err != nil {
 			return fmt.Errorf("%w: %w", errTxUpdateLien, err)
 		}
 
-		// Save account (heavier operation with balance)
+		// Save account with balance change
 		if err := txRepo.Save(account); err != nil {
 			return fmt.Errorf("%w: %w", errTxSaveAccount, err)
 		}
@@ -305,16 +306,29 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 
 	if txErr != nil {
 		// Determine which operation failed for proper error reporting
-		if errors.Is(txErr, persistence.ErrLienVersionConflict) {
+		switch {
+		case errors.Is(txErr, persistence.ErrLienVersionConflict):
 			operationStatus = opStatusVersionConflict
 			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
-		}
-		if errors.Is(txErr, errTxSaveAccount) {
+		case errors.Is(txErr, persistence.ErrVersionConflict):
+			operationStatus = opStatusVersionConflict
+			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
+		case errors.Is(txErr, errTxSaveAccount):
 			operationStatus = opStatusSaveAccountFailed
-		} else {
+			return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
+		case errors.Is(txErr, errTxUpdateLien):
 			operationStatus = opStatusUpdateLienFailed
+			return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
+		case errors.Is(txErr, errTxExecuteFailed):
+			operationStatus = opStatusExecuteFailed
+			return nil, status.Errorf(codes.FailedPrecondition, "failed to execute lien: %v", txErr)
+		case errors.Is(txErr, errTxWithdrawFailed):
+			operationStatus = opStatusWithdrawFailed
+			return nil, status.Errorf(codes.FailedPrecondition, "failed to debit account: %v", txErr)
+		default:
+			operationStatus = opStatusRetrieveAccountFailed
+			return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
 		}
-		return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
 	}
 
 	transactionID := fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8])
