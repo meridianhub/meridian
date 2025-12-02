@@ -479,6 +479,9 @@ func TestInitiatePaymentOrder_NegativeAmount(t *testing.T) {
 // ErrDatabaseError is a test error for database failures
 var ErrDatabaseError = errors.New("database error")
 
+// ErrLienServiceUnavailable is a test error for lien service failures
+var ErrLienServiceUnavailable = errors.New("lien service unavailable")
+
 func TestInitiatePaymentOrder_RepositoryError(t *testing.T) {
 	repo := NewMockRepository()
 	repo.createErr = ErrDatabaseError
@@ -1947,4 +1950,79 @@ func TestUpdatePaymentOrder_UnspecifiedStatus(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 	assert.Contains(t, st.Message(), "gateway status is required")
+}
+
+// TestUpdatePaymentOrder_LienExecutionFailure tests that ExecuteLien failures
+// are logged but don't fail the payment completion (payment still succeeds).
+func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
+	repo := NewMockRepository()
+	caClient := &MockCurrentAccountClient{
+		executeLienErr: ErrLienServiceUnavailable,
+	}
+
+	svc := &Service{
+		repo:                 repo,
+		currentAccountClient: caClient,
+		logger:               testLogger(),
+	}
+
+	// Create a payment order in EXECUTING state
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = repo.Create(po)
+
+	req := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "update-key"},
+	}
+
+	resp, err := svc.UpdatePaymentOrder(context.Background(), req)
+
+	// Payment should still succeed even though ExecuteLien failed
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, resp.PaymentOrder.Status)
+	assert.True(t, caClient.executeLienCalled, "ExecuteLien should have been called")
+
+	// Verify the payment order is in COMPLETED state in the repo
+	updatedPO, _ := repo.FindByID(po.ID)
+	assert.Equal(t, domain.PaymentOrderStatusCompleted, updatedPO.Status)
+}
+
+// TestUpdatePaymentOrder_UnknownGatewayStatus tests that an unknown gateway status
+// (not SETTLED, REJECTED, or PENDING) returns an appropriate error.
+func TestUpdatePaymentOrder_UnknownGatewayStatus(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	// Create an executing payment order
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder(
+		"ACC-12345678",
+		"GB82WEST12345698765432",
+		amount,
+		"unknown-status-test",
+		"corr-123",
+	)
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gw-ref-123")
+	_ = repo.Create(po)
+
+	// Use a status value that exists in the proto but isn't handled
+	// (e.g., a hypothetical future status or edge case)
+	// Since we can't easily create an invalid proto enum value,
+	// we use GatewayStatus(999) to simulate an unknown status
+	req := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus(999), // Unknown status
+	}
+	_, err := svc.UpdatePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "unknown gateway status")
 }
