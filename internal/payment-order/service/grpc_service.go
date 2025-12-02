@@ -240,7 +240,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	// idempotency key could both pass this check. The database unique constraint on
 	// idempotency_key is the authoritative guard - concurrent inserts will fail with a
 	// constraint violation and should be handled by returning the existing record.
-	existingPO, err := s.repo.FindByIdempotencyKey(idempotencyKey)
+	existingPO, err := s.repo.FindByIdempotencyKey(ctx, idempotencyKey)
 	if err != nil && !errors.Is(err, persistence.ErrPaymentOrderNotFound) {
 		s.logger.Error("failed to check idempotency", "error", err)
 		return nil, status.Error(codes.Internal, "failed to check idempotency")
@@ -277,11 +277,11 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	}
 
 	// Persist to database
-	if err := s.repo.Create(po); err != nil {
+	if err := s.repo.Create(ctx, po); err != nil {
 		// Handle idempotency key conflict (TOCTOU race): another request won the race
 		// Reload and return the existing payment order for idempotent behavior
 		if errors.Is(err, persistence.ErrIdempotencyKeyConflict) {
-			existingPO, findErr := s.repo.FindByIdempotencyKey(idempotencyKey)
+			existingPO, findErr := s.repo.FindByIdempotencyKey(ctx, idempotencyKey)
 			if findErr != nil {
 				s.logger.Error("failed to retrieve existing payment order after idempotency conflict",
 					"error", findErr,
@@ -340,7 +340,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 				// Reload fresh state before failing - the original po may be stale
 				// if the saga made state transitions before panicking
 				failCtx := context.Background()
-				freshPO, err := s.repo.FindByID(paymentOrderID)
+				freshPO, err := s.repo.FindByID(failCtx, paymentOrderID)
 				if err != nil {
 					s.logger.Error("failed to reload payment order after panic",
 						"payment_order_id", paymentOrderID.String(),
@@ -363,7 +363,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		}
 
 		// Reload fresh state to avoid race with caller who may still reference po
-		freshPO, err := s.repo.FindByID(paymentOrderID)
+		freshPO, err := s.repo.FindByID(sagaCtx, paymentOrderID)
 		if err != nil {
 			s.logger.Error("failed to reload payment order for saga",
 				"payment_order_id", paymentOrderID.String(),
@@ -453,7 +453,7 @@ func (s *Service) addReserveFundsStep(saga *clients.SagaOrchestrator, po *domain
 				return fmt.Errorf("failed to transition to RESERVED: %w", err)
 			}
 
-			if err := s.repo.Update(po); err != nil {
+			if err := s.repo.Update(stepCtx, po); err != nil {
 				return fmt.Errorf("failed to update payment order: %w", err)
 			}
 
@@ -551,7 +551,7 @@ func (s *Service) processGatewayResponse(ctx context.Context, po *domain.Payment
 			return fmt.Errorf("failed to transition to EXECUTING: %w", err)
 		}
 
-		if err := s.repo.Update(po); err != nil {
+		if err := s.repo.Update(ctx, po); err != nil {
 			return fmt.Errorf("failed to update payment order: %w", err)
 		}
 
@@ -593,7 +593,7 @@ func (s *Service) handleSagaResult(ctx context.Context, po *domain.PaymentOrder,
 			"compensated_steps", result.CompensatedSteps)
 
 		// Reload payment order to get latest state
-		latestPO, err := s.repo.FindByID(po.ID)
+		latestPO, err := s.repo.FindByID(ctx, po.ID)
 		if err != nil {
 			s.logger.Error("failed to reload payment order for failure handling", "error", err)
 			return
@@ -636,7 +636,7 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 		return fmt.Errorf("failed to transition to FAILED state: %w", err)
 	}
 
-	if err := s.repo.Update(po); err != nil {
+	if err := s.repo.Update(ctx, po); err != nil {
 		s.logger.Error("failed to persist FAILED state",
 			"error", err,
 			"payment_order_id", po.ID.String())
@@ -685,7 +685,7 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 }
 
 // RetrievePaymentOrder gets payment order details by ID.
-func (s *Service) RetrievePaymentOrder(_ context.Context, req *pb.RetrievePaymentOrderRequest) (*pb.RetrievePaymentOrderResponse, error) {
+func (s *Service) RetrievePaymentOrder(ctx context.Context, req *pb.RetrievePaymentOrderRequest) (*pb.RetrievePaymentOrderResponse, error) {
 	// Parse payment order ID
 	poID, err := uuid.Parse(req.PaymentOrderId)
 	if err != nil {
@@ -693,7 +693,7 @@ func (s *Service) RetrievePaymentOrder(_ context.Context, req *pb.RetrievePaymen
 	}
 
 	// Retrieve from repository
-	po, err := s.repo.FindByID(poID)
+	po, err := s.repo.FindByID(ctx, poID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPaymentOrderNotFound) {
 			return nil, status.Errorf(codes.NotFound, "payment order not found: %s", req.PaymentOrderId)
@@ -726,7 +726,7 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 	}()
 
 	// Lookup payment order by ID or gateway reference ID
-	po, err := s.lookupPaymentOrder(req)
+	po, err := s.lookupPaymentOrder(ctx, req)
 	if err != nil {
 		operationStatus = opStatusError
 		return nil, err
@@ -781,7 +781,7 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 }
 
 // lookupPaymentOrder finds a payment order by ID or gateway reference ID.
-func (s *Service) lookupPaymentOrder(req *pb.UpdatePaymentOrderRequest) (*domain.PaymentOrder, error) {
+func (s *Service) lookupPaymentOrder(ctx context.Context, req *pb.UpdatePaymentOrderRequest) (*domain.PaymentOrder, error) {
 	var po *domain.PaymentOrder
 	var err error
 
@@ -790,9 +790,9 @@ func (s *Service) lookupPaymentOrder(req *pb.UpdatePaymentOrderRequest) (*domain
 		if parseErr != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid payment order ID: %v", parseErr)
 		}
-		po, err = s.repo.FindByID(poID)
+		po, err = s.repo.FindByID(ctx, poID)
 	} else if req.GatewayReferenceId != "" {
-		po, err = s.repo.FindByGatewayReferenceID(req.GatewayReferenceId)
+		po, err = s.repo.FindByGatewayReferenceID(ctx, req.GatewayReferenceId)
 	} else {
 		return nil, status.Error(codes.InvalidArgument, "either payment_order_id or gateway_reference_id must be provided")
 	}
@@ -836,7 +836,7 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 	}
 
 	// Persist state change
-	if err := s.repo.Update(po); err != nil {
+	if err := s.repo.Update(ctx, po); err != nil {
 		s.logger.Error("failed to update payment order to COMPLETED",
 			"error", err,
 			"payment_order_id", po.ID.String())
@@ -984,7 +984,7 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 	}
 
 	// Retrieve payment order
-	po, err := s.repo.FindByID(poID)
+	po, err := s.repo.FindByID(ctx, poID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPaymentOrderNotFound) {
 			return nil, status.Errorf(codes.NotFound, "payment order not found: %s", req.PaymentOrderId)
@@ -1012,7 +1012,7 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 		return nil, status.Errorf(codes.Internal, "failed to cancel payment order: %v", err)
 	}
 
-	if err := s.repo.Update(po); err != nil {
+	if err := s.repo.Update(ctx, po); err != nil {
 		return nil, status.Error(codes.Internal, "failed to update payment order")
 	}
 
@@ -1063,7 +1063,7 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 // ListPaymentOrders returns a paginated list of payment orders.
 // Uses cursor-based pagination for consistent results even when items are inserted/deleted.
 // The cursor is an opaque token encoding (created_at, id) for deterministic ordering.
-func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrdersRequest) (*pb.ListPaymentOrdersResponse, error) {
+func (s *Service) ListPaymentOrders(ctx context.Context, req *pb.ListPaymentOrdersRequest) (*pb.ListPaymentOrdersResponse, error) {
 	if req.DebtorAccountId == "" {
 		return nil, status.Error(codes.InvalidArgument, "debtor_account_id is required for listing")
 	}
@@ -1088,7 +1088,7 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 	}
 
 	// Query with cursor-based pagination
-	result, err := s.repo.FindByDebtorAccountIDWithCursor(req.DebtorAccountId, pageSize, cursor)
+	result, err := s.repo.FindByDebtorAccountIDWithCursor(ctx, req.DebtorAccountId, pageSize, cursor)
 	if err != nil {
 		s.logger.Error("failed to list payment orders", "error", err)
 		return nil, status.Error(codes.Internal, "failed to list payment orders")

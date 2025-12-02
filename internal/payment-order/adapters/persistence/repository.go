@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -77,16 +78,18 @@ type PaginatedResult struct {
 
 // Repository defines the contract for payment order persistence.
 // This interface enables mocking in service-layer tests.
+// All methods accept context.Context as the first parameter to enable
+// proper request lifecycle management, timeout handling, and cancellation propagation.
 type Repository interface {
-	Create(po *domain.PaymentOrder) error
-	FindByID(id uuid.UUID) (*domain.PaymentOrder, error)
-	FindByIdempotencyKey(key string) (*domain.PaymentOrder, error)
-	FindByGatewayReferenceID(gatewayRefID string) (*domain.PaymentOrder, error)
-	FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error)
+	Create(ctx context.Context, po *domain.PaymentOrder) error
+	FindByID(ctx context.Context, id uuid.UUID) (*domain.PaymentOrder, error)
+	FindByIdempotencyKey(ctx context.Context, key string) (*domain.PaymentOrder, error)
+	FindByGatewayReferenceID(ctx context.Context, gatewayRefID string) (*domain.PaymentOrder, error)
+	FindByDebtorAccountID(ctx context.Context, accountID string) ([]*domain.PaymentOrder, error)
 	// FindByDebtorAccountIDWithCursor retrieves payment orders using cursor-based pagination.
 	// Pass an empty cursor for the first page. Results are ordered by created_at DESC, id DESC.
-	FindByDebtorAccountIDWithCursor(accountID string, limit int, cursor Cursor) (*PaginatedResult, error)
-	Update(po *domain.PaymentOrder) error
+	FindByDebtorAccountIDWithCursor(ctx context.Context, accountID string, limit int, cursor Cursor) (*PaginatedResult, error)
+	Update(ctx context.Context, po *domain.PaymentOrder) error
 }
 
 // PaymentOrderRepository provides persistence operations for payment orders
@@ -104,9 +107,9 @@ func NewPaymentOrderRepository(db *gorm.DB) *PaymentOrderRepository {
 
 // Create inserts a new payment order.
 // Returns ErrIdempotencyKeyConflict if a payment order with the same idempotency key exists.
-func (r *PaymentOrderRepository) Create(po *domain.PaymentOrder) error {
+func (r *PaymentOrderRepository) Create(ctx context.Context, po *domain.PaymentOrder) error {
 	entity := toEntity(po)
-	err := r.db.Create(entity).Error
+	err := r.db.WithContext(ctx).Create(entity).Error
 	if err != nil && strings.Contains(err.Error(), errUniqueConstraintIdempotencyKey) {
 		return ErrIdempotencyKeyConflict
 	}
@@ -114,9 +117,9 @@ func (r *PaymentOrderRepository) Create(po *domain.PaymentOrder) error {
 }
 
 // FindByID retrieves a payment order by its UUID
-func (r *PaymentOrderRepository) FindByID(id uuid.UUID) (*domain.PaymentOrder, error) {
+func (r *PaymentOrderRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.PaymentOrder, error) {
 	var entity PaymentOrderEntity
-	result := r.db.Where("id = ?", id).First(&entity)
+	result := r.db.WithContext(ctx).Where("id = ?", id).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrPaymentOrderNotFound
@@ -130,9 +133,9 @@ func (r *PaymentOrderRepository) FindByID(id uuid.UUID) (*domain.PaymentOrder, e
 }
 
 // FindByIdempotencyKey retrieves a payment order by its idempotency key
-func (r *PaymentOrderRepository) FindByIdempotencyKey(key string) (*domain.PaymentOrder, error) {
+func (r *PaymentOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*domain.PaymentOrder, error) {
 	var entity PaymentOrderEntity
-	result := r.db.Where("idempotency_key = ?", key).First(&entity)
+	result := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrPaymentOrderNotFound
@@ -146,9 +149,9 @@ func (r *PaymentOrderRepository) FindByIdempotencyKey(key string) (*domain.Payme
 }
 
 // FindByGatewayReferenceID retrieves a payment order by its gateway reference ID
-func (r *PaymentOrderRepository) FindByGatewayReferenceID(gatewayRefID string) (*domain.PaymentOrder, error) {
+func (r *PaymentOrderRepository) FindByGatewayReferenceID(ctx context.Context, gatewayRefID string) (*domain.PaymentOrder, error) {
 	var entity PaymentOrderEntity
-	result := r.db.Where("gateway_reference_id = ?", gatewayRefID).First(&entity)
+	result := r.db.WithContext(ctx).Where("gateway_reference_id = ?", gatewayRefID).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrPaymentOrderNotFound
@@ -162,9 +165,9 @@ func (r *PaymentOrderRepository) FindByGatewayReferenceID(gatewayRefID string) (
 }
 
 // FindByDebtorAccountID retrieves all payment orders for a debtor account
-func (r *PaymentOrderRepository) FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error) {
+func (r *PaymentOrderRepository) FindByDebtorAccountID(ctx context.Context, accountID string) ([]*domain.PaymentOrder, error) {
 	var entities []PaymentOrderEntity
-	result := r.db.Where("debtor_account_id = ?", accountID).Find(&entities)
+	result := r.db.WithContext(ctx).Where("debtor_account_id = ?", accountID).Find(&entities)
 
 	if result.Error != nil {
 		return nil, result.Error
@@ -192,10 +195,10 @@ func (r *PaymentOrderRepository) FindByDebtorAccountID(accountID string) ([]*dom
 //	WHERE (created_at < cursor_time) OR (created_at = cursor_time AND id < cursor_id)
 //
 // This ensures stable pagination even with concurrent inserts.
-func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(accountID string, limit int, cursor Cursor) (*PaginatedResult, error) {
+func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Context, accountID string, limit int, cursor Cursor) (*PaginatedResult, error) {
 	// Get total count (for UI purposes - this is still useful for showing "X of Y" in pagination)
 	var totalCount int64
-	countResult := r.db.Model(&PaymentOrderEntity{}).
+	countResult := r.db.WithContext(ctx).Model(&PaymentOrderEntity{}).
 		Where("debtor_account_id = ?", accountID).
 		Count(&totalCount)
 
@@ -215,7 +218,7 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(accountID strin
 
 	// Build query with cursor-based pagination
 	// Request one extra to determine if there are more results
-	query := r.db.Where("debtor_account_id = ?", accountID)
+	query := r.db.WithContext(ctx).Where("debtor_account_id = ?", accountID)
 
 	// Apply cursor condition if provided (not first page)
 	if !cursor.CreatedAt.IsZero() {
@@ -271,11 +274,11 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(accountID strin
 }
 
 // Update updates an existing payment order with optimistic locking
-func (r *PaymentOrderRepository) Update(po *domain.PaymentOrder) error {
+func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentOrder) error {
 	entity := toEntity(po)
 
 	// Optimistic locking: use WHERE clause with version check
-	result := r.db.Model(&PaymentOrderEntity{}).
+	result := r.db.WithContext(ctx).Model(&PaymentOrderEntity{}).
 		Where("id = ? AND version = ?", entity.ID, po.Version).
 		Updates(map[string]interface{}{
 			"status":               entity.Status,

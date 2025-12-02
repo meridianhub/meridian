@@ -95,7 +95,7 @@ func copyPaymentOrder(po *domain.PaymentOrder) *domain.PaymentOrder {
 	return &poCopy
 }
 
-func (m *MockRepository) Create(po *domain.PaymentOrder) error {
+func (m *MockRepository) Create(_ context.Context, po *domain.PaymentOrder) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.createErr != nil {
@@ -109,7 +109,7 @@ func (m *MockRepository) Create(po *domain.PaymentOrder) error {
 	return nil
 }
 
-func (m *MockRepository) FindByID(id uuid.UUID) (*domain.PaymentOrder, error) {
+func (m *MockRepository) FindByID(_ context.Context, id uuid.UUID) (*domain.PaymentOrder, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.findByIDErr != nil {
@@ -123,7 +123,7 @@ func (m *MockRepository) FindByID(id uuid.UUID) (*domain.PaymentOrder, error) {
 	return copyPaymentOrder(po), nil
 }
 
-func (m *MockRepository) FindByIdempotencyKey(key string) (*domain.PaymentOrder, error) {
+func (m *MockRepository) FindByIdempotencyKey(_ context.Context, key string) (*domain.PaymentOrder, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.findByIdempotencyErr != nil {
@@ -137,7 +137,7 @@ func (m *MockRepository) FindByIdempotencyKey(key string) (*domain.PaymentOrder,
 	return copyPaymentOrder(po), nil
 }
 
-func (m *MockRepository) FindByGatewayReferenceID(gatewayRefID string) (*domain.PaymentOrder, error) {
+func (m *MockRepository) FindByGatewayReferenceID(_ context.Context, gatewayRefID string) (*domain.PaymentOrder, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	po, ok := m.gatewayRefIndex[gatewayRefID]
@@ -148,7 +148,7 @@ func (m *MockRepository) FindByGatewayReferenceID(gatewayRefID string) (*domain.
 	return copyPaymentOrder(po), nil
 }
 
-func (m *MockRepository) FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error) {
+func (m *MockRepository) FindByDebtorAccountID(_ context.Context, accountID string) ([]*domain.PaymentOrder, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	pos := m.debtorAccountIndex[accountID]
@@ -160,7 +160,7 @@ func (m *MockRepository) FindByDebtorAccountID(accountID string) ([]*domain.Paym
 	return result, nil
 }
 
-func (m *MockRepository) FindByDebtorAccountIDWithCursor(accountID string, limit int, cursor persistence.Cursor) (*persistence.PaginatedResult, error) {
+func (m *MockRepository) FindByDebtorAccountIDWithCursor(_ context.Context, accountID string, limit int, cursor persistence.Cursor) (*persistence.PaginatedResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	pos := m.debtorAccountIndex[accountID]
@@ -234,7 +234,7 @@ func (m *MockRepository) FindByDebtorAccountIDWithCursor(accountID string, limit
 	}, nil
 }
 
-func (m *MockRepository) Update(po *domain.PaymentOrder) error {
+func (m *MockRepository) Update(_ context.Context, po *domain.PaymentOrder) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.updateErr != nil {
@@ -505,7 +505,7 @@ func TestRetrievePaymentOrder_Success(t *testing.T) {
 	// Create a payment order first
 	amount, _ := cadomain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.RetrievePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -558,7 +558,7 @@ func TestCancelPaymentOrder_Success(t *testing.T) {
 	// Create a payment order in INITIATED state
 	amount, _ := cadomain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.CancelPaymentOrderRequest{
 		PaymentOrderId:     po.ID.String(),
@@ -581,7 +581,7 @@ func TestCancelPaymentOrder_AlreadyCancelled_Idempotent(t *testing.T) {
 	amount, _ := cadomain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Cancel("Already cancelled")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.CancelPaymentOrderRequest{
 		PaymentOrderId:     po.ID.String(),
@@ -605,7 +605,7 @@ func TestCancelPaymentOrder_NotCancellable(t *testing.T) {
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.CancelPaymentOrderRequest{
 		PaymentOrderId:     po.ID.String(),
@@ -628,7 +628,7 @@ func TestCancelPaymentOrder_MissingReason(t *testing.T) {
 
 	amount, _ := cadomain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.CancelPaymentOrderRequest{
 		PaymentOrderId:     po.ID.String(),
@@ -666,7 +666,7 @@ func TestCancelPaymentOrder_ReleasesLien(t *testing.T) {
 	amount, _ := cadomain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.CancelPaymentOrderRequest{
 		PaymentOrderId:     po.ID.String(),
@@ -705,7 +705,7 @@ func TestUpdatePaymentOrder_Settled(t *testing.T) {
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -742,7 +742,7 @@ func TestUpdatePaymentOrder_Rejected(t *testing.T) {
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -780,8 +780,8 @@ func TestUpdatePaymentOrder_ByGatewayReferenceID(t *testing.T) {
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
-	_ = repo.Create(po)
-	_ = repo.Update(po) // This adds gateway ref to index
+	_ = repo.Create(context.Background(), po)
+	_ = repo.Update(context.Background(), po) // This adds gateway ref to index
 
 	req := &pb.UpdatePaymentOrderRequest{
 		GatewayReferenceId: "gateway-ref-123",
@@ -846,7 +846,7 @@ func TestUpdatePaymentOrder_Idempotent_Settled(t *testing.T) {
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -882,7 +882,7 @@ func TestUpdatePaymentOrder_Idempotent_Rejected(t *testing.T) {
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -916,7 +916,7 @@ func TestUpdatePaymentOrder_PendingRejectsStaleCallbacks(t *testing.T) {
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("") // Already completed
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	// PENDING callback should be rejected for completed orders
 	req := &pb.UpdatePaymentOrderRequest{
@@ -943,8 +943,8 @@ func TestListPaymentOrders_Success(t *testing.T) {
 	amount, _ := cadomain.NewMoney("GBP", 10000)
 	po1, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "key-1", uuid.New().String())
 	po2, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765433", amount, "key-2", uuid.New().String())
-	_ = repo.Create(po1)
-	_ = repo.Create(po2)
+	_ = repo.Create(context.Background(), po1)
+	_ = repo.Create(context.Background(), po2)
 
 	req := &pb.ListPaymentOrdersRequest{
 		DebtorAccountId: "ACC-12345678",
@@ -984,7 +984,7 @@ func TestListPaymentOrders_Pagination(t *testing.T) {
 			fmt.Sprintf("key-%d", i),
 			uuid.New().String(),
 		)
-		_ = repo.Create(po)
+		_ = repo.Create(context.Background(), po)
 	}
 
 	// Test first page with page size 2
@@ -1073,7 +1073,7 @@ func TestListPaymentOrders_PageSizeExceedsMax(t *testing.T) {
 			fmt.Sprintf("key-%d", i),
 			uuid.New().String(),
 		)
-		_ = repo.Create(po)
+		_ = repo.Create(context.Background(), po)
 	}
 
 	req := &pb.ListPaymentOrdersRequest{
@@ -1104,7 +1104,7 @@ func TestListPaymentOrders_CursorBeyondResults(t *testing.T) {
 			fmt.Sprintf("key-%d", i),
 			uuid.New().String(),
 		)
-		_ = repo.Create(po)
+		_ = repo.Create(context.Background(), po)
 	}
 
 	// Create a cursor pointing to a very old timestamp (before all records)
@@ -1337,7 +1337,7 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 	// The saga runs in a goroutine and should reach EXECUTING state
 	// Use polling with timeout to verify final state
 	require.Eventually(t, func() bool {
-		po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+		po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 		if err != nil {
 			return false
 		}
@@ -1345,7 +1345,7 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "payment order should reach EXECUTING state")
 
 	// Verify final state
-	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.PaymentOrderStatusExecuting, po.Status)
@@ -1388,7 +1388,7 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 
 	// Wait for async saga to fail and mark payment as FAILED
 	require.Eventually(t, func() bool {
-		po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+		po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 		if err != nil {
 			return false
 		}
@@ -1396,7 +1396,7 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "payment order should reach FAILED state")
 
 	// Verify failure state
-	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
@@ -1445,7 +1445,7 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 
 	// Wait for async saga to fail
 	require.Eventually(t, func() bool {
-		po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+		po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 		if err != nil {
 			return false
 		}
@@ -1453,7 +1453,7 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "payment order should reach FAILED state")
 
 	// Verify failure state
-	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
@@ -1529,7 +1529,7 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 
 	// Wait for async saga to timeout and fail
 	require.Eventually(t, func() bool {
-		po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+		po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 		if err != nil {
 			return false
 		}
@@ -1537,7 +1537,7 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "payment order should reach FAILED state after timeout")
 
 	// Verify failure state
-	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
@@ -1677,7 +1677,7 @@ func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
 
 	// Wait for saga to complete - should fail due to malformed response
 	require.Eventually(t, func() bool {
-		po, findErr := repo.FindByID(uuid.MustParse(paymentOrderID))
+		po, findErr := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 		if findErr != nil {
 			return false
 		}
@@ -1685,7 +1685,7 @@ func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "payment order should fail due to malformed lien response")
 
 	// Verify failure reason
-	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 	require.NoError(t, err)
 	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
 	assert.Contains(t, po.FailureReason, "malformed lien response")
@@ -1732,7 +1732,7 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 
 	// Wait for saga to complete - should reach EXECUTING (pending gateway confirmation)
 	require.Eventually(t, func() bool {
-		po, findErr := repo.FindByID(uuid.MustParse(paymentOrderID))
+		po, findErr := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 		if findErr != nil {
 			return false
 		}
@@ -1740,7 +1740,7 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 	}, 3*time.Second, 50*time.Millisecond, "payment order should reach EXECUTING state")
 
 	// Verify state
-	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	po, err := repo.FindByID(context.Background(), uuid.MustParse(paymentOrderID))
 	require.NoError(t, err)
 	assert.Equal(t, domain.PaymentOrderStatusExecuting, po.Status)
 	assert.Equal(t, "gw-pending-ref-123", po.GatewayReferenceID)
@@ -1765,7 +1765,7 @@ func TestUpdatePaymentOrder_UnspecifiedStatus(t *testing.T) {
 	po.LienID = "lien-123"
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gw-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	// Update with unspecified status
 	req := &pb.UpdatePaymentOrderRequest{
@@ -1800,7 +1800,7 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1816,7 +1816,7 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 	assert.True(t, caClient.executeLienCalled, "ExecuteLien should have been called")
 
 	// Verify the payment order is in COMPLETED state in the repo
-	updatedPO, _ := repo.FindByID(po.ID)
+	updatedPO, _ := repo.FindByID(context.Background(), po.ID)
 	assert.Equal(t, domain.PaymentOrderStatusCompleted, updatedPO.Status)
 }
 
@@ -1837,7 +1837,7 @@ func TestUpdatePaymentOrder_UnknownGatewayStatus(t *testing.T) {
 	)
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gw-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	// Use a status value that exists in the proto but isn't handled
 	// (e.g., a hypothetical future status or edge case)
