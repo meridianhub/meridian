@@ -36,6 +36,7 @@ var (
 	ErrPaymentGatewayNil       = errors.New("payment gateway cannot be nil")
 	ErrKafkaProducerNil        = errors.New("kafka producer cannot be nil")
 	ErrAmountRequired          = errors.New("amount is required")
+	ErrInvalidNanos            = errors.New("nanos must be in range [-999999999, 999999999]")
 	ErrPaymentRejected         = errors.New("payment rejected by gateway")
 	ErrUnexpectedGatewayStatus = errors.New("unexpected gateway status")
 	ErrIdempotencyKeyTooLong   = errors.New("idempotency key exceeds maximum length")
@@ -331,6 +332,10 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		}
 		s.orchestratePayment(sagaCtx, freshPO)
 	}(po.ID)
+
+	// Prevent accidental access to po after goroutine launch - the goroutine
+	// reloads fresh state from DB, so any access to po here would be stale
+	po = nil //nolint:ineffassign // Intentional: prevent future code from accidentally using stale po
 
 	return &pb.InitiatePaymentOrderResponse{
 		PaymentOrder: responseProto,
@@ -741,6 +746,11 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 
 // CancelPaymentOrder cancels a payment order before completion.
 func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentOrderRequest) (*pb.CancelPaymentOrderResponse, error) {
+	// Validate cancellation reason - required for audit purposes
+	if req.CancellationReason == "" {
+		return nil, status.Error(codes.InvalidArgument, "cancellation_reason is required")
+	}
+
 	// Parse payment order ID
 	poID, err := uuid.Parse(req.PaymentOrderId)
 	if err != nil {
@@ -959,6 +969,12 @@ func toMoneyAmount(m cadomain.Money) *commonpb.MoneyAmount {
 func protoToMoney(amount *commonpb.MoneyAmount) (cadomain.Money, error) {
 	if amount == nil || amount.Amount == nil {
 		return cadomain.Money{}, ErrAmountRequired
+	}
+
+	// Validate nanos is within bounds (per Google Money spec)
+	const maxNanos = 999999999
+	if amount.Amount.Nanos < -maxNanos || amount.Amount.Nanos > maxNanos {
+		return cadomain.Money{}, ErrInvalidNanos
 	}
 
 	// Convert to cents with symmetric rounding (round half away from zero)

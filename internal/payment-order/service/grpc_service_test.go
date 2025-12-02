@@ -577,6 +577,29 @@ func TestCancelPaymentOrder_NotCancellable(t *testing.T) {
 	assert.Equal(t, codes.FailedPrecondition, st.Code())
 }
 
+func TestCancelPaymentOrder_MissingReason(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = repo.Create(po)
+
+	req := &pb.CancelPaymentOrderRequest{
+		PaymentOrderId:     po.ID.String(),
+		CancellationReason: "", // Empty - should fail validation
+		CancelledBy:        "user@example.com",
+	}
+
+	_, err := svc.CancelPaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "cancellation_reason is required")
+}
+
 func TestCancelPaymentOrder_ReleasesLien(t *testing.T) {
 	repo := NewMockRepository()
 	caClient := &MockCurrentAccountClient{
@@ -1127,6 +1150,30 @@ func TestProtoToMoney(t *testing.T) {
 			},
 			wantCents: -556, // -5.56 (rounded from -5.555)
 			wantErr:   false,
+		},
+		{
+			name: "nanos exceeds max bounds",
+			amount: &commonpb.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        10,
+					Nanos:        1000000000, // Exceeds max 999999999
+				},
+			},
+			wantCents: 0,
+			wantErr:   true,
+		},
+		{
+			name: "nanos exceeds min bounds",
+			amount: &commonpb.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        -10,
+					Nanos:        -1000000000, // Exceeds min -999999999
+				},
+			},
+			wantCents: 0,
+			wantErr:   true,
 		},
 	}
 
