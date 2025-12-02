@@ -1,38 +1,43 @@
-// Package main is the entry point for the Payment Order service.
+// Package main is the entry point for the PaymentOrder service.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/gateway"
+	webhookhttp "github.com/meridianhub/meridian/internal/payment-order/adapters/http"
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/payment-order/service"
 	"github.com/meridianhub/meridian/internal/platform/kafka"
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-// Build information set via ldflags during compilation
+// Build information set via ldflags during compilation.
 var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
+
+// ErrMissingHMACSecret is returned when the WEBHOOK_HMAC_SECRET environment variable is not set.
+var ErrMissingHMACSecret = errors.New("WEBHOOK_HMAC_SECRET environment variable is required")
 
 func main() {
 	// Initialize structured logging
@@ -64,7 +69,6 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to load tracer config: %w", err)
 	}
 
-	// Override service name and version from build info
 	tracerConfig = tracerConfig.
 		WithServiceName("payment-order-service").
 		WithServiceVersion(Version)
@@ -83,9 +87,7 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("tracer initialized",
 		"service_name", tracerConfig.ServiceName,
-		"environment", tracerConfig.Environment,
-		"otlp_endpoint", tracerConfig.OTLPEndpoint,
-		"sampling_rate", tracerConfig.SamplingRate)
+		"environment", tracerConfig.Environment)
 
 	// Initialize database connection
 	db, err := initDatabase(logger)
@@ -93,49 +95,30 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	defer closeDatabase(db, logger)
-
 	logger.Info("database connection established")
 
 	// Create repository
 	repo := persistence.NewPaymentOrderRepository(db)
 
-	// Get Kubernetes namespace from environment (defaults to "default")
+	// Get Kubernetes namespace from environment
 	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
 
-	// Create Current Account client for lien operations
-	currentAccountClient, err := createCurrentAccountClient(namespace, logger, tracer)
+	// Create external clients
+	currentAccountClient, cleanup, err := createCurrentAccountClient(namespace, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create current account client: %w", err)
 	}
-	defer func() {
-		if err := currentAccountClient.Close(); err != nil {
-			logger.Error("failed to close current account client", "error", err)
-		}
-	}()
+	defer cleanup()
 
-	logger.Info("current account client initialized",
-		"service", "current-account."+namespace+".svc.cluster.local:50051")
+	// Create payment gateway
+	paymentGateway := createPaymentGateway(logger)
 
-	// Create Kafka producer for event publishing
-	kafkaBrokers := getEnvOrDefault("KAFKA_BROKERS", "kafka:9092")
-	kafkaProducer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
-		BootstrapServers: kafkaBrokers,
-		ClientID:         "payment-order-service",
-	})
+	// Create Kafka producer
+	kafkaProducer, err := createKafkaProducer(logger)
 	if err != nil {
-		return fmt.Errorf("failed to create kafka producer: %w", err)
+		return fmt.Errorf("failed to create Kafka producer: %w", err)
 	}
 	defer kafkaProducer.Close()
-
-	logger.Info("kafka producer initialized", "brokers", kafkaBrokers)
-
-	// Create payment gateway (mock for now)
-	paymentGateway := gateway.NewMockGateway(gateway.MockGatewayConfig{
-		Latency:     100 * time.Millisecond,
-		FailureRate: 0.0, // No simulated failures in production
-	})
-
-	logger.Info("payment gateway initialized (mock)")
 
 	// Create payment order service
 	paymentOrderService, err := service.NewServiceWithConfig(service.Config{
@@ -150,9 +133,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create payment order service: %w", err)
 	}
 
-	logger.Info("payment order service initialized")
-
-	// Create gRPC server with observability interceptors
+	// Create gRPC server
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			tracer.UnaryServerInterceptor(),
@@ -162,36 +143,69 @@ func run(logger *slog.Logger) error {
 		),
 	)
 
-	// Register services
+	// Register gRPC services
 	pb.RegisterPaymentOrderServiceServer(grpcServer, paymentOrderService)
-
-	// Register health check service
-	healthServer := health.NewServer()
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-	healthServer.SetServingStatus("meridian.payment_order.v1.PaymentOrderService", grpc_health_v1.HealthCheckResponse_SERVING)
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-
-	// Register reflection service for debugging
+	grpc_health_v1.RegisterHealthServer(grpcServer, &simpleHealthServer{})
 	reflection.Register(grpcServer)
-
 	logger.Info("gRPC services registered")
 
-	// Get port from environment
-	port := getEnvOrDefault("GRPC_PORT", "50054")
-	address := fmt.Sprintf(":%s", port)
-
-	// Create listener
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", address, err)
+	// Create HTTP webhook handler
+	hmacSecret := []byte(getEnvOrDefault("WEBHOOK_HMAC_SECRET", ""))
+	if len(hmacSecret) == 0 {
+		return ErrMissingHMACSecret
 	}
 
+	// Create a gRPC client wrapper for the local service
+	localServiceClient := &localPaymentOrderClient{service: paymentOrderService}
+
+	webhookHandler, err := webhookhttp.NewWebhookHandler(webhookhttp.WebhookHandlerConfig{
+		PaymentOrderService: localServiceClient,
+		HMACSecret:          hmacSecret,
+		Logger:              logger,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create webhook handler: %w", err)
+	}
+
+	// Create HTTP server
+	httpPort := getEnvAsInt("HTTP_PORT", 8080)
+	httpServer, err := webhookhttp.NewServer(webhookhttp.ServerConfig{
+		Port:               httpPort,
+		WebhookHandler:     webhookHandler,
+		Logger:             logger,
+		RateLimitPerSecond: getEnvAsFloat("HTTP_RATE_LIMIT_PER_SECOND", 100),
+		RateLimitBurst:     getEnvAsInt("HTTP_RATE_LIMIT_BURST", 200),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP server: %w", err)
+	}
+
+	// Get gRPC port
+	grpcPort := getEnvOrDefault("GRPC_PORT", "50054")
+	grpcAddress := fmt.Sprintf(":%s", grpcPort)
+
+	// Create gRPC listener
+	grpcListener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", grpcAddress)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
+	}
+
+	// Channel to collect server errors
+	serverErrors := make(chan error, 2)
+
 	// Start gRPC server in background
-	serverErrors := make(chan error, 1)
 	go func() {
-		logger.Info("starting gRPC server", "address", address)
-		if err := grpcServer.Serve(listener); err != nil {
-			serverErrors <- err
+		logger.Info("starting gRPC server", "address", grpcAddress)
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
+		}
+	}()
+
+	// Start HTTP server in background
+	go func() {
+		logger.Info("starting HTTP server", "port", httpPort)
+		if err := httpServer.Start(); err != nil {
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
 
@@ -203,18 +217,19 @@ func run(logger *slog.Logger) error {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		return err
 	}
 
 	// Graceful shutdown
-	logger.Info("shutting down server...")
+	logger.Info("shutting down servers...")
 
-	// Mark health as not serving
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
-
-	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Shutdown HTTP server first (stop accepting new webhooks)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("failed to shutdown HTTP server", "error", err)
+	}
 
 	// Gracefully stop gRPC server
 	stopped := make(chan struct{})
@@ -223,10 +238,9 @@ func run(logger *slog.Logger) error {
 		close(stopped)
 	}()
 
-	// Wait for graceful stop or timeout
 	select {
 	case <-stopped:
-		logger.Info("server stopped gracefully")
+		logger.Info("servers stopped gracefully")
 	case <-shutdownCtx.Done():
 		logger.Warn("graceful shutdown timeout, forcing stop")
 		grpcServer.Stop()
@@ -235,29 +249,130 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
-// initDatabase initializes the database connection with connection pooling
+// localPaymentOrderClient wraps the local service to implement the client interface.
+type localPaymentOrderClient struct {
+	service *service.Service
+}
+
+func (c *localPaymentOrderClient) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
+	return c.service.UpdatePaymentOrder(ctx, req)
+}
+
+// simpleHealthServer implements grpc_health_v1.HealthServer with basic checks.
+type simpleHealthServer struct {
+	grpc_health_v1.UnimplementedHealthServer
+}
+
+func (s *simpleHealthServer) Check(_ context.Context, _ *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
+	return &grpc_health_v1.HealthCheckResponse{
+		Status: grpc_health_v1.HealthCheckResponse_SERVING,
+	}, nil
+}
+
+func (s *simpleHealthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, server grpc_health_v1.Health_WatchServer) error {
+	// Send initial status
+	if err := server.Send(&grpc_health_v1.HealthCheckResponse{
+		Status: grpc_health_v1.HealthCheckResponse_SERVING,
+	}); err != nil {
+		return err
+	}
+	// Block until context is done to keep stream open
+	<-server.Context().Done()
+	return server.Context().Err()
+}
+
+// currentAccountGRPCClient implements service.CurrentAccountClient using gRPC.
+type currentAccountGRPCClient struct {
+	conn   *grpc.ClientConn
+	client currentaccountv1.CurrentAccountServiceClient
+}
+
+func (c *currentAccountGRPCClient) InitiateLien(ctx context.Context, req *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
+	return c.client.InitiateLien(ctx, req)
+}
+
+func (c *currentAccountGRPCClient) TerminateLien(ctx context.Context, req *currentaccountv1.TerminateLienRequest) (*currentaccountv1.TerminateLienResponse, error) {
+	return c.client.TerminateLien(ctx, req)
+}
+
+func (c *currentAccountGRPCClient) ExecuteLien(ctx context.Context, req *currentaccountv1.ExecuteLienRequest) (*currentaccountv1.ExecuteLienResponse, error) {
+	return c.client.ExecuteLien(ctx, req)
+}
+
+func (c *currentAccountGRPCClient) Close() error {
+	return c.conn.Close()
+}
+
+// createCurrentAccountClient creates the CurrentAccount gRPC client.
+func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.CurrentAccountClient, func(), error) {
+	target := fmt.Sprintf("dns:///current-account.%s.svc.cluster.local:50051", namespace)
+	logger.Info("connecting to current-account service", "target", target)
+
+	conn, err := grpc.NewClient(
+		target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to connect to current-account service: %w", err)
+	}
+
+	client := &currentAccountGRPCClient{
+		conn:   conn,
+		client: currentaccountv1.NewCurrentAccountServiceClient(conn),
+	}
+
+	cleanup := func() {
+		if err := client.Close(); err != nil {
+			logger.Error("failed to close current-account client", "error", err)
+		}
+	}
+
+	return client, cleanup, nil
+}
+
+// createPaymentGateway creates the payment gateway client.
+func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
+	gatewayURL := getEnvOrDefault("PAYMENT_GATEWAY_URL", "")
+	if gatewayURL == "" {
+		logger.Warn("PAYMENT_GATEWAY_URL not set, using mock gateway")
+		return gateway.New(gateway.Config{UseMock: true})
+	}
+
+	return gateway.New(gateway.Config{
+		Timeout:    30 * time.Second,
+		MaxRetries: 3,
+	})
+}
+
+// createKafkaProducer creates the Kafka producer.
+func createKafkaProducer(logger *slog.Logger) (*kafka.ProtoProducer, error) {
+	brokers := getEnvOrDefault("KAFKA_BROKERS", "kafka:9092")
+	logger.Info("connecting to Kafka", "brokers", brokers)
+	return kafka.NewProtoProducer(kafka.ProducerConfig{
+		BootstrapServers: brokers,
+		ClientID:         "payment-order-service",
+	})
+}
+
+// initDatabase initializes the database connection with connection pooling.
 func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
 	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian:meridian@cockroachdb:26257/meridian?sslmode=disable")
 
-	// Open database connection
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		// Disable default transaction for better performance
 		SkipDefaultTransaction: true,
-		// Prepare statements for better performance
-		PrepareStmt: true,
-		Logger:      nil, // Use slog instead of gorm's default logger
+		PrepareStmt:            true,
+		Logger:                 nil,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Configure connection pool
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database instance: %w", err)
 	}
 
-	// Connection pool settings
 	maxOpenConns := getEnvAsInt("DB_MAX_OPEN_CONNS", 25)
 	maxIdleConns := getEnvAsInt("DB_MAX_IDLE_CONNS", 5)
 	connMaxLifetime := getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
@@ -270,11 +385,8 @@ func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
 
 	logger.Info("database connection pool configured",
 		"max_open_conns", maxOpenConns,
-		"max_idle_conns", maxIdleConns,
-		"conn_max_lifetime", connMaxLifetime,
-		"conn_max_idle_time", connMaxIdleTime)
+		"max_idle_conns", maxIdleConns)
 
-	// Verify connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -285,7 +397,7 @@ func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
 	return db, nil
 }
 
-// closeDatabase closes the database connection gracefully
+// closeDatabase closes the database connection gracefully.
 func closeDatabase(db *gorm.DB, logger *slog.Logger) {
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -300,56 +412,8 @@ func closeDatabase(db *gorm.DB, logger *slog.Logger) {
 	}
 }
 
-// currentAccountClient implements service.CurrentAccountClient using gRPC
-type currentAccountClient struct {
-	conn   *grpc.ClientConn
-	client currentaccountv1.CurrentAccountServiceClient
-}
+// Environment variable helpers
 
-// createCurrentAccountClient creates a gRPC client for the CurrentAccount service
-func createCurrentAccountClient(namespace string, _ *slog.Logger, tracer *observability.Tracer) (service.CurrentAccountClient, error) {
-	// Build the service address using DNS-based service discovery
-	address := fmt.Sprintf("dns:///current-account.%s.svc.cluster.local:50051", namespace)
-
-	// Create gRPC connection with tracing interceptors
-	conn, err := grpc.NewClient(
-		address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
-		grpc.WithUnaryInterceptor(tracer.UnaryClientInterceptor()),
-		grpc.WithStreamInterceptor(tracer.StreamClientInterceptor()),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to current-account service: %w", err)
-	}
-
-	return &currentAccountClient{
-		conn:   conn,
-		client: currentaccountv1.NewCurrentAccountServiceClient(conn),
-	}, nil
-}
-
-// InitiateLien creates a fund reservation on an account
-func (c *currentAccountClient) InitiateLien(ctx context.Context, req *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
-	return c.client.InitiateLien(ctx, req)
-}
-
-// TerminateLien releases a reservation without executing
-func (c *currentAccountClient) TerminateLien(ctx context.Context, req *currentaccountv1.TerminateLienRequest) (*currentaccountv1.TerminateLienResponse, error) {
-	return c.client.TerminateLien(ctx, req)
-}
-
-// ExecuteLien converts a reservation to an actual debit
-func (c *currentAccountClient) ExecuteLien(ctx context.Context, req *currentaccountv1.ExecuteLienRequest) (*currentaccountv1.ExecuteLienResponse, error) {
-	return c.client.ExecuteLien(ctx, req)
-}
-
-// Close terminates the client connection
-func (c *currentAccountClient) Close() error {
-	return c.conn.Close()
-}
-
-// getEnvOrDefault returns the environment variable value or default
 func getEnvOrDefault(key, defaultValue string) string {
 	value := os.Getenv(key)
 	if value == "" {
@@ -358,21 +422,32 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return value
 }
 
-// getEnvAsInt returns the environment variable value as int or default
 func getEnvAsInt(key string, defaultValue int) int {
 	valueStr := os.Getenv(key)
 	if valueStr == "" {
 		return defaultValue
 	}
 
-	var value int
-	if _, err := fmt.Sscanf(valueStr, "%d", &value); err != nil {
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
 		return defaultValue
 	}
 	return value
 }
 
-// getEnvAsDuration returns the environment variable value as duration or default
+func getEnvAsFloat(key string, defaultValue float64) float64 {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return defaultValue
+	}
+	return value
+}
+
 func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 	valueStr := os.Getenv(key)
 	if valueStr == "" {
