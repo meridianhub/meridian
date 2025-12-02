@@ -331,18 +331,54 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.
 	return client, cleanup, nil
 }
 
-// createPaymentGateway creates the payment gateway client.
+// createPaymentGateway creates the payment gateway client with resilience patterns.
+// The gateway is wrapped with circuit breaker, rate limiting, and retry logic.
 func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 	gatewayURL := getEnvOrDefault("PAYMENT_GATEWAY_URL", "")
+
+	var baseGateway gateway.PaymentGateway
 	if gatewayURL == "" {
 		logger.Warn("PAYMENT_GATEWAY_URL not set, using mock gateway")
-		return gateway.New(gateway.Config{UseMock: true})
+		baseGateway = gateway.New(gateway.Config{UseMock: true})
+	} else {
+		baseGateway = gateway.New(gateway.Config{
+			Timeout:    30 * time.Second,
+			MaxRetries: 3,
+		})
 	}
 
-	return gateway.New(gateway.Config{
-		Timeout:    30 * time.Second,
-		MaxRetries: 3,
-	})
+	// Configure resilience settings from environment
+	resilientConfig := gateway.ResilientGatewayConfig{
+		// Circuit breaker settings
+		CircuitBreakerName:     "payment-gateway",
+		CircuitBreakerTimeout:  getEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval: getEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		MaxRequests:            uint32(getEnvAsInt("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1)),
+		FailureThreshold:       uint32(getEnvAsInt("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5)),
+
+		// Rate limiting settings
+		RateLimit:      getEnvAsFloat("GATEWAY_RATE_LIMIT", 100.0),
+		RateLimitBurst: getEnvAsInt("GATEWAY_RATE_LIMIT_BURST", 10),
+
+		// Retry settings
+		MaxRetries:          getEnvAsInt("GATEWAY_MAX_RETRIES", 3),
+		InitialInterval:     getEnvAsDuration("GATEWAY_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
+		MaxInterval:         getEnvAsDuration("GATEWAY_RETRY_MAX_INTERVAL", 5*time.Second),
+		Multiplier:          getEnvAsFloat("GATEWAY_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: getEnvAsFloat("GATEWAY_RETRY_RANDOMIZATION", 0.5),
+
+		Logger: logger,
+	}
+
+	logger.Info("payment gateway configured with resilience patterns",
+		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
+		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
+		"rate_limit", resilientConfig.RateLimit,
+		"rate_limit_burst", resilientConfig.RateLimitBurst,
+		"max_retries", resilientConfig.MaxRetries,
+	)
+
+	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig)
 }
 
 // createKafkaProducer creates the Kafka producer.
