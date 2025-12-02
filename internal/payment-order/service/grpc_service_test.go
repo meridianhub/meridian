@@ -49,13 +49,50 @@ func NewMockRepository() *MockRepository {
 	}
 }
 
+// copyPaymentOrder creates a deep copy of a PaymentOrder to simulate database behavior
+// where each query returns a fresh object rather than a shared pointer.
+func copyPaymentOrder(po *domain.PaymentOrder) *domain.PaymentOrder {
+	if po == nil {
+		return nil
+	}
+	poCopy := *po // shallow copy of the struct
+	// Deep copy any pointer fields
+	if po.ReservedAt != nil {
+		t := *po.ReservedAt
+		poCopy.ReservedAt = &t
+	}
+	if po.ExecutingAt != nil {
+		t := *po.ExecutingAt
+		poCopy.ExecutingAt = &t
+	}
+	if po.CompletedAt != nil {
+		t := *po.CompletedAt
+		poCopy.CompletedAt = &t
+	}
+	if po.FailedAt != nil {
+		t := *po.FailedAt
+		poCopy.FailedAt = &t
+	}
+	if po.CancelledAt != nil {
+		t := *po.CancelledAt
+		poCopy.CancelledAt = &t
+	}
+	if po.ReversedAt != nil {
+		t := *po.ReversedAt
+		poCopy.ReversedAt = &t
+	}
+	return &poCopy
+}
+
 func (m *MockRepository) Create(po *domain.PaymentOrder) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
-	m.paymentOrders[po.ID] = po
-	m.idempotencyKeyIndex[po.IdempotencyKey] = po
-	m.debtorAccountIndex[po.DebtorAccountID] = append(m.debtorAccountIndex[po.DebtorAccountID], po)
+	// Store a copy to simulate database behavior where the stored object is separate
+	stored := copyPaymentOrder(po)
+	m.paymentOrders[po.ID] = stored
+	m.idempotencyKeyIndex[po.IdempotencyKey] = stored
+	m.debtorAccountIndex[po.DebtorAccountID] = append(m.debtorAccountIndex[po.DebtorAccountID], stored)
 	return nil
 }
 
@@ -67,7 +104,8 @@ func (m *MockRepository) FindByID(id uuid.UUID) (*domain.PaymentOrder, error) {
 	if !ok {
 		return nil, persistence.ErrPaymentOrderNotFound
 	}
-	return po, nil
+	// Return a copy to simulate database behavior
+	return copyPaymentOrder(po), nil
 }
 
 func (m *MockRepository) FindByIdempotencyKey(key string) (*domain.PaymentOrder, error) {
@@ -78,7 +116,8 @@ func (m *MockRepository) FindByIdempotencyKey(key string) (*domain.PaymentOrder,
 	if !ok {
 		return nil, persistence.ErrPaymentOrderNotFound
 	}
-	return po, nil
+	// Return a copy to simulate database behavior
+	return copyPaymentOrder(po), nil
 }
 
 func (m *MockRepository) FindByGatewayReferenceID(gatewayRefID string) (*domain.PaymentOrder, error) {
@@ -86,20 +125,29 @@ func (m *MockRepository) FindByGatewayReferenceID(gatewayRefID string) (*domain.
 	if !ok {
 		return nil, persistence.ErrPaymentOrderNotFound
 	}
-	return po, nil
+	// Return a copy to simulate database behavior
+	return copyPaymentOrder(po), nil
 }
 
 func (m *MockRepository) FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error) {
-	return m.debtorAccountIndex[accountID], nil
+	pos := m.debtorAccountIndex[accountID]
+	// Return copies to simulate database behavior
+	result := make([]*domain.PaymentOrder, len(pos))
+	for i, po := range pos {
+		result[i] = copyPaymentOrder(po)
+	}
+	return result, nil
 }
 
 func (m *MockRepository) Update(po *domain.PaymentOrder) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
-	m.paymentOrders[po.ID] = po
+	// Store a copy to simulate database behavior
+	stored := copyPaymentOrder(po)
+	m.paymentOrders[po.ID] = stored
 	if po.GatewayReferenceID != "" {
-		m.gatewayRefIndex[po.GatewayReferenceID] = po
+		m.gatewayRefIndex[po.GatewayReferenceID] = stored
 	}
 	return nil
 }
