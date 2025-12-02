@@ -1127,6 +1127,177 @@ func TestListPaymentOrders_CursorBeyondResults(t *testing.T) {
 	assert.Equal(t, int64(2), resp.Pagination.TotalCount)
 }
 
+// Test ReversePaymentOrder
+func TestReversePaymentOrder_Success(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	// Create a payment order and move it to COMPLETED state
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = po.Complete("ledger-booking-123")
+	_ = repo.Create(po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	resp, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_REVERSED, resp.PaymentOrder.Status)
+	assert.NotNil(t, resp.PaymentOrder.ReversedAt)
+}
+
+func TestReversePaymentOrder_AlreadyReversed_Idempotent(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	// Create a payment order that's already reversed
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = po.Complete("ledger-booking-123")
+	_ = po.Reverse("Already reversed")
+	_ = repo.Create(po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "Second reversal attempt",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	resp, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_REVERSED, resp.PaymentOrder.Status)
+}
+
+func TestReversePaymentOrder_NotCompleted(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	// Create a payment order in INITIATED state (cannot be reversed)
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = repo.Create(po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	_, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "only COMPLETED orders can be reversed")
+}
+
+func TestReversePaymentOrder_MissingReason(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = po.Complete("ledger-booking-123")
+	_ = repo.Create(po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "", // Empty - should fail validation
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	_, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "reversal_reason is required")
+}
+
+func TestReversePaymentOrder_MissingReversedBy(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = po.Complete("ledger-booking-123")
+	_ = repo.Create(po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "", // Empty - should fail validation
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	_, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "reversed_by is required")
+}
+
+func TestReversePaymentOrder_NotFound(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: uuid.New().String(),
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	_, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestReversePaymentOrder_InvalidID(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: "not-a-uuid",
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	_, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "invalid payment order ID")
+}
+
 // Test proto conversion helpers
 func TestToProto(t *testing.T) {
 	amount, _ := cadomain.NewMoney("GBP", 10000)

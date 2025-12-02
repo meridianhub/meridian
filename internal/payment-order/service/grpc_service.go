@@ -50,6 +50,7 @@ const (
 	TopicPaymentOrderCompleted = "payment-order.completed.v1"
 	TopicPaymentOrderFailed    = "payment-order.failed.v1"
 	TopicPaymentOrderCancelled = "payment-order.cancelled.v1"
+	TopicPaymentOrderReversed  = "payment-order.reversed.v1"
 )
 
 // CurrentAccountClient defines the interface for communicating with the CurrentAccount service
@@ -957,6 +958,91 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 			TotalCount:    result.TotalCount,
 		},
 	}, nil
+}
+
+// ReversePaymentOrder reverses a completed payment order (post-completion compensation).
+// This creates compensating ledger entries and transitions the order to REVERSED.
+// Idempotent: returns success if already reversed.
+func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymentOrderRequest) (*pb.ReversePaymentOrderResponse, error) {
+	// Validate reversal reason - required for audit purposes
+	if req.ReversalReason == "" {
+		return nil, status.Error(codes.InvalidArgument, "reversal_reason is required")
+	}
+
+	// Validate reversed_by - required for audit purposes
+	if req.ReversedBy == "" {
+		return nil, status.Error(codes.InvalidArgument, "reversed_by is required")
+	}
+
+	// Parse payment order ID
+	poID, err := uuid.Parse(req.PaymentOrderId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid payment order ID: %v", err)
+	}
+
+	// Retrieve payment order
+	po, err := s.repo.FindByID(poID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrPaymentOrderNotFound) {
+			return nil, status.Errorf(codes.NotFound, "payment order not found: %s", req.PaymentOrderId)
+		}
+		return nil, status.Error(codes.Internal, "failed to retrieve payment order")
+	}
+
+	// Check if already reversed (idempotent)
+	if po.Status == domain.PaymentOrderStatusReversed {
+		return &pb.ReversePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
+	}
+
+	// Check if can be reversed
+	if !po.CanReverse() {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"payment order cannot be reversed in status %s (only COMPLETED orders can be reversed)", po.Status)
+	}
+
+	// Store original ledger booking ID for the event
+	originalLedgerBookingID := po.LedgerBookingID
+
+	// Reverse the payment order
+	if err := po.Reverse(req.ReversalReason); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to reverse payment order: %v", err)
+	}
+
+	// Update in database
+	if err := s.repo.Update(po); err != nil {
+		return nil, status.Error(codes.Internal, "failed to update payment order")
+	}
+
+	// Publish PaymentOrderReversed event
+	// Note: In a full implementation, this would trigger compensating ledger entries
+	// via FinancialAccounting service. For now, we publish the event for downstream
+	// consumers to handle the compensation.
+	s.publishEvent(ctx, TopicPaymentOrderReversed, po.ID.String(), &eventsv1.PaymentOrderReversedEvent{
+		EventId:                     uuid.New().String(),
+		PaymentOrderId:              po.ID.String(),
+		DebtorAccountId:             po.DebtorAccountID,
+		Amount:                      toMoneyAmount(po.Amount),
+		ReversalReason:              req.ReversalReason,
+		ReversedBy:                  req.ReversedBy,
+		OriginalLedgerBookingId:     originalLedgerBookingID,
+		CompensatingLedgerBookingId: "", // Will be populated when FA service creates compensating entry
+		CorrelationId:               po.CorrelationID,
+		CausationId:                 po.ID.String(),
+		Timestamp:                   timestamppb.Now(),
+		Version:                     int64(po.Version),
+		IdempotencyKey:              po.IdempotencyKey,
+	})
+
+	s.logger.Info("payment order reversed",
+		"payment_order_id", po.ID.String(),
+		"reason", req.ReversalReason,
+		"reversed_by", req.ReversedBy,
+		"amount_cents", po.Amount.AmountCents(),
+		"currency", po.Amount.Currency(),
+		"original_ledger_booking_id", originalLedgerBookingID,
+		"correlation_id", po.CorrelationID)
+
+	return &pb.ReversePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
 }
 
 // Helper functions
