@@ -858,6 +858,37 @@ func TestUpdatePaymentOrder_Idempotent_Rejected(t *testing.T) {
 	assert.Equal(t, resp1.PaymentOrder.PaymentOrderId, resp2.PaymentOrder.PaymentOrderId)
 }
 
+func TestUpdatePaymentOrder_PendingRejectsStaleCallbacks(t *testing.T) {
+	repo := NewMockRepository()
+	svc := &Service{
+		repo:   repo,
+		logger: testLogger(),
+	}
+
+	// Create a payment order that has already completed
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = po.Complete("") // Already completed
+	_ = repo.Create(po)
+
+	// PENDING callback should be rejected for completed orders
+	req := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_PENDING,
+	}
+
+	_, err := svc.UpdatePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "PENDING callback")
+	assert.Contains(t, st.Message(), "COMPLETED")
+}
+
 // Test ListPaymentOrders
 func TestListPaymentOrders_Success(t *testing.T) {
 	repo := NewMockRepository()

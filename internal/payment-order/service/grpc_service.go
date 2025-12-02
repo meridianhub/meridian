@@ -81,6 +81,14 @@ const (
 	DefaultMaxIdempotencyKeyLength = 256
 )
 
+// Money conversion constants for Google Money proto (nanos have 9 decimal places)
+const (
+	// nanosPerCent is the number of nanos in one cent (1 cent = 0.01 = 10^7 nanos)
+	nanosPerCent = 10000000
+	// nanosRoundingOffset is half a cent in nanos, used for rounding
+	nanosRoundingOffset = 5000000
+)
+
 // Service implements the PaymentOrderService gRPC service
 type Service struct {
 	pb.UnimplementedPaymentOrderServiceServer
@@ -218,7 +226,11 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		return nil, status.Errorf(codes.InvalidArgument, "idempotency_key exceeds maximum length of %d", s.maxIdempotencyKeyLength)
 	}
 
-	// Check for existing payment order with same idempotency key (idempotent)
+	// Check for existing payment order with same idempotency key (idempotent).
+	// Note: This check has a TOCTOU race window where concurrent requests with the same
+	// idempotency key could both pass this check. The database unique constraint on
+	// idempotency_key is the authoritative guard - concurrent inserts will fail with a
+	// constraint violation and should be handled by returning the existing record.
 	existingPO, err := s.repo.FindByIdempotencyKey(idempotencyKey)
 	if err != nil && !errors.Is(err, persistence.ErrPaymentOrderNotFound) {
 		s.logger.Error("failed to check idempotency", "error", err)
@@ -751,6 +763,12 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		}
 
 	case pb.GatewayStatus_GATEWAY_STATUS_PENDING:
+		// Validate that we're still in EXECUTING state - PENDING callbacks for
+		// terminal states (COMPLETED, FAILED, etc.) should be rejected as stale
+		if po.Status != domain.PaymentOrderStatusExecuting {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"cannot process PENDING callback: payment order is in %s state", po.Status)
+		}
 		// No state change needed - still waiting
 		s.logger.Info("payment still pending at gateway",
 			"payment_order_id", po.ID.String(),
@@ -979,7 +997,7 @@ func toMoneyAmount(m cadomain.Money) *commonpb.MoneyAmount {
 	units := amountCents / 100
 	remainder := amountCents % 100
 	// #nosec G115 - remainder is always -99 to 99
-	nanos := int32(remainder * 10000000)
+	nanos := int32(remainder * nanosPerCent)
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
@@ -1006,9 +1024,9 @@ func protoToMoney(amount *commonpb.MoneyAmount) (cadomain.Money, error) {
 	unitsCents := amount.Amount.Units * 100
 	var nanosCents int64
 	if amount.Amount.Nanos >= 0 {
-		nanosCents = int64((amount.Amount.Nanos + 5000000) / 10000000)
+		nanosCents = int64((amount.Amount.Nanos + nanosRoundingOffset) / nanosPerCent)
 	} else {
-		nanosCents = int64((amount.Amount.Nanos - 5000000) / 10000000)
+		nanosCents = int64((amount.Amount.Nanos - nanosRoundingOffset) / nanosPerCent)
 	}
 	totalCents := unitsCents + nanosCents
 
