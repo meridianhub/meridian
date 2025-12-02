@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -210,7 +211,7 @@ func (r *ResilientPaymentGateway) SendPayment(ctx context.Context, req PaymentRe
 }
 
 // isRetryable determines if an error should be retried.
-// Context errors and permanent business errors are not retried.
+// Context errors, permanent business errors, and known non-transient errors are not retried.
 func (r *ResilientPaymentGateway) isRetryable(err error) bool {
 	if err == nil {
 		return false
@@ -221,10 +222,37 @@ func (r *ResilientPaymentGateway) isRetryable(err error) bool {
 		return false
 	}
 
-	// Retry transient errors (network issues, timeouts, temporary failures)
+	// Never retry gateway timeout errors (already timed out, retrying won't help immediately)
+	if errors.Is(err, ErrGatewayTimeout) {
+		return false
+	}
+
+	// Check for common permanent error patterns in the error string
+	// These indicate configuration or validation issues, not transient failures
+	errStr := err.Error()
+	permanentPatterns := []string{
+		"invalid",
+		"unauthorized",
+		"forbidden",
+		"not found",
+		"bad request",
+		"validation",
+	}
+	for _, pattern := range permanentPatterns {
+		if containsCaseInsensitive(errStr, pattern) {
+			return false
+		}
+	}
+
+	// Retry transient errors (network issues, connection resets, temporary failures)
 	// Business logic errors from the gateway (StatusRejected) are wrapped differently
 	// and handled by the saga, so they won't reach here
 	return true
+}
+
+// containsCaseInsensitive checks if s contains substr (case-insensitive).
+func containsCaseInsensitive(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 // CircuitBreakerState returns the current state of the circuit breaker.

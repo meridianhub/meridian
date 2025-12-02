@@ -341,9 +341,11 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 		logger.Warn("PAYMENT_GATEWAY_URL not set, using mock gateway")
 		baseGateway = gateway.New(gateway.Config{UseMock: true})
 	} else {
+		// Note: MaxRetries is 0 because the ResilientPaymentGateway wrapper handles retries.
+		// Setting retries on both layers would create nested retry behavior (3x3 = 9 attempts).
 		baseGateway = gateway.New(gateway.Config{
 			Timeout:    30 * time.Second,
-			MaxRetries: 3,
+			MaxRetries: 0,
 		})
 	}
 
