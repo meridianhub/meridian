@@ -364,12 +364,6 @@ func (p *PaymentOrder) SetLienExecutionFailed(err string) {
 	p.UpdatedAt = time.Now()
 }
 
-// IncrementLienExecutionAttempts increments the lien execution attempt counter.
-func (p *PaymentOrder) IncrementLienExecutionAttempts() {
-	p.LienExecutionAttempts++
-	p.UpdatedAt = time.Now()
-}
-
 // RequiresLienExecution returns true if this payment order needs lien execution.
 // This is true for COMPLETED payments with a lien that hasn't been successfully executed.
 func (p *PaymentOrder) RequiresLienExecution() bool {

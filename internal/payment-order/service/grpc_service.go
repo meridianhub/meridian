@@ -1358,6 +1358,22 @@ func safeIntToInt32(n int) int32 {
 //
 // nolint:contextcheck // Context is intentionally created fresh for async operation
 func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID uuid.UUID, lienID string) {
+	// Recover from panics to prevent silent goroutine crashes
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic in executeLienWithRetry",
+				"panic", r,
+				"payment_order_id", paymentOrderID.String(),
+				"lien_id", lienID)
+			// Attempt to mark as FAILED to prevent stuck PENDING state
+			po, findErr := s.repo.FindByID(paymentOrderID)
+			if findErr == nil {
+				po.SetLienExecutionFailed(fmt.Sprintf("panic: %v", r))
+				_ = s.repo.Update(po)
+			}
+		}
+	}()
+
 	// Create a context with timeout for the entire retry sequence
 	ctx, cancel := context.WithTimeout(parentCtx, DefaultLienExecutionRetryTimeout)
 	defer cancel()
