@@ -37,12 +37,28 @@ jobs:
       run: buf generate
 
     - name: Run govulncheck
-      # Note: GO-2025-4155 (crypto/x509) requires Go 1.25.5 which isn't in GitHub Actions cache yet.
-      # This will fail until actions/go-versions releases 1.25.5. Remove continue-on-error when available.
-      continue-on-error: true
       run: |
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        govulncheck ./...
+        # GO-2025-4155: crypto/x509 vulnerability - fix requires Go 1.25.5 (not yet released)
+        # Temporarily filter this specific CVE until Go 1.25.5 is available
+        # TODO: Remove this workaround when Go 1.25.5 is released
+        govulncheck -format json ./... > vulncheck-results.json || true
+
+        # Check for vulnerabilities excluding GO-2025-4155
+        VULN_COUNT=$(jq '[.finding // empty | select(.osv != "GO-2025-4155")] | length' vulncheck-results.json)
+
+        if [ "$VULN_COUNT" -gt 0 ]; then
+          echo "❌ Found $VULN_COUNT vulnerabilities (excluding GO-2025-4155):"
+          jq '.finding // empty | select(.osv != "GO-2025-4155")' vulncheck-results.json
+          exit 1
+        fi
+
+        # Report if GO-2025-4155 is present (informational only)
+        if jq -e '.finding // empty | select(.osv == "GO-2025-4155")' vulncheck-results.json > /dev/null 2>&1; then
+          echo "ℹ️  GO-2025-4155 detected (crypto/x509) - awaiting Go 1.25.5 release for fix"
+        fi
+
+        echo "✅ No actionable vulnerabilities found"
 
   gosec:
     name: Security Scanner (Gosec)
@@ -66,7 +82,7 @@ jobs:
       run: buf generate
 
     - name: Install Gosec
-      # Pinned version for reproducibility. v2.21.4 incompatible with Go 1.25.x
+      # Pinned version for reproducibility. v2.21.4 incompatible with Go 1.25
       # (golang.org/x/tools v0.25.0 issue). Using v2.22.0+ for compatibility.
       run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0
 
