@@ -27,6 +27,7 @@ var (
 	ErrMissingReferenceID     = errors.New("gateway_reference_id is required")
 	ErrInvalidGatewayStatus   = errors.New("invalid gateway_status")
 	ErrTimestampExpired       = errors.New("webhook timestamp expired")
+	ErrTimestampFuture        = errors.New("webhook timestamp is in the future")
 	ErrPaymentOrderService    = errors.New("payment order service error")
 	ErrNilPaymentOrderService = errors.New("payment order service cannot be nil")
 	ErrEmptyHMACSecret        = errors.New("HMAC secret cannot be empty")
@@ -40,6 +41,9 @@ const IdempotencyKeyHeader = "X-Idempotency-Key"
 
 // DefaultWebhookMaxAge is the default maximum age for webhook timestamps to prevent replay attacks.
 const DefaultWebhookMaxAge = 5 * time.Minute
+
+// DefaultClockDriftTolerance is the maximum allowed future timestamp to account for clock drift.
+const DefaultClockDriftTolerance = 30 * time.Second
 
 // PaymentOrderServiceClient defines the interface for calling the PaymentOrder gRPC service.
 type PaymentOrderServiceClient interface {
@@ -155,12 +159,27 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate timestamp freshness to prevent replay attacks
-	if !webhookReq.Timestamp.IsZero() && time.Since(webhookReq.Timestamp) > DefaultWebhookMaxAge {
-		h.logger.Warn("webhook timestamp too old",
-			"timestamp", webhookReq.Timestamp,
-			"age", time.Since(webhookReq.Timestamp))
-		h.writeErrorResponse(w, http.StatusBadRequest, ErrTimestampExpired.Error())
-		return
+	if !webhookReq.Timestamp.IsZero() {
+		now := time.Now()
+		age := now.Sub(webhookReq.Timestamp)
+
+		// Reject timestamps too far in the past
+		if age > DefaultWebhookMaxAge {
+			h.logger.Warn("webhook timestamp too old",
+				"timestamp", webhookReq.Timestamp,
+				"age", age)
+			h.writeErrorResponse(w, http.StatusBadRequest, ErrTimestampExpired.Error())
+			return
+		}
+
+		// Reject timestamps too far in the future (with small tolerance for clock drift)
+		if age < -DefaultClockDriftTolerance {
+			h.logger.Warn("webhook timestamp too far in the future",
+				"timestamp", webhookReq.Timestamp,
+				"offset", -age)
+			h.writeErrorResponse(w, http.StatusBadRequest, ErrTimestampFuture.Error())
+			return
+		}
 	}
 
 	// Map gateway status to proto enum

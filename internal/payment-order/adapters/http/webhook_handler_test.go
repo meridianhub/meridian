@@ -450,3 +450,38 @@ func TestWebhookHandler_HandleWebhook_ExpiredTimestamp(t *testing.T) {
 	assert.False(t, resp.Acknowledged)
 	assert.Equal(t, ErrTimestampExpired.Error(), resp.Error)
 }
+
+func TestWebhookHandler_HandleWebhook_FutureTimestamp(t *testing.T) {
+	secret := []byte("test-secret")
+	handler, err := NewWebhookHandler(WebhookHandlerConfig{
+		PaymentOrderService: &mockPaymentOrderService{},
+		HMACSecret:          secret,
+	})
+	require.NoError(t, err)
+
+	// Create a webhook request with a future timestamp (1 hour in the future)
+	webhookReq := WebhookRequest{
+		GatewayReferenceID: "gw-ref-123",
+		Status:             "Settled",
+		Timestamp:          time.Now().Add(1 * time.Hour),
+	}
+	body, err := json.Marshal(webhookReq)
+	require.NoError(t, err)
+
+	signature := GenerateWebhookSignature(body, secret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/payment-gateway", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(WebhookSignatureHeader, signature)
+
+	rr := httptest.NewRecorder()
+	handler.HandleWebhook(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+	var resp WebhookResponse
+	err = json.NewDecoder(rr.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.False(t, resp.Acknowledged)
+	assert.Equal(t, ErrTimestampFuture.Error(), resp.Error)
+}
