@@ -9,10 +9,28 @@ import (
 )
 
 var (
+	// Payment order metrics
+	paymentOrdersTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_order_total",
+			Help: "Total number of payment orders by status",
+		},
+		[]string{"status"},
+	)
+
 	// Operation duration metrics
 	operationDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "payment_order_operation_duration_seconds",
+			Help:    "Duration of payment order operations in seconds",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+		},
+		[]string{"operation", "status"},
+	)
+
+	paymentOrderDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "payment_order_duration_seconds",
 			Help:    "Duration of payment order operations in seconds",
 			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
 		},
@@ -84,6 +102,24 @@ var (
 		[]string{"status"},
 	)
 
+	// Saga stage metrics
+	sagaStageDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "payment_order_saga_stage_duration_seconds",
+			Help:    "Duration of saga stages in seconds",
+			Buckets: []float64{.01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
+		},
+		[]string{"stage", "status"},
+	)
+
+	sagaCompensationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_order_saga_compensation_total",
+			Help: "Total number of saga compensations by reason",
+		},
+		[]string{"reason"},
+	)
+
 	// Idempotency metrics
 	idempotentRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -91,6 +127,42 @@ var (
 			Help: "Total number of idempotent (duplicate) requests handled",
 		},
 		[]string{"operation"},
+	)
+
+	// Lien operation metrics
+	lienOperationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_order_lien_operations_total",
+			Help: "Total number of lien operations",
+		},
+		[]string{"operation", "status"},
+	)
+
+	lienOperationDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "payment_order_lien_operation_duration_seconds",
+			Help:    "Duration of lien operations in seconds",
+			Buckets: []float64{.01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+		},
+		[]string{"operation"},
+	)
+
+	// Payment gateway metrics
+	gatewayRequestDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "payment_order_gateway_request_duration_seconds",
+			Help:    "Duration of payment gateway requests in seconds",
+			Buckets: []float64{.1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+		},
+		[]string{"status"},
+	)
+
+	gatewayRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_order_gateway_requests_total",
+			Help: "Total number of gateway requests by status",
+		},
+		[]string{"status"},
 	)
 
 	// External service error metrics
@@ -101,11 +173,29 @@ var (
 		},
 		[]string{"service", "operation"},
 	)
+
+	// In-flight payment orders gauge
+	paymentOrdersInFlight = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "payment_order_in_flight",
+			Help: "Number of payment orders currently being processed",
+		},
+	)
 )
+
+// RecordPaymentOrder records a payment order by status.
+func RecordPaymentOrder(status string) {
+	paymentOrdersTotal.WithLabelValues(status).Inc()
+}
 
 // RecordOperationDuration records the duration of a payment order operation
 func RecordOperationDuration(operation, status string, duration time.Duration) {
 	operationDuration.WithLabelValues(operation, status).Observe(duration.Seconds())
+}
+
+// RecordPaymentOrderDuration records the duration of a payment order operation.
+func RecordPaymentOrderDuration(operation, status string, duration time.Duration) {
+	paymentOrderDuration.WithLabelValues(operation, status).Observe(duration.Seconds())
 }
 
 // RecordGatewayCallback records a gateway callback update
@@ -152,12 +242,48 @@ func RecordSagaDuration(status string, duration time.Duration) {
 	sagaDuration.WithLabelValues(status).Observe(duration.Seconds())
 }
 
+// RecordSagaStageDuration records the duration of a saga stage.
+func RecordSagaStageDuration(stage, status string, duration time.Duration) {
+	sagaStageDuration.WithLabelValues(stage, status).Observe(duration.Seconds())
+}
+
+// RecordSagaCompensation records a saga compensation.
+func RecordSagaCompensation(reason string) {
+	sagaCompensationsTotal.WithLabelValues(reason).Inc()
+}
+
 // RecordIdempotentRequest records an idempotent (duplicate) request
 func RecordIdempotentRequest(operation string) {
 	idempotentRequestsTotal.WithLabelValues(operation).Inc()
 }
 
-// RecordExternalServiceError records an external service error
+// RecordLienOperation records a lien operation.
+func RecordLienOperation(operation, status string) {
+	lienOperationsTotal.WithLabelValues(operation, status).Inc()
+}
+
+// RecordLienOperationDuration records the duration of a lien operation.
+func RecordLienOperationDuration(operation string, duration time.Duration) {
+	lienOperationDuration.WithLabelValues(operation).Observe(duration.Seconds())
+}
+
+// RecordGatewayLatency records payment gateway request duration.
+func RecordGatewayLatency(status string, duration time.Duration) {
+	gatewayRequestDuration.WithLabelValues(status).Observe(duration.Seconds())
+	gatewayRequestsTotal.WithLabelValues(status).Inc()
+}
+
+// RecordExternalServiceError records an external service error.
 func RecordExternalServiceError(service, operation string) {
 	externalServiceErrors.WithLabelValues(service, operation).Inc()
+}
+
+// IncPaymentOrdersInFlight increments the in-flight gauge.
+func IncPaymentOrdersInFlight() {
+	paymentOrdersInFlight.Inc()
+}
+
+// DecPaymentOrdersInFlight decrements the in-flight gauge.
+func DecPaymentOrdersInFlight() {
+	paymentOrdersInFlight.Dec()
 }
