@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -159,36 +160,77 @@ func (m *MockRepository) FindByDebtorAccountID(_ context.Context, accountID stri
 	return result, nil
 }
 
-func (m *MockRepository) FindByDebtorAccountIDPaginated(_ context.Context, accountID string, limit, offset int) (*persistence.PaginatedResult, error) {
+func (m *MockRepository) FindByDebtorAccountIDWithCursor(_ context.Context, accountID string, limit int, cursor persistence.Cursor) (*persistence.PaginatedResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	pos := m.debtorAccountIndex[accountID]
 	totalCount := len(pos)
 
-	// Apply pagination bounds
-	if offset >= totalCount {
+	// Sort by created_at DESC, id DESC to match real repository behavior
+	sortedPos := make([]*domain.PaymentOrder, len(pos))
+	copy(sortedPos, pos)
+	// Sort descending by created_at, then by id (use sort.Slice for clarity)
+	sort.Slice(sortedPos, func(i, j int) bool {
+		if !sortedPos[i].CreatedAt.Equal(sortedPos[j].CreatedAt) {
+			return sortedPos[i].CreatedAt.After(sortedPos[j].CreatedAt) // DESC by created_at
+		}
+		return sortedPos[i].ID.String() > sortedPos[j].ID.String() // DESC by id
+	})
+
+	// Filter items that come after the cursor in DESC order
+	// In DESC order, "after" means: created_at < cursor_time OR (created_at == cursor_time AND id < cursor_id)
+	var filtered []*domain.PaymentOrder
+	for _, po := range sortedPos {
+		if cursor.CreatedAt.IsZero() {
+			// No cursor = first page, include all
+			filtered = append(filtered, po)
+		} else if po.CreatedAt.Before(cursor.CreatedAt) {
+			// Item has earlier timestamp - include it
+			filtered = append(filtered, po)
+		} else if po.CreatedAt.Equal(cursor.CreatedAt) && po.ID.String() < cursor.ID.String() {
+			// Same timestamp but smaller ID - include it
+			filtered = append(filtered, po)
+		}
+		// Otherwise skip (item is at or before cursor position)
+	}
+
+	// No results after cursor
+	if len(filtered) == 0 {
 		return &persistence.PaginatedResult{
 			PaymentOrders: []*domain.PaymentOrder{},
 			TotalCount:    int64(totalCount),
 			HasMore:       false,
+			NextCursor:    "",
 		}, nil
 	}
 
-	end := offset + limit
-	if end > totalCount {
-		end = totalCount
+	// Apply limit
+	hasMore := len(filtered) > limit
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
 	}
 
 	// Return copies to simulate database behavior
-	result := make([]*domain.PaymentOrder, 0, end-offset)
-	for i := offset; i < end; i++ {
-		result = append(result, copyPaymentOrder(pos[i]))
+	result := make([]*domain.PaymentOrder, 0, len(filtered))
+	for _, po := range filtered {
+		result = append(result, copyPaymentOrder(po))
+	}
+
+	// Build next cursor from last item if there are more results
+	var nextCursor string
+	if hasMore && len(result) > 0 {
+		lastPO := result[len(result)-1]
+		nextCursor = persistence.EncodeCursor(persistence.Cursor{
+			CreatedAt: lastPO.CreatedAt,
+			ID:        lastPO.ID,
+		})
 	}
 
 	return &persistence.PaginatedResult{
 		PaymentOrders: result,
 		TotalCount:    int64(totalCount),
-		HasMore:       end < totalCount,
+		HasMore:       hasMore,
+		NextCursor:    nextCursor,
 	}, nil
 }
 
@@ -981,7 +1023,7 @@ func TestListPaymentOrders_InvalidPageToken(t *testing.T) {
 	req := &pb.ListPaymentOrdersRequest{
 		DebtorAccountId: "ACC-12345678",
 		Pagination: &commonpb.Pagination{
-			PageToken: "not-a-number",
+			PageToken: "not-valid-base64!@#",
 		},
 	}
 
@@ -994,14 +1036,15 @@ func TestListPaymentOrders_InvalidPageToken(t *testing.T) {
 	assert.Contains(t, st.Message(), "page_token")
 }
 
-func TestListPaymentOrders_NegativePageToken(t *testing.T) {
+func TestListPaymentOrders_MalformedCursor(t *testing.T) {
 	repo := NewMockRepository()
 	svc, _ := NewService(repo)
 
+	// Valid base64 but malformed cursor content (missing UUID)
 	req := &pb.ListPaymentOrdersRequest{
 		DebtorAccountId: "ACC-12345678",
 		Pagination: &commonpb.Pagination{
-			PageToken: "-5",
+			PageToken: "MjAyNC0wMS0wMVQwMDowMDowMFo=", // "2024-01-01T00:00:00Z" - missing UUID part
 		},
 	}
 
@@ -1044,7 +1087,7 @@ func TestListPaymentOrders_PageSizeExceedsMax(t *testing.T) {
 	assert.Len(t, resp.PaymentOrders, 3)
 }
 
-func TestListPaymentOrders_OffsetBeyondResults(t *testing.T) {
+func TestListPaymentOrders_CursorBeyondResults(t *testing.T) {
 	repo := NewMockRepository()
 	svc, _ := NewService(repo)
 
@@ -1061,16 +1104,24 @@ func TestListPaymentOrders_OffsetBeyondResults(t *testing.T) {
 		_ = repo.Create(context.Background(), po)
 	}
 
+	// Create a cursor pointing to a very old timestamp (before all records)
+	oldCursor := persistence.EncodeCursor(persistence.Cursor{
+		CreatedAt: time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+		ID:        uuid.Nil,
+	})
+
 	req := &pb.ListPaymentOrdersRequest{
 		DebtorAccountId: "ACC-12345678",
 		Pagination: &commonpb.Pagination{
-			PageToken: "100", // Offset beyond the 2 results
+			PageToken: oldCursor,
 		},
 	}
 
 	resp, err := svc.ListPaymentOrders(context.Background(), req)
 
 	require.NoError(t, err)
+	// With cursor-based DESC ordering, a cursor from 1970 means "after 1970" which is all records
+	// But the cursor check is "<" so nothing comes after 1970 in DESC order
 	assert.Len(t, resp.PaymentOrders, 0)
 	assert.Empty(t, resp.Pagination.NextPageToken)
 	assert.Equal(t, int64(2), resp.Pagination.TotalCount)

@@ -737,6 +737,40 @@ k8s_resource(
   labels=['microservices'],
 )
 
+# Payment-Order Service - gRPC microservice for payment order management with saga orchestration
+docker_build(
+  'payment-order',
+  context='.',
+  dockerfile='cmd/payment-order/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+)
+
+# Deploy Payment-Order Kubernetes manifests
+k8s_yaml('deployments/k8s/payment-order/secret.yaml')
+k8s_yaml('deployments/k8s/payment-order/configmap.yaml')
+k8s_yaml('deployments/k8s/payment-order/deployment.yaml')
+k8s_yaml('deployments/k8s/payment-order/service.yaml')
+
+# Set resource dependencies for Payment-Order
+k8s_resource(
+  'payment-order',
+  port_forwards=[
+    '50054:50054',  # gRPC API
+  ],
+  resource_deps=[
+    'generate-proto',
+    'cockroachdb',
+    'kafka-cluster',
+    'current-account',  # Depends on current-account for lien operations
+    'migrate-payment-order',
+  ],
+  labels=['microservices'],
+)
+
 # =============================================================================
 # Resource Configuration
 # =============================================================================
@@ -875,6 +909,15 @@ local_resource(
   trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
+local_resource(
+  'migrate-payment-order',
+  cmd='atlas migrate apply --env local --config file://atlas.payment_order.hcl --url "{}"'.format(database_url),
+  resource_deps=['migrate-current-account'],  # Depends on current_account for account FK reference
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
 local_resource(
   'kafka-health',
@@ -930,6 +973,8 @@ Services:
 Microservices:
   • Current-Account        → localhost:50051 (gRPC)
   • Financial-Accounting   → localhost:50052 (gRPC)
+  • Position-Keeping       → localhost:50053 (gRPC)
+  • Payment-Order          → localhost:50054 (gRPC)
 
 Backing Services:
   • CockroachDB            → localhost:26257
@@ -954,12 +999,15 @@ Tilt UI                    → http://localhost:10350
 Hot reload: Edit Go code and see changes in ~3 seconds
 
 Database Migrations:
-  • Migrations run automatically on startup (3 resources):
+  • Migrations run automatically on startup (4 resources):
     1. current_account (customers, accounts, current_account_audit)
     2. financial_accounting (general_ledger, financial_accounting_audit)
     3. position_keeping (transactions, position_keeping_audit)
+    4. payment_order (payment orders, saga state)
   • Parallel execution: current_account + financial_accounting run together after init-database
-  • Sequential dependency: position_keeping waits for current_account (Account FK)
+  • Sequential dependencies:
+    - position_keeping waits for current_account (Account FK)
+    - payment_order waits for current_account (Account FK)
   • Each service has its own audit schema for isolation
   • Phase 1: Empty audit tables created (current work)
   • Phase 2: GORM hooks for audit logging (future PR, see ADR-0009)
@@ -967,6 +1015,7 @@ Database Migrations:
     - tilt trigger migrate-current-account
     - tilt trigger migrate-financial-accounting
     - tilt trigger migrate-position-keeping
+    - tilt trigger migrate-payment-order
   • Check status:
     - make migrate-status-all (requires DATABASE_URL env var)
 
