@@ -1592,3 +1592,137 @@ func TestConcurrentIdempotentRequests(t *testing.T) {
 
 	assert.Equal(t, numRequests, count)
 }
+
+// TestSagaOrchestration_MalformedLienResponse tests that the saga handles
+// malformed (nil) lien responses gracefully without panicking.
+func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
+	repo := NewMockRepository()
+	// Mock returns nil lien response (malformed)
+	caClient := &MockCurrentAccountClient{
+		initiateLienResp: nil, // nil response should trigger ErrMalformedLienResponse
+	}
+	gwClient := &MockPaymentGateway{}
+
+	// Create service directly to avoid kafka producer requirement
+	svc := &Service{
+		repo:                    repo,
+		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient:    caClient,
+		paymentGateway:          gwClient,
+		sagaTimeout:             1 * time.Second,
+		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+		// kafkaProducer is nil - events won't be published but saga still runs
+	}
+
+	req := newInitiateRequest("malformed-lien-test", "ACC-12345678", "GB82WEST12345698765432", 10000)
+	resp, err := svc.InitiatePaymentOrder(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	paymentOrderID := resp.PaymentOrder.PaymentOrderId
+
+	// Wait for saga to complete - should fail due to malformed response
+	require.Eventually(t, func() bool {
+		po, findErr := repo.FindByID(uuid.MustParse(paymentOrderID))
+		if findErr != nil {
+			return false
+		}
+		return po.Status == domain.PaymentOrderStatusFailed
+	}, 2*time.Second, 50*time.Millisecond, "payment order should fail due to malformed lien response")
+
+	// Verify failure reason
+	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	require.NoError(t, err)
+	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
+	assert.Contains(t, po.FailureReason, "malformed lien response")
+}
+
+// TestSagaOrchestration_GatewayPending tests that gateway pending status
+// correctly transitions the payment order to EXECUTING state.
+func TestSagaOrchestration_GatewayPending(t *testing.T) {
+	repo := NewMockRepository()
+	caClient := &MockCurrentAccountClient{
+		initiateLienResp: &currentaccountv1.InitiateLienResponse{
+			Lien: &currentaccountv1.Lien{
+				LienId: "lien-pending-123",
+			},
+		},
+		executeLienResp: &currentaccountv1.ExecuteLienResponse{},
+	}
+	// Gateway returns pending status (async confirmation expected)
+	gwClient := &MockPaymentGateway{
+		response: gateway.PaymentResponse{
+			Status:             gateway.StatusPending,
+			GatewayReferenceID: "gw-pending-ref-123",
+			Message:            "Payment pending confirmation",
+		},
+	}
+
+	// Create service directly to avoid kafka producer requirement
+	svc := &Service{
+		repo:                    repo,
+		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient:    caClient,
+		paymentGateway:          gwClient,
+		sagaTimeout:             5 * time.Second,
+		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+		// kafkaProducer is nil - events won't be published but saga still runs
+	}
+
+	req := newInitiateRequest("pending-test", "ACC-12345678", "GB82WEST12345698765432", 10000)
+	resp, err := svc.InitiatePaymentOrder(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	paymentOrderID := resp.PaymentOrder.PaymentOrderId
+
+	// Wait for saga to complete - should reach EXECUTING (pending gateway confirmation)
+	require.Eventually(t, func() bool {
+		po, findErr := repo.FindByID(uuid.MustParse(paymentOrderID))
+		if findErr != nil {
+			return false
+		}
+		return po.Status == domain.PaymentOrderStatusExecuting
+	}, 3*time.Second, 50*time.Millisecond, "payment order should reach EXECUTING state")
+
+	// Verify state
+	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	require.NoError(t, err)
+	assert.Equal(t, domain.PaymentOrderStatusExecuting, po.Status)
+	assert.Equal(t, "gw-pending-ref-123", po.GatewayReferenceID)
+	assert.NotNil(t, po.ExecutingAt)
+}
+
+// TestUpdatePaymentOrder_UnspecifiedStatus tests that GATEWAY_STATUS_UNSPECIFIED
+// returns an appropriate error.
+func TestUpdatePaymentOrder_UnspecifiedStatus(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	// Create an executing payment order first
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder(
+		"ACC-12345678",
+		"GB82WEST12345698765432",
+		amount,
+		"unspecified-test",
+		"corr-123",
+	)
+	po.LienID = "lien-123"
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gw-ref-123")
+	_ = repo.Create(po)
+
+	// Update with unspecified status
+	req := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED,
+	}
+	_, err := svc.UpdatePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "gateway status is required")
+}
