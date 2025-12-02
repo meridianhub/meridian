@@ -39,6 +39,12 @@ type ServerConfig struct {
 	RateLimitPerSecond float64
 	// RateLimitBurst is the max burst size for rate limiting.
 	RateLimitBurst int
+	// RateLimitMaxEntries is the max number of IPs to track for rate limiting.
+	// When exceeded, oldest entries are evicted. Defaults to 10000.
+	RateLimitMaxEntries int
+	// TrustProxyHeaders controls whether to trust X-Forwarded-For and X-Real-IP headers.
+	// Only enable this when running behind a trusted reverse proxy.
+	TrustProxyHeaders bool
 	// ReadTimeout for HTTP requests.
 	ReadTimeout time.Duration
 	// WriteTimeout for HTTP responses.
@@ -50,12 +56,14 @@ type ServerConfig struct {
 // DefaultServerConfig returns a ServerConfig with sensible defaults.
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		Port:               8080,
-		RateLimitPerSecond: 100,
-		RateLimitBurst:     200,
-		ReadTimeout:        10 * time.Second,
-		WriteTimeout:       30 * time.Second,
-		IdleTimeout:        60 * time.Second,
+		Port:                8080,
+		RateLimitPerSecond:  100,
+		RateLimitBurst:      200,
+		RateLimitMaxEntries: 10000,
+		TrustProxyHeaders:   false,
+		ReadTimeout:         10 * time.Second,
+		WriteTimeout:        30 * time.Second,
+		IdleTimeout:         60 * time.Second,
 	}
 }
 
@@ -80,6 +88,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.RateLimitBurst <= 0 {
 		cfg.RateLimitBurst = 200
 	}
+	if cfg.RateLimitMaxEntries <= 0 {
+		cfg.RateLimitMaxEntries = 10000
+	}
 	if cfg.ReadTimeout <= 0 {
 		cfg.ReadTimeout = 10 * time.Second
 	}
@@ -90,8 +101,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		cfg.IdleTimeout = 60 * time.Second
 	}
 
-	// Create rate limiter
-	rateLimiter := newIPRateLimiter(rate.Limit(cfg.RateLimitPerSecond), cfg.RateLimitBurst)
+	// Create rate limiter with max entries to prevent unbounded growth
+	rateLimiter := newIPRateLimiter(rate.Limit(cfg.RateLimitPerSecond), cfg.RateLimitBurst, cfg.RateLimitMaxEntries)
 
 	// Create mux and register handlers
 	mux := http.NewServeMux()
@@ -102,8 +113,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	handler := chainMiddleware(
 		mux,
 		requestIDMiddleware(logger),
-		loggingMiddleware(logger),
-		rateLimitMiddleware(rateLimiter, logger),
+		loggingMiddleware(logger, cfg.TrustProxyHeaders),
+		rateLimitMiddleware(rateLimiter, logger, cfg.TrustProxyHeaders),
 		recoveryMiddleware(logger),
 	)
 
@@ -205,7 +216,7 @@ func GetRequestID(ctx context.Context) string {
 }
 
 // loggingMiddleware logs HTTP requests.
-func loggingMiddleware(logger *slog.Logger) middleware {
+func loggingMiddleware(logger *slog.Logger, trustProxyHeaders bool) middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -224,7 +235,7 @@ func loggingMiddleware(logger *slog.Logger) middleware {
 				"path", r.URL.Path,
 				"status", wrapped.statusCode,
 				"duration_ms", duration.Milliseconds(),
-				"remote_addr", getClientIP(r),
+				"remote_addr", getClientIP(r, trustProxyHeaders),
 				"user_agent", r.UserAgent())
 		})
 	}
@@ -242,10 +253,10 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 // rateLimitMiddleware applies per-IP rate limiting.
-func rateLimitMiddleware(limiter *ipRateLimiter, logger *slog.Logger) middleware {
+func rateLimitMiddleware(limiter *ipRateLimiter, logger *slog.Logger, trustProxyHeaders bool) middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := getClientIP(r)
+			ip := getClientIP(r, trustProxyHeaders)
 			if !limiter.allow(ip) {
 				requestID := GetRequestID(r.Context())
 				logger.Warn("rate limit exceeded",
@@ -280,22 +291,25 @@ func recoveryMiddleware(logger *slog.Logger) middleware {
 }
 
 // getClientIP extracts the client IP from the request.
-// Handles X-Forwarded-For and X-Real-IP headers for proxied requests.
-func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For first (may contain multiple IPs)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP (original client)
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
+// When trustProxyHeaders is true, it checks X-Forwarded-For and X-Real-IP headers.
+// When false, it only uses RemoteAddr to prevent IP spoofing attacks.
+func getClientIP(r *http.Request, trustProxyHeaders bool) string {
+	if trustProxyHeaders {
+		// Check X-Forwarded-For first (may contain multiple IPs)
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// Take the first IP (original client)
+			for i := 0; i < len(xff); i++ {
+				if xff[i] == ',' {
+					return xff[:i]
+				}
 			}
+			return xff
 		}
-		return xff
-	}
 
-	// Check X-Real-IP
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+		// Check X-Real-IP
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			return xri
+		}
 	}
 
 	// Fall back to RemoteAddr
@@ -307,43 +321,72 @@ func getClientIP(r *http.Request) string {
 }
 
 // ipRateLimiter provides per-IP rate limiting using token bucket.
+// It maintains a bounded map of limiters with LRU-style eviction.
 type ipRateLimiter struct {
-	limiters map[string]*rate.Limiter
-	mu       sync.RWMutex
-	r        rate.Limit
-	b        int
+	limiters   map[string]*rateLimiterEntry
+	mu         sync.Mutex
+	r          rate.Limit
+	b          int
+	maxEntries int
 }
 
-// newIPRateLimiter creates a new IP-based rate limiter.
-func newIPRateLimiter(r rate.Limit, b int) *ipRateLimiter {
+// rateLimiterEntry holds a rate limiter and its last access time.
+type rateLimiterEntry struct {
+	limiter    *rate.Limiter
+	lastAccess time.Time
+}
+
+// newIPRateLimiter creates a new IP-based rate limiter with bounded entries.
+func newIPRateLimiter(r rate.Limit, b int, maxEntries int) *ipRateLimiter {
 	return &ipRateLimiter{
-		limiters: make(map[string]*rate.Limiter),
-		r:        r,
-		b:        b,
+		limiters:   make(map[string]*rateLimiterEntry),
+		r:          r,
+		b:          b,
+		maxEntries: maxEntries,
 	}
 }
 
 // getLimiter returns the rate limiter for the given IP.
 func (l *ipRateLimiter) getLimiter(ip string) *rate.Limiter {
-	l.mu.RLock()
-	limiter, exists := l.limiters[ip]
-	l.mu.RUnlock()
-
-	if exists {
-		return limiter
-	}
+	now := time.Now()
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Double-check after acquiring write lock
-	if limiter, exists := l.limiters[ip]; exists {
-		return limiter
+	if entry, exists := l.limiters[ip]; exists {
+		entry.lastAccess = now
+		return entry.limiter
 	}
 
-	limiter = rate.NewLimiter(l.r, l.b)
-	l.limiters[ip] = limiter
-	return limiter
+	// Evict oldest entries if at capacity
+	if len(l.limiters) >= l.maxEntries {
+		l.evictOldest()
+	}
+
+	entry := &rateLimiterEntry{
+		limiter:    rate.NewLimiter(l.r, l.b),
+		lastAccess: now,
+	}
+	l.limiters[ip] = entry
+	return entry.limiter
+}
+
+// evictOldest removes the oldest entry from the limiters map.
+// Must be called with write lock held.
+func (l *ipRateLimiter) evictOldest() {
+	var oldestIP string
+	var oldestTime time.Time
+
+	for ip, entry := range l.limiters {
+		if oldestIP == "" || entry.lastAccess.Before(oldestTime) {
+			oldestIP = ip
+			oldestTime = entry.lastAccess
+		}
+	}
+
+	if oldestIP != "" {
+		delete(l.limiters, oldestIP)
+	}
 }
 
 // allow checks if the request from the given IP should be allowed.

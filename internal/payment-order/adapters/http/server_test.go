@@ -100,6 +100,8 @@ func TestDefaultServerConfig(t *testing.T) {
 	assert.Equal(t, 8080, cfg.Port)
 	assert.Equal(t, float64(100), cfg.RateLimitPerSecond)
 	assert.Equal(t, 200, cfg.RateLimitBurst)
+	assert.Equal(t, 10000, cfg.RateLimitMaxEntries)
+	assert.False(t, cfg.TrustProxyHeaders)
 	assert.Equal(t, 10*time.Second, cfg.ReadTimeout)
 	assert.Equal(t, 30*time.Second, cfg.WriteTimeout)
 	assert.Equal(t, 60*time.Second, cfg.IdleTimeout)
@@ -248,39 +250,59 @@ func (r *fixedReader) Read(p []byte) (n int, err error) {
 
 func TestGetClientIP(t *testing.T) {
 	tests := []struct {
-		name          string
-		xForwardedFor string
-		xRealIP       string
-		remoteAddr    string
-		expectedIP    string
+		name              string
+		xForwardedFor     string
+		xRealIP           string
+		remoteAddr        string
+		trustProxyHeaders bool
+		expectedIP        string
 	}{
 		{
-			name:          "X-Forwarded-For single IP",
-			xForwardedFor: "192.168.1.1",
-			remoteAddr:    "10.0.0.1:12345",
-			expectedIP:    "192.168.1.1",
+			name:              "X-Forwarded-For single IP with trust",
+			xForwardedFor:     "192.168.1.1",
+			remoteAddr:        "10.0.0.1:12345",
+			trustProxyHeaders: true,
+			expectedIP:        "192.168.1.1",
 		},
 		{
-			name:          "X-Forwarded-For multiple IPs",
-			xForwardedFor: "192.168.1.1, 10.0.0.2, 172.16.0.1",
-			remoteAddr:    "10.0.0.1:12345",
-			expectedIP:    "192.168.1.1",
+			name:              "X-Forwarded-For multiple IPs with trust",
+			xForwardedFor:     "192.168.1.1, 10.0.0.2, 172.16.0.1",
+			remoteAddr:        "10.0.0.1:12345",
+			trustProxyHeaders: true,
+			expectedIP:        "192.168.1.1",
 		},
 		{
-			name:       "X-Real-IP",
-			xRealIP:    "192.168.2.2",
-			remoteAddr: "10.0.0.1:12345",
-			expectedIP: "192.168.2.2",
+			name:              "X-Real-IP with trust",
+			xRealIP:           "192.168.2.2",
+			remoteAddr:        "10.0.0.1:12345",
+			trustProxyHeaders: true,
+			expectedIP:        "192.168.2.2",
 		},
 		{
-			name:       "Remote address with port",
-			remoteAddr: "192.168.3.3:54321",
-			expectedIP: "192.168.3.3",
+			name:              "Remote address with port",
+			remoteAddr:        "192.168.3.3:54321",
+			trustProxyHeaders: false,
+			expectedIP:        "192.168.3.3",
 		},
 		{
-			name:       "Remote address without port",
-			remoteAddr: "192.168.4.4",
-			expectedIP: "192.168.4.4",
+			name:              "Remote address without port",
+			remoteAddr:        "192.168.4.4",
+			trustProxyHeaders: false,
+			expectedIP:        "192.168.4.4",
+		},
+		{
+			name:              "X-Forwarded-For ignored without trust",
+			xForwardedFor:     "192.168.1.1",
+			remoteAddr:        "10.0.0.1:12345",
+			trustProxyHeaders: false,
+			expectedIP:        "10.0.0.1",
+		},
+		{
+			name:              "X-Real-IP ignored without trust",
+			xRealIP:           "192.168.2.2",
+			remoteAddr:        "10.0.0.1:12345",
+			trustProxyHeaders: false,
+			expectedIP:        "10.0.0.1",
 		},
 	}
 
@@ -295,7 +317,7 @@ func TestGetClientIP(t *testing.T) {
 			}
 			req.RemoteAddr = tt.remoteAddr
 
-			ip := getClientIP(req)
+			ip := getClientIP(req, tt.trustProxyHeaders)
 			assert.Equal(t, tt.expectedIP, ip)
 		})
 	}
@@ -313,8 +335,8 @@ func TestGetRequestID(t *testing.T) {
 }
 
 func TestIPRateLimiter(t *testing.T) {
-	// Create a rate limiter that allows 2 requests per second with burst of 2
-	limiter := newIPRateLimiter(2, 2)
+	// Create a rate limiter that allows 2 requests per second with burst of 2 and max 100 entries
+	limiter := newIPRateLimiter(2, 2, 100)
 
 	ip := "192.168.1.1"
 
@@ -329,6 +351,30 @@ func TestIPRateLimiter(t *testing.T) {
 	ip2 := "192.168.1.2"
 	assert.True(t, limiter.allow(ip2))
 	assert.True(t, limiter.allow(ip2))
+}
+
+func TestIPRateLimiterEviction(t *testing.T) {
+	// Create a rate limiter with max 2 entries
+	limiter := newIPRateLimiter(100, 100, 2)
+
+	// Add two IPs
+	limiter.allow("192.168.1.1")
+	limiter.allow("192.168.1.2")
+
+	// Verify both exist
+	assert.Equal(t, 2, len(limiter.limiters))
+
+	// Add a third IP - should evict the oldest
+	limiter.allow("192.168.1.3")
+
+	// Should still have only 2 entries
+	assert.Equal(t, 2, len(limiter.limiters))
+
+	// The newest two should exist
+	_, exists2 := limiter.limiters["192.168.1.2"]
+	_, exists3 := limiter.limiters["192.168.1.3"]
+	assert.True(t, exists2)
+	assert.True(t, exists3)
 }
 
 func TestMiddlewareChain(t *testing.T) {

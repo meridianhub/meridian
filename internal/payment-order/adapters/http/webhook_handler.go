@@ -33,6 +33,9 @@ var (
 // WebhookSignatureHeader is the HTTP header containing the HMAC signature.
 const WebhookSignatureHeader = "X-Webhook-Signature"
 
+// IdempotencyKeyHeader is the HTTP header containing the gateway-provided idempotency key.
+const IdempotencyKeyHeader = "X-Idempotency-Key"
+
 // PaymentOrderServiceClient defines the interface for calling the PaymentOrder gRPC service.
 type PaymentOrderServiceClient interface {
 	UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error)
@@ -124,7 +127,7 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !h.validateSignature(body, signature) {
-		h.logger.Warn("invalid webhook signature", "signature", signature)
+		h.logger.Warn("invalid webhook signature")
 		h.writeErrorResponse(w, http.StatusUnauthorized, ErrInvalidSignature.Error())
 		return
 	}
@@ -152,8 +155,11 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate idempotency key from webhook data
-	idempotencyKey := h.generateIdempotencyKey(webhookReq)
+	// Use gateway-provided idempotency key if available, otherwise generate one
+	idempotencyKey := r.Header.Get(IdempotencyKeyHeader)
+	if idempotencyKey == "" {
+		idempotencyKey = h.generateIdempotencyKey(webhookReq)
+	}
 
 	// Build UpdatePaymentOrder request
 	updateReq := &pb.UpdatePaymentOrderRequest{

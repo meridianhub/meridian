@@ -270,9 +270,15 @@ func (s *simpleHealthServer) Check(_ context.Context, _ *grpc_health_v1.HealthCh
 }
 
 func (s *simpleHealthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, server grpc_health_v1.Health_WatchServer) error {
-	return server.Send(&grpc_health_v1.HealthCheckResponse{
+	// Send initial status
+	if err := server.Send(&grpc_health_v1.HealthCheckResponse{
 		Status: grpc_health_v1.HealthCheckResponse_SERVING,
-	})
+	}); err != nil {
+		return err
+	}
+	// Block until context is done to keep stream open
+	<-server.Context().Done()
+	return server.Context().Err()
 }
 
 // currentAccountGRPCClient implements service.CurrentAccountClient using gRPC.

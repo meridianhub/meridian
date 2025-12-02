@@ -367,3 +367,50 @@ func TestNewWebhookRequest(t *testing.T) {
 	assert.Equal(t, "Success", req.Message)
 	assert.False(t, req.Timestamp.IsZero())
 }
+
+func TestWebhookHandler_HandleWebhook_GatewayIdempotencyKey(t *testing.T) {
+	secret := []byte("test-secret-key")
+	gatewayIdempotencyKey := "gateway-provided-key-123"
+
+	var capturedReq *pb.UpdatePaymentOrderRequest
+	handler, err := NewWebhookHandler(WebhookHandlerConfig{
+		PaymentOrderService: &mockPaymentOrderService{
+			updateFunc: func(_ context.Context, req *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
+				capturedReq = req
+				return &pb.UpdatePaymentOrderResponse{
+					PaymentOrder: &pb.PaymentOrder{
+						PaymentOrderId: "test-order-id",
+						Status:         pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED,
+					},
+				}, nil
+			},
+		},
+		HMACSecret: secret,
+	})
+	require.NoError(t, err)
+
+	webhookReq := WebhookRequest{
+		GatewayReferenceID: "gw-ref-123",
+		Status:             "Settled",
+		Timestamp:          time.Now().UTC(),
+	}
+	body, err := json.Marshal(webhookReq)
+	require.NoError(t, err)
+
+	signature := GenerateWebhookSignature(body, secret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/payment-gateway", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(WebhookSignatureHeader, signature)
+	req.Header.Set(IdempotencyKeyHeader, gatewayIdempotencyKey)
+
+	rr := httptest.NewRecorder()
+	handler.HandleWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Verify the gateway-provided idempotency key was used
+	require.NotNil(t, capturedReq)
+	require.NotNil(t, capturedReq.IdempotencyKey)
+	assert.Equal(t, gatewayIdempotencyKey, capturedReq.IdempotencyKey.Key)
+}
