@@ -1218,7 +1218,7 @@ func toProto(po *domain.PaymentOrder) *pb.PaymentOrder {
 		CausationId:           po.CausationID,
 		ErrorCode:             po.ErrorCode,
 		LienExecutionStatus:   mapLienExecutionStatusToProto(po.LienExecutionStatus),
-		LienExecutionAttempts: int32(po.LienExecutionAttempts),
+		LienExecutionAttempts: safeIntToInt32(po.LienExecutionAttempts),
 		LienExecutionError:    po.LienExecutionError,
 	}
 
@@ -1329,6 +1329,21 @@ func mapLienExecutionStatusToProto(status domain.LienExecutionStatus) pb.LienExe
 	default:
 		return pb.LienExecutionStatus_LIEN_EXECUTION_STATUS_UNSPECIFIED
 	}
+}
+
+// safeIntToInt32 safely converts an int to int32 with bounds checking.
+// Returns math.MaxInt32 if the value exceeds int32 range.
+// This is used for lien execution attempts which should never exceed
+// a small number in practice, but we need safe conversion for gosec.
+func safeIntToInt32(n int) int32 {
+	const maxInt32 = 1<<31 - 1
+	if n > maxInt32 {
+		return maxInt32
+	}
+	if n < -maxInt32-1 {
+		return -maxInt32 - 1
+	}
+	return int32(n)
 }
 
 // executeLienWithRetry executes a lien asynchronously with exponential backoff retry.
