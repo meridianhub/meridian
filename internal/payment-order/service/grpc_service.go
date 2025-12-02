@@ -357,6 +357,10 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 }
 
 // orchestratePayment executes the payment saga with compensation on failure.
+// The saga steps (reserve_funds, send_to_gateway) are executed strictly sequentially by
+// the SagaOrchestrator - there is no concurrent step execution. The same PaymentOrder
+// pointer is safely shared across steps since only one step runs at a time.
+// Compensation is also sequential, running in reverse order (LIFO) on failure.
 func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrder) {
 	s.logger.Info("starting payment saga",
 		"payment_order_id", po.ID.String(),
@@ -393,6 +397,11 @@ func (s *Service) addReserveFundsStep(saga *clients.SagaOrchestrator, po *domain
 	saga.AddStep("reserve_funds",
 		// Action: Create lien to reserve funds
 		func(stepCtx context.Context) error {
+			// Check context cancellation early to avoid unnecessary work
+			if err := stepCtx.Err(); err != nil {
+				return fmt.Errorf("context cancelled before reserve_funds: %w", err)
+			}
+
 			s.logger.Info("executing reserve_funds step",
 				"payment_order_id", po.ID.String(),
 				"debtor_account_id", po.DebtorAccountID)
@@ -472,6 +481,11 @@ func (s *Service) addSendToGatewayStep(saga *clients.SagaOrchestrator, po *domai
 	saga.AddStep("send_to_gateway",
 		// Action: Send payment to gateway
 		func(stepCtx context.Context) error {
+			// Check context cancellation early to avoid unnecessary work
+			if err := stepCtx.Err(); err != nil {
+				return fmt.Errorf("context cancelled before send_to_gateway: %w", err)
+			}
+
 			s.logger.Info("executing send_to_gateway step",
 				"payment_order_id", po.ID.String())
 
@@ -930,7 +944,9 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 // Helper functions
 
 // publishEvent publishes a Kafka event if the producer is configured.
-// Logs errors but does not fail the operation - events are recovered via outbox pattern.
+// This is best-effort/fire-and-forget: errors are logged but not retried or persisted.
+// Failed events are NOT automatically recovered. For guaranteed delivery, consider
+// implementing a transactional outbox pattern in the future.
 func (s *Service) publishEvent(ctx context.Context, topic string, key string, event proto.Message) {
 	if s.kafkaProducer == nil {
 		return
@@ -991,7 +1007,13 @@ func toProto(po *domain.PaymentOrder) *pb.PaymentOrder {
 	return proto
 }
 
-// toMoneyAmount converts domain Money to proto MoneyAmount
+// toMoneyAmount converts domain Money (in cents) to proto MoneyAmount (units + nanos).
+// The conversion splits cents into units (dollars) and nanos:
+//   - units = cents / 100 (integer division)
+//   - nanos = (cents % 100) * 10^7 (remainder converted to nanos)
+//
+// This is a lossless conversion since cents are exact representations.
+// The inverse operation protoToMoney uses symmetric rounding for any sub-cent precision.
 func toMoneyAmount(m cadomain.Money) *commonpb.MoneyAmount {
 	amountCents := m.AmountCents()
 	units := amountCents / 100
