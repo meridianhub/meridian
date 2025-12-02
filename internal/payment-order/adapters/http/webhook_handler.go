@@ -192,9 +192,14 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("webhook processed successfully",
-		"payment_order_id", resp.PaymentOrder.PaymentOrderId,
-		"status", resp.PaymentOrder.Status.String())
+	// Log success with payment order details if available
+	if resp != nil && resp.PaymentOrder != nil {
+		h.logger.Info("webhook processed successfully",
+			"payment_order_id", resp.PaymentOrder.PaymentOrderId,
+			"status", resp.PaymentOrder.Status.String())
+	} else {
+		h.logger.Info("webhook processed successfully")
+	}
 
 	h.writeSuccessResponse(w, "webhook processed successfully")
 }

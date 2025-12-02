@@ -309,25 +309,26 @@ func TestWebhookHandler_HandleWebhook_MethodNotAllowed(t *testing.T) {
 
 func TestMapGatewayStatus(t *testing.T) {
 	tests := []struct {
+		name     string
 		input    string
 		expected pb.GatewayStatus
 		wantErr  bool
 	}{
-		{"Settled", pb.GatewayStatus_GATEWAY_STATUS_SETTLED, false},
-		{"SETTLED", pb.GatewayStatus_GATEWAY_STATUS_SETTLED, false},
-		{"settled", pb.GatewayStatus_GATEWAY_STATUS_SETTLED, false},
-		{"Rejected", pb.GatewayStatus_GATEWAY_STATUS_REJECTED, false},
-		{"REJECTED", pb.GatewayStatus_GATEWAY_STATUS_REJECTED, false},
-		{"rejected", pb.GatewayStatus_GATEWAY_STATUS_REJECTED, false},
-		{"Pending", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
-		{"PENDING", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
-		{"pending", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
-		{"Unknown", pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED, true},
-		{"", pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED, true},
+		{"Settled", "Settled", pb.GatewayStatus_GATEWAY_STATUS_SETTLED, false},
+		{"SETTLED", "SETTLED", pb.GatewayStatus_GATEWAY_STATUS_SETTLED, false},
+		{"settled", "settled", pb.GatewayStatus_GATEWAY_STATUS_SETTLED, false},
+		{"Rejected", "Rejected", pb.GatewayStatus_GATEWAY_STATUS_REJECTED, false},
+		{"REJECTED", "REJECTED", pb.GatewayStatus_GATEWAY_STATUS_REJECTED, false},
+		{"rejected", "rejected", pb.GatewayStatus_GATEWAY_STATUS_REJECTED, false},
+		{"Pending", "Pending", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
+		{"PENDING", "PENDING", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
+		{"pending", "pending", pb.GatewayStatus_GATEWAY_STATUS_PENDING, false},
+		{"unknown_status", "Unknown", pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED, true},
+		{"empty_status", "", pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED, true},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			result, err := mapGatewayStatus(tt.input)
 			if tt.wantErr {
 				assert.Error(t, err)
