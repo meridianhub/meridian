@@ -353,8 +353,8 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 		CircuitBreakerName:     "payment-gateway",
 		CircuitBreakerTimeout:  getEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
 		CircuitBreakerInterval: getEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
-		MaxRequests:            uint32(getEnvAsInt("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1)),
-		FailureThreshold:       uint32(getEnvAsInt("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5)),
+		MaxRequests:            getEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       getEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
 
 		// Rate limiting settings
 		RateLimit:      getEnvAsFloat("GATEWAY_RATE_LIMIT", 100.0),
@@ -469,6 +469,19 @@ func getEnvAsInt(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return value
+}
+
+func getEnvAsUint32(key string, defaultValue uint32) uint32 {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.ParseUint(valueStr, 10, 32)
+	if err != nil {
+		return defaultValue
+	}
+	return uint32(value)
 }
 
 func getEnvAsFloat(key string, defaultValue float64) float64 {
