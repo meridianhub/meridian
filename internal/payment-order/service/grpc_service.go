@@ -236,17 +236,25 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	// Start saga orchestration asynchronously
 	// The saga runs in the background after returning the response
 	// nolint:contextcheck // Intentionally using background context for async saga orchestration
-	go func() {
+	go func(paymentOrderID uuid.UUID) {
 		// Recover from panics to prevent silent goroutine termination
 		defer func() {
 			if r := recover(); r != nil {
 				s.logger.Error("panic in payment saga orchestration",
 					"panic", r,
-					"payment_order_id", po.ID.String(),
+					"payment_order_id", paymentOrderID.String(),
 					"correlation_id", correlationID)
-				// Attempt to fail the payment order so it doesn't remain in limbo
+				// Reload fresh state before failing - the original po may be stale
+				// if the saga made state transitions before panicking
 				failCtx := context.Background()
-				s.failPaymentOrder(failCtx, po, "internal panic during saga orchestration", "INTERNAL_ERROR")
+				freshPO, err := s.repo.FindByID(paymentOrderID)
+				if err != nil {
+					s.logger.Error("failed to reload payment order after panic",
+						"payment_order_id", paymentOrderID.String(),
+						"error", err)
+					return
+				}
+				s.failPaymentOrder(failCtx, freshPO, "internal panic during saga orchestration", "INTERNAL_ERROR")
 			}
 		}()
 		sagaCtx := context.Background()
@@ -254,7 +262,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 			sagaCtx = observability.WithCorrelationID(sagaCtx, correlationID)
 		}
 		s.orchestratePayment(sagaCtx, po)
-	}()
+	}(po.ID)
 
 	return &pb.InitiatePaymentOrderResponse{
 		PaymentOrder: responseProto,
