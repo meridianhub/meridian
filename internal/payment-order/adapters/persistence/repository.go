@@ -3,6 +3,7 @@ package persistence
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	cadomain "github.com/meridianhub/meridian/internal/current-account/domain"
@@ -12,8 +13,10 @@ import (
 
 // Repository errors
 var (
-	ErrPaymentOrderNotFound        = errors.New("payment order not found")
-	ErrPaymentOrderVersionConflict = errors.New("version conflict: payment order was modified by another transaction")
+	ErrPaymentOrderNotFound           = errors.New("payment order not found")
+	ErrPaymentOrderVersionConflict    = errors.New("version conflict: payment order was modified by another transaction")
+	ErrIdempotencyKeyConflict         = errors.New("payment order with this idempotency key already exists")
+	errUniqueConstraintIdempotencyKey = "payment_orders_idempotency_key_key" // PostgreSQL constraint name
 )
 
 // PaginatedResult holds paginated query results
@@ -48,10 +51,15 @@ func NewPaymentOrderRepository(db *gorm.DB) *PaymentOrderRepository {
 	return &PaymentOrderRepository{db: db}
 }
 
-// Create inserts a new payment order
+// Create inserts a new payment order.
+// Returns ErrIdempotencyKeyConflict if a payment order with the same idempotency key exists.
 func (r *PaymentOrderRepository) Create(po *domain.PaymentOrder) error {
 	entity := toEntity(po)
-	return r.db.Create(entity).Error
+	err := r.db.Create(entity).Error
+	if err != nil && strings.Contains(err.Error(), errUniqueConstraintIdempotencyKey) {
+		return ErrIdempotencyKeyConflict
+	}
+	return err
 }
 
 // FindByID retrieves a payment order by its UUID

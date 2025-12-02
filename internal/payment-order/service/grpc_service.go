@@ -40,6 +40,7 @@ var (
 	ErrPaymentRejected         = errors.New("payment rejected by gateway")
 	ErrUnexpectedGatewayStatus = errors.New("unexpected gateway status")
 	ErrIdempotencyKeyTooLong   = errors.New("idempotency key exceeds maximum length")
+	ErrMalformedLienResponse   = errors.New("current account service returned empty or malformed lien response")
 )
 
 // Kafka topic constants
@@ -200,6 +201,7 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 }
 
 // InitiatePaymentOrder creates a new payment order and begins the saga.
+// nolint:gocognit // Complexity justified by validation, idempotency handling (TOCTOU), event publishing, and saga startup
 func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaymentOrderRequest) (*pb.InitiatePaymentOrderResponse, error) {
 	start := time.Now()
 	defer func() {
@@ -269,6 +271,23 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 
 	// Persist to database
 	if err := s.repo.Create(po); err != nil {
+		// Handle idempotency key conflict (TOCTOU race): another request won the race
+		// Reload and return the existing payment order for idempotent behavior
+		if errors.Is(err, persistence.ErrIdempotencyKeyConflict) {
+			existingPO, findErr := s.repo.FindByIdempotencyKey(idempotencyKey)
+			if findErr != nil {
+				s.logger.Error("failed to retrieve existing payment order after idempotency conflict",
+					"error", findErr,
+					"idempotency_key", idempotencyKey)
+				return nil, status.Error(codes.Internal, "failed to retrieve payment order")
+			}
+			s.logger.Info("returning existing payment order (idempotency race)",
+				"payment_order_id", existingPO.ID.String(),
+				"idempotency_key", idempotencyKey)
+			return &pb.InitiatePaymentOrderResponse{
+				PaymentOrder: toProto(existingPO),
+			}, nil
+		}
 		s.logger.Error("failed to save payment order", "error", err)
 		return nil, status.Error(codes.Internal, "failed to save payment order")
 	}
@@ -413,6 +432,11 @@ func (s *Service) addReserveFundsStep(saga *clients.SagaOrchestrator, po *domain
 			})
 			if err != nil {
 				return fmt.Errorf("failed to reserve funds: %w", err)
+			}
+
+			// Defensive check: ensure response is well-formed to avoid panics
+			if resp == nil || resp.Lien == nil || resp.Lien.LienId == "" {
+				return ErrMalformedLienResponse
 			}
 
 			*lienID = resp.Lien.LienId
