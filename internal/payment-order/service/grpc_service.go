@@ -63,6 +63,10 @@ type CurrentAccountClient interface {
 	Close() error
 }
 
+// DefaultSagaTimeout is the default timeout for payment saga orchestration.
+// This allows for typical payment gateway latency plus retries.
+const DefaultSagaTimeout = 5 * time.Minute
+
 // Service implements the PaymentOrderService gRPC service
 type Service struct {
 	pb.UnimplementedPaymentOrderServiceServer
@@ -72,6 +76,7 @@ type Service struct {
 	kafkaProducer        *kafka.ProtoProducer
 	logger               *slog.Logger
 	tracer               *observability.Tracer
+	sagaTimeout          time.Duration
 }
 
 // Config contains configuration for creating a new Service
@@ -82,6 +87,9 @@ type Config struct {
 	KafkaProducer        *kafka.ProtoProducer
 	Logger               *slog.Logger
 	Tracer               *observability.Tracer
+	// SagaTimeout is the maximum duration for saga orchestration.
+	// If zero, DefaultSagaTimeout is used.
+	SagaTimeout time.Duration
 }
 
 // NewService creates a new payment order service with minimal dependencies.
@@ -92,8 +100,9 @@ func NewService(repo persistence.Repository) (*Service, error) {
 		return nil, ErrRepositoryNil
 	}
 	return &Service{
-		repo:   repo,
-		logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		repo:        repo,
+		logger:      slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		sagaTimeout: DefaultSagaTimeout,
 	}, nil
 }
 
@@ -120,6 +129,12 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
+	// Apply default saga timeout if not provided
+	sagaTimeout := config.SagaTimeout
+	if sagaTimeout == 0 {
+		sagaTimeout = DefaultSagaTimeout
+	}
+
 	return &Service{
 		repo:                 config.Repository,
 		currentAccountClient: config.CurrentAccountClient,
@@ -127,6 +142,7 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 		kafkaProducer:        config.KafkaProducer,
 		logger:               logger,
 		tracer:               config.Tracer,
+		sagaTimeout:          sagaTimeout,
 	}, nil
 }
 
@@ -264,8 +280,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 			}
 		}()
 		// Create saga context with timeout to prevent indefinite hangs
-		// 5 minutes allows for typical payment gateway latency plus retries
-		sagaCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		sagaCtx, cancel := context.WithTimeout(context.Background(), s.sagaTimeout)
 		defer cancel()
 		if s.tracer != nil {
 			sagaCtx = observability.WithCorrelationID(sagaCtx, correlationID)

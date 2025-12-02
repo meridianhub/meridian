@@ -1166,6 +1166,7 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient: caClient,
 		paymentGateway:       gwMock,
+		sagaTimeout:          DefaultSagaTimeout,
 		// kafkaProducer is nil - events won't be published but saga still runs
 	}
 
@@ -1223,6 +1224,7 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient: caClient,
 		paymentGateway:       gwMock,
+		sagaTimeout:          DefaultSagaTimeout,
 	}
 
 	ctx := context.Background()
@@ -1278,6 +1280,7 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient: caClient,
 		paymentGateway:       gwMock,
+		sagaTimeout:          DefaultSagaTimeout,
 	}
 
 	ctx := context.Background()
