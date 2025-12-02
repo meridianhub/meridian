@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,8 +30,16 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// MockRepository implements persistence.Repository for testing
+// Test errors for mock responses
+var (
+	errInsufficientFunds  = errors.New("insufficient funds")
+	errGatewayUnavailable = errors.New("gateway unavailable")
+)
+
+// MockRepository implements persistence.Repository for testing.
+// Thread-safe for use with async saga tests.
 type MockRepository struct {
+	mu                   sync.RWMutex
 	paymentOrders        map[uuid.UUID]*domain.PaymentOrder
 	idempotencyKeyIndex  map[string]*domain.PaymentOrder
 	gatewayRefIndex      map[string]*domain.PaymentOrder
@@ -86,6 +95,8 @@ func copyPaymentOrder(po *domain.PaymentOrder) *domain.PaymentOrder {
 }
 
 func (m *MockRepository) Create(po *domain.PaymentOrder) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -98,6 +109,8 @@ func (m *MockRepository) Create(po *domain.PaymentOrder) error {
 }
 
 func (m *MockRepository) FindByID(id uuid.UUID) (*domain.PaymentOrder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.findByIDErr != nil {
 		return nil, m.findByIDErr
 	}
@@ -110,6 +123,8 @@ func (m *MockRepository) FindByID(id uuid.UUID) (*domain.PaymentOrder, error) {
 }
 
 func (m *MockRepository) FindByIdempotencyKey(key string) (*domain.PaymentOrder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.findByIdempotencyErr != nil {
 		return nil, m.findByIdempotencyErr
 	}
@@ -122,6 +137,8 @@ func (m *MockRepository) FindByIdempotencyKey(key string) (*domain.PaymentOrder,
 }
 
 func (m *MockRepository) FindByGatewayReferenceID(gatewayRefID string) (*domain.PaymentOrder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	po, ok := m.gatewayRefIndex[gatewayRefID]
 	if !ok {
 		return nil, persistence.ErrPaymentOrderNotFound
@@ -131,6 +148,8 @@ func (m *MockRepository) FindByGatewayReferenceID(gatewayRefID string) (*domain.
 }
 
 func (m *MockRepository) FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	pos := m.debtorAccountIndex[accountID]
 	// Return copies to simulate database behavior
 	result := make([]*domain.PaymentOrder, len(pos))
@@ -141,6 +160,8 @@ func (m *MockRepository) FindByDebtorAccountID(accountID string) ([]*domain.Paym
 }
 
 func (m *MockRepository) FindByDebtorAccountIDPaginated(accountID string, limit, offset int) (*persistence.PaginatedResult, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	pos := m.debtorAccountIndex[accountID]
 	totalCount := len(pos)
 
@@ -172,6 +193,8 @@ func (m *MockRepository) FindByDebtorAccountIDPaginated(accountID string, limit,
 }
 
 func (m *MockRepository) Update(po *domain.PaymentOrder) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.updateErr != nil {
 		return m.updateErr
 	}
@@ -1113,4 +1136,177 @@ func TestToMoneyAmount(t *testing.T) {
 	assert.Equal(t, "GBP", proto.Amount.CurrencyCode)
 	assert.Equal(t, int64(100), proto.Amount.Units)
 	assert.Equal(t, int32(500000000), proto.Amount.Nanos)
+}
+
+// TestSagaOrchestration_HappyPath tests the full saga flow from InitiatePaymentOrder
+// through to EXECUTING state, exercising the async saga orchestration.
+func TestSagaOrchestration_HappyPath(t *testing.T) {
+	repo := NewMockRepository()
+
+	// Set up mock CurrentAccountClient with successful lien response
+	caClient := &MockCurrentAccountClient{
+		initiateLienResp: &currentaccountv1.InitiateLienResponse{
+			Lien: &currentaccountv1.Lien{
+				LienId: "test-lien-123",
+			},
+		},
+	}
+
+	// Set up mock PaymentGateway with successful acceptance response
+	gwMock := &MockPaymentGateway{
+		response: gateway.PaymentResponse{
+			Status:             gateway.StatusAccepted,
+			GatewayReferenceID: "gw-ref-456",
+		},
+	}
+
+	// Create service with all dependencies configured
+	svc := &Service{
+		repo:                 repo,
+		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient: caClient,
+		paymentGateway:       gwMock,
+		// kafkaProducer is nil - events won't be published but saga still runs
+	}
+
+	// Initiate payment order
+	ctx := context.Background()
+	req := newInitiateRequest("saga-test-key", "debtor-123", "creditor-ref", 5000)
+
+	resp, err := svc.InitiatePaymentOrder(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.PaymentOrder)
+
+	paymentOrderID := resp.PaymentOrder.PaymentOrderId
+
+	// Initial response should show INITIATED status
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_INITIATED, resp.PaymentOrder.Status)
+
+	// Wait for async saga to complete
+	// The saga runs in a goroutine and should reach EXECUTING state
+	// Use polling with timeout to verify final state
+	require.Eventually(t, func() bool {
+		po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+		if err != nil {
+			return false
+		}
+		return po.Status == domain.PaymentOrderStatusExecuting
+	}, 2*time.Second, 50*time.Millisecond, "payment order should reach EXECUTING state")
+
+	// Verify final state
+	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusExecuting, po.Status)
+	assert.Equal(t, "test-lien-123", po.LienID)
+	assert.Equal(t, "gw-ref-456", po.GatewayReferenceID)
+	assert.NotNil(t, po.ReservedAt)
+	assert.NotNil(t, po.ExecutingAt)
+}
+
+// TestSagaOrchestration_LienFailure tests saga compensation when lien creation fails.
+func TestSagaOrchestration_LienFailure(t *testing.T) {
+	repo := NewMockRepository()
+
+	// Set up mock CurrentAccountClient to fail lien creation
+	caClient := &MockCurrentAccountClient{
+		initiateLienErr: errInsufficientFunds,
+	}
+
+	// Gateway mock won't be called since lien fails first
+	gwMock := &MockPaymentGateway{}
+
+	svc := &Service{
+		repo:                 repo,
+		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient: caClient,
+		paymentGateway:       gwMock,
+	}
+
+	ctx := context.Background()
+	req := newInitiateRequest("saga-fail-key", "debtor-456", "creditor-ref", 5000)
+
+	resp, err := svc.InitiatePaymentOrder(ctx, req)
+
+	require.NoError(t, err) // InitiatePaymentOrder succeeds, saga fails async
+	require.NotNil(t, resp)
+
+	paymentOrderID := resp.PaymentOrder.PaymentOrderId
+
+	// Wait for async saga to fail and mark payment as FAILED
+	require.Eventually(t, func() bool {
+		po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+		if err != nil {
+			return false
+		}
+		return po.Status == domain.PaymentOrderStatusFailed
+	}, 2*time.Second, 50*time.Millisecond, "payment order should reach FAILED state")
+
+	// Verify failure state
+	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
+	assert.Contains(t, po.FailureReason, "insufficient funds")
+	assert.Equal(t, "SAGA_FAILED", po.ErrorCode)
+	assert.Empty(t, po.LienID) // Lien was never created
+	assert.NotNil(t, po.FailedAt)
+}
+
+// TestSagaOrchestration_GatewayFailure tests saga compensation when gateway submission fails.
+func TestSagaOrchestration_GatewayFailure(t *testing.T) {
+	repo := NewMockRepository()
+
+	// Set up mock CurrentAccountClient with successful lien response
+	caClient := &MockCurrentAccountClient{
+		initiateLienResp: &currentaccountv1.InitiateLienResponse{
+			Lien: &currentaccountv1.Lien{
+				LienId: "test-lien-789",
+			},
+		},
+	}
+
+	// Set up mock PaymentGateway to fail
+	gwMock := &MockPaymentGateway{
+		err: errGatewayUnavailable,
+	}
+
+	svc := &Service{
+		repo:                 repo,
+		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient: caClient,
+		paymentGateway:       gwMock,
+	}
+
+	ctx := context.Background()
+	req := newInitiateRequest("saga-gw-fail-key", "debtor-789", "creditor-ref", 5000)
+
+	resp, err := svc.InitiatePaymentOrder(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	paymentOrderID := resp.PaymentOrder.PaymentOrderId
+
+	// Wait for async saga to fail
+	require.Eventually(t, func() bool {
+		po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+		if err != nil {
+			return false
+		}
+		return po.Status == domain.PaymentOrderStatusFailed
+	}, 2*time.Second, 50*time.Millisecond, "payment order should reach FAILED state")
+
+	// Verify failure state
+	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
+	assert.Contains(t, po.FailureReason, "gateway unavailable")
+	assert.Equal(t, "SAGA_FAILED", po.ErrorCode)
+	// Lien was created but should be released by compensation
+	assert.Equal(t, "test-lien-789", po.LienID)
+	assert.NotNil(t, po.FailedAt)
 }

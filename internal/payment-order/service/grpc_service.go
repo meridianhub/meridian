@@ -255,10 +255,18 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 						"error", err)
 					return
 				}
-				s.failPaymentOrder(failCtx, freshPO, "internal panic during saga orchestration", "INTERNAL_ERROR")
+				// Async path: log and swallow error - best effort failure handling
+				if err := s.failPaymentOrder(failCtx, freshPO, "internal panic during saga orchestration", "INTERNAL_ERROR"); err != nil {
+					s.logger.Error("failed to mark payment order as failed after panic",
+						"payment_order_id", paymentOrderID.String(),
+						"error", err)
+				}
 			}
 		}()
-		sagaCtx := context.Background()
+		// Create saga context with timeout to prevent indefinite hangs
+		// 5 minutes allows for typical payment gateway latency plus retries
+		sagaCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
 		if s.tracer != nil {
 			sagaCtx = observability.WithCorrelationID(sagaCtx, correlationID)
 		}
@@ -281,7 +289,12 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 	if s.currentAccountClient == nil || s.paymentGateway == nil {
 		s.logger.Error("saga dependencies not configured",
 			"payment_order_id", po.ID.String())
-		s.failPaymentOrder(ctx, po, "service configuration error", "INTERNAL_ERROR")
+		// Async path: log and swallow error - best effort failure handling
+		if err := s.failPaymentOrder(ctx, po, "service configuration error", "INTERNAL_ERROR"); err != nil {
+			s.logger.Error("failed to mark payment order as failed",
+				"payment_order_id", po.ID.String(),
+				"error", err)
+		}
 		return
 	}
 
@@ -460,7 +473,12 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 			return
 		}
 
-		s.failPaymentOrder(ctx, latestPO, result.Error.Error(), "SAGA_FAILED")
+		// Async path: log and swallow error - best effort failure handling
+		if err := s.failPaymentOrder(ctx, latestPO, result.Error.Error(), "SAGA_FAILED"); err != nil {
+			s.logger.Error("failed to mark payment order as failed after saga failure",
+				"payment_order_id", po.ID.String(),
+				"error", err)
+		}
 		return
 	}
 
@@ -473,7 +491,10 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 }
 
 // failPaymentOrder handles payment order failure with proper state transition and event publishing.
-func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder, reason string, errorCode string) {
+// Returns an error if the state transition or persistence fails. Callers in synchronous paths
+// (e.g., UpdatePaymentOrder) should propagate this error to clients. Callers in async paths
+// (e.g., saga orchestration) may log and swallow the error.
+func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder, reason string, errorCode string) error {
 	// Capture original status before transitioning (for event)
 	failedAtStatus := po.Status
 
@@ -486,14 +507,14 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 		s.logger.Error("failed to transition to FAILED state",
 			"error", err,
 			"payment_order_id", po.ID.String())
-		return
+		return fmt.Errorf("failed to transition to FAILED state: %w", err)
 	}
 
 	if err := s.repo.Update(po); err != nil {
 		s.logger.Error("failed to persist FAILED state",
 			"error", err,
 			"payment_order_id", po.ID.String())
-		return
+		return fmt.Errorf("failed to persist FAILED state: %w", err)
 	}
 
 	// Release lien if needed
@@ -536,6 +557,8 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 		"payment_order_id", po.ID.String(),
 		"reason", reason,
 		"error_code", errorCode)
+
+	return nil
 }
 
 // RetrievePaymentOrder gets payment order details by ID.
@@ -657,8 +680,10 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 			"gateway_reference_id", po.GatewayReferenceID)
 
 	case pb.GatewayStatus_GATEWAY_STATUS_REJECTED:
-		// Fail the payment
-		s.failPaymentOrder(ctx, po, req.GatewayMessage, "GATEWAY_REJECTED")
+		// Fail the payment - synchronous path: propagate error to client
+		if err := s.failPaymentOrder(ctx, po, req.GatewayMessage, "GATEWAY_REJECTED"); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to mark payment as rejected: %v", err)
+		}
 
 	case pb.GatewayStatus_GATEWAY_STATUS_PENDING:
 		// No state change needed - still waiting
