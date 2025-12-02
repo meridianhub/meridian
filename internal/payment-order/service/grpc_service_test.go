@@ -808,6 +808,30 @@ func TestProtoToMoney(t *testing.T) {
 			wantCents: 0,
 			wantErr:   true,
 		},
+		{
+			name: "negative amount with nanos",
+			amount: &commonpb.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        -10,
+					Nanos:        -123456789, // -10.123456789 should round to -1012 cents
+				},
+			},
+			wantCents: -1012, // -10.12 (rounded from -10.123456789)
+			wantErr:   false,
+		},
+		{
+			name: "negative amount rounds correctly",
+			amount: &commonpb.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "USD",
+					Units:        -5,
+					Nanos:        -555000000, // -5.555 should round to -556 cents
+				},
+			},
+			wantCents: -556, // -5.56 (rounded from -5.555)
+			wantErr:   false,
+		},
 	}
 
 	for _, tt := range tests {

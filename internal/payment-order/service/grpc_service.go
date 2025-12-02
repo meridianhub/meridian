@@ -905,10 +905,15 @@ func protoToMoney(amount *commonpb.MoneyAmount) (cadomain.Money, error) {
 		return cadomain.Money{}, ErrAmountRequired
 	}
 
-	// Convert to cents
+	// Convert to cents with symmetric rounding (round half away from zero)
 	unitsCents := amount.Amount.Units * 100
-	nanosCents := (amount.Amount.Nanos + 5000000) / 10000000
-	totalCents := unitsCents + int64(nanosCents)
+	var nanosCents int64
+	if amount.Amount.Nanos >= 0 {
+		nanosCents = int64((amount.Amount.Nanos + 5000000) / 10000000)
+	} else {
+		nanosCents = int64((amount.Amount.Nanos - 5000000) / 10000000)
+	}
+	totalCents := unitsCents + nanosCents
 
 	return cadomain.NewMoney(amount.Amount.CurrencyCode, totalCents)
 }
