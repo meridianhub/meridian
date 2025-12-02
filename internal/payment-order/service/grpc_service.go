@@ -717,10 +717,11 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 	gatewayStatusStr := req.GatewayStatus.String()
 
 	defer func() {
-		poobservability.RecordOperationDuration("update_payment_order", operationStatus, time.Since(start))
+		elapsed := time.Since(start)
+		poobservability.RecordOperationDuration("update_payment_order", operationStatus, elapsed)
 		poobservability.RecordGatewayCallback(gatewayStatusStr, operationStatus)
 		s.logger.Info("update_payment_order completed",
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", elapsed.Milliseconds(),
 			"gateway_status", gatewayStatusStr,
 			"result", operationStatus)
 	}()
