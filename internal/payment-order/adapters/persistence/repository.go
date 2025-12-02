@@ -1,9 +1,11 @@
 package persistence
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	cadomain "github.com/meridianhub/meridian/internal/current-account/domain"
@@ -16,14 +18,61 @@ var (
 	ErrPaymentOrderNotFound           = errors.New("payment order not found")
 	ErrPaymentOrderVersionConflict    = errors.New("version conflict: payment order was modified by another transaction")
 	ErrIdempotencyKeyConflict         = errors.New("payment order with this idempotency key already exists")
+	ErrInvalidCursor                  = errors.New("invalid pagination cursor")
 	errUniqueConstraintIdempotencyKey = "payment_orders_idempotency_key_key" // PostgreSQL constraint name
 )
+
+// Cursor represents a pagination cursor for cursor-based pagination.
+// It uses created_at + id as a composite cursor to handle ties (items with same created_at).
+type Cursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+// EncodeCursor encodes a cursor to a base64 string for use as an opaque page token.
+// Format: RFC3339Nano timestamp + "|" + UUID
+func EncodeCursor(c Cursor) string {
+	data := c.CreatedAt.Format(time.RFC3339Nano) + "|" + c.ID.String()
+	return base64.URLEncoding.EncodeToString([]byte(data))
+}
+
+// DecodeCursor decodes a base64 page token back to a Cursor.
+// Returns ErrInvalidCursor if the token is malformed.
+func DecodeCursor(token string) (Cursor, error) {
+	if token == "" {
+		return Cursor{}, nil
+	}
+
+	data, err := base64.URLEncoding.DecodeString(token)
+	if err != nil {
+		return Cursor{}, ErrInvalidCursor
+	}
+
+	parts := strings.SplitN(string(data), "|", 2)
+	if len(parts) != 2 {
+		return Cursor{}, ErrInvalidCursor
+	}
+
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return Cursor{}, ErrInvalidCursor
+	}
+
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return Cursor{}, ErrInvalidCursor
+	}
+
+	return Cursor{CreatedAt: createdAt, ID: id}, nil
+}
 
 // PaginatedResult holds paginated query results
 type PaginatedResult struct {
 	PaymentOrders []*domain.PaymentOrder
 	TotalCount    int64
 	HasMore       bool
+	// NextCursor is the cursor for fetching the next page (empty if no more results)
+	NextCursor string
 }
 
 // Repository defines the contract for payment order persistence.
@@ -34,7 +83,9 @@ type Repository interface {
 	FindByIdempotencyKey(key string) (*domain.PaymentOrder, error)
 	FindByGatewayReferenceID(gatewayRefID string) (*domain.PaymentOrder, error)
 	FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error)
-	FindByDebtorAccountIDPaginated(accountID string, limit, offset int) (*PaginatedResult, error)
+	// FindByDebtorAccountIDWithCursor retrieves payment orders using cursor-based pagination.
+	// Pass an empty cursor for the first page. Results are ordered by created_at DESC, id DESC.
+	FindByDebtorAccountIDWithCursor(accountID string, limit int, cursor Cursor) (*PaginatedResult, error)
 	Update(po *domain.PaymentOrder) error
 }
 
@@ -131,11 +182,18 @@ func (r *PaymentOrderRepository) FindByDebtorAccountID(accountID string) ([]*dom
 	return paymentOrders, nil
 }
 
-// FindByDebtorAccountIDPaginated retrieves payment orders for a debtor account with pagination.
-// Uses database-level LIMIT/OFFSET for efficient queries on large datasets.
-// Results are ordered by created_at DESC (newest first) for consistent pagination.
-func (r *PaymentOrderRepository) FindByDebtorAccountIDPaginated(accountID string, limit, offset int) (*PaginatedResult, error) {
-	// Get total count first (single COUNT query, very efficient with index)
+// FindByDebtorAccountIDWithCursor retrieves payment orders for a debtor account with cursor-based pagination.
+// This provides consistent results even when items are inserted/deleted during pagination.
+// Results are ordered by created_at DESC, id DESC (newest first) for deterministic ordering.
+//
+// The cursor uses (created_at, id) as a composite key to handle ties when multiple records
+// have the same created_at timestamp. The query uses:
+//
+//	WHERE (created_at < cursor_time) OR (created_at = cursor_time AND id < cursor_id)
+//
+// This ensures stable pagination even with concurrent inserts.
+func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(accountID string, limit int, cursor Cursor) (*PaginatedResult, error) {
+	// Get total count (for UI purposes - this is still useful for showing "X of Y" in pagination)
 	var totalCount int64
 	countResult := r.db.Model(&PaymentOrderEntity{}).
 		Where("debtor_account_id = ?", accountID).
@@ -151,19 +209,38 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDPaginated(accountID string
 			PaymentOrders: []*domain.PaymentOrder{},
 			TotalCount:    0,
 			HasMore:       false,
+			NextCursor:    "",
 		}, nil
 	}
 
-	// Query with pagination
+	// Build query with cursor-based pagination
+	// Request one extra to determine if there are more results
+	query := r.db.Where("debtor_account_id = ?", accountID)
+
+	// Apply cursor condition if provided (not first page)
+	if !cursor.CreatedAt.IsZero() {
+		// Use composite cursor: (created_at < cursor_time) OR (created_at = cursor_time AND id < cursor_id)
+		// This handles ties when multiple records have the same created_at
+		query = query.Where(
+			"(created_at < ?) OR (created_at = ? AND id < ?)",
+			cursor.CreatedAt, cursor.CreatedAt, cursor.ID,
+		)
+	}
+
 	var entities []PaymentOrderEntity
-	result := r.db.Where("debtor_account_id = ?", accountID).
-		Order("created_at DESC").
-		Limit(limit).
-		Offset(offset).
+	result := query.
+		Order("created_at DESC, id DESC").
+		Limit(limit + 1). // Fetch one extra to check for more
 		Find(&entities)
 
 	if result.Error != nil {
 		return nil, result.Error
+	}
+
+	// Determine if there are more results
+	hasMore := len(entities) > limit
+	if hasMore {
+		entities = entities[:limit] // Trim to requested limit
 	}
 
 	paymentOrders := make([]*domain.PaymentOrder, 0, len(entities))
@@ -175,12 +252,21 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDPaginated(accountID string
 		paymentOrders = append(paymentOrders, po)
 	}
 
-	hasMore := int64(offset+len(entities)) < totalCount
+	// Build next cursor from the last item if there are more results
+	var nextCursor string
+	if hasMore && len(paymentOrders) > 0 {
+		lastPO := paymentOrders[len(paymentOrders)-1]
+		nextCursor = EncodeCursor(Cursor{
+			CreatedAt: lastPO.CreatedAt,
+			ID:        lastPO.ID,
+		})
+	}
 
 	return &PaginatedResult{
 		PaymentOrders: paymentOrders,
 		TotalCount:    totalCount,
 		HasMore:       hasMore,
+		NextCursor:    nextCursor,
 	}, nil
 }
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -912,7 +911,8 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 }
 
 // ListPaymentOrders returns a paginated list of payment orders.
-// Uses database-level pagination for efficient queries on large datasets.
+// Uses cursor-based pagination for consistent results even when items are inserted/deleted.
+// The cursor is an opaque token encoding (created_at, id) for deterministic ordering.
 func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrdersRequest) (*pb.ListPaymentOrdersResponse, error) {
 	if req.DebtorAccountId == "" {
 		return nil, status.Error(codes.InvalidArgument, "debtor_account_id is required for listing")
@@ -927,18 +927,18 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 		}
 	}
 
-	// Parse page token (offset-based)
-	offset := 0
+	// Decode cursor from page token (empty token = first page)
+	var cursor persistence.Cursor
 	if req.Pagination != nil && req.Pagination.PageToken != "" {
-		parsedOffset, parseErr := strconv.Atoi(req.Pagination.PageToken)
-		if parseErr != nil || parsedOffset < 0 {
+		var err error
+		cursor, err = persistence.DecodeCursor(req.Pagination.PageToken)
+		if err != nil {
 			return nil, status.Error(codes.InvalidArgument, "invalid page_token")
 		}
-		offset = parsedOffset
 	}
 
-	// Query with database-level pagination
-	result, err := s.repo.FindByDebtorAccountIDPaginated(req.DebtorAccountId, pageSize, offset)
+	// Query with cursor-based pagination
+	result, err := s.repo.FindByDebtorAccountIDWithCursor(req.DebtorAccountId, pageSize, cursor)
 	if err != nil {
 		s.logger.Error("failed to list payment orders", "error", err)
 		return nil, status.Error(codes.Internal, "failed to list payment orders")
@@ -950,16 +950,10 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 		protoOrders = append(protoOrders, toProto(po))
 	}
 
-	// Build next page token if more results exist
-	var nextPageToken string
-	if result.HasMore {
-		nextPageToken = strconv.Itoa(offset + len(result.PaymentOrders))
-	}
-
 	return &pb.ListPaymentOrdersResponse{
 		PaymentOrders: protoOrders,
 		Pagination: &commonpb.PaginationResponse{
-			NextPageToken: nextPageToken,
+			NextPageToken: result.NextCursor,
 			TotalCount:    result.TotalCount,
 		},
 	}, nil
