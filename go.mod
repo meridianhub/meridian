@@ -1,6 +1,6 @@
 module github.com/meridianhub/meridian
 
-go 1.25.3
+go 1.25.4
 
 require (
 	ariga.io/atlas-provider-gorm v0.6.0
