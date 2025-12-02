@@ -1378,3 +1378,186 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 	assert.Equal(t, "test-lien-789", po.LienID)
 	assert.NotNil(t, po.FailedAt)
 }
+
+// SlowCurrentAccountClient implements CurrentAccountClient with configurable delays for timeout testing
+type SlowCurrentAccountClient struct {
+	delay            time.Duration
+	initiateLienResp *currentaccountv1.InitiateLienResponse
+}
+
+func (m *SlowCurrentAccountClient) InitiateLien(ctx context.Context, _ *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
+	select {
+	case <-time.After(m.delay):
+		return m.initiateLienResp, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (m *SlowCurrentAccountClient) TerminateLien(_ context.Context, _ *currentaccountv1.TerminateLienRequest) (*currentaccountv1.TerminateLienResponse, error) {
+	return &currentaccountv1.TerminateLienResponse{}, nil
+}
+
+func (m *SlowCurrentAccountClient) ExecuteLien(_ context.Context, _ *currentaccountv1.ExecuteLienRequest) (*currentaccountv1.ExecuteLienResponse, error) {
+	return &currentaccountv1.ExecuteLienResponse{}, nil
+}
+
+func (m *SlowCurrentAccountClient) Close() error {
+	return nil
+}
+
+// TestSagaOrchestration_Timeout tests that the saga fails gracefully when it times out.
+func TestSagaOrchestration_Timeout(t *testing.T) {
+	repo := NewMockRepository()
+
+	// Set up slow CurrentAccountClient that will exceed saga timeout
+	caClient := &SlowCurrentAccountClient{
+		delay: 500 * time.Millisecond, // Longer than saga timeout
+		initiateLienResp: &currentaccountv1.InitiateLienResponse{
+			Lien: &currentaccountv1.Lien{
+				LienId: "test-lien-timeout",
+			},
+		},
+	}
+
+	gwMock := &MockPaymentGateway{}
+
+	// Configure very short saga timeout to trigger timeout
+	svc := &Service{
+		repo:                    repo,
+		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient:    caClient,
+		paymentGateway:          gwMock,
+		sagaTimeout:             100 * time.Millisecond, // Short timeout
+		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+	}
+
+	ctx := context.Background()
+	req := newInitiateRequest("saga-timeout-key", "debtor-timeout", "creditor-ref", 5000)
+
+	resp, err := svc.InitiatePaymentOrder(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	paymentOrderID := resp.PaymentOrder.PaymentOrderId
+
+	// Wait for async saga to timeout and fail
+	require.Eventually(t, func() bool {
+		po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+		if err != nil {
+			return false
+		}
+		return po.Status == domain.PaymentOrderStatusFailed
+	}, 2*time.Second, 50*time.Millisecond, "payment order should reach FAILED state after timeout")
+
+	// Verify failure state
+	po, err := repo.FindByID(uuid.MustParse(paymentOrderID))
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status)
+	assert.Contains(t, po.FailureReason, "context deadline exceeded")
+	assert.Equal(t, "SAGA_FAILED", po.ErrorCode)
+	assert.NotNil(t, po.FailedAt)
+}
+
+// TestConcurrentPaymentOrders tests that multiple concurrent payment orders
+// are handled correctly without data races or incorrect state.
+func TestConcurrentPaymentOrders(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	const numOrders = 10
+	var wg sync.WaitGroup
+	results := make(chan *pb.InitiatePaymentOrderResponse, numOrders)
+	errs := make(chan error, numOrders)
+
+	// Create concurrent payment orders with unique idempotency keys
+	for i := 0; i < numOrders; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			req := newInitiateRequest(
+				fmt.Sprintf("concurrent-key-%d", index),
+				fmt.Sprintf("ACC-%08d", index),
+				"GB82WEST12345698765432",
+				10000,
+			)
+			resp, err := svc.InitiatePaymentOrder(context.Background(), req)
+			if err != nil {
+				errs <- err
+			} else {
+				results <- resp
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	// Verify no errors
+	for err := range errs {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Verify all orders were created with unique IDs
+	ids := make(map[string]bool)
+	count := 0
+	for resp := range results {
+		count++
+		assert.NotNil(t, resp.PaymentOrder)
+		assert.NotEmpty(t, resp.PaymentOrder.PaymentOrderId)
+		// Ensure no duplicate IDs
+		_, exists := ids[resp.PaymentOrder.PaymentOrderId]
+		assert.False(t, exists, "duplicate payment order ID: %s", resp.PaymentOrder.PaymentOrderId)
+		ids[resp.PaymentOrder.PaymentOrderId] = true
+	}
+
+	assert.Equal(t, numOrders, count, "expected %d orders, got %d", numOrders, count)
+}
+
+// TestConcurrentIdempotentRequests tests that concurrent requests with the same
+// idempotency key all return the same payment order (idempotency guarantee).
+func TestConcurrentIdempotentRequests(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	const numRequests = 10
+	const idempotencyKey = "same-key-for-all"
+	var wg sync.WaitGroup
+	results := make(chan *pb.InitiatePaymentOrderResponse, numRequests)
+
+	// Fire concurrent requests with the same idempotency key
+	for i := 0; i < numRequests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := newInitiateRequest(idempotencyKey, "ACC-12345678", "GB82WEST12345698765432", 10000)
+			resp, err := svc.InitiatePaymentOrder(context.Background(), req)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			results <- resp
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	// All responses should return the same payment order ID
+	var firstID string
+	count := 0
+	for resp := range results {
+		count++
+		if firstID == "" {
+			firstID = resp.PaymentOrder.PaymentOrderId
+		} else {
+			assert.Equal(t, firstID, resp.PaymentOrder.PaymentOrderId,
+				"idempotent requests should return same payment order")
+		}
+	}
+
+	assert.Equal(t, numRequests, count)
+}

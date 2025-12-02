@@ -265,6 +265,8 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		"payment_order_id", po.ID.String(),
 		"debtor_account_id", po.DebtorAccountID,
 		"amount_cents", po.Amount.AmountCents(),
+		"currency", po.Amount.Currency(),
+		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", correlationID)
 
 	// Publish PaymentOrderInitiated event to Kafka
@@ -343,7 +345,6 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 }
 
 // orchestratePayment executes the payment saga with compensation on failure.
-// nolint:gocognit // Complex saga orchestration requires multiple nested steps
 func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrder) {
 	s.logger.Info("starting payment saga",
 		"payment_order_id", po.ID.String(),
@@ -362,13 +363,21 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 		return
 	}
 
-	// Create saga orchestrator
+	// Create saga orchestrator and track lien state for compensation
 	saga := clients.NewSagaOrchestrator(s.logger)
-
-	// Track saga state for compensation
 	var lienID string
 
-	// Step 1: Reserve funds via CurrentAccount.InitiateLien
+	// Add saga steps
+	s.addReserveFundsStep(saga, po, &lienID)
+	s.addSendToGatewayStep(saga, po)
+
+	// Execute saga
+	result := saga.Execute(ctx)
+	s.handleSagaResult(ctx, po, result)
+}
+
+// addReserveFundsStep adds the reserve_funds saga step that creates a lien to reserve funds.
+func (s *Service) addReserveFundsStep(saga *clients.SagaOrchestrator, po *domain.PaymentOrder, lienID *string) {
 	saga.AddStep("reserve_funds",
 		// Action: Create lien to reserve funds
 		func(stepCtx context.Context) error {
@@ -385,10 +394,10 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 				return fmt.Errorf("failed to reserve funds: %w", err)
 			}
 
-			lienID = resp.Lien.LienId
+			*lienID = resp.Lien.LienId
 
 			// Update payment order with lien ID and transition to RESERVED
-			if err := po.Reserve(lienID); err != nil {
+			if err := po.Reserve(*lienID); err != nil {
 				return fmt.Errorf("failed to transition to RESERVED: %w", err)
 			}
 
@@ -398,14 +407,14 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 
 			s.logger.Info("reserve_funds step completed",
 				"payment_order_id", po.ID.String(),
-				"lien_id", lienID)
+				"lien_id", *lienID)
 
 			// Publish PaymentOrderReserved event
 			s.publishEvent(stepCtx, TopicPaymentOrderReserved, po.ID.String(), &eventsv1.PaymentOrderReservedEvent{
 				EventId:         uuid.New().String(),
 				PaymentOrderId:  po.ID.String(),
 				DebtorAccountId: po.DebtorAccountID,
-				LienId:          lienID,
+				LienId:          *lienID,
 				Amount:          toMoneyAmount(po.Amount),
 				CorrelationId:   po.CorrelationID,
 				CausationId:     po.ID.String(),
@@ -418,34 +427,36 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 		},
 		// Compensate: Release lien
 		func(stepCtx context.Context) error {
-			if lienID == "" {
+			if *lienID == "" {
 				s.logger.Warn("no lien to release in compensation")
 				return nil
 			}
 
 			s.logger.Info("compensating reserve_funds step",
 				"payment_order_id", po.ID.String(),
-				"lien_id", lienID)
+				"lien_id", *lienID)
 
 			_, err := s.currentAccountClient.TerminateLien(stepCtx, &currentaccountv1.TerminateLienRequest{
-				LienId: lienID,
+				LienId: *lienID,
 				Reason: fmt.Sprintf("Payment order %s saga compensation", po.ID.String()),
 			})
 			if err != nil {
 				s.logger.Error("failed to release lien in compensation",
 					"error", err,
-					"lien_id", lienID)
+					"lien_id", *lienID)
 				return err
 			}
 
 			s.logger.Info("reserve_funds compensation completed",
-				"lien_id", lienID)
+				"lien_id", *lienID)
 
 			return nil
 		},
 	)
+}
 
-	// Step 2: Send to payment gateway
+// addSendToGatewayStep adds the send_to_gateway saga step that sends payment to the external gateway.
+func (s *Service) addSendToGatewayStep(saga *clients.SagaOrchestrator, po *domain.PaymentOrder) {
 	saga.AddStep("send_to_gateway",
 		// Action: Send payment to gateway
 		func(stepCtx context.Context) error {
@@ -463,55 +474,59 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 				return fmt.Errorf("failed to send payment to gateway: %w", err)
 			}
 
-			// Check gateway response status
-			switch resp.Status {
-			case gateway.StatusAccepted, gateway.StatusPending:
-				// Transition to EXECUTING
-				if err := po.Execute(resp.GatewayReferenceID); err != nil {
-					return fmt.Errorf("failed to transition to EXECUTING: %w", err)
-				}
-
-				if err := s.repo.Update(po); err != nil {
-					return fmt.Errorf("failed to update payment order: %w", err)
-				}
-
-				s.logger.Info("send_to_gateway step completed",
-					"payment_order_id", po.ID.String(),
-					"gateway_reference_id", resp.GatewayReferenceID,
-					"gateway_status", resp.Status)
-
-				// Publish PaymentOrderExecuting event
-				s.publishEvent(stepCtx, TopicPaymentOrderExecuting, po.ID.String(), &eventsv1.PaymentOrderExecutingEvent{
-					EventId:            uuid.New().String(),
-					PaymentOrderId:     po.ID.String(),
-					GatewayReferenceId: resp.GatewayReferenceID,
-					CorrelationId:      po.CorrelationID,
-					CausationId:        po.ID.String(),
-					Timestamp:          timestamppb.Now(),
-					Version:            int64(po.Version),
-					IdempotencyKey:     po.IdempotencyKey,
-				})
-
-				return nil
-
-			case gateway.StatusRejected:
-				return fmt.Errorf("%w: %s", ErrPaymentRejected, resp.Message)
-
-			default:
-				return fmt.Errorf("%w: %s", ErrUnexpectedGatewayStatus, resp.Status)
-			}
+			return s.processGatewayResponse(stepCtx, po, resp)
 		},
-		// Compensate: Mark as failed (lien will be released by previous step's compensation)
+		// Compensate: No-op (lien will be released by reserve_funds compensation)
 		func(_ context.Context) error {
 			s.logger.Info("send_to_gateway compensation (no-op - lien released by reserve_funds compensation)",
 				"payment_order_id", po.ID.String())
 			return nil
 		},
 	)
+}
 
-	// Execute saga
-	result := saga.Execute(ctx)
+// processGatewayResponse handles the gateway response and transitions payment order state.
+func (s *Service) processGatewayResponse(ctx context.Context, po *domain.PaymentOrder, resp gateway.PaymentResponse) error {
+	switch resp.Status {
+	case gateway.StatusAccepted, gateway.StatusPending:
+		// Transition to EXECUTING
+		if err := po.Execute(resp.GatewayReferenceID); err != nil {
+			return fmt.Errorf("failed to transition to EXECUTING: %w", err)
+		}
 
+		if err := s.repo.Update(po); err != nil {
+			return fmt.Errorf("failed to update payment order: %w", err)
+		}
+
+		s.logger.Info("send_to_gateway step completed",
+			"payment_order_id", po.ID.String(),
+			"gateway_reference_id", resp.GatewayReferenceID,
+			"gateway_status", resp.Status)
+
+		// Publish PaymentOrderExecuting event
+		s.publishEvent(ctx, TopicPaymentOrderExecuting, po.ID.String(), &eventsv1.PaymentOrderExecutingEvent{
+			EventId:            uuid.New().String(),
+			PaymentOrderId:     po.ID.String(),
+			GatewayReferenceId: resp.GatewayReferenceID,
+			CorrelationId:      po.CorrelationID,
+			CausationId:        po.ID.String(),
+			Timestamp:          timestamppb.Now(),
+			Version:            int64(po.Version),
+			IdempotencyKey:     po.IdempotencyKey,
+		})
+
+		return nil
+
+	case gateway.StatusRejected:
+		return fmt.Errorf("%w: %s", ErrPaymentRejected, resp.Message)
+
+	default:
+		return fmt.Errorf("%w: %s", ErrUnexpectedGatewayStatus, resp.Status)
+	}
+}
+
+// handleSagaResult processes the saga execution result and handles failure scenarios.
+func (s *Service) handleSagaResult(ctx context.Context, po *domain.PaymentOrder, result clients.SagaResult) {
 	if !result.Success {
 		s.logger.Error("payment saga failed",
 			"payment_order_id", po.ID.String(),
@@ -605,7 +620,9 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 	s.logger.Info("payment order failed",
 		"payment_order_id", po.ID.String(),
 		"reason", reason,
-		"error_code", errorCode)
+		"error_code", errorCode,
+		"idempotency_key", po.IdempotencyKey,
+		"correlation_id", po.CorrelationID)
 
 	return nil
 }
@@ -721,7 +738,11 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 
 		s.logger.Info("payment order completed",
 			"payment_order_id", po.ID.String(),
-			"gateway_reference_id", po.GatewayReferenceID)
+			"gateway_reference_id", po.GatewayReferenceID,
+			"amount_cents", po.Amount.AmountCents(),
+			"currency", po.Amount.Currency(),
+			"idempotency_key", po.IdempotencyKey,
+			"correlation_id", po.CorrelationID)
 
 	case pb.GatewayStatus_GATEWAY_STATUS_REJECTED:
 		// Fail the payment - synchronous path: propagate error to client
@@ -823,7 +844,11 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 	s.logger.Info("payment order cancelled",
 		"payment_order_id", po.ID.String(),
 		"reason", req.CancellationReason,
-		"cancelled_by", req.CancelledBy)
+		"cancelled_by", req.CancelledBy,
+		"amount_cents", po.Amount.AmountCents(),
+		"currency", po.Amount.Currency(),
+		"idempotency_key", po.IdempotencyKey,
+		"correlation_id", po.CorrelationID)
 
 	return &pb.CancelPaymentOrderResponse{
 		PaymentOrder: toProto(po),
