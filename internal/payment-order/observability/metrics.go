@@ -38,12 +38,14 @@ var (
 	)
 
 	// Payment rejection metrics
+	// Note: error_category uses bounded values (gateway_rejected, insufficient_funds, validation_error, internal_error)
+	// to prevent metric cardinality explosion from arbitrary gateway error codes
 	rejectionsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "payment_order_rejections_total",
 			Help: "Total number of rejected payment orders",
 		},
-		[]string{"currency", "error_code"},
+		[]string{"currency", "error_category"},
 	)
 
 	// Lien execution metrics
@@ -116,9 +118,18 @@ func RecordCompletion(currency string) {
 	completionsTotal.WithLabelValues(currency).Inc()
 }
 
-// RecordRejection records a rejected payment order
-func RecordRejection(currency, errorCode string) {
-	rejectionsTotal.WithLabelValues(currency, errorCode).Inc()
+// Error category constants for bounded cardinality
+const (
+	ErrorCategoryGatewayRejected   = "gateway_rejected"
+	ErrorCategoryInsufficientFunds = "insufficient_funds"
+	ErrorCategoryValidationError   = "validation_error"
+	ErrorCategoryInternalError     = "internal_error"
+)
+
+// RecordRejection records a rejected payment order.
+// errorCategory should be one of the ErrorCategory* constants to ensure bounded cardinality.
+func RecordRejection(currency, errorCategory string) {
+	rejectionsTotal.WithLabelValues(currency, errorCategory).Inc()
 }
 
 // RecordLienExecution records a lien execution attempt

@@ -897,8 +897,10 @@ func (s *Service) executeLien(ctx context.Context, po *domain.PaymentOrder) bool
 		LienId: po.LienID,
 	})
 	if execErr != nil {
-		// Log error for reconciliation but don't fail the payment completion
-		// ExecuteLien failures require async retry or manual intervention
+		// Log error for reconciliation but don't fail the payment completion.
+		// ExecuteLien failures require async retry or manual intervention.
+		// Failures are tracked via payment_order_external_service_errors_total{service="current_account",operation="execute_lien"}
+		// and payment_order_lien_executions_total{status="failure"} for alerting.
 		s.logger.Error("failed to execute lien after payment completion",
 			"error", execErr,
 			"lien_id", po.LienID,
@@ -926,14 +928,14 @@ func (s *Service) handleRejectedStatus(ctx context.Context, po *domain.PaymentOr
 		return &updateResult{po: po, isIdempotent: true}, nil
 	}
 
-	// Record metrics before failing (to capture pre-failure state)
-	poobservability.RecordRejection(po.Amount.Currency(), "GATEWAY_REJECTED")
-	poobservability.RecordPaymentAmount(po.Amount.Currency(), "rejected", po.Amount.AmountCents())
-
 	// Fail the payment - synchronous path: propagate error to client
 	if err := s.failPaymentOrder(ctx, po, gatewayMessage, "GATEWAY_REJECTED"); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to mark payment as rejected: %v", err)
 	}
+
+	// Record metrics after successful persistence to ensure accuracy
+	poobservability.RecordRejection(po.Amount.Currency(), poobservability.ErrorCategoryGatewayRejected)
+	poobservability.RecordPaymentAmount(po.Amount.Currency(), "rejected", po.Amount.AmountCents())
 
 	// Audit log for rejection
 	s.logger.Info("payment order rejected via gateway callback",
