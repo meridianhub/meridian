@@ -1367,11 +1367,20 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 				"lien_id", lienID)
 			// Attempt to mark as FAILED to prevent stuck PENDING state
 			// Use a fresh context since the original may be cancelled
-			panicCtx := context.Background()
-			po, findErr := s.repo.FindByID(panicCtx, paymentOrderID)
-			if findErr == nil {
-				po.SetLienExecutionFailed(fmt.Sprintf("panic: %v", r))
-				_ = s.repo.Update(panicCtx, po)
+			panicCtx, panicCancel := context.WithTimeout(context.Background(), 10*time.Second) //nolint:contextcheck
+			defer panicCancel()
+			po, findErr := s.repo.FindByID(panicCtx, paymentOrderID) //nolint:contextcheck
+			if findErr != nil {
+				s.logger.Error("failed to fetch payment order after panic",
+					"payment_order_id", paymentOrderID.String(),
+					"error", findErr)
+				return
+			}
+			po.SetLienExecutionFailed(fmt.Sprintf("panic: %v", r))
+			if updateErr := s.repo.Update(panicCtx, po); updateErr != nil { //nolint:contextcheck
+				s.logger.Error("failed to update payment order status after panic",
+					"payment_order_id", paymentOrderID.String(),
+					"error", updateErr)
 			}
 		}
 	}()
@@ -1437,7 +1446,8 @@ func (s *Service) updateLienExecutionStatus(
 	lastErr error,
 	logger *slog.Logger,
 ) {
-	const maxUpdateRetries = 3
+	// Increase retry count to reduce likelihood of exhaustion under contention
+	const maxUpdateRetries = 5
 
 	// Use a fresh context to ensure status update isn't cancelled by parent timeout.
 	// This is intentional - the parent context may have timed out during retries,
@@ -1447,6 +1457,18 @@ func (s *Service) updateLienExecutionStatus(
 	defer cancel()
 
 	for updateAttempt := 1; updateAttempt <= maxUpdateRetries; updateAttempt++ {
+		// Apply exponential backoff for retries to reduce contention
+		if updateAttempt > 1 {
+			backoff := time.Duration(updateAttempt-1) * 100 * time.Millisecond
+			select {
+			case <-updateCtx.Done():
+				logger.Error("context cancelled during update retry backoff",
+					"update_attempt", updateAttempt)
+				return
+			case <-time.After(backoff):
+			}
+		}
+
 		// Fetch the current payment order (fresh version)
 		po, err := s.repo.FindByID(updateCtx, paymentOrderID) //nolint:contextcheck
 		if err != nil {
@@ -1507,6 +1529,11 @@ func (s *Service) updateLienExecutionStatus(
 		return
 	}
 
+	// Log and record metric for exhausted retries - this will leave the payment order
+	// in PENDING state which will be caught by the reconciliation query using the
+	// idx_payment_orders_lien_execution partial index
 	logger.Error("failed to update lien execution status after max retries due to version conflicts",
-		"max_attempts", maxUpdateRetries)
+		"max_attempts", maxUpdateRetries,
+		"payment_order_id", paymentOrderID.String())
+	poobservability.RecordLienExecutionStatusUpdateExhausted()
 }
