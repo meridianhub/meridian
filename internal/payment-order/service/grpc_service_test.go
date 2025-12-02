@@ -789,10 +789,16 @@ func TestUpdatePaymentOrder_Settled_LienExecutionStatusTracking(t *testing.T) {
 		t.Fatal("timeout waiting for ExecuteLien to be called")
 	}
 
-	// Give some time for status update to complete
-	time.Sleep(100 * time.Millisecond)
+	// Wait for status update to complete using Eventually (avoids flaky time.Sleep)
+	assert.Eventually(t, func() bool {
+		updatedPO, err := repo.FindByID(po.ID)
+		if err != nil {
+			return false
+		}
+		return updatedPO.LienExecutionStatus == domain.LienExecutionStatusSucceeded
+	}, 2*time.Second, 10*time.Millisecond, "lien execution status should be SUCCEEDED")
 
-	// Verify the lien execution status was updated to SUCCEEDED
+	// Verify the final state
 	updatedPO, err := repo.FindByID(po.ID)
 	require.NoError(t, err)
 	assert.Equal(t, domain.LienExecutionStatusSucceeded, updatedPO.LienExecutionStatus)

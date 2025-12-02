@@ -1409,6 +1409,7 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 
 // updateLienExecutionStatus updates the payment order's lien execution status after retry completion.
 // This is called after all retry attempts have finished (success or failure).
+// Uses optimistic locking with retry on version conflict to handle concurrent updates.
 func (s *Service) updateLienExecutionStatus(
 	_ context.Context,
 	paymentOrderID uuid.UUID,
@@ -1417,42 +1418,66 @@ func (s *Service) updateLienExecutionStatus(
 	lastErr error,
 	logger *slog.Logger,
 ) {
-	// Fetch the current payment order
-	po, err := s.repo.FindByID(paymentOrderID)
-	if err != nil {
-		logger.Error("failed to fetch payment order for lien execution status update",
-			"error", err)
-		return
-	}
+	const maxUpdateRetries = 3
 
-	// Update lien execution tracking fields
-	po.LienExecutionAttempts = attempts
-
-	if retryErr == nil {
-		// Success
-		po.SetLienExecutionSucceeded()
-		logger.Info("lien execution completed successfully",
-			"total_attempts", attempts)
-	} else {
-		// Failed after all retries
-		errMsg := "unknown error"
-		if lastErr != nil {
-			errMsg = lastErr.Error()
+	for updateAttempt := 1; updateAttempt <= maxUpdateRetries; updateAttempt++ {
+		// Fetch the current payment order (fresh version)
+		po, err := s.repo.FindByID(paymentOrderID)
+		if err != nil {
+			logger.Error("failed to fetch payment order for lien execution status update",
+				"error", err,
+				"update_attempt", updateAttempt)
+			return
 		}
-		po.SetLienExecutionFailed(errMsg)
-		logger.Error("lien execution failed after all retries",
-			"total_attempts", attempts,
-			"error", errMsg)
-	}
 
-	// Persist the updated status
-	if updateErr := s.repo.Update(po); updateErr != nil {
+		// Update lien execution tracking fields
+		po.LienExecutionAttempts = attempts
+
+		if retryErr == nil {
+			// Success
+			po.SetLienExecutionSucceeded()
+			if updateAttempt == 1 {
+				logger.Info("lien execution completed successfully",
+					"total_attempts", attempts)
+			}
+		} else {
+			// Failed after all retries
+			errMsg := "unknown error"
+			if lastErr != nil {
+				errMsg = lastErr.Error()
+			}
+			po.SetLienExecutionFailed(errMsg)
+			if updateAttempt == 1 {
+				logger.Error("lien execution failed after all retries",
+					"total_attempts", attempts,
+					"error", errMsg)
+			}
+		}
+
+		// Persist the updated status
+		updateErr := s.repo.Update(po)
+		if updateErr == nil {
+			logger.Info("payment order lien execution status updated",
+				"status", po.LienExecutionStatus,
+				"attempts", po.LienExecutionAttempts)
+			return
+		}
+
+		// Check if this is a version conflict (optimistic locking failure)
+		if errors.Is(updateErr, persistence.ErrPaymentOrderVersionConflict) {
+			logger.Warn("version conflict updating lien execution status, retrying",
+				"update_attempt", updateAttempt,
+				"max_attempts", maxUpdateRetries)
+			continue
+		}
+
+		// Non-recoverable error
 		logger.Error("failed to update payment order lien execution status",
-			"error", updateErr)
+			"error", updateErr,
+			"update_attempt", updateAttempt)
 		return
 	}
 
-	logger.Info("payment order lien execution status updated",
-		"status", po.LienExecutionStatus,
-		"attempts", po.LienExecutionAttempts)
+	logger.Error("failed to update lien execution status after max retries due to version conflicts",
+		"max_attempts", maxUpdateRetries)
 }
