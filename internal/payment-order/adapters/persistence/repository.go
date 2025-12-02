@@ -16,6 +16,13 @@ var (
 	ErrPaymentOrderVersionConflict = errors.New("version conflict: payment order was modified by another transaction")
 )
 
+// PaginatedResult holds paginated query results
+type PaginatedResult struct {
+	PaymentOrders []*domain.PaymentOrder
+	TotalCount    int64
+	HasMore       bool
+}
+
 // Repository defines the contract for payment order persistence.
 // This interface enables mocking in service-layer tests.
 type Repository interface {
@@ -24,6 +31,7 @@ type Repository interface {
 	FindByIdempotencyKey(key string) (*domain.PaymentOrder, error)
 	FindByGatewayReferenceID(gatewayRefID string) (*domain.PaymentOrder, error)
 	FindByDebtorAccountID(accountID string) ([]*domain.PaymentOrder, error)
+	FindByDebtorAccountIDPaginated(accountID string, limit, offset int) (*PaginatedResult, error)
 	Update(po *domain.PaymentOrder) error
 }
 
@@ -113,6 +121,59 @@ func (r *PaymentOrderRepository) FindByDebtorAccountID(accountID string) ([]*dom
 	}
 
 	return paymentOrders, nil
+}
+
+// FindByDebtorAccountIDPaginated retrieves payment orders for a debtor account with pagination.
+// Uses database-level LIMIT/OFFSET for efficient queries on large datasets.
+// Results are ordered by created_at DESC (newest first) for consistent pagination.
+func (r *PaymentOrderRepository) FindByDebtorAccountIDPaginated(accountID string, limit, offset int) (*PaginatedResult, error) {
+	// Get total count first (single COUNT query, very efficient with index)
+	var totalCount int64
+	countResult := r.db.Model(&PaymentOrderEntity{}).
+		Where("debtor_account_id = ?", accountID).
+		Count(&totalCount)
+
+	if countResult.Error != nil {
+		return nil, countResult.Error
+	}
+
+	// Return early if no results
+	if totalCount == 0 {
+		return &PaginatedResult{
+			PaymentOrders: []*domain.PaymentOrder{},
+			TotalCount:    0,
+			HasMore:       false,
+		}, nil
+	}
+
+	// Query with pagination
+	var entities []PaymentOrderEntity
+	result := r.db.Where("debtor_account_id = ?", accountID).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&entities)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	paymentOrders := make([]*domain.PaymentOrder, 0, len(entities))
+	for i := range entities {
+		po, err := toDomain(&entities[i])
+		if err != nil {
+			return nil, err
+		}
+		paymentOrders = append(paymentOrders, po)
+	}
+
+	hasMore := int64(offset+len(entities)) < totalCount
+
+	return &PaginatedResult{
+		PaymentOrders: paymentOrders,
+		TotalCount:    totalCount,
+		HasMore:       hasMore,
+	}, nil
 }
 
 // Update updates an existing payment order with optimistic locking

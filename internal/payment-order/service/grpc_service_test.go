@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -139,6 +140,37 @@ func (m *MockRepository) FindByDebtorAccountID(accountID string) ([]*domain.Paym
 	return result, nil
 }
 
+func (m *MockRepository) FindByDebtorAccountIDPaginated(accountID string, limit, offset int) (*persistence.PaginatedResult, error) {
+	pos := m.debtorAccountIndex[accountID]
+	totalCount := len(pos)
+
+	// Apply pagination bounds
+	if offset >= totalCount {
+		return &persistence.PaginatedResult{
+			PaymentOrders: []*domain.PaymentOrder{},
+			TotalCount:    int64(totalCount),
+			HasMore:       false,
+		}, nil
+	}
+
+	end := offset + limit
+	if end > totalCount {
+		end = totalCount
+	}
+
+	// Return copies to simulate database behavior
+	result := make([]*domain.PaymentOrder, 0, end-offset)
+	for i := offset; i < end; i++ {
+		result = append(result, copyPaymentOrder(pos[i]))
+	}
+
+	return &persistence.PaginatedResult{
+		PaymentOrders: result,
+		TotalCount:    int64(totalCount),
+		HasMore:       end < totalCount,
+	}, nil
+}
+
 func (m *MockRepository) Update(po *domain.PaymentOrder) error {
 	if m.updateErr != nil {
 		return m.updateErr
@@ -230,17 +262,19 @@ func newInitiateRequest(idempotencyKey, debtorAccountID, creditorRef string, amo
 // Test NewService constructor
 func TestNewService(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, err := NewService(repo)
 
+	require.NoError(t, err)
 	assert.NotNil(t, svc)
 	assert.NotNil(t, svc.repo)
 	assert.NotNil(t, svc.logger)
 }
 
-func TestNewService_NilRepository_Panics(t *testing.T) {
-	assert.Panics(t, func() {
-		NewService(nil)
-	})
+func TestNewService_NilRepository_ReturnsError(t *testing.T) {
+	svc, err := NewService(nil)
+
+	assert.Nil(t, svc)
+	assert.ErrorIs(t, err, ErrRepositoryNil)
 }
 
 // Test NewServiceWithConfig
@@ -287,7 +321,7 @@ func TestNewServiceWithConfig(t *testing.T) {
 // Test InitiatePaymentOrder
 func TestInitiatePaymentOrder_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	req := newInitiateRequest("test-key-1", "ACC-12345678", "GB82WEST12345698765432", 10000)
 
@@ -304,7 +338,7 @@ func TestInitiatePaymentOrder_Success(t *testing.T) {
 
 func TestInitiatePaymentOrder_Idempotent(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	req := newInitiateRequest("idempotent-key", "ACC-12345678", "GB82WEST12345698765432", 10000)
 
@@ -322,7 +356,7 @@ func TestInitiatePaymentOrder_Idempotent(t *testing.T) {
 
 func TestInitiatePaymentOrder_InvalidAmount(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	// Zero amount
 	req := newInitiateRequest("test-key", "ACC-12345678", "GB82WEST12345698765432", 0)
@@ -338,7 +372,7 @@ func TestInitiatePaymentOrder_InvalidAmount(t *testing.T) {
 
 func TestInitiatePaymentOrder_NegativeAmount(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	// Negative amount
 	req := &pb.InitiatePaymentOrderRequest{
@@ -368,7 +402,7 @@ var ErrDatabaseError = errors.New("database error")
 func TestInitiatePaymentOrder_RepositoryError(t *testing.T) {
 	repo := NewMockRepository()
 	repo.createErr = ErrDatabaseError
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	req := newInitiateRequest("test-key", "ACC-12345678", "GB82WEST12345698765432", 10000)
 
@@ -383,7 +417,7 @@ func TestInitiatePaymentOrder_RepositoryError(t *testing.T) {
 // Test RetrievePaymentOrder
 func TestRetrievePaymentOrder_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	// Create a payment order first
 	amount, _ := cadomain.NewMoney("GBP", 10000)
@@ -403,7 +437,7 @@ func TestRetrievePaymentOrder_Success(t *testing.T) {
 
 func TestRetrievePaymentOrder_NotFound(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	req := &pb.RetrievePaymentOrderRequest{
 		PaymentOrderId: uuid.New().String(),
@@ -419,7 +453,7 @@ func TestRetrievePaymentOrder_NotFound(t *testing.T) {
 
 func TestRetrievePaymentOrder_InvalidID(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	req := &pb.RetrievePaymentOrderRequest{
 		PaymentOrderId: "not-a-uuid",
@@ -436,7 +470,7 @@ func TestRetrievePaymentOrder_InvalidID(t *testing.T) {
 // Test CancelPaymentOrder
 func TestCancelPaymentOrder_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	// Create a payment order in INITIATED state
 	amount, _ := cadomain.NewMoney("GBP", 10000)
@@ -458,7 +492,7 @@ func TestCancelPaymentOrder_Success(t *testing.T) {
 
 func TestCancelPaymentOrder_AlreadyCancelled_Idempotent(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	// Create and cancel a payment order
 	amount, _ := cadomain.NewMoney("GBP", 10000)
@@ -481,7 +515,7 @@ func TestCancelPaymentOrder_AlreadyCancelled_Idempotent(t *testing.T) {
 
 func TestCancelPaymentOrder_NotCancellable(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	// Create a payment order and move it to EXECUTING state
 	amount, _ := cadomain.NewMoney("GBP", 10000)
@@ -657,7 +691,7 @@ func TestUpdatePaymentOrder_ByGatewayReferenceID(t *testing.T) {
 
 func TestUpdatePaymentOrder_NotFound(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: uuid.New().String(),
@@ -675,7 +709,7 @@ func TestUpdatePaymentOrder_NotFound(t *testing.T) {
 
 func TestUpdatePaymentOrder_MissingIdentifier(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	req := &pb.UpdatePaymentOrderRequest{
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
@@ -690,10 +724,83 @@ func TestUpdatePaymentOrder_MissingIdentifier(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 }
 
+func TestUpdatePaymentOrder_Idempotent_Settled(t *testing.T) {
+	repo := NewMockRepository()
+	caClient := &MockCurrentAccountClient{
+		executeLienResp: &currentaccountv1.ExecuteLienResponse{},
+	}
+	svc := &Service{
+		repo:                 repo,
+		currentAccountClient: caClient,
+		logger:               testLogger(),
+	}
+
+	// Create a payment order in EXECUTING state
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = repo.Create(po)
+
+	req := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "update-key"},
+	}
+
+	// First call - should succeed
+	resp1, err := svc.UpdatePaymentOrder(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, resp1.PaymentOrder.Status)
+
+	// Second call with same request - should be idempotent
+	resp2, err := svc.UpdatePaymentOrder(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, resp2.PaymentOrder.Status)
+	assert.Equal(t, resp1.PaymentOrder.PaymentOrderId, resp2.PaymentOrder.PaymentOrderId)
+}
+
+func TestUpdatePaymentOrder_Idempotent_Rejected(t *testing.T) {
+	repo := NewMockRepository()
+	caClient := &MockCurrentAccountClient{
+		terminateLienResp: &currentaccountv1.TerminateLienResponse{},
+	}
+	svc := &Service{
+		repo:                 repo,
+		currentAccountClient: caClient,
+		logger:               testLogger(),
+	}
+
+	// Create a payment order in EXECUTING state
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = repo.Create(po)
+
+	req := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_REJECTED,
+		GatewayMessage: "Insufficient funds",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "update-key"},
+	}
+
+	// First call - should succeed
+	resp1, err := svc.UpdatePaymentOrder(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_FAILED, resp1.PaymentOrder.Status)
+
+	// Second call with same request - should be idempotent
+	resp2, err := svc.UpdatePaymentOrder(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_FAILED, resp2.PaymentOrder.Status)
+	assert.Equal(t, resp1.PaymentOrder.PaymentOrderId, resp2.PaymentOrder.PaymentOrderId)
+}
+
 // Test ListPaymentOrders
 func TestListPaymentOrders_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	// Create some payment orders
 	amount, _ := cadomain.NewMoney("GBP", 10000)
@@ -714,7 +821,7 @@ func TestListPaymentOrders_Success(t *testing.T) {
 
 func TestListPaymentOrders_EmptyDebtorAccountID(t *testing.T) {
 	repo := NewMockRepository()
-	svc := NewService(repo)
+	svc, _ := NewService(repo)
 
 	req := &pb.ListPaymentOrdersRequest{}
 
@@ -724,6 +831,157 @@ func TestListPaymentOrders_EmptyDebtorAccountID(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+func TestListPaymentOrders_Pagination(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	// Create 5 payment orders
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	for i := 0; i < 5; i++ {
+		po, _ := domain.NewPaymentOrder(
+			"ACC-12345678",
+			"GB82WEST12345698765432",
+			amount,
+			fmt.Sprintf("key-%d", i),
+			uuid.New().String(),
+		)
+		_ = repo.Create(po)
+	}
+
+	// Test first page with page size 2
+	req := &pb.ListPaymentOrdersRequest{
+		DebtorAccountId: "ACC-12345678",
+		Pagination: &commonpb.Pagination{
+			PageSize: 2,
+		},
+	}
+
+	resp, err := svc.ListPaymentOrders(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Len(t, resp.PaymentOrders, 2)
+	assert.Equal(t, int64(5), resp.Pagination.TotalCount)
+	assert.NotEmpty(t, resp.Pagination.NextPageToken)
+
+	// Test second page
+	req.Pagination.PageToken = resp.Pagination.NextPageToken
+	resp2, err := svc.ListPaymentOrders(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Len(t, resp2.PaymentOrders, 2)
+	assert.NotEmpty(t, resp2.Pagination.NextPageToken)
+
+	// Test last page
+	req.Pagination.PageToken = resp2.Pagination.NextPageToken
+	resp3, err := svc.ListPaymentOrders(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Len(t, resp3.PaymentOrders, 1) // Only 1 remaining
+	assert.Empty(t, resp3.Pagination.NextPageToken)
+}
+
+func TestListPaymentOrders_InvalidPageToken(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	req := &pb.ListPaymentOrdersRequest{
+		DebtorAccountId: "ACC-12345678",
+		Pagination: &commonpb.Pagination{
+			PageToken: "not-a-number",
+		},
+	}
+
+	_, err := svc.ListPaymentOrders(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "page_token")
+}
+
+func TestListPaymentOrders_NegativePageToken(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	req := &pb.ListPaymentOrdersRequest{
+		DebtorAccountId: "ACC-12345678",
+		Pagination: &commonpb.Pagination{
+			PageToken: "-5",
+		},
+	}
+
+	_, err := svc.ListPaymentOrders(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+func TestListPaymentOrders_PageSizeExceedsMax(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	// Create 3 payment orders
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	for i := 0; i < 3; i++ {
+		po, _ := domain.NewPaymentOrder(
+			"ACC-12345678",
+			"GB82WEST12345698765432",
+			amount,
+			fmt.Sprintf("key-%d", i),
+			uuid.New().String(),
+		)
+		_ = repo.Create(po)
+	}
+
+	req := &pb.ListPaymentOrdersRequest{
+		DebtorAccountId: "ACC-12345678",
+		Pagination: &commonpb.Pagination{
+			PageSize: 5000, // Exceeds max of 1000
+		},
+	}
+
+	resp, err := svc.ListPaymentOrders(context.Background(), req)
+
+	require.NoError(t, err)
+	// Should return all 3 (page size capped but we only have 3)
+	assert.Len(t, resp.PaymentOrders, 3)
+}
+
+func TestListPaymentOrders_OffsetBeyondResults(t *testing.T) {
+	repo := NewMockRepository()
+	svc, _ := NewService(repo)
+
+	// Create 2 payment orders
+	amount, _ := cadomain.NewMoney("GBP", 10000)
+	for i := 0; i < 2; i++ {
+		po, _ := domain.NewPaymentOrder(
+			"ACC-12345678",
+			"GB82WEST12345698765432",
+			amount,
+			fmt.Sprintf("key-%d", i),
+			uuid.New().String(),
+		)
+		_ = repo.Create(po)
+	}
+
+	req := &pb.ListPaymentOrdersRequest{
+		DebtorAccountId: "ACC-12345678",
+		Pagination: &commonpb.Pagination{
+			PageToken: "100", // Offset beyond the 2 results
+		},
+	}
+
+	resp, err := svc.ListPaymentOrders(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Len(t, resp.PaymentOrders, 0)
+	assert.Empty(t, resp.Pagination.NextPageToken)
+	assert.Equal(t, int64(2), resp.Pagination.TotalCount)
 }
 
 // Test proto conversion helpers

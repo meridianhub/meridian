@@ -85,15 +85,16 @@ type Config struct {
 }
 
 // NewService creates a new payment order service with minimal dependencies.
-// This is primarily used for testing. For production use, prefer NewServiceWithClients.
-func NewService(repo persistence.Repository) *Service {
+// This is primarily used for testing. For production use, prefer NewServiceWithConfig.
+// Returns ErrRepositoryNil if the repository is nil.
+func NewService(repo persistence.Repository) (*Service, error) {
 	if repo == nil {
-		panic("repository cannot be nil")
+		return nil, ErrRepositoryNil
 	}
 	return &Service{
 		repo:   repo,
 		logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-	}
+	}, nil
 }
 
 // NewServiceWithConfig creates a new payment order service with full configuration.
@@ -761,22 +762,13 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 }
 
 // ListPaymentOrders returns a paginated list of payment orders.
+// Uses database-level pagination for efficient queries on large datasets.
 func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrdersRequest) (*pb.ListPaymentOrdersResponse, error) {
-	// For now, implement a simple filter by debtor account ID
 	if req.DebtorAccountId == "" {
 		return nil, status.Error(codes.InvalidArgument, "debtor_account_id is required for listing")
 	}
 
-	// TODO: Implement repository-level pagination for better performance with large datasets
-	paymentOrders, err := s.repo.FindByDebtorAccountID(req.DebtorAccountId)
-	if err != nil {
-		s.logger.Error("failed to list payment orders", "error", err)
-		return nil, status.Error(codes.Internal, "failed to list payment orders")
-	}
-
-	totalCount := len(paymentOrders)
-
-	// Apply in-memory pagination
+	// Parse and validate pagination parameters
 	const defaultPageSize = 50
 	const maxPageSize = 1000
 
@@ -788,50 +780,40 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 		}
 	}
 
-	// Parse page token (offset-based for simplicity)
+	// Parse page token (offset-based)
 	offset := 0
 	if req.Pagination != nil && req.Pagination.PageToken != "" {
 		parsedOffset, parseErr := strconv.Atoi(req.Pagination.PageToken)
-		if parseErr != nil {
+		if parseErr != nil || parsedOffset < 0 {
 			return nil, status.Error(codes.InvalidArgument, "invalid page_token")
 		}
 		offset = parsedOffset
 	}
 
-	// Apply pagination bounds
-	if offset >= totalCount {
-		// Return empty page if offset is beyond results
-		return &pb.ListPaymentOrdersResponse{
-			PaymentOrders: []*pb.PaymentOrder{},
-			Pagination: &commonpb.PaginationResponse{
-				TotalCount: int64(totalCount),
-			},
-		}, nil
+	// Query with database-level pagination
+	result, err := s.repo.FindByDebtorAccountIDPaginated(req.DebtorAccountId, pageSize, offset)
+	if err != nil {
+		s.logger.Error("failed to list payment orders", "error", err)
+		return nil, status.Error(codes.Internal, "failed to list payment orders")
 	}
 
-	end := offset + pageSize
-	if end > totalCount {
-		end = totalCount
-	}
-
-	// Convert paginated slice to proto
-	paginatedOrders := paymentOrders[offset:end]
-	protoOrders := make([]*pb.PaymentOrder, 0, len(paginatedOrders))
-	for _, po := range paginatedOrders {
+	// Convert to proto
+	protoOrders := make([]*pb.PaymentOrder, 0, len(result.PaymentOrders))
+	for _, po := range result.PaymentOrders {
 		protoOrders = append(protoOrders, toProto(po))
 	}
 
 	// Build next page token if more results exist
 	var nextPageToken string
-	if end < totalCount {
-		nextPageToken = strconv.Itoa(end)
+	if result.HasMore {
+		nextPageToken = strconv.Itoa(offset + len(result.PaymentOrders))
 	}
 
 	return &pb.ListPaymentOrdersResponse{
 		PaymentOrders: protoOrders,
 		Pagination: &commonpb.PaginationResponse{
 			NextPageToken: nextPageToken,
-			TotalCount:    int64(totalCount),
+			TotalCount:    result.TotalCount,
 		},
 	}, nil
 }
