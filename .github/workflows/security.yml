@@ -25,8 +25,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.25.x'
-        check-latest: true
+        go-version: '1.25.4'
         cache: true
 
     - name: Set up buf
@@ -40,43 +39,26 @@ jobs:
     - name: Run govulncheck
       run: |
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        # govulncheck exits with code 3 if vulnerabilities are found
-        # We capture output to check if only stdlib vulnerabilities exist
-        # that require a Go version not yet available in GitHub Actions cache
-        set +e
-        OUTPUT=$(govulncheck ./... 2>&1)
-        EXIT_CODE=$?
-        echo "$OUTPUT"
-        set -e
+        # GO-2025-4155: crypto/x509 vulnerability - fix requires Go 1.25.5 (not yet released)
+        # Temporarily filter this specific CVE until Go 1.25.5 is available
+        # TODO: Remove this workaround when Go 1.25.5 is released
+        govulncheck -format json ./... > vulncheck-results.json || true
 
-        if [ $EXIT_CODE -eq 0 ]; then
-          echo "✅ No vulnerabilities found"
-          exit 0
-        fi
+        # Check for vulnerabilities excluding GO-2025-4155
+        VULN_COUNT=$(jq '[.finding // empty | select(.osv != "GO-2025-4155")] | length' vulncheck-results.json)
 
-        # Count total vulnerabilities and stdlib vulnerabilities
-        TOTAL_VULNS=$(echo "$OUTPUT" | grep -c "Vulnerability #" || true)
-        STDLIB_VULNS=$(echo "$OUTPUT" | grep -c "Standard library" || true)
-
-        echo "Found $TOTAL_VULNS total vulnerabilities, $STDLIB_VULNS in stdlib"
-
-        # If all vulnerabilities are in the stdlib, warn but pass
-        # This handles cases where Go releases a security patch but GitHub Actions
-        # hasn't cached the new version yet
-        if [ "$TOTAL_VULNS" -eq "$STDLIB_VULNS" ] && [ "$STDLIB_VULNS" -gt 0 ]; then
-          echo "⚠️ Go stdlib vulnerability found - awaiting Go patch release in CI"
-          echo "The fix is available in a newer Go version, but GitHub Actions"
-          echo "hasn't cached it yet. This will auto-resolve when the cache updates."
-          exit 0
-        fi
-
-        # Fail if there are non-stdlib vulnerabilities
-        if [ "$TOTAL_VULNS" -gt "$STDLIB_VULNS" ]; then
-          echo "❌ Vulnerabilities found in dependencies"
+        if [ "$VULN_COUNT" -gt 0 ]; then
+          echo "❌ Found $VULN_COUNT vulnerabilities (excluding GO-2025-4155):"
+          jq '.finding // empty | select(.osv != "GO-2025-4155")' vulncheck-results.json
           exit 1
         fi
 
-        exit $EXIT_CODE
+        # Report if GO-2025-4155 is present (informational only)
+        if jq -e '.finding // empty | select(.osv == "GO-2025-4155")' vulncheck-results.json > /dev/null 2>&1; then
+          echo "ℹ️  GO-2025-4155 detected (crypto/x509) - awaiting Go 1.25.5 release for fix"
+        fi
+
+        echo "✅ No actionable vulnerabilities found"
 
   gosec:
     name: Security Scanner (Gosec)
@@ -88,8 +70,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.25.x'
-        check-latest: true
+        go-version: '1.25.4'
         cache: true
 
     - name: Set up buf
@@ -101,7 +82,7 @@ jobs:
       run: buf generate
 
     - name: Install Gosec
-      # Pinned version for reproducibility. v2.21.4 incompatible with Go 1.25.3
+      # Pinned version for reproducibility. v2.21.4 incompatible with Go 1.25
       # (golang.org/x/tools v0.25.0 issue). Using v2.22.0+ for compatibility.
       run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0
 
