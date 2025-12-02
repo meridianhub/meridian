@@ -201,9 +201,24 @@ func (m *MockRepository) Update(po *domain.PaymentOrder) error {
 	// Store a copy to simulate database behavior
 	stored := copyPaymentOrder(po)
 	m.paymentOrders[po.ID] = stored
+
+	// Update idempotency key index
+	m.idempotencyKeyIndex[po.IdempotencyKey] = stored
+
+	// Update gateway reference index
 	if po.GatewayReferenceID != "" {
 		m.gatewayRefIndex[po.GatewayReferenceID] = stored
 	}
+
+	// Update debtor account index by replacing the stale entry
+	list := m.debtorAccountIndex[po.DebtorAccountID]
+	for i, old := range list {
+		if old.ID == po.ID {
+			list[i] = stored
+			break
+		}
+	}
+
 	return nil
 }
 
