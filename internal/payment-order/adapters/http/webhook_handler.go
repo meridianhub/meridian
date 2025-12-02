@@ -26,6 +26,7 @@ var (
 	ErrInvalidRequestBody     = errors.New("invalid request body")
 	ErrMissingReferenceID     = errors.New("gateway_reference_id is required")
 	ErrInvalidGatewayStatus   = errors.New("invalid gateway_status")
+	ErrTimestampExpired       = errors.New("webhook timestamp expired")
 	ErrPaymentOrderService    = errors.New("payment order service error")
 	ErrNilPaymentOrderService = errors.New("payment order service cannot be nil")
 	ErrEmptyHMACSecret        = errors.New("HMAC secret cannot be empty")
@@ -36,6 +37,9 @@ const WebhookSignatureHeader = "X-Webhook-Signature"
 
 // IdempotencyKeyHeader is the HTTP header containing the gateway-provided idempotency key.
 const IdempotencyKeyHeader = "X-Idempotency-Key"
+
+// DefaultWebhookMaxAge is the default maximum age for webhook timestamps to prevent replay attacks.
+const DefaultWebhookMaxAge = 5 * time.Minute
 
 // PaymentOrderServiceClient defines the interface for calling the PaymentOrder gRPC service.
 type PaymentOrderServiceClient interface {
@@ -150,6 +154,15 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate timestamp freshness to prevent replay attacks
+	if !webhookReq.Timestamp.IsZero() && time.Since(webhookReq.Timestamp) > DefaultWebhookMaxAge {
+		h.logger.Warn("webhook timestamp too old",
+			"timestamp", webhookReq.Timestamp,
+			"age", time.Since(webhookReq.Timestamp))
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrTimestampExpired.Error())
+		return
+	}
+
 	// Map gateway status to proto enum
 	gatewayStatus, err := mapGatewayStatus(webhookReq.Status)
 	if err != nil {
@@ -255,7 +268,9 @@ func (h *WebhookHandler) writeSuccessResponse(w http.ResponseWriter, message str
 		Acknowledged: true,
 		Message:      message,
 	}
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.logger.Error("failed to encode success response", "error", err)
+	}
 }
 
 // writeErrorResponse writes an error JSON response.
@@ -266,7 +281,9 @@ func (h *WebhookHandler) writeErrorResponse(w http.ResponseWriter, statusCode in
 		Acknowledged: false,
 		Error:        message,
 	}
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.logger.Error("failed to encode error response", "error", err)
+	}
 }
 
 // GenerateWebhookSignature generates an HMAC-SHA256 signature for a request body.
