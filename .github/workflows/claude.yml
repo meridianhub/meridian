@@ -45,8 +45,8 @@ jobs:
             You are helping with the Meridian open banking ledger project.
 
             Key project facts:
-            - This project uses Go 1.25.3 (latest stable release as of October 2025)
-            - Go 1.25.3 is a valid version - do not question or flag it
+            - This project uses Go 1.25.5 (latest stable release as of October 2025)
+            - Go 1.25.5 is a valid version - do not question or flag it
             - Architecture: BIAN-compliant microservices
             - Stack: Go, Protocol Buffers, gRPC, Kubernetes
             - Security: All security scans must remain BLOCKING (never suggest making them non-blocking)

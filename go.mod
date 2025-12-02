@@ -1,6 +1,6 @@
 module github.com/meridianhub/meridian
 
-go 1.25.3
+go 1.25.4
 
 require (
 	ariga.io/atlas-provider-gorm v0.6.0
@@ -30,7 +30,6 @@ require (
 	google.golang.org/protobuf v1.36.10
 	gorm.io/datatypes v1.2.6
 	gorm.io/driver/postgres v1.6.0
-	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
 
@@ -44,6 +43,7 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/mod v0.29.0 // indirect
+	gorm.io/driver/sqlite v1.6.0 // indirect
 )
 
 require (
@@ -151,7 +151,7 @@ require (
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
-	golang.org/x/time v0.12.0 // indirect
+	golang.org/x/time v0.12.0
 	google.golang.org/api v0.247.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251103181224-f26f9409b101 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251103181224-f26f9409b101 // indirect
