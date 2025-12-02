@@ -20,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/payment-order/domain"
+	poobservability "github.com/meridianhub/meridian/internal/payment-order/observability"
 	"github.com/meridianhub/meridian/internal/platform/kafka"
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -51,6 +52,13 @@ const (
 	TopicPaymentOrderCompleted = "payment-order.completed.v1"
 	TopicPaymentOrderFailed    = "payment-order.failed.v1"
 	TopicPaymentOrderCancelled = "payment-order.cancelled.v1"
+)
+
+// Operation result status constants for observability
+const (
+	opStatusSuccess    = "success"
+	opStatusError      = "error"
+	opStatusIdempotent = "idempotent"
 )
 
 // CurrentAccountClient defines the interface for communicating with the CurrentAccount service
@@ -701,15 +709,79 @@ func (s *Service) RetrievePaymentOrder(_ context.Context, req *pb.RetrievePaymen
 }
 
 // UpdatePaymentOrder handles asynchronous gateway callbacks.
-// nolint:gocognit // Gateway callback handling requires multiple state transitions
+// Implements idempotency, audit logging, and observability per task 11 requirements.
+// nolint:gocognit // Gateway callback handling requires multiple state transitions and idempotency checks
 func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
 	start := time.Now()
+	operationStatus := opStatusSuccess
+	gatewayStatusStr := req.GatewayStatus.String()
+
 	defer func() {
+		poobservability.RecordOperationDuration("update_payment_order", operationStatus, time.Since(start))
+		poobservability.RecordGatewayCallback(gatewayStatusStr, operationStatus)
 		s.logger.Info("update_payment_order completed",
-			"duration_ms", time.Since(start).Milliseconds())
+			"duration_ms", time.Since(start).Milliseconds(),
+			"gateway_status", gatewayStatusStr,
+			"result", operationStatus)
 	}()
 
-	// Lookup payment order
+	// Lookup payment order by ID or gateway reference ID
+	po, err := s.lookupPaymentOrder(req)
+	if err != nil {
+		operationStatus = opStatusError
+		return nil, err
+	}
+
+	s.logger.Info("processing gateway callback",
+		"payment_order_id", po.ID.String(),
+		"gateway_reference_id", po.GatewayReferenceID,
+		"current_status", po.Status,
+		"gateway_status", gatewayStatusStr,
+		"correlation_id", po.CorrelationID)
+
+	// Process based on gateway status
+	switch req.GatewayStatus {
+	case pb.GatewayStatus_GATEWAY_STATUS_SETTLED:
+		result, err := s.handleSettledStatus(ctx, po)
+		if err != nil {
+			operationStatus = opStatusError
+			return nil, err
+		}
+		if result.isIdempotent {
+			operationStatus = opStatusIdempotent
+		}
+		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}, nil
+
+	case pb.GatewayStatus_GATEWAY_STATUS_REJECTED:
+		result, err := s.handleRejectedStatus(ctx, po, req.GatewayMessage)
+		if err != nil {
+			operationStatus = opStatusError
+			return nil, err
+		}
+		if result.isIdempotent {
+			operationStatus = opStatusIdempotent
+		}
+		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}, nil
+
+	case pb.GatewayStatus_GATEWAY_STATUS_PENDING:
+		if err := s.handlePendingStatus(po, req.GatewayReferenceId); err != nil {
+			operationStatus = opStatusError
+			return nil, err
+		}
+		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
+
+	case pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED:
+		operationStatus = opStatusError
+		return nil, status.Error(codes.InvalidArgument, "gateway status is required")
+
+	default:
+		operationStatus = opStatusError
+		return nil, status.Errorf(codes.InvalidArgument, "unknown gateway status: %v", req.GatewayStatus)
+	}
+}
+
+// lookupPaymentOrder finds a payment order by ID or gateway reference ID.
+func (s *Service) lookupPaymentOrder(req *pb.UpdatePaymentOrderRequest) (*domain.PaymentOrder, error) {
 	var po *domain.PaymentOrder
 	var err error
 
@@ -733,92 +805,167 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		return nil, status.Error(codes.Internal, "failed to find payment order")
 	}
 
-	// Process based on gateway status
-	switch req.GatewayStatus {
-	case pb.GatewayStatus_GATEWAY_STATUS_SETTLED:
-		// Complete the payment
-		if err := po.Complete(""); err != nil {
-			if errors.Is(err, domain.ErrInvalidPaymentOrderTransition) {
-				// Already completed (idempotent)
-				if po.Status == domain.PaymentOrderStatusCompleted {
-					return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
-				}
-				return nil, status.Errorf(codes.FailedPrecondition, "cannot complete payment: %v", err)
-			}
-			return nil, status.Errorf(codes.Internal, "failed to complete payment: %v", err)
-		}
+	return po, nil
+}
 
-		if err := s.repo.Update(po); err != nil {
-			s.logger.Error("failed to update payment order", "error", err)
-			return nil, status.Error(codes.Internal, "failed to update payment order")
-		}
+// updateResult holds the result of a status update operation.
+type updateResult struct {
+	po           *domain.PaymentOrder
+	isIdempotent bool
+}
 
-		// Execute lien (convert reservation to actual debit)
-		// TODO: ExecuteLien failure creates state inconsistency - payment order is COMPLETED
-		// but lien remains active. Consider:
-		// 1. Implement async retry mechanism with idempotent lien execution
-		// 2. Add LienExecutionStatus field to PaymentOrder for reconciliation
-		// 3. Use transactional outbox pattern to ensure eventual consistency
-		if s.currentAccountClient != nil && po.LienID != "" {
-			_, execErr := s.currentAccountClient.ExecuteLien(ctx, &currentaccountv1.ExecuteLienRequest{
-				LienId: po.LienID,
-			})
-			if execErr != nil {
-				s.logger.Error("failed to execute lien", "error", execErr, "lien_id", po.LienID)
-				// Continue - the payment is still complete, lien execution can be retried
-				// via reconciliation process or manual intervention
-			}
-		}
-
-		// Publish PaymentOrderCompleted event
-		s.publishEvent(ctx, TopicPaymentOrderCompleted, po.ID.String(), &eventsv1.PaymentOrderCompletedEvent{
-			EventId:            uuid.New().String(),
-			PaymentOrderId:     po.ID.String(),
-			DebtorAccountId:    po.DebtorAccountID,
-			Amount:             toMoneyAmount(po.Amount),
-			LienId:             po.LienID,
-			GatewayReferenceId: po.GatewayReferenceID,
-			LedgerBookingId:    po.LedgerBookingID,
-			CorrelationId:      po.CorrelationID,
-			CausationId:        po.ID.String(),
-			Timestamp:          timestamppb.Now(),
-			Version:            int64(po.Version),
-			IdempotencyKey:     po.IdempotencyKey,
-		})
-
-		s.logger.Info("payment order completed",
+// handleSettledStatus processes a SETTLED gateway callback.
+// Implements idempotency: returns success if already COMPLETED.
+func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrder) (*updateResult, error) {
+	// Idempotency check: if already completed, return success without modification
+	if po.Status == domain.PaymentOrderStatusCompleted {
+		s.logger.Info("idempotent settled callback - payment already completed",
 			"payment_order_id", po.ID.String(),
-			"gateway_reference_id", po.GatewayReferenceID,
-			"amount_cents", po.Amount.AmountCents(),
-			"currency", po.Amount.Currency(),
-			"idempotency_key", po.IdempotencyKey,
 			"correlation_id", po.CorrelationID)
-
-	case pb.GatewayStatus_GATEWAY_STATUS_REJECTED:
-		// Fail the payment - synchronous path: propagate error to client
-		if err := s.failPaymentOrder(ctx, po, req.GatewayMessage, "GATEWAY_REJECTED"); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to mark payment as rejected: %v", err)
-		}
-
-	case pb.GatewayStatus_GATEWAY_STATUS_PENDING:
-		// Validate that we're still in EXECUTING state - PENDING callbacks for
-		// terminal states (COMPLETED, FAILED, etc.) should be rejected as stale
-		if po.Status != domain.PaymentOrderStatusExecuting {
-			return nil, status.Errorf(codes.FailedPrecondition,
-				"cannot process PENDING callback: payment order is in %s state", po.Status)
-		}
-		// No state change needed - still waiting
-		s.logger.Info("payment still pending at gateway",
-			"payment_order_id", po.ID.String(),
-			"gateway_reference_id", req.GatewayReferenceId)
-
-	case pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED:
-		return nil, status.Error(codes.InvalidArgument, "gateway status is required")
+		poobservability.RecordIdempotentRequest("update_payment_order_settled")
+		return &updateResult{po: po, isIdempotent: true}, nil
 	}
 
-	return &pb.UpdatePaymentOrderResponse{
-		PaymentOrder: toProto(po),
-	}, nil
+	// Attempt state transition
+	if err := po.Complete(""); err != nil {
+		if errors.Is(err, domain.ErrInvalidPaymentOrderTransition) {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"cannot complete payment order in %s state: %v", po.Status, err)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to complete payment: %v", err)
+	}
+
+	// Persist state change
+	if err := s.repo.Update(po); err != nil {
+		s.logger.Error("failed to update payment order to COMPLETED",
+			"error", err,
+			"payment_order_id", po.ID.String())
+		return nil, status.Error(codes.Internal, "failed to update payment order")
+	}
+
+	// Execute lien (convert reservation to actual debit)
+	lienExecuted := s.executeLien(ctx, po)
+
+	// Record metrics
+	poobservability.RecordCompletion(po.Amount.Currency())
+	poobservability.RecordPaymentAmount(po.Amount.Currency(), "completed", po.Amount.AmountCents())
+	if lienExecuted {
+		poobservability.RecordLienExecution("success")
+	} else if po.LienID != "" {
+		poobservability.RecordLienExecution("failure")
+	}
+
+	// Publish PaymentOrderCompleted event
+	s.publishEvent(ctx, TopicPaymentOrderCompleted, po.ID.String(), &eventsv1.PaymentOrderCompletedEvent{
+		EventId:            uuid.New().String(),
+		PaymentOrderId:     po.ID.String(),
+		DebtorAccountId:    po.DebtorAccountID,
+		Amount:             toMoneyAmount(po.Amount),
+		LienId:             po.LienID,
+		GatewayReferenceId: po.GatewayReferenceID,
+		LedgerBookingId:    po.LedgerBookingID,
+		CorrelationId:      po.CorrelationID,
+		CausationId:        po.ID.String(),
+		Timestamp:          timestamppb.Now(),
+		Version:            int64(po.Version),
+		IdempotencyKey:     po.IdempotencyKey,
+	})
+
+	// Audit log for successful completion
+	s.logger.Info("payment order completed via gateway callback",
+		"payment_order_id", po.ID.String(),
+		"gateway_reference_id", po.GatewayReferenceID,
+		"amount_cents", po.Amount.AmountCents(),
+		"currency", po.Amount.Currency(),
+		"lien_id", po.LienID,
+		"lien_executed", lienExecuted,
+		"idempotency_key", po.IdempotencyKey,
+		"correlation_id", po.CorrelationID)
+
+	return &updateResult{po: po, isIdempotent: false}, nil
+}
+
+// executeLien attempts to execute the lien for a completed payment.
+// Returns true if execution succeeded, false otherwise.
+// Errors are logged but not propagated - payment completion is the primary concern.
+func (s *Service) executeLien(ctx context.Context, po *domain.PaymentOrder) bool {
+	if s.currentAccountClient == nil || po.LienID == "" {
+		return false
+	}
+
+	_, execErr := s.currentAccountClient.ExecuteLien(ctx, &currentaccountv1.ExecuteLienRequest{
+		LienId: po.LienID,
+	})
+	if execErr != nil {
+		// Log error for reconciliation but don't fail the payment completion
+		// ExecuteLien failures require async retry or manual intervention
+		s.logger.Error("failed to execute lien after payment completion",
+			"error", execErr,
+			"lien_id", po.LienID,
+			"payment_order_id", po.ID.String(),
+			"correlation_id", po.CorrelationID)
+		poobservability.RecordExternalServiceError("current_account", "execute_lien")
+		return false
+	}
+
+	s.logger.Info("lien executed successfully",
+		"lien_id", po.LienID,
+		"payment_order_id", po.ID.String())
+	return true
+}
+
+// handleRejectedStatus processes a REJECTED gateway callback.
+// Implements idempotency: returns success if already FAILED.
+func (s *Service) handleRejectedStatus(ctx context.Context, po *domain.PaymentOrder, gatewayMessage string) (*updateResult, error) {
+	// Idempotency check: if already failed, return success without modification
+	if po.Status == domain.PaymentOrderStatusFailed {
+		s.logger.Info("idempotent rejected callback - payment already failed",
+			"payment_order_id", po.ID.String(),
+			"correlation_id", po.CorrelationID)
+		poobservability.RecordIdempotentRequest("update_payment_order_rejected")
+		return &updateResult{po: po, isIdempotent: true}, nil
+	}
+
+	// Record metrics before failing (to capture pre-failure state)
+	poobservability.RecordRejection(po.Amount.Currency(), "GATEWAY_REJECTED")
+	poobservability.RecordPaymentAmount(po.Amount.Currency(), "rejected", po.Amount.AmountCents())
+
+	// Fail the payment - synchronous path: propagate error to client
+	if err := s.failPaymentOrder(ctx, po, gatewayMessage, "GATEWAY_REJECTED"); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to mark payment as rejected: %v", err)
+	}
+
+	// Audit log for rejection
+	s.logger.Info("payment order rejected via gateway callback",
+		"payment_order_id", po.ID.String(),
+		"gateway_reference_id", po.GatewayReferenceID,
+		"gateway_message", gatewayMessage,
+		"amount_cents", po.Amount.AmountCents(),
+		"currency", po.Amount.Currency(),
+		"lien_id", po.LienID,
+		"idempotency_key", po.IdempotencyKey,
+		"correlation_id", po.CorrelationID)
+
+	return &updateResult{po: po, isIdempotent: false}, nil
+}
+
+// handlePendingStatus processes a PENDING gateway callback.
+// Validates state and logs - no state transition needed.
+func (s *Service) handlePendingStatus(po *domain.PaymentOrder, gatewayRefID string) error {
+	// Validate that we're still in EXECUTING state - PENDING callbacks for
+	// terminal states (COMPLETED, FAILED, etc.) should be rejected as stale
+	if po.Status != domain.PaymentOrderStatusExecuting {
+		return status.Errorf(codes.FailedPrecondition,
+			"cannot process PENDING callback: payment order is in %s state", po.Status)
+	}
+
+	// No state change needed - still waiting for final confirmation
+	s.logger.Info("payment still pending at gateway",
+		"payment_order_id", po.ID.String(),
+		"gateway_reference_id", gatewayRefID,
+		"correlation_id", po.CorrelationID)
+
+	return nil
 }
 
 // CancelPaymentOrder cancels a payment order before completion.
