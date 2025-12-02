@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -109,6 +110,9 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ensure body is closed when we're done
+	defer func() { _ = r.Body.Close() }()
+
 	// Read request body
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
 	if err != nil {
@@ -116,7 +120,6 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		h.writeErrorResponse(w, http.StatusBadRequest, ErrInvalidRequestBody.Error())
 		return
 	}
-	defer func() { _ = r.Body.Close() }()
 
 	// Validate HMAC signature
 	signature := r.Header.Get(WebhookSignatureHeader)
@@ -197,13 +200,21 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateSignature validates the HMAC-SHA256 signature of the request body.
+// The signature is expected to be a hex-encoded HMAC-SHA256 hash.
 func (h *WebhookHandler) validateSignature(body []byte, signature string) bool {
+	// Decode the hex-encoded signature from the request
+	providedMAC, err := hex.DecodeString(signature)
+	if err != nil {
+		return false
+	}
+
+	// Compute the expected MAC
 	mac := hmac.New(sha256.New, h.hmacSecret)
 	mac.Write(body)
 	expectedMAC := mac.Sum(nil)
-	expectedSignature := hex.EncodeToString(expectedMAC)
 
-	return hmac.Equal([]byte(signature), []byte(expectedSignature))
+	// Use constant-time comparison on raw bytes
+	return hmac.Equal(providedMAC, expectedMAC)
 }
 
 // generateIdempotencyKey creates a deterministic idempotency key from webhook data.
@@ -217,13 +228,14 @@ func (h *WebhookHandler) generateIdempotencyKey(req WebhookRequest) string {
 }
 
 // mapGatewayStatus converts the gateway status string to proto enum.
+// Status comparison is case-insensitive.
 func mapGatewayStatus(status string) (pb.GatewayStatus, error) {
-	switch status {
-	case "Settled", "SETTLED", "settled":
+	switch strings.ToUpper(status) {
+	case "SETTLED":
 		return pb.GatewayStatus_GATEWAY_STATUS_SETTLED, nil
-	case "Rejected", "REJECTED", "rejected":
+	case "REJECTED":
 		return pb.GatewayStatus_GATEWAY_STATUS_REJECTED, nil
-	case "Pending", "PENDING", "pending":
+	case "PENDING":
 		return pb.GatewayStatus_GATEWAY_STATUS_PENDING, nil
 	default:
 		return pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED, ErrInvalidGatewayStatus
