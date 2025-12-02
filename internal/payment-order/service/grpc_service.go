@@ -1428,8 +1428,9 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 // updateLienExecutionStatus updates the payment order's lien execution status after retry completion.
 // This is called after all retry attempts have finished (success or failure).
 // Uses optimistic locking with retry on version conflict to handle concurrent updates.
+// Note: Uses a fresh context to ensure the status update completes even if the parent context has timed out.
 func (s *Service) updateLienExecutionStatus(
-	ctx context.Context,
+	_ context.Context, // Ignore parent context - it may have timed out during retries
 	paymentOrderID uuid.UUID,
 	attempts int,
 	retryErr error,
@@ -1438,9 +1439,16 @@ func (s *Service) updateLienExecutionStatus(
 ) {
 	const maxUpdateRetries = 3
 
+	// Use a fresh context to ensure status update isn't cancelled by parent timeout.
+	// This is intentional - the parent context may have timed out during retries,
+	// but we must still persist the final status for reconciliation purposes.
+	//nolint:contextcheck // Intentionally using fresh context to ensure status persistence
+	updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	for updateAttempt := 1; updateAttempt <= maxUpdateRetries; updateAttempt++ {
 		// Fetch the current payment order (fresh version)
-		po, err := s.repo.FindByID(ctx, paymentOrderID)
+		po, err := s.repo.FindByID(updateCtx, paymentOrderID) //nolint:contextcheck
 		if err != nil {
 			logger.Error("failed to fetch payment order for lien execution status update",
 				"error", err,
@@ -1476,7 +1484,7 @@ func (s *Service) updateLienExecutionStatus(
 		}
 
 		// Persist the updated status
-		updateErr := s.repo.Update(ctx, po)
+		updateErr := s.repo.Update(updateCtx, po) //nolint:contextcheck
 		if updateErr == nil {
 			logger.Info("payment order lien execution status updated",
 				"status", po.LienExecutionStatus,
