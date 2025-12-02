@@ -342,6 +342,44 @@ message ListPaymentOrdersResponse {
   meridian.common.v1.PaginationResponse pagination = 2;
 }
 
+// ReversePaymentOrderRequest reverses a completed payment order (BQ: Exchange).
+// This creates compensating ledger entries and transitions the order to REVERSED.
+// Can only be called when the payment order is in COMPLETED state.
+message ReversePaymentOrderRequest {
+  // payment_order_id is the unique identifier of the payment order to reverse.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // reversal_reason explains why the payment is being reversed.
+  string reversal_reason = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // reversed_by identifies who is requesting the reversal.
+  string reversed_by = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // idempotency_key ensures exactly-once processing of reversal.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
+
+  // correlation_id is optional for distributed tracing (generated if not provided).
+  string correlation_id = 5 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+}
+
+// ReversePaymentOrderResponse returns the reversed payment order.
+message ReversePaymentOrderResponse {
+  // payment_order is the reversed payment order with status REVERSED.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
 // PaymentOrderService provides BIAN-compliant payment order operations.
 // This service acts as the saga orchestrator for money movement,
 // coordinating funds reservation, gateway execution, and ledger booking.
@@ -395,4 +433,10 @@ service PaymentOrderService {
   // ListPaymentOrders returns a paginated list of payment orders with optional filtering.
   // Supports filtering by debtor_account_id, status, and date range.
   rpc ListPaymentOrders(ListPaymentOrdersRequest) returns (ListPaymentOrdersResponse);
+
+  // ReversePaymentOrder reverses a completed payment order (post-completion compensation).
+  // Only valid for COMPLETED state. Creates compensating ledger entries to reverse
+  // the original transaction and transitions the order to REVERSED.
+  // Idempotent: returns success if already reversed with the same idempotency key.
+  rpc ReversePaymentOrder(ReversePaymentOrderRequest) returns (ReversePaymentOrderResponse);
 }
