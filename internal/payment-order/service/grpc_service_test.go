@@ -765,7 +765,7 @@ func TestUpdatePaymentOrder_Settled_LienExecutionStatusTracking(t *testing.T) {
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -791,7 +791,7 @@ func TestUpdatePaymentOrder_Settled_LienExecutionStatusTracking(t *testing.T) {
 
 	// Wait for status update to complete using Eventually (avoids flaky time.Sleep)
 	assert.Eventually(t, func() bool {
-		updatedPO, err := repo.FindByID(po.ID)
+		updatedPO, err := repo.FindByID(context.Background(), po.ID)
 		if err != nil {
 			return false
 		}
@@ -799,7 +799,7 @@ func TestUpdatePaymentOrder_Settled_LienExecutionStatusTracking(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond, "lien execution status should be SUCCEEDED")
 
 	// Verify the final state
-	updatedPO, err := repo.FindByID(po.ID)
+	updatedPO, err := repo.FindByID(context.Background(), po.ID)
 	require.NoError(t, err)
 	assert.Equal(t, domain.LienExecutionStatusSucceeded, updatedPO.LienExecutionStatus)
 	assert.Equal(t, 1, updatedPO.LienExecutionAttempts)
@@ -1227,7 +1227,7 @@ func TestReversePaymentOrder_Success(t *testing.T) {
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("ledger-booking-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1254,7 +1254,7 @@ func TestReversePaymentOrder_AlreadyReversed_Idempotent(t *testing.T) {
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("ledger-booking-123")
 	_ = po.Reverse("Already reversed")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1276,7 +1276,7 @@ func TestReversePaymentOrder_NotCompleted(t *testing.T) {
 	// Create a payment order in INITIATED state (cannot be reversed)
 	amount, _ := cadomain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1303,7 +1303,7 @@ func TestReversePaymentOrder_MissingReason(t *testing.T) {
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("ledger-booking-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1330,7 +1330,7 @@ func TestReversePaymentOrder_MissingReversedBy(t *testing.T) {
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("ledger-booking-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -2089,7 +2089,7 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 
 	// Wait for status update to complete (async retry will fail and update status to FAILED)
 	assert.Eventually(t, func() bool {
-		updatedPO, err := repo.FindByID(po.ID)
+		updatedPO, err := repo.FindByID(context.Background(), po.ID)
 		if err != nil {
 			return false
 		}

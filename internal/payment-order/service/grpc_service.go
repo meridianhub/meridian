@@ -1112,7 +1112,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 	}
 
 	// Retrieve payment order
-	po, err := s.repo.FindByID(poID)
+	po, err := s.repo.FindByID(ctx, poID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPaymentOrderNotFound) {
 			return nil, status.Errorf(codes.NotFound, "payment order not found: %s", req.PaymentOrderId)
@@ -1140,7 +1140,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 	}
 
 	// Update in database
-	if err := s.repo.Update(po); err != nil {
+	if err := s.repo.Update(ctx, po); err != nil {
 		return nil, status.Error(codes.Internal, "failed to update payment order")
 	}
 
@@ -1366,10 +1366,12 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 				"payment_order_id", paymentOrderID.String(),
 				"lien_id", lienID)
 			// Attempt to mark as FAILED to prevent stuck PENDING state
-			po, findErr := s.repo.FindByID(paymentOrderID)
+			// Use a fresh context since the original may be cancelled
+			panicCtx := context.Background()
+			po, findErr := s.repo.FindByID(panicCtx, paymentOrderID)
 			if findErr == nil {
 				po.SetLienExecutionFailed(fmt.Sprintf("panic: %v", r))
-				_ = s.repo.Update(po)
+				_ = s.repo.Update(panicCtx, po)
 			}
 		}
 	}()
@@ -1427,7 +1429,7 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 // This is called after all retry attempts have finished (success or failure).
 // Uses optimistic locking with retry on version conflict to handle concurrent updates.
 func (s *Service) updateLienExecutionStatus(
-	_ context.Context,
+	ctx context.Context,
 	paymentOrderID uuid.UUID,
 	attempts int,
 	retryErr error,
@@ -1438,7 +1440,7 @@ func (s *Service) updateLienExecutionStatus(
 
 	for updateAttempt := 1; updateAttempt <= maxUpdateRetries; updateAttempt++ {
 		// Fetch the current payment order (fresh version)
-		po, err := s.repo.FindByID(paymentOrderID)
+		po, err := s.repo.FindByID(ctx, paymentOrderID)
 		if err != nil {
 			logger.Error("failed to fetch payment order for lien execution status update",
 				"error", err,
@@ -1455,6 +1457,7 @@ func (s *Service) updateLienExecutionStatus(
 			if updateAttempt == 1 {
 				logger.Info("lien execution completed successfully",
 					"total_attempts", attempts)
+				poobservability.RecordLienExecution("success")
 			}
 		} else {
 			// Failed after all retries
@@ -1467,11 +1470,13 @@ func (s *Service) updateLienExecutionStatus(
 				logger.Error("lien execution failed after all retries",
 					"total_attempts", attempts,
 					"error", errMsg)
+				poobservability.RecordLienExecution("failure")
+				poobservability.RecordExternalServiceError("current_account", "execute_lien")
 			}
 		}
 
 		// Persist the updated status
-		updateErr := s.repo.Update(po)
+		updateErr := s.repo.Update(ctx, po)
 		if updateErr == nil {
 			logger.Info("payment order lien execution status updated",
 				"status", po.LienExecutionStatus,
