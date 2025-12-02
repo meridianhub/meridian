@@ -88,6 +88,12 @@ const (
 
 	// DefaultMaxIdempotencyKeyLength is the maximum allowed length for idempotency keys.
 	DefaultMaxIdempotencyKeyLength = 256
+
+	// DefaultLienExecutionMaxRetries is the maximum number of retry attempts for ExecuteLien.
+	DefaultLienExecutionMaxRetries = 5
+
+	// DefaultLienExecutionRetryTimeout is the timeout for the entire retry sequence.
+	DefaultLienExecutionRetryTimeout = 2 * time.Minute
 )
 
 // Money conversion constants for Google Money proto (nanos have 9 decimal places)
@@ -836,6 +842,11 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		return nil, status.Errorf(codes.Internal, "failed to complete payment: %v", err)
 	}
 
+	// Mark lien execution as pending before saving
+	if po.LienID != "" {
+		po.SetLienExecutionPending()
+	}
+
 	// Persist state change
 	if err := s.repo.Update(ctx, po); err != nil {
 		s.logger.Error("failed to update payment order to COMPLETED",
@@ -844,16 +855,18 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		return nil, status.Error(codes.Internal, "failed to update payment order")
 	}
 
-	// Execute lien (convert reservation to actual debit)
-	lienExecuted := s.executeLien(ctx, po)
-
 	// Record metrics
 	poobservability.RecordCompletion(po.Amount.Currency())
 	poobservability.RecordPaymentAmount(po.Amount.Currency(), "completed", po.Amount.AmountCents())
-	if lienExecuted {
-		poobservability.RecordLienExecution("success")
-	} else if po.LienID != "" {
-		poobservability.RecordLienExecution("failure")
+
+	// Execute lien asynchronously with retry mechanism
+	// The lien execution status is tracked in the payment order for reconciliation
+	if s.currentAccountClient != nil && po.LienID != "" {
+		// Start async retry goroutine - this won't block the webhook response
+		// We create a new background context since the request context will be cancelled
+		// after the webhook response is sent
+		//nolint:contextcheck // Intentionally using fresh context for async operation
+		go s.executeLienWithRetry(context.Background(), po.ID, po.LienID)
 	}
 
 	// Publish PaymentOrderCompleted event
@@ -879,42 +892,10 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		"amount_cents", po.Amount.AmountCents(),
 		"currency", po.Amount.Currency(),
 		"lien_id", po.LienID,
-		"lien_executed", lienExecuted,
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", po.CorrelationID)
 
 	return &updateResult{po: po, isIdempotent: false}, nil
-}
-
-// executeLien attempts to execute the lien for a completed payment.
-// Returns true if execution succeeded, false otherwise.
-// Errors are logged but not propagated - payment completion is the primary concern.
-func (s *Service) executeLien(ctx context.Context, po *domain.PaymentOrder) bool {
-	if s.currentAccountClient == nil || po.LienID == "" {
-		return false
-	}
-
-	_, execErr := s.currentAccountClient.ExecuteLien(ctx, &currentaccountv1.ExecuteLienRequest{
-		LienId: po.LienID,
-	})
-	if execErr != nil {
-		// Log error for reconciliation but don't fail the payment completion.
-		// ExecuteLien failures require async retry or manual intervention.
-		// Failures are tracked via payment_order_external_service_errors_total{service="current_account",operation="execute_lien"}
-		// and payment_order_lien_executions_total{status="failure"} for alerting.
-		s.logger.Error("failed to execute lien after payment completion",
-			"error", execErr,
-			"lien_id", po.LienID,
-			"payment_order_id", po.ID.String(),
-			"correlation_id", po.CorrelationID)
-		poobservability.RecordExternalServiceError("current_account", "execute_lien")
-		return false
-	}
-
-	s.logger.Info("lien executed successfully",
-		"lien_id", po.LienID,
-		"payment_order_id", po.ID.String())
-	return true
 }
 
 // handleRejectedStatus processes a REJECTED gateway callback.
@@ -1220,22 +1201,25 @@ func (s *Service) publishEvent(ctx context.Context, topic string, key string, ev
 // toProto converts a domain PaymentOrder to proto PaymentOrder
 func toProto(po *domain.PaymentOrder) *pb.PaymentOrder {
 	proto := &pb.PaymentOrder{
-		PaymentOrderId:     po.ID.String(),
-		DebtorAccountId:    po.DebtorAccountID,
-		CreditorReference:  po.CreditorReference,
-		Amount:             toMoneyAmount(po.Amount),
-		Status:             mapStatusToProto(po.Status),
-		LienId:             po.LienID,
-		GatewayReferenceId: po.GatewayReferenceID,
-		CorrelationId:      po.CorrelationID,
-		IdempotencyKey:     po.IdempotencyKey,
-		FailureReason:      po.FailureReason,
-		CreatedAt:          timestamppb.New(po.CreatedAt),
-		UpdatedAt:          timestamppb.New(po.UpdatedAt),
-		Version:            int64(po.Version),
-		LedgerBookingId:    po.LedgerBookingID,
-		CausationId:        po.CausationID,
-		ErrorCode:          po.ErrorCode,
+		PaymentOrderId:        po.ID.String(),
+		DebtorAccountId:       po.DebtorAccountID,
+		CreditorReference:     po.CreditorReference,
+		Amount:                toMoneyAmount(po.Amount),
+		Status:                mapStatusToProto(po.Status),
+		LienId:                po.LienID,
+		GatewayReferenceId:    po.GatewayReferenceID,
+		CorrelationId:         po.CorrelationID,
+		IdempotencyKey:        po.IdempotencyKey,
+		FailureReason:         po.FailureReason,
+		CreatedAt:             timestamppb.New(po.CreatedAt),
+		UpdatedAt:             timestamppb.New(po.UpdatedAt),
+		Version:               int64(po.Version),
+		LedgerBookingId:       po.LedgerBookingID,
+		CausationId:           po.CausationID,
+		ErrorCode:             po.ErrorCode,
+		LienExecutionStatus:   mapLienExecutionStatusToProto(po.LienExecutionStatus),
+		LienExecutionAttempts: int32(po.LienExecutionAttempts),
+		LienExecutionError:    po.LienExecutionError,
 	}
 
 	// Set optional timestamps
@@ -1329,4 +1313,131 @@ func mapStatusToProto(status domain.PaymentOrderStatus) pb.PaymentOrderStatus {
 	default:
 		return pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_UNSPECIFIED
 	}
+}
+
+// mapLienExecutionStatusToProto maps domain LienExecutionStatus to proto
+func mapLienExecutionStatusToProto(status domain.LienExecutionStatus) pb.LienExecutionStatus {
+	switch status {
+	case domain.LienExecutionStatusUnspecified:
+		return pb.LienExecutionStatus_LIEN_EXECUTION_STATUS_UNSPECIFIED
+	case domain.LienExecutionStatusPending:
+		return pb.LienExecutionStatus_LIEN_EXECUTION_STATUS_PENDING
+	case domain.LienExecutionStatusSucceeded:
+		return pb.LienExecutionStatus_LIEN_EXECUTION_STATUS_SUCCEEDED
+	case domain.LienExecutionStatusFailed:
+		return pb.LienExecutionStatus_LIEN_EXECUTION_STATUS_FAILED
+	default:
+		return pb.LienExecutionStatus_LIEN_EXECUTION_STATUS_UNSPECIFIED
+	}
+}
+
+// executeLienWithRetry executes a lien asynchronously with exponential backoff retry.
+// This is called in a goroutine after a payment order is marked COMPLETED.
+// The lien execution status is tracked in the payment order for reconciliation.
+//
+// The method:
+// 1. Creates a context with timeout for the entire retry sequence
+// 2. Uses exponential backoff for retries with the existing clients.Retry infrastructure
+// 3. Updates the payment order's lien execution status on success or final failure
+// 4. Logs all attempts for monitoring and alerting
+//
+// nolint:contextcheck // Context is intentionally created fresh for async operation
+func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID uuid.UUID, lienID string) {
+	// Create a context with timeout for the entire retry sequence
+	ctx, cancel := context.WithTimeout(parentCtx, DefaultLienExecutionRetryTimeout)
+	defer cancel()
+
+	logger := s.logger.With(
+		"payment_order_id", paymentOrderID.String(),
+		"lien_id", lienID,
+		"operation", "execute_lien_async",
+	)
+
+	logger.Info("starting async lien execution with retry")
+
+	// Configure retry with exponential backoff
+	retryConfig := clients.RetryConfig{
+		MaxRetries:          DefaultLienExecutionMaxRetries,
+		InitialInterval:     500 * time.Millisecond,
+		MaxInterval:         30 * time.Second,
+		Multiplier:          2.0,
+		RandomizationFactor: 0.5,
+	}
+
+	var lastErr error
+	var attempts int
+
+	// Execute with retry
+	err := clients.Retry(ctx, retryConfig, func() error {
+		attempts++
+		logger.Info("attempting lien execution", "attempt", attempts)
+
+		_, execErr := s.currentAccountClient.ExecuteLien(ctx, &currentaccountv1.ExecuteLienRequest{
+			LienId: lienID,
+		})
+
+		if execErr != nil {
+			logger.Warn("lien execution attempt failed",
+				"attempt", attempts,
+				"error", execErr)
+			lastErr = execErr
+			return execErr
+		}
+
+		logger.Info("lien execution succeeded", "attempt", attempts)
+		return nil
+	})
+
+	// Update payment order with final status
+	s.updateLienExecutionStatus(ctx, paymentOrderID, attempts, err, lastErr, logger)
+}
+
+// updateLienExecutionStatus updates the payment order's lien execution status after retry completion.
+// This is called after all retry attempts have finished (success or failure).
+func (s *Service) updateLienExecutionStatus(
+	_ context.Context,
+	paymentOrderID uuid.UUID,
+	attempts int,
+	retryErr error,
+	lastErr error,
+	logger *slog.Logger,
+) {
+	// Fetch the current payment order
+	po, err := s.repo.FindByID(paymentOrderID)
+	if err != nil {
+		logger.Error("failed to fetch payment order for lien execution status update",
+			"error", err)
+		return
+	}
+
+	// Update lien execution tracking fields
+	po.LienExecutionAttempts = attempts
+
+	if retryErr == nil {
+		// Success
+		po.SetLienExecutionSucceeded()
+		logger.Info("lien execution completed successfully",
+			"total_attempts", attempts)
+	} else {
+		// Failed after all retries
+		errMsg := "unknown error"
+		if lastErr != nil {
+			errMsg = lastErr.Error()
+		}
+		po.SetLienExecutionFailed(errMsg)
+		logger.Error("lien execution failed after all retries",
+			"total_attempts", attempts,
+			"error", errMsg)
+	}
+
+	// Persist the updated status
+	if updateErr := s.repo.Update(po); updateErr != nil {
+		logger.Error("failed to update payment order lien execution status",
+			"error", updateErr)
+		return
+	}
+
+	logger.Info("payment order lien execution status updated",
+		"status", po.LienExecutionStatus,
+		"attempts", po.LienExecutionAttempts)
 }
