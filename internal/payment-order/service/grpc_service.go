@@ -25,19 +25,20 @@ import (
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Service errors
 var (
-	ErrRepositoryNil             = errors.New("repository cannot be nil")
-	ErrCurrentAccountClientNil   = errors.New("current account client cannot be nil")
-	ErrPaymentGatewayNil         = errors.New("payment gateway cannot be nil")
-	ErrKafkaProducerNil          = errors.New("kafka producer cannot be nil")
-	ErrCurrentAccountTargetEmpty = errors.New("current account target cannot be empty")
-	ErrAmountRequired            = errors.New("amount is required")
-	ErrPaymentRejected           = errors.New("payment rejected by gateway")
-	ErrUnexpectedGatewayStatus   = errors.New("unexpected gateway status")
+	ErrRepositoryNil           = errors.New("repository cannot be nil")
+	ErrCurrentAccountClientNil = errors.New("current account client cannot be nil")
+	ErrPaymentGatewayNil       = errors.New("payment gateway cannot be nil")
+	ErrKafkaProducerNil        = errors.New("kafka producer cannot be nil")
+	ErrAmountRequired          = errors.New("amount is required")
+	ErrPaymentRejected         = errors.New("payment rejected by gateway")
+	ErrUnexpectedGatewayStatus = errors.New("unexpected gateway status")
+	ErrIdempotencyKeyTooLong   = errors.New("idempotency key exceeds maximum length")
 )
 
 // Kafka topic constants
@@ -63,20 +64,35 @@ type CurrentAccountClient interface {
 	Close() error
 }
 
-// DefaultSagaTimeout is the default timeout for payment saga orchestration.
-// This allows for typical payment gateway latency plus retries.
-const DefaultSagaTimeout = 5 * time.Minute
+// Configuration defaults
+const (
+	// DefaultSagaTimeout is the default timeout for payment saga orchestration.
+	// This allows for typical payment gateway latency plus retries.
+	DefaultSagaTimeout = 5 * time.Minute
+
+	// DefaultPageSize is the default number of items per page for list operations.
+	DefaultPageSize = 50
+
+	// DefaultMaxPageSize is the maximum allowed page size for list operations.
+	DefaultMaxPageSize = 1000
+
+	// DefaultMaxIdempotencyKeyLength is the maximum allowed length for idempotency keys.
+	DefaultMaxIdempotencyKeyLength = 256
+)
 
 // Service implements the PaymentOrderService gRPC service
 type Service struct {
 	pb.UnimplementedPaymentOrderServiceServer
-	repo                 persistence.Repository
-	currentAccountClient CurrentAccountClient
-	paymentGateway       gateway.PaymentGateway
-	kafkaProducer        *kafka.ProtoProducer
-	logger               *slog.Logger
-	tracer               *observability.Tracer
-	sagaTimeout          time.Duration
+	repo                    persistence.Repository
+	currentAccountClient    CurrentAccountClient
+	paymentGateway          gateway.PaymentGateway
+	kafkaProducer           *kafka.ProtoProducer
+	logger                  *slog.Logger
+	tracer                  *observability.Tracer
+	sagaTimeout             time.Duration
+	defaultPageSize         int
+	maxPageSize             int
+	maxIdempotencyKeyLength int
 }
 
 // Config contains configuration for creating a new Service
@@ -90,6 +106,13 @@ type Config struct {
 	// SagaTimeout is the maximum duration for saga orchestration.
 	// If zero, DefaultSagaTimeout is used.
 	SagaTimeout time.Duration
+	// DefaultPageSize is the default number of items per page. If zero, DefaultPageSize is used.
+	DefaultPageSize int
+	// MaxPageSize is the maximum allowed page size. If zero, DefaultMaxPageSize is used.
+	MaxPageSize int
+	// MaxIdempotencyKeyLength is the maximum allowed idempotency key length.
+	// If zero, DefaultMaxIdempotencyKeyLength is used.
+	MaxIdempotencyKeyLength int
 }
 
 // NewService creates a new payment order service with minimal dependencies.
@@ -100,9 +123,12 @@ func NewService(repo persistence.Repository) (*Service, error) {
 		return nil, ErrRepositoryNil
 	}
 	return &Service{
-		repo:        repo,
-		logger:      slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-		sagaTimeout: DefaultSagaTimeout,
+		repo:                    repo,
+		logger:                  slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		sagaTimeout:             DefaultSagaTimeout,
+		defaultPageSize:         DefaultPageSize,
+		maxPageSize:             DefaultMaxPageSize,
+		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 	}, nil
 }
 
@@ -129,20 +155,38 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
-	// Apply default saga timeout if not provided
+	// Apply defaults for optional config values
 	sagaTimeout := config.SagaTimeout
 	if sagaTimeout == 0 {
 		sagaTimeout = DefaultSagaTimeout
 	}
 
+	defaultPageSize := config.DefaultPageSize
+	if defaultPageSize == 0 {
+		defaultPageSize = DefaultPageSize
+	}
+
+	maxPageSize := config.MaxPageSize
+	if maxPageSize == 0 {
+		maxPageSize = DefaultMaxPageSize
+	}
+
+	maxIdempotencyKeyLength := config.MaxIdempotencyKeyLength
+	if maxIdempotencyKeyLength == 0 {
+		maxIdempotencyKeyLength = DefaultMaxIdempotencyKeyLength
+	}
+
 	return &Service{
-		repo:                 config.Repository,
-		currentAccountClient: config.CurrentAccountClient,
-		paymentGateway:       config.PaymentGateway,
-		kafkaProducer:        config.KafkaProducer,
-		logger:               logger,
-		tracer:               config.Tracer,
-		sagaTimeout:          sagaTimeout,
+		repo:                    config.Repository,
+		currentAccountClient:    config.CurrentAccountClient,
+		paymentGateway:          config.PaymentGateway,
+		kafkaProducer:           config.KafkaProducer,
+		logger:                  logger,
+		tracer:                  config.Tracer,
+		sagaTimeout:             sagaTimeout,
+		defaultPageSize:         defaultPageSize,
+		maxPageSize:             maxPageSize,
+		maxIdempotencyKeyLength: maxIdempotencyKeyLength,
 	}, nil
 }
 
@@ -168,6 +212,9 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	}
 	if idempotencyKey == "" {
 		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
+	}
+	if len(idempotencyKey) > s.maxIdempotencyKeyLength {
+		return nil, status.Errorf(codes.InvalidArgument, "idempotency_key exceeds maximum length of %d", s.maxIdempotencyKeyLength)
 	}
 
 	// Check for existing payment order with same idempotency key (idempotent)
@@ -220,31 +267,19 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		"correlation_id", correlationID)
 
 	// Publish PaymentOrderInitiated event to Kafka
-	if s.kafkaProducer != nil {
-		event := &eventsv1.PaymentOrderInitiatedEvent{
-			EventId:           uuid.New().String(),
-			PaymentOrderId:    po.ID.String(),
-			DebtorAccountId:   po.DebtorAccountID,
-			CreditorReference: po.CreditorReference,
-			Amount:            toMoneyAmount(po.Amount),
-			CorrelationId:     po.CorrelationID,
-			CausationId:       po.ID.String(), // Initial event caused by the order creation
-			Timestamp:         timestamppb.Now(),
-			Version:           int64(po.Version),
-			IdempotencyKey:    po.IdempotencyKey,
-		}
-
-		if err := s.kafkaProducer.Publish(ctx, TopicPaymentOrderInitiated, po.ID.String(), event); err != nil {
-			s.logger.Error("failed to publish PaymentOrderInitiated event",
-				"error", err,
-				"payment_order_id", po.ID.String())
-			// Don't fail the request - event will be recovered via outbox pattern or retry
-		} else {
-			s.logger.Info("published PaymentOrderInitiated event",
-				"payment_order_id", po.ID.String(),
-				"topic", TopicPaymentOrderInitiated)
-		}
-	}
+	// Publish event (publishEvent handles nil kafkaProducer)
+	s.publishEvent(ctx, TopicPaymentOrderInitiated, po.ID.String(), &eventsv1.PaymentOrderInitiatedEvent{
+		EventId:           uuid.New().String(),
+		PaymentOrderId:    po.ID.String(),
+		DebtorAccountId:   po.DebtorAccountID,
+		CreditorReference: po.CreditorReference,
+		Amount:            toMoneyAmount(po.Amount),
+		CorrelationId:     po.CorrelationID,
+		CausationId:       po.ID.String(), // Initial event caused by the order creation
+		Timestamp:         timestamppb.Now(),
+		Version:           int64(po.Version),
+		IdempotencyKey:    po.IdempotencyKey,
+	})
 
 	// Convert to proto BEFORE starting the async goroutine to avoid data race
 	// The saga may modify po while toProto reads from it
@@ -285,7 +320,16 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		if s.tracer != nil {
 			sagaCtx = observability.WithCorrelationID(sagaCtx, correlationID)
 		}
-		s.orchestratePayment(sagaCtx, po)
+
+		// Reload fresh state to avoid race with caller who may still reference po
+		freshPO, err := s.repo.FindByID(paymentOrderID)
+		if err != nil {
+			s.logger.Error("failed to reload payment order for saga",
+				"payment_order_id", paymentOrderID.String(),
+				"error", err)
+			return
+		}
+		s.orchestratePayment(sagaCtx, freshPO)
 	}(po.ID)
 
 	return &pb.InitiatePaymentOrderResponse{
@@ -352,23 +396,18 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 				"lien_id", lienID)
 
 			// Publish PaymentOrderReserved event
-			if s.kafkaProducer != nil {
-				event := &eventsv1.PaymentOrderReservedEvent{
-					EventId:         uuid.New().String(),
-					PaymentOrderId:  po.ID.String(),
-					DebtorAccountId: po.DebtorAccountID,
-					LienId:          lienID,
-					Amount:          toMoneyAmount(po.Amount),
-					CorrelationId:   po.CorrelationID,
-					CausationId:     po.ID.String(),
-					Timestamp:       timestamppb.Now(),
-					Version:         int64(po.Version),
-					IdempotencyKey:  po.IdempotencyKey,
-				}
-				if err := s.kafkaProducer.Publish(stepCtx, TopicPaymentOrderReserved, po.ID.String(), event); err != nil {
-					s.logger.Error("failed to publish PaymentOrderReserved event", "error", err)
-				}
-			}
+			s.publishEvent(stepCtx, TopicPaymentOrderReserved, po.ID.String(), &eventsv1.PaymentOrderReservedEvent{
+				EventId:         uuid.New().String(),
+				PaymentOrderId:  po.ID.String(),
+				DebtorAccountId: po.DebtorAccountID,
+				LienId:          lienID,
+				Amount:          toMoneyAmount(po.Amount),
+				CorrelationId:   po.CorrelationID,
+				CausationId:     po.ID.String(),
+				Timestamp:       timestamppb.Now(),
+				Version:         int64(po.Version),
+				IdempotencyKey:  po.IdempotencyKey,
+			})
 
 			return nil
 		},
@@ -437,21 +476,16 @@ func (s *Service) orchestratePayment(ctx context.Context, po *domain.PaymentOrde
 					"gateway_status", resp.Status)
 
 				// Publish PaymentOrderExecuting event
-				if s.kafkaProducer != nil {
-					event := &eventsv1.PaymentOrderExecutingEvent{
-						EventId:            uuid.New().String(),
-						PaymentOrderId:     po.ID.String(),
-						GatewayReferenceId: resp.GatewayReferenceID,
-						CorrelationId:      po.CorrelationID,
-						CausationId:        po.ID.String(),
-						Timestamp:          timestamppb.Now(),
-						Version:            int64(po.Version),
-						IdempotencyKey:     po.IdempotencyKey,
-					}
-					if err := s.kafkaProducer.Publish(stepCtx, TopicPaymentOrderExecuting, po.ID.String(), event); err != nil {
-						s.logger.Error("failed to publish PaymentOrderExecuting event", "error", err)
-					}
-				}
+				s.publishEvent(stepCtx, TopicPaymentOrderExecuting, po.ID.String(), &eventsv1.PaymentOrderExecutingEvent{
+					EventId:            uuid.New().String(),
+					PaymentOrderId:     po.ID.String(),
+					GatewayReferenceId: resp.GatewayReferenceID,
+					CorrelationId:      po.CorrelationID,
+					CausationId:        po.ID.String(),
+					Timestamp:          timestamppb.Now(),
+					Version:            int64(po.Version),
+					IdempotencyKey:     po.IdempotencyKey,
+				})
 
 				return nil
 
@@ -547,26 +581,21 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 	}
 
 	// Publish PaymentOrderFailed event
-	if s.kafkaProducer != nil {
-		event := &eventsv1.PaymentOrderFailedEvent{
-			EventId:         uuid.New().String(),
-			PaymentOrderId:  po.ID.String(),
-			DebtorAccountId: po.DebtorAccountID,
-			Amount:          toMoneyAmount(po.Amount),
-			FailureReason:   reason,
-			ErrorCode:       errorCode,
-			FailedAtStatus:  mapStatusToProto(failedAtStatus),
-			LienId:          lienID,
-			CorrelationId:   po.CorrelationID,
-			CausationId:     po.ID.String(),
-			Timestamp:       timestamppb.Now(),
-			Version:         int64(po.Version),
-			IdempotencyKey:  po.IdempotencyKey,
-		}
-		if err := s.kafkaProducer.Publish(ctx, TopicPaymentOrderFailed, po.ID.String(), event); err != nil {
-			s.logger.Error("failed to publish PaymentOrderFailed event", "error", err)
-		}
-	}
+	s.publishEvent(ctx, TopicPaymentOrderFailed, po.ID.String(), &eventsv1.PaymentOrderFailedEvent{
+		EventId:         uuid.New().String(),
+		PaymentOrderId:  po.ID.String(),
+		DebtorAccountId: po.DebtorAccountID,
+		Amount:          toMoneyAmount(po.Amount),
+		FailureReason:   reason,
+		ErrorCode:       errorCode,
+		FailedAtStatus:  mapStatusToProto(failedAtStatus),
+		LienId:          lienID,
+		CorrelationId:   po.CorrelationID,
+		CausationId:     po.ID.String(),
+		Timestamp:       timestamppb.Now(),
+		Version:         int64(po.Version),
+		IdempotencyKey:  po.IdempotencyKey,
+	})
 
 	s.logger.Info("payment order failed",
 		"payment_order_id", po.ID.String(),
@@ -670,25 +699,20 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		}
 
 		// Publish PaymentOrderCompleted event
-		if s.kafkaProducer != nil {
-			event := &eventsv1.PaymentOrderCompletedEvent{
-				EventId:            uuid.New().String(),
-				PaymentOrderId:     po.ID.String(),
-				DebtorAccountId:    po.DebtorAccountID,
-				Amount:             toMoneyAmount(po.Amount),
-				LienId:             po.LienID,
-				GatewayReferenceId: po.GatewayReferenceID,
-				LedgerBookingId:    po.LedgerBookingID,
-				CorrelationId:      po.CorrelationID,
-				CausationId:        po.ID.String(),
-				Timestamp:          timestamppb.Now(),
-				Version:            int64(po.Version),
-				IdempotencyKey:     po.IdempotencyKey,
-			}
-			if err := s.kafkaProducer.Publish(ctx, TopicPaymentOrderCompleted, po.ID.String(), event); err != nil {
-				s.logger.Error("failed to publish PaymentOrderCompleted event", "error", err)
-			}
-		}
+		s.publishEvent(ctx, TopicPaymentOrderCompleted, po.ID.String(), &eventsv1.PaymentOrderCompletedEvent{
+			EventId:            uuid.New().String(),
+			PaymentOrderId:     po.ID.String(),
+			DebtorAccountId:    po.DebtorAccountID,
+			Amount:             toMoneyAmount(po.Amount),
+			LienId:             po.LienID,
+			GatewayReferenceId: po.GatewayReferenceID,
+			LedgerBookingId:    po.LedgerBookingID,
+			CorrelationId:      po.CorrelationID,
+			CausationId:        po.ID.String(),
+			Timestamp:          timestamppb.Now(),
+			Version:            int64(po.Version),
+			IdempotencyKey:     po.IdempotencyKey,
+		})
 
 		s.logger.Info("payment order completed",
 			"payment_order_id", po.ID.String(),
@@ -771,25 +795,20 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 	}
 
 	// Publish PaymentOrderCancelled event
-	if s.kafkaProducer != nil {
-		event := &eventsv1.PaymentOrderCancelledEvent{
-			EventId:            uuid.New().String(),
-			PaymentOrderId:     po.ID.String(),
-			DebtorAccountId:    po.DebtorAccountID,
-			Amount:             toMoneyAmount(po.Amount),
-			CancellationReason: req.CancellationReason,
-			CancelledBy:        req.CancelledBy,
-			LienId:             lienID,
-			CorrelationId:      po.CorrelationID,
-			CausationId:        po.ID.String(),
-			Timestamp:          timestamppb.Now(),
-			Version:            int64(po.Version),
-			IdempotencyKey:     po.IdempotencyKey,
-		}
-		if err := s.kafkaProducer.Publish(ctx, TopicPaymentOrderCancelled, po.ID.String(), event); err != nil {
-			s.logger.Error("failed to publish PaymentOrderCancelled event", "error", err)
-		}
-	}
+	s.publishEvent(ctx, TopicPaymentOrderCancelled, po.ID.String(), &eventsv1.PaymentOrderCancelledEvent{
+		EventId:            uuid.New().String(),
+		PaymentOrderId:     po.ID.String(),
+		DebtorAccountId:    po.DebtorAccountID,
+		Amount:             toMoneyAmount(po.Amount),
+		CancellationReason: req.CancellationReason,
+		CancelledBy:        req.CancelledBy,
+		LienId:             lienID,
+		CorrelationId:      po.CorrelationID,
+		CausationId:        po.ID.String(),
+		Timestamp:          timestamppb.Now(),
+		Version:            int64(po.Version),
+		IdempotencyKey:     po.IdempotencyKey,
+	})
 
 	s.logger.Info("payment order cancelled",
 		"payment_order_id", po.ID.String(),
@@ -809,14 +828,11 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 	}
 
 	// Parse and validate pagination parameters
-	const defaultPageSize = 50
-	const maxPageSize = 1000
-
-	pageSize := defaultPageSize
+	pageSize := s.defaultPageSize
 	if req.Pagination != nil && req.Pagination.PageSize > 0 {
 		pageSize = int(req.Pagination.PageSize)
-		if pageSize > maxPageSize {
-			pageSize = maxPageSize
+		if pageSize > s.maxPageSize {
+			pageSize = s.maxPageSize
 		}
 	}
 
@@ -859,6 +875,24 @@ func (s *Service) ListPaymentOrders(_ context.Context, req *pb.ListPaymentOrders
 }
 
 // Helper functions
+
+// publishEvent publishes a Kafka event if the producer is configured.
+// Logs errors but does not fail the operation - events are recovered via outbox pattern.
+func (s *Service) publishEvent(ctx context.Context, topic string, key string, event proto.Message) {
+	if s.kafkaProducer == nil {
+		return
+	}
+	if err := s.kafkaProducer.Publish(ctx, topic, key, event); err != nil {
+		s.logger.Error("failed to publish event",
+			"topic", topic,
+			"key", key,
+			"error", err)
+	} else {
+		s.logger.Info("published event",
+			"topic", topic,
+			"key", key)
+	}
+}
 
 // toProto converts a domain PaymentOrder to proto PaymentOrder
 func toProto(po *domain.PaymentOrder) *pb.PaymentOrder {

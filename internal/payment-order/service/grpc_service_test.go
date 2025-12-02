@@ -1162,11 +1162,12 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 
 	// Create service with all dependencies configured
 	svc := &Service{
-		repo:                 repo,
-		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		currentAccountClient: caClient,
-		paymentGateway:       gwMock,
-		sagaTimeout:          DefaultSagaTimeout,
+		repo:                    repo,
+		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient:    caClient,
+		paymentGateway:          gwMock,
+		sagaTimeout:             DefaultSagaTimeout,
+		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 		// kafkaProducer is nil - events won't be published but saga still runs
 	}
 
@@ -1220,11 +1221,12 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 	gwMock := &MockPaymentGateway{}
 
 	svc := &Service{
-		repo:                 repo,
-		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		currentAccountClient: caClient,
-		paymentGateway:       gwMock,
-		sagaTimeout:          DefaultSagaTimeout,
+		repo:                    repo,
+		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient:    caClient,
+		paymentGateway:          gwMock,
+		sagaTimeout:             DefaultSagaTimeout,
+		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 	}
 
 	ctx := context.Background()
@@ -1276,11 +1278,12 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:                 repo,
-		logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
-		currentAccountClient: caClient,
-		paymentGateway:       gwMock,
-		sagaTimeout:          DefaultSagaTimeout,
+		repo:                    repo,
+		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		currentAccountClient:    caClient,
+		paymentGateway:          gwMock,
+		sagaTimeout:             DefaultSagaTimeout,
+		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 	}
 
 	ctx := context.Background()
