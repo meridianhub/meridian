@@ -38,10 +38,10 @@ linters:
     - sqlclosecheck  # Check SQL resources are closed
     - rowserrcheck   # Check database rows errors
 
-    # Compile-time safety linters (planned - enable after fixing existing issues)
-    # - nilnil         # Prevent returning (nil, nil) which hides errors [disabled: 15 violations to fix]
-    # - forcetypeassert # Require checked type assertions (v, ok := x.(T)) [disabled: 14 violations to fix]
-    # - gocritic       # Additional safety diagnostics [disabled: 10 violations to fix]
+    # Compile-time safety linters
+    - nilnil         # Prevent returning (nil, nil) which hides errors
+    - forcetypeassert # Require checked type assertions (v, ok := x.(T))
+    - gocritic       # Additional safety diagnostics
     - bodyclose      # HTTP response bodies must be closed
 
   disable:
@@ -124,14 +124,34 @@ linters-settings:
     asserts: true
     comparison: true
 
-  # gocritic: Disabled until existing violations are fixed. Config preserved for re-enabling:
-  # gocritic:
-  #   enabled-checks:
-  #     - appendAssign, argOrder, badCall, badCond, badLock, badRegexp
-  #     - builtinShadowDecl, caseOrder, deferInLoop, dupArg, dupBranchBody
-  #     - dupCase, dupSubExpr, externalErrorReassign, flagDeref, mapKey
-  #     - nilValReturn, offBy1, regexpPattern, sloppyReassign, sortSlice
-  #     - sprintfQuotedString, sqlQuery, syncMapLoadAndDelete, truncateCmp, weakCond
+  gocritic:
+    enabled-checks:
+      - appendAssign
+      - argOrder
+      - badCall
+      - badCond
+      - badLock
+      - badRegexp
+      - builtinShadowDecl
+      - caseOrder
+      - deferInLoop
+      - dupArg
+      - dupBranchBody
+      - dupCase
+      - dupSubExpr
+      - externalErrorReassign
+      - flagDeref
+      - mapKey
+      - nilValReturn
+      - offBy1
+      - regexpPattern
+      - sloppyReassign
+      - sortSlice
+      - sprintfQuotedString
+      - sqlQuery
+      - syncMapLoadAndDelete
+      - truncateCmp
+      - weakCond
 
 issues:
   exclude-use-default: false
