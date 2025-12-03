@@ -1141,7 +1141,7 @@ func TestReversePaymentOrder_Success(t *testing.T) {
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("ledger-booking-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1168,7 +1168,7 @@ func TestReversePaymentOrder_AlreadyReversed_Idempotent(t *testing.T) {
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("ledger-booking-123")
 	_ = po.Reverse("Already reversed")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1190,7 +1190,7 @@ func TestReversePaymentOrder_NotCompleted(t *testing.T) {
 	// Create a payment order in INITIATED state (cannot be reversed)
 	amount, _ := cadomain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1217,7 +1217,7 @@ func TestReversePaymentOrder_MissingReason(t *testing.T) {
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("ledger-booking-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
@@ -1244,7 +1244,7 @@ func TestReversePaymentOrder_MissingReversedBy(t *testing.T) {
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
 	_ = po.Complete("ledger-booking-123")
-	_ = repo.Create(po)
+	_ = repo.Create(context.Background(), po)
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
