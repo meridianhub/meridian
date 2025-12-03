@@ -161,17 +161,16 @@ func TestFluentChaining(t *testing.T) {
 // TestRealWorldScenario demonstrates a practical use case
 func TestRealWorldScenario_WaitForState(t *testing.T) {
 	// Simulate an async operation that changes state
-	type Order struct {
-		Status string
-	}
-	order := &Order{Status: "PENDING"}
+	// Using atomic.Value for thread-safe status updates
+	var status atomic.Value
+	status.Store("PENDING")
 
 	// Simulate async status change
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		order.Status = "PROCESSING"
+		status.Store("PROCESSING")
 		time.Sleep(50 * time.Millisecond)
-		order.Status = "COMPLETED"
+		status.Store("COMPLETED")
 	}()
 
 	// Wait for completed status
@@ -179,9 +178,9 @@ func TestRealWorldScenario_WaitForState(t *testing.T) {
 		AtMost(500 * time.Millisecond).
 		PollInterval(10 * time.Millisecond).
 		Until(func() bool {
-			return order.Status == "COMPLETED"
+			return status.Load().(string) == "COMPLETED"
 		})
 
 	require.NoError(t, err)
-	assert.Equal(t, "COMPLETED", order.Status)
+	assert.Equal(t, "COMPLETED", status.Load().(string))
 }
