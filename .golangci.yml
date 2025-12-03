@@ -170,6 +170,9 @@ issues:
         - unparam
         - wrapcheck
         - bodyclose
+        - forcetypeassert  # Type assertions in tests are acceptable for cleaner test code
+        - gocritic         # Style checks less critical in tests
+        - nilnil           # Tests may use (nil, nil) for mock implementations
 
     # Exclude all linters for integration tests (require external services)
     - path: test/integration/

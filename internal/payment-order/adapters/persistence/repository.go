@@ -310,7 +310,7 @@ func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentO
 	}
 
 	// Update domain model version
-	po.Version = po.Version + 1
+	po.Version++
 
 	return nil
 }

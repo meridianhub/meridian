@@ -21,6 +21,8 @@ var (
 	ErrMissingTimestamp = errors.New("deposit event: timestamp is required")
 	// ErrInvalidCurrency is returned when a deposit event has an unknown or unspecified currency
 	ErrInvalidCurrency = errors.New("deposit event: unknown or unspecified currency")
+	// ErrUnexpectedMessageType is returned when the message is not a DepositEvent
+	ErrUnexpectedMessageType = errors.New("unexpected message type")
 )
 
 // DepositConsumer consumes DepositEvent messages from Kafka and processes them
@@ -58,7 +60,11 @@ func NewDepositConsumer(config kafka.ConsumerConfig, postingService *service.Pos
 
 	// Handler converts Kafka messages to service commands
 	handler := func(ctx context.Context, _ []byte, msg proto.Message) error {
-		return dc.handleDepositEvent(ctx, msg.(*eventsv1.DepositEvent))
+		event, ok := msg.(*eventsv1.DepositEvent)
+		if !ok {
+			return fmt.Errorf("%w: expected *DepositEvent, got %T", ErrUnexpectedMessageType, msg)
+		}
+		return dc.handleDepositEvent(ctx, event)
 	}
 
 	consumer, err := kafka.NewProtoConsumer(config, msgFactory, handler)
