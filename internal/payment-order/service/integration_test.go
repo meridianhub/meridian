@@ -29,7 +29,7 @@ import (
 )
 
 // =============================================================================
-// Test Infrastructure Setup (Subtask 13.1)
+// Test Infrastructure Setup
 // =============================================================================
 
 // Mock errors for testing
@@ -288,7 +288,7 @@ func waitForSagaCompletion(ctx context.Context, t *testing.T, repo persistence.R
 }
 
 // =============================================================================
-// Happy Path Integration Tests (Subtask 13.2)
+// Happy Path Integration Tests
 // =============================================================================
 
 // TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete tests the full
@@ -469,7 +469,7 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 }
 
 // =============================================================================
-// Compensation Scenario Tests (Subtask 13.3)
+// Compensation Scenario Tests
 // =============================================================================
 
 // TestIntegration_InsufficientFunds_SagaFails tests that a payment order
@@ -661,7 +661,7 @@ func TestIntegration_ConcurrentPayments_SameAccount(t *testing.T) {
 }
 
 // =============================================================================
-// Defensive Tests (Subtask 13.4)
+// Defensive Tests
 // =============================================================================
 
 // TestIntegration_NetworkTimeout_DuringExecutePhase tests handling of network
@@ -1196,37 +1196,4 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, domain.PaymentOrderStatusReversed, reversedPO.Status)
 	assert.NotNil(t, reversedPO.ReversedAt)
-}
-
-// =============================================================================
-// Benchmark Tests
-// =============================================================================
-
-// BenchmarkInitiatePaymentOrder benchmarks payment order initiation.
-func BenchmarkInitiatePaymentOrder(b *testing.B) {
-	db, cleanup := testdb.SetupPostgres(&testing.T{}, []interface{}{
-		&persistence.PaymentOrderEntity{},
-	})
-	defer cleanup()
-
-	repo := persistence.NewPaymentOrderRepository(db)
-	mockCA := newMockCurrentAccountClient()
-	mockGW := newMockPaymentGateway()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-
-	svc, _ := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
-	})
-
-	ctx := context.Background()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		req := createTestPaymentRequest("ACC-BENCH-001", 100, 0)
-		_, _ = svc.InitiatePaymentOrder(ctx, req)
-	}
 }
