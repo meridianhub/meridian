@@ -73,6 +73,7 @@ const (
 	orderStatusUniqueFoundStr     = "UNIQUE_FOUND"
 	orderStatusDuplicatesFoundStr = "DUPLICATES_FOUND"
 	orderStatusNoneFoundStr       = "NONE_FOUND"
+	orderStatusUnknownStr         = "UNKNOWN"
 )
 
 func (s OrderStatus) String() string {
@@ -84,7 +85,7 @@ func (s OrderStatus) String() string {
 	case OrderStatusNoneFound:
 		return orderStatusNoneFoundStr
 	default:
-		return statusUnknownStr
+		return orderStatusUnknownStr
 	}
 }
 
