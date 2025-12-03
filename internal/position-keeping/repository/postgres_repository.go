@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/internal/position-keeping/domain"
+	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
 )
 
@@ -357,12 +358,10 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	}
 
 	// Filter for only new audit entries
-	newAuditEntries := make([]*domain.AuditTrailEntry, 0)
-	for _, entry := range log.AuditTrail {
-		if _, exists := existingAuditIDs[entry.AuditID]; !exists {
-			newAuditEntries = append(newAuditEntries, entry)
-		}
-	}
+	newAuditEntries := lo.Filter(log.AuditTrail, func(entry *domain.AuditTrailEntry, _ int) bool {
+		_, exists := existingAuditIDs[entry.AuditID]
+		return !exists
+	})
 
 	// Insert only new audit entries
 	if len(newAuditEntries) > 0 {
