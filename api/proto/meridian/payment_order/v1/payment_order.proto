@@ -491,10 +491,19 @@ service PaymentOrderService {
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create a new payment order"
+      description: "Initiates a payment order and begins the saga flow. The order "
+                   "progresses through INITIATED → RESERVED → EXECUTING → COMPLETED/FAILED."
       responses: {
         key: "201"
         value: {
           description: "Payment order created successfully"
+        }
+      }
+      responses: {
+        key: "400"
+        value: {
+          description: "Invalid request (missing required fields or validation error)"
         }
       }
     };
@@ -505,14 +514,34 @@ service PaymentOrderService {
     option (google.api.http) = {
       get: "/v1/payment-orders/{payment_order_id}"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get payment order details"
+      responses: {
+        key: "404"
+        value: {
+          description: "Payment order not found"
+        }
+      }
+    };
   }
 
   // UpdatePaymentOrder handles asynchronous gateway callbacks.
   // Called when the external gateway reports the final payment status.
   rpc UpdatePaymentOrder(UpdatePaymentOrderRequest) returns (UpdatePaymentOrderResponse) {
     option (google.api.http) = {
-      put: "/v1/payment-orders/{payment_order_id}"
+      patch: "/v1/payment-orders/{payment_order_id}"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Update payment order status"
+      description: "Handles asynchronous gateway callbacks when the external payment "
+                   "gateway reports the final payment status (success or failure)."
+      responses: {
+        key: "404"
+        value: {
+          description: "Payment order not found"
+        }
+      }
     };
   }
 
@@ -524,6 +553,23 @@ service PaymentOrderService {
       post: "/v1/payment-orders/{payment_order_id}/cancel"
       body: "*"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Cancel a payment order"
+      description: "Cancels a payment order before completion. Only valid for INITIATED "
+                   "or RESERVED states. If RESERVED, releases the lien on the debtor account."
+      responses: {
+        key: "404"
+        value: {
+          description: "Payment order not found"
+        }
+      }
+      responses: {
+        key: "409"
+        value: {
+          description: "Cannot cancel - order is EXECUTING or already completed"
+        }
+      }
+    };
   }
 
   // ListPaymentOrders returns a paginated list of payment orders with optional filtering.
@@ -531,6 +577,11 @@ service PaymentOrderService {
   rpc ListPaymentOrders(ListPaymentOrdersRequest) returns (ListPaymentOrdersResponse) {
     option (google.api.http) = {
       get: "/v1/payment-orders"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List payment orders"
+      description: "Returns a paginated list of payment orders with optional filtering "
+                   "by debtor_account_id, status, and date range."
     };
   }
 
@@ -542,6 +593,23 @@ service PaymentOrderService {
     option (google.api.http) = {
       post: "/v1/payment-orders/{payment_order_id}/reverse"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Reverse a completed payment order"
+      description: "Reverses a completed payment order by creating compensating ledger "
+                   "entries. Only valid for COMPLETED state. Idempotent operation."
+      responses: {
+        key: "404"
+        value: {
+          description: "Payment order not found"
+        }
+      }
+      responses: {
+        key: "409"
+        value: {
+          description: "Cannot reverse - order is not in COMPLETED state"
+        }
+      }
     };
   }
 }
