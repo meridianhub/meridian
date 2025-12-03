@@ -63,6 +63,20 @@ const (
 	PaymentOrderStatusReversed  PaymentOrderStatus = "REVERSED"
 )
 
+// LienExecutionStatus tracks the status of lien execution for completed payment orders.
+type LienExecutionStatus string
+
+const (
+	// LienExecutionStatusUnspecified means the status is not set (payment not yet completed).
+	LienExecutionStatusUnspecified LienExecutionStatus = ""
+	// LienExecutionStatusPending means ExecuteLien has not been attempted yet or is in progress.
+	LienExecutionStatusPending LienExecutionStatus = "PENDING"
+	// LienExecutionStatusSucceeded means ExecuteLien completed successfully.
+	LienExecutionStatusSucceeded LienExecutionStatus = "SUCCEEDED"
+	// LienExecutionStatusFailed means ExecuteLien failed after all retry attempts.
+	LienExecutionStatusFailed LienExecutionStatus = "FAILED"
+)
+
 // PaymentOrder represents the aggregate root for the payment order saga.
 // It acts as the saga orchestrator for money movement, coordinating
 // across CurrentAccount (reservations) and FinancialAccounting (ledger booking).
@@ -93,6 +107,10 @@ type PaymentOrder struct {
 	FailedAt           *time.Time
 	CancelledAt        *time.Time
 	ReversedAt         *time.Time
+	// LienExecutionStatus tracks the status of lien execution for completed payment orders.
+	LienExecutionStatus   LienExecutionStatus
+	LienExecutionAttempts int
+	LienExecutionError    string
 }
 
 // NewPaymentOrder creates a new payment order in INITIATED status.
@@ -321,4 +339,45 @@ func (p *PaymentOrder) RequiresLienRelease() bool {
 func (p *PaymentOrder) SetCausationID(causationID string) {
 	p.CausationID = causationID
 	p.UpdatedAt = time.Now()
+}
+
+// SetLienExecutionPending marks lien execution as pending.
+// Call this when starting lien execution retry attempts.
+func (p *PaymentOrder) SetLienExecutionPending() {
+	p.LienExecutionStatus = LienExecutionStatusPending
+	p.UpdatedAt = time.Now()
+}
+
+// SetLienExecutionSucceeded marks lien execution as succeeded.
+// Call this when ExecuteLien completes successfully.
+func (p *PaymentOrder) SetLienExecutionSucceeded() {
+	p.LienExecutionStatus = LienExecutionStatusSucceeded
+	p.LienExecutionError = ""
+	p.UpdatedAt = time.Now()
+}
+
+// maxLienExecutionErrorLength is the maximum length of the lien execution error message.
+// Matches the database column size (VARCHAR(1000)) and proto field constraint.
+const maxLienExecutionErrorLength = 1000
+
+// SetLienExecutionFailed marks lien execution as failed after all retries exhausted.
+// Call this when all retry attempts have failed and manual reconciliation is needed.
+// Error messages exceeding maxLienExecutionErrorLength are truncated with a suffix.
+func (p *PaymentOrder) SetLienExecutionFailed(err string) {
+	p.LienExecutionStatus = LienExecutionStatusFailed
+	// Truncate error message to fit database column size
+	if len(err) > maxLienExecutionErrorLength {
+		const truncatedSuffix = "...[truncated]"
+		err = err[:maxLienExecutionErrorLength-len(truncatedSuffix)] + truncatedSuffix
+	}
+	p.LienExecutionError = err
+	p.UpdatedAt = time.Now()
+}
+
+// RequiresLienExecution returns true if this payment order needs lien execution.
+// This is true for COMPLETED payments with a lien that hasn't been successfully executed.
+func (p *PaymentOrder) RequiresLienExecution() bool {
+	return p.Status == PaymentOrderStatusCompleted &&
+		p.LienID != "" &&
+		p.LienExecutionStatus != LienExecutionStatusSucceeded
 }

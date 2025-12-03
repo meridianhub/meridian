@@ -75,6 +75,14 @@ var (
 		[]string{"status"},
 	)
 
+	// Lien execution status update exhaustion - indicates reconciliation needed
+	lienExecutionStatusUpdateExhausted = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "payment_order_lien_execution_status_update_exhausted_total",
+			Help: "Total number of lien execution status updates that exhausted all retries due to version conflicts",
+		},
+	)
+
 	// Payment amount metrics
 	paymentAmountTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -225,6 +233,13 @@ func RecordRejection(currency, errorCategory string) {
 // RecordLienExecution records a lien execution attempt
 func RecordLienExecution(status string) {
 	lienExecutionsTotal.WithLabelValues(status).Inc()
+}
+
+// RecordLienExecutionStatusUpdateExhausted records when a lien execution status update
+// exhausts all retries due to version conflicts. This indicates the payment order
+// may be stuck in PENDING state and requires reconciliation.
+func RecordLienExecutionStatusUpdateExhausted() {
+	lienExecutionStatusUpdateExhausted.Inc()
 }
 
 // RecordPaymentAmount records the payment amount processed
