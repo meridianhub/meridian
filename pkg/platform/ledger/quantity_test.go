@@ -10,7 +10,7 @@ import (
 func TestNewQuantity(t *testing.T) {
 	t.Run("creates quantity with valid amount", func(t *testing.T) {
 		result := NewQuantity(USD, 10000)
-		q, err := result.Unwrap()
+		q, err := result.Get()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -24,7 +24,7 @@ func TestNewQuantity(t *testing.T) {
 
 	t.Run("handles negative amounts", func(t *testing.T) {
 		result := NewQuantity(USD, -5000)
-		q, err := result.Unwrap()
+		q, err := result.Get()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -50,7 +50,7 @@ func TestNewQuantityFromMajor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := NewQuantityFromMajor(tt.unit, tt.major)
-			q, err := result.Unwrap()
+			q, err := result.Get()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -75,7 +75,7 @@ func TestQuantityMajorAmount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			q, _ := NewQuantity(tt.unit, tt.minor).Unwrap()
+			q := NewQuantity(tt.unit, tt.minor).MustGet()
 			if q.MajorAmount() != tt.expected {
 				t.Errorf("expected %f, got %f", tt.expected, q.MajorAmount())
 			}
@@ -85,10 +85,10 @@ func TestQuantityMajorAmount(t *testing.T) {
 
 func TestQuantityAdd(t *testing.T) {
 	t.Run("adds two quantities", func(t *testing.T) {
-		q1, _ := NewQuantity(USD, 10000).Unwrap()
-		q2, _ := NewQuantity(USD, 5000).Unwrap()
+		q1 := NewQuantity(USD, 10000).MustGet()
+		q2 := NewQuantity(USD, 5000).MustGet()
 		result := q1.Add(q2)
-		sum, err := result.Unwrap()
+		sum, err := result.Get()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -98,19 +98,19 @@ func TestQuantityAdd(t *testing.T) {
 	})
 
 	t.Run("handles negative amounts", func(t *testing.T) {
-		q1, _ := NewQuantity(USD, 10000).Unwrap()
-		q2, _ := NewQuantity(USD, -3000).Unwrap()
-		sum, _ := q1.Add(q2).Unwrap()
+		q1 := NewQuantity(USD, 10000).MustGet()
+		q2 := NewQuantity(USD, -3000).MustGet()
+		sum := q1.Add(q2).MustGet()
 		if sum.Amount() != 7000 {
 			t.Errorf("expected 7000, got %d", sum.Amount())
 		}
 	})
 
 	t.Run("detects overflow", func(t *testing.T) {
-		q1, _ := NewQuantity(USD, math.MaxInt64).Unwrap()
-		q2, _ := NewQuantity(USD, 1).Unwrap()
+		q1 := NewQuantity(USD, math.MaxInt64).MustGet()
+		q2 := NewQuantity(USD, 1).MustGet()
 		result := q1.Add(q2)
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected overflow error")
 		}
 		if result.Error() != ErrAmountOverflow {
@@ -121,19 +121,19 @@ func TestQuantityAdd(t *testing.T) {
 
 func TestQuantitySub(t *testing.T) {
 	t.Run("subtracts two quantities", func(t *testing.T) {
-		q1, _ := NewQuantity(USD, 10000).Unwrap()
-		q2, _ := NewQuantity(USD, 3000).Unwrap()
-		diff, _ := q1.Sub(q2).Unwrap()
+		q1 := NewQuantity(USD, 10000).MustGet()
+		q2 := NewQuantity(USD, 3000).MustGet()
+		diff := q1.Sub(q2).MustGet()
 		if diff.Amount() != 7000 {
 			t.Errorf("expected 7000, got %d", diff.Amount())
 		}
 	})
 
 	t.Run("detects underflow", func(t *testing.T) {
-		q1, _ := NewQuantity(USD, math.MinInt64).Unwrap()
-		q2, _ := NewQuantity(USD, 1).Unwrap()
+		q1 := NewQuantity(USD, math.MinInt64).MustGet()
+		q2 := NewQuantity(USD, 1).MustGet()
 		result := q1.Sub(q2)
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected underflow error")
 		}
 	})
@@ -141,25 +141,25 @@ func TestQuantitySub(t *testing.T) {
 
 func TestQuantityMul(t *testing.T) {
 	t.Run("multiplies by scalar", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		product, _ := q.Mul(5).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		product := q.Mul(5).MustGet()
 		if product.Amount() != 500 {
 			t.Errorf("expected 500, got %d", product.Amount())
 		}
 	})
 
 	t.Run("multiply by zero", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		product, _ := q.Mul(0).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		product := q.Mul(0).MustGet()
 		if product.Amount() != 0 {
 			t.Errorf("expected 0, got %d", product.Amount())
 		}
 	})
 
 	t.Run("detects overflow", func(t *testing.T) {
-		q, _ := NewQuantity(USD, math.MaxInt64/2+1).Unwrap()
+		q := NewQuantity(USD, math.MaxInt64/2+1).MustGet()
 		result := q.Mul(2)
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected overflow error")
 		}
 	})
@@ -167,17 +167,17 @@ func TestQuantityMul(t *testing.T) {
 
 func TestQuantityDiv(t *testing.T) {
 	t.Run("divides by scalar", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		quotient, _ := q.Div(4).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		quotient := q.Div(4).MustGet()
 		if quotient.Amount() != 25 {
 			t.Errorf("expected 25, got %d", quotient.Amount())
 		}
 	})
 
 	t.Run("division by zero", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
 		result := q.Div(0)
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected division by zero error")
 		}
 		if result.Error() != ErrDivisionByZero {
@@ -186,9 +186,9 @@ func TestQuantityDiv(t *testing.T) {
 	})
 
 	t.Run("MinInt64 divided by -1 overflows", func(t *testing.T) {
-		q, _ := NewQuantity(USD, math.MinInt64).Unwrap()
+		q := NewQuantity(USD, math.MinInt64).MustGet()
 		result := q.Div(-1)
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected overflow error")
 		}
 	})
@@ -196,25 +196,25 @@ func TestQuantityDiv(t *testing.T) {
 
 func TestQuantityNegate(t *testing.T) {
 	t.Run("negates positive", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		neg, _ := q.Negate().Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		neg := q.Negate().MustGet()
 		if neg.Amount() != -100 {
 			t.Errorf("expected -100, got %d", neg.Amount())
 		}
 	})
 
 	t.Run("negates negative", func(t *testing.T) {
-		q, _ := NewQuantity(USD, -100).Unwrap()
-		neg, _ := q.Negate().Unwrap()
+		q := NewQuantity(USD, -100).MustGet()
+		neg := q.Negate().MustGet()
 		if neg.Amount() != 100 {
 			t.Errorf("expected 100, got %d", neg.Amount())
 		}
 	})
 
 	t.Run("MinInt64 overflow", func(t *testing.T) {
-		q, _ := NewQuantity(USD, math.MinInt64).Unwrap()
+		q := NewQuantity(USD, math.MinInt64).MustGet()
 		result := q.Negate()
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected overflow error")
 		}
 	})
@@ -222,16 +222,16 @@ func TestQuantityNegate(t *testing.T) {
 
 func TestQuantityAbs(t *testing.T) {
 	t.Run("abs of positive", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		abs, _ := q.Abs().Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		abs := q.Abs().MustGet()
 		if abs.Amount() != 100 {
 			t.Errorf("expected 100, got %d", abs.Amount())
 		}
 	})
 
 	t.Run("abs of negative", func(t *testing.T) {
-		q, _ := NewQuantity(USD, -100).Unwrap()
-		abs, _ := q.Abs().Unwrap()
+		q := NewQuantity(USD, -100).MustGet()
+		abs := q.Abs().MustGet()
 		if abs.Amount() != 100 {
 			t.Errorf("expected 100, got %d", abs.Amount())
 		}
@@ -239,9 +239,9 @@ func TestQuantityAbs(t *testing.T) {
 }
 
 func TestQuantityComparisons(t *testing.T) {
-	q100, _ := NewQuantity(USD, 100).Unwrap()
-	q200, _ := NewQuantity(USD, 200).Unwrap()
-	q100b, _ := NewQuantity(USD, 100).Unwrap()
+	q100 := NewQuantity(USD, 100).MustGet()
+	q200 := NewQuantity(USD, 200).MustGet()
+	q100b := NewQuantity(USD, 100).MustGet()
 
 	t.Run("Equal", func(t *testing.T) {
 		if !q100.Equal(q100b) {
@@ -316,29 +316,29 @@ func TestQuantityPredicates(t *testing.T) {
 		if !zero.IsZero() {
 			t.Error("expected zero to be zero")
 		}
-		q, _ := NewQuantity(USD, 100).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
 		if q.IsZero() {
 			t.Error("expected 100 to not be zero")
 		}
 	})
 
 	t.Run("IsNegative", func(t *testing.T) {
-		neg, _ := NewQuantity(USD, -100).Unwrap()
+		neg := NewQuantity(USD, -100).MustGet()
 		if !neg.IsNegative() {
 			t.Error("expected -100 to be negative")
 		}
-		pos, _ := NewQuantity(USD, 100).Unwrap()
+		pos := NewQuantity(USD, 100).MustGet()
 		if pos.IsNegative() {
 			t.Error("expected 100 to not be negative")
 		}
 	})
 
 	t.Run("IsPositive", func(t *testing.T) {
-		pos, _ := NewQuantity(USD, 100).Unwrap()
+		pos := NewQuantity(USD, 100).MustGet()
 		if !pos.IsPositive() {
 			t.Error("expected 100 to be positive")
 		}
-		neg, _ := NewQuantity(USD, -100).Unwrap()
+		neg := NewQuantity(USD, -100).MustGet()
 		if neg.IsPositive() {
 			t.Error("expected -100 to not be positive")
 		}
@@ -347,8 +347,8 @@ func TestQuantityPredicates(t *testing.T) {
 
 func TestQuantitySplit(t *testing.T) {
 	t.Run("even split", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		parts, _ := q.Split(4).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		parts := q.Split(4).MustGet()
 		if len(parts) != 4 {
 			t.Fatalf("expected 4 parts, got %d", len(parts))
 		}
@@ -360,8 +360,8 @@ func TestQuantitySplit(t *testing.T) {
 	})
 
 	t.Run("uneven split with remainder", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		parts, _ := q.Split(3).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		parts := q.Split(3).MustGet()
 		// 100 / 3 = 33 remainder 1
 		// First part gets the remainder
 		if parts[0].Amount() != 34 {
@@ -381,9 +381,9 @@ func TestQuantitySplit(t *testing.T) {
 	})
 
 	t.Run("split by zero", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
 		result := q.Split(0)
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected error for split by zero")
 		}
 	})
@@ -391,8 +391,8 @@ func TestQuantitySplit(t *testing.T) {
 
 func TestQuantityAllocate(t *testing.T) {
 	t.Run("allocate proportionally", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		parts, _ := q.Allocate([]int64{1, 2, 1}).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		parts := q.Allocate([]int64{1, 2, 1}).MustGet()
 		// Total ratio = 4
 		// Expected: 25, 50, 25
 		if parts[0].Amount() != 25 {
@@ -407,8 +407,8 @@ func TestQuantityAllocate(t *testing.T) {
 	})
 
 	t.Run("allocate with remainder distribution", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
-		parts, _ := q.Allocate([]int64{1, 1, 1}).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
+		parts := q.Allocate([]int64{1, 1, 1}).MustGet()
 		// 100 / 3 = 33 remainder 1
 		total := parts[0].Amount() + parts[1].Amount() + parts[2].Amount()
 		if total != 100 {
@@ -417,25 +417,25 @@ func TestQuantityAllocate(t *testing.T) {
 	})
 
 	t.Run("allocate empty ratios", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
 		result := q.Allocate([]int64{})
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected error for empty ratios")
 		}
 	})
 
 	t.Run("allocate zero total ratio", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
 		result := q.Allocate([]int64{0, 0, 0})
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected error for zero total ratio")
 		}
 	})
 
 	t.Run("allocate negative ratio", func(t *testing.T) {
-		q, _ := NewQuantity(USD, 100).Unwrap()
+		q := NewQuantity(USD, 100).MustGet()
 		result := q.Allocate([]int64{1, -1, 1})
-		if !result.IsErr() {
+		if !result.IsError() {
 			t.Error("expected error for negative ratio")
 		}
 	})
@@ -473,9 +473,5 @@ func TestZero(t *testing.T) {
 
 // Helper function for tests
 func mustQuantity[U UnitMarker](r types.Result[Quantity[U]]) Quantity[U] {
-	q, err := r.Unwrap()
-	if err != nil {
-		panic(err)
-	}
-	return q
+	return r.MustGet()
 }

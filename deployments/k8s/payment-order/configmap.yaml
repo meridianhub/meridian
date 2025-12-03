@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-order-config
+  labels:
+    app: payment-order
+    component: microservice
+data:
+  # Logging configuration
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+
+  # Database connection pool settings
+  DB_MAX_OPEN_CONNS: "25"
+  DB_MAX_IDLE_CONNS: "5"
+  DB_CONN_MAX_LIFETIME: "5m"
+  DB_CONN_MAX_IDLE_TIME: "10m"
+
+  # gRPC server configuration
+  GRPC_PORT: "50054"
+  GRPC_MAX_CONCURRENT_STREAMS: "100"
+
+  # Kafka configuration
+  KAFKA_BROKERS: "kafka:9092"
+
+  # OpenTelemetry configuration
+  OTEL_SERVICE_NAME: "payment-order-service"
+  OTEL_SAMPLING_RATE: "0.1"

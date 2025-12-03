@@ -1,0 +1,1039 @@
+# -*- mode: Python -*-
+
+# Tiltfile for Meridian local development
+# Fast Kubernetes development with live reload
+#
+# Offline Development:
+# Once all Docker images are cached locally, this entire stack runs offline.
+# No external network access required after initial setup.
+#
+# To ensure offline readiness, pre-pull all required images:
+#   docker pull cockroachdb/cockroach:v23.1.11
+#   docker pull redis:7-alpine
+#   docker pull apache/kafka:3.9.1
+#   docker pull quay.io/keycloak/keycloak:26.0
+#
+# Verify images are cached: docker images
+# Then run: tilt up (works completely offline)
+
+# Build date helper (requires POSIX-compliant shell)
+def get_build_date():
+    """Returns current UTC datetime in ISO 8601 format (macOS/Linux/WSL)"""
+    # Use shell command instead of Python datetime (Starlark doesn't support datetime)
+    # Note: Requires POSIX 'date' command (available on macOS, Linux, WSL, Git Bash)
+    return str(local('date -u +"%Y-%m-%dT%H:%M:%SZ"')).strip()
+
+# Allow Tilt to connect to local Kubernetes cluster
+allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desktop', 'colima', 'rancher-desktop'])
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+# Fast startup mode - skip tests on initial load for faster development iteration
+# Set TILT_FAST_STARTUP=true to skip automatic test execution
+# Tests can still be manually triggered via 'tilt trigger test'
+fast_startup = os.getenv('TILT_FAST_STARTUP', 'false').lower() == 'true'
+
+# Detect and use local registry if available (created by ctlptl)
+# This speeds up image builds by avoiding remote registry pushes
+if k8s_context() == 'kind-meridian-local':
+    # Allow registry name to be configured via environment variable
+    # Default: ctlptl-registry (matches ctlptl's default behavior)
+    registry_name = os.getenv('TILT_REGISTRY_NAME', 'ctlptl-registry')
+
+    # Registry URL that Tilt expects (host:port format)
+    # ctlptl configures the registry to be accessible at localhost:5000
+    registry_url = os.getenv('TILT_REGISTRY_URL', 'localhost:5000')
+
+    # Validate that registry container exists
+    registry_check = str(local('docker ps --filter name=%s --format "{{.Names}}" 2>/dev/null || true' % registry_name, quiet=True)).strip()
+
+    if registry_check == registry_name:
+        default_registry(registry_url)
+        print('✓ Using local registry: %s (%s)' % (registry_name, registry_url))
+    else:
+        print('⚠️  Warning: Local registry "%s" not found' % registry_name)
+        print('   Images will be loaded via "kind load" (slower)')
+        print('   To create cluster with registry:')
+        print('   ctlptl create cluster kind --registry=%s --name=kind-meridian-local' % registry_name)
+
+# Docker image configuration
+docker_registry = os.getenv('DOCKER_REGISTRY', 'ghcr.io/meridianhub')
+image_name = 'meridian'
+full_image = '{}/{}'.format(docker_registry, image_name)
+
+# Kubernetes namespace
+k8s_namespace = 'default'
+
+# Database configuration
+# SECURITY: Never commit credentials to version control
+# For local development with CockroachDB (insecure mode, no password required)
+database_url = os.getenv('DATABASE_URL', 'postgres://meridian@localhost:26257/meridian?sslmode=disable')
+
+# =============================================================================
+# Backing Services
+# =============================================================================
+# NOTE: These configurations are optimized for LOCAL DEVELOPMENT ONLY.
+# Production deployments require:
+# - TLS/SSL encryption
+# - Authentication and authorization
+# - Persistent volumes and StatefulSets
+# - Multi-node clusters with replication
+# - Resource limits appropriate for production workloads
+
+# CockroachDB - Single-node for local development
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Service
+metadata:
+  name: cockroachdb
+  labels:
+    app: cockroachdb
+spec:
+  type: ClusterIP
+  ports:
+  - name: grpc
+    port: 26257
+    targetPort: 26257
+  - name: http
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: cockroachdb
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cockroachdb-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cockroachdb
+spec:
+  serviceName: cockroachdb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cockroachdb
+  template:
+    metadata:
+      labels:
+        app: cockroachdb
+    spec:
+      containers:
+      - name: cockroachdb
+        image: cockroachdb/cockroach:v23.1.11
+        ports:
+        - containerPort: 26257
+          name: grpc
+        - containerPort: 8080
+          name: http
+        command:
+        - /cockroach/cockroach
+        - start-single-node
+        - --insecure
+        - --store=path=/cockroach/cockroach-data
+        - --advertise-addr=cockroachdb.default.svc.cluster.local
+        volumeMounts:
+        - name: datadir
+          mountPath: /cockroach/cockroach-data
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+      volumes:
+      - name: datadir
+        persistentVolumeClaim:
+          claimName: cockroachdb-pvc
+'''))
+
+# Redis - Default configuration
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  type: ClusterIP
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: 6379
+  selector:
+    app: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+'''))
+
+# Kafka - 3-broker cluster with KRaft mode for local development
+# KRaft (Kafka Raft) replaces Zookeeper for metadata management
+# Multi-broker setup enables testing of:
+# - Partition replication and failover
+# - Leader election
+# - Quorum consensus
+# - Production-like scenarios in local dev
+#
+# Architecture:
+# - 3 brokers (kafka-0, kafka-1, kafka-2) each acting as both broker and controller
+# - KRaft quorum across all 3 nodes for metadata consensus
+# - Replication factor 2 for topics (allows 1 broker failure)
+# - Headless service for StatefulSet pod discovery
+# - Client service exposing kafka-0 as default endpoint
+#
+# Testing Failover:
+# 1. Create topic with RF=2: kubectl exec kafka-0 -- kafka-topics --create --topic test --partitions 3 --replication-factor 2 --bootstrap-server localhost:9092
+# 2. Describe topic: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
+# 3. Kill a broker: kubectl delete pod kafka-1
+# 4. Verify leadership transfer: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
+# 5. Produce/consume messages to verify data persists
+#
+# Resource Usage: ~1.5GB RAM total (512MB per broker)
+#
+# Storage Limits (prevent disk exhaustion):
+# - 512MB per topic partition (log.retention.bytes=536870912)
+# - 128MB segment size (log.segment.bytes=134217728)
+# - 24h time-based retention
+# - Log cleanup runs every 60 seconds
+# - LZ4 compression enabled (~50% reduction)
+# - Estimated max: ~1.5GB per broker for active topics
+#
+# Resource-Constrained Development (8GB RAM machines):
+# For machines with limited RAM, you can reduce to single-broker mode by:
+# 1. Change replicas: 3 → 1
+# 2. Change KAFKA_DEFAULT_REPLICATION_FACTOR: "2" → "1"
+# 3. Change KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "2" → "1"
+# 4. Reduce memory per broker: 384Mi → 256Mi
+# This reduces Kafka memory from ~1.5GB to ~512MB
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+spec:
+  type: ClusterIP
+  ports:
+  - name: broker
+    port: 9092
+    targetPort: 9092
+  selector:
+    app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    app: kafka
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: broker
+    port: 9092
+    targetPort: 9092
+  - name: controller
+    port: 9093
+    targetPort: 9093
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: apache/kafka:3.9.1
+        ports:
+        - containerPort: 9092
+          name: broker
+        - containerPort: 9093
+          name: controller
+        env:
+        # JVM heap settings for broker memory management
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms384M -Xmx384M"
+        # Cluster ID - must be consistent across all brokers in the KRaft cluster
+        # Generated once and shared by all nodes for cluster membership
+        - name: CLUSTER_ID
+          value: "MkU3OEVBNTcwNTJENDM2Qk"
+        # Pod name used to derive node ID and configure per-pod settings
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - sh
+        - -c
+        - |
+          # Extract node ID from pod name (kafka-0 -> 1, kafka-1 -> 2, kafka-2 -> 3)
+          NODE_ID=$((${POD_NAME##*-} + 1))
+
+          # Define paths
+          LOG_DIRS=/tmp/kraft-combined-logs
+          CONFIG_FILE=/tmp/server-${POD_NAME}.properties
+
+          echo "Generating server.properties for node ${NODE_ID} (${POD_NAME})..."
+
+          # Generate per-pod server.properties with correct configuration
+          cat > ${CONFIG_FILE} << EOF
+          # Node Configuration
+          node.id=${NODE_ID}
+          process.roles=broker,controller
+
+          # Listeners
+          listeners=PLAINTEXT://:9092,CONTROLLER://:9093
+          advertised.listeners=PLAINTEXT://${POD_NAME}.kafka-headless:9092
+          controller.listener.names=CONTROLLER
+          listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+
+          # KRaft Quorum
+          controller.quorum.voters=1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093
+
+          # Storage
+          log.dirs=${LOG_DIRS}
+
+          # Replication
+          offsets.topic.replication.factor=2
+          transaction.state.log.replication.factor=2
+          transaction.state.log.min.isr=1
+          default.replication.factor=2
+          min.insync.replicas=1
+
+          # Auto-create topics
+          auto.create.topics.enable=true
+
+          # Performance
+          num.network.threads=3
+          num.io.threads=8
+          socket.send.buffer.bytes=102400
+          socket.receive.buffer.bytes=102400
+          socket.request.max.bytes=104857600
+
+          # Log Retention (aggressive for local dev to prevent disk exhaustion)
+          log.retention.hours=24
+          log.retention.bytes=536870912
+          log.segment.bytes=134217728
+          log.retention.check.interval.ms=60000
+          log.cleanup.policy=delete
+          log.cleaner.enable=true
+          compression.type=lz4
+          EOF
+
+          # Format KRaft storage if not already formatted
+          if [ ! -f ${LOG_DIRS}/meta.properties ]; then
+            echo "Formatting KRaft storage for node ${NODE_ID}..."
+            /opt/kafka/bin/kafka-storage.sh format \
+              -t ${CLUSTER_ID} \
+              -c ${CONFIG_FILE}
+          else
+            echo "KRaft storage already formatted for node ${NODE_ID}"
+          fi
+
+          # Start Kafka with per-pod configuration
+          echo "Starting Kafka with configuration from ${CONFIG_FILE}..."
+          exec /opt/kafka/bin/kafka-server-start.sh ${CONFIG_FILE}
+        readinessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 200m
+            memory: 384Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+'''))
+
+# Keycloak - Identity and Access Management
+# Provides OAuth 2.0 / OpenID Connect authentication for local development
+# Pre-configured with:
+# - Realm: meridian
+# - Admin user: admin/admin
+# - Client ID: meridian-service
+# - JWKS endpoint: http://keycloak:8080/realms/meridian/protocol/openid-connect/certs
+k8s_yaml(blob('''
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  labels:
+    app: keycloak
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: keycloak
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:26.0
+        args:
+        - start-dev
+        - --http-port=8080
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: KEYCLOAK_ADMIN
+          value: admin
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          value: admin
+        - name: KC_HTTP_RELATIVE_PATH
+          value: /
+        - name: KC_HOSTNAME_STRICT
+          value: "false"
+        - name: KC_HOSTNAME_STRICT_HTTPS
+          value: "false"
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 9000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+'''))
+
+# =============================================================================
+# Observability Stack (Grafana, Loki, Tempo, Prometheus, Alloy)
+# =============================================================================
+# NOTE: This configuration provides a complete observability stack for local development.
+# The stack includes:
+# - Grafana Alloy: OpenTelemetry collector (receives OTLP traces/metrics)
+# - Grafana Tempo: Distributed tracing backend
+# - Grafana Loki: Log aggregation and storage
+# - Prometheus: Metrics collection and storage
+# - Grafana: Visualization and dashboards
+#
+# Grafana is accessible at http://localhost:3000 (no login required in dev mode)
+# All services are configured with anonymous access for easy local development
+
+k8s_yaml('deployments/k8s/observability/grafana-stack.yaml')
+
+# Grafana resources
+k8s_resource(
+  'grafana',
+  port_forwards='3000:3000',
+  labels=['observability'],
+  resource_deps=['tempo', 'loki', 'prometheus'],
+)
+
+# Tempo (traces)
+k8s_resource(
+  'tempo',
+  labels=['observability'],
+  resource_deps=[],
+)
+
+# Loki (logs)
+k8s_resource(
+  'loki',
+  labels=['observability'],
+  resource_deps=[],
+)
+
+# Prometheus (metrics)
+k8s_resource(
+  'prometheus',
+  port_forwards='9090:9090',
+  labels=['observability'],
+  resource_deps=[],
+)
+
+# Alloy (collector)
+k8s_resource(
+  'alloy',
+  labels=['observability'],
+  resource_deps=['tempo', 'prometheus'],
+)
+
+# =============================================================================
+# Main Application
+# =============================================================================
+
+# Build Docker image with live reload
+# Use Dockerfile.dev for local development (has tar/rm for Tilt)
+# Use Dockerfile for production builds (distroless)
+docker_build(
+  'meridian',
+  context='.',
+  dockerfile='Dockerfile.dev',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+  live_update=[
+    # Sync Go source code
+    sync('./cmd', '/app/cmd'),
+    sync('./internal', '/app/internal'),
+    sync('./pkg', '/app/pkg'),
+    sync('./go.mod', '/app/go.mod'),
+    sync('./go.sum', '/app/go.sum'),
+
+    # Rebuild binary on changes (fast incremental builds)
+    run(
+      'cd /app && go build -o meridian ./cmd/meridian',
+      trigger=['./cmd', './internal', './pkg'],
+    ),
+
+    # Restart the service using HUP signal
+    run('kill -HUP 1', trigger=['./cmd', './internal', './pkg']),
+  ],
+)
+
+# Deploy Kubernetes manifests
+k8s_yaml(kustomize('deployments/k8s/base'))
+
+# Meridian DB Secret - for local development only
+# Uses the same CockroachDB credentials as other services
+# NOTE: Production deployments must use External Secrets Operator or Sealed Secrets
+secret_path = 'deployments/k8s/base/secret.yaml'
+if os.path.exists(secret_path):
+  # Load custom secret if manually created via scripts/setup-local-secrets.sh
+  k8s_yaml(secret_path)
+else:
+  # Generate default development secret (consistent with current-account, financial-accounting, position-keeping)
+  k8s_yaml(blob('''
+apiVersion: v1
+kind: Secret
+metadata:
+  name: meridian-db
+  labels:
+    app: meridian
+type: Opaque
+stringData:
+  # Local development connection string - CockroachDB in insecure mode
+  DATABASE_URL: "postgres://meridian@cockroachdb:26257/meridian?sslmode=disable"
+'''))
+
+# Set resource dependencies
+k8s_resource(
+  'meridian',
+  port_forwards=[
+    '8080:8080',  # HTTP API
+    '9090:9090',  # gRPC API
+  ],
+  resource_deps=[
+    'generate-proto',  # Ensures proto files are generated before building
+    'init-database',  # Ensures database and user are created before app starts
+    'redis',
+    'kafka-cluster',
+    'keycloak',
+  ],
+  labels=['microservices'],
+  # Group RBAC and config resources under the main app
+  objects=[
+    'meridian:serviceaccount',
+    'meridian:role',
+    'meridian:rolebinding',
+    'meridian-config:configmap',
+    # Note: meridian-version ConfigMap omitted (Kustomize hash suffix changes with content)
+    # Tilt will still deploy it via kustomize, just not explicitly tracked here
+  ],
+)
+
+# =============================================================================
+# Microservices
+# =============================================================================
+
+# Current-Account Service - gRPC microservice for customer and account management
+docker_build(
+  'current-account',
+  context='.',
+  dockerfile='cmd/current-account/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+)
+
+# Deploy Current-Account Kubernetes manifests
+k8s_yaml('deployments/k8s/current-account/secret.yaml')
+k8s_yaml('deployments/k8s/current-account/configmap.yaml')
+k8s_yaml('deployments/k8s/current-account/deployment.yaml')
+k8s_yaml('deployments/k8s/current-account/service.yaml')
+
+# Set resource dependencies for Current-Account
+k8s_resource(
+  'current-account',
+  port_forwards=[
+    '50051:50051',  # gRPC API
+  ],
+  resource_deps=[
+    'generate-proto',
+    'cockroachdb',
+    'migrate-current-account',
+  ],
+  labels=['microservices'],
+)
+
+# Financial-Accounting Service - gRPC microservice for ledger and booking operations
+docker_build(
+  'financial-accounting',
+  context='.',
+  dockerfile='cmd/financial-accounting/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+)
+
+# Deploy Financial-Accounting Kubernetes manifests
+k8s_yaml('deployments/k8s/financial-accounting/secret.yaml')
+k8s_yaml('deployments/k8s/financial-accounting/configmap.yaml')
+k8s_yaml('deployments/k8s/financial-accounting/deployment.yaml')
+k8s_yaml('deployments/k8s/financial-accounting/service.yaml')
+
+# Set resource dependencies for Financial-Accounting
+k8s_resource(
+  'financial-accounting',
+  port_forwards=[
+    '50052:50052',  # gRPC API
+  ],
+  resource_deps=[
+    'generate-proto',
+    'cockroachdb',
+    'migrate-financial-accounting',  # Financial accounting has its own schema
+  ],
+  labels=['microservices'],
+)
+
+# Position-Keeping Service - gRPC microservice for transaction position management
+docker_build(
+  'position-keeping',
+  context='.',
+  dockerfile='cmd/position-keeping/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+)
+
+# Deploy Position-Keeping Kubernetes manifests
+k8s_yaml('deployments/k8s/position-keeping/secret.yaml')
+k8s_yaml('deployments/k8s/position-keeping/configmap.yaml')
+k8s_yaml('deployments/k8s/position-keeping/deployment.yaml')
+k8s_yaml('deployments/k8s/position-keeping/service.yaml')
+
+# Set resource dependencies for Position-Keeping
+k8s_resource(
+  'position-keeping',
+  port_forwards=[
+    '50053:50053',  # gRPC API
+  ],
+  resource_deps=[
+    'generate-proto',
+    'cockroachdb',
+    'migrate-position-keeping',
+  ],
+  labels=['microservices'],
+)
+
+# Payment-Order Service - gRPC microservice for payment order management with saga orchestration
+docker_build(
+  'payment-order',
+  context='.',
+  dockerfile='cmd/payment-order/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+)
+
+# Deploy Payment-Order Kubernetes manifests
+k8s_yaml('deployments/k8s/payment-order/secret.yaml')
+k8s_yaml('deployments/k8s/payment-order/configmap.yaml')
+k8s_yaml('deployments/k8s/payment-order/deployment.yaml')
+k8s_yaml('deployments/k8s/payment-order/service.yaml')
+
+# Set resource dependencies for Payment-Order
+k8s_resource(
+  'payment-order',
+  port_forwards=[
+    '50054:50054',  # gRPC API
+  ],
+  resource_deps=[
+    'generate-proto',
+    'cockroachdb',
+    'kafka-cluster',
+    'current-account',  # Depends on current-account for lien operations
+    'migrate-payment-order',
+  ],
+  labels=['microservices'],
+)
+
+# =============================================================================
+# Resource Configuration
+# =============================================================================
+
+# CockroachDB resource
+k8s_resource(
+  'cockroachdb',
+  port_forwards='26257:26257',  # SQL port
+  labels=['database'],
+  resource_deps=[],
+  objects=['cockroachdb-pvc:persistentvolumeclaim'],
+)
+
+# Redis resource
+k8s_resource(
+  'redis',
+  port_forwards='6379:6379',
+  labels=['cache'],
+  resource_deps=[],
+)
+
+# Kafka cluster resources (3-broker KRaft cluster - no Zookeeper dependency)
+# Port forwarding to kafka-0 for client access
+# Individual pods visible in Tilt UI for monitoring cluster health
+k8s_resource(
+  'kafka',
+  new_name='kafka-cluster',
+  port_forwards='9092:9092',
+  labels=['messaging'],
+  resource_deps=[],
+  pod_readiness='wait',  # Wait for all 3 pods to be ready
+)
+
+# Label standalone kafka client service (defined via blob() earlier)
+# Groups it with messaging resources to prevent appearing as "uncategorized"
+k8s_resource(
+  new_name='kafka-client-service',
+  objects=['kafka:service'],
+  labels=['messaging'],
+  resource_deps=[],
+)
+
+# Keycloak resource
+k8s_resource(
+  'keycloak',
+  port_forwards='18080:8080',  # Admin console on port 18080 to avoid conflict with app
+  labels=['auth'],
+  resource_deps=[],
+)
+
+# Note: meridian-version ConfigMap remains "uncategorized" due to kustomize hash suffix
+# The hash changes on every build, so we can't reference it statically in objects=[]
+# This is acceptable - it's a single small ConfigMap with build metadata
+# Alternative: Move to dedicated meridian-config if this becomes an issue
+
+# =============================================================================
+# Development Helpers
+# =============================================================================
+
+# Run tests on file changes
+# In fast startup mode, tests are disabled on initial load but can be manually triggered
+local_resource(
+  'test',
+  cmd='make test',
+  deps=['./cmd', './internal', './pkg', './go.mod'],
+  resource_deps=['generate-proto'],
+  labels=['quality'],
+  allow_parallel=True,
+  auto_init=False if fast_startup else True,  # Skip on startup in fast mode
+)
+
+# Run linters on file changes
+local_resource(
+  'lint',
+  cmd='make lint',
+  deps=['./cmd', './internal', './pkg', './go.mod'],
+  labels=['quality'],
+  allow_parallel=True,
+  auto_init=False,  # Run manually with 'tilt trigger lint'
+)
+
+# Generate protobuf files - runs once on Tilt startup
+# Ensures all *.pb.go files exist before building Go code
+# Manual re-trigger: tilt trigger generate-proto
+local_resource(
+  'generate-proto',
+  cmd='make proto',
+  labels=['build'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Manual re-trigger only; auto_init runs once on startup
+  deps=['api/proto'],
+)
+
+# Initialize CockroachDB database and user - runs automatically after CockroachDB is ready
+# Creates the meridian database and user required for the application
+# Uses dedicated script with pod readiness check and verification
+local_resource(
+  'init-database',
+  cmd='./scripts/init-database.sh',
+  resource_deps=['cockroachdb'],
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Manual re-trigger; auto_init runs it on startup
+)
+
+# Run database migrations on startup - uses Atlas to apply schema changes
+# Each service has its own business schema
+# Migrations execute in parallel where possible:
+# - Parallel: current_account + financial_accounting (both depend only on init-database)
+# - Sequential: position_keeping waits for current_account (requires Account FK reference)
+# This minimizes total migration time while respecting schema dependencies
+local_resource(
+  'migrate-current-account',
+  cmd='atlas migrate apply --env local --config file://atlas.current_account.hcl --url "{}"'.format(database_url),
+  resource_deps=['init-database'],  # Database and user must exist before migrations
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+  'migrate-position-keeping',
+  cmd='atlas migrate apply --env local --config file://atlas.position_keeping.hcl --url "{}"'.format(database_url),
+  resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+  'migrate-financial-accounting',
+  cmd='atlas migrate apply --env local --config file://atlas.financial_accounting.hcl --url "{}"'.format(database_url),
+  resource_deps=['init-database'],  # Independent schema, only needs database to exist
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+  'migrate-payment-order',
+  cmd='atlas migrate apply --env local --config file://atlas.payment_order.hcl --url "{}"'.format(database_url),
+  resource_deps=['migrate-current-account'],  # Depends on current_account for account FK reference
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# Kafka cluster health check - runs automatically after kafka-cluster is ready
+local_resource(
+  'kafka-health',
+  cmd='./scripts/kafka-tests/cluster-health.sh',
+  resource_deps=['kafka-cluster'],
+  labels=['messaging'],
+  auto_init=True,  # Runs automatically on Tilt startup
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger kafka-health'
+)
+
+# Kafka failover test - manual trigger for testing broker failure scenarios
+local_resource(
+  'kafka-failover',
+  cmd='./scripts/kafka-tests/failover-test.sh',
+  resource_deps=['kafka-cluster'],
+  labels=['messaging'],
+  auto_init=False,  # Run manually with 'tilt trigger kafka-failover'
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# Keycloak setup - runs automatically after keycloak is ready
+# Configures realm, client, and test user
+local_resource(
+  'keycloak-setup',
+  cmd='./scripts/keycloak-setup.sh',
+  resource_deps=['keycloak'],
+  labels=['auth'],
+  auto_init=True,  # Runs automatically on Tilt startup
+  trigger_mode=TRIGGER_MODE_MANUAL,  # Can be re-run manually via 'tilt trigger keycloak-setup'
+)
+
+# =============================================================================
+# UI Configuration
+# =============================================================================
+
+# Tilt UI settings
+update_settings(max_parallel_updates=3, k8s_upsert_timeout_secs=60)
+
+fast_startup_msg = """
+⚡ FAST STARTUP MODE ENABLED
+   Tests skipped on initial load (trigger manually: 'tilt trigger test')
+""" if fast_startup else ""
+
+print("""
+========================================
+🚀 Meridian Development Environment
+========================================
+{}
+Services:
+  • Meridian API           → http://localhost:8080
+  • Meridian gRPC          → localhost:9090
+
+Microservices:
+  • Current-Account        → localhost:50051 (gRPC)
+  • Financial-Accounting   → localhost:50052 (gRPC)
+  • Position-Keeping       → localhost:50053 (gRPC)
+  • Payment-Order          → localhost:50054 (gRPC)
+
+Backing Services:
+  • CockroachDB            → localhost:26257
+  • Redis                  → localhost:6379
+  • Kafka Cluster          → localhost:9092
+    - 3 brokers with KRaft quorum (kafka-0, kafka-1, kafka-2)
+    - Replication factor: 2 (tolerates 1 broker failure)
+  • Keycloak               → http://localhost:18080
+    - Admin console: admin/admin
+    - Realm: meridian (create manually)
+    - JWKS: http://localhost:18080/realms/meridian/protocol/openid-connect/certs
+
+Observability Stack:
+  • Grafana                → http://localhost:3000 (dashboards, traces, logs, metrics)
+  • Prometheus             → http://localhost:9090 (metrics queries)
+  • Tempo                  → traces via Alloy OTLP endpoint (alloy:4317)
+  • Loki                   → logs aggregation
+  • Alloy                  → OpenTelemetry collector
+
+Tilt UI                    → http://localhost:10350
+
+Hot reload: Edit Go code and see changes in ~3 seconds
+
+Database Migrations:
+  • Migrations run automatically on startup (4 resources):
+    1. current_account (customers, accounts, current_account_audit)
+    2. financial_accounting (general_ledger, financial_accounting_audit)
+    3. position_keeping (transactions, position_keeping_audit)
+    4. payment_order (payment orders, saga state)
+  • Parallel execution: current_account + financial_accounting run together after init-database
+  • Sequential dependencies:
+    - position_keeping waits for current_account (Account FK)
+    - payment_order waits for current_account (Account FK)
+  • Each service has its own audit schema for isolation
+  • Phase 1: Empty audit tables created (current work)
+  • Phase 2: GORM hooks for audit logging (future PR, see ADR-0009)
+  • Manual triggers:
+    - tilt trigger migrate-current-account
+    - tilt trigger migrate-financial-accounting
+    - tilt trigger migrate-position-keeping
+    - tilt trigger migrate-payment-order
+  • Check status:
+    - make migrate-status-all (requires DATABASE_URL env var)
+
+Testing Kafka Failover:
+  kubectl delete pod kafka-1  # Kill broker
+  kubectl exec kafka-0 -- kafka-topics --describe --topic <topic> --bootstrap-server localhost:9092
+
+Fast Startup Mode:
+  • Enable: export TILT_FAST_STARTUP=true && tilt up
+  • Skips automatic test execution on startup for faster iteration
+  • Manually trigger tests: tilt trigger test
+
+Storage Limits (prevent disk exhaustion):
+  • Observability stack: ~7Gi max (Tempo 2Gi, Loki 2Gi, Prometheus 3Gi)
+  • Kafka: ~1.5Gi per broker (512MB/partition, 24h retention)
+  • Docker daemon logs: Configure in ~/.docker/daemon.json:
+    {{"log-driver": "json-file", "log-opts": {{"max-size": "10m", "max-file": "3"}}}}
+  • Kind cluster: Restart Kind to reclaim emptyDir space
+
+========================================
+""".format(fast_startup_msg))

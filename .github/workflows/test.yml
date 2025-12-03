@@ -1,0 +1,84 @@
+name: Test
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.4'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests with coverage
+        env:
+          SKIP_KAFKA_TESTS: "1"
+        run: |
+          mkdir -p coverage
+          # Use -short flag to skip timing-sensitive tests in CI
+          # These tests validate exponential backoff, jitter, and timeouts which
+          # can be flaky due to CPU scheduler variance in CI environments.
+          # Functional correctness (retry attempts, error handling) is still validated.
+          # Run full test suite locally without -short for complete validation.
+          go test -short -v -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
+          echo "Filtering generated proto files from coverage..."
+          grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true
+
+      - name: Generate coverage report
+        run: go tool cover -html=coverage/coverage.out -o coverage/coverage.html
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Check test coverage threshold
+        run: |
+          # Use filtered coverage (excludes generated .pb.go files)
+          coverage=$(go tool cover -func=coverage/coverage-filtered.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Coverage (excluding generated proto files): ${coverage}%"
+          # Threshold for actual code (not including generated proto files)
+          # Raised to 50% after proto implementation with comprehensive tests
+          if (( $(echo "$coverage < 50.0" | bc -l) )); then
+            echo "❌ Coverage ${coverage}% is below 50% threshold"
+            exit 1
+          fi
+          echo "✅ Coverage ${coverage}% meets threshold"

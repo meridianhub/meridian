@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package meridian.common.v1;
+
+import "buf/validate/validate.proto";
+import "google/type/money.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/common/v1;commonv1";
+
+// AccountType defines the type of account in BIAN terms.
+enum AccountType {
+  // ACCOUNT_TYPE_UNSPECIFIED means the account type is unknown.
+  ACCOUNT_TYPE_UNSPECIFIED = 0;
+  // ACCOUNT_TYPE_DEBIT is a debit account (asset).
+  ACCOUNT_TYPE_DEBIT = 1;
+  // ACCOUNT_TYPE_CREDIT is a credit account (liability).
+  ACCOUNT_TYPE_CREDIT = 2;
+  // ACCOUNT_TYPE_VOSTRO is a correspondent bank account (our books, their money).
+  ACCOUNT_TYPE_VOSTRO = 3;
+  // ACCOUNT_TYPE_NOSTRO is a correspondent bank account (their books, our money).
+  ACCOUNT_TYPE_NOSTRO = 4;
+  // ACCOUNT_TYPE_CURRENT is a current account (demand deposit).
+  ACCOUNT_TYPE_CURRENT = 5;
+  // ACCOUNT_TYPE_SAVINGS is a savings account.
+  ACCOUNT_TYPE_SAVINGS = 6;
+}
+
+// PostingDirection defines the direction of a financial posting.
+enum PostingDirection {
+  // POSTING_DIRECTION_UNSPECIFIED means the direction is unknown.
+  POSTING_DIRECTION_UNSPECIFIED = 0;
+  // POSTING_DIRECTION_DEBIT increases debit accounts, decreases credit accounts.
+  POSTING_DIRECTION_DEBIT = 1;
+  // POSTING_DIRECTION_CREDIT increases credit accounts, decreases debit accounts.
+  POSTING_DIRECTION_CREDIT = 2;
+}
+
+// TransactionStatus defines the lifecycle state of a transaction.
+enum TransactionStatus {
+  // TRANSACTION_STATUS_UNSPECIFIED means the status is unknown.
+  TRANSACTION_STATUS_UNSPECIFIED = 0;
+  // TRANSACTION_STATUS_PENDING means the transaction is captured but not yet posted.
+  TRANSACTION_STATUS_PENDING = 1;
+  // TRANSACTION_STATUS_POSTED means the transaction has been posted to the ledger.
+  TRANSACTION_STATUS_POSTED = 2;
+  // TRANSACTION_STATUS_FAILED means the transaction posting failed.
+  TRANSACTION_STATUS_FAILED = 3;
+  // TRANSACTION_STATUS_CANCELLED means the transaction was cancelled.
+  TRANSACTION_STATUS_CANCELLED = 4;
+  // TRANSACTION_STATUS_REVERSED means the transaction was reversed.
+  TRANSACTION_STATUS_REVERSED = 5;
+}
+
+// Currency defines ISO 4217 currency codes commonly used in banking.
+enum Currency {
+  // CURRENCY_UNSPECIFIED means the currency is unknown.
+  CURRENCY_UNSPECIFIED = 0;
+  // CURRENCY_GBP is British Pound Sterling.
+  CURRENCY_GBP = 1;
+  // CURRENCY_USD is United States Dollar.
+  CURRENCY_USD = 2;
+  // CURRENCY_EUR is Euro.
+  CURRENCY_EUR = 3;
+  // CURRENCY_JPY is Japanese Yen.
+  CURRENCY_JPY = 4;
+  // CURRENCY_CHF is Swiss Franc.
+  CURRENCY_CHF = 5;
+  // CURRENCY_CAD is Canadian Dollar.
+  CURRENCY_CAD = 6;
+  // CURRENCY_AUD is Australian Dollar.
+  CURRENCY_AUD = 7;
+}
+
+// MoneyAmount wraps google.type.Money with validation for financial services.
+// This allows negative amounts for balances and adjustments.
+// For strictly positive amounts (transactions, fees, limits), the value must be > 0
+// which is enforced at the service layer for business logic.
+message MoneyAmount {
+  // amount is the monetary amount.
+  google.type.Money amount = 1 [(buf.validate.field).required = true];
+}
+
+// DateRange represents a period between two dates.
+message DateRange {
+  // start_date is the beginning of the period (inclusive) in YYYY-MM-DD format.
+  string start_date = 1 [(buf.validate.field).string = {pattern: "^\\d{4}-\\d{2}-\\d{2}$"}];
+
+  // end_date is the end of the period (inclusive) in YYYY-MM-DD format.
+  string end_date = 2 [(buf.validate.field).string = {pattern: "^\\d{4}-\\d{2}-\\d{2}$"}];
+}
+
+// IdempotencyKey ensures exactly-once processing of requests.
+message IdempotencyKey {
+  // key is a unique identifier for this request (UUID v4 recommended, alphanumeric with hyphens/underscores).
+  string key = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_-]+$" // Alphanumeric, hyphens, underscores only for safe key storage
+  }];
+
+  // ttl_seconds is how long the key should be valid (optional).
+  int32 ttl_seconds = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 86400 // Max 24 hours
+  }];
+}
+
+// Pagination represents pagination parameters for list operations.
+message Pagination {
+  // page_size is the number of items to return (default: 50, max: 1000).
+  int32 page_size = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 1000
+  }];
+
+  // page_token is an opaque token for fetching the next page.
+  string page_token = 2;
+}
+
+// PaginationResponse contains pagination metadata in responses.
+message PaginationResponse {
+  // next_page_token is the token for fetching the next page (empty if last page).
+  string next_page_token = 1;
+
+  // total_count is the total number of items (if known, -1 otherwise).
+  int64 total_count = 2;
+}

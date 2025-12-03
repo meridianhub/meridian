@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: meridian-base
+
+namespace: default
+
+labels:
+- pairs:
+    app: meridian
+    managed-by: kustomize
+
+resources:
+- serviceaccount.yaml
+- configmap.yaml
+# secret.yaml is generated from secret.yaml.example via scripts/setup-local-secrets.sh
+# and excluded from git via .gitignore. In CI, use external secret management.
+- deployment.yaml
+- service.yaml
+- role.yaml
+- rolebinding.yaml
+
+images:
+- name: meridian
+  newTag: latest
+
+configMapGenerator:
+- name: meridian-version
+  literals:
+  - version=dev
+  - commit=unknown
+  - build_date=unknown
+
+generatorOptions:
+  disableNameSuffixHash: false
+  labels:
+    app: meridian

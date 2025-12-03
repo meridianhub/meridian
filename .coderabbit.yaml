@@ -1,0 +1,36 @@
+# CodeRabbit Configuration
+# Enable auto-reviews for PRs targeting the develop branch
+
+reviews:
+  # Enable reviews for PRs targeting develop branch (in addition to default branch)
+  base_branches:
+    - develop
+    - main
+
+  # Exclude generated files from code review (! prefix = exclude pattern)
+  path_filters:
+    - "!**/*.pb.go"
+    - "!**/*.pb.validate.go"
+    - "!**/*_grpc.pb.go"
+
+  # Disable high-level summary/poem - focus on inline code review only
+  high_level_summary: false
+  poem: false
+
+  # Optional: Show review status in PR comments
+  review_status: true
+
+  # Optional: Request changes for high severity issues
+  request_changes_workflow: false
+
+  # Optional: Auto-approve PRs that pass all checks
+  auto_review:
+    enabled: true
+
+  # Finishing touches configuration
+  finishing_touches:
+    # Docstring coverage settings
+    # Disabled - percentage calculation not working as expected
+    # Code review will still flag missing documentation on public APIs
+    docstrings:
+      enabled: false

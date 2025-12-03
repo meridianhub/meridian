@@ -1,0 +1,29 @@
+{
+  "timestamp": "2025-11-19T15:43:48Z",
+  "services": {
+    "position-keeping": {
+      "afferent_coupling": 1,
+      "efferent_coupling": 0,
+      "instability": 0,
+      "assessment": "stable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "current-account": {
+      "afferent_coupling": 0,
+      "efferent_coupling": 2,
+      "instability": 1.00,
+      "assessment": "too-dependent",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "financial-accounting": {
+      "afferent_coupling": 1,
+      "efferent_coupling": 0,
+      "instability": 0,
+      "assessment": "stable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    }
+  }
+}

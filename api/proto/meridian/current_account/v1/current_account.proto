@@ -1,0 +1,551 @@
+syntax = "proto3";
+
+package meridian.current_account.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1;currentaccountv1";
+
+// OpenAPI specification metadata for Current Account Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Current Account Service API"
+    version: "1.0"
+    description: "BIAN-compliant current account operations including deposits, "
+                 "withdrawals, and lien management for fund reservations."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+  security_definitions: {
+    security: {
+      key: "Bearer"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+        description: "Bearer token authentication"
+      }
+    }
+  }
+  security: {
+    security_requirement: {
+      key: "Bearer"
+      value: {}
+    }
+  }
+};
+
+// AccountStatus defines the lifecycle state of a current account facility
+enum AccountStatus {
+  // ACCOUNT_STATUS_UNSPECIFIED means the status is unknown
+  ACCOUNT_STATUS_UNSPECIFIED = 0;
+  // ACCOUNT_STATUS_ACTIVE means the account is operational and can process transactions
+  ACCOUNT_STATUS_ACTIVE = 1;
+  // ACCOUNT_STATUS_FROZEN means the account is temporarily suspended
+  ACCOUNT_STATUS_FROZEN = 2;
+  // ACCOUNT_STATUS_CLOSED means the account is permanently closed
+  ACCOUNT_STATUS_CLOSED = 3;
+}
+
+// Transaction status for deposit/withdrawal operations
+enum TransactionStatus {
+  // TRANSACTION_STATUS_UNSPECIFIED is the default value and should not be used in requests
+  TRANSACTION_STATUS_UNSPECIFIED = 0;
+  // TRANSACTION_STATUS_PENDING indicates the transaction is awaiting processing
+  TRANSACTION_STATUS_PENDING = 1;
+  // TRANSACTION_STATUS_COMPLETED indicates the transaction has been successfully processed
+  TRANSACTION_STATUS_COMPLETED = 2;
+  // TRANSACTION_STATUS_FAILED indicates the transaction processing failed
+  TRANSACTION_STATUS_FAILED = 3;
+  // TRANSACTION_STATUS_REVERSED indicates the transaction has been reversed or cancelled
+  TRANSACTION_STATUS_REVERSED = 4;
+}
+
+// LienStatus defines the lifecycle state of a fund reservation (lien)
+// A lien is a hold placed on funds to reserve them for a pending payment
+enum LienStatus {
+  // LIEN_STATUS_UNSPECIFIED is the default value and should not be used
+  LIEN_STATUS_UNSPECIFIED = 0;
+  // LIEN_STATUS_ACTIVE means the funds are currently reserved
+  LIEN_STATUS_ACTIVE = 1;
+  // LIEN_STATUS_EXECUTED means the lien was converted to an actual debit
+  LIEN_STATUS_EXECUTED = 2;
+  // LIEN_STATUS_TERMINATED means the lien was released without execution
+  LIEN_STATUS_TERMINATED = 3;
+}
+
+// CurrentAccountFacility represents a BIAN-compliant current account facility
+// Task 5.1: Define CurrentAccountFacility message with account identification and status management
+message CurrentAccountFacility {
+  // account_id is the unique identifier for this account facility (alphanumeric with hyphens/underscores).
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // account_identification is the IBAN or other standard account identifier.
+  // IBAN format: 2 letter country code + 2 check digits + up to 30 alphanumeric characters.
+  string account_identification = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 34 // IBAN max length
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$" // IBAN format validation
+  }];
+
+  // account_status is the current lifecycle state of the account
+  AccountStatus account_status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] /* Prevent UNSPECIFIED in requests */
+  }];
+
+  // base_currency is the primary currency for this account
+  meridian.common.v1.Currency base_currency = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] /* Prevent UNSPECIFIED currency */
+  }];
+
+  // created_at is when the account facility was created
+  google.protobuf.Timestamp created_at = 5;
+
+  // updated_at is when the account facility was last modified
+  google.protobuf.Timestamp updated_at = 6;
+
+  // version is for optimistic locking
+  int32 version = 7 [(buf.validate.field).int32 = {gte: 0}];
+
+  // current_balance tracks the current account balance
+  // Task 5.2: Implement account balance tracking and overdraft limits
+  AccountBalance current_balance = 8;
+
+  // overdraft_limit configures the overdraft facility for this account
+  OverdraftConfiguration overdraft_limit = 9;
+
+  // transaction_history tracks recent transactions for this account
+  // Task 5.4: Add transaction history and account status management features
+  TransactionHistory transaction_history = 10;
+}
+
+// AccountBalance represents the current balance state of an account
+// Task 5.2: Account balance tracking
+message AccountBalance {
+  // current_balance is the actual account balance (can be negative if overdrawn)
+  meridian.common.v1.MoneyAmount current_balance = 1 [(buf.validate.field).required = true];
+
+  // available_balance is current balance plus overdraft limit (if enabled)
+  meridian.common.v1.MoneyAmount available_balance = 2 [(buf.validate.field).required = true];
+
+  // last_updated is when the balance was last calculated
+  google.protobuf.Timestamp last_updated = 3 [(buf.validate.field).required = true];
+}
+
+// OverdraftConfiguration defines the overdraft facility settings
+// Task 5.2: Overdraft limits
+message OverdraftConfiguration {
+  // overdraft_limit is the maximum overdraft amount allowed
+  meridian.common.v1.MoneyAmount overdraft_limit = 1 [(buf.validate.field).required = true];
+
+  // interest_rate is the annual percentage rate for overdraft usage
+  double interest_rate = 2 [(buf.validate.field).double = {
+    gte: 0
+    lte: 100
+  }];
+
+  // is_enabled indicates if overdraft facility is active
+  bool is_enabled = 3;
+
+  // last_updated is when the overdraft configuration was last modified
+  google.protobuf.Timestamp last_updated = 4;
+}
+
+// AccountTransaction represents a debit or credit transaction on an account
+// Task 5.3: Create debit/credit transaction operations
+message AccountTransaction {
+  // transaction_id is the unique identifier for this transaction (alphanumeric with hyphens/underscores).
+  string transaction_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // account_id is the account this transaction belongs to (alphanumeric with hyphens/underscores).
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // direction is whether this is a debit or credit
+  meridian.common.v1.PostingDirection direction = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] /* Prevent UNSPECIFIED */
+  }];
+
+  // amount is the transaction amount
+  meridian.common.v1.MoneyAmount amount = 4 [(buf.validate.field).required = true];
+
+  // status is the current transaction status
+  meridian.common.v1.TransactionStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] /* Prevent UNSPECIFIED */
+  }];
+
+  // description is a human-readable transaction description
+  string description = 6 [(buf.validate.field).string = {max_len: 500}];
+
+  // reference is an external reference or payment reference (alphanumeric with hyphens, underscores, slashes).
+  string reference = 7 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_/-]*$"
+  }];
+
+  // timestamp is when the transaction occurred
+  google.protobuf.Timestamp timestamp = 8 [(buf.validate.field).required = true];
+}
+
+// TransactionHistory represents the transaction history for an account
+// Task 5.4: Add transaction history and account status management features
+message TransactionHistory {
+  // account_id is the account this history belongs to
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // transactions is the list of transactions (most recent first)
+  repeated AccountTransaction transactions = 2;
+
+  // total_count is the total number of transactions (for pagination)
+  int64 total_count = 3 [(buf.validate.field).int64 = {gte: 0}];
+
+  // last_updated is when the history was last updated
+  google.protobuf.Timestamp last_updated = 4;
+}
+
+// Lien represents a fund reservation (hold) on an account
+// Used by Payment Order to reserve funds before executing external payments
+// Invariant: Available Balance = Current Balance - Sum(Active Liens)
+message Lien {
+  // lien_id is the unique identifier for this lien
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // account_id is the account this lien belongs to
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the reserved amount (must be positive, validated at service layer)
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // status is the current lien lifecycle state
+  // State transitions:
+  //   ACTIVE → EXECUTED (via ExecuteLien - idempotent)
+  //   ACTIVE → TERMINATED (via TerminateLien)
+  //   EXECUTED → no further transitions allowed
+  //   TERMINATED → no further transitions allowed
+  LienStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // payment_order_reference is the Payment Order that created this lien
+  string payment_order_reference = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_/-]+$"
+  }];
+
+  // created_at is when the lien was created
+  google.protobuf.Timestamp created_at = 6 [(buf.validate.field).required = true];
+
+  // updated_at is when the lien was last modified
+  google.protobuf.Timestamp updated_at = 7 [(buf.validate.field).required = true];
+}
+
+// Request to initiate a new current account
+message InitiateCurrentAccountRequest {
+  // customer_id is the customer who owns this account
+  string customer_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // account_identification is the IBAN
+  string account_identification = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 34
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
+  }];
+
+  // base_currency is the account currency
+  meridian.common.v1.Currency base_currency = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// Response for initiating a current account
+message InitiateCurrentAccountResponse {
+  // account_id is the newly created account ID
+  string account_id = 1;
+
+  // facility is the complete account facility details
+  CurrentAccountFacility facility = 2;
+}
+
+// Request to execute a deposit (Behavior Qualifier)
+message ExecuteDepositRequest {
+  // account_id is the account to deposit to
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // amount is the deposit amount
+  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+
+  // description is optional deposit description
+  string description = 3 [(buf.validate.field).string = {max_len: 500}];
+
+  // reference is optional reference
+  string reference = 4 [(buf.validate.field).string = {max_len: 100}];
+}
+
+// Response for deposit execution
+message ExecuteDepositResponse {
+  // account_id is the account ID
+  string account_id = 1;
+
+  // transaction_id is the created transaction ID
+  string transaction_id = 2;
+
+  // new_balance is the updated account balance
+  meridian.common.v1.MoneyAmount new_balance = 3;
+
+  // available_balance is the updated available balance
+  meridian.common.v1.MoneyAmount available_balance = 4;
+
+  // status is the transaction status
+  TransactionStatus status = 5;
+}
+
+// Request to retrieve current account details
+message RetrieveCurrentAccountRequest {
+  // account_id is the account to retrieve
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+}
+
+// Response for retrieving current account
+message RetrieveCurrentAccountResponse {
+  // facility is the current account facility
+  CurrentAccountFacility facility = 1;
+}
+
+// Request to initiate a lien (reserve funds) on an account
+// BQ: Initiate - Creates a new fund reservation
+message InitiateLienRequest {
+  // account_id is the account to place the lien on
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the amount to reserve
+  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+
+  // payment_order_reference identifies the Payment Order creating this lien
+  // Forward slash allowed for hierarchical Payment Order references
+  string payment_order_reference = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_/-]+$"
+  }];
+
+  // idempotency_key ensures exactly-once lien creation for retry scenarios
+  meridian.common.v1.IdempotencyKey idempotency_key = 4;
+}
+
+// Response for initiating a lien
+message InitiateLienResponse {
+  // lien is the created lien with ACTIVE status
+  Lien lien = 1 [(buf.validate.field).required = true];
+
+  // available_balance is the updated available balance after reservation
+  meridian.common.v1.MoneyAmount available_balance = 2 [(buf.validate.field).required = true];
+}
+
+// Request to execute a lien (convert reservation to actual debit)
+// BQ: Execute - Atomically converts lien to debit and removes reservation
+message ExecuteLienRequest {
+  // lien_id is the lien to execute
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// Response for executing a lien
+message ExecuteLienResponse {
+  // lien is the executed lien with EXECUTED status
+  Lien lien = 1 [(buf.validate.field).required = true];
+
+  // new_balance is the account balance after the debit
+  meridian.common.v1.MoneyAmount new_balance = 2 [(buf.validate.field).required = true];
+
+  // available_balance is the updated available balance
+  meridian.common.v1.MoneyAmount available_balance = 3 [(buf.validate.field).required = true];
+
+  // transaction_id is the debit transaction created
+  string transaction_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// Request to terminate a lien (release reserved funds)
+// BQ: Terminate - Releases the reservation without executing
+message TerminateLienRequest {
+  // lien_id is the lien to terminate
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // reason is an optional explanation for termination (for audit trail)
+  string reason = 2 [(buf.validate.field).string = {max_len: 500}];
+}
+
+// Response for terminating a lien
+message TerminateLienResponse {
+  // lien is the terminated lien with TERMINATED status
+  Lien lien = 1 [(buf.validate.field).required = true];
+
+  // available_balance is the updated available balance after release
+  meridian.common.v1.MoneyAmount available_balance = 2 [(buf.validate.field).required = true];
+}
+
+// Request to retrieve a lien
+message RetrieveLienRequest {
+  // lien_id is the lien to retrieve
+  string lien_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// Response for retrieving a lien
+message RetrieveLienResponse {
+  // lien is the requested lien
+  Lien lien = 1 [(buf.validate.field).required = true];
+}
+
+// CurrentAccountService provides BIAN-compliant current account operations.
+//
+// Design Notes:
+// - DELETE operations are intentionally not provided. Accounts are managed
+//   through status transitions (Active → Frozen → Closed) for audit compliance.
+// - Liens follow a lifecycle pattern: create under account context, then
+//   operate independently via /v1/liens/{lien_id} for execute/terminate/retrieve.
+service CurrentAccountService {
+  // InitiateCurrentAccount creates a new current account facility
+  rpc InitiateCurrentAccount(InitiateCurrentAccountRequest) returns (InitiateCurrentAccountResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Current account created successfully"
+        }
+      }
+    };
+  }
+
+  // ExecuteDeposit processes a deposit transaction (Behavior Qualifier)
+  rpc ExecuteDeposit(ExecuteDepositRequest) returns (ExecuteDepositResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts/{account_id}/deposits"
+      body: "*"
+    };
+  }
+
+  // RetrieveCurrentAccount gets current account details
+  rpc RetrieveCurrentAccount(RetrieveCurrentAccountRequest) returns (RetrieveCurrentAccountResponse) {
+    option (google.api.http) = {
+      get: "/v1/current-accounts/{account_id}"
+    };
+  }
+
+  // InitiateLien creates a fund reservation on an account.
+  // Used by Payment Order to reserve funds before external payment execution.
+  // Note: Liens are created under the account context but become independent
+  // resources with their own endpoints (GET/POST /v1/liens/{lien_id}) for
+  // execute, terminate, and retrieve operations.
+  rpc InitiateLien(InitiateLienRequest) returns (InitiateLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts/{account_id}/liens"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Lien created successfully - funds are now reserved"
+        }
+      }
+    };
+  }
+
+  // ExecuteLien converts a reservation to an actual debit atomically
+  // Called when the external payment is confirmed as settled
+  rpc ExecuteLien(ExecuteLienRequest) returns (ExecuteLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/liens/{lien_id}/execute"
+      body: "*"
+    };
+  }
+
+  // TerminateLien releases a reservation without executing
+  // Called when the external payment fails or is cancelled
+  rpc TerminateLien(TerminateLienRequest) returns (TerminateLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/liens/{lien_id}/terminate"
+      body: "*"
+    };
+  }
+
+  // RetrieveLien gets lien details
+  rpc RetrieveLien(RetrieveLienRequest) returns (RetrieveLienResponse) {
+    option (google.api.http) = {
+      get: "/v1/liens/{lien_id}"
+    };
+  }
+}

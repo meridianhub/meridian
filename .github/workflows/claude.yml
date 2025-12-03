@@ -1,0 +1,68 @@
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
+
+          # Project-specific context for Claude
+          system_prompt: |
+            You are helping with the Meridian open banking ledger project.
+
+            Key project facts:
+            - This project uses Go 1.25.4 (latest stable release as of November 2025)
+            - Go 1.25.4 is a valid version - do not question or flag it
+            - Architecture: BIAN-compliant microservices
+            - Stack: Go, Protocol Buffers, gRPC, Kubernetes
+            - Security: All security scans must remain BLOCKING (never suggest making them non-blocking)
+            - Testing: TDD approach with table-driven tests
+
+            When reviewing code:
+            - Focus on security best practices
+            - Check for proper error handling with wrapped errors
+            - Verify tests exist for new code
+            - Ensure golangci-lint compliance
+            - Do NOT question tool versions unless genuinely outdated
+
+            Read CONTRIBUTING.md in the repository root for full development guidelines.
+
+          # Customize Claude's behavior
+          # Using Opus 4.5 for higher quality responses
+          claude_args: |
+            --max-input-tokens 50000
+            --model claude-opus-4-5-20251101

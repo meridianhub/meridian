@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package meridian.common.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/common/v1;commonv1";
+
+// ErrorCode defines standardized error codes for Meridian services.
+enum ErrorCode {
+  // ERROR_CODE_UNSPECIFIED means no specific error code.
+  ERROR_CODE_UNSPECIFIED = 0;
+
+  // General errors (1000-1999)
+  // ERROR_CODE_INTERNAL is an internal server error.
+  ERROR_CODE_INTERNAL = 1000;
+  // ERROR_CODE_INVALID_ARGUMENT means the request contains invalid data.
+  ERROR_CODE_INVALID_ARGUMENT = 1001;
+  // ERROR_CODE_NOT_FOUND means the requested resource was not found.
+  ERROR_CODE_NOT_FOUND = 1002;
+  // ERROR_CODE_ALREADY_EXISTS means the resource already exists.
+  ERROR_CODE_ALREADY_EXISTS = 1003;
+  // ERROR_CODE_PERMISSION_DENIED means the caller lacks permission.
+  ERROR_CODE_PERMISSION_DENIED = 1004;
+  // ERROR_CODE_UNAUTHENTICATED means the request lacks valid authentication.
+  ERROR_CODE_UNAUTHENTICATED = 1005;
+  // ERROR_CODE_RESOURCE_EXHAUSTED means quota or rate limit exceeded.
+  ERROR_CODE_RESOURCE_EXHAUSTED = 1006;
+  // ERROR_CODE_PRECONDITION_FAILED means operation rejected due to system state.
+  ERROR_CODE_PRECONDITION_FAILED = 1007;
+  // ERROR_CODE_ABORTED means the operation was aborted (typically due to concurrency).
+  ERROR_CODE_ABORTED = 1008;
+  // ERROR_CODE_OUT_OF_RANGE means operation attempted past valid range.
+  ERROR_CODE_OUT_OF_RANGE = 1009;
+  // ERROR_CODE_UNIMPLEMENTED means the operation is not implemented.
+  ERROR_CODE_UNIMPLEMENTED = 1010;
+  // ERROR_CODE_UNAVAILABLE means the service is currently unavailable.
+  ERROR_CODE_UNAVAILABLE = 1011;
+  // ERROR_CODE_DEADLINE_EXCEEDED means the operation deadline expired.
+  ERROR_CODE_DEADLINE_EXCEEDED = 1012;
+
+  // Financial errors (2000-2999)
+  // ERROR_CODE_INSUFFICIENT_FUNDS means the account has insufficient balance.
+  ERROR_CODE_INSUFFICIENT_FUNDS = 2000;
+  // ERROR_CODE_INVALID_CURRENCY means the currency code is not supported.
+  ERROR_CODE_INVALID_CURRENCY = 2001;
+  // ERROR_CODE_INVALID_AMOUNT means the transaction amount is invalid.
+  ERROR_CODE_INVALID_AMOUNT = 2002;
+  // ERROR_CODE_DOUBLE_ENTRY_VIOLATION means double-entry accounting rules violated.
+  ERROR_CODE_DOUBLE_ENTRY_VIOLATION = 2003;
+  // ERROR_CODE_POSTING_FAILED means the ledger posting operation failed.
+  ERROR_CODE_POSTING_FAILED = 2004;
+  // ERROR_CODE_ACCOUNT_CLOSED means the account is closed.
+  ERROR_CODE_ACCOUNT_CLOSED = 2005;
+  // ERROR_CODE_ACCOUNT_FROZEN means the account is frozen.
+  ERROR_CODE_ACCOUNT_FROZEN = 2006;
+  // ERROR_CODE_LIMIT_EXCEEDED means a financial limit was exceeded.
+  ERROR_CODE_LIMIT_EXCEEDED = 2007;
+  // ERROR_CODE_INVALID_VALUE_DATE means the value date is invalid.
+  ERROR_CODE_INVALID_VALUE_DATE = 2008;
+  // ERROR_CODE_DUPLICATE_TRANSACTION means duplicate transaction detected.
+  ERROR_CODE_DUPLICATE_TRANSACTION = 2009;
+
+  // BIAN-specific errors (3000-3999)
+  // ERROR_CODE_CONTROL_RECORD_NOT_FOUND means the BIAN control record was not found.
+  ERROR_CODE_CONTROL_RECORD_NOT_FOUND = 3000;
+  // ERROR_CODE_BEHAVIOR_QUALIFIER_INVALID means the behavior qualifier is invalid.
+  ERROR_CODE_BEHAVIOR_QUALIFIER_INVALID = 3001;
+  // ERROR_CODE_SERVICE_DOMAIN_UNAVAILABLE means the BIAN service domain is unavailable.
+  ERROR_CODE_SERVICE_DOMAIN_UNAVAILABLE = 3002;
+}
+
+// Error represents a structured error response.
+message Error {
+  // code is the error code.
+  ErrorCode code = 1 [(buf.validate.field).required = true];
+
+  // message is a human-readable error message.
+  string message = 2 [(buf.validate.field).string.min_len = 1];
+
+  // details contains additional error context (optional).
+  repeated google.protobuf.Any details = 3;
+
+  // field_violations contains field-specific validation errors (optional).
+  repeated FieldViolation field_violations = 4;
+
+  // trace_id is a correlation ID for tracing (optional).
+  string trace_id = 5;
+
+  // retry_info provides guidance on retry behavior (optional).
+  RetryInfo retry_info = 6;
+}
+
+// FieldViolation describes a single field validation error.
+message FieldViolation {
+  // field is the field path (e.g., "amount.currency_code").
+  string field = 1 [(buf.validate.field).string.min_len = 1];
+
+  // description explains why the field is invalid.
+  string description = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// RetryInfo provides guidance on when and how to retry a failed request.
+message RetryInfo {
+  // retryable indicates whether the operation can be retried.
+  bool retryable = 1;
+
+  // retry_delay_seconds suggests how long to wait before retrying.
+  int32 retry_delay_seconds = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 3600 // Max 1 hour
+  }];
+}

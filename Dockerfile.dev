@@ -1,0 +1,43 @@
+# Meridian - Development Dockerfile for Tilt Live Update
+# Uses alpine base for shell tools (tar, rm, sh) required by Tilt
+
+FROM golang:1.25.3-alpine
+
+# Install runtime dependencies for live update
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    bash
+
+# Create non-root user for security
+RUN addgroup -g 65532 -S nonroot && \
+    adduser -u 65532 -S nonroot -G nonroot
+
+# Set working directory
+WORKDIR /app
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum* ./
+RUN go mod download && go mod verify
+
+# Copy source code
+COPY . .
+
+# Build binary
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
+    -o meridian \
+    ./cmd/meridian
+
+# Switch to non-root user
+USER nonroot:nonroot
+
+# Expose port
+EXPOSE 8080
+
+# Run the binary
+ENTRYPOINT ["/app/meridian"]

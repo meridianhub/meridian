@@ -1,0 +1,627 @@
+syntax = "proto3";
+
+package meridian.payment_order.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1;paymentorderv1";
+
+// OpenAPI specification metadata for Payment Order Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Payment Order Service API"
+    version: "1.0"
+    description: "BIAN-compliant payment order operations for saga-based money movement. "
+                 "Orchestrates funds reservation, gateway execution, and ledger booking."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+  security_definitions: {
+    security: {
+      key: "Bearer"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+        description: "Bearer token authentication"
+      }
+    }
+  }
+  security: {
+    security_requirement: {
+      key: "Bearer"
+      value: {}
+    }
+  }
+  responses: {
+    key: "401"
+    value: {
+      description: "Unauthorized - Missing or invalid Bearer token"
+    }
+  }
+  responses: {
+    key: "403"
+    value: {
+      description: "Forbidden - Insufficient permissions for this operation"
+    }
+  }
+};
+
+// PaymentOrderStatus defines the lifecycle state of a payment order in the saga.
+//
+// State Machine:
+//   INITIATED → RESERVED → EXECUTING → COMPLETED (happy path)
+//
+// Failure transitions (from any non-terminal state):
+//   INITIATED → FAILED (validation failure, account not found)
+//   RESERVED  → FAILED (gateway rejection, timeout) - triggers lien release
+//   EXECUTING → FAILED (gateway rejection) - triggers lien release
+//
+// Cancellation (user/system initiated before completion):
+//   INITIATED → CANCELLED (no compensation needed)
+//   RESERVED  → CANCELLED (triggers lien release)
+//   EXECUTING → not cancellable (must wait for gateway response)
+//
+// Reversal (post-completion compensation):
+//   COMPLETED → REVERSED (triggers compensating ledger entries)
+//
+// Terminal states: COMPLETED, FAILED, CANCELLED, REVERSED
+enum PaymentOrderStatus {
+  // PAYMENT_ORDER_STATUS_UNSPECIFIED means the status is unknown.
+  PAYMENT_ORDER_STATUS_UNSPECIFIED = 0;
+  // PAYMENT_ORDER_STATUS_INITIATED means the payment order has been created and validated.
+  // Next: RESERVED (on lien success), FAILED (on validation error), CANCELLED (on user request)
+  PAYMENT_ORDER_STATUS_INITIATED = 1;
+  // PAYMENT_ORDER_STATUS_RESERVED means funds have been reserved via a lien on the debtor account.
+  // Next: EXECUTING (on gateway send), FAILED (on error), CANCELLED (on user request)
+  PAYMENT_ORDER_STATUS_RESERVED = 2;
+  // PAYMENT_ORDER_STATUS_EXECUTING means the payment has been sent to the external gateway.
+  // Next: COMPLETED (on gateway success), FAILED (on gateway rejection)
+  // Note: Cannot be cancelled - must wait for gateway response
+  PAYMENT_ORDER_STATUS_EXECUTING = 3;
+  // PAYMENT_ORDER_STATUS_COMPLETED means the payment has been settled and funds transferred.
+  // Terminal state. Can transition to REVERSED for post-completion compensation.
+  PAYMENT_ORDER_STATUS_COMPLETED = 4;
+  // PAYMENT_ORDER_STATUS_FAILED means the payment failed at some stage of the saga.
+  // Terminal state. Compensation (lien release) is triggered automatically.
+  PAYMENT_ORDER_STATUS_FAILED = 5;
+  // PAYMENT_ORDER_STATUS_CANCELLED means the payment was cancelled before completion.
+  // Terminal state. Different from FAILED: CANCELLED is intentional, FAILED is due to error.
+  // Compensation (lien release) is triggered if status was RESERVED.
+  PAYMENT_ORDER_STATUS_CANCELLED = 6;
+  // PAYMENT_ORDER_STATUS_REVERSED means the payment was reversed after completion (compensation).
+  // Terminal state. Used for post-completion corrections (e.g., refunds, chargebacks).
+  PAYMENT_ORDER_STATUS_REVERSED = 7;
+}
+
+// GatewayStatus represents the status returned by an external payment gateway.
+enum GatewayStatus {
+  // GATEWAY_STATUS_UNSPECIFIED means the status is unknown.
+  GATEWAY_STATUS_UNSPECIFIED = 0;
+  // GATEWAY_STATUS_SETTLED means the gateway has confirmed the payment was successful.
+  GATEWAY_STATUS_SETTLED = 1;
+  // GATEWAY_STATUS_REJECTED means the gateway has rejected the payment.
+  GATEWAY_STATUS_REJECTED = 2;
+  // GATEWAY_STATUS_PENDING means the gateway is still processing the payment.
+  GATEWAY_STATUS_PENDING = 3;
+}
+
+// LienExecutionStatus tracks the status of lien execution for completed payment orders.
+// This is used to track async retry attempts when ExecuteLien fails after payment completion.
+enum LienExecutionStatus {
+  // LIEN_EXECUTION_STATUS_UNSPECIFIED means the status is not set (payment not yet completed).
+  LIEN_EXECUTION_STATUS_UNSPECIFIED = 0;
+  // LIEN_EXECUTION_STATUS_PENDING means ExecuteLien has not been attempted yet or is in progress.
+  LIEN_EXECUTION_STATUS_PENDING = 1;
+  // LIEN_EXECUTION_STATUS_SUCCEEDED means ExecuteLien completed successfully.
+  LIEN_EXECUTION_STATUS_SUCCEEDED = 2;
+  // LIEN_EXECUTION_STATUS_FAILED means ExecuteLien failed after all retry attempts.
+  // Requires manual reconciliation.
+  LIEN_EXECUTION_STATUS_FAILED = 3;
+}
+
+// PaymentOrder represents the BIAN Payment Order control record.
+// It acts as the saga orchestrator for money movement, coordinating
+// across CurrentAccount (reservations) and FinancialAccounting (ledger booking).
+message PaymentOrder {
+  // payment_order_id is the unique identifier for this payment order.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // debtor_account_id is the internal account ID from which funds are debited.
+  string debtor_account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // creditor_reference is the external account identifier (IBAN or other standard).
+  // IBAN format: 2 letter country code + 2 check digits + up to 30 alphanumeric characters.
+  string creditor_reference = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 34
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
+  }];
+
+  // amount is the payment amount.
+  // NOTE: Amount must be positive (> 0). This is enforced at the service layer
+  // since CEL validation on MoneyAmount wrapper types is not supported.
+  // See README "Money Field Validation Limitations"
+  meridian.common.v1.MoneyAmount amount = 4 [(buf.validate.field).required = true];
+
+  // status is the current state in the payment saga lifecycle.
+  PaymentOrderStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // lien_id references the reservation created in CurrentAccount (populated after RESERVED).
+  string lien_id = 6 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // gateway_reference_id is the external ID from the payment gateway (populated after EXECUTING).
+  string gateway_reference_id = 7 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // correlation_id is used for distributed tracing and request correlation.
+  string correlation_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // idempotency_key ensures exactly-once processing of this payment order.
+  string idempotency_key = 9 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // failure_reason describes why the payment failed (populated only if status is FAILED).
+  string failure_reason = 10 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+
+  // created_at is when this payment order was initiated.
+  google.protobuf.Timestamp created_at = 11 [(buf.validate.field).required = true];
+
+  // updated_at is when this payment order was last modified.
+  google.protobuf.Timestamp updated_at = 12 [(buf.validate.field).required = true];
+
+  // version is for optimistic locking.
+  int64 version = 13 [(buf.validate.field).int64 = {gte: 1}];
+
+  // ledger_booking_id references the FinancialAccounting booking log (populated after COMPLETED).
+  string ledger_booking_id = 14 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // reserved_at is when funds were reserved via lien.
+  google.protobuf.Timestamp reserved_at = 15;
+
+  // executing_at is when the payment was sent to the gateway.
+  google.protobuf.Timestamp executing_at = 16;
+
+  // completed_at is when the payment was settled.
+  google.protobuf.Timestamp completed_at = 17;
+
+  // failed_at is when the payment failed.
+  google.protobuf.Timestamp failed_at = 18;
+
+  // cancelled_at is when the payment was cancelled.
+  google.protobuf.Timestamp cancelled_at = 19;
+
+  // reversed_at is when the payment was reversed (post-completion compensation).
+  google.protobuf.Timestamp reversed_at = 20;
+
+  // causation_id identifies the event or command that caused the last state change.
+  string causation_id = 21 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // error_code provides a machine-readable error identifier (populated only if status is FAILED).
+  string error_code = 22 [(buf.validate.field).string = {
+    max_len: 50
+  }];
+
+  // lien_execution_status tracks whether the lien has been successfully executed.
+  // Only relevant for COMPLETED payment orders with a lien_id.
+  // Used for reconciliation when ExecuteLien fails after payment completion.
+  LienExecutionStatus lien_execution_status = 23;
+
+  // lien_execution_attempts tracks how many times ExecuteLien has been attempted.
+  // Used for monitoring and alerting on retry exhaustion.
+  int32 lien_execution_attempts = 24;
+
+  // lien_execution_error stores the last error message from ExecuteLien.
+  // Only populated if lien_execution_status is FAILED.
+  string lien_execution_error = 25 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+}
+
+// InitiatePaymentOrderRequest creates a new payment order (BQ: Initiate).
+message InitiatePaymentOrderRequest {
+  // debtor_account_id is the internal account to debit.
+  string debtor_account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // creditor_reference is the external account to credit (IBAN format).
+  string creditor_reference = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 34
+    pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$"
+  }];
+
+  // amount is the payment amount.
+  // NOTE: Amount must be positive (> 0). This is enforced at the service layer
+  // since CEL validation on MoneyAmount wrapper types is not supported.
+  // See README "Money Field Validation Limitations"
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
+
+  // correlation_id is optional for distributed tracing (generated if not provided).
+  string correlation_id = 5 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+}
+
+// InitiatePaymentOrderResponse returns the created payment order.
+message InitiatePaymentOrderResponse {
+  // payment_order is the newly created payment order.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// RetrievePaymentOrderRequest gets payment order details by ID.
+message RetrievePaymentOrderRequest {
+  // payment_order_id is the unique identifier of the payment order to retrieve.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrievePaymentOrderResponse returns the requested payment order.
+message RetrievePaymentOrderResponse {
+  // payment_order is the retrieved payment order.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// UpdatePaymentOrderRequest handles asynchronous gateway callbacks (BQ: Update).
+// This is typically called from the webhook HTTP adapter when the gateway
+// reports the final status of a payment.
+//
+// Lookup Strategy:
+// The service uses payment_order_id if provided, otherwise falls back to
+// gateway_reference_id lookup. At least one must be provided.
+//
+// Race Condition Handling:
+// If a webhook arrives before the EXECUTING state is persisted (race condition),
+// the service should:
+// 1. If payment_order_id provided: Look up directly and process
+// 2. If only gateway_reference_id: Return 404/retry-after, webhook will be redelivered
+// The idempotency_key ensures safe reprocessing when the webhook is retried.
+message UpdatePaymentOrderRequest {
+  // gateway_reference_id is the external ID from the payment gateway.
+  // Used to look up the corresponding payment order when payment_order_id is not available.
+  // Optional if payment_order_id is provided.
+  string gateway_reference_id = 1 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // gateway_status is the status reported by the payment gateway.
+  GatewayStatus gateway_status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // gateway_message is optional details from the gateway (e.g., rejection reason).
+  string gateway_message = 3 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+
+  // payment_order_id is the preferred lookup method when available.
+  // This avoids race conditions if webhook arrives before EXECUTING state is persisted.
+  // Either payment_order_id or gateway_reference_id must be provided (enforced at service layer).
+  string payment_order_id = 4 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // idempotency_key ensures exactly-once processing of webhook callbacks.
+  // Webhooks can be delivered multiple times, so this is required.
+  meridian.common.v1.IdempotencyKey idempotency_key = 5 [(buf.validate.field).required = true];
+}
+
+// UpdatePaymentOrderResponse returns the updated payment order.
+message UpdatePaymentOrderResponse {
+  // payment_order is the updated payment order.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// CancelPaymentOrderRequest cancels a payment order before completion (BQ: Control).
+// Can only be called when status is INITIATED or RESERVED. EXECUTING payments
+// cannot be cancelled as they must wait for the gateway response.
+message CancelPaymentOrderRequest {
+  // payment_order_id is the unique identifier of the payment order to cancel.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // cancellation_reason explains why the payment is being cancelled.
+  string cancellation_reason = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // cancelled_by identifies who is requesting the cancellation.
+  string cancelled_by = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // idempotency_key ensures exactly-once processing of cancellation.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
+}
+
+// CancelPaymentOrderResponse returns the cancelled payment order.
+message CancelPaymentOrderResponse {
+  // payment_order is the cancelled payment order with status CANCELLED.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// ListPaymentOrdersRequest lists payment orders with filtering and pagination.
+message ListPaymentOrdersRequest {
+  // debtor_account_id filters by the internal account from which funds are debited.
+  string debtor_account_id = 1 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // status filters by payment order status. Empty means all statuses.
+  repeated PaymentOrderStatus status = 2;
+
+  // date_range filters by created_at timestamp.
+  meridian.common.v1.DateRange date_range = 3;
+
+  // pagination controls the page size and cursor.
+  meridian.common.v1.Pagination pagination = 4;
+}
+
+// ListPaymentOrdersResponse returns a paginated list of payment orders.
+message ListPaymentOrdersResponse {
+  // payment_orders is the list of payment orders matching the filter criteria.
+  repeated PaymentOrder payment_orders = 1;
+
+  // pagination contains the next page token and total count.
+  meridian.common.v1.PaginationResponse pagination = 2;
+}
+
+// ReversePaymentOrderRequest reverses a completed payment order (BQ: Exchange).
+// This creates compensating ledger entries and transitions the order to REVERSED.
+// Can only be called when the payment order is in COMPLETED state.
+message ReversePaymentOrderRequest {
+  // payment_order_id is the unique identifier of the payment order to reverse.
+  string payment_order_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // reversal_reason explains why the payment is being reversed.
+  string reversal_reason = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // reversed_by identifies who is requesting the reversal.
+  string reversed_by = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // idempotency_key ensures exactly-once processing of reversal.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
+
+  // correlation_id is optional for distributed tracing (generated if not provided).
+  string correlation_id = 5 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+}
+
+// ReversePaymentOrderResponse returns the reversed payment order.
+message ReversePaymentOrderResponse {
+  // payment_order is the reversed payment order with status REVERSED.
+  PaymentOrder payment_order = 1 [(buf.validate.field).required = true];
+}
+
+// PaymentOrderService provides BIAN-compliant payment order operations.
+// This service acts as the saga orchestrator for money movement,
+// coordinating funds reservation, gateway execution, and ledger booking.
+//
+// State Machine:
+// The service manages a payment order through the following states:
+//   INITIATED → RESERVED → EXECUTING → COMPLETED (happy path)
+//
+// Each state transition is atomic and triggers the next saga step:
+//   1. InitiatePaymentOrder: Creates order in INITIATED state
+//   2. Saga worker reserves funds → transitions to RESERVED
+//   3. Saga worker sends to gateway → transitions to EXECUTING
+//   4. UpdatePaymentOrder (webhook): Gateway callback → COMPLETED or FAILED
+//
+// Idempotency:
+// All mutating operations require an idempotency_key to ensure exactly-once
+// processing. The service stores idempotency keys with their responses and
+// returns cached responses for duplicate requests within the TTL window.
+//
+// - InitiatePaymentOrder: Client-provided idempotency_key prevents duplicate
+//   payment creation. Same key returns the existing payment order.
+// - UpdatePaymentOrder: Webhook idempotency_key prevents duplicate processing
+//   of gateway callbacks (webhooks may be delivered multiple times).
+//
+// Correlation and Causation:
+// - correlation_id: Links all events across services for a single user request
+// - causation_id: Identifies the specific event that caused a state change
+//
+// Error Handling:
+// Failures at any stage trigger automatic compensation:
+// - INITIATED → FAILED: No compensation needed (no funds reserved)
+// - RESERVED/EXECUTING → FAILED: Lien is automatically released
+// - COMPLETED → REVERSED: Compensating ledger entries are created
+service PaymentOrderService {
+  // InitiatePaymentOrder creates a new payment order and begins the saga.
+  // The saga flow: INITIATED → RESERVED → EXECUTING → COMPLETED/FAILED
+  rpc InitiatePaymentOrder(InitiatePaymentOrderRequest) returns (InitiatePaymentOrderResponse) {
+    option (google.api.http) = {
+      post: "/v1/payment-orders"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create a new payment order"
+      description: "Initiates a payment order and begins the saga flow. The order "
+                   "progresses through INITIATED → RESERVED → EXECUTING → COMPLETED/FAILED."
+      responses: {
+        key: "201"
+        value: {
+          description: "Payment order created successfully"
+        }
+      }
+      responses: {
+        key: "400"
+        value: {
+          description: "Invalid request (missing required fields or validation error)"
+        }
+      }
+    };
+  }
+
+  // RetrievePaymentOrder gets payment order details by ID.
+  rpc RetrievePaymentOrder(RetrievePaymentOrderRequest) returns (RetrievePaymentOrderResponse) {
+    option (google.api.http) = {
+      get: "/v1/payment-orders/{payment_order_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get payment order details"
+      responses: {
+        key: "404"
+        value: {
+          description: "Payment order not found"
+        }
+      }
+    };
+  }
+
+  // UpdatePaymentOrder handles asynchronous gateway callbacks.
+  // Called when the external gateway reports the final payment status.
+  rpc UpdatePaymentOrder(UpdatePaymentOrderRequest) returns (UpdatePaymentOrderResponse) {
+    option (google.api.http) = {
+      patch: "/v1/payment-orders/{payment_order_id}"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Update payment order status"
+      description: "Handles asynchronous gateway callbacks when the external payment "
+                   "gateway reports the final payment status (success or failure)."
+      responses: {
+        key: "404"
+        value: {
+          description: "Payment order not found"
+        }
+      }
+    };
+  }
+
+  // CancelPaymentOrder cancels a payment order before completion.
+  // Only valid for INITIATED or RESERVED states. EXECUTING payments cannot be cancelled.
+  // If status is RESERVED, compensation will release the lien on the debtor account.
+  rpc CancelPaymentOrder(CancelPaymentOrderRequest) returns (CancelPaymentOrderResponse) {
+    option (google.api.http) = {
+      post: "/v1/payment-orders/{payment_order_id}/cancel"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Cancel a payment order"
+      description: "Cancels a payment order before completion. Only valid for INITIATED "
+                   "or RESERVED states. If RESERVED, releases the lien on the debtor account."
+      responses: {
+        key: "404"
+        value: {
+          description: "Payment order not found"
+        }
+      }
+      responses: {
+        key: "409"
+        value: {
+          description: "Cannot cancel - order is EXECUTING or already completed"
+        }
+      }
+    };
+  }
+
+  // ListPaymentOrders returns a paginated list of payment orders with optional filtering.
+  // Supports filtering by debtor_account_id, status, and date range.
+  rpc ListPaymentOrders(ListPaymentOrdersRequest) returns (ListPaymentOrdersResponse) {
+    option (google.api.http) = {
+      get: "/v1/payment-orders"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List payment orders"
+      description: "Returns a paginated list of payment orders with optional filtering "
+                   "by debtor_account_id, status, and date range."
+    };
+  }
+
+  // ReversePaymentOrder reverses a completed payment order (post-completion compensation).
+  // Only valid for COMPLETED state. Creates compensating ledger entries to reverse
+  // the original transaction and transitions the order to REVERSED.
+  // Idempotent: returns success if already reversed with the same idempotency key.
+  rpc ReversePaymentOrder(ReversePaymentOrderRequest) returns (ReversePaymentOrderResponse) {
+    option (google.api.http) = {
+      post: "/v1/payment-orders/{payment_order_id}/reverse"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Reverse a completed payment order"
+      description: "Reverses a completed payment order by creating compensating ledger "
+                   "entries. Only valid for COMPLETED state. Idempotent operation."
+      responses: {
+        key: "404"
+        value: {
+          description: "Payment order not found"
+        }
+      }
+      responses: {
+        key: "409"
+        value: {
+          description: "Cannot reverse - order is not in COMPLETED state"
+        }
+      }
+    };
+  }
+}

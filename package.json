@@ -1,0 +1,26 @@
+{
+  "name": "meridian",
+  "version": "1.0.0",
+  "description": "A learning-focused reference implementation of an open banking ledger following BIAN (Banking Industry Architecture Network) standards.",
+  "private": true,
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "lint:md": "markdownlint-cli2 '**/*.md' '!node_modules' '!**/node_modules/**'",
+    "lint:md:fix": "markdownlint-cli2 --fix '**/*.md' '!node_modules' '!**/node_modules/**'",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "bian",
+    "open-banking",
+    "ledger",
+    "golang",
+    "grpc"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "markdownlint-cli2": "^0.19.0"
+  }
+}
