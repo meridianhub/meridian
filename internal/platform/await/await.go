@@ -5,6 +5,10 @@
 // Inspired by Java's Awaitility library, this package provides a fluent API
 // for expressing test synchronization intent clearly.
 //
+// Note: This is a lightweight, zero-dependency implementation. If more advanced
+// features are needed (matchers, async assertions, etc.), consider migrating to
+// gomega.Eventually() and deleting this package. See: github.com/onsi/gomega
+//
 // Example usage:
 //
 //	// Wait for a condition with defaults (10s timeout, 100ms poll interval)
