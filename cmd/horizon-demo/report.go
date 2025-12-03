@@ -63,6 +63,21 @@ type VerificationReport struct {
 	BalanceCorrect bool `json:"balance_correct"`
 	// NoDoubleSpend is true if exactly one transaction was recorded
 	NoDoubleSpend bool `json:"no_double_spend"`
+	// LienVerification contains optional lien state verification (omitted if not performed)
+	LienVerification *LienVerificationReport `json:"lien_verification,omitempty"`
+}
+
+// LienVerificationReport contains the optional lien state verification results.
+// This is a stretch goal that verifies no orphaned liens exist after payment completion.
+type LienVerificationReport struct {
+	// LienID is the lien that was verified
+	LienID string `json:"lien_id"`
+	// Status is the current lien status (EXECUTED, ACTIVE, TERMINATED)
+	Status string `json:"status"`
+	// IsOrphaned is true if the lien is still ACTIVE (should have been executed/terminated)
+	IsOrphaned bool `json:"is_orphaned"`
+	// Verified is true if the lien verification completed successfully
+	Verified bool `json:"verified"`
 }
 
 // Report verdict string constants for JSON output.
@@ -125,6 +140,21 @@ func (r *Report) SetFinalBalance(finalBalanceCents int64, transactionsRecorded i
 	r.Verification.BalanceCorrect = finalBalanceCents == r.Account.ExpectedBalanceCents
 	r.Verification.NoDoubleSpend = transactionsRecorded == 1
 	r.Verdict = r.CalculateVerdict()
+}
+
+// SetLienVerification sets the optional lien verification results.
+// This is a non-blocking check that doesn't affect the overall verdict.
+func (r *Report) SetLienVerification(lienResult *LienAuditResult) {
+	if lienResult == nil {
+		return
+	}
+
+	r.Verification.LienVerification = &LienVerificationReport{
+		LienID:     lienResult.LienID,
+		Status:     lienResult.LienStatus,
+		IsOrphaned: lienResult.IsOrphaned,
+		Verified:   lienResult.Verdict != AuditVerdictError,
+	}
 }
 
 // ToJSON converts the report to a formatted JSON string.
