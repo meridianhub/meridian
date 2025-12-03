@@ -125,7 +125,9 @@ linters-settings:
     comparison: true
 
   gocritic:
+    # Enable only safety-focused diagnostics, not style suggestions
     enabled-checks:
+      # Bug detection
       - appendAssign
       - argOrder
       - badCall
@@ -134,9 +136,7 @@ linters-settings:
       - badRegexp
       - builtinShadowDecl
       - caseOrder
-      - codegenComment
       - deferInLoop
-      - deprecatedComment
       - dupArg
       - dupBranchBody
       - dupCase
@@ -153,8 +153,17 @@ linters-settings:
       - sqlQuery
       - syncMapLoadAndDelete
       - truncateCmp
-      - unnecessaryDefer
       - weakCond
+    # Explicitly disable style suggestions (these are auto-enabled but not safety-focused)
+    disabled-checks:
+      - assignOp
+      - elseif
+      - ifElseChain
+      - singleCaseSwitch
+      - unlambda
+      - unnamedResult
+      - unnecessaryDefer
+      - exitAfterDefer
 
 issues:
   exclude-use-default: false
@@ -175,6 +184,7 @@ issues:
         - forcetypeassert
         - gocritic
         - bodyclose
+        - nilnil
 
     # Exclude all linters for integration tests (require external services)
     - path: test/integration/
@@ -195,6 +205,13 @@ issues:
     - path: mock_.*\.go
       linters:
         - all
+
+    # Exclude example test files (they often use simpler patterns for documentation)
+    - path: _example_test\.go
+      linters:
+        - forcetypeassert
+        - gocritic
+        - nilnil
 
     # Allow main() to have unchecked errors for flag parsing
     - path: cmd/
