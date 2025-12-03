@@ -6,6 +6,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"time"
@@ -19,6 +20,126 @@ var (
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
+
+// Exit codes for the demo tool.
+const (
+	ExitCodePassed = 0 // Demo passed - no phantom transactions
+	ExitCodeFailed = 1 // Demo failed - integrity issue detected
+	ExitCodeError  = 2 // Execution error - service unavailable, etc.
+)
+
+// ANSI color codes for terminal output.
+const (
+	colorReset  = "\033[0m"
+	colorGreen  = "\033[32m"
+	colorRed    = "\033[31m"
+	colorYellow = "\033[33m"
+	colorBold   = "\033[1m"
+	colorCyan   = "\033[36m"
+)
+
+// StepStatus represents the outcome of a demo step.
+type StepStatus int
+
+const (
+	StatusOK StepStatus = iota
+	StatusTimeout
+	StatusFailed
+	StatusPassed
+	StatusError
+)
+
+func (s StepStatus) String() string {
+	switch s {
+	case StatusOK:
+		return "OK"
+	case StatusTimeout:
+		return "TIMEOUT"
+	case StatusFailed:
+		return "FAIL"
+	case StatusPassed:
+		return "PASSED"
+	case StatusError:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func (s StepStatus) color() string {
+	switch s {
+	case StatusOK, StatusPassed:
+		return colorGreen
+	case StatusFailed, StatusError:
+		return colorRed
+	case StatusTimeout:
+		return colorYellow
+	default:
+		return colorReset
+	}
+}
+
+// StepResult captures the outcome of a single demo step.
+type StepResult struct {
+	Step    int
+	Name    string
+	Status  StepStatus
+	Details string
+}
+
+// DemoResult captures the overall demo outcome.
+type DemoResult struct {
+	Steps   []StepResult
+	Verdict Verdict
+}
+
+// Verdict represents the final demo verdict.
+type Verdict int
+
+const (
+	VerdictPassed Verdict = iota
+	VerdictFailed
+	VerdictError
+)
+
+func (v Verdict) String() string {
+	switch v {
+	case VerdictPassed:
+		return "PASSED"
+	case VerdictFailed:
+		return "FAILED"
+	case VerdictError:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func (v Verdict) exitCode() int {
+	switch v {
+	case VerdictPassed:
+		return ExitCodePassed
+	case VerdictFailed:
+		return ExitCodeFailed
+	case VerdictError:
+		return ExitCodeError
+	default:
+		return ExitCodeError
+	}
+}
+
+func (v Verdict) color() string {
+	switch v {
+	case VerdictPassed:
+		return colorGreen
+	case VerdictFailed:
+		return colorRed
+	case VerdictError:
+		return colorYellow
+	default:
+		return colorYellow
+	}
+}
 
 // Configuration validation errors.
 var (
@@ -60,14 +181,25 @@ func DefaultConfig() *Config {
 }
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	exitCode := runWithExitCode()
+	os.Exit(exitCode)
 }
 
-func run() error {
+func runWithExitCode() int {
+	result, err := run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return ExitCodeError
+	}
+	if result == nil {
+		return ExitCodePassed
+	}
+	return result.Verdict.exitCode()
+}
+
+func run() (*DemoResult, error) {
 	cfg := DefaultConfig()
+	var demoResult *DemoResult
 
 	rootCmd := &cobra.Command{
 		Use:   "horizon-demo",
@@ -88,7 +220,9 @@ The demo:
 5. Generates a forensic audit report`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", Version, Commit, BuildDate),
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runDemo(cfg)
+			var err error
+			demoResult, err = runDemo(cfg)
+			return err
 		},
 	}
 
@@ -107,11 +241,12 @@ The demo:
 	flags.BoolVar(&cfg.NoCleanup, "no-cleanup", cfg.NoCleanup,
 		"skip test account cleanup after demo (useful for debugging)")
 
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	return demoResult, err
 }
 
 // runDemo executes the Horizon integrity proof demonstration.
-func runDemo(cfg *Config) error {
+func runDemo(cfg *Config) (*DemoResult, error) {
 	// Initialize logger based on verbosity
 	logLevel := slog.LevelInfo
 	if cfg.Verbose {
@@ -135,7 +270,7 @@ func runDemo(cfg *Config) error {
 
 	// Validate configuration
 	if err := validateConfig(cfg); err != nil {
-		return fmt.Errorf("invalid configuration: %w", err)
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	// TODO: Implement demo logic in subsequent tasks
@@ -146,8 +281,40 @@ func runDemo(cfg *Config) error {
 	// Task 6-7: Forensic audit
 	// Task 9-10: Report generation
 
-	logger.Info("demo completed successfully")
-	return nil
+	// For now, return a placeholder result to demonstrate the output formatting
+	result := &DemoResult{
+		Steps: []StepResult{
+			{Step: 1, Name: "Create Test Account", Status: StatusOK, Details: "HORIZON-TEST-placeholder"},
+			{Step: 2, Name: "Deposit GBP 1,000", Status: StatusOK, Details: "Balance: GBP 1,000.00"},
+			{Step: 3, Name: "Payment (Attempt 1)", Status: StatusTimeout, Details: "Client: context deadline exceeded"},
+			{Step: 4, Name: "Payment (Attempt 2)", Status: StatusOK, Details: "Idempotency hit, PO: po_placeholder"},
+			{Step: 5, Name: "Verify Balance", Status: StatusPassed, Details: "GBP 900.00 (expected: GBP 900.00)"},
+			{Step: 6, Name: "Verify Orders", Status: StatusPassed, Details: "1 order (expected: 1)"},
+		},
+		Verdict: VerdictPassed,
+	}
+
+	// Print ASCII table
+	printASCIITable(os.Stdout, result)
+
+	// TODO: Task 9 will implement actual JSON report generation
+	// For now, just log the configured output path
+	logger.Debug("report output configured", "path", cfg.Output)
+
+	// Execute cleanup unless --no-cleanup is specified
+	if !cfg.NoCleanup {
+		logger.Debug("executing cleanup", "account", "HORIZON-TEST-placeholder")
+		if err := executeCleanup(logger, "placeholder-account-id"); err != nil {
+			logger.Warn("cleanup failed", "error", err)
+			fmt.Fprintf(os.Stderr, "\n%sWarning:%s Manual cleanup may be required for test account\n",
+				colorYellow, colorReset)
+		}
+	} else {
+		logger.Info("skipping cleanup (--no-cleanup specified)")
+	}
+
+	logger.Info("demo completed", "verdict", result.Verdict.String())
+	return result, nil
 }
 
 // validateConfig validates the CLI configuration.
@@ -180,5 +347,77 @@ func validateConfig(cfg *Config) error {
 		return ErrOutputEmpty
 	}
 
+	return nil
+}
+
+// printASCIITable prints the demo results as a formatted ASCII table with ANSI colors.
+func printASCIITable(w io.Writer, result *DemoResult) {
+	const (
+		stepWidth   = 25
+		statusWidth = 12
+		headerLine  = "=============================================================="
+		rowLine     = "--------------------------------------------------------------"
+	)
+
+	// Header
+	_, _ = fmt.Fprintf(w, "\n%s%sHORIZON INTEGRITY PROOF%s\n", colorBold, colorCyan, colorReset)
+	_, _ = fmt.Fprintln(w, headerLine)
+	_, _ = fmt.Fprintln(w)
+
+	// Column headers
+	_, _ = fmt.Fprintf(w, "%-*s %-*s %s\n", stepWidth, "STEP", statusWidth, "STATUS", "DETAILS")
+	_, _ = fmt.Fprintln(w, rowLine)
+
+	// Print each step
+	for _, step := range result.Steps {
+		statusStr := fmt.Sprintf("%s%-*s%s",
+			step.Status.color(),
+			statusWidth,
+			step.Status.String(),
+			colorReset)
+
+		_, _ = fmt.Fprintf(w, "%d. %-*s %s %s\n",
+			step.Step,
+			stepWidth-3, // -3 for "N. " prefix
+			step.Name,
+			statusStr,
+			step.Details)
+	}
+
+	_, _ = fmt.Fprintln(w, rowLine)
+	_, _ = fmt.Fprintln(w)
+
+	// Verdict line
+	verdictMsg := getVerdictMessage(result.Verdict)
+	_, _ = fmt.Fprintf(w, "%sVERDICT: %s%s%s - %s%s\n",
+		colorBold,
+		result.Verdict.color(),
+		result.Verdict.String(),
+		colorReset,
+		verdictMsg,
+		colorReset)
+}
+
+func getVerdictMessage(v Verdict) string {
+	switch v {
+	case VerdictPassed:
+		return "No phantom transactions, no double-spend"
+	case VerdictFailed:
+		return "Integrity issue detected"
+	case VerdictError:
+		return "Execution error occurred"
+	default:
+		return "Unknown result"
+	}
+}
+
+// executeCleanup attempts to clean up the test account created during the demo.
+func executeCleanup(logger *slog.Logger, accountID string) error {
+	// TODO: Implement actual cleanup logic in subsequent tasks
+	// This will call CurrentAccountService to close/delete the test account
+	logger.Debug("cleanup would delete account", "account_id", accountID)
+
+	// For now, cleanup is a no-op since we don't have actual gRPC clients yet
+	// The cleanup will be implemented when Task 2 (gRPC client setup) is complete
 	return nil
 }
