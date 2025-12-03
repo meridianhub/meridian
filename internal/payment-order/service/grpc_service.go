@@ -1131,7 +1131,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 	}
 
 	// Retrieve payment order
-	po, err := s.repo.FindByID(poID)
+	po, err := s.repo.FindByID(ctx, poID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPaymentOrderNotFound) {
 			return nil, status.Errorf(codes.NotFound, "payment order not found: %s", req.PaymentOrderId)
@@ -1159,7 +1159,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 	}
 
 	// Update in database
-	if err := s.repo.Update(po); err != nil {
+	if err := s.repo.Update(ctx, po); err != nil {
 		return nil, status.Error(codes.Internal, "failed to update payment order")
 	}
 
