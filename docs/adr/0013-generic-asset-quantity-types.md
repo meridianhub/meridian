@@ -74,6 +74,11 @@ modifying the core quantity library, and produces zero-overhead code through Go'
 
 ### Type Hierarchy
 
+The `Unit` interface is open for extension. Any type implementing `Unit` can be used with `Quantity[U]`.
+The examples below (Currency, EnergyUnit, ComputeUnit) are illustrative - the system supports arbitrary
+asset classes including loyalty points, air miles, water usage, bandwidth, storage, tokens, or any
+other quantifiable unit a tenant may need.
+
 ```
                          ┌─────────────────────┐
                          │    Unit interface   │
@@ -82,22 +87,32 @@ modifying the core quantity library, and produces zero-overhead code through Go'
                          │  Precision() int    │
                          └─────────┬───────────┘
                                    │
-           ┌───────────────────────┼───────────────────────┐
-           │                       │                       │
-    ┌──────▼──────┐        ┌───────▼───────┐       ┌───────▼───────┐
-    │  Currency   │        │  EnergyUnit   │       │  ComputeUnit  │
-    │  ─────────  │        │  ───────────  │       │  ───────────  │
-    │  GBP, USD   │        │  kWh, MWh     │       │  GPU-Hour     │
-    │  EUR, JPY   │        │  Therm, BTU   │       │  CPU-Hour     │
-    └──────┬──────┘        └───────┬───────┘       └───────┬───────┘
-           │                       │                       │
-    ┌──────▼──────┐        ┌───────▼───────┐       ┌───────▼───────┐
-    │ Quantity    │        │  Quantity     │       │  Quantity     │
-    │ [Currency]  │        │  [EnergyUnit] │       │  [ComputeUnit]│
-    │  ─────────  │        │  ───────────  │       │  ───────────  │
-    │  = Money    │        │  = Energy     │       │  = Compute    │
-    └─────────────┘        └───────────────┘       └───────────────┘
+                    ┌──────────────┼──────────────┐
+                    │              │              │
+                    ▼              ▼              ▼
+             ┌───────────┐  ┌───────────┐  ┌───────────┐
+             │ Currency  │  │EnergyUnit │  │    ...    │
+             │ (example) │  │ (example) │  │ (custom)  │
+             └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
+                   │              │              │
+                   ▼              ▼              ▼
+             ┌───────────┐  ┌───────────┐  ┌───────────┐
+             │ Quantity  │  │ Quantity  │  │ Quantity  │
+             │[Currency] │  │[EnergyUnit│  │ [Custom]  │
+             │ = Money   │  │ = Energy  │  │           │
+             └───────────┘  └───────────┘  └───────────┘
 ```
+
+**Example unit types** (not exhaustive):
+- `Currency` - Fiat money (GBP, USD, EUR)
+- `EnergyUnit` - Power consumption (kWh, MWh, Therm)
+- `ComputeUnit` - Processing time (GPU-Hour, CPU-Hour)
+- `CarbonUnit` - Emissions (tCO2e, kgCO2e)
+- `LoyaltyUnit` - Points, miles, rewards
+- `StorageUnit` - Data (GB, TB)
+- `BandwidthUnit` - Transfer (Mbps, GB/month)
+- `TokenUnit` - Crypto or internal tokens
+- *...any custom unit a tenant defines*
 
 ### Core Types
 
@@ -158,22 +173,27 @@ Same-type but different-unit errors (GBP + USD) are caught at runtime, matching 
 
 ### Package Structure
 
+The core library provides the generic `Quantity[U]` type and `Unit` interface. Example unit
+implementations are provided for common use cases, but tenants can define custom units in their
+own packages without modifying the core library.
+
 ```
 pkg/platform/quantity/
 ├── quantity.go       // Quantity[U] generic type and operations
 ├── unit.go           // Unit interface definition
-├── currency/
+│
+├── currency/         // Example: fiat currency
 │   ├── currency.go   // Currency type implementing Unit
-│   └── codes.go      // ISO 4217 currency codes (GBP, USD, EUR, etc.)
-├── energy/
-│   ├── energy.go     // EnergyUnit type implementing Unit
-│   └── units.go      // Energy units (kWh, MWh, Therm, BTU)
-├── compute/
-│   ├── compute.go    // ComputeUnit type implementing Unit
-│   └── units.go      // Compute units (GPU-Hour, CPU-Hour)
-└── carbon/
-    ├── carbon.go     // CarbonUnit type implementing Unit
-    └── units.go      // Carbon units (tCO2e, kgCO2e)
+│   └── codes.go      // ISO 4217 currency codes
+│
+└── examples/         // Reference implementations for other asset classes
+    ├── energy/       // kWh, MWh, Therm, BTU
+    ├── compute/      // GPU-Hour, CPU-Hour
+    └── carbon/       // tCO2e, kgCO2e
+
+# Tenants define custom units in their own packages:
+# internal/tenant-acme/units/airmiles/
+# internal/tenant-xyz/units/waterusage/
 ```
 
 ### Migration Strategy
