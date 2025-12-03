@@ -15,3 +15,13 @@ plugins:
 
   # Note: buf-validate uses runtime validation via github.com/bufbuild/protovalidate-go
   # No code generation plugin needed - validation happens at runtime
+
+  # OpenAPI v2 (Swagger) specification generator
+  # Generates swagger.json files for REST API documentation and testing
+  - remote: buf.build/grpc-ecosystem/openapiv2:v2.25.1
+    out: api/openapi
+    opt:
+      - allow_merge=true
+      - merge_file_name=meridian
+      - openapi_naming_strategy=simple
+      - generate_unbound_methods=true

@@ -2,12 +2,18 @@ syntax = "proto3";
 
 package meridian.common.v1;
 
+import "google/api/annotations.proto";
+
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/common/v1;commonv1";
 
 // HealthService provides health check endpoints for all Meridian services.
 service HealthService {
   // Check performs a health check of the service.
-  rpc Check(CheckRequest) returns (CheckResponse);
+  rpc Check(CheckRequest) returns (CheckResponse) {
+    option (google.api.http) = {
+      get: "/v1/health"
+    };
+  }
 }
 
 // CheckRequest is the request for a health check.

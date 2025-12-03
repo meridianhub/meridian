@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all docs
 
 # Default target
 all: help
@@ -46,9 +46,10 @@ help:
 	@echo "  make validate-tilt     - Validate Tiltfile configuration"
 	@echo "  make fmt               - Format Go code"
 	@echo "  make clean             - Remove build artifacts"
-	@echo "  make proto             - Generate code from all protobuf versions"
+	@echo "  make proto             - Generate code from all protobuf versions (includes OpenAPI)"
 	@echo "  make proto-v1          - Generate code from v1 protobuf definitions"
 	@echo "  make proto-v2          - Generate code from v2 protobuf definitions (future)"
+	@echo "  make proto-openapi     - Show location of generated OpenAPI spec"
 	@echo "  make proto-validate    - Validate protobuf directory structure"
 	@echo "  make proto-lint        - Lint protobuf files with buf"
 	@echo "  make proto-breaking    - Check for breaking proto changes"
@@ -153,6 +154,24 @@ proto-v2:
 	@echo "  1. Create api/proto/meridian/*/v2/ directories"
 	@echo "  2. Update buf.gen.yaml for v2 generation paths"
 	@echo "  3. Implement v2-specific generation logic here"
+
+## proto-openapi: Show location of generated OpenAPI spec
+proto-openapi: proto
+	@echo ""
+	@echo "OpenAPI specification generated:"
+	@echo "  Location: api/openapi/meridian.swagger.json"
+	@echo ""
+	@echo "Usage:"
+	@echo "  - Import into Postman/Insomnia for API testing"
+	@echo "  - Generate client SDKs with OpenAPI Generator"
+	@echo "  - Host with Swagger UI for interactive docs"
+	@echo ""
+	@if [ -f api/openapi/meridian.swagger.json ]; then \
+		echo "File size: $$(wc -c < api/openapi/meridian.swagger.json | tr -d ' ') bytes"; \
+		echo "Endpoints: $$(grep -c '"operationId"' api/openapi/meridian.swagger.json) operations"; \
+	else \
+		echo "Note: Run 'make proto' first to generate the spec"; \
+	fi
 
 ## proto-validate: Validate protobuf directory structure and versions
 proto-validate:
