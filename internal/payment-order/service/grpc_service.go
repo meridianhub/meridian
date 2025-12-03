@@ -1500,17 +1500,9 @@ func (s *Service) updateLienExecutionStatus(
 		// Update lien execution tracking fields
 		po.LienExecutionAttempts = totalLienAttempts
 
-		if retryErr == nil {
-			// Success
-			po.SetLienExecutionSucceeded()
-			if updateAttempt == 1 {
-				logger.Info("lien execution completed successfully",
-					"total_attempts", totalLienAttempts)
-				poobservability.RecordLienExecution("success")
-			}
-		} else {
-			// Failed after all retries - prefer lastErr (specific error) over retryErr (wrapper)
-			var errMsg string
+		// Determine error message if failed
+		var errMsg string
+		if retryErr != nil {
 			switch {
 			case lastErr != nil:
 				errMsg = lastErr.Error()
@@ -1519,19 +1511,31 @@ func (s *Service) updateLienExecutionStatus(
 			default:
 				errMsg = "unknown error"
 			}
+		}
+
+		// Set status on domain object
+		if retryErr == nil {
+			po.SetLienExecutionSucceeded()
+		} else {
 			po.SetLienExecutionFailed(errMsg)
-			if updateAttempt == 1 {
+		}
+
+		// Persist the updated status
+		updateErr := s.repo.Update(updateCtx, po) //nolint:contextcheck
+		if updateErr == nil {
+			// Record metrics only after successful persistence to avoid double-counting
+			// on version conflict retries
+			if retryErr == nil {
+				logger.Info("lien execution completed successfully",
+					"total_attempts", totalLienAttempts)
+				poobservability.RecordLienExecution("success")
+			} else {
 				logger.Error("lien execution failed after all retries",
 					"total_attempts", totalLienAttempts,
 					"error", errMsg)
 				poobservability.RecordLienExecution("failure")
 				poobservability.RecordExternalServiceError("current_account", "execute_lien")
 			}
-		}
-
-		// Persist the updated status
-		updateErr := s.repo.Update(updateCtx, po) //nolint:contextcheck
-		if updateErr == nil {
 			logger.Info("payment order lien execution status updated",
 				"status", po.LienExecutionStatus,
 				"attempts", po.LienExecutionAttempts)
