@@ -2086,13 +2086,15 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 	}
 
 	// Wait for status update to complete (async retry will fail and update status to FAILED)
+	// Timeout must accommodate retry backoff: 500ms + 1s + 2s + 4s + 8s = 15.5s base,
+	// plus 50% jitter (RandomizationFactor=0.5) can extend to ~23s worst case
 	assert.Eventually(t, func() bool {
 		updatedPO, err := repo.FindByID(context.Background(), po.ID)
 		if err != nil {
 			return false
 		}
 		return updatedPO.LienExecutionStatus == domain.LienExecutionStatusFailed
-	}, 5*time.Second, 50*time.Millisecond, "lien execution status should be FAILED after retries exhausted")
+	}, 25*time.Second, 100*time.Millisecond, "lien execution status should be FAILED after retries exhausted")
 
 	// Verify the payment order is in COMPLETED state in the repo
 	updatedPO, _ := repo.FindByID(context.Background(), po.ID)
