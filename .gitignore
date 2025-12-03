@@ -45,6 +45,9 @@ __debug_bin
 *.pb.go
 *.pb.validate.go
 *_grpc.pb.go
+
+# Generated OpenAPI specs (regenerate with buf generate)
+api/openapi/
 __pycache__/
 # Add current-account binary to .gitignore (use leading / to avoid matching directories)
 /current-account
