@@ -76,6 +76,11 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
+            IMPORTANT CONTEXT:
+            - Current date: December 2025 or later
+            - Go version: This project uses Go 1.25+ which is the current stable release
+            - Do not flag Go version references (like "Go 1.25") as errors or future versions
+
             Please review this pull request and provide feedback on:
             - Code quality and best practices
             - Potential bugs or issues
