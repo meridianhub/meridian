@@ -94,6 +94,13 @@ const (
 
 	// DefaultLienExecutionRetryTimeout is the timeout for the entire retry sequence.
 	DefaultLienExecutionRetryTimeout = 2 * time.Minute
+
+	// lienStatusUpdateMaxRetries is the number of times to retry status updates on version conflict.
+	lienStatusUpdateMaxRetries = 5
+	// lienStatusUpdateBackoffBase is the base duration for exponential backoff between retries.
+	lienStatusUpdateBackoffBase = 100 * time.Millisecond
+	// lienStatusUpdateTimeout is the timeout for the entire status update operation.
+	lienStatusUpdateTimeout = 30 * time.Second
 )
 
 // Money conversion constants for Google Money proto (nanos have 9 decimal places)
@@ -1450,23 +1457,13 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 	s.updateLienExecutionStatus(paymentOrderID, attempts, err, lastErr, logger)
 }
 
-// Lien execution status update configuration
-const (
-	// lienStatusUpdateMaxRetries is the number of times to retry status updates on version conflict
-	lienStatusUpdateMaxRetries = 5
-	// lienStatusUpdateBackoffBase is the base duration for exponential backoff between retries
-	lienStatusUpdateBackoffBase = 100 * time.Millisecond
-	// lienStatusUpdateTimeout is the timeout for the entire status update operation
-	lienStatusUpdateTimeout = 30 * time.Second
-)
-
 // updateLienExecutionStatus updates the payment order's lien execution status after retry completion.
 // This is called after all retry attempts have finished (success or failure).
 // Uses optimistic locking with retry on version conflict to handle concurrent updates.
 // Note: Uses a fresh context to ensure the status update completes even if the parent context has timed out.
 func (s *Service) updateLienExecutionStatus(
 	paymentOrderID uuid.UUID,
-	attempts int,
+	totalLienAttempts int,
 	retryErr error,
 	lastErr error,
 	logger *slog.Logger,
@@ -1501,14 +1498,14 @@ func (s *Service) updateLienExecutionStatus(
 		}
 
 		// Update lien execution tracking fields
-		po.LienExecutionAttempts = attempts
+		po.LienExecutionAttempts = totalLienAttempts
 
 		if retryErr == nil {
 			// Success
 			po.SetLienExecutionSucceeded()
 			if updateAttempt == 1 {
 				logger.Info("lien execution completed successfully",
-					"total_attempts", attempts)
+					"total_attempts", totalLienAttempts)
 				poobservability.RecordLienExecution("success")
 			}
 		} else {
@@ -1525,7 +1522,7 @@ func (s *Service) updateLienExecutionStatus(
 			po.SetLienExecutionFailed(errMsg)
 			if updateAttempt == 1 {
 				logger.Error("lien execution failed after all retries",
-					"total_attempts", attempts,
+					"total_attempts", totalLienAttempts,
 					"error", errMsg)
 				poobservability.RecordLienExecution("failure")
 				poobservability.RecordExternalServiceError("current_account", "execute_lien")

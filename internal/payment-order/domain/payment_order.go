@@ -356,10 +356,20 @@ func (p *PaymentOrder) SetLienExecutionSucceeded() {
 	p.UpdatedAt = time.Now()
 }
 
+// maxLienExecutionErrorLength is the maximum length of the lien execution error message.
+// Matches the database column size (VARCHAR(1000)) and proto field constraint.
+const maxLienExecutionErrorLength = 1000
+
 // SetLienExecutionFailed marks lien execution as failed after all retries exhausted.
 // Call this when all retry attempts have failed and manual reconciliation is needed.
+// Error messages exceeding maxLienExecutionErrorLength are truncated with a suffix.
 func (p *PaymentOrder) SetLienExecutionFailed(err string) {
 	p.LienExecutionStatus = LienExecutionStatusFailed
+	// Truncate error message to fit database column size
+	if len(err) > maxLienExecutionErrorLength {
+		const truncatedSuffix = "...[truncated]"
+		err = err[:maxLienExecutionErrorLength-len(truncatedSuffix)] + truncatedSuffix
+	}
 	p.LienExecutionError = err
 	p.UpdatedAt = time.Now()
 }
