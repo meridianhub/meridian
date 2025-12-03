@@ -63,6 +63,11 @@ func TestNewClients_ConfigValidation(t *testing.T) {
 		wantError error
 	}{
 		{
+			name:      "nil config",
+			cfg:       nil,
+			wantError: ErrTargetRequired,
+		},
+		{
 			name: "missing CurrentAccountTarget",
 			cfg: &ClientsConfig{
 				CurrentAccountTarget: "",

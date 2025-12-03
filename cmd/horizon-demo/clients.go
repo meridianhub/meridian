@@ -60,6 +60,10 @@ type ClientsConfig struct {
 // NewClients creates gRPC clients for CurrentAccountService and PaymentOrderService.
 // It establishes connections with insecure credentials suitable for local/Tilt environments.
 func NewClients(cfg *ClientsConfig) (*Clients, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("%w: ClientsConfig is nil", ErrTargetRequired)
+	}
+
 	if cfg.CurrentAccountTarget == "" {
 		return nil, fmt.Errorf("%w: CurrentAccountTarget", ErrTargetRequired)
 	}
@@ -158,20 +162,46 @@ func (c *Clients) CheckHealth(_ context.Context) error {
 // WaitForReady blocks until both services are ready or the context is cancelled.
 // This is useful for startup health checks before beginning the demo.
 func (c *Clients) WaitForReady(ctx context.Context) error {
-	c.logger.Debug("waiting for CurrentAccountService to be ready")
-	if !c.currentAccountConn.WaitForStateChange(ctx, connectivity.Idle) {
-		// If we're still idle, try to connect
-		c.currentAccountConn.Connect()
+	// Wait for CurrentAccountService
+	if err := c.waitForConnReady(ctx, c.currentAccountConn, "CurrentAccountService"); err != nil {
+		return err
 	}
 
-	c.logger.Debug("waiting for PaymentOrderService to be ready")
-	if !c.paymentOrderConn.WaitForStateChange(ctx, connectivity.Idle) {
-		// If we're still idle, try to connect
-		c.paymentOrderConn.Connect()
+	// Wait for PaymentOrderService
+	if err := c.waitForConnReady(ctx, c.paymentOrderConn, "PaymentOrderService"); err != nil {
+		return err
 	}
 
-	// Verify both are now ready
-	return c.CheckHealth(ctx)
+	return nil
+}
+
+// waitForConnReady waits for a single connection to reach Ready state.
+func (c *Clients) waitForConnReady(ctx context.Context, conn *grpc.ClientConn, serviceName string) error {
+	c.logger.Debug("waiting for service to be ready", "service", serviceName)
+
+	// Trigger connection attempt (grpc.NewClient starts in Idle without I/O)
+	conn.Connect()
+
+	for {
+		state := conn.GetState()
+		c.logger.Debug("connection state", "service", serviceName, "state", state.String())
+
+		if state == connectivity.Ready {
+			return nil
+		}
+
+		if state == connectivity.Shutdown {
+			return fmt.Errorf("%w: %s is in state %s",
+				ErrServiceUnreachable, serviceName, state.String())
+		}
+
+		// TransientFailure is temporary; keep waiting unless context expires
+		if !conn.WaitForStateChange(ctx, state) {
+			// Context was cancelled or timed out
+			return fmt.Errorf("%w: context expired while waiting for %s: %w",
+				ErrHealthCheckFailed, serviceName, ctx.Err())
+		}
+	}
 }
 
 // ContextWithCorrelationID creates a new context with the correlation ID set in gRPC metadata.
