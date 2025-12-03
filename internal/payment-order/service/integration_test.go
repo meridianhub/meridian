@@ -349,6 +349,15 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, updateResp.PaymentOrder.Status)
 
+	// Wait for async lien execution to complete (runs in background goroutine)
+	err = await.New().
+		AtMost(5 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			return atomic.LoadInt32(&mockCA.executeLienCalls) >= 1
+		})
+	require.NoError(t, err, "ExecuteLien should be called within timeout")
+
 	// Verify lien was executed
 	assert.Equal(t, int32(1), atomic.LoadInt32(&mockCA.executeLienCalls), "ExecuteLien should be called once")
 
@@ -472,6 +481,15 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, updateResp1.PaymentOrder.Status)
+
+	// Wait for async lien execution to complete before checking call count
+	err = await.New().
+		AtMost(5 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			return atomic.LoadInt32(&mockCA.executeLienCalls) >= 1
+		})
+	require.NoError(t, err, "ExecuteLien should be called within timeout")
 
 	executeLienCalls1 := atomic.LoadInt32(&mockCA.executeLienCalls)
 
@@ -799,8 +817,17 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 	require.NoError(t, err, "Payment completion should succeed even if ExecuteLien fails")
 	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, updateResp.PaymentOrder.Status)
 
+	// Wait for async lien execution attempt (it will fail, but should be attempted)
+	err = await.New().
+		AtMost(5 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			return atomic.LoadInt32(&mockCA.executeLienCalls) >= 1
+		})
+	require.NoError(t, err, "ExecuteLien should be attempted within timeout")
+
 	// Verify ExecuteLien was attempted
-	assert.Equal(t, int32(1), atomic.LoadInt32(&mockCA.executeLienCalls),
+	assert.GreaterOrEqual(t, atomic.LoadInt32(&mockCA.executeLienCalls), int32(1),
 		"ExecuteLien should be attempted")
 }
 
@@ -1245,6 +1272,17 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
 	})
 	require.NoError(t, err)
+
+	// Wait for async lien execution to complete and DB to be updated
+	// (runs in background goroutine after SETTLED)
+	err = await.New().
+		AtMost(5 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			po, findErr := repo.FindByID(ctx, poID)
+			return findErr == nil && po.LienExecutionStatus == domain.LienExecutionStatusSucceeded
+		})
+	require.NoError(t, err, "LienExecutionStatus should be SUCCEEDED within timeout")
 
 	// Now reverse the completed payment
 	reverseResp, err := svc.ReversePaymentOrder(ctx, &pb.ReversePaymentOrderRequest{
