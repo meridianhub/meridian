@@ -171,9 +171,22 @@ func RunAudit(ctx context.Context, clients *Clients, cfg *AuditConfig) (*AuditRe
 	}
 
 	// Extract balance using moneyToPence from preflight.go
-	result.FinalBalancePence = moneyToPence(
-		retrieveResp.GetFacility().GetCurrentBalance().GetCurrentBalance().GetAmount(),
-	)
+	// Defensive nil checks for chained gRPC getters
+	facility := retrieveResp.GetFacility()
+	if facility == nil {
+		result.Error = fmt.Errorf("%w: response has nil facility", ErrAuditBalanceRetrieval)
+		result.Verdict = AuditVerdictError
+		logger.Error("audit: nil facility in response", "account_id", cfg.AccountID)
+		return result, result.Error
+	}
+	accountBalance := facility.GetCurrentBalance()
+	if accountBalance == nil {
+		result.Error = fmt.Errorf("%w: facility has nil current_balance", ErrAuditBalanceRetrieval)
+		result.Verdict = AuditVerdictError
+		logger.Error("audit: nil current_balance in facility", "account_id", cfg.AccountID)
+		return result, result.Error
+	}
+	result.FinalBalancePence = moneyToPence(accountBalance.GetCurrentBalance().GetAmount())
 
 	logger.Info("audit: retrieved final balance",
 		"account_id", cfg.AccountID,
@@ -293,7 +306,11 @@ func DefaultAuditConfig() *AuditConfig {
 
 // NewAuditConfigFromPreFlight creates an AuditConfig from PreFlightResult.
 // This ensures the audit uses the actual values from the pre-flight phase.
+// Returns nil if preflight is nil.
 func NewAuditConfigFromPreFlight(preflight *PreFlightResult, paymentAmountPence int64, logger *slog.Logger) *AuditConfig {
+	if preflight == nil {
+		return nil
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}

@@ -386,6 +386,82 @@ func TestRunAudit_ServiceError(t *testing.T) {
 	}
 }
 
+func TestRunAudit_NilFacility(t *testing.T) {
+	mockClient := &mockAuditCurrentAccountClient{
+		retrieveFunc: func(_ context.Context, _ *currentaccountv1.RetrieveCurrentAccountRequest, _ ...grpc.CallOption) (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
+			// Return response with nil facility
+			return &currentaccountv1.RetrieveCurrentAccountResponse{
+				Facility: nil,
+			}, nil
+		},
+	}
+
+	clients := &Clients{
+		CurrentAccount: mockClient,
+	}
+
+	cfg := &AuditConfig{
+		AccountID:           auditTestAccountID,
+		InitialBalancePence: auditTestInitialBalance,
+		PaymentAmountPence:  auditTestPaymentAmount,
+		Logger:              slog.Default(),
+	}
+
+	ctx := context.Background()
+	result, err := RunAudit(ctx, clients, cfg)
+
+	if err == nil {
+		t.Fatal("expected error for nil facility, got nil")
+	}
+
+	if !errors.Is(err, ErrAuditBalanceRetrieval) {
+		t.Errorf("expected ErrAuditBalanceRetrieval, got %v", err)
+	}
+
+	if result.Verdict != AuditVerdictError {
+		t.Errorf("expected Verdict %v, got %v", AuditVerdictError, result.Verdict)
+	}
+}
+
+func TestRunAudit_NilCurrentBalance(t *testing.T) {
+	mockClient := &mockAuditCurrentAccountClient{
+		retrieveFunc: func(_ context.Context, _ *currentaccountv1.RetrieveCurrentAccountRequest, _ ...grpc.CallOption) (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
+			// Return response with nil current balance
+			return &currentaccountv1.RetrieveCurrentAccountResponse{
+				Facility: &currentaccountv1.CurrentAccountFacility{
+					CurrentBalance: nil,
+				},
+			}, nil
+		},
+	}
+
+	clients := &Clients{
+		CurrentAccount: mockClient,
+	}
+
+	cfg := &AuditConfig{
+		AccountID:           auditTestAccountID,
+		InitialBalancePence: auditTestInitialBalance,
+		PaymentAmountPence:  auditTestPaymentAmount,
+		Logger:              slog.Default(),
+	}
+
+	ctx := context.Background()
+	result, err := RunAudit(ctx, clients, cfg)
+
+	if err == nil {
+		t.Fatal("expected error for nil current balance, got nil")
+	}
+
+	if !errors.Is(err, ErrAuditBalanceRetrieval) {
+		t.Errorf("expected ErrAuditBalanceRetrieval, got %v", err)
+	}
+
+	if result.Verdict != AuditVerdictError {
+		t.Errorf("expected Verdict %v, got %v", AuditVerdictError, result.Verdict)
+	}
+}
+
 func TestRunAudit_InvalidConfig(t *testing.T) {
 	clients := &Clients{}
 
@@ -436,6 +512,14 @@ func TestNewAuditConfigFromPreFlight(t *testing.T) {
 
 	if cfg.Logger == nil {
 		t.Error("expected Logger to be set")
+	}
+}
+
+func TestNewAuditConfigFromPreFlight_NilPreflight(t *testing.T) {
+	cfg := NewAuditConfigFromPreFlight(nil, auditTestPaymentAmount, nil)
+
+	if cfg != nil {
+		t.Errorf("expected nil config for nil preflight, got %+v", cfg)
 	}
 }
 
