@@ -107,16 +107,17 @@ const (
 // Service implements the PaymentOrderService gRPC service
 type Service struct {
 	pb.UnimplementedPaymentOrderServiceServer
-	repo                    persistence.Repository
-	currentAccountClient    CurrentAccountClient
-	paymentGateway          gateway.PaymentGateway
-	kafkaProducer           *kafka.ProtoProducer
-	logger                  *slog.Logger
-	tracer                  *observability.Tracer
-	sagaTimeout             time.Duration
-	defaultPageSize         int
-	maxPageSize             int
-	maxIdempotencyKeyLength int
+	repo                     persistence.Repository
+	currentAccountClient     CurrentAccountClient
+	paymentGateway           gateway.PaymentGateway
+	kafkaProducer            *kafka.ProtoProducer
+	logger                   *slog.Logger
+	tracer                   *observability.Tracer
+	sagaTimeout              time.Duration
+	defaultPageSize          int
+	maxPageSize              int
+	maxIdempotencyKeyLength  int
+	lienExecutionRetryConfig *clients.RetryConfig // nil means use default
 }
 
 // Config contains configuration for creating a new Service
@@ -137,6 +138,9 @@ type Config struct {
 	// MaxIdempotencyKeyLength is the maximum allowed idempotency key length.
 	// If zero, DefaultMaxIdempotencyKeyLength is used.
 	MaxIdempotencyKeyLength int
+	// LienExecutionRetryConfig configures retry behavior for async lien execution.
+	// If nil, default retry config is used. Primarily useful for testing.
+	LienExecutionRetryConfig *clients.RetryConfig
 }
 
 // NewService creates a new payment order service with minimal dependencies.
@@ -201,16 +205,17 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 	}
 
 	return &Service{
-		repo:                    config.Repository,
-		currentAccountClient:    config.CurrentAccountClient,
-		paymentGateway:          config.PaymentGateway,
-		kafkaProducer:           config.KafkaProducer,
-		logger:                  logger,
-		tracer:                  config.Tracer,
-		sagaTimeout:             sagaTimeout,
-		defaultPageSize:         defaultPageSize,
-		maxPageSize:             maxPageSize,
-		maxIdempotencyKeyLength: maxIdempotencyKeyLength,
+		repo:                     config.Repository,
+		currentAccountClient:     config.CurrentAccountClient,
+		paymentGateway:           config.PaymentGateway,
+		kafkaProducer:            config.KafkaProducer,
+		logger:                   logger,
+		tracer:                   config.Tracer,
+		sagaTimeout:              sagaTimeout,
+		defaultPageSize:          defaultPageSize,
+		maxPageSize:              maxPageSize,
+		maxIdempotencyKeyLength:  maxIdempotencyKeyLength,
+		lienExecutionRetryConfig: config.LienExecutionRetryConfig, // nil means use default
 	}, nil
 }
 
@@ -1358,6 +1363,14 @@ func safeIntToInt32(n int) int32 {
 //
 // nolint:contextcheck // Context is intentionally created fresh for async operation
 func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID uuid.UUID, lienID string) {
+	// Defensive check: guard against nil currentAccountClient even though callers currently check
+	if s.currentAccountClient == nil {
+		s.logger.Error("executeLienWithRetry called with nil currentAccountClient",
+			"payment_order_id", paymentOrderID.String(),
+			"lien_id", lienID)
+		return
+	}
+
 	// Recover from panics to prevent silent goroutine crashes
 	defer func() {
 		if r := recover(); r != nil {
@@ -1397,20 +1410,23 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 
 	logger.Info("starting async lien execution with retry")
 
-	// Configure retry with exponential backoff
-	retryConfig := clients.RetryConfig{
-		MaxRetries:          DefaultLienExecutionMaxRetries,
-		InitialInterval:     500 * time.Millisecond,
-		MaxInterval:         30 * time.Second,
-		Multiplier:          2.0,
-		RandomizationFactor: 0.5,
+	// Use configured retry config or default
+	retryConfig := s.lienExecutionRetryConfig
+	if retryConfig == nil {
+		retryConfig = &clients.RetryConfig{
+			MaxRetries:          DefaultLienExecutionMaxRetries,
+			InitialInterval:     500 * time.Millisecond,
+			MaxInterval:         30 * time.Second,
+			Multiplier:          2.0,
+			RandomizationFactor: 0.5,
+		}
 	}
 
 	var lastErr error
 	var attempts int
 
 	// Execute with retry
-	err := clients.Retry(ctx, retryConfig, func() error {
+	err := clients.Retry(ctx, *retryConfig, func() error {
 		attempts++
 		logger.Info("attempting lien execution", "attempt", attempts)
 

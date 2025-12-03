@@ -15,6 +15,7 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
+	"github.com/meridianhub/meridian/internal/current-account/clients"
 	cadomain "github.com/meridianhub/meridian/internal/current-account/domain"
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/persistence"
@@ -2049,10 +2050,19 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 		executeLienDone: executeLienDone,
 	}
 
+	// Use fast retry config for tests to avoid long wait times
+	fastRetryConfig := &clients.RetryConfig{
+		MaxRetries:          3,
+		InitialInterval:     10 * time.Millisecond,
+		MaxInterval:         50 * time.Millisecond,
+		Multiplier:          1.5,
+		RandomizationFactor: 0.1,
+	}
 	svc := &Service{
-		repo:                 repo,
-		currentAccountClient: caClient,
-		logger:               testLogger(),
+		repo:                     repo,
+		currentAccountClient:     caClient,
+		logger:                   testLogger(),
+		lienExecutionRetryConfig: fastRetryConfig,
 	}
 
 	// Create a payment order in EXECUTING state
@@ -2086,15 +2096,14 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 	}
 
 	// Wait for status update to complete (async retry will fail and update status to FAILED)
-	// Timeout must accommodate retry backoff: 500ms + 1s + 2s + 4s + 8s = 15.5s base,
-	// plus 50% jitter (RandomizationFactor=0.5) can extend to ~23s worst case
+	// With fast test retry config (3 retries, 10ms initial, 1.5x multiplier), max wait is ~100ms
 	assert.Eventually(t, func() bool {
 		updatedPO, err := repo.FindByID(context.Background(), po.ID)
 		if err != nil {
 			return false
 		}
 		return updatedPO.LienExecutionStatus == domain.LienExecutionStatusFailed
-	}, 25*time.Second, 100*time.Millisecond, "lien execution status should be FAILED after retries exhausted")
+	}, 2*time.Second, 50*time.Millisecond, "lien execution status should be FAILED after retries exhausted")
 
 	// Verify the payment order is in COMPLETED state in the repo
 	updatedPO, _ := repo.FindByID(context.Background(), po.ID)
