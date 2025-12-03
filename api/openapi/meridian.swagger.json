@@ -40,40 +40,6 @@
     "application/json"
   ],
   "paths": {
-    "/meridian.common.v1.HealthService/Check": {
-      "post": {
-        "summary": "Check performs a health check of the service.",
-        "operationId": "HealthService_Check",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/CheckResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "description": "CheckRequest is the request for a health check.",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/CheckRequest"
-            }
-          }
-        ],
-        "tags": [
-          "HealthService"
-        ]
-      }
-    },
     "/v1/booking-logs": {
       "get": {
         "summary": "ListFinancialBookingLogs lists booking logs with optional filtering.",
@@ -421,6 +387,38 @@
         ],
         "tags": [
           "CurrentAccountService"
+        ]
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "summary": "Check performs a health check of the service.",
+        "operationId": "HealthService_Check",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/CheckResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "service",
+            "description": "service is the name of the service to check (optional).",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "HealthService"
         ]
       }
     },
@@ -1518,16 +1516,6 @@
         }
       },
       "description": "CaptureLedgerPostingResponse returns the created posting."
-    },
-    "CheckRequest": {
-      "type": "object",
-      "properties": {
-        "service": {
-          "type": "string",
-          "description": "service is the name of the service to check (optional)."
-        }
-      },
-      "description": "CheckRequest is the request for a health check."
     },
     "CheckResponse": {
       "type": "object",
@@ -2864,6 +2852,14 @@
       "default": "TRANSACTION_STATUS_UNSPECIFIED",
       "description": "- TRANSACTION_STATUS_UNSPECIFIED: TRANSACTION_STATUS_UNSPECIFIED is the default value and should not be used in requests\n - TRANSACTION_STATUS_PENDING: TRANSACTION_STATUS_PENDING indicates the transaction is awaiting processing\n - TRANSACTION_STATUS_COMPLETED: TRANSACTION_STATUS_COMPLETED indicates the transaction has been successfully processed\n - TRANSACTION_STATUS_FAILED: TRANSACTION_STATUS_FAILED indicates the transaction processing failed\n - TRANSACTION_STATUS_REVERSED: TRANSACTION_STATUS_REVERSED indicates the transaction has been reversed or cancelled",
       "title": "Transaction status for deposit/withdrawal operations"
+    }
+  },
+  "securityDefinitions": {
+    "Bearer": {
+      "type": "apiKey",
+      "description": "Bearer token authentication",
+      "name": "Authorization",
+      "in": "header"
     }
   }
 }
