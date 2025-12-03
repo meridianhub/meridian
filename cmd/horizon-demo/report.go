@@ -71,11 +71,11 @@ const (
 	ReportVerdictFailed = "FAILED"
 )
 
-// Report attempt status string constants for JSON output.
+// Attempt status string constants for JSON output.
 const (
-	ReportStatusClientTimeout = "CLIENT_TIMEOUT"
-	ReportStatusSuccess       = "SUCCESS"
-	ReportStatusError         = "ERROR"
+	AttemptStatusClientTimeout = "CLIENT_TIMEOUT"
+	AttemptStatusSuccess       = "SUCCESS"
+	AttemptStatusError         = "ERROR"
 )
 
 // NewReport creates a new Report with a unique demo ID and current timestamp.
