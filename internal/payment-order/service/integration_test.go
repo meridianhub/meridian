@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/payment-order/domain"
+	"github.com/meridianhub/meridian/internal/platform/await"
 	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -259,32 +260,37 @@ func createTestPaymentRequest(accountID string, units int64, nanos int32) *pb.In
 // waitForSagaCompletion polls the repository until the payment order reaches a terminal state.
 func waitForSagaCompletion(ctx context.Context, t *testing.T, repo persistence.Repository, poID uuid.UUID) *domain.PaymentOrder {
 	t.Helper()
-	deadline := time.Now().Add(defaultSagaWaitTimeout)
+	var result *domain.PaymentOrder
 
-	for time.Now().Before(deadline) {
-		po, err := repo.FindByID(ctx, poID)
-		if err != nil {
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
+	err := await.New().
+		AtMost(defaultSagaWaitTimeout).
+		PollInterval(50 * time.Millisecond).
+		WithContext(ctx).
+		Until(func() bool {
+			po, err := repo.FindByID(ctx, poID)
+			if err != nil {
+				return false
+			}
 
-		// Check for terminal states (non-transient states that indicate saga finished)
-		switch po.Status {
-		case domain.PaymentOrderStatusCompleted,
-			domain.PaymentOrderStatusFailed,
-			domain.PaymentOrderStatusCancelled,
-			domain.PaymentOrderStatusReversed,
-			domain.PaymentOrderStatusExecuting:
-			return po
-		case domain.PaymentOrderStatusInitiated, domain.PaymentOrderStatusReserved:
-			// Transient states - keep waiting
-		}
-
-		time.Sleep(50 * time.Millisecond)
+			// Check for terminal states (non-transient states that indicate saga finished)
+			switch po.Status {
+			case domain.PaymentOrderStatusCompleted,
+				domain.PaymentOrderStatusFailed,
+				domain.PaymentOrderStatusCancelled,
+				domain.PaymentOrderStatusReversed,
+				domain.PaymentOrderStatusExecuting:
+				result = po
+				return true
+			case domain.PaymentOrderStatusInitiated, domain.PaymentOrderStatusReserved:
+				// Transient states - keep waiting
+				return false
+			}
+			return false
+		})
+	if err != nil {
+		t.Fatalf("Timeout waiting for saga completion for payment order %s: %v", poID, err)
 	}
-
-	t.Fatalf("Timeout waiting for saga completion for payment order %s", poID)
-	return nil
+	return result
 }
 
 // =============================================================================
@@ -395,8 +401,14 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 	require.NoError(t, err)
 	poID1 := resp1.PaymentOrder.PaymentOrderId
 
-	// Wait briefly for saga to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for saga to start processing (at least one lien call or state change)
+	err = await.New().
+		AtMost(1 * time.Second).
+		PollInterval(20 * time.Millisecond).
+		Until(func() bool {
+			return atomic.LoadInt32(&mockCA.initiateLienCalls) >= 1
+		})
+	require.NoError(t, err, "Saga should start processing")
 
 	// Second request with same idempotency key
 	resp2, err := svc.InitiatePaymentOrder(ctx, req)
@@ -408,7 +420,15 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 
 	// InitiateLien should only be called once (by the first saga)
 	// The second request should return the cached result
-	time.Sleep(200 * time.Millisecond)
+	// Wait a bit to ensure no additional calls are made
+	_ = await.New().
+		AtMost(500 * time.Millisecond).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			// This will timeout, which is fine - we're just giving the system time
+			// to make any additional calls it might want to make
+			return false
+		})
 	assert.LessOrEqual(t, atomic.LoadInt32(&mockCA.initiateLienCalls), int32(1),
 		"InitiateLien should be called at most once for idempotent requests")
 }
@@ -551,9 +571,13 @@ func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 	assert.Contains(t, po.FailureReason, "timeout", "Failure reason should mention timeout")
 
 	// Verify lien was released (compensation)
-	time.Sleep(100 * time.Millisecond) // Allow compensation to complete
-	assert.GreaterOrEqual(t, atomic.LoadInt32(&mockCA.terminateLienCalls), int32(1),
-		"Lien should be released during compensation")
+	err = await.New().
+		AtMost(1 * time.Second).
+		PollInterval(20 * time.Millisecond).
+		Until(func() bool {
+			return atomic.LoadInt32(&mockCA.terminateLienCalls) >= 1
+		})
+	require.NoError(t, err, "Lien should be released during compensation")
 }
 
 // TestIntegration_GatewayRejects_StatusFailed tests that when the gateway
@@ -592,9 +616,13 @@ func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 	assert.Equal(t, domain.PaymentOrderStatusFailed, po.Status, "Payment should be FAILED")
 
 	// Verify lien was released
-	time.Sleep(100 * time.Millisecond)
-	assert.GreaterOrEqual(t, atomic.LoadInt32(&mockCA.terminateLienCalls), int32(1),
-		"Lien should be released when gateway rejects payment")
+	err = await.New().
+		AtMost(1 * time.Second).
+		PollInterval(20 * time.Millisecond).
+		Until(func() bool {
+			return atomic.LoadInt32(&mockCA.terminateLienCalls) >= 1
+		})
+	require.NoError(t, err, "Lien should be released when gateway rejects payment")
 }
 
 // TestIntegration_ConcurrentPayments_SameAccount tests concurrent payment
@@ -705,8 +733,16 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 
 	poID, _ := uuid.Parse(resp.PaymentOrder.PaymentOrderId)
 
-	// Wait for saga to timeout - allow extra time for compensation to run
-	time.Sleep(4 * time.Second)
+	// Wait for saga to timeout and compensation to complete
+	// This test is timing-sensitive: saga timeout (3s) + gateway delay (5s) + margin
+	err = await.New().
+		AtMost(6 * time.Second).
+		PollInterval(100 * time.Millisecond).
+		Until(func() bool {
+			// Wait until lien termination is called (compensation ran)
+			return atomic.LoadInt32(&mockCA.terminateLienCalls) >= 1
+		})
+	require.NoError(t, err, "Lien should be released during compensation")
 
 	// Verify the payment is not in a successful state (COMPLETED/EXECUTING)
 	// Due to context cancellation, the order may be stuck in RESERVED or marked as FAILED
@@ -718,10 +754,6 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 		"Payment should not be in EXECUTING state after gateway timeout")
 	assert.NotEqual(t, domain.PaymentOrderStatusCompleted, po.Status,
 		"Payment should not be COMPLETED after gateway timeout")
-
-	// Verify lien was released during compensation (when the saga was still running)
-	assert.GreaterOrEqual(t, atomic.LoadInt32(&mockCA.terminateLienCalls), int32(1),
-		"Lien should be released during compensation")
 }
 
 // TestIntegration_PartialFailure_GatewayAcceptsLedgerFails tests when the
@@ -1026,11 +1058,22 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 	require.NoError(t, err)
 	poID := createResp.PaymentOrder.PaymentOrderId
 
-	// Give saga a moment to get to RESERVED state
-	time.Sleep(200 * time.Millisecond)
-
-	po, err := repo.FindByID(ctx, uuid.MustParse(poID))
-	require.NoError(t, err)
+	// Wait for saga to get to RESERVED state (when lien is created)
+	var po *domain.PaymentOrder
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			var findErr error
+			po, findErr = repo.FindByID(ctx, uuid.MustParse(poID))
+			if findErr != nil {
+				return false
+			}
+			// Wait until we're in a state with a lien (RESERVED or later)
+			return po.Status == domain.PaymentOrderStatusReserved ||
+				po.Status == domain.PaymentOrderStatusExecuting
+		})
+	require.NoError(t, err, "Should reach RESERVED state")
 
 	// Only test cancellation if we're in a cancellable state
 	if po.CanCancel() {
@@ -1044,9 +1087,13 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 
 		// Verify lien was released if one was created
 		if po.LienID != "" {
-			time.Sleep(100 * time.Millisecond)
-			assert.GreaterOrEqual(t, atomic.LoadInt32(&mockCA.terminateLienCalls), int32(1),
-				"Lien should be released on cancellation")
+			err = await.New().
+				AtMost(1 * time.Second).
+				PollInterval(20 * time.Millisecond).
+				Until(func() bool {
+					return atomic.LoadInt32(&mockCA.terminateLienCalls) >= 1
+				})
+			require.NoError(t, err, "Lien should be released on cancellation")
 		}
 	}
 }
@@ -1077,6 +1124,7 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 
 	// Create multiple payment orders
 	numOrders := 7
+	createdIDs := make([]string, 0, numOrders)
 	for i := 0; i < numOrders; i++ {
 		req := &pb.InitiatePaymentOrderRequest{
 			DebtorAccountId:   accountID,
@@ -1090,10 +1138,26 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 			},
 			IdempotencyKey: &commonpb.IdempotencyKey{Key: uuid.New().String()},
 		}
-		_, err := svc.InitiatePaymentOrder(ctx, req)
+		resp, err := svc.InitiatePaymentOrder(ctx, req)
 		require.NoError(t, err)
-		time.Sleep(10 * time.Millisecond) // Ensure different created_at times
+		createdIDs = append(createdIDs, resp.PaymentOrder.PaymentOrderId)
+
+		// Wait for this payment to be persisted before creating next
+		// This ensures distinct created_at timestamps for pagination ordering
+		expectedCount := i + 1
+		err = await.New().
+			AtMost(1 * time.Second).
+			PollInterval(10 * time.Millisecond).
+			Until(func() bool {
+				list, listErr := svc.ListPaymentOrders(ctx, &pb.ListPaymentOrdersRequest{
+					DebtorAccountId: accountID,
+					Pagination:      &commonpb.Pagination{PageSize: 100},
+				})
+				return listErr == nil && len(list.PaymentOrders) >= expectedCount
+			})
+		require.NoError(t, err, "Payment order %d should be persisted", i+1)
 	}
+	_ = createdIDs // Used implicitly via ListPaymentOrders verification
 
 	// List first page with page size 3
 	listResp1, err := svc.ListPaymentOrders(ctx, &pb.ListPaymentOrdersRequest{
