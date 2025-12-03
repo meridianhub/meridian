@@ -60,6 +60,56 @@ api/proto/meridian/common/v1/
 
 **Note**: Generated files (`*.pb.go`) are committed to version control for reproducibility.
 
+## OpenAPI Specification
+
+An OpenAPI (Swagger 2.0) specification is generated from the proto definitions using grpc-gateway annotations.
+
+### Generating the OpenAPI Spec
+
+```bash
+# Generate all code including OpenAPI spec
+make proto
+
+# The spec is written to:
+# api/openapi/meridian.swagger.json
+```
+
+### Accessing the OpenAPI Spec
+
+The generated spec is **not committed to version control** (it's in `.gitignore`).
+Generate it locally with `make proto` or `buf generate`.
+
+**Output location**: `api/openapi/meridian.swagger.json`
+
+### Features
+
+The OpenAPI specification includes:
+
+- **HTTP/REST mappings** for all gRPC endpoints via `google.api.http` annotations
+- **Bearer token authentication** security definitions
+- **201 Created response codes** for resource creation endpoints
+- **Request/response schemas** derived from protobuf messages
+
+### Using the Spec
+
+1. **Import into Postman/Insomnia**: Import `api/openapi/meridian.swagger.json` directly
+2. **Generate client SDKs**: Use OpenAPI Generator with the spec
+3. **API documentation**: Host with Swagger UI or Redoc
+4. **API Gateway configuration**: Use for AWS API Gateway, Kong, etc.
+
+### HTTP Endpoint Patterns
+
+Services expose RESTful endpoints following these patterns:
+
+| gRPC Method | HTTP Method | URL Pattern |
+|-------------|-------------|-------------|
+| `InitiatePaymentOrder` | POST | `/v1/payment-orders` |
+| `RetrievePaymentOrder` | GET | `/v1/payment-orders/{payment_order_id}` |
+| `UpdatePaymentOrder` | PATCH | `/v1/payment-orders/{payment_order_id}` |
+| `InitiateCurrentAccount` | POST | `/v1/current-accounts` |
+| `InitiateLien` | POST | `/v1/current-accounts/{account_id}/liens` |
+| `Check` (Health) | GET | `/v1/health` |
+
 ## Writing Proto Definitions
 
 ### Package Naming
