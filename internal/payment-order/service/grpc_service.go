@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/samber/lo"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
@@ -22,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/internal/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/internal/payment-order/observability"
 	"github.com/meridianhub/meridian/internal/platform/observability"
+	"github.com/samber/lo"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

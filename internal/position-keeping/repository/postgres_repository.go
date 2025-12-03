@@ -11,10 +11,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/samber/lo"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/internal/position-keeping/domain"
+	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
 )
 
