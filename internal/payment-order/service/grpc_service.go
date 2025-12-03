@@ -21,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/internal/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/internal/payment-order/observability"
 	"github.com/meridianhub/meridian/internal/platform/observability"
+	"github.com/samber/lo"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -1091,14 +1092,10 @@ func (s *Service) ListPaymentOrders(ctx context.Context, req *pb.ListPaymentOrde
 		return nil, status.Error(codes.Internal, "failed to list payment orders")
 	}
 
-	// Convert to proto
-	protoOrders := make([]*pb.PaymentOrder, 0, len(result.PaymentOrders))
-	for _, po := range result.PaymentOrders {
-		protoOrders = append(protoOrders, toProto(po))
-	}
-
 	return &pb.ListPaymentOrdersResponse{
-		PaymentOrders: protoOrders,
+		PaymentOrders: lo.Map(result.PaymentOrders, func(po *domain.PaymentOrder, _ int) *pb.PaymentOrder {
+			return toProto(po)
+		}),
 		Pagination: &commonpb.PaginationResponse{
 			NextPageToken: result.NextCursor,
 			TotalCount:    result.TotalCount,

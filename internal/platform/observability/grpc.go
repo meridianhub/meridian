@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
@@ -459,9 +460,5 @@ func (mc metadataCarrier) Set(key string, value string) {
 
 // Keys lists the keys stored in this carrier.
 func (mc metadataCarrier) Keys() []string {
-	keys := make([]string, 0, len(mc))
-	for k := range mc {
-		keys = append(keys, k)
-	}
-	return keys
+	return lo.Keys(mc)
 }
