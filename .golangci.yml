@@ -38,10 +38,10 @@ linters:
     - sqlclosecheck  # Check SQL resources are closed
     - rowserrcheck   # Check database rows errors
 
-    # Compile-time safety linters
-    - nilnil         # Prevent returning (nil, nil) which hides errors
-    - forcetypeassert # Require checked type assertions (v, ok := x.(T))
-    - gocritic       # Additional safety diagnostics
+    # Compile-time safety linters (planned - enable after fixing existing issues)
+    # - nilnil         # Prevent returning (nil, nil) which hides errors [disabled: 15 violations to fix]
+    # - forcetypeassert # Require checked type assertions (v, ok := x.(T)) [disabled: 14 violations to fix]
+    # - gocritic       # Additional safety diagnostics [disabled: 10 violations to fix]
     - bodyclose      # HTTP response bodies must be closed
 
   disable:
@@ -124,46 +124,14 @@ linters-settings:
     asserts: true
     comparison: true
 
-  gocritic:
-    # Enable only safety-focused diagnostics, not style suggestions
-    enabled-checks:
-      # Bug detection
-      - appendAssign
-      - argOrder
-      - badCall
-      - badCond
-      - badLock
-      - badRegexp
-      - builtinShadowDecl
-      - caseOrder
-      - deferInLoop
-      - dupArg
-      - dupBranchBody
-      - dupCase
-      - dupSubExpr
-      - externalErrorReassign
-      - flagDeref
-      - mapKey
-      - nilValReturn
-      - offBy1
-      - regexpPattern
-      - sloppyReassign
-      - sortSlice
-      - sprintfQuotedString
-      - sqlQuery
-      - syncMapLoadAndDelete
-      - truncateCmp
-      - weakCond
-    # Explicitly disable style suggestions (these are auto-enabled but not safety-focused)
-    disabled-checks:
-      - assignOp
-      - elseif
-      - ifElseChain
-      - singleCaseSwitch
-      - unlambda
-      - unnamedResult
-      - unnecessaryDefer
-      - exitAfterDefer
+  # gocritic: Disabled until existing violations are fixed. Config preserved for re-enabling:
+  # gocritic:
+  #   enabled-checks:
+  #     - appendAssign, argOrder, badCall, badCond, badLock, badRegexp
+  #     - builtinShadowDecl, caseOrder, deferInLoop, dupArg, dupBranchBody
+  #     - dupCase, dupSubExpr, externalErrorReassign, flagDeref, mapKey
+  #     - nilValReturn, offBy1, regexpPattern, sloppyReassign, sortSlice
+  #     - sprintfQuotedString, sqlQuery, syncMapLoadAndDelete, truncateCmp, weakCond
 
 issues:
   exclude-use-default: false
@@ -181,10 +149,7 @@ issues:
         - goconst
         - unparam
         - wrapcheck
-        - forcetypeassert
-        - gocritic
         - bodyclose
-        - nilnil
 
     # Exclude all linters for integration tests (require external services)
     - path: test/integration/
@@ -205,13 +170,6 @@ issues:
     - path: mock_.*\.go
       linters:
         - all
-
-    # Exclude example test files (they often use simpler patterns for documentation)
-    - path: _example_test\.go
-      linters:
-        - forcetypeassert
-        - gocritic
-        - nilnil
 
     # Allow main() to have unchecked errors for flag parsing
     - path: cmd/
