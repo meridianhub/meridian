@@ -1,0 +1,186 @@
+# golangci-lint configuration for Meridian
+# Production-grade Go linting with strict quality standards
+
+version: 2
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+
+linters:
+  enable:
+    # Core linters (always enabled)
+    - govet          # Official Go vet
+    - errcheck       # Check for unchecked errors
+    - staticcheck    # Go static analysis (includes gosimple)
+    - unused         # Check for unused code
+    - ineffassign    # Detect ineffectual assignments
+    - misspell       # Spell checker
+    - gocyclo        # Cyclomatic complexity
+
+    # Additional quality linters
+    # - revive         # Disabled: var-naming rule cannot be configured per-path
+    - goconst        # Repeated strings that could be constants
+    - gocognit       # Cognitive complexity
+    - unconvert      # Remove unnecessary type conversions
+    - unparam        # Unused function parameters
+    - nakedret       # Naked returns in long functions
+    - prealloc       # Slice preallocation
+    - nilerr         # Check for nil error returns
+    - noctx          # Check for missing context.Context
+    - exhaustive     # Check exhaustiveness of enum switch statements
+    - err113         # Go 1.13 error wrapping
+    # - wrapcheck      # Check error wrapping (disabled: gRPC services return terminal errors)
+    # - errorlint      # Disabled: Too strict for tests (error identity comparison common)
+    - contextcheck   # Check context.Context usage
+    - sqlclosecheck  # Check SQL resources are closed
+    - rowserrcheck   # Check database rows errors
+
+  disable:
+    - varnamelen     # Too strict for production code
+    - testpackage    # Allow internal testing
+    - paralleltest   # Not always appropriate
+    - wrapcheck      # Disabled: gRPC services return terminal errors
+    - err113         # Disabled: Too strict for test files, dynamic errors common in tests
+
+formatters:
+  enable:
+    - gofmt          # Standard Go formatting
+    - goimports      # Manage imports
+    - gofumpt        # Stricter gofmt
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - shadow       # Too many false positives
+
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - fmt.Print*
+      - fmt.Fprint*
+
+  staticcheck:
+    checks: ["all"]
+
+  gocyclo:
+    min-complexity: 15
+
+  gocognit:
+    min-complexity: 20
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  misspell:
+    locale: US
+
+  nakedret:
+    max-func-lines: 30
+
+  unparam:
+    check-exported: false
+
+  revive:
+    confidence: 0.8
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+        disabled: true  # Disabled: "types" is a common and acceptable package name
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+
+  exclude-rules:
+    # Exclude some linters for test files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - gocognit
+        - errcheck
+        - goconst
+        - unparam
+        - wrapcheck
+        - err113
+        - revive
+        - errorlint
+
+    # Exclude all linters for integration tests (require external services)
+    - path: test/integration/
+      linters:
+        - all
+
+    # Exclude some linters for generated files
+    - path: \.pb\.go$
+      linters:
+        - all
+
+    # Exclude typecheck for tools.go (imports main packages for tool dependency tracking)
+    - path: tools\.go$
+      linters:
+        - typecheck
+
+    # Exclude some linters for mock files
+    - path: mock_.*\.go
+      linters:
+        - all
+
+    # Allow main() to have unchecked errors for flag parsing
+    - path: cmd/
+      text: "Error return value of.*is not checked"
+      linters:
+        - errcheck
+
+    # Allow long functions in main packages for setup
+    - path: cmd/
+      linters:
+        - gocyclo
+        - gocognit
+
+    # Allow "types" package name (common pattern in Go)
+    - path: types/
+      linters:
+        - revive
+
+output:
+  formats:
+    colored-line-number:
+      path: stdout
+  print-issued-lines: true
+  print-linter-name: true
+  sort-results: true
