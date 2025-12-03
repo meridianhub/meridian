@@ -97,6 +97,22 @@ The OpenAPI specification includes:
 3. **API documentation**: Host with Swagger UI or Redoc
 4. **API Gateway configuration**: Use for AWS API Gateway, Kong, etc.
 
+### Preview with Swagger UI
+
+You can preview the API documentation locally using Swagger UI:
+
+```bash
+# Using Docker (recommended)
+make proto
+docker run -p 8080:8080 -e SWAGGER_JSON=/spec/meridian.swagger.json \
+  -v $(pwd)/api/openapi:/spec swaggerapi/swagger-ui
+# Open http://localhost:8080
+
+# Using npx (quick preview)
+make proto
+npx swagger-ui-watcher api/openapi/meridian.swagger.json
+```
+
 ### HTTP Endpoint Patterns
 
 Services expose RESTful endpoints following these patterns:

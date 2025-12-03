@@ -46,6 +46,18 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       value: {}
     }
   }
+  responses: {
+    key: "401"
+    value: {
+      description: "Unauthorized - Missing or invalid Bearer token"
+    }
+  }
+  responses: {
+    key: "403"
+    value: {
+      description: "Forbidden - Insufficient permissions for this operation"
+    }
+  }
 };
 
 // PaymentOrderStatus defines the lifecycle state of a payment order in the saga.
