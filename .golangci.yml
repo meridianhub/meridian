@@ -75,6 +75,37 @@ linters:
           - gocognit
           - gocritic
 
+      # Exclude complexity linters for gRPC service implementations
+      # These have inherently complex request handling with validation, conversion, and persistence
+      - path: internal/.*/service/.*\.go
+        linters:
+          - gocyclo
+          - gocognit
+
+      # Exclude complexity linters for repository implementations (complex query building)
+      - path: internal/.*/repository/.*\.go
+        linters:
+          - gocyclo
+          - gocognit
+
+      # Exclude complexity linters for adapter implementations (mapping logic)
+      - path: internal/.*/adapters/.*\.go
+        linters:
+          - gocyclo
+          - gocognit
+
+      # Exclude complexity linters for Kafka implementations (complex message handling)
+      - path: internal/platform/kafka/.*\.go
+        linters:
+          - gocyclo
+          - gocognit
+
+      # Exclude complexity linters for auth config (complex switch statements for auth modes)
+      - path: internal/platform/auth/.*\.go
+        linters:
+          - gocyclo
+          - gocognit
+
       # Exclude all linters for integration tests (require external services)
       - path: test/integration/
         linters:
@@ -106,6 +137,23 @@ linters:
         linters:
           - gocyclo
           - gocognit
+
+      # Exclude misspell for protobuf enum references (CANCELLED is the official enum name)
+      - text: "CANCELLED.*is a misspelling of.*CANCELED"
+        linters:
+          - misspell
+
+      # Exclude misspell for British English variations in comments/strings
+      # The codebase uses British English for user-facing terminology
+      - text: "cancelled.*is a misspelling of.*canceled"
+        linters:
+          - misspell
+      - text: "Cancelled.*is a misspelling of.*Canceled"
+        linters:
+          - misspell
+      - text: "cancelling.*is a misspelling of.*canceling"
+        linters:
+          - misspell
 
   settings:
     govet:

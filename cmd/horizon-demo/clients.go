@@ -114,27 +114,26 @@ func NewClients(cfg *ClientsConfig) (*Clients, error) {
 // Close terminates all gRPC connections.
 // It attempts to close all connections and returns the first error encountered.
 func (c *Clients) Close() error {
-	var firstErr error
+	var errs []error
 
 	if c.currentAccountConn != nil {
 		if err := c.currentAccountConn.Close(); err != nil {
 			c.logger.Warn("failed to close CurrentAccountService connection", "error", err)
-			if firstErr == nil {
-				firstErr = fmt.Errorf("failed to close CurrentAccountService connection: %w", err)
-			}
+			errs = append(errs, fmt.Errorf("failed to close CurrentAccountService connection: %w", err))
 		}
 	}
 
 	if c.paymentOrderConn != nil {
 		if err := c.paymentOrderConn.Close(); err != nil {
 			c.logger.Warn("failed to close PaymentOrderService connection", "error", err)
-			if firstErr == nil {
-				firstErr = fmt.Errorf("failed to close PaymentOrderService connection: %w", err)
-			}
+			errs = append(errs, fmt.Errorf("failed to close PaymentOrderService connection: %w", err))
 		}
 	}
 
-	return firstErr
+	if len(errs) > 0 {
+		return errs[0] // Return first error
+	}
+	return nil
 }
 
 // CheckHealth verifies that both services are reachable.
@@ -159,7 +158,7 @@ func (c *Clients) CheckHealth(_ context.Context) error {
 	return nil
 }
 
-// WaitForReady blocks until both services are ready or the context is cancelled.
+// WaitForReady blocks until both services are ready or the context is canceled.
 // This is useful for startup health checks before beginning the demo.
 func (c *Clients) WaitForReady(ctx context.Context) error {
 	// Wait for CurrentAccountService
@@ -168,11 +167,7 @@ func (c *Clients) WaitForReady(ctx context.Context) error {
 	}
 
 	// Wait for PaymentOrderService
-	if err := c.waitForConnReady(ctx, c.paymentOrderConn, "PaymentOrderService"); err != nil {
-		return err
-	}
-
-	return nil
+	return c.waitForConnReady(ctx, c.paymentOrderConn, "PaymentOrderService")
 }
 
 // waitForConnReady waits for a single connection to reach Ready state.
@@ -197,7 +192,7 @@ func (c *Clients) waitForConnReady(ctx context.Context, conn *grpc.ClientConn, s
 
 		// TransientFailure is temporary; keep waiting unless context expires
 		if !conn.WaitForStateChange(ctx, state) {
-			// Context was cancelled or timed out
+			// Context was canceled or timed out
 			return fmt.Errorf("%w: context expired while waiting for %s: %w",
 				ErrHealthCheckFailed, serviceName, ctx.Err())
 		}
