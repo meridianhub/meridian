@@ -1431,35 +1431,41 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 	})
 
 	// Update payment order with final status
-	s.updateLienExecutionStatus(ctx, paymentOrderID, attempts, err, lastErr, logger)
+	s.updateLienExecutionStatus(paymentOrderID, attempts, err, lastErr, logger)
 }
+
+// Lien execution status update configuration
+const (
+	// lienStatusUpdateMaxRetries is the number of times to retry status updates on version conflict
+	lienStatusUpdateMaxRetries = 5
+	// lienStatusUpdateBackoffBase is the base duration for exponential backoff between retries
+	lienStatusUpdateBackoffBase = 100 * time.Millisecond
+	// lienStatusUpdateTimeout is the timeout for the entire status update operation
+	lienStatusUpdateTimeout = 30 * time.Second
+)
 
 // updateLienExecutionStatus updates the payment order's lien execution status after retry completion.
 // This is called after all retry attempts have finished (success or failure).
 // Uses optimistic locking with retry on version conflict to handle concurrent updates.
 // Note: Uses a fresh context to ensure the status update completes even if the parent context has timed out.
 func (s *Service) updateLienExecutionStatus(
-	_ context.Context, // Ignore parent context - it may have timed out during retries
 	paymentOrderID uuid.UUID,
 	attempts int,
 	retryErr error,
 	lastErr error,
 	logger *slog.Logger,
 ) {
-	// Increase retry count to reduce likelihood of exhaustion under contention
-	const maxUpdateRetries = 5
-
 	// Use a fresh context to ensure status update isn't cancelled by parent timeout.
 	// This is intentional - the parent context may have timed out during retries,
 	// but we must still persist the final status for reconciliation purposes.
 	//nolint:contextcheck // Intentionally using fresh context to ensure status persistence
-	updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	updateCtx, cancel := context.WithTimeout(context.Background(), lienStatusUpdateTimeout)
 	defer cancel()
 
-	for updateAttempt := 1; updateAttempt <= maxUpdateRetries; updateAttempt++ {
+	for updateAttempt := 1; updateAttempt <= lienStatusUpdateMaxRetries; updateAttempt++ {
 		// Apply exponential backoff for retries to reduce contention
 		if updateAttempt > 1 {
-			backoff := time.Duration(updateAttempt-1) * 100 * time.Millisecond
+			backoff := time.Duration(updateAttempt-1) * lienStatusUpdateBackoffBase
 			select {
 			case <-updateCtx.Done():
 				logger.Error("context cancelled during update retry backoff",
@@ -1490,10 +1496,15 @@ func (s *Service) updateLienExecutionStatus(
 				poobservability.RecordLienExecution("success")
 			}
 		} else {
-			// Failed after all retries
-			errMsg := "unknown error"
-			if lastErr != nil {
+			// Failed after all retries - prefer lastErr (specific error) over retryErr (wrapper)
+			var errMsg string
+			switch {
+			case lastErr != nil:
 				errMsg = lastErr.Error()
+			case retryErr != nil:
+				errMsg = retryErr.Error()
+			default:
+				errMsg = "unknown error"
 			}
 			po.SetLienExecutionFailed(errMsg)
 			if updateAttempt == 1 {
@@ -1518,7 +1529,7 @@ func (s *Service) updateLienExecutionStatus(
 		if errors.Is(updateErr, persistence.ErrPaymentOrderVersionConflict) {
 			logger.Warn("version conflict updating lien execution status, retrying",
 				"update_attempt", updateAttempt,
-				"max_attempts", maxUpdateRetries)
+				"max_attempts", lienStatusUpdateMaxRetries)
 			continue
 		}
 
@@ -1533,7 +1544,7 @@ func (s *Service) updateLienExecutionStatus(
 	// in PENDING state which will be caught by the reconciliation query using the
 	// idx_payment_orders_lien_execution partial index
 	logger.Error("failed to update lien execution status after max retries due to version conflicts",
-		"max_attempts", maxUpdateRetries,
+		"max_attempts", lienStatusUpdateMaxRetries,
 		"payment_order_id", paymentOrderID.String())
 	poobservability.RecordLienExecutionStatusUpdateExhausted()
 }

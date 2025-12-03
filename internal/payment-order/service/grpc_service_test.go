@@ -277,6 +277,8 @@ type MockCurrentAccountClient struct {
 	executeLienCalled  bool
 	// executeLienDone is closed when ExecuteLien is called (for async testing)
 	executeLienDone chan struct{}
+	// executeLienDoneOnce ensures executeLienDone is closed only once (prevents race condition)
+	executeLienDoneOnce sync.Once
 }
 
 func (m *MockCurrentAccountClient) InitiateLien(_ context.Context, _ *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
@@ -298,13 +300,9 @@ func (m *MockCurrentAccountClient) TerminateLien(_ context.Context, _ *currentac
 func (m *MockCurrentAccountClient) ExecuteLien(_ context.Context, _ *currentaccountv1.ExecuteLienRequest) (*currentaccountv1.ExecuteLienResponse, error) {
 	m.executeLienCalled = true
 	// Signal that ExecuteLien was called (for async testing)
+	// Use sync.Once to safely close channel even if called multiple times concurrently
 	if m.executeLienDone != nil {
-		select {
-		case <-m.executeLienDone:
-			// Already closed, do nothing
-		default:
-			close(m.executeLienDone)
-		}
+		m.executeLienDoneOnce.Do(func() { close(m.executeLienDone) })
 	}
 	if m.executeLienErr != nil {
 		return nil, m.executeLienErr
