@@ -20,7 +20,6 @@ import (
 	"github.com/meridianhub/meridian/internal/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/internal/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/internal/payment-order/observability"
-	"github.com/meridianhub/meridian/internal/platform/kafka"
 	"github.com/meridianhub/meridian/internal/platform/observability"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -34,7 +33,6 @@ var (
 	ErrRepositoryNil           = errors.New("repository cannot be nil")
 	ErrCurrentAccountClientNil = errors.New("current account client cannot be nil")
 	ErrPaymentGatewayNil       = errors.New("payment gateway cannot be nil")
-	ErrKafkaProducerNil        = errors.New("kafka producer cannot be nil")
 	ErrAmountRequired          = errors.New("amount is required")
 	ErrInvalidNanos            = errors.New("nanos must be in range [-999999999, 999999999]")
 	ErrPaymentRejected         = errors.New("payment rejected by gateway")
@@ -72,6 +70,13 @@ type CurrentAccountClient interface {
 	ExecuteLien(ctx context.Context, req *currentaccountv1.ExecuteLienRequest) (*currentaccountv1.ExecuteLienResponse, error)
 	// Close terminates the client connection
 	Close() error
+}
+
+// KafkaPublisher defines the interface for publishing protobuf messages to Kafka.
+// This abstraction allows for mocking in tests and alternative implementations.
+type KafkaPublisher interface {
+	// Publish sends a protobuf message to the specified Kafka topic.
+	Publish(ctx context.Context, topic string, key string, msg proto.Message) error
 }
 
 // Configuration defaults
@@ -117,7 +122,7 @@ type Service struct {
 	repo                     persistence.Repository
 	currentAccountClient     CurrentAccountClient
 	paymentGateway           gateway.PaymentGateway
-	kafkaProducer            *kafka.ProtoProducer
+	kafkaPublisher           KafkaPublisher
 	logger                   *slog.Logger
 	tracer                   *observability.Tracer
 	sagaTimeout              time.Duration
@@ -132,7 +137,7 @@ type Config struct {
 	Repository           persistence.Repository
 	CurrentAccountClient CurrentAccountClient
 	PaymentGateway       gateway.PaymentGateway
-	KafkaProducer        *kafka.ProtoProducer
+	KafkaPublisher       KafkaPublisher
 	Logger               *slog.Logger
 	Tracer               *observability.Tracer
 	// SagaTimeout is the maximum duration for saga orchestration.
@@ -180,9 +185,7 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 	if config.PaymentGateway == nil {
 		return nil, ErrPaymentGatewayNil
 	}
-	if config.KafkaProducer == nil {
-		return nil, ErrKafkaProducerNil
-	}
+	// KafkaPublisher is optional - nil is handled gracefully by publishEvent
 
 	// Apply default logger if not provided
 	logger := config.Logger
@@ -215,7 +218,7 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 		repo:                     config.Repository,
 		currentAccountClient:     config.CurrentAccountClient,
 		paymentGateway:           config.PaymentGateway,
-		kafkaProducer:            config.KafkaProducer,
+		kafkaPublisher:           config.KafkaPublisher,
 		logger:                   logger,
 		tracer:                   config.Tracer,
 		sagaTimeout:              sagaTimeout,
@@ -327,7 +330,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		"correlation_id", correlationID)
 
 	// Publish PaymentOrderInitiated event to Kafka
-	// Publish event (publishEvent handles nil kafkaProducer)
+	// Publish event (publishEvent handles nil kafkaPublisher)
 	s.publishEvent(ctx, TopicPaymentOrderInitiated, po.ID.String(), &eventsv1.PaymentOrderInitiatedEvent{
 		EventId:           uuid.New().String(),
 		PaymentOrderId:    po.ID.String(),
@@ -1190,15 +1193,15 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 
 // Helper functions
 
-// publishEvent publishes a Kafka event if the producer is configured.
+// publishEvent publishes a Kafka event if the publisher is configured.
 // This is best-effort/fire-and-forget: errors are logged but not retried or persisted.
 // Failed events are NOT automatically recovered. For guaranteed delivery, consider
 // implementing a transactional outbox pattern in the future.
 func (s *Service) publishEvent(ctx context.Context, topic string, key string, event proto.Message) {
-	if s.kafkaProducer == nil {
+	if s.kafkaPublisher == nil {
 		return
 	}
-	if err := s.kafkaProducer.Publish(ctx, topic, key, event); err != nil {
+	if err := s.kafkaPublisher.Publish(ctx, topic, key, event); err != nil {
 		s.logger.Error("failed to publish event",
 			"topic", topic,
 			"key", key,

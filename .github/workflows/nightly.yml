@@ -1,0 +1,85 @@
+name: Nightly
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC (same as security scans)
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+permissions:
+  contents: read
+
+jobs:
+  # =============================================================================
+  # Full Integration Tests (including slow/timing-sensitive tests)
+  # =============================================================================
+  # These tests are timing-sensitive (network timeouts, exponential backoff)
+  # and are skipped in regular CI (via -short flag) to avoid flakiness from
+  # CPU scheduler variance. Running them nightly ensures they're validated.
+
+  slow-integration-tests:
+    name: Slow Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: meridian_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.4'
+        cache: true
+
+    - name: Set up buf
+      uses: bufbuild/buf-setup-action@v1
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Generate protobuf files
+      run: buf generate
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run full test suite (including slow tests)
+      env:
+        SKIP_KAFKA_TESTS: "1"
+        DATABASE_URL: postgres://test:test@localhost:5432/meridian_test?sslmode=disable
+      run: |
+        # Run WITHOUT -short flag to include all timing-sensitive tests
+        # Regular CI runs with -short, but nightly runs the full suite
+        echo "Running full test suite including timing-sensitive tests..."
+        go test -v -race -timeout 15m ./... 2>&1 | tee test-output.txt
+
+        # Report summary
+        echo ""
+        echo "=== Test Summary ==="
+        PASS_COUNT=$(grep -c "^--- PASS" test-output.txt || echo "0")
+        FAIL_COUNT=$(grep -c "^--- FAIL" test-output.txt || echo "0")
+        SKIP_COUNT=$(grep -c "^--- SKIP" test-output.txt || echo "0")
+        echo "Passed: $PASS_COUNT"
+        echo "Failed: $FAIL_COUNT"
+        echo "Skipped: $SKIP_COUNT"
+
+        # Exit with failure if any tests failed
+        if [ "$FAIL_COUNT" -gt 0 ]; then
+          echo ""
+          echo "=== Failed Tests ==="
+          grep -B5 "^--- FAIL" test-output.txt
+          exit 1
+        fi

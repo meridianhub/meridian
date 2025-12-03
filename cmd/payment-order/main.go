@@ -125,7 +125,7 @@ func run(logger *slog.Logger) error {
 		Repository:           repo,
 		CurrentAccountClient: currentAccountClient,
 		PaymentGateway:       paymentGateway,
-		KafkaProducer:        kafkaProducer,
+		KafkaPublisher:       kafkaProducer,
 		Logger:               logger,
 		Tracer:               tracer,
 	})
