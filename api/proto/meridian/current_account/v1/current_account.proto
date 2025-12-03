@@ -465,13 +465,27 @@ message RetrieveLienResponse {
   Lien lien = 1 [(buf.validate.field).required = true];
 }
 
-// CurrentAccountService provides BIAN-compliant current account operations
+// CurrentAccountService provides BIAN-compliant current account operations.
+//
+// Design Notes:
+// - DELETE operations are intentionally not provided. Accounts are managed
+//   through status transitions (Active → Frozen → Closed) for audit compliance.
+// - Liens follow a lifecycle pattern: create under account context, then
+//   operate independently via /v1/liens/{lien_id} for execute/terminate/retrieve.
 service CurrentAccountService {
   // InitiateCurrentAccount creates a new current account facility
   rpc InitiateCurrentAccount(InitiateCurrentAccountRequest) returns (InitiateCurrentAccountResponse) {
     option (google.api.http) = {
       post: "/v1/current-accounts"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Current account created successfully"
+        }
+      }
     };
   }
 
@@ -490,12 +504,23 @@ service CurrentAccountService {
     };
   }
 
-  // InitiateLien creates a fund reservation on an account
-  // Used by Payment Order to reserve funds before external payment execution
+  // InitiateLien creates a fund reservation on an account.
+  // Used by Payment Order to reserve funds before external payment execution.
+  // Note: Liens are created under the account context but become independent
+  // resources with their own endpoints (GET/POST /v1/liens/{lien_id}) for
+  // execute, terminate, and retrieve operations.
   rpc InitiateLien(InitiateLienRequest) returns (InitiateLienResponse) {
     option (google.api.http) = {
       post: "/v1/current-accounts/{account_id}/liens"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Lien created successfully - funds are now reserved"
+        }
+      }
     };
   }
 

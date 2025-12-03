@@ -490,6 +490,14 @@ service PaymentOrderService {
       post: "/v1/payment-orders"
       body: "*"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Payment order created successfully"
+        }
+      }
+    };
   }
 
   // RetrievePaymentOrder gets payment order details by ID.

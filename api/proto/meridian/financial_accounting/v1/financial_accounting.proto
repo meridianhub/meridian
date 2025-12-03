@@ -431,6 +431,14 @@ service FinancialAccountingService {
       post: "/v1/booking-logs"
       body: "*"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Financial booking log created successfully"
+        }
+      }
+    };
   }
 
   // UpdateFinancialBookingLog updates an existing booking log.
@@ -460,6 +468,14 @@ service FinancialAccountingService {
     option (google.api.http) = {
       post: "/v1/booking-logs/{financial_booking_log_id}/postings"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Ledger posting created successfully"
+        }
+      }
     };
   }
 

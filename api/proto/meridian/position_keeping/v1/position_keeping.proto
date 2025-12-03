@@ -403,6 +403,14 @@ service PositionKeepingService {
       post: "/v1/position-logs"
       body: "*"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Financial position log created successfully"
+        }
+      }
+    };
   }
 
   // InitiateFinancialPositionLogBatch creates multiple logs atomically in a single transaction.
@@ -410,6 +418,14 @@ service PositionKeepingService {
     option (google.api.http) = {
       post: "/v1/position-logs/batch"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Financial position logs created successfully"
+        }
+      }
     };
   }
 
