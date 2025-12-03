@@ -3,11 +3,34 @@ syntax = "proto3";
 package meridian.financial_accounting.v1;
 
 import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 import "google/type/money.proto";
 import "meridian/common/v1/types.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
+
+// OpenAPI specification metadata for Financial Accounting Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Financial Accounting Service API"
+    version: "1.0"
+    description: "BIAN-compliant financial accounting operations for double-entry "
+                 "bookkeeping, ledger postings, and financial booking log management."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+};
 
 // FinancialBookingLog represents the BIAN Financial Booking Log entity.
 // It maintains records of financial transactions and their processing status.
@@ -386,26 +409,62 @@ message ListLedgerPostingsResponse {
 // FinancialAccountingService provides the BIAN Financial Accounting service interface.
 service FinancialAccountingService {
   // InitiateFinancialBookingLog creates a new financial booking log.
-  rpc InitiateFinancialBookingLog(InitiateFinancialBookingLogRequest) returns (InitiateFinancialBookingLogResponse);
+  rpc InitiateFinancialBookingLog(InitiateFinancialBookingLogRequest) returns (InitiateFinancialBookingLogResponse) {
+    option (google.api.http) = {
+      post: "/v1/booking-logs"
+      body: "*"
+    };
+  }
 
   // UpdateFinancialBookingLog updates an existing booking log.
-  rpc UpdateFinancialBookingLog(UpdateFinancialBookingLogRequest) returns (UpdateFinancialBookingLogResponse);
+  rpc UpdateFinancialBookingLog(UpdateFinancialBookingLogRequest) returns (UpdateFinancialBookingLogResponse) {
+    option (google.api.http) = {
+      put: "/v1/booking-logs/{id}"
+      body: "*"
+    };
+  }
 
   // RetrieveFinancialBookingLog retrieves a specific booking log.
-  rpc RetrieveFinancialBookingLog(RetrieveFinancialBookingLogRequest) returns (RetrieveFinancialBookingLogResponse);
+  rpc RetrieveFinancialBookingLog(RetrieveFinancialBookingLogRequest) returns (RetrieveFinancialBookingLogResponse) {
+    option (google.api.http) = {
+      get: "/v1/booking-logs/{id}"
+    };
+  }
 
   // ListFinancialBookingLogs lists booking logs with optional filtering.
-  rpc ListFinancialBookingLogs(ListFinancialBookingLogsRequest) returns (ListFinancialBookingLogsResponse);
+  rpc ListFinancialBookingLogs(ListFinancialBookingLogsRequest) returns (ListFinancialBookingLogsResponse) {
+    option (google.api.http) = {
+      get: "/v1/booking-logs"
+    };
+  }
 
   // CaptureLedgerPosting creates a new ledger posting.
-  rpc CaptureLedgerPosting(CaptureLedgerPostingRequest) returns (CaptureLedgerPostingResponse);
+  rpc CaptureLedgerPosting(CaptureLedgerPostingRequest) returns (CaptureLedgerPostingResponse) {
+    option (google.api.http) = {
+      post: "/v1/booking-logs/{financial_booking_log_id}/postings"
+      body: "*"
+    };
+  }
 
   // UpdateLedgerPosting updates an existing ledger posting.
-  rpc UpdateLedgerPosting(UpdateLedgerPostingRequest) returns (UpdateLedgerPostingResponse);
+  rpc UpdateLedgerPosting(UpdateLedgerPostingRequest) returns (UpdateLedgerPostingResponse) {
+    option (google.api.http) = {
+      put: "/v1/postings/{id}"
+      body: "*"
+    };
+  }
 
   // RetrieveLedgerPosting retrieves a specific posting.
-  rpc RetrieveLedgerPosting(RetrieveLedgerPostingRequest) returns (RetrieveLedgerPostingResponse);
+  rpc RetrieveLedgerPosting(RetrieveLedgerPostingRequest) returns (RetrieveLedgerPostingResponse) {
+    option (google.api.http) = {
+      get: "/v1/postings/{id}"
+    };
+  }
 
   // ListLedgerPostings lists ledger postings with optional filtering.
-  rpc ListLedgerPostings(ListLedgerPostingsRequest) returns (ListLedgerPostingsResponse);
+  rpc ListLedgerPostings(ListLedgerPostingsRequest) returns (ListLedgerPostingsResponse) {
+    option (google.api.http) = {
+      get: "/v1/postings"
+    };
+  }
 }

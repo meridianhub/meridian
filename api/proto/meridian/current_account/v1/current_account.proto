@@ -3,10 +3,33 @@ syntax = "proto3";
 package meridian.current_account.v1;
 
 import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 import "meridian/common/v1/types.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1;currentaccountv1";
+
+// OpenAPI specification metadata for Current Account Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Current Account Service API"
+    version: "1.0"
+    description: "BIAN-compliant current account operations including deposits, "
+                 "withdrawals, and lien management for fund reservations."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+};
 
 // AccountStatus defines the lifecycle state of a current account facility
 enum AccountStatus {
@@ -428,26 +451,59 @@ message RetrieveLienResponse {
 // CurrentAccountService provides BIAN-compliant current account operations
 service CurrentAccountService {
   // InitiateCurrentAccount creates a new current account facility
-  rpc InitiateCurrentAccount(InitiateCurrentAccountRequest) returns (InitiateCurrentAccountResponse);
+  rpc InitiateCurrentAccount(InitiateCurrentAccountRequest) returns (InitiateCurrentAccountResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts"
+      body: "*"
+    };
+  }
 
   // ExecuteDeposit processes a deposit transaction (Behavior Qualifier)
-  rpc ExecuteDeposit(ExecuteDepositRequest) returns (ExecuteDepositResponse);
+  rpc ExecuteDeposit(ExecuteDepositRequest) returns (ExecuteDepositResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts/{account_id}/deposits"
+      body: "*"
+    };
+  }
 
   // RetrieveCurrentAccount gets current account details
-  rpc RetrieveCurrentAccount(RetrieveCurrentAccountRequest) returns (RetrieveCurrentAccountResponse);
+  rpc RetrieveCurrentAccount(RetrieveCurrentAccountRequest) returns (RetrieveCurrentAccountResponse) {
+    option (google.api.http) = {
+      get: "/v1/current-accounts/{account_id}"
+    };
+  }
 
   // InitiateLien creates a fund reservation on an account
   // Used by Payment Order to reserve funds before external payment execution
-  rpc InitiateLien(InitiateLienRequest) returns (InitiateLienResponse);
+  rpc InitiateLien(InitiateLienRequest) returns (InitiateLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts/{account_id}/liens"
+      body: "*"
+    };
+  }
 
   // ExecuteLien converts a reservation to an actual debit atomically
   // Called when the external payment is confirmed as settled
-  rpc ExecuteLien(ExecuteLienRequest) returns (ExecuteLienResponse);
+  rpc ExecuteLien(ExecuteLienRequest) returns (ExecuteLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/liens/{lien_id}/execute"
+      body: "*"
+    };
+  }
 
   // TerminateLien releases a reservation without executing
   // Called when the external payment fails or is cancelled
-  rpc TerminateLien(TerminateLienRequest) returns (TerminateLienResponse);
+  rpc TerminateLien(TerminateLienRequest) returns (TerminateLienResponse) {
+    option (google.api.http) = {
+      post: "/v1/liens/{lien_id}/terminate"
+      body: "*"
+    };
+  }
 
   // RetrieveLien gets lien details
-  rpc RetrieveLien(RetrieveLienRequest) returns (RetrieveLienResponse);
+  rpc RetrieveLien(RetrieveLienRequest) returns (RetrieveLienResponse) {
+    option (google.api.http) = {
+      get: "/v1/liens/{lien_id}"
+    };
+  }
 }

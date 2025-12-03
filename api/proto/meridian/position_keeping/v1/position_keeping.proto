@@ -3,10 +3,33 @@ syntax = "proto3";
 package meridian.position_keeping.v1;
 
 import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 import "meridian/common/v1/types.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1;positionkeepingv1";
+
+// OpenAPI specification metadata for Position Keeping Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Position Keeping Service API"
+    version: "1.0"
+    description: "BIAN-compliant position keeping operations for tracking financial "
+                 "positions, transaction logs, and audit trails."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+};
 
 // TransactionLogEntry represents a single entry in the financial position log.
 message TransactionLogEntry {
@@ -358,20 +381,48 @@ message ListFinancialPositionLogsResponse {
 // PositionKeepingService provides operations for managing financial position logs.
 service PositionKeepingService {
   // InitiateFinancialPositionLog creates a new financial position log.
-  rpc InitiateFinancialPositionLog(InitiateFinancialPositionLogRequest) returns (InitiateFinancialPositionLogResponse);
+  rpc InitiateFinancialPositionLog(InitiateFinancialPositionLogRequest) returns (InitiateFinancialPositionLogResponse) {
+    option (google.api.http) = {
+      post: "/v1/position-logs"
+      body: "*"
+    };
+  }
 
   // InitiateFinancialPositionLogBatch creates multiple logs atomically in a single transaction.
-  rpc InitiateFinancialPositionLogBatch(InitiateFinancialPositionLogBatchRequest) returns (InitiateFinancialPositionLogBatchResponse);
+  rpc InitiateFinancialPositionLogBatch(InitiateFinancialPositionLogBatchRequest) returns (InitiateFinancialPositionLogBatchResponse) {
+    option (google.api.http) = {
+      post: "/v1/position-logs/batch"
+      body: "*"
+    };
+  }
 
   // UpdateFinancialPositionLog updates an existing financial position log.
-  rpc UpdateFinancialPositionLog(UpdateFinancialPositionLogRequest) returns (UpdateFinancialPositionLogResponse);
+  rpc UpdateFinancialPositionLog(UpdateFinancialPositionLogRequest) returns (UpdateFinancialPositionLogResponse) {
+    option (google.api.http) = {
+      put: "/v1/position-logs/{log_id}"
+      body: "*"
+    };
+  }
 
   // RetrieveFinancialPositionLog retrieves a specific financial position log.
-  rpc RetrieveFinancialPositionLog(RetrieveFinancialPositionLogRequest) returns (RetrieveFinancialPositionLogResponse);
+  rpc RetrieveFinancialPositionLog(RetrieveFinancialPositionLogRequest) returns (RetrieveFinancialPositionLogResponse) {
+    option (google.api.http) = {
+      get: "/v1/position-logs/{log_id}"
+    };
+  }
 
   // BulkImportTransactions imports multiple transactions into a log at once.
-  rpc BulkImportTransactions(BulkImportTransactionsRequest) returns (BulkImportTransactionsResponse);
+  rpc BulkImportTransactions(BulkImportTransactionsRequest) returns (BulkImportTransactionsResponse) {
+    option (google.api.http) = {
+      post: "/v1/position-logs/{log_id}/transactions/bulk"
+      body: "*"
+    };
+  }
 
   // ListFinancialPositionLogs lists financial position logs with filtering.
-  rpc ListFinancialPositionLogs(ListFinancialPositionLogsRequest) returns (ListFinancialPositionLogsResponse);
+  rpc ListFinancialPositionLogs(ListFinancialPositionLogsRequest) returns (ListFinancialPositionLogsResponse) {
+    option (google.api.http) = {
+      get: "/v1/position-logs"
+    };
+  }
 }
