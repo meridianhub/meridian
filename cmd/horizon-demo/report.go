@@ -65,17 +65,17 @@ type VerificationReport struct {
 	NoDoubleSpend bool `json:"no_double_spend"`
 }
 
-// Verdict constants for report outcome.
+// Report verdict string constants for JSON output.
 const (
-	VerdictPassed = "PASSED"
-	VerdictFailed = "FAILED"
+	ReportVerdictPassed = "PASSED"
+	ReportVerdictFailed = "FAILED"
 )
 
-// Attempt status constants.
+// Attempt status string constants for JSON output.
 const (
-	StatusClientTimeout = "CLIENT_TIMEOUT"
-	StatusSuccess       = "SUCCESS"
-	StatusError         = "ERROR"
+	AttemptStatusClientTimeout = "CLIENT_TIMEOUT"
+	AttemptStatusSuccess       = "SUCCESS"
+	AttemptStatusError         = "ERROR"
 )
 
 // NewReport creates a new Report with a unique demo ID and current timestamp.
@@ -89,18 +89,18 @@ func NewReport() *Report {
 }
 
 // CalculateVerdict determines the verdict based on verification results.
-// Returns VerdictPassed if:
+// Returns ReportVerdictPassed if:
 // - BalanceCorrect is true
 // - TransactionsRecorded equals 1
 // - NoDoubleSpend is true
-// Otherwise returns VerdictFailed.
+// Otherwise returns ReportVerdictFailed.
 func (r *Report) CalculateVerdict() string {
 	if r.Verification.BalanceCorrect &&
 		r.Verification.TransactionsRecorded == 1 &&
 		r.Verification.NoDoubleSpend {
-		return VerdictPassed
+		return ReportVerdictPassed
 	}
-	return VerdictFailed
+	return ReportVerdictFailed
 }
 
 // AddAttempt adds a payment attempt to the report.
