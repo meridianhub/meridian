@@ -330,7 +330,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		"correlation_id", correlationID)
 
 	// Publish PaymentOrderInitiated event to Kafka
-	// Publish event (publishEvent handles nil kafkaProducer)
+	// Publish event (publishEvent handles nil kafkaPublisher)
 	s.publishEvent(ctx, TopicPaymentOrderInitiated, po.ID.String(), &eventsv1.PaymentOrderInitiatedEvent{
 		EventId:           uuid.New().String(),
 		PaymentOrderId:    po.ID.String(),
