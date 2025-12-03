@@ -106,6 +106,12 @@ linters:
           - gocyclo
           - gocognit
 
+      # Exclude unparam for ledger package (unparam panics on Go generics with type constraints)
+      # See: https://github.com/golangci/golangci-lint/issues/5254
+      - path: pkg/platform/ledger/.*\.go
+        linters:
+          - unparam
+
       # Exclude all linters for integration tests (require external services)
       - path: test/integration/
         linters:
