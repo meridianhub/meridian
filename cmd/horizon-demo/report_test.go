@@ -107,7 +107,7 @@ func TestReport_AddAttempt(t *testing.T) {
 	attempt1 := AttemptReport{
 		Attempt:        1,
 		IdempotencyKey: "HORIZON-TXN-123",
-		Status:         StatusClientTimeout,
+		Status:         AttemptStatusClientTimeout,
 		Error:          "context deadline exceeded",
 		DurationMs:     45,
 	}
@@ -121,7 +121,7 @@ func TestReport_AddAttempt(t *testing.T) {
 	attempt2 := AttemptReport{
 		Attempt:        2,
 		IdempotencyKey: "HORIZON-TXN-123",
-		Status:         StatusSuccess,
+		Status:         AttemptStatusSuccess,
 		PaymentOrderID: "po_abc123",
 		DurationMs:     120,
 	}
@@ -193,14 +193,14 @@ func TestReport_ToJSON(t *testing.T) {
 			{
 				Attempt:        1,
 				IdempotencyKey: "HORIZON-TXN-xxx",
-				Status:         StatusClientTimeout,
+				Status:         AttemptStatusClientTimeout,
 				Error:          "context deadline exceeded",
 				DurationMs:     45,
 			},
 			{
 				Attempt:        2,
 				IdempotencyKey: "HORIZON-TXN-xxx",
-				Status:         StatusSuccess,
+				Status:         AttemptStatusSuccess,
 				PaymentOrderID: "po_xxx",
 				DurationMs:     120,
 			},
@@ -242,7 +242,7 @@ func TestReport_ToJSON_OmitsEmptyFields(t *testing.T) {
 			{
 				Attempt:        1,
 				IdempotencyKey: "key",
-				Status:         StatusSuccess,
+				Status:         AttemptStatusSuccess,
 				DurationMs:     100,
 				// Error and PaymentOrderID are empty
 			},
@@ -278,7 +278,7 @@ func TestReport_WriteToFile(t *testing.T) {
 			{
 				Attempt:        1,
 				IdempotencyKey: "HORIZON-TXN-test",
-				Status:         StatusSuccess,
+				Status:         AttemptStatusSuccess,
 				PaymentOrderID: "po_test",
 				DurationMs:     100,
 			},
@@ -333,7 +333,7 @@ func TestReport_FullScenario_Passed(t *testing.T) {
 	report.AddAttempt(AttemptReport{
 		Attempt:        1,
 		IdempotencyKey: "HORIZON-TXN-12345",
-		Status:         StatusClientTimeout,
+		Status:         AttemptStatusClientTimeout,
 		Error:          "context deadline exceeded",
 		DurationMs:     45,
 	})
@@ -342,7 +342,7 @@ func TestReport_FullScenario_Passed(t *testing.T) {
 	report.AddAttempt(AttemptReport{
 		Attempt:        2,
 		IdempotencyKey: "HORIZON-TXN-12345",
-		Status:         StatusSuccess,
+		Status:         AttemptStatusSuccess,
 		PaymentOrderID: "po_abc123",
 		DurationMs:     120,
 	})
@@ -367,7 +367,7 @@ func TestReport_FullScenario_DoubleSpend(t *testing.T) {
 	report.AddAttempt(AttemptReport{
 		Attempt:        1,
 		IdempotencyKey: "HORIZON-TXN-12345",
-		Status:         StatusSuccess, // First request succeeded
+		Status:         AttemptStatusSuccess, // First request succeeded
 		PaymentOrderID: "po_abc123",
 		DurationMs:     100,
 	})
@@ -375,8 +375,8 @@ func TestReport_FullScenario_DoubleSpend(t *testing.T) {
 	report.AddAttempt(AttemptReport{
 		Attempt:        2,
 		IdempotencyKey: "HORIZON-TXN-12345",
-		Status:         StatusSuccess, // Second request also succeeded (BAD!)
-		PaymentOrderID: "po_def456",   // Different order ID = double spend
+		Status:         AttemptStatusSuccess, // Second request also succeeded (BAD!)
+		PaymentOrderID: "po_def456",          // Different order ID = double spend
 		DurationMs:     100,
 	})
 
@@ -398,7 +398,7 @@ func TestReport_FullScenario_NoTransaction(t *testing.T) {
 	report.AddAttempt(AttemptReport{
 		Attempt:        1,
 		IdempotencyKey: "HORIZON-TXN-12345",
-		Status:         StatusClientTimeout,
+		Status:         AttemptStatusClientTimeout,
 		Error:          "context deadline exceeded",
 		DurationMs:     45,
 	})
