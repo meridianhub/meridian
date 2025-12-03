@@ -297,8 +297,9 @@ func runDemo(cfg *Config) (*DemoResult, error) {
 	// Print ASCII table
 	printASCIITable(os.Stdout, result)
 
-	// Print report location
-	fmt.Printf("\nReport written to: %s\n", cfg.Output)
+	// TODO: Task 9 will implement actual JSON report generation
+	// For now, just log the configured output path
+	logger.Debug("report output configured", "path", cfg.Output)
 
 	// Execute cleanup unless --no-cleanup is specified
 	if !cfg.NoCleanup {

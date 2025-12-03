@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -476,4 +478,26 @@ func TestDemoResult_Structure(t *testing.T) {
 	assert.Equal(t, StatusOK, result.Steps[0].Status)
 	assert.Equal(t, "detail1", result.Steps[0].Details)
 	assert.Equal(t, VerdictPassed, result.Verdict)
+}
+
+func TestExecuteCleanup_NoError(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	err := executeCleanup(logger, "test-account-id")
+	assert.NoError(t, err)
+}
+
+func TestPrintASCIITable_EmptySteps(t *testing.T) {
+	result := &DemoResult{
+		Steps:   []StepResult{},
+		Verdict: VerdictPassed,
+	}
+
+	var buf bytes.Buffer
+	printASCIITable(&buf, result)
+	output := buf.String()
+
+	// Should still have header and verdict even with no steps
+	assert.Contains(t, output, "HORIZON INTEGRITY PROOF")
+	assert.Contains(t, output, "VERDICT:")
+	assert.Contains(t, output, "PASSED")
 }
