@@ -45,7 +45,7 @@ func TestReport_CalculateVerdict_Passed(t *testing.T) {
 	}
 
 	verdict := report.CalculateVerdict()
-	assert.Equal(t, VerdictPassed, verdict)
+	assert.Equal(t, ReportVerdictPassed, verdict)
 }
 
 func TestReport_CalculateVerdict_Failed(t *testing.T) {
@@ -95,7 +95,7 @@ func TestReport_CalculateVerdict_Failed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			report := &Report{Verification: tt.verification}
 			verdict := report.CalculateVerdict()
-			assert.Equal(t, VerdictFailed, verdict)
+			assert.Equal(t, ReportVerdictFailed, verdict)
 		})
 	}
 }
@@ -151,7 +151,7 @@ func TestReport_SetFinalBalance(t *testing.T) {
 		assert.True(t, report.Verification.BalanceCorrect)
 		assert.True(t, report.Verification.NoDoubleSpend)
 		assert.Equal(t, 1, report.Verification.TransactionsRecorded)
-		assert.Equal(t, VerdictPassed, report.Verdict)
+		assert.Equal(t, ReportVerdictPassed, report.Verdict)
 	})
 
 	t.Run("double spend detected", func(t *testing.T) {
@@ -163,7 +163,7 @@ func TestReport_SetFinalBalance(t *testing.T) {
 		assert.False(t, report.Verification.BalanceCorrect)
 		assert.False(t, report.Verification.NoDoubleSpend)
 		assert.Equal(t, 2, report.Verification.TransactionsRecorded)
-		assert.Equal(t, VerdictFailed, report.Verdict)
+		assert.Equal(t, ReportVerdictFailed, report.Verdict)
 	})
 
 	t.Run("no transaction executed", func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestReport_SetFinalBalance(t *testing.T) {
 		assert.False(t, report.Verification.BalanceCorrect)
 		assert.False(t, report.Verification.NoDoubleSpend)
 		assert.Equal(t, 0, report.Verification.TransactionsRecorded)
-		assert.Equal(t, VerdictFailed, report.Verdict)
+		assert.Equal(t, ReportVerdictFailed, report.Verdict)
 	})
 }
 
@@ -211,7 +211,7 @@ func TestReport_ToJSON(t *testing.T) {
 			BalanceCorrect:       true,
 			NoDoubleSpend:        true,
 		},
-		Verdict: VerdictPassed,
+		Verdict: ReportVerdictPassed,
 	}
 
 	data, err := report.ToJSON()
@@ -247,7 +247,7 @@ func TestReport_ToJSON_OmitsEmptyFields(t *testing.T) {
 				// Error and PaymentOrderID are empty
 			},
 		},
-		Verdict: VerdictPassed,
+		Verdict: ReportVerdictPassed,
 	}
 
 	data, err := report.ToJSON()
@@ -289,7 +289,7 @@ func TestReport_WriteToFile(t *testing.T) {
 			BalanceCorrect:       true,
 			NoDoubleSpend:        true,
 		},
-		Verdict: VerdictPassed,
+		Verdict: ReportVerdictPassed,
 	}
 
 	outputPath := filepath.Join(tmpDir, "integrity_report.json")
@@ -351,7 +351,7 @@ func TestReport_FullScenario_Passed(t *testing.T) {
 	report.SetFinalBalance(90000, 1)
 
 	// Assert final state
-	assert.Equal(t, VerdictPassed, report.Verdict)
+	assert.Equal(t, ReportVerdictPassed, report.Verdict)
 	assert.Equal(t, 2, report.Verification.RequestsSent)
 	assert.Equal(t, 1, report.Verification.TransactionsRecorded)
 	assert.True(t, report.Verification.BalanceCorrect)
@@ -384,7 +384,7 @@ func TestReport_FullScenario_DoubleSpend(t *testing.T) {
 	report.SetFinalBalance(80000, 2)
 
 	// Assert failure
-	assert.Equal(t, VerdictFailed, report.Verdict)
+	assert.Equal(t, ReportVerdictFailed, report.Verdict)
 	assert.False(t, report.Verification.BalanceCorrect)
 	assert.False(t, report.Verification.NoDoubleSpend)
 }
@@ -406,7 +406,7 @@ func TestReport_FullScenario_NoTransaction(t *testing.T) {
 	report.AddAttempt(AttemptReport{
 		Attempt:        2,
 		IdempotencyKey: "HORIZON-TXN-12345",
-		Status:         StatusError,
+		Status:         AttemptStatusError,
 		Error:          "service unavailable",
 		DurationMs:     200,
 	})
@@ -415,7 +415,7 @@ func TestReport_FullScenario_NoTransaction(t *testing.T) {
 	report.SetFinalBalance(100000, 0)
 
 	// Assert failure
-	assert.Equal(t, VerdictFailed, report.Verdict)
+	assert.Equal(t, ReportVerdictFailed, report.Verdict)
 	assert.False(t, report.Verification.BalanceCorrect)
 	assert.False(t, report.Verification.NoDoubleSpend)
 	assert.Equal(t, 0, report.Verification.TransactionsRecorded)
