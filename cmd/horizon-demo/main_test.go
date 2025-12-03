@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,4 +245,235 @@ func TestValidateConfig_BoundaryConditions(t *testing.T) {
 		}
 		assert.NoError(t, validateConfig(cfg))
 	})
+}
+
+func TestExitCodes(t *testing.T) {
+	assert.Equal(t, 0, ExitCodePassed)
+	assert.Equal(t, 1, ExitCodeFailed)
+	assert.Equal(t, 2, ExitCodeError)
+}
+
+func TestStepStatus_String(t *testing.T) {
+	tests := []struct {
+		status   StepStatus
+		expected string
+	}{
+		{StatusOK, "OK"},
+		{StatusTimeout, "TIMEOUT"},
+		{StatusFailed, "FAIL"},
+		{StatusPassed, "PASSED"},
+		{StatusError, "ERROR"},
+		{StepStatus(99), "UNKNOWN"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.status.String())
+		})
+	}
+}
+
+func TestStepStatus_Color(t *testing.T) {
+	tests := []struct {
+		status        StepStatus
+		expectedColor string
+	}{
+		{StatusOK, colorGreen},
+		{StatusPassed, colorGreen},
+		{StatusFailed, colorRed},
+		{StatusError, colorRed},
+		{StatusTimeout, colorYellow},
+		{StepStatus(99), colorReset},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status.String(), func(t *testing.T) {
+			assert.Equal(t, tt.expectedColor, tt.status.color())
+		})
+	}
+}
+
+func TestVerdict_String(t *testing.T) {
+	tests := []struct {
+		verdict  Verdict
+		expected string
+	}{
+		{VerdictPassed, "PASSED"},
+		{VerdictFailed, "FAILED"},
+		{VerdictError, "ERROR"},
+		{Verdict(99), "UNKNOWN"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.verdict.String())
+		})
+	}
+}
+
+func TestVerdict_ExitCode(t *testing.T) {
+	tests := []struct {
+		verdict      Verdict
+		expectedCode int
+	}{
+		{VerdictPassed, ExitCodePassed},
+		{VerdictFailed, ExitCodeFailed},
+		{VerdictError, ExitCodeError},
+		{Verdict(99), ExitCodeError}, // Unknown defaults to error
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.verdict.String(), func(t *testing.T) {
+			assert.Equal(t, tt.expectedCode, tt.verdict.exitCode())
+		})
+	}
+}
+
+func TestVerdict_Color(t *testing.T) {
+	tests := []struct {
+		verdict       Verdict
+		expectedColor string
+	}{
+		{VerdictPassed, colorGreen},
+		{VerdictFailed, colorRed},
+		{VerdictError, colorYellow},
+		{Verdict(99), colorYellow}, // Unknown defaults to yellow
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.verdict.String(), func(t *testing.T) {
+			assert.Equal(t, tt.expectedColor, tt.verdict.color())
+		})
+	}
+}
+
+func TestPrintASCIITable(t *testing.T) {
+	result := &DemoResult{
+		Steps: []StepResult{
+			{Step: 1, Name: "Create Account", Status: StatusOK, Details: "acc_123"},
+			{Step: 2, Name: "Deposit Funds", Status: StatusOK, Details: "GBP 1000"},
+			{Step: 3, Name: "Payment Attempt 1", Status: StatusTimeout, Details: "deadline exceeded"},
+			{Step: 4, Name: "Payment Attempt 2", Status: StatusOK, Details: "idempotent"},
+			{Step: 5, Name: "Verify Balance", Status: StatusPassed, Details: "correct"},
+			{Step: 6, Name: "Verify Orders", Status: StatusPassed, Details: "1 order"},
+		},
+		Verdict: VerdictPassed,
+	}
+
+	var buf bytes.Buffer
+	printASCIITable(&buf, result)
+	output := buf.String()
+
+	// Verify header
+	assert.Contains(t, output, "HORIZON INTEGRITY PROOF")
+	assert.Contains(t, output, "STEP")
+	assert.Contains(t, output, "STATUS")
+	assert.Contains(t, output, "DETAILS")
+
+	// Verify steps are present
+	assert.Contains(t, output, "Create Account")
+	assert.Contains(t, output, "Deposit Funds")
+	assert.Contains(t, output, "Payment Attempt 1")
+	assert.Contains(t, output, "Payment Attempt 2")
+	assert.Contains(t, output, "Verify Balance")
+	assert.Contains(t, output, "Verify Orders")
+
+	// Verify status values
+	assert.Contains(t, output, "OK")
+	assert.Contains(t, output, "TIMEOUT")
+	assert.Contains(t, output, "PASSED")
+
+	// Verify verdict
+	assert.Contains(t, output, "VERDICT:")
+	assert.Contains(t, output, "PASSED")
+	assert.Contains(t, output, "No phantom transactions, no double-spend")
+}
+
+func TestPrintASCIITable_FailedVerdict(t *testing.T) {
+	result := &DemoResult{
+		Steps: []StepResult{
+			{Step: 1, Name: "Create Account", Status: StatusOK, Details: "acc_123"},
+			{Step: 2, Name: "Verify Balance", Status: StatusFailed, Details: "expected 900, got 800"},
+		},
+		Verdict: VerdictFailed,
+	}
+
+	var buf bytes.Buffer
+	printASCIITable(&buf, result)
+	output := buf.String()
+
+	assert.Contains(t, output, "VERDICT:")
+	assert.Contains(t, output, "FAILED")
+	assert.Contains(t, output, "Integrity issue detected")
+}
+
+func TestPrintASCIITable_ErrorVerdict(t *testing.T) {
+	result := &DemoResult{
+		Steps: []StepResult{
+			{Step: 1, Name: "Connect", Status: StatusError, Details: "connection refused"},
+		},
+		Verdict: VerdictError,
+	}
+
+	var buf bytes.Buffer
+	printASCIITable(&buf, result)
+	output := buf.String()
+
+	assert.Contains(t, output, "VERDICT:")
+	assert.Contains(t, output, "ERROR")
+	assert.Contains(t, output, "Execution error occurred")
+}
+
+func TestPrintASCIITable_ContainsANSICodes(t *testing.T) {
+	result := &DemoResult{
+		Steps: []StepResult{
+			{Step: 1, Name: "Test Step", Status: StatusOK, Details: "done"},
+		},
+		Verdict: VerdictPassed,
+	}
+
+	var buf bytes.Buffer
+	printASCIITable(&buf, result)
+	output := buf.String()
+
+	// Verify ANSI codes are present (green for OK/PASSED)
+	assert.True(t, strings.Contains(output, colorGreen), "should contain green ANSI code")
+	assert.True(t, strings.Contains(output, colorReset), "should contain reset ANSI code")
+	assert.True(t, strings.Contains(output, colorBold), "should contain bold ANSI code")
+	assert.True(t, strings.Contains(output, colorCyan), "should contain cyan ANSI code for header")
+}
+
+func TestGetVerdictMessage(t *testing.T) {
+	tests := []struct {
+		verdict  Verdict
+		expected string
+	}{
+		{VerdictPassed, "No phantom transactions, no double-spend"},
+		{VerdictFailed, "Integrity issue detected"},
+		{VerdictError, "Execution error occurred"},
+		{Verdict(99), "Unknown result"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.verdict.String(), func(t *testing.T) {
+			assert.Equal(t, tt.expected, getVerdictMessage(tt.verdict))
+		})
+	}
+}
+
+func TestDemoResult_Structure(t *testing.T) {
+	result := &DemoResult{
+		Steps: []StepResult{
+			{Step: 1, Name: "Step One", Status: StatusOK, Details: "detail1"},
+			{Step: 2, Name: "Step Two", Status: StatusPassed, Details: "detail2"},
+		},
+		Verdict: VerdictPassed,
+	}
+
+	require.Len(t, result.Steps, 2)
+	assert.Equal(t, 1, result.Steps[0].Step)
+	assert.Equal(t, "Step One", result.Steps[0].Name)
+	assert.Equal(t, StatusOK, result.Steps[0].Status)
+	assert.Equal(t, "detail1", result.Steps[0].Details)
+	assert.Equal(t, VerdictPassed, result.Verdict)
 }
