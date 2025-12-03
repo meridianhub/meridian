@@ -38,6 +38,12 @@ linters:
     - sqlclosecheck  # Check SQL resources are closed
     - rowserrcheck   # Check database rows errors
 
+    # Compile-time safety linters
+    - nilnil         # Prevent returning (nil, nil) which hides errors
+    - forcetypeassert # Require checked type assertions (v, ok := x.(T))
+    - gocritic       # Additional safety diagnostics
+    - bodyclose      # HTTP response bodies must be closed
+
   disable:
     - varnamelen     # Too strict for production code
     - testpackage    # Allow internal testing
@@ -118,6 +124,38 @@ linters-settings:
     asserts: true
     comparison: true
 
+  gocritic:
+    enabled-checks:
+      - appendAssign
+      - argOrder
+      - badCall
+      - badCond
+      - badLock
+      - badRegexp
+      - builtinShadowDecl
+      - caseOrder
+      - codegenComment
+      - deferInLoop
+      - deprecatedComment
+      - dupArg
+      - dupBranchBody
+      - dupCase
+      - dupSubExpr
+      - externalErrorReassign
+      - flagDeref
+      - mapKey
+      - nilValReturn
+      - offBy1
+      - regexpPattern
+      - sloppyReassign
+      - sortSlice
+      - sprintfQuotedString
+      - sqlQuery
+      - syncMapLoadAndDelete
+      - truncateCmp
+      - unnecessaryDefer
+      - weakCond
+
 issues:
   exclude-use-default: false
   max-issues-per-linter: 0
@@ -134,6 +172,9 @@ issues:
         - goconst
         - unparam
         - wrapcheck
+        - forcetypeassert
+        - gocritic
+        - bodyclose
 
     # Exclude all linters for integration tests (require external services)
     - path: test/integration/
