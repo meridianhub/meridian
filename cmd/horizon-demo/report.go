@@ -65,17 +65,17 @@ type VerificationReport struct {
 	NoDoubleSpend bool `json:"no_double_spend"`
 }
 
-// JSON verdict string constants for report output.
+// Report verdict string constants for JSON output.
 const (
 	ReportVerdictPassed = "PASSED"
 	ReportVerdictFailed = "FAILED"
 )
 
-// JSON attempt status string constants for report output.
+// Attempt status string constants for JSON output.
 const (
-	ReportStatusClientTimeout = "CLIENT_TIMEOUT"
-	ReportStatusSuccess       = "SUCCESS"
-	ReportStatusError         = "ERROR"
+	AttemptStatusClientTimeout = "CLIENT_TIMEOUT"
+	AttemptStatusSuccess       = "SUCCESS"
+	AttemptStatusError         = "ERROR"
 )
 
 // NewReport creates a new Report with a unique demo ID and current timestamp.
