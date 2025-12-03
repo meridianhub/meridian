@@ -160,7 +160,7 @@ func (r *LienRepository) Update(lien *domain.Lien) error {
 	}
 
 	// Update domain model version
-	lien.Version = lien.Version + 1
+	lien.Version++
 
 	return nil
 }

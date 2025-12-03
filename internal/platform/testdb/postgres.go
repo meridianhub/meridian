@@ -76,8 +76,8 @@ func createSchemas(t *testing.T, db *gorm.DB, schemas map[string]bool) {
 		}
 
 		// Use parameterized query with proper identifier quoting
-		// PostgreSQL uses double quotes for identifiers
-		sql := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS \"%s\"", schema)
+		// PostgreSQL uses double quotes for identifiers, %q provides this
+		sql := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schema)
 		if err := db.Exec(sql).Error; err != nil {
 			t.Fatalf("Failed to create schema %s: %v", schema, err)
 		}

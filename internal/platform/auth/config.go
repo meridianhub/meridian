@@ -227,8 +227,8 @@ func (c Config) NewAuthenticator(ctx context.Context) (*Interceptor, error) {
 		return nil, ErrOAuthModeNotSupported
 
 	case AuthModeDisabled:
-		// No authentication
-		return nil, nil
+		// No authentication - returning nil validator is intentional
+		return nil, nil //nolint:nilnil // Disabled mode intentionally returns no validator and no error
 
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedAuthMode, c.Mode)
