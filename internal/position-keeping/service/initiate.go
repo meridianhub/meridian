@@ -165,10 +165,11 @@ func validateInitiateRequest(req *positionkeepingv1.InitiateFinancialPositionLog
 	return nil
 }
 
-// protoEntryToDomain converts a proto TransactionLogEntry to domain
+// protoEntryToDomain converts a proto TransactionLogEntry to domain.
+// Returns (nil, nil) for nil input to handle optional proto fields.
 func protoEntryToDomain(proto *positionkeepingv1.TransactionLogEntry) (*domain.TransactionLogEntry, error) {
 	if proto == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // Intentional: nil input returns nil output for optional field handling
 	}
 
 	transactionID, err := uuid.Parse(proto.TransactionId)
@@ -215,10 +216,11 @@ func protoEntryToDomain(proto *positionkeepingv1.TransactionLogEntry) (*domain.T
 	)
 }
 
-// protoLineageToDomain converts a proto TransactionLineage to domain
+// protoLineageToDomain converts a proto TransactionLineage to domain.
+// Returns (nil, nil) for nil input to handle optional proto fields.
 func protoLineageToDomain(proto *positionkeepingv1.TransactionLineage) (*domain.TransactionLineage, error) {
 	if proto == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // Intentional: nil input returns nil output for optional field handling
 	}
 
 	transactionID, err := uuid.Parse(proto.TransactionId)

@@ -261,10 +261,11 @@ func applyStatusTransition(log *domain.FinancialPositionLog, req *positionkeepin
 	return nil
 }
 
-// protoAuditEntryToDomain converts proto AuditTrailEntry to domain
+// protoAuditEntryToDomain converts proto AuditTrailEntry to domain.
+// Returns (nil, nil) for nil input to handle optional proto fields.
 func protoAuditEntryToDomain(proto *positionkeepingv1.AuditTrailEntry) (*domain.AuditTrailEntry, error) {
 	if proto == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // Intentional: nil input returns nil output for optional field handling
 	}
 
 	// TODO: Extract IP address from gRPC context/metadata

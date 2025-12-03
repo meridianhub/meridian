@@ -1506,13 +1506,11 @@ func (s *Service) updateLienExecutionStatus(
 		// Determine error message if failed
 		var errMsg string
 		if retryErr != nil {
-			switch {
-			case lastErr != nil:
+			// Prefer lastErr (the underlying error) over retryErr (the retry wrapper)
+			if lastErr != nil {
 				errMsg = lastErr.Error()
-			case retryErr != nil:
+			} else {
 				errMsg = retryErr.Error()
-			default:
-				errMsg = "unknown error"
 			}
 		}
 

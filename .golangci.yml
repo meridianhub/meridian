@@ -50,161 +50,148 @@ linters:
     - paralleltest   # Not always appropriate
     - wrapcheck      # Disabled: gRPC services return terminal errors
 
+  exclusions:
+    # v2 format: path-based exclusions
+    rules:
+      # Exclude some linters for test files
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - gocognit
+          - errcheck
+          - goconst
+          - unparam
+          - wrapcheck
+          - bodyclose
+          - forcetypeassert  # Type assertions in tests are acceptable for cleaner test code
+          - gocritic         # Style checks less critical in tests
+          - nilnil           # Tests may use (nil, nil) for mock implementations
+          - govet            # unusedwrite and nilness checks too strict for test scaffolding
+
+      # Exclude linters for testdb package (test support utilities)
+      - path: internal/platform/testdb/
+        linters:
+          - gocyclo
+          - gocognit
+          - gocritic
+
+      # Exclude all linters for integration tests (require external services)
+      - path: test/integration/
+        linters:
+          - all
+
+      # Exclude some linters for generated files
+      - path: \.pb\.go$
+        linters:
+          - all
+
+      # Exclude typecheck for tools.go (imports main packages for tool dependency tracking)
+      - path: tools\.go$
+        linters:
+          - typecheck
+
+      # Exclude some linters for mock files
+      - path: mock_.*\.go
+        linters:
+          - all
+
+      # Allow main() to have unchecked errors for flag parsing
+      - path: cmd/
+        text: "Error return value of.*is not checked"
+        linters:
+          - errcheck
+
+      # Allow long functions in main packages for setup
+      - path: cmd/
+        linters:
+          - gocyclo
+          - gocognit
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - shadow          # Too many false positives
+        - fieldalignment  # Struct field alignment is informative but too noisy
+
+    errcheck:
+      check-type-assertions: true
+      check-blank: false  # Allow _ = to explicitly ignore errors
+      exclude-functions:
+        - fmt.Print*
+        - fmt.Fprint*
+
+    staticcheck:
+      checks: ["all"]
+
+    gocyclo:
+      min-complexity: 15
+
+    gocognit:
+      min-complexity: 20
+
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+
+    misspell:
+      locale: US
+
+    nakedret:
+      max-func-lines: 30
+
+    unparam:
+      check-exported: false
+
+    revive:
+      confidence: 0.8
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    gocritic:
+      # Enable only diagnostic checks (safety), disable style checks
+      enabled-tags:
+        - diagnostic
+      disabled-tags:
+        - style
+        - performance
+        - opinionated
+      # Note: ifElseChain, elseif, unlambda, exitAfterDefer, assignOp are
+      # already disabled by disabled-tags: [style]
+
 formatters:
   enable:
     - gofmt          # Standard Go formatting
     - goimports      # Manage imports
     - gofumpt        # Stricter gofmt
-
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - shadow       # Too many false positives
-
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-    exclude-functions:
-      - fmt.Print*
-      - fmt.Fprint*
-
-  staticcheck:
-    checks: ["all"]
-
-  gocyclo:
-    min-complexity: 15
-
-  gocognit:
-    min-complexity: 20
-
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-
-  misspell:
-    locale: US
-
-  nakedret:
-    max-func-lines: 30
-
-  unparam:
-    check-exported: false
-
-  revive:
-    confidence: 0.8
-    rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-      - name: exported
-      - name: if-return
-      - name: increment-decrement
-      - name: var-naming
-      - name: var-declaration
-      - name: package-comments
-      - name: range
-      - name: receiver-naming
-      - name: time-naming
-      - name: unexported-return
-      - name: indent-error-flow
-      - name: errorf
-      - name: empty-block
-      - name: superfluous-else
-      - name: unused-parameter
-      - name: unreachable-code
-      - name: redefines-builtin-id
-
-  errorlint:
-    errorf: true
-    asserts: true
-    comparison: true
-
-  gocritic:
-    enabled-checks:
-      - appendAssign
-      - argOrder
-      - badCall
-      - badCond
-      - badLock
-      - badRegexp
-      - builtinShadowDecl
-      - caseOrder
-      - deferInLoop
-      - dupArg
-      - dupBranchBody
-      - dupCase
-      - dupSubExpr
-      - externalErrorReassign
-      - flagDeref
-      - mapKey
-      - nilValReturn
-      - offBy1
-      - regexpPattern
-      - sloppyReassign
-      - sortSlice
-      - sprintfQuotedString
-      - sqlQuery
-      - syncMapLoadAndDelete
-      - truncateCmp
-      - weakCond
-
-issues:
-  exclude-use-default: false
-  max-issues-per-linter: 0
-  max-same-issues: 0
-  uniq-by-line: true
-
-  exclude-rules:
-    # Exclude some linters for test files
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - gocognit
-        - errcheck
-        - goconst
-        - unparam
-        - wrapcheck
-        - bodyclose
-        - forcetypeassert  # Type assertions in tests are acceptable for cleaner test code
-        - gocritic         # Style checks less critical in tests
-        - nilnil           # Tests may use (nil, nil) for mock implementations
-
-    # Exclude all linters for integration tests (require external services)
-    - path: test/integration/
-      linters:
-        - all
-
-    # Exclude some linters for generated files
-    - path: \.pb\.go$
-      linters:
-        - all
-
-    # Exclude typecheck for tools.go (imports main packages for tool dependency tracking)
-    - path: tools\.go$
-      linters:
-        - typecheck
-
-    # Exclude some linters for mock files
-    - path: mock_.*\.go
-      linters:
-        - all
-
-    # Allow main() to have unchecked errors for flag parsing
-    - path: cmd/
-      text: "Error return value of.*is not checked"
-      linters:
-        - errcheck
-
-    # Allow long functions in main packages for setup
-    - path: cmd/
-      linters:
-        - gocyclo
-        - gocognit
 
 output:
   formats:
