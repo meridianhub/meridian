@@ -40,6 +40,12 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       }
     }
   }
+  security: {
+    security_requirement: {
+      key: "Bearer"
+      value: {}
+    }
+  }
 };
 
 // PaymentOrderStatus defines the lifecycle state of a payment order in the saga.

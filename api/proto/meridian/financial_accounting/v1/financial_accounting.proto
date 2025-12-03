@@ -41,6 +41,12 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       }
     }
   }
+  security: {
+    security_requirement: {
+      key: "Bearer"
+      value: {}
+    }
+  }
 };
 
 // FinancialBookingLog represents the BIAN Financial Booking Log entity.
