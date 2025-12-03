@@ -67,6 +67,20 @@ enum GatewayStatus {
   GATEWAY_STATUS_PENDING = 3;
 }
 
+// LienExecutionStatus tracks the status of lien execution for completed payment orders.
+// This is used to track async retry attempts when ExecuteLien fails after payment completion.
+enum LienExecutionStatus {
+  // LIEN_EXECUTION_STATUS_UNSPECIFIED means the status is not set (payment not yet completed).
+  LIEN_EXECUTION_STATUS_UNSPECIFIED = 0;
+  // LIEN_EXECUTION_STATUS_PENDING means ExecuteLien has not been attempted yet or is in progress.
+  LIEN_EXECUTION_STATUS_PENDING = 1;
+  // LIEN_EXECUTION_STATUS_SUCCEEDED means ExecuteLien completed successfully.
+  LIEN_EXECUTION_STATUS_SUCCEEDED = 2;
+  // LIEN_EXECUTION_STATUS_FAILED means ExecuteLien failed after all retry attempts.
+  // Requires manual reconciliation.
+  LIEN_EXECUTION_STATUS_FAILED = 3;
+}
+
 // PaymentOrder represents the BIAN Payment Order control record.
 // It acts as the saga orchestrator for money movement, coordinating
 // across CurrentAccount (reservations) and FinancialAccounting (ledger booking).
@@ -174,6 +188,21 @@ message PaymentOrder {
   // error_code provides a machine-readable error identifier (populated only if status is FAILED).
   string error_code = 22 [(buf.validate.field).string = {
     max_len: 50
+  }];
+
+  // lien_execution_status tracks whether the lien has been successfully executed.
+  // Only relevant for COMPLETED payment orders with a lien_id.
+  // Used for reconciliation when ExecuteLien fails after payment completion.
+  LienExecutionStatus lien_execution_status = 23;
+
+  // lien_execution_attempts tracks how many times ExecuteLien has been attempted.
+  // Used for monitoring and alerting on retry exhaustion.
+  int32 lien_execution_attempts = 24;
+
+  // lien_execution_error stores the last error message from ExecuteLien.
+  // Only populated if lien_execution_status is FAILED.
+  string lien_execution_error = 25 [(buf.validate.field).string = {
+    max_len: 1000
   }];
 }
 
