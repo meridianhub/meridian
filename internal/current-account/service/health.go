@@ -3,7 +3,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -295,23 +294,17 @@ func (d *DatabaseHealthChecker) Check(ctx context.Context) health.ComponentResul
 	checkCtx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 
-	// Attempt to find a non-existent account as connectivity check
-	// This exercises the connection pool and query execution path
-	_, err := d.repo.FindByID("health-check-probe")
+	// Use Ping() which executes SELECT 1 - no record-not-found logging
+	err := d.repo.Ping()
 
 	responseTime := time.Since(start)
 
-	// Expected: ErrAccountNotFound indicates database is reachable
-	// Unexpected: Any other error indicates database issues
 	status := health.StatusHealthy
 	message := "database connection successful"
 
-	if err != nil && !errors.Is(err, persistence.ErrAccountNotFound) {
+	if err != nil {
 		status = health.StatusUnhealthy
 		message = fmt.Sprintf("database check failed: %v", err)
-	} else if errors.Is(err, persistence.ErrAccountNotFound) {
-		// Clear the error - ErrAccountNotFound is the expected successful result
-		err = nil
 	}
 
 	// Check context cancellation (timeout)
