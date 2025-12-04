@@ -28,7 +28,8 @@ var (
 // Claims represents the JWT claims extracted from a validated token.
 // It contains standard JWT claims plus custom claims for user identification and authorization.
 type Claims struct {
-	UserID   string   `json:"user_id"`
+	UserID string `json:"user_id"`
+	// TenantID is the tenant identifier extracted from the meridian_tenant_id JWT claim.
 	TenantID string   `json:"meridian_tenant_id"`
 	Roles    []string `json:"roles"`
 	Scopes   []string `json:"scopes"`
@@ -102,6 +103,12 @@ func (c *Claims) GetTenantID() (tenancy.TenantID, error) {
 		return "", ErrTenantClaimMissing
 	}
 	return tenancy.NewTenantID(c.TenantID)
+}
+
+// HasTenantID returns true if the tenant ID claim is present.
+// Use this for quick presence checks before calling GetTenantID().
+func (c *Claims) HasTenantID() bool {
+	return c.TenantID != ""
 }
 
 // GetRoles extracts the roles from the validated claims.

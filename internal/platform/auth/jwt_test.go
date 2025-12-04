@@ -229,6 +229,47 @@ func TestClaims_GetTenantID(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, tenancy.TenantID("bank123"), tenantID)
 	})
+
+	t.Run("accepts single character tenant ID (min length)", func(t *testing.T) {
+		claims := &Claims{TenantID: "a"}
+		tenantID, err := claims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID("a"), tenantID)
+	})
+
+	t.Run("accepts 50 character tenant ID (max length)", func(t *testing.T) {
+		maxLengthID := "a1234567890123456789012345678901234567890123456789"
+		claims := &Claims{TenantID: maxLengthID}
+		tenantID, err := claims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID(maxLengthID), tenantID)
+	})
+
+	t.Run("rejects 51 character tenant ID (exceeds max length)", func(t *testing.T) {
+		tooLongID := "a12345678901234567890123456789012345678901234567890"
+		claims := &Claims{TenantID: tooLongID}
+		tenantID, err := claims.GetTenantID()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tenancy.ErrInvalidTenantID)
+		assert.Equal(t, tenancy.TenantID(""), tenantID)
+	})
+}
+
+func TestClaims_HasTenantID(t *testing.T) {
+	t.Run("returns true when tenant ID is present", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme_bank"}
+		assert.True(t, claims.HasTenantID())
+	})
+
+	t.Run("returns false when tenant ID is empty", func(t *testing.T) {
+		claims := &Claims{TenantID: ""}
+		assert.False(t, claims.HasTenantID())
+	})
+
+	t.Run("returns false when tenant ID is not set", func(t *testing.T) {
+		claims := &Claims{UserID: "user-123"}
+		assert.False(t, claims.HasTenantID())
+	})
 }
 
 func TestClaims_GetRoles(t *testing.T) {
