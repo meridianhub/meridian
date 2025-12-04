@@ -42,7 +42,10 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 
 // Save creates or updates an account with optimistic locking
 func (r *Repository) Save(account *domain.CurrentAccount) error {
-	entity := toEntity(account)
+	entity, err := toEntity(account)
+	if err != nil {
+		return err
+	}
 
 	// Check if exists by account_number (IBAN)
 	var existing CurrentAccountEntity
@@ -208,9 +211,12 @@ func (r *Repository) Ping() error {
 // - AccountID is mapped to AccountNumber
 // - AccountIdentification is stored in AccountNumber (IBAN format)
 // - OverdraftEnabled, OverdraftRate, BalanceUpdatedAt, Version need migration
-func toEntity(account *domain.CurrentAccount) *CurrentAccountEntity {
+func toEntity(account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
 	// Parse CustomerID as UUID - domain model uses string for flexibility
-	customerUUID, _ := uuid.Parse(account.CustomerID)
+	customerUUID, err := uuid.Parse(account.CustomerID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid customer ID %q: %w", account.CustomerID, err)
+	}
 
 	return &CurrentAccountEntity{
 		ID:               account.ID,
@@ -226,7 +232,7 @@ func toEntity(account *domain.CurrentAccount) *CurrentAccountEntity {
 		UpdatedAt:        account.UpdatedAt,
 		CreatedBy:        "system", // TODO: Extract from context
 		UpdatedBy:        "system", // TODO: Extract from context
-	}
+	}, nil
 }
 
 // toDomain converts database entity to domain model
