@@ -417,19 +417,66 @@ Phase 4: Remove legacy types once all services migrated
 
 ## Notes
 
-### Protocol Buffer Representation
+### Protocol Buffer Representation (Wire Format)
 
-Since Protocol Buffers don't support generics, the API layer uses explicit message types:
+Protocol Buffers don't support generics. Two approaches:
 
+**Option A: Asset-specific messages** (current fiat approach)
 ```protobuf
 message MoneyAmount {
-  string amount = 1;      // Decimal as string for precision
-  string currency = 2;    // ISO 4217 code
+  string amount = 1;
+  string currency = 2;  // ISO 4217
+}
+```
+*Risk: Requires recompile/redeploy for every new asset type.*
+
+**Option B: Generic asset message** (recommended for extensibility)
+```protobuf
+message AssetAmount {
+  string amount = 1;       // Decimal as string
+  string asset_code = 2;   // "GBP", "KWH", "GPU-A100"
+}
+```
+
+The adapter layer (per [ADR-0005](0005-adapter-pattern-layer-translation.md)) hydrates the generic
+proto into a specific `Quantity[U]` based on context. If a service expects `Quantity[EnergyUnit]`
+and receives `asset_code: "GBP"`, the adapter returns an error.
+
+This allows new asset types without API recompilation - the adapter validates at runtime.
+
+### Database Persistence (GORM)
+
+Go generics and ORMs often conflict. Strategy:
+
+**Storage**: Persist `Quantity[U]` as composite columns:
+```sql
+CREATE TABLE positions (
+    id UUID PRIMARY KEY,
+    amount DECIMAL(38, 18) NOT NULL,  -- Precise decimal
+    unit_code VARCHAR(16) NOT NULL,    -- "GBP", "KWH", etc.
+    -- ...
+);
+```
+
+**Why composite columns over JSONB:**
+- SQL-level aggregation (`SUM(amount) WHERE unit_code = 'KWH'`)
+- Indexing on `unit_code` for tenant queries
+- Schema enforcement at database level
+
+**Go implementation**: Custom `Scanner`/`Valuer` for GORM:
+```go
+func (q *Quantity[U]) Scan(value interface{}) error {
+    // Hydrate from (amount, unit_code) composite
 }
 
-// Tenant-specific proto messages for their unit types
-// defined in their own proto packages
+func (q Quantity[U]) Value() (driver.Value, error) {
+    // Serialize to composite columns
+}
 ```
+
+**Consistency enforcement**: The type parameter `U` is enforced at the application layer.
+The database stores the generic `unit_code` string; the adapter validates it matches
+the expected `U` when reading.
 
 ### The Valuation Engine
 
