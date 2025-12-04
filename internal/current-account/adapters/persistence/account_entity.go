@@ -15,16 +15,17 @@ type CurrentAccountEntity struct {
 	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 
 	// Business fields - these column names must match the migration schema
-	AccountNumber    string     `gorm:"column:account_number;type:varchar(34);uniqueIndex;not null"` // IBAN format
-	AccountType      string     `gorm:"column:account_type;type:varchar(50);not null"`               // current, savings, etc.
-	Currency         string     `gorm:"column:currency;type:char(3);not null;default:'GBP'"`         // ISO 4217
-	Status           string     `gorm:"column:status;type:varchar(20);not null;default:'active'"`
-	CustomerID       uuid.UUID  `gorm:"column:customer_id;type:uuid;not null;index"`
-	Balance          int64      `gorm:"column:balance;not null;default:0"`           // in smallest currency unit (pence)
-	AvailableBalance int64      `gorm:"column:available_balance;not null;default:0"` // after pending transactions
-	OverdraftLimit   int64      `gorm:"column:overdraft_limit;not null;default:0"`   // in smallest currency unit
-	OpenedAt         *time.Time `gorm:"column:opened_at;index"`
-	ClosedAt         *time.Time `gorm:"column:closed_at;index"`
+	AccountID             string     `gorm:"column:account_id;type:varchar(100);uniqueIndex;not null"`            // Business account identifier
+	AccountIdentification string     `gorm:"column:account_identification;type:varchar(34);uniqueIndex;not null"` // IBAN format
+	AccountType           string     `gorm:"column:account_type;type:varchar(50);not null"`                       // current, savings, etc.
+	Currency              string     `gorm:"column:currency;type:char(3);not null;default:'GBP'"`                 // ISO 4217
+	Status                string     `gorm:"column:status;type:varchar(20);not null;default:'active'"`
+	CustomerID            uuid.UUID  `gorm:"column:customer_id;type:uuid;not null;index"`
+	Balance               int64      `gorm:"column:balance;not null;default:0"`           // in smallest currency unit (pence)
+	AvailableBalance      int64      `gorm:"column:available_balance;not null;default:0"` // after pending transactions
+	OverdraftLimit        int64      `gorm:"column:overdraft_limit;not null;default:0"`   // in smallest currency unit
+	OpenedAt              *time.Time `gorm:"column:opened_at;index"`
+	ClosedAt              *time.Time `gorm:"column:closed_at;index"`
 
 	// Audit fields - must match BaseModel columns from migration
 	CreatedAt time.Time  `gorm:"column:created_at;not null;default:now()"`

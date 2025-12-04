@@ -41,7 +41,7 @@ func TestSaveNewAccount(t *testing.T) {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	// AccountID is now set from AccountNumber in toDomain
+	// AccountID is now set from AccountIdentification in toDomain
 	if retrieved.AccountID != iban {
 		t.Errorf("Expected %s, got %s", iban, retrieved.AccountID)
 	}
@@ -120,7 +120,7 @@ func TestFindByIBAN(t *testing.T) {
 		t.Fatalf("FindByIBAN failed: %v", err)
 	}
 
-	// AccountID is now set from AccountNumber (IBAN) in toDomain
+	// AccountID is now set from AccountIdentification (IBAN) in toDomain
 	if retrieved.AccountID != iban {
 		t.Errorf("Expected %s, got %s", iban, retrieved.AccountID)
 	}
@@ -264,19 +264,19 @@ func TestOptimisticLocking(t *testing.T) {
 func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
 	// Test: Empty currency in database should return error, not silently create invalid Money
 	entity := &CurrentAccountEntity{
-		ID:               uuid.New(),
-		AccountNumber:    "GB82WEST12345698765432",
-		AccountType:      "current",
-		CustomerID:       uuid.New(),
-		Balance:          10000,
-		AvailableBalance: 10000,
-		Currency:         "", // Invalid: empty currency
-		Status:           "active",
-		OverdraftLimit:   0,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-		CreatedBy:        "system",
-		UpdatedBy:        "system",
+		ID:                    uuid.New(),
+		AccountIdentification: "GB82WEST12345698765432",
+		AccountType:           "current",
+		CustomerID:            uuid.New(),
+		Balance:               10000,
+		AvailableBalance:      10000,
+		Currency:              "", // Invalid: empty currency
+		Status:                "active",
+		OverdraftLimit:        0,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		CreatedBy:             "system",
+		UpdatedBy:             "system",
 	}
 
 	_, err := toDomain(entity)
@@ -300,26 +300,26 @@ func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
 
 	// Manually insert corrupted data (empty currency) into database
 	entity := &CurrentAccountEntity{
-		ID:               uuid.New(),
-		AccountNumber:    "GB82WEST12345698765432",
-		AccountType:      "current",
-		CustomerID:       uuid.New(),
-		Balance:          10000,
-		AvailableBalance: 10000,
-		Currency:         "", // Corrupted: empty currency
-		Status:           "active",
-		OverdraftLimit:   0,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-		CreatedBy:        "system",
-		UpdatedBy:        "system",
+		ID:                    uuid.New(),
+		AccountIdentification: "GB82WEST12345698765432",
+		AccountType:           "current",
+		CustomerID:            uuid.New(),
+		Balance:               10000,
+		AvailableBalance:      10000,
+		Currency:              "", // Corrupted: empty currency
+		Status:                "active",
+		OverdraftLimit:        0,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		CreatedBy:             "system",
+		UpdatedBy:             "system",
 	}
 
 	result := db.Create(entity)
 	require.NoError(t, result.Error, "Setup: Should be able to insert corrupted data")
 
 	// Now try to retrieve it - should fail gracefully
-	_, err := repo.FindByID(entity.AccountNumber)
+	_, err := repo.FindByID(entity.AccountIdentification)
 
 	assert.Error(t, err, "FindByID should fail with corrupted currency")
 	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
@@ -341,37 +341,37 @@ func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
 
 	// Insert one valid account
 	validEntity := &CurrentAccountEntity{
-		ID:               uuid.New(),
-		AccountNumber:    "GB82WEST12345698765432",
-		AccountType:      "current",
-		CustomerID:       customerID,
-		Balance:          10000,
-		AvailableBalance: 10000,
-		Currency:         "GBP",
-		Status:           "active",
-		OverdraftLimit:   0,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-		CreatedBy:        "system",
-		UpdatedBy:        "system",
+		ID:                    uuid.New(),
+		AccountIdentification: "GB82WEST12345698765432",
+		AccountType:           "current",
+		CustomerID:            customerID,
+		Balance:               10000,
+		AvailableBalance:      10000,
+		Currency:              "GBP",
+		Status:                "active",
+		OverdraftLimit:        0,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		CreatedBy:             "system",
+		UpdatedBy:             "system",
 	}
 	require.NoError(t, db.Create(validEntity).Error)
 
 	// Manually insert corrupted account with same customer
 	corruptedEntity := &CurrentAccountEntity{
-		ID:               uuid.New(),
-		AccountNumber:    "GB82WEST99999999999999",
-		AccountType:      "current",
-		CustomerID:       customerID, // Same customer
-		Balance:          5000,
-		AvailableBalance: 5000,
-		Currency:         "", // Corrupted
-		Status:           "active",
-		OverdraftLimit:   0,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-		CreatedBy:        "system",
-		UpdatedBy:        "system",
+		ID:                    uuid.New(),
+		AccountIdentification: "GB82WEST99999999999999",
+		AccountType:           "current",
+		CustomerID:            customerID, // Same customer
+		Balance:               5000,
+		AvailableBalance:      5000,
+		Currency:              "", // Corrupted
+		Status:                "active",
+		OverdraftLimit:        0,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		CreatedBy:             "system",
+		UpdatedBy:             "system",
 	}
 	require.NoError(t, db.Create(corruptedEntity).Error)
 

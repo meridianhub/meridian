@@ -135,25 +135,35 @@ func TestMigrationsMatchEntities(t *testing.T) {
 	})
 }
 
-// applyMigrations runs all SQL migration files against the database
+// migrationFile represents a migration with its schema and filename
+type migrationFile struct {
+	schema   string
+	filename string
+	fullPath string
+}
+
+// applyMigrations runs all SQL migration files against the database in global timestamp order.
+// This ensures cross-schema FK constraints are created/updated in the correct order,
+// matching how migrations would be applied in production.
 func applyMigrations(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 
 	projectRoot, err := findProjectRoot()
 	require.NoError(t, err, "Failed to find project root")
 
-	// Define schema order based on dependencies
-	schemaOrder := []string{
+	// Schemas to include in migration
+	schemas := []string{
 		"current_account",
 		"position_keeping",
 		"payment_order",
 		"financial_accounting",
 	}
 
-	for _, schema := range schemaOrder {
+	// Collect all migration files from all schemas
+	var allMigrations []migrationFile
+	for _, schema := range schemas {
 		migrationDir := filepath.Join(projectRoot, "migrations", schema)
 
-		// Read all .sql files in the migration directory
 		entries, err := os.ReadDir(migrationDir)
 		if err != nil {
 			// Schema might not have migrations yet
@@ -161,26 +171,32 @@ func applyMigrations(ctx context.Context, t *testing.T, db *sql.DB) {
 			continue
 		}
 
-		// Sort migration files by name (they're typically timestamped)
-		var sqlFiles []string
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
-				sqlFiles = append(sqlFiles, entry.Name())
+				allMigrations = append(allMigrations, migrationFile{
+					schema:   schema,
+					filename: entry.Name(),
+					fullPath: filepath.Join(migrationDir, entry.Name()),
+				})
 			}
 		}
-		sort.Strings(sqlFiles)
+	}
 
-		// Execute each migration
-		for _, fileName := range sqlFiles {
-			filePath := filepath.Join(migrationDir, fileName)
-			content, err := os.ReadFile(filePath)
-			require.NoError(t, err, "Failed to read migration %s", filePath)
+	// Sort all migrations by filename (timestamp) globally across all schemas
+	// This ensures correct ordering for cross-schema FK constraints
+	sort.Slice(allMigrations, func(i, j int) bool {
+		return allMigrations[i].filename < allMigrations[j].filename
+	})
 
-			_, err = db.ExecContext(ctx, string(content))
-			require.NoError(t, err, "Failed to apply migration %s: SQL error", filePath)
+	// Execute each migration in global timestamp order
+	for _, mig := range allMigrations {
+		content, err := os.ReadFile(mig.fullPath)
+		require.NoError(t, err, "Failed to read migration %s", mig.fullPath)
 
-			t.Logf("Applied migration: %s", filePath)
-		}
+		_, err = db.ExecContext(ctx, string(content))
+		require.NoError(t, err, "Failed to apply migration %s: SQL error", mig.fullPath)
+
+		t.Logf("Applied migration: [%s] %s", mig.schema, mig.filename)
 	}
 }
 
@@ -199,19 +215,20 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 
 	// Entity fields must match migration schema columns exactly
 	entity := &capersistence.CurrentAccountEntity{
-		ID:               uuid.New(),
-		AccountNumber:    "GB82WEST12345698765432", // IBAN - matches account_number column
-		AccountType:      "current",
-		Currency:         "GBP",
-		Status:           "active",
-		CustomerID:       customerID,
-		Balance:          10000,
-		AvailableBalance: 8000,
-		OverdraftLimit:   5000,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-		CreatedBy:        "system",
-		UpdatedBy:        "system",
+		ID:                    uuid.New(),
+		AccountID:             "ACC-TEST-001",           // Business identifier - matches account_id column
+		AccountIdentification: "GB82WEST12345698765432", // IBAN - matches account_identification column
+		AccountType:           "current",
+		Currency:              "GBP",
+		Status:                "active",
+		CustomerID:            customerID,
+		Balance:               10000,
+		AvailableBalance:      8000,
+		OverdraftLimit:        5000,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		CreatedBy:             "system",
+		UpdatedBy:             "system",
 	}
 
 	// Create - will fail if columns don't match
@@ -228,7 +245,7 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 	}
 
 	// Verify data integrity
-	assert.Equal(t, entity.AccountNumber, retrieved.AccountNumber)
+	assert.Equal(t, entity.AccountIdentification, retrieved.AccountIdentification)
 	assert.Equal(t, entity.Balance, retrieved.Balance)
 	assert.Equal(t, entity.Currency, retrieved.Currency)
 }

@@ -47,9 +47,9 @@ func (r *Repository) Save(account *domain.CurrentAccount) error {
 		return err
 	}
 
-	// Check if exists by account_number (IBAN)
+	// Check if exists by account_identification (IBAN)
 	var existing CurrentAccountEntity
-	result := r.db.Where("account_number = ?", entity.AccountNumber).First(&existing)
+	result := r.db.Where("account_identification = ?", entity.AccountIdentification).First(&existing)
 
 	if result.Error == nil {
 		// Update existing
@@ -59,7 +59,7 @@ func (r *Repository) Save(account *domain.CurrentAccount) error {
 
 		// Use WHERE clause for atomic update
 		updateResult := r.db.Model(&CurrentAccountEntity{}).
-			Where("account_number = ?", entity.AccountNumber).
+			Where("account_identification = ?", entity.AccountIdentification).
 			Updates(map[string]interface{}{
 				"balance":           entity.Balance,
 				"available_balance": entity.AvailableBalance,
@@ -84,10 +84,10 @@ func (r *Repository) Save(account *domain.CurrentAccount) error {
 	return result.Error
 }
 
-// FindByID retrieves an account by its account number (IBAN)
+// FindByID retrieves an account by its account identification (IBAN)
 func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
-	result := r.db.Where("account_number = ? AND deleted_at IS NULL", accountID).First(&entity)
+	result := r.db.Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrAccountNotFound
@@ -100,12 +100,12 @@ func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) 
 	return toDomain(&entity)
 }
 
-// FindByIDForUpdate retrieves an account by its account number with a pessimistic lock.
+// FindByIDForUpdate retrieves an account by its account identification with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
 func (r *Repository) FindByIDForUpdate(accountID string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
 	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("account_number = ? AND deleted_at IS NULL", accountID).
+		Where("account_identification = ? AND deleted_at IS NULL", accountID).
 		First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -119,10 +119,10 @@ func (r *Repository) FindByIDForUpdate(accountID string) (*domain.CurrentAccount
 	return toDomain(&entity)
 }
 
-// FindByIBAN retrieves an account by its IBAN (stored in account_number column)
+// FindByIBAN retrieves an account by its IBAN (stored in account_identification column)
 func (r *Repository) FindByIBAN(iban string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
-	result := r.db.Where("account_number = ? AND deleted_at IS NULL", iban).First(&entity)
+	result := r.db.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrAccountNotFound
@@ -194,7 +194,7 @@ func (r *Repository) FindByCustomerID(customerID string) ([]*domain.CurrentAccou
 // Delete soft deletes an account
 func (r *Repository) Delete(accountID string) error {
 	return r.db.Model(&CurrentAccountEntity{}).
-		Where("account_number = ?", accountID).
+		Where("account_identification = ?", accountID).
 		Update("deleted_at", time.Now()).Error
 }
 
@@ -208,8 +208,7 @@ func (r *Repository) Ping() error {
 // toEntity converts domain model to database entity
 // Note: The entity schema matches migrations/current_account/*.sql
 // Some domain fields don't have corresponding database columns yet:
-// - AccountID is mapped to AccountNumber
-// - AccountIdentification is stored in AccountNumber (IBAN format)
+// - AccountID and AccountIdentification both map to account_identification column (IBAN format)
 // - OverdraftEnabled, OverdraftRate, BalanceUpdatedAt, Version need migration
 func toEntity(account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
 	// Parse CustomerID as UUID - domain model uses string for flexibility
@@ -219,19 +218,20 @@ func toEntity(account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
 	}
 
 	return &CurrentAccountEntity{
-		ID:               account.ID,
-		AccountNumber:    account.AccountIdentification, // IBAN stored in account_number
-		AccountType:      "current",                     // Default for current accounts
-		Currency:         account.Balance.Currency(),
-		Status:           string(account.Status),
-		CustomerID:       customerUUID,
-		Balance:          account.Balance.AmountCents(),
-		AvailableBalance: account.AvailableBalance.AmountCents(),
-		OverdraftLimit:   account.OverdraftLimit.AmountCents(),
-		CreatedAt:        account.CreatedAt,
-		UpdatedAt:        account.UpdatedAt,
-		CreatedBy:        "system", // TODO: Extract from context
-		UpdatedBy:        "system", // TODO: Extract from context
+		ID:                    account.ID,
+		AccountID:             account.AccountID,             // Business account identifier
+		AccountIdentification: account.AccountIdentification, // IBAN stored in account_identification
+		AccountType:           "current",                     // Default for current accounts
+		Currency:              account.Balance.Currency(),
+		Status:                string(account.Status),
+		CustomerID:            customerUUID,
+		Balance:               account.Balance.AmountCents(),
+		AvailableBalance:      account.AvailableBalance.AmountCents(),
+		OverdraftLimit:        account.OverdraftLimit.AmountCents(),
+		CreatedAt:             account.CreatedAt,
+		UpdatedAt:             account.UpdatedAt,
+		CreatedBy:             "system", // TODO: Extract from context
+		UpdatedBy:             "system", // TODO: Extract from context
 	}, nil
 }
 
@@ -259,8 +259,8 @@ func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 
 	return &domain.CurrentAccount{
 		ID:                    entity.ID,
-		AccountID:             entity.AccountNumber, // Use account_number as AccountID
-		AccountIdentification: entity.AccountNumber, // IBAN stored in account_number
+		AccountID:             entity.AccountID,             // Business account identifier
+		AccountIdentification: entity.AccountIdentification, // IBAN stored in account_identification
 		CustomerID:            entity.CustomerID.String(),
 		Balance:               balance,
 		AvailableBalance:      availableBalance,
