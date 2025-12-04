@@ -70,12 +70,14 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 		updateResult := r.db.WithContext(ctx).Model(&CurrentAccountEntity{}).
 			Where("account_identification = ?", entity.AccountIdentification).
 			Updates(map[string]interface{}{
-				"balance":           entity.Balance,
-				"available_balance": entity.AvailableBalance,
-				"status":            entity.Status,
-				"overdraft_limit":   entity.OverdraftLimit,
-				"updated_at":        entity.UpdatedAt,
-				"updated_by":        entity.UpdatedBy,
+				"balance":            entity.Balance,
+				"available_balance":  entity.AvailableBalance,
+				"status":             entity.Status,
+				"overdraft_limit":    entity.OverdraftLimit,
+				"overdraft_rate":     entity.OverdraftRate,
+				"balance_updated_at": entity.BalanceUpdatedAt,
+				"updated_at":         entity.UpdatedAt,
+				"updated_by":         entity.UpdatedBy,
 			})
 
 		if updateResult.Error != nil {
@@ -217,8 +219,8 @@ func (r *Repository) Ping() error {
 // toEntity converts domain model to database entity
 // Note: The entity schema matches migrations/current_account/*.sql
 // Some domain fields don't have corresponding database columns yet:
-// - AccountID and AccountIdentification both map to account_identification column (IBAN format)
-// - OverdraftEnabled, OverdraftRate, BalanceUpdatedAt, Version need migration
+// - OverdraftEnabled is derived from OverdraftLimit > 0
+// - Version needs migration (tracked in #206)
 func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
 	// Parse CustomerID as UUID - domain model uses string for flexibility
 	customerUUID, err := uuid.Parse(account.CustomerID)
@@ -240,6 +242,8 @@ func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAcco
 		Balance:               account.Balance.AmountCents(),
 		AvailableBalance:      account.AvailableBalance.AmountCents(),
 		OverdraftLimit:        account.OverdraftLimit.AmountCents(),
+		OverdraftRate:         account.OverdraftRate,
+		BalanceUpdatedAt:      &account.BalanceUpdatedAt,
 		CreatedAt:             account.CreatedAt,
 		UpdatedAt:             account.UpdatedAt,
 		CreatedBy:             auditUser,
@@ -248,7 +252,8 @@ func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAcco
 }
 
 // toDomain converts database entity to domain model
-// Note: Some domain fields are derived or defaulted since they don't exist in DB yet
+// Note: OverdraftEnabled is derived from OverdraftLimit > 0
+// Version field needs migration (tracked in #206)
 func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 	// Use NewMoney constructor - errors indicate data corruption
 	balance, err := domain.NewMoney(entity.Currency, entity.Balance)
@@ -269,6 +274,12 @@ func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 	// Derive overdraft enabled from limit > 0
 	overdraftEnabled := entity.OverdraftLimit > 0
 
+	// Handle balance_updated_at - fallback to updated_at if null (for legacy rows)
+	balanceUpdatedAt := entity.UpdatedAt
+	if entity.BalanceUpdatedAt != nil {
+		balanceUpdatedAt = *entity.BalanceUpdatedAt
+	}
+
 	return &domain.CurrentAccount{
 		ID:                    entity.ID,
 		AccountID:             entity.AccountID,             // Business account identifier
@@ -279,9 +290,9 @@ func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 		Status:                domain.AccountStatus(entity.Status),
 		OverdraftLimit:        overdraftLimit,
 		OverdraftEnabled:      overdraftEnabled,
-		OverdraftRate:         0,                // Default - column doesn't exist in DB yet
-		BalanceUpdatedAt:      entity.UpdatedAt, // Use updated_at as proxy
-		Version:               1,                // Default - column doesn't exist in DB yet
+		OverdraftRate:         entity.OverdraftRate,
+		BalanceUpdatedAt:      balanceUpdatedAt,
+		Version:               1, // Default - column doesn't exist in DB yet (tracked in #206)
 		CreatedAt:             entity.CreatedAt,
 		UpdatedAt:             entity.UpdatedAt,
 	}, nil

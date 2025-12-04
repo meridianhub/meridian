@@ -24,6 +24,8 @@ type CurrentAccountEntity struct {
 	Balance               int64      `gorm:"column:balance;not null;default:0"`           // in smallest currency unit (pence)
 	AvailableBalance      int64      `gorm:"column:available_balance;not null;default:0"` // after pending transactions
 	OverdraftLimit        int64      `gorm:"column:overdraft_limit;not null;default:0"`   // in smallest currency unit
+	OverdraftRate         float64    `gorm:"column:overdraft_rate;type:numeric(5,4);not null;default:0"`
+	BalanceUpdatedAt      *time.Time `gorm:"column:balance_updated_at"`
 	OpenedAt              *time.Time `gorm:"column:opened_at;index"`
 	ClosedAt              *time.Time `gorm:"column:closed_at;index"`
 
