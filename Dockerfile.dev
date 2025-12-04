@@ -1,7 +1,7 @@
 # Meridian - Development Dockerfile for Tilt Live Update
 # Uses alpine base for shell tools (tar, rm, sh) required by Tilt
 
-FROM golang:1.25.3-alpine
+FROM golang:1.25-alpine
 
 # Install runtime dependencies for live update
 RUN apk add --no-cache \

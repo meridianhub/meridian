@@ -72,10 +72,12 @@ echo "Client ID: $CLIENT_ID"
 echo ""
 
 # Function to wait for Keycloak to be ready
+# Note: Health endpoint is on management port 9000 (not exposed), so we check the main endpoint
 wait_for_keycloak() {
     echo -n "Waiting for Keycloak to be ready..."
     for _ in {1..60}; do
-        if curl -sf "$KEYCLOAK_URL/health/ready" > /dev/null 2>&1; then
+        # Check if Keycloak responds on the main port (returns redirect or page)
+        if curl -sf -o /dev/null -w "%{http_code}" "$KEYCLOAK_URL/" 2>/dev/null | grep -qE "^(200|302|303)$"; then
             echo -e " ${GREEN}✓${NC}"
             return 0
         fi

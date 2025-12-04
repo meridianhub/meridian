@@ -137,6 +137,9 @@ get_version() {
         protoc)
             version=$(protoc --version 2>/dev/null | awk '{print $2}')
             ;;
+        grpcurl)
+            version=$(grpcurl --version 2>&1 | head -1 | awk '{print $2}')
+            ;;
         make)
             version=$(make --version 2>/dev/null | head -1 | awk '{print $3}')
             ;;
@@ -171,6 +174,7 @@ get_install_cmd() {
         macos-tilt) echo "brew install tilt-dev/tap/tilt" ;;
         macos-buf) echo "brew install bufbuild/buf/buf" ;;
         macos-protoc) echo "brew install protobuf" ;;
+        macos-grpcurl) echo "brew install grpcurl" ;;
         macos-golangci-lint) echo "brew install golangci-lint" ;;
         macos-node) echo "brew install node" ;;
 
@@ -184,6 +188,7 @@ get_install_cmd() {
         linux-tilt) echo "curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash" ;;
         linux-buf) echo "go install github.com/bufbuild/buf/cmd/buf@latest" ;;
         linux-protoc) echo "sudo ${PKG_MANAGER} install -y protobuf-compiler" ;;
+        linux-grpcurl) echo "go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest" ;;
         linux-golangci-lint) echo "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b \$(go env GOPATH)/bin" ;;
         linux-node) echo "sudo ${PKG_MANAGER} install -y nodejs npm" ;;
 
@@ -495,7 +500,26 @@ check_git_hooks() {
     echo "Checking git hooks..."
 
     local source_hook=".githooks/pre-commit"
-    local installed_hook=".git/hooks/pre-commit"
+    local git_dir
+    local installed_hook
+
+    # Handle git worktrees: .git is a file with 'gitdir:' pointing to actual git dir
+    if [ -f ".git" ]; then
+        # Extract the gitdir path from the .git file
+        git_dir=$(sed -n 's/^gitdir: //p' .git)
+        if [ -n "$git_dir" ]; then
+            # For worktrees, hooks are shared from the main repo's .git/hooks
+            # Worktree gitdir format: /path/to/main/.git/worktrees/<name>
+            # We need: /path/to/main/.git/hooks/pre-commit
+            local main_git_dir
+            main_git_dir=$(dirname "$(dirname "$git_dir")")
+            installed_hook="${main_git_dir}/hooks/pre-commit"
+        else
+            installed_hook=".git/hooks/pre-commit"
+        fi
+    else
+        installed_hook=".git/hooks/pre-commit"
+    fi
 
     if [ ! -f "$source_hook" ]; then
         echo -e "${RED}✗${NC} Source pre-commit hook not found"
@@ -625,6 +649,9 @@ check_tool "buf" "1.x+"
 echo ""
 
 check_tool "protoc" "3.x+"
+echo ""
+
+check_tool "grpcurl" ""
 echo ""
 
 # Code Quality

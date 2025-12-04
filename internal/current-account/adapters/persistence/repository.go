@@ -213,6 +213,13 @@ func (r *Repository) Delete(accountID string) error {
 		Update("deleted_at", time.Now()).Error
 }
 
+// Ping checks database connectivity without triggering record-not-found logging.
+// This is used by health checks to verify the database is reachable.
+func (r *Repository) Ping() error {
+	var result int
+	return r.db.Raw("SELECT 1").Scan(&result).Error
+}
+
 // toEntity converts domain model to database entity
 func toEntity(account *domain.CurrentAccount) *CurrentAccountEntity {
 	return &CurrentAccountEntity{

@@ -31,9 +31,9 @@ allow_k8s_contexts(['kind-meridian-local', 'kind-kind', 'minikube', 'docker-desk
 # =============================================================================
 
 # Fast startup mode - skip tests on initial load for faster development iteration
-# Set TILT_FAST_STARTUP=true to skip automatic test execution
-# Tests can still be manually triggered via 'tilt trigger test'
-fast_startup = os.getenv('TILT_FAST_STARTUP', 'false').lower() == 'true'
+# Default: true (fast startup enabled) - tests can be manually triggered via 'tilt trigger test'
+# Set TILT_FAST_STARTUP=false to run tests automatically on startup
+fast_startup = os.getenv('TILT_FAST_STARTUP', 'true').lower() == 'true'
 
 # Detect and use local registry if available (created by ctlptl)
 # This speeds up image builds by avoiding remote registry pushes
@@ -1023,10 +1023,10 @@ Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker
   kubectl exec kafka-0 -- kafka-topics --describe --topic <topic> --bootstrap-server localhost:9092
 
-Fast Startup Mode:
-  • Enable: export TILT_FAST_STARTUP=true && tilt up
-  • Skips automatic test execution on startup for faster iteration
+Fast Startup Mode (default):
+  • Tests are skipped on startup for faster iteration
   • Manually trigger tests: tilt trigger test
+  • Disable: export TILT_FAST_STARTUP=false && tilt up
 
 Storage Limits (prevent disk exhaustion):
   • Observability stack: ~7Gi max (Tempo 2Gi, Loki 2Gi, Prometheus 3Gi)
