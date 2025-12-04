@@ -8,7 +8,7 @@ on:
       - 'internal/*/adapters/persistence/*_entity.go'
       - 'internal/domain/models/**'
       - 'cmd/atlas-loader/**'
-      - 'atlas*.hcl'
+      - 'atlas/**'
   pull_request:
     branches: [develop, main]
     paths:
@@ -16,7 +16,7 @@ on:
       - 'internal/*/adapters/persistence/*_entity.go'
       - 'internal/domain/models/**'
       - 'cmd/atlas-loader/**'
-      - 'atlas*.hcl'
+      - 'atlas/**'
 
 permissions:
   contents: read
