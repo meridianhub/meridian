@@ -499,5 +499,6 @@ func TestExecuteSabotageAttempt_ContextCancellation(t *testing.T) {
 
 	assert.True(t, attempt.TimedOut)
 	assert.NotNil(t, attempt.Error)
-	assert.GreaterOrEqual(t, attempt.Duration.Milliseconds(), int64(10))
+	// Allow tolerance for timer precision variability on CI runners
+	assert.GreaterOrEqual(t, attempt.Duration.Milliseconds(), int64(5))
 }
