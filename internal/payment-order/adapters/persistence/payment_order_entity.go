@@ -47,10 +47,10 @@ type PaymentOrderEntity struct {
 	ErrorCode     string `gorm:"size:50"`
 
 	// Lien execution tracking for async retry mechanism
-	// Check constraint is managed via SQL migration, not GORM struct tags
-	LienExecutionStatus   string `gorm:"size:20"`
-	LienExecutionAttempts int    `gorm:"not null;default:0"`
-	LienExecutionError    string `gorm:"size:1000"`
+	// Check constraint: NULL or IN ('PENDING', 'SUCCEEDED', 'FAILED')
+	LienExecutionStatus   *string `gorm:"column:lien_execution_status;size:20"`
+	LienExecutionAttempts int     `gorm:"column:lien_execution_attempts;not null;default:0"`
+	LienExecutionError    *string `gorm:"column:lien_execution_error;size:1000"`
 
 	// Audit fields
 	CreatedAt   time.Time `gorm:"not null"`
