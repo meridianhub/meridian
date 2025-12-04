@@ -102,7 +102,7 @@ echo -e "${GREEN}✓ All services running${NC}\n"
 # PART 1: Health Checks & Service Discovery
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 1: Health Checks & Service Readiness                    ║${NC}"
+echo -e "${MAGENTA}║  Part 1: Health Checks & Service Readiness                     ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -118,6 +118,10 @@ echo -e "\n${CYAN}► Checking FinancialAccounting service health...${NC}"
 HEALTH=$(grpcurl -plaintext localhost:50052 grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
 echo "$HEALTH" | jq '{service: "financial-accounting", status: .status}'
 
+echo -e "\n${CYAN}► Checking PaymentOrder service health...${NC}"
+HEALTH=$(grpcurl -plaintext localhost:50054 grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
+echo "$HEALTH" | jq '{service: "payment-order", status: .status}'
+
 echo -e "\n${GREEN}✓ All services healthy and ready${NC}\n"
 pause
 
@@ -125,7 +129,7 @@ pause
 # PART 2: Saga Pattern - Distributed Transaction with Compensation
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 2: Saga Pattern - Distributed Transaction               ║${NC}"
+echo -e "${MAGENTA}║  Part 2: Saga Pattern - Distributed Transaction                ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -181,7 +185,7 @@ pause
 # PART 3: DNS-Based Load Balancing with Pod Scaling
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 3: DNS-Based Client-Side Load Balancing                 ║${NC}"
+echo -e "${MAGENTA}║  Part 3: DNS-Based Client-Side Load Balancing                  ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -270,7 +274,7 @@ pause
 # PART 4: Idempotency with Redis
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 4: Idempotency Architecture (Conceptual)                ║${NC}"
+echo -e "${MAGENTA}║  Part 4: Idempotency Architecture (Conceptual)                 ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -311,7 +315,7 @@ pause
 # PART 5: Distributed Tracing (OpenTelemetry)
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 5: Distributed Tracing Across Services                  ║${NC}"
+echo -e "${MAGENTA}║  Part 5: Distributed Tracing Across Services                   ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -338,7 +342,7 @@ pause
 # PART 6: Position Keeping - Transaction History
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 6: Position Keeping - Transaction Audit Trail           ║${NC}"
+echo -e "${MAGENTA}║  Part 6: Position Keeping - Transaction Audit Trail            ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -367,7 +371,7 @@ pause
 # PART 7: Financial Accounting - Double-Entry Ledger
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 7: Financial Accounting - Double-Entry Bookkeeping      ║${NC}"
+echo -e "${MAGENTA}║  Part 7: Financial Accounting - Double-Entry Bookkeeping       ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -395,7 +399,7 @@ pause
 # PART 8: Final Account State
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 8: Final Account State & Summary                        ║${NC}"
+echo -e "${MAGENTA}║  Part 8: Final Account State & Summary                         ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -459,7 +463,7 @@ echo ""
 
 if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
     echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  Part 9: Horizon Integrity Proof                              ║${NC}"
+    echo -e "${MAGENTA}║  Part 9: Horizon Integrity Proof                               ║${NC}"
     echo -e "${MAGENTA}║  Demonstrating resilience against phantom transactions        ║${NC}"
     echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
