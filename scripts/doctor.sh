@@ -495,7 +495,26 @@ check_git_hooks() {
     echo "Checking git hooks..."
 
     local source_hook=".githooks/pre-commit"
-    local installed_hook=".git/hooks/pre-commit"
+    local git_dir
+    local installed_hook
+
+    # Handle git worktrees: .git is a file with 'gitdir:' pointing to actual git dir
+    if [ -f ".git" ]; then
+        # Extract the gitdir path from the .git file
+        git_dir=$(sed -n 's/^gitdir: //p' .git)
+        if [ -n "$git_dir" ]; then
+            # For worktrees, hooks are shared from the main repo's .git/hooks
+            # Worktree gitdir format: /path/to/main/.git/worktrees/<name>
+            # We need: /path/to/main/.git/hooks/pre-commit
+            local main_git_dir
+            main_git_dir=$(dirname "$(dirname "$git_dir")")
+            installed_hook="${main_git_dir}/hooks/pre-commit"
+        else
+            installed_hook=".git/hooks/pre-commit"
+        fi
+    else
+        installed_hook=".git/hooks/pre-commit"
+    fi
 
     if [ ! -f "$source_hook" ]; then
         echo -e "${RED}✗${NC} Source pre-commit hook not found"

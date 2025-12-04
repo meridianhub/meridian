@@ -40,6 +40,7 @@ command -v grpcurl >/dev/null 2>&1 || { echo "grpcurl required. Install: brew in
 command -v jq >/dev/null 2>&1 || { echo "jq required. Install: brew install jq"; exit 1; }
 command -v kubectl >/dev/null 2>&1 || { echo "kubectl required."; exit 1; }
 command -v tilt >/dev/null 2>&1 || { echo "tilt required. Install: brew install tilt"; exit 1; }
+command -v bc >/dev/null 2>&1 || { echo "bc required. Install: brew install bc"; exit 1; }
 echo -e "${GREEN}✓ All tools available${NC}\n"
 
 # Check if Tilt is running, start if needed
@@ -446,3 +447,124 @@ echo -e "  • Check Redis idempotency:   kubectl exec -it redis-0 -- redis-cli"
 echo -e "  • View metrics:              kubectl port-forward svc/prometheus 9090:9090"
 echo -e "  • Database queries:          kubectl exec -it cockroachdb-0 -- ./cockroach sql"
 echo ""
+
+# ════════════════════════════════════════════════════════════════
+# PART 9: Horizon Integrity Proof (Optional)
+# ════════════════════════════════════════════════════════════════
+echo -e "${CYAN}Would you like to run the Horizon Integrity Proof demo?${NC}"
+echo -e "${YELLOW}This demonstrates resilience against phantom transactions (Post Office Horizon problem).${NC}"
+echo ""
+read -p "Run Horizon demo? [y/N] " run_horizon
+echo ""
+
+if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
+    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${MAGENTA}║  Part 9: Horizon Integrity Proof                              ║${NC}"
+    echo -e "${MAGENTA}║  Demonstrating resilience against phantom transactions        ║${NC}"
+    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    echo -e "${CYAN}Select demo mode:${NC}"
+    echo -e "  ${GREEN}1)${NC} Happy Path - Normal operation (payment succeeds first try)"
+    echo -e "  ${YELLOW}2)${NC} Unhappy Path - Network failure simulation (aggressive timeout triggers retry)"
+    echo -e "  ${CYAN}3)${NC} Both - Run happy path, then unhappy path"
+    echo ""
+    read -p "Enter choice [1-3]: " horizon_choice
+
+    HORIZON_MODE=""
+    case $horizon_choice in
+        1) HORIZON_MODE="happy" ;;
+        2) HORIZON_MODE="unhappy" ;;
+        3) HORIZON_MODE="both" ;;
+        *) HORIZON_MODE="unhappy" ;;
+    esac
+
+    run_horizon_demo() {
+        local mode=$1
+        local timeout_ms=""
+        local mode_desc=""
+        local output_file="./integrity_report.json"
+
+        case $mode in
+            happy)
+                timeout_ms="5000"  # 5 seconds - plenty of time
+                mode_desc="Happy Path (normal timeout)"
+                [ "$HORIZON_MODE" = "both" ] && output_file="./integrity_report_happy.json"
+                ;;
+            unhappy)
+                timeout_ms="30"    # 30ms - triggers retry
+                mode_desc="Unhappy Path (aggressive timeout)"
+                [ "$HORIZON_MODE" = "both" ] && output_file="./integrity_report_unhappy.json"
+                ;;
+        esac
+
+        echo ""
+        echo -e "${CYAN}► Running: $mode_desc${NC}"
+        echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        go run ./cmd/horizon-demo --timeout "${timeout_ms}ms" --output "$output_file"
+        local exit_code=$?
+
+        if [ -f "$output_file" ]; then
+            echo ""
+            local verdict
+            local initial
+            local final
+            local requests
+            local transactions
+            verdict=$(jq -r '.verdict' "$output_file" 2>/dev/null)
+            initial=$(jq -r '.account.initial_balance_cents' "$output_file" 2>/dev/null)
+            final=$(jq -r '.account.final_balance_cents' "$output_file" 2>/dev/null)
+            requests=$(jq -r '.verification.requests_sent' "$output_file" 2>/dev/null)
+            transactions=$(jq -r '.verification.transactions_recorded' "$output_file" 2>/dev/null)
+
+            echo -e "${CYAN}Results:${NC}"
+            echo -e "  Initial Balance: £$(echo "scale=2; $initial / 100" | bc)"
+            echo -e "  Final Balance:   £$(echo "scale=2; $final / 100" | bc)"
+            echo -e "  Requests Sent:   $requests"
+            echo -e "  Transactions:    $transactions"
+            echo ""
+
+            if [ "$verdict" = "PASSED" ]; then
+                echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${GREEN}║  INTEGRITY PROOF PASSED                                       ║${NC}"
+                echo -e "${GREEN}║  No phantom transactions. Idempotency guarantees hold.        ║${NC}"
+                echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
+            else
+                echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${YELLOW}║  INTEGRITY PROOF: $verdict                                    ║${NC}"
+                echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════╝${NC}"
+            fi
+        fi
+        return $exit_code
+    }
+
+    case $HORIZON_MODE in
+        happy)
+            run_horizon_demo "happy"
+            ;;
+        unhappy)
+            run_horizon_demo "unhappy"
+            ;;
+        both)
+            echo -e "${CYAN}═══════════════════════════════════════════════════════════════════${NC}"
+            echo -e "${CYAN}  Part 1: Happy Path${NC}"
+            echo -e "${CYAN}═══════════════════════════════════════════════════════════════════${NC}"
+            run_horizon_demo "happy"
+            pause
+            echo -e "${CYAN}═══════════════════════════════════════════════════════════════════${NC}"
+            echo -e "${CYAN}  Part 2: Unhappy Path (Network Failure Simulation)${NC}"
+            echo -e "${CYAN}═══════════════════════════════════════════════════════════════════${NC}"
+            run_horizon_demo "unhappy"
+            ;;
+    esac
+
+    echo ""
+    echo -e "${GREEN}✓ Horizon Integrity Proof complete${NC}"
+    if [ "$HORIZON_MODE" = "both" ]; then
+        echo -e "${YELLOW}  Full reports: ./integrity_report_happy.json, ./integrity_report_unhappy.json${NC}"
+    else
+        echo -e "${YELLOW}  Full report: ./integrity_report.json${NC}"
+    fi
+    echo ""
+fi
