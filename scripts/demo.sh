@@ -518,6 +518,12 @@ if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
             requests=$(jq -r '.verification.requests_sent' "$output_file" 2>/dev/null)
             transactions=$(jq -r '.verification.transactions_recorded' "$output_file" 2>/dev/null)
 
+            # Validate jq extraction
+            if [ -z "$verdict" ] || [ "$verdict" = "null" ]; then
+                echo -e "${RED}✗${NC} Failed to parse integrity report from $output_file"
+                return 1
+            fi
+
             echo -e "${CYAN}Results:${NC}"
             echo -e "  Initial Balance: £$(echo "scale=2; $initial / 100" | bc)"
             echo -e "  Final Balance:   £$(echo "scale=2; $final / 100" | bc)"
