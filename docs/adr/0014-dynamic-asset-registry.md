@@ -187,16 +187,32 @@ type AssetRegistry interface {
     ValidateAttributes(ctx context.Context, def AssetDefinition, attrs map[string]string) error
 }
 
-// Adapter layer usage
+// Adapter layer usage with explicit error taxonomy
 func (a *TransactionAdapter) CreatePosition(ctx context.Context, req *pb.CreatePositionRequest) error {
+    // Extract tenant from context (see Tenant Isolation section)
+    tenantID, err := auth.TenantFromContext(ctx)
+    if err != nil {
+        return status.Errorf(codes.Unauthenticated, "tenant context required")
+    }
+
     // 1. Load asset definition
     def, err := a.registry.GetDefinition(ctx, tenantID, req.AssetCode, req.AssetVersion)
     if err != nil {
-        return status.Errorf(codes.NotFound, "unknown asset: %s v%d", req.AssetCode, req.AssetVersion)
+        if errors.Is(err, ErrAssetNotFound) {
+            return status.Errorf(codes.NotFound, "unknown asset: %s v%d", req.AssetCode, req.AssetVersion)
+        }
+        // Registry lookup failure (database error, etc.)
+        return status.Errorf(codes.Internal, "registry lookup failed: %v", err)
     }
 
     // 2. Validate attributes against schema
     if err := a.registry.ValidateAttributes(ctx, def, req.Attributes); err != nil {
+        var schemaErr *SchemaError
+        if errors.As(err, &schemaErr) {
+            // Malformed schema in registry = platform bug
+            return status.Errorf(codes.FailedPrecondition, "schema error: %v", err)
+        }
+        // User-provided attributes don't match schema
         return status.Errorf(codes.InvalidArgument, "invalid attributes: %v", err)
     }
 
@@ -211,8 +227,17 @@ func (a *TransactionAdapter) CreatePosition(ctx context.Context, req *pb.CreateP
         Amount: decimal.RequireFromString(req.Amount),
     }
 
+    // 4. Idempotency: positionService.Create should be idempotent
+    // (reject duplicate position keys or use upsert pattern)
     return a.positionService.Create(ctx, position)
 }
+
+// Error taxonomy:
+// - codes.NotFound: Asset code/version doesn't exist in registry
+// - codes.InvalidArgument: User attributes fail schema validation
+// - codes.FailedPrecondition: Schema itself is malformed (platform bug)
+// - codes.Internal: Registry/database unavailable
+// - codes.Unauthenticated: No tenant context
 ```
 
 ### Version Lifecycle
@@ -314,10 +339,10 @@ func (m *MigrationService) MigratePosition(
 
 ### Bulk Migration (Wash & Reload)
 
-For large-scale migrations, batch processing with idempotency:
+For large-scale migrations, batch processing with idempotency and failure recovery:
 
 ```go
-// BulkMigration represents a migration job.
+// BulkMigration represents a migration job with idempotency tracking.
 type BulkMigration struct {
     ID            uuid.UUID
     TenantID      uuid.UUID
@@ -327,17 +352,23 @@ type BulkMigration struct {
     Status        MigrationStatus // Pending, Running, Completed, Failed
     Progress      int             // Positions migrated
     Total         int             // Total positions
+    LastProcessed uuid.UUID       // Cursor for resumable iteration
     AttributeMap  map[string]string // Default attributes for new version
     CreatedAt     time.Time
     CompletedAt   *time.Time
 }
 
-// MigrateBatch processes a batch of positions.
-func (m *MigrationService) MigrateBatch(ctx context.Context, job BulkMigration, batchSize int) error {
+// MigrateBatch processes a batch of positions with idempotency.
+// If the job restarts, it resumes from LastProcessed cursor.
+func (m *MigrationService) MigrateBatch(ctx context.Context, job *BulkMigration, batchSize int) error {
+    // Fetch only un-migrated positions (those still on FromVersion)
+    // The WHERE clause inherently provides idempotency: once migrated,
+    // positions move to ToVersion and won't appear in subsequent queries.
     positions, err := m.ledger.GetPositions(ctx, GetPositionsRequest{
         TenantID:  job.TenantID,
         AssetCode: job.AssetCode,
-        Version:   job.FromVersion,
+        Version:   job.FromVersion,  // Only fetch source version
+        AfterID:   job.LastProcessed, // Resume from cursor
         Limit:     batchSize,
     })
     if err != nil {
@@ -347,13 +378,24 @@ func (m *MigrationService) MigrateBatch(ctx context.Context, job BulkMigration, 
     for _, pos := range positions {
         attrs := mergeAttributes(pos.Attributes, job.AttributeMap)
         if err := m.MigratePosition(ctx, pos, job.ToVersion, attrs); err != nil {
+            // Record failure point for investigation
+            job.Status = MigrationStatusFailed
             return fmt.Errorf("failed to migrate position %s: %w", pos.ID, err)
         }
+        // Update cursor after each successful migration
+        job.LastProcessed = pos.ID
+        job.Progress++
     }
 
     return nil
 }
 ```
+
+**Idempotency guarantees:**
+- Positions only appear in query while on `FromVersion`; once migrated, they're excluded
+- `LastProcessed` cursor enables resumable iteration after crashes
+- Each `MigratePosition` is atomic (ledger transaction); partial failures leave source positions intact
+- Re-running the job on a completed migration is a no-op (zero positions match the query)
 
 ### Caching Strategy
 
@@ -383,7 +425,30 @@ func (r *CachedAssetRegistry) GetDefinition(ctx context.Context, tenantID uuid.U
 }
 ```
 
-**Cache invalidation**: On version creation or deprecation, invalidate tenant's asset cache.
+**Cache invalidation strategy:**
+
+- **When**: Synchronously at database commit, before API returns success
+- **Scope**: Invalidate specific cache keys (`asset:{tenantID}:{code}:*`) not entire tenant cache
+- **Distributed invalidation**: Use pub/sub (Redis, Kafka) to broadcast invalidation events to all instances
+
+```go
+// On asset version creation or deprecation
+func (r *CachedAssetRegistry) InvalidateAsset(ctx context.Context, tenantID uuid.UUID, code string) error {
+    // 1. Invalidate local cache
+    pattern := fmt.Sprintf("asset:%s:%s:*", tenantID, code)
+    r.cache.DeleteByPattern(pattern)
+
+    // 2. Broadcast to other instances
+    return r.pubsub.Publish(ctx, "asset-invalidation", InvalidationEvent{
+        TenantID: tenantID,
+        Code:     code,
+    })
+}
+```
+
+**Consistency guarantee**: Stale reads are possible during the brief window between DB commit and
+cache invalidation propagation (eventual consistency). For strong consistency requirements,
+bypass cache and query database directly.
 
 ## Positive Consequences
 
@@ -415,6 +480,22 @@ Asset definitions are tenant-scoped. The `tenant_id` column ensures:
 - Tenants cannot see or use other tenants' custom assets
 - Platform-wide assets (USD, EUR) use a special system tenant ID
 - Queries always filter by tenant
+
+**Context propagation**: Tenant ID is extracted from the authenticated request context via
+`auth.TenantFromContext(ctx)`. All gRPC interceptors validate authentication and inject
+tenant context before handlers execute.
+
+**Enforcement**: The `AssetRegistry` interface requires `tenantID` as an explicit parameter
+(not optional). Queries use parameterized SQL with tenant filter:
+
+```sql
+SELECT * FROM asset_definitions
+WHERE tenant_id = $1 AND code = $2 AND version = $3
+```
+
+This prevents accidental cross-tenant queries. The system tenant ID (`00000000-...`) is
+used for platform assets and is automatically included in tenant lookups via UNION or
+separate query.
 
 ### Built-in Assets
 
@@ -458,6 +539,38 @@ message CreateAssetRequest {
     string description = 6;
 }
 ```
+
+### Relationships & Integration Points
+
+This ADR focuses on **asset definitions** (what assets exist, their schemas, versions).
+[ADR-0013](0013-generic-asset-quantity-types.md) focuses on **types and valuation** (how quantities
+are represented, converted, and valued).
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ARCHITECTURAL BOUNDARY                             │
+├─────────────────────────────────────┬───────────────────────────────────────┤
+│        ADR-0014 (This ADR)          │            ADR-0013                   │
+│        Asset Registry               │         Type System & Valuation       │
+├─────────────────────────────────────┼───────────────────────────────────────┤
+│ • Asset definitions (UnitDef)       │ • Quantity[D] generic type            │
+│ • Schema validation                 │ • Rate type and resolution            │
+│ • Version lifecycle                 │ • ValuationProvider interface         │
+│ • Migration-as-Trade                │ • ValuationOrchestrator               │
+│ • Tenant isolation                  │ • Position/Valuation flow             │
+└─────────────────────────────────────┴───────────────────────────────────────┘
+```
+
+**Integration flow:**
+
+1. **At ingestion**: Adapter queries `AssetRegistry.GetDefinition()` to load `UnitDef`
+2. **At runtime**: `Quantity[D]` instances carry the loaded `UnitDef`
+3. **At valuation**: `ValuationOrchestrator` uses `UnitDef.Code` to route to appropriate provider
+
+**Out of scope for this ADR:**
+- `ValuationProvider` registration and discovery (future ADR or implementation detail)
+- Rate management and temporal rate storage (covered in ADR-0013's Rate type)
+- Market data integration (ValuationProvider implementation concern)
 
 ### Reconsidering This Decision
 

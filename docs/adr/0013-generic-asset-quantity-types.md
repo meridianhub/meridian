@@ -311,8 +311,8 @@ type Rate struct {
     From      UnitDef
     To        UnitDef
     Factor    decimal.Decimal
-    ValidFrom time.Time
-    ValidTo   time.Time
+    ValidFrom time.Time  // nil = effective from beginning of time
+    ValidTo   time.Time  // nil = effective indefinitely
 }
 
 // Identity rate for fiat (£1 = £1)
@@ -321,6 +321,15 @@ identityRate := Rate{From: gbpDef, To: gbpDef, Factor: decimal.NewFromInt(1)}
 // FX rate
 fxRate := Rate{From: usdDef, To: gbpDef, Factor: decimal.NewFromFloat(0.79)}
 ```
+
+**Rate Resolution Semantics:**
+
+- **Selection**: For a given valuation timestamp, select rates where `ValidFrom <= timestamp < ValidTo`
+- **Overlaps**: If multiple rates match, prefer the one with the latest `ValidFrom` (most recent wins)
+- **Gaps**: If no rate exists for a timestamp, valuation fails with `ErrNoRateAvailable`
+- **Missing bounds**: `nil ValidFrom` means effective from epoch; `nil ValidTo` means no expiry
+
+Detailed rate resolution rules will be specified in the ValuationOrchestrator implementation.
 
 ### Pluggable Valuation Architecture
 
@@ -377,7 +386,7 @@ func (v *ValuationOrchestrator) Valuate(ctx context.Context, position Position) 
 
 ### Protocol Buffer Representation (Wire Format)
 
-Use a generic asset message to avoid recompilation per asset type:
+We choose a generic `AssetAmount` message to avoid per-asset recompilation:
 
 ```protobuf
 message AssetAmount {
@@ -388,10 +397,16 @@ message AssetAmount {
 }
 ```
 
-The adapter layer validates:
-1. `asset_code` exists in Registry
-2. `version` matches or is compatible
-3. `attributes` conform to the asset's schema
+**Adapter Validation Contract:**
+
+The adapter layer performs Schema-on-Write validation before converting to domain types:
+
+1. `asset_code` must exist in Registry → `codes.NotFound` if missing
+2. `version` must match or be compatible → `codes.FailedPrecondition` if incompatible
+3. `attributes` must conform to schema → `codes.InvalidArgument` if invalid
+
+If validation fails, the adapter returns an error and rejects the request. Invalid data
+never enters the domain layer.
 
 ### Database Persistence
 
@@ -414,6 +429,26 @@ CREATE TABLE positions (
 - Composite columns enable `SUM(amount) WHERE asset_code = 'KWH'`
 - JSONB handles variable attributes while preserving queryability
 - Application layer enforces schema; database stores validated data
+
+**Scanner Validation Contract:**
+
+When reading positions from the database, the scanner validates dimension consistency:
+
+```go
+func (q *Quantity[D]) Scan(src interface{}) error {
+    // 1. Parse amount and asset_code from row
+    // 2. Load UnitDef from registry by asset_code + version
+    // 3. Validate dimension matches expected D
+    if def.Dimension != dimensionName[D]() {
+        return ErrDimensionMismatch  // Fatal: DB corruption or migration bug
+    }
+    // 4. Populate Quantity fields
+}
+```
+
+**Failure Semantics:** An invalid `asset_code` or dimension mismatch in a persisted row
+indicates database corruption or a migration/adapter bug. The scanner returns a non-nil
+error and fails fast - it never silently defaults or coerces values.
 
 ### Migration Strategy
 
