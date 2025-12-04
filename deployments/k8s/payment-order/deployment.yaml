@@ -47,6 +47,11 @@ spec:
             secretKeyRef:
               name: payment-order-db
               key: DATABASE_URL
+        - name: WEBHOOK_HMAC_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: payment-order-db
+              key: WEBHOOK_HMAC_SECRET
         - name: POD_NAME
           valueFrom:
             fieldRef:
