@@ -89,8 +89,10 @@ func TestSaveUpdateExisting(t *testing.T) {
 		t.Errorf("Expected balance 10000, got %d", retrieved.Balance.AmountCents())
 	}
 
-	// Note: Version tracking is not in the database schema yet
-	// The domain model version is always 1 when retrieved from database
+	// Version should be incremented after update
+	if retrieved.Version != 2 {
+		t.Errorf("Expected version 2, got %d", retrieved.Version)
+	}
 }
 
 func TestFindByIDNotFound(t *testing.T) {
@@ -195,11 +197,6 @@ func TestDeleteAccount(t *testing.T) {
 }
 
 func TestOptimisticLocking(t *testing.T) {
-	// Note: Optimistic locking via version column is not in the current database schema.
-	// This test is skipped until a migration adds the version column.
-	// See GitHub Issue #202 for schema alignment work.
-	t.Skip("Skipping: version column not yet in database schema")
-
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 

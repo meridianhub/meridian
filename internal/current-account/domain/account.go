@@ -42,7 +42,7 @@ type CurrentAccount struct {
 	OverdraftEnabled      bool
 	OverdraftRate         float64
 	BalanceUpdatedAt      time.Time
-	Version               int
+	Version               int64
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }

@@ -29,6 +29,9 @@ type CurrentAccountEntity struct {
 	OpenedAt              *time.Time `gorm:"column:opened_at;index"`
 	ClosedAt              *time.Time `gorm:"column:closed_at;index"`
 
+	// Optimistic locking
+	Version int64 `gorm:"column:version;not null;default:1"`
+
 	// Audit fields - must match BaseModel columns from migration
 	CreatedAt time.Time  `gorm:"column:created_at;not null;default:now()"`
 	CreatedBy string     `gorm:"column:created_by;type:varchar(100);not null"`
