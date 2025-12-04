@@ -37,7 +37,7 @@ type LienEntity struct {
 	Version   int       `gorm:"not null;default:1"`
 }
 
-// TableName overrides the default table name
+// TableName overrides the default table name with schema prefix
 func (LienEntity) TableName() string {
-	return "liens"
+	return "current_account.liens"
 }
