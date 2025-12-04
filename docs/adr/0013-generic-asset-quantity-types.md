@@ -116,67 +116,75 @@ modifying the core quantity library, and produces zero-overhead code through Go'
 
 The `Unit` interface is open for extension. Any type implementing `Unit` can be used with `Quantity[U]`.
 
-```
-                         ┌─────────────────────┐
-                         │    Unit interface   │
-                         │  ─────────────────  │
-                         │  Symbol() string    │
-                         │  Precision() int    │
-                         └─────────┬───────────┘
-                                   │
-          ┌────────────────────────┼────────────────────────┐
-          │                        │                        │
-          ▼                        ▼                        ▼
-   ┌─────────────┐         ┌─────────────┐          ┌─────────────┐
-   │  Currency   │         │     ...     │          │     ...     │
-   │   (fiat)    │         │  (tenant)   │          │  (tenant)   │
-   └──────┬──────┘         └──────┬──────┘          └──────┬──────┘
-          │                       │                        │
-          ▼                       ▼                        ▼
-   ┌─────────────┐         ┌─────────────┐          ┌─────────────┐
-   │  Quantity   │         │  Quantity   │          │  Quantity   │
-   │ [Currency]  │         │   [...]     │          │   [...]     │
-   │  = Money    │         │             │          │             │
-   └─────────────┘         └─────────────┘          └─────────────┘
+```mermaid
+classDiagram
+    class Unit {
+        <<interface>>
+        +Symbol() string
+        +Precision() int
+    }
+
+    class Currency {
+        +code string
+        +precision int
+    }
+
+    class TenantUnitA {
+        +symbol string
+        +precision int
+    }
+
+    class TenantUnitB {
+        +symbol string
+        +precision int
+    }
+
+    Unit <|.. Currency : implements
+    Unit <|.. TenantUnitA : implements
+    Unit <|.. TenantUnitB : implements
+
+    class Quantity~U~ {
+        +amount Decimal
+        +unit U
+    }
+
+    Quantity~Currency~ <-- Currency : parameterizes
+    Quantity~TenantUnitA~ <-- TenantUnitA : parameterizes
+    Quantity~TenantUnitB~ <-- TenantUnitB : parameterizes
 ```
 
 ### The Position/Valuation Model
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         POSITION KEEPING                             │
-│                                                                      │
-│   Tracks: Quantity[U] - amounts in native units                     │
-│   Handles: Telemetry ingestion, deduplication, gap detection        │
-│   Output: Timestamped positions with full audit trail               │
-│                                                                      │
-└─────────────────────────────────┬───────────────────────────────────┘
-                                  │
-                                  │ Position + Rate
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                           VALUATION                                  │
-│                                                                      │
-│   Input: Quantity[U] + Rate[U, Currency] + MarketData               │
-│   Routes to: Appropriate ValuationProvider for asset class          │
-│   Output: Quantity[Currency] + RiskMetrics                          │
-│                                                                      │
-│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐              │
-│   │ Identity │ │  Tariff  │ │  Spot    │ │QuantLib  │  ...         │
-│   │  (fiat)  │ │ (energy) │ │(compute) │ │(derivs)  │              │
-│   └──────────┘ └──────────┘ └──────────┘ └──────────┘              │
-│                                                                      │
-└─────────────────────────────────┬───────────────────────────────────┘
-                                  │
-                                  │ Valued Position
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      FINANCIAL ACCOUNTING                            │
-│                                                                      │
-│   Records: Quantity[Currency] - settlement amounts                  │
-│   Provides: Double-entry ledger, audit trail, reconciliation        │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph PK["<b>POSITION KEEPING</b>"]
+        PK1["Tracks: Quantity[U] - amounts in native units"]
+        PK2["Handles: Telemetry ingestion, deduplication, gap detection"]
+        PK3["Output: Timestamped positions with full audit trail"]
+    end
+
+    subgraph VAL["<b>VALUATION</b>"]
+        VAL1["Input: Quantity[U] + Rate[U, Currency] + MarketData"]
+        VAL2["Routes to: Appropriate ValuationProvider for asset class"]
+        VAL3["Output: Quantity[Currency] + RiskMetrics"]
+
+        subgraph Providers[" "]
+            direction LR
+            P1["Identity<br/>(fiat)"]
+            P2["Tariff<br/>(energy)"]
+            P3["Spot<br/>(compute)"]
+            P4["QuantLib<br/>(derivs)"]
+            P5["..."]
+        end
+    end
+
+    subgraph FA["<b>FINANCIAL ACCOUNTING</b>"]
+        FA1["Records: Quantity[Currency] - settlement amounts"]
+        FA2["Provides: Double-entry ledger, audit trail, reconciliation"]
+    end
+
+    PK -->|"Position + Rate"| VAL
+    VAL -->|"Valued Position"| FA
 ```
 
 **For fiat currency**: Valuation is the identity function. Position = Settlement.
