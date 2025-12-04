@@ -23,56 +23,54 @@ Proposed
 
 ## Context
 
-Meridian is evolving from a "Production-Grade Open Banking Ledger" to a **Universal Asset Bank** - a
-high-integrity transaction engine capable of tracking any quantifiable, time-sensitive asset with
-complex valuation requirements.
+Meridian is a **high-integrity transaction engine**. At its core, the system does two things:
 
-### The RBC Pattern: Read, Bill, Collect
+1. **Position Keeping**: Track quantities in their native units
+2. **Valuation**: Convert positions to settlement currency
 
-Across multiple industries, we observe the same fundamental pattern:
+### The Key Insight: Fiat is the Degenerate Case
 
-| Phase | Description | Challenge |
-|-------|-------------|-----------|
-| **Read** | Capture usage/consumption from edge telemetry | Out-of-order delivery, duplicates, gaps, estimated vs actual |
-| **Bill** | Apply time-varying rates to produce valuations | Dynamic pricing, complex tariffs, multiple rate structures |
-| **Collect** | Settle in fiat currency with full audit trail | Reconciliation, disputes, regulatory compliance |
+Today, Meridian tracks fiat currency. The valuation function is trivial: £1 = £1.
 
-This pattern appears in:
+But the architecture we've built - Position Keeping, Financial Accounting, Sagas, audit trails -
+applies to *any* quantifiable asset. The only thing that changes is the **valuation function**:
 
-**Energy & Utilities**
-- Smart meter readings (half-hourly kWh) with estimated vs actual reconciliation
-- Time-of-use tariffs varying by 30-minute settlement period
-- Carbon intensity multipliers for green energy tracking
+| Asset Type | Position (Native Unit) | Valuation Function | Settlement |
+|------------|----------------------|-------------------|------------|
+| Fiat | £100.00 | Identity (1:1) | £100.00 |
+| Energy | 150 kWh | Tariff × Time-of-Use | £52.50 |
+| Compute | 10 GPU-hours | Spot Price × Region | $25.00 |
+| Derivatives | 100 Options | Black-Scholes(Δ,Θ,Γ,ν,ρ) | £3,450.00 |
+| Carbon | 50 tCO2e | Market Price | €2,750.00 |
 
-**Cloud & Compute**
-- GPU-hour consumption from distributed clusters
-- Spot vs reserved instance pricing (like energy day-ahead vs intraday markets)
-- Per-tenant resource attribution across shared infrastructure
+**Position Keeping is asset-agnostic. Valuation is where complexity lives.**
 
-**Advertising & Attention**
-- Real-time bidding (RTB) for ad impressions - auction-based pricing
-- Click/conversion attribution with complex multi-touch models
-- Budget pacing across time zones and campaigns
+This separation is powerful:
+- The ledger doesn't need to understand tariff curves or option Greeks
+- New asset classes plug in via valuation providers
+- The core remains simple, auditable, and correct
 
-**Logistics & Capacity**
-- Container shipping (TEU) with spot rate volatility
-- Warehouse slot reservations with seasonal pricing
-- Last-mile delivery surge pricing
+### Why This Matters
 
-**Financial Instruments**
-- Derivative valuations requiring "the Greeks" (Delta, Theta, Vega)
-- Bond pricing with yield curve dependencies
-- Options with Black-Scholes or Monte Carlo valuations
+The same challenges appear across industries:
 
-### The Common Challenge
+**Telemetry Complexity**
+- Data arrives out-of-order, with gaps, duplicates, or corrections
+- Estimated readings must reconcile against actuals
+- Meters/sensors may be unreliable or delayed
 
-All these domains share critical complexity:
+**Valuation Complexity**
+- Time-varying rates (the same unit has different values at different times)
+- Complex pricing models (spot vs reserved, tiered, auction-based)
+- Risk metrics and sensitivities (Greeks for derivatives)
 
-1. **Unreliable Telemetry**: Data arrives out-of-order, with gaps, duplicates, or corrections
-2. **Temporal Pricing**: The same unit has different values at different times
-3. **Estimated vs Actual**: Initial estimates must reconcile against final actuals
-4. **Complex Valuation**: Simple multiplication isn't enough - need pluggable pricing engines
-5. **Regulatory Audit**: Every calculation must be reproducible and explainable
+**Regulatory Requirements**
+- Every calculation must be reproducible and explainable
+- Full audit trail from position to settlement
+- Dispute resolution requires historical rate lookup
+
+These aren't energy-specific or compute-specific problems. They're **position keeping and
+valuation problems** that happen to manifest in different domains.
 
 ### Current State: Fiat-Only Money Types
 
@@ -88,7 +86,7 @@ This creates problems:
 
 1. **Duplication**: Same logic repeated three times with subtle differences
 2. **Type safety gaps**: Nothing prevents adding GBP to USD at compile time
-3. **Fiat-only**: Cannot represent kWh, GPU-hours, or ad impressions
+3. **Fiat-only**: Cannot represent kWh, GPU-hours, or other units
 4. **No temporal awareness**: No concept of "when" a quantity was measured
 
 ## Decision Drivers
@@ -130,36 +128,61 @@ The `Unit` interface is open for extension. Any type implementing `Unit` can be 
           │                        │                        │
           ▼                        ▼                        ▼
    ┌─────────────┐         ┌─────────────┐          ┌─────────────┐
-   │  Currency   │         │ EnergyUnit  │          │ ComputeUnit │
-   │   (fiat)    │         │  (metered)  │          │   (cloud)   │
+   │  Currency   │         │     ...     │          │     ...     │
+   │   (fiat)    │         │  (tenant)   │          │  (tenant)   │
    └──────┬──────┘         └──────┬──────┘          └──────┬──────┘
           │                       │                        │
           ▼                       ▼                        ▼
    ┌─────────────┐         ┌─────────────┐          ┌─────────────┐
    │  Quantity   │         │  Quantity   │          │  Quantity   │
-   │ [Currency]  │         │[EnergyUnit] │          │[ComputeUnit]│
-   │  = Money    │         │  = Energy   │          │ = Compute   │
+   │ [Currency]  │         │   [...]     │          │   [...]     │
+   │  = Money    │         │             │          │             │
    └─────────────┘         └─────────────┘          └─────────────┘
 ```
 
-### Target Use Cases
+### The Position/Valuation Model
 
-This type system is designed to support:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         POSITION KEEPING                             │
+│                                                                      │
+│   Tracks: Quantity[U] - amounts in native units                     │
+│   Handles: Telemetry ingestion, deduplication, gap detection        │
+│   Output: Timestamped positions with full audit trail               │
+│                                                                      │
+└─────────────────────────────────┬───────────────────────────────────┘
+                                  │
+                                  │ Position + Rate
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                           VALUATION                                  │
+│                                                                      │
+│   Input: Quantity[U] + Rate[U, Currency] + MarketData               │
+│   Routes to: Appropriate ValuationProvider for asset class          │
+│   Output: Quantity[Currency] + RiskMetrics                          │
+│                                                                      │
+│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐              │
+│   │ Identity │ │  Tariff  │ │  Spot    │ │QuantLib  │  ...         │
+│   │  (fiat)  │ │ (energy) │ │(compute) │ │(derivs)  │              │
+│   └──────────┘ └──────────┘ └──────────┘ └──────────┘              │
+│                                                                      │
+└─────────────────────────────────┬───────────────────────────────────┘
+                                  │
+                                  │ Valued Position
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      FINANCIAL ACCOUNTING                            │
+│                                                                      │
+│   Records: Quantity[Currency] - settlement amounts                  │
+│   Provides: Double-entry ledger, audit trail, reconciliation        │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-| Domain | Unit Type | Example Units | Valuation Complexity |
-|--------|-----------|---------------|---------------------|
-| **Banking** | Currency | GBP, USD, EUR | FX rates, interest curves |
-| **Energy** | EnergyUnit | kWh, MWh, Therm | Half-hourly tariffs, carbon intensity |
-| **Compute** | ComputeUnit | GPU-Hour, CPU-Hour | Spot pricing, reserved capacity |
-| **Advertising** | ImpressionUnit | CPM, CPC, CPA | Real-time bidding, attribution |
-| **Carbon** | CarbonUnit | tCO2e, kgCO2e | Market-traded allowances |
-| **Logistics** | CapacityUnit | TEU, Pallet-Day | Seasonal rates, surge pricing |
-| **Crypto** | TokenUnit | BTC, ETH, USDC | Exchange rates, gas fees |
-| **Loyalty** | LoyaltyUnit | Points, Miles | Redemption rates, tier multipliers |
-| **Derivatives** | ContractUnit | Option, Future | Greeks (Δ, Θ, Γ, ν, ρ) |
+**For fiat currency**: Valuation is the identity function. Position = Settlement.
 
-Each domain has unique valuation requirements, but all share the same fundamental ledger operations:
-track quantities, apply rates, produce settlements.
+**For everything else**: Valuation is where the domain complexity lives. The ledger
+doesn't need to understand it - just route to the right provider.
 
 ### Core Types
 
@@ -188,22 +211,8 @@ type Currency struct {
     precision int    // 2 for most, 0 for JPY
 }
 
-// EnergyUnit implements Unit for energy measurements.
-type EnergyUnit struct {
-    symbol    string // "kWh", "MWh", "Therm"
-    precision int    // typically 3
-}
-
-// ComputeUnit implements Unit for cloud resource consumption.
-type ComputeUnit struct {
-    symbol    string // "GPU-hr", "CPU-hr", "vCPU-sec"
-    precision int    // typically 6 for fine-grained billing
-}
-
-// Type aliases for common domain usage
+// Type alias for common domain usage
 type Money = Quantity[Currency]
-type Energy = Quantity[EnergyUnit]
-type Compute = Quantity[ComputeUnit]
 ```
 
 ### Compile-Time Safety
@@ -215,6 +224,7 @@ usd := quantity.New(decimal.NewFromInt(50), currency.USD)
 sum, err := gbp.Add(gbp)  // OK: Quantity[Currency] + Quantity[Currency]
 
 // COMPILE ERROR: Different unit types
+// (assuming tenant has defined an EnergyUnit)
 kwh := quantity.New(decimal.NewFromFloat(150.5), energy.KWH)
 invalid := gbp.Add(kwh)  // Error: cannot use Quantity[EnergyUnit] as Quantity[Currency]
 
@@ -232,116 +242,81 @@ pkg/platform/quantity/
 ├── quantity.go       // Quantity[U] generic type and operations
 ├── unit.go           // Unit interface definition
 │
-├── currency/         // Fiat currency (ISO 4217)
-│   ├── currency.go
-│   └── codes.go
-│
-├── energy/           // Energy metering (kWh, MWh, Therm)
-│   ├── energy.go
-│   └── units.go
-│
-├── compute/          // Cloud resources (GPU-hr, CPU-hr)
-│   ├── compute.go
-│   └── units.go
-│
-└── examples/         // Reference implementations
-    ├── carbon/       // Emissions trading
-    ├── loyalty/      // Points programs
-    └── advertising/  // Impression tracking
+└── currency/         // Fiat currency (ISO 4217)
+    ├── currency.go   // Currency type implementing Unit
+    └── codes.go      // Standard currency codes
+
+# Tenants define their own unit types:
+# internal/tenant-acme/units/...
 ```
 
-### Rate Type for Temporal Pricing
+The core library provides `Quantity[U]` and `Currency`. Tenants extend with their own
+unit types as needed. The ledger doesn't prescribe what assets you can track.
 
-The `Rate` type models time-varying conversion factors - the heart of the "Bill" phase.
+### Rate Type for Valuation
+
+The `Rate` type models conversion factors between unit types.
 
 ```go
 // Rate represents a conversion factor between two unit types.
-// Supports temporal pricing: the rate at 14:00 differs from 03:00.
+// For temporal pricing, rates have validity periods.
 type Rate[From, To Unit] struct {
     from      From
     to        To
     factor    decimal.Decimal
-    validFrom time.Time         // Rate effective period
+    validFrom time.Time         // Optional: rate effective period
     validTo   time.Time
 }
 
-// Example: Half-hourly electricity tariff
-peakRate := rate.New(
-    energy.KWH,
-    currency.GBP,
-    decimal.NewFromFloat(0.35),    // £0.35/kWh
-    time.Date(2025, 1, 15, 16, 0, 0, 0, time.UTC),  // 16:00
-    time.Date(2025, 1, 15, 16, 30, 0, 0, time.UTC), // 16:30
-)
+// Identity rate for fiat (£1 = £1)
+identityRate := rate.New(currency.GBP, currency.GBP, decimal.NewFromInt(1))
 
-// Example: GPU spot pricing
-spotRate := rate.New(
-    compute.GPUHour,
-    currency.USD,
-    decimal.NewFromFloat(2.50),    // $2.50/GPU-hr
-    time.Now(),
-    time.Now().Add(5 * time.Minute), // Valid for 5 minutes
-)
+// FX rate
+fxRate := rate.New(currency.USD, currency.GBP, decimal.NewFromFloat(0.79))
 ```
 
 ### Pluggable Valuation Architecture
 
-The ledger doesn't implement valuation math. It routes to specialized engines.
+The ledger doesn't implement valuation math. It routes to specialized providers.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Valuation Orchestrator                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │   Router    │──│ Market Data │──│   Cache     │              │
-│  └──────┬──────┘  └─────────────┘  └─────────────┘              │
-│         │                                                        │
-│    ┌────┴────┬────────────┬────────────┬────────────┐           │
-│    ▼         ▼            ▼            ▼            ▼           │
-│ ┌──────┐ ┌──────┐   ┌──────────┐ ┌──────────┐ ┌──────────┐     │
-│ │Energy│ │Compute│  │Derivatives│ │  Carbon  │ │  Custom  │     │
-│ │Pricer│ │Pricer │  │(QuantLib) │ │ (Market) │ │ (Tenant) │     │
-│ └──────┘ └──────┘   └──────────┘ └──────────┘ └──────────┘     │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-Each valuation provider implements a common gRPC interface:
-
-```protobuf
-service ValuationProvider {
-  rpc Valuate(ValuateRequest) returns (ValuateResponse);
+```go
+// ValuationProvider is implemented by each pricing engine
+type ValuationProvider interface {
+    Valuate(ctx context.Context, req ValuationRequest) (ValuationResponse, error)
+    Supports(assetClass string) bool
 }
 
-message ValuateRequest {
-  string asset_id = 1;
-  string asset_class = 2;           // "ENERGY", "COMPUTE", "DERIVATIVE"
-  string quantity = 3;              // Decimal as string
-  string unit = 4;                  // "kWh", "GPU-hr"
-  google.protobuf.Timestamp as_of = 5;
-  map<string, string> market_inputs = 6;  // Spot price, volatility, etc.
+// The orchestrator routes to the appropriate provider
+type ValuationOrchestrator struct {
+    providers []ValuationProvider
+    marketData MarketDataService
 }
 
-message ValuateResponse {
-  MoneyAmount value = 1;            // The calculated value
-  map<string, double> risk_metrics = 2;  // Greeks, sensitivities
-  string valuation_model = 3;       // "BLACK_SCHOLES", "MONTE_CARLO"
+func (v *ValuationOrchestrator) Valuate(ctx context.Context, position Position) (Money, error) {
+    provider := v.findProvider(position.AssetClass)
+    if provider == nil {
+        // No valuation needed - already in settlement currency
+        return position.Amount.(Money), nil
+    }
+    return provider.Valuate(ctx, position, v.marketData)
 }
 ```
 
 This enables:
-- **Energy tenant**: Routes to tariff engine with half-hourly rates
-- **Compute tenant**: Routes to spot pricing engine with availability curves
-- **Derivatives tenant**: Routes to QuantLib wrapper for Greeks calculation
-- **Custom tenant**: Routes to tenant-provided valuation service
+- **Fiat**: Identity provider (or nil - no valuation needed)
+- **Tenant A**: Custom tariff engine for their domain
+- **Tenant B**: Integration with their existing pricing system
+- **Complex assets**: QuantLib wrapper, Monte Carlo, etc.
 
-### Handling Unreliable Telemetry
+### Handling Telemetry Complexity
 
-The type system supports the complexity of real-world data ingestion:
+For assets with complex ingestion requirements, `TimestampedQuantity` captures metadata:
 
 ```go
 // TimestampedQuantity wraps Quantity with measurement metadata
 type TimestampedQuantity[U Unit] struct {
     Quantity[U]
-    MeasuredAt   time.Time     // When the meter reading was taken
+    MeasuredAt   time.Time     // When the reading was taken
     ReceivedAt   time.Time     // When we received it (may differ)
     SourceID     string        // Meter/sensor identifier
     IsEstimate   bool          // Estimated vs actual reading
@@ -351,9 +326,11 @@ type TimestampedQuantity[U Unit] struct {
 // Position Keeping handles:
 // - Out-of-order: Sort by MeasuredAt, not ReceivedAt
 // - Duplicates: Dedupe by SourceID + MeasuredAt
-// - Gaps: Detect missing settlement periods, flag for estimation
+// - Gaps: Detect missing periods, flag for estimation
 // - Corrections: SupersedesID links actual to estimated readings
 ```
+
+This is optional complexity - fiat positions don't need it.
 
 ### Migration Strategy
 
@@ -381,9 +358,8 @@ Phase 4: Remove legacy types once all services migrated
 * **Compile-time unit safety**: Cannot add GBP to kWh - caught by compiler
 * **Single source of truth**: One Quantity implementation across all services
 * **Extensible**: New asset types add Unit implementation only - no core changes
-* **Pluggable valuation**: Complex pricing logic isolated in specialized engines
-* **Temporal pricing**: Rate type models time-varying valuations naturally
-* **Telemetry-ready**: TimestampedQuantity handles real-world data complexity
+* **Pluggable valuation**: Complex pricing logic isolated in tenant-specific providers
+* **Clean abstraction**: Position Keeping is asset-agnostic; Valuation is the plugin point
 * **Zero runtime overhead**: Go monomorphizes generics - no interface dispatch
 
 ## Negative Consequences
@@ -391,7 +367,6 @@ Phase 4: Remove legacy types once all services migrated
 * **Learning curve**: Team must understand Go generics (introduced Go 1.18)
 * **Migration effort**: Three existing Money implementations to converge
 * **Proto complexity**: Protocol Buffers don't support generics - need separate messages
-* **Valuation complexity**: Each asset class needs its own pricing engine
 
 ## Pros and Cons of the Options
 
@@ -453,45 +428,21 @@ message MoneyAmount {
   string currency = 2;    // ISO 4217 code
 }
 
-message EnergyAmount {
-  string amount = 1;
-  string unit = 2;        // "kWh", "MWh"
-  google.protobuf.Timestamp measured_at = 3;
-  bool is_estimate = 4;
-}
-
-message ComputeAmount {
-  string amount = 1;
-  string unit = 2;        // "GPU-hr", "CPU-hr"
-  string resource_id = 3; // Which GPU/cluster
-}
+// Tenant-specific proto messages for their unit types
+// defined in their own proto packages
 ```
 
-### Future: The Valuation Engine (Task 10)
+### The Valuation Engine (Task 10)
 
 This ADR enables the pluggable valuation architecture:
 
-1. **Position Keeping** tracks `Quantity[U]` - usage in native units
-2. **Market Information** provides `Rate[U, Currency]` - time-varying prices
-3. **Valuation Engine** routes to appropriate provider based on asset class
-4. **Financial Accounting** records `Quantity[Currency]` - settled values
+1. **Position Keeping** tracks `Quantity[U]` - amounts in native units
+2. **Valuation Engine** routes to appropriate provider based on asset class
+3. **Financial Accounting** records `Quantity[Currency]` - settled values
 
-The valuation engine doesn't know Black-Scholes or tariff curves. It knows routing.
-Each asset class plugs in its own pricing logic via the `ValuationProvider` interface.
-
-### Design Considerations for Complex Domains
-
-**Energy**: Half-hourly settlement periods, estimated vs actual readings, carbon intensity
-multipliers, reactive power charges, grid balancing costs.
-
-**Compute**: Spot vs reserved pricing, preemption credits, multi-region arbitrage,
-sustained use discounts, committed use contracts.
-
-**Derivatives**: Greeks calculation (Δ, Θ, Γ, ν, ρ), implied volatility surfaces,
-Monte Carlo simulations, regulatory capital requirements.
-
-The type system provides the foundation. Domain-specific complexity lives in the
-valuation providers, not the ledger.
+For fiat, step 2 is identity (or skipped entirely). For everything else, it's where
+domain complexity lives - but that complexity is encapsulated in valuation providers,
+not spread through the ledger.
 
 ### Reconsidering This Decision
 
