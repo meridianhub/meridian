@@ -40,7 +40,13 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
 
-// Save creates or updates an account with optimistic locking
+// Save creates or updates an account.
+//
+// NOTE: Optimistic locking via version column is NOT currently implemented because
+// the migration schema doesn't include a version column. The previous code referenced
+// a non-existent 'version' column which would have failed at runtime.
+// TODO: Add version column migration and restore optimistic locking (see ADR-008)
+// For now, use FindByIDForUpdate() with SELECT FOR UPDATE for concurrent modifications.
 func (r *Repository) Save(account *domain.CurrentAccount) error {
 	entity, err := toEntity(account)
 	if err != nil {
