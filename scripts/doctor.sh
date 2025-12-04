@@ -137,6 +137,9 @@ get_version() {
         protoc)
             version=$(protoc --version 2>/dev/null | awk '{print $2}')
             ;;
+        grpcurl)
+            version=$(grpcurl --version 2>&1 | head -1 | awk '{print $2}')
+            ;;
         make)
             version=$(make --version 2>/dev/null | head -1 | awk '{print $3}')
             ;;
@@ -171,6 +174,7 @@ get_install_cmd() {
         macos-tilt) echo "brew install tilt-dev/tap/tilt" ;;
         macos-buf) echo "brew install bufbuild/buf/buf" ;;
         macos-protoc) echo "brew install protobuf" ;;
+        macos-grpcurl) echo "brew install grpcurl" ;;
         macos-golangci-lint) echo "brew install golangci-lint" ;;
         macos-node) echo "brew install node" ;;
 
@@ -184,6 +188,7 @@ get_install_cmd() {
         linux-tilt) echo "curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash" ;;
         linux-buf) echo "go install github.com/bufbuild/buf/cmd/buf@latest" ;;
         linux-protoc) echo "sudo ${PKG_MANAGER} install -y protobuf-compiler" ;;
+        linux-grpcurl) echo "go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest" ;;
         linux-golangci-lint) echo "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b \$(go env GOPATH)/bin" ;;
         linux-node) echo "sudo ${PKG_MANAGER} install -y nodejs npm" ;;
 
@@ -644,6 +649,9 @@ check_tool "buf" "1.x+"
 echo ""
 
 check_tool "protoc" "3.x+"
+echo ""
+
+check_tool "grpcurl" ""
 echo ""
 
 # Code Quality
