@@ -264,6 +264,35 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 	assert.Equal(t, entity.Currency, retrieved.Currency)
 	assert.Equal(t, entity.Status, retrieved.Status)
 	assert.Equal(t, entity.PaymentOrderReference, retrieved.PaymentOrderReference)
+
+	// Update - verify status transitions work (ACTIVE -> EXECUTED)
+	retrieved.Status = "EXECUTED"
+	retrieved.UpdatedAt = time.Now()
+	err = db.Save(&retrieved).Error
+	if err != nil {
+		t.Fatalf("Failed to update LienEntity - schema mismatch detected: %v", err)
+	}
+
+	// Verify update persisted
+	var updated capersistence.LienEntity
+	err = db.First(&updated, "id = ?", entity.ID).Error
+	require.NoError(t, err)
+	assert.Equal(t, "EXECUTED", updated.Status)
+
+	// Constraint validation: amount_cents must be > 0
+	invalidLien := &capersistence.LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             accountID,
+		AmountCents:           0, // Invalid: must be > 0
+		Currency:              "GBP",
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-LIEN-TEST-002",
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		Version:               1,
+	}
+	err = db.Create(invalidLien).Error
+	assert.Error(t, err, "Expected error for amount_cents <= 0 constraint violation")
 }
 
 // testCurrentAccountEntity tests that CurrentAccountEntity works with the migrated schema
