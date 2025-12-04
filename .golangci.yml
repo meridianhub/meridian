@@ -25,7 +25,9 @@ linters:
     - goconst        # Repeated strings that could be constants
     - gocognit       # Cognitive complexity
     - unconvert      # Remove unnecessary type conversions
-    - unparam        # Unused function parameters
+    # - unparam      # Disabled: panics on Go generics with type constraints (e.g., ~string)
+    #                # See: https://github.com/golangci/golangci-lint/issues/5254
+    #                # revive's unused-parameter rule provides similar coverage
     - nakedret       # Naked returns in long functions
     - prealloc       # Slice preallocation
     - nilerr         # Check for nil error returns
@@ -67,6 +69,8 @@ linters:
           - gocritic         # Style checks less critical in tests
           - nilnil           # Tests may use (nil, nil) for mock implementations
           - govet            # unusedwrite and nilness checks too strict for test scaffolding
+          - err113           # Direct error comparison acceptable in tests for cleaner assertions
+          - errorlint        # Error wrapping checks too strict for test assertions
 
       # Exclude linters for testdb package (test support utilities)
       - path: internal/platform/testdb/
@@ -105,12 +109,6 @@ linters:
         linters:
           - gocyclo
           - gocognit
-
-      # Exclude unparam for ledger package (unparam panics on Go generics with type constraints)
-      # See: https://github.com/golangci/golangci-lint/issues/5254
-      - path: pkg/platform/ledger/.*\.go
-        linters:
-          - unparam
 
       # Exclude all linters for integration tests (require external services)
       - path: test/integration/
