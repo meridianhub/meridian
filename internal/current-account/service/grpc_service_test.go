@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/internal/current-account/adapters/persistence"
@@ -74,7 +75,7 @@ func TestExecuteDeposit(t *testing.T) {
 	svc := NewService(repo, nil)
 
 	// Create account first
-	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
@@ -162,7 +163,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	svc := NewService(repo, nil)
 
 	// Create account first
-	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
@@ -203,7 +204,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	svc := NewService(repo, nil)
 
 	// Create account first
-	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
@@ -289,7 +290,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	svc := NewService(repo, nil)
 
 	// Create GBP account
-	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
 	if err := repo.Save(account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
@@ -428,7 +429,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 	svc := NewService(repo, nil)
 
 	// Create account
-	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(account))
 
@@ -493,7 +494,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	svc := NewService(repo, nil)
 
 	// Create account
-	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(account))
 

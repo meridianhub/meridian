@@ -27,7 +27,9 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, func()) {
 
 func createTestAccountWithBalance(t *testing.T, repo *persistence.Repository, accountID string, balanceCents int64) *domain.CurrentAccount {
 	t.Helper()
-	account, err := domain.NewCurrentAccount(accountID, "GB82WEST12345698765432", "CUST-001", "GBP")
+	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
+	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
+	account, err := domain.NewCurrentAccount(accountID, accountID, uuid.New().String(), "GBP")
 	require.NoError(t, err)
 
 	if balanceCents > 0 {
