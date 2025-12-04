@@ -174,7 +174,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 }
 
 // InitiateCurrentAccount creates a new current account facility
-func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurrentAccountRequest) (*pb.InitiateCurrentAccountResponse, error) {
+func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCurrentAccountRequest) (*pb.InitiateCurrentAccountResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
@@ -203,8 +203,8 @@ func (s *Service) InitiateCurrentAccount(_ context.Context, req *pb.InitiateCurr
 		return nil, status.Errorf(codes.InvalidArgument, "failed to create account: %v", err)
 	}
 
-	// Save to database
-	if err := s.repo.Save(account); err != nil {
+	// Save to database (context carries audit user info for created_by/updated_by fields)
+	if err := s.repo.Save(ctx, account); err != nil {
 		operationStatus = "save_failed"
 		return nil, status.Errorf(codes.Internal, "failed to create account: %v", err)
 	}
@@ -300,7 +300,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 			"account_id", account.AccountID,
 			"transaction_id", transactionID)
 
-		if err := s.repo.Save(account); err != nil {
+		if err := s.repo.Save(ctx, account); err != nil {
 			operationStatus = "save_failed"
 			return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
 		}
@@ -535,13 +535,13 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 	// Step 3: Save account to database (only after external services succeed)
 	saga.AddStep("save_account",
 		// Action: Persist the updated account balance
-		func(_ context.Context) error {
+		func(stepCtx context.Context) error {
 			s.logger.Info("executing save_account step",
 				"account_id", account.AccountID,
 				"transaction_id", transactionID,
 				"new_balance", account.Balance.AmountCents())
 
-			if err := s.repo.Save(account); err != nil {
+			if err := s.repo.Save(stepCtx, account); err != nil {
 				return fmt.Errorf("failed to save account: %w", err)
 			}
 

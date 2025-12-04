@@ -1,12 +1,14 @@
 package persistence
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/meridianhub/meridian/internal/platform/auth"
 	"github.com/meridianhub/meridian/internal/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +32,8 @@ func TestSaveNewAccount(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
 	require.NoError(t, err)
 
-	err = repo.Save(account)
+	ctx := context.Background()
+	err = repo.Save(ctx, account)
 	if err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
@@ -58,8 +61,10 @@ func TestSaveUpdateExisting(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
 	require.NoError(t, err)
 
+	ctx := context.Background()
+
 	// Save initial
-	if err := repo.Save(account); err != nil {
+	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Initial save failed: %v", err)
 	}
 
@@ -70,7 +75,7 @@ func TestSaveUpdateExisting(t *testing.T) {
 		t.Fatalf("Deposit failed: %v", err)
 	}
 
-	if err := repo.Save(account); err != nil {
+	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Update save failed: %v", err)
 	}
 
@@ -111,7 +116,8 @@ func TestFindByIBAN(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
 	require.NoError(t, err)
 
-	if err := repo.Save(account); err != nil {
+	ctx := context.Background()
+	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
@@ -142,10 +148,11 @@ func TestFindByCustomerID(t *testing.T) {
 	account2, err := domain.NewCurrentAccount(iban2, iban2, customerID, "EUR")
 	require.NoError(t, err)
 
-	if err := repo.Save(account1); err != nil {
+	ctx := context.Background()
+	if err := repo.Save(ctx, account1); err != nil {
 		t.Fatalf("Save account1 failed: %v", err)
 	}
-	if err := repo.Save(account2); err != nil {
+	if err := repo.Save(ctx, account2); err != nil {
 		t.Fatalf("Save account2 failed: %v", err)
 	}
 
@@ -170,7 +177,8 @@ func TestDeleteAccount(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
 	require.NoError(t, err)
 
-	if err := repo.Save(account); err != nil {
+	ctx := context.Background()
+	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
@@ -199,10 +207,12 @@ func TestOptimisticLocking(t *testing.T) {
 	customerID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
+	ctx := context.Background()
+
 	// Create initial account
 	account1, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(account1); err != nil {
+	if err := repo.Save(ctx, account1); err != nil {
 		t.Fatalf("Initial save failed: %v", err)
 	}
 
@@ -228,7 +238,7 @@ func TestOptimisticLocking(t *testing.T) {
 		t.Fatalf("Deposit failed: %v", err)
 	}
 
-	if err := repo.Save(account2); err != nil {
+	if err := repo.Save(ctx, account2); err != nil {
 		t.Fatalf("First save failed: %v", err)
 	}
 
@@ -238,7 +248,7 @@ func TestOptimisticLocking(t *testing.T) {
 		t.Fatalf("Deposit failed: %v", err)
 	}
 
-	err = repo.Save(account3)
+	err = repo.Save(ctx, account3)
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Errorf("Expected ErrVersionConflict, got %v", err)
 	}
@@ -380,4 +390,97 @@ func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
 
 	assert.Error(t, err, "FindByCustomerID should fail when any account is corrupted")
 	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
+}
+
+// Audit context tests
+
+func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	customerID := uuid.New().String()
+	iban := "GB82WEST12345698765432"
+
+	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	require.NoError(t, err)
+
+	// Create context with authenticated user
+	testUserID := "user-123"
+	ctx := context.WithValue(context.Background(), auth.UserIDContextKey, testUserID)
+
+	// Save new account
+	err = repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Verify audit fields were set from context
+	var entity CurrentAccountEntity
+	err = db.Where("account_identification = ?", iban).First(&entity).Error
+	require.NoError(t, err)
+
+	assert.Equal(t, testUserID, entity.CreatedBy, "created_by should be set from context")
+	assert.Equal(t, testUserID, entity.UpdatedBy, "updated_by should be set from context")
+}
+
+func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	customerID := uuid.New().String()
+	iban := "GB82WEST12345698765432"
+
+	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	require.NoError(t, err)
+
+	// Use empty context (no user)
+	ctx := context.Background()
+
+	// Save new account
+	err = repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Verify audit fields default to "system"
+	var entity CurrentAccountEntity
+	err = db.Where("account_identification = ?", iban).First(&entity).Error
+	require.NoError(t, err)
+
+	assert.Equal(t, "system", entity.CreatedBy, "created_by should default to 'system'")
+	assert.Equal(t, "system", entity.UpdatedBy, "updated_by should default to 'system'")
+}
+
+func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	customerID := uuid.New().String()
+	iban := "GB82WEST12345698765432"
+
+	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	require.NoError(t, err)
+
+	// Create with user1
+	user1 := "user-creator"
+	ctx1 := context.WithValue(context.Background(), auth.UserIDContextKey, user1)
+	err = repo.Save(ctx1, account)
+	require.NoError(t, err)
+
+	// Update with user2
+	user2 := "user-updater"
+	ctx2 := context.WithValue(context.Background(), auth.UserIDContextKey, user2)
+	depositMoney, _ := domain.NewMoney("GBP", 5000)
+	err = account.Deposit(depositMoney)
+	require.NoError(t, err)
+
+	err = repo.Save(ctx2, account)
+	require.NoError(t, err)
+
+	// Verify created_by preserved but updated_by changed
+	var entity CurrentAccountEntity
+	err = db.Where("account_identification = ?", iban).First(&entity).Error
+	require.NoError(t, err)
+
+	assert.Equal(t, user1, entity.CreatedBy, "created_by should be preserved from original creation")
+	assert.Equal(t, user2, entity.UpdatedBy, "updated_by should reflect the user who made the update")
 }

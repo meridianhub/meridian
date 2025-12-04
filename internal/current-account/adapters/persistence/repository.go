@@ -1,12 +1,14 @@
 package persistence
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/internal/current-account/domain"
+	"github.com/meridianhub/meridian/internal/platform/audit"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -41,21 +43,22 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 }
 
 // Save creates or updates an account.
+// The context is used to extract audit information (user ID) for the created_by/updated_by fields.
 //
 // NOTE: Optimistic locking via version column is NOT currently implemented because
 // the migration schema doesn't include a version column. The previous code referenced
 // a non-existent 'version' column which would have failed at runtime.
 // TODO: Add version column migration and restore optimistic locking (see ADR-008)
 // For now, use FindByIDForUpdate() with SELECT FOR UPDATE for concurrent modifications.
-func (r *Repository) Save(account *domain.CurrentAccount) error {
-	entity, err := toEntity(account)
+func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) error {
+	entity, err := toEntity(ctx, account)
 	if err != nil {
 		return err
 	}
 
 	// Check if exists by account_identification (IBAN)
 	var existing CurrentAccountEntity
-	result := r.db.Where("account_identification = ?", entity.AccountIdentification).First(&existing)
+	result := r.db.WithContext(ctx).Where("account_identification = ?", entity.AccountIdentification).First(&existing)
 
 	if result.Error == nil {
 		// Update existing
@@ -64,7 +67,7 @@ func (r *Repository) Save(account *domain.CurrentAccount) error {
 		entity.CreatedBy = existing.CreatedBy
 
 		// Use WHERE clause for atomic update
-		updateResult := r.db.Model(&CurrentAccountEntity{}).
+		updateResult := r.db.WithContext(ctx).Model(&CurrentAccountEntity{}).
 			Where("account_identification = ?", entity.AccountIdentification).
 			Updates(map[string]interface{}{
 				"balance":           entity.Balance,
@@ -84,7 +87,7 @@ func (r *Repository) Save(account *domain.CurrentAccount) error {
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		// Create new
-		return r.db.Create(&entity).Error
+		return r.db.WithContext(ctx).Create(&entity).Error
 	}
 
 	return result.Error
@@ -216,12 +219,15 @@ func (r *Repository) Ping() error {
 // Some domain fields don't have corresponding database columns yet:
 // - AccountID and AccountIdentification both map to account_identification column (IBAN format)
 // - OverdraftEnabled, OverdraftRate, BalanceUpdatedAt, Version need migration
-func toEntity(account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
+func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
 	// Parse CustomerID as UUID - domain model uses string for flexibility
 	customerUUID, err := uuid.Parse(account.CustomerID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid customer ID %q: %w", account.CustomerID, err)
 	}
+
+	// Extract audit user from context (falls back to "system" if not available)
+	auditUser := audit.GetUserFromContext(ctx)
 
 	return &CurrentAccountEntity{
 		ID:                    account.ID,
@@ -236,8 +242,8 @@ func toEntity(account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
 		OverdraftLimit:        account.OverdraftLimit.AmountCents(),
 		CreatedAt:             account.CreatedAt,
 		UpdatedAt:             account.UpdatedAt,
-		CreatedBy:             "system", // TODO: Extract from context
-		UpdatedBy:             "system", // TODO: Extract from context
+		CreatedBy:             auditUser,
+		UpdatedBy:             auditUser,
 	}, nil
 }
 

@@ -38,7 +38,7 @@ func createTestAccountWithBalance(t *testing.T, repo *persistence.Repository, ac
 		require.NoError(t, account.Deposit(depositAmount))
 	}
 
-	require.NoError(t, repo.Save(account))
+	require.NoError(t, repo.Save(context.Background(), account))
 	return account
 }
 
