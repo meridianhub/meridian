@@ -93,7 +93,8 @@ func TestTenantID_SchemaName(t *testing.T) {
 	}{
 		{"acme_bank", "tenant_acme_bank"},
 		{"bank123", "tenant_bank123"},
-		{"ABC", "tenant_ABC"},
+		{"ABC", "tenant_abc"}, // normalized to lowercase for PostgreSQL
+		{"AcmeBank", "tenant_acmebank"},
 	}
 
 	for _, tt := range tests {
@@ -140,6 +141,17 @@ func TestFromContext_Missing(t *testing.T) {
 	}
 	if !tid.IsEmpty() {
 		t.Errorf("FromContext returned non-empty TenantID %q for context without tenant", tid)
+	}
+}
+
+func TestFromContext_NilContext(t *testing.T) {
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
+	tid, ok := tenancy.FromContext(nil)
+	if ok {
+		t.Error("FromContext returned ok=true for nil context")
+	}
+	if !tid.IsEmpty() {
+		t.Errorf("FromContext returned non-empty TenantID %q for nil context", tid)
 	}
 }
 

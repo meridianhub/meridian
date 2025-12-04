@@ -15,7 +15,11 @@ func WithTenant(ctx context.Context, tenantID TenantID) context.Context {
 
 // FromContext extracts the tenant ID from the context.
 // Returns the tenant ID and true if present, or an empty tenant ID and false if not.
+// Returns (empty, false) if ctx is nil.
 func FromContext(ctx context.Context) (TenantID, bool) {
+	if ctx == nil {
+		return "", false
+	}
 	tenant, ok := ctx.Value(tenantContextKey).(TenantID)
 	return tenant, ok
 }

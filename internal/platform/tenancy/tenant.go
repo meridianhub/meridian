@@ -1,6 +1,9 @@
 package tenancy
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // tenantIDPattern matches alphanumeric characters and underscores, 1-50 chars.
 var tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_]{1,50}$`)
@@ -35,9 +38,10 @@ func (t TenantID) String() string {
 }
 
 // SchemaName returns the PostgreSQL schema name for this tenant.
-// Uses the convention "tenant_" + tenant ID.
+// Uses the convention "tenant_" + lowercase(tenant ID).
+// Normalized to lowercase to match PostgreSQL's identifier case folding behavior.
 func (t TenantID) SchemaName() string {
-	return "tenant_" + string(t)
+	return "tenant_" + strings.ToLower(string(t))
 }
 
 // IsEmpty returns true if the tenant ID is empty.
