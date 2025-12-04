@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/meridianhub/meridian/internal/platform/tenancy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -175,6 +176,102 @@ func TestClaims_GetUserID(t *testing.T) {
 	})
 }
 
+func TestClaims_GetTenantID(t *testing.T) {
+	t.Run("returns tenant ID when valid", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme_bank"}
+		tenantID, err := claims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID("acme_bank"), tenantID)
+	})
+
+	t.Run("returns error when tenant claim missing", func(t *testing.T) {
+		claims := &Claims{UserID: "user-123"}
+		tenantID, err := claims.GetTenantID()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrTenantClaimMissing)
+		assert.Equal(t, tenancy.TenantID(""), tenantID)
+	})
+
+	t.Run("returns error when tenant claim empty", func(t *testing.T) {
+		claims := &Claims{TenantID: ""}
+		tenantID, err := claims.GetTenantID()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrTenantClaimMissing)
+		assert.Equal(t, tenancy.TenantID(""), tenantID)
+	})
+
+	t.Run("returns error for invalid format with spaces", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme bank"}
+		tenantID, err := claims.GetTenantID()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tenancy.ErrInvalidTenantID)
+		assert.Equal(t, tenancy.TenantID(""), tenantID)
+	})
+
+	t.Run("returns error for invalid format with special chars", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme-bank!"}
+		tenantID, err := claims.GetTenantID()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tenancy.ErrInvalidTenantID)
+		assert.Equal(t, tenancy.TenantID(""), tenantID)
+	})
+
+	t.Run("accepts valid tenant IDs with underscores", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme_bank_corp"}
+		tenantID, err := claims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID("acme_bank_corp"), tenantID)
+	})
+
+	t.Run("accepts valid tenant IDs with numbers", func(t *testing.T) {
+		claims := &Claims{TenantID: "bank123"}
+		tenantID, err := claims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID("bank123"), tenantID)
+	})
+
+	t.Run("accepts single character tenant ID (min length)", func(t *testing.T) {
+		claims := &Claims{TenantID: "a"}
+		tenantID, err := claims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID("a"), tenantID)
+	})
+
+	t.Run("accepts 50 character tenant ID (max length)", func(t *testing.T) {
+		maxLengthID := "a1234567890123456789012345678901234567890123456789"
+		claims := &Claims{TenantID: maxLengthID}
+		tenantID, err := claims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID(maxLengthID), tenantID)
+	})
+
+	t.Run("rejects 51 character tenant ID (exceeds max length)", func(t *testing.T) {
+		tooLongID := "a12345678901234567890123456789012345678901234567890"
+		claims := &Claims{TenantID: tooLongID}
+		tenantID, err := claims.GetTenantID()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tenancy.ErrInvalidTenantID)
+		assert.Equal(t, tenancy.TenantID(""), tenantID)
+	})
+}
+
+func TestClaims_HasTenantID(t *testing.T) {
+	t.Run("returns true when tenant ID is present", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme_bank"}
+		assert.True(t, claims.HasTenantID())
+	})
+
+	t.Run("returns false when tenant ID is empty", func(t *testing.T) {
+		claims := &Claims{TenantID: ""}
+		assert.False(t, claims.HasTenantID())
+	})
+
+	t.Run("returns false when tenant ID is not set", func(t *testing.T) {
+		claims := &Claims{UserID: "user-123"}
+		assert.False(t, claims.HasTenantID())
+	})
+}
+
 func TestClaims_GetRoles(t *testing.T) {
 	t.Run("returns roles when present", func(t *testing.T) {
 		claims := &Claims{Roles: []string{"admin", "user"}}
@@ -317,9 +414,10 @@ func TestClaims_EdgeCases(t *testing.T) {
 
 	t.Run("claims with all fields populated", func(t *testing.T) {
 		claims := &Claims{
-			UserID: "user-123",
-			Roles:  []string{"admin"},
-			Scopes: []string{"read"},
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			Scopes:   []string{"read"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 				IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -330,10 +428,73 @@ func TestClaims_EdgeCases(t *testing.T) {
 			},
 		}
 		assert.Equal(t, "user-123", claims.GetUserID())
+		tenantID, err := claims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID("acme_bank"), tenantID)
 		assert.Equal(t, []string{"admin"}, claims.GetRoles())
 		assert.Equal(t, []string{"read"}, claims.GetScopes())
 		assert.False(t, claims.IsExpired())
 		assert.Equal(t, "test-issuer", claims.Issuer)
 		assert.Equal(t, "test-subject", claims.Subject)
+	})
+}
+
+func TestValidateToken_WithTenantClaim(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	validator, err := NewJWTValidator(publicKey)
+	require.NoError(t, err)
+
+	t.Run("extracts tenant claim from valid JWT", func(t *testing.T) {
+		claims := &Claims{
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			Scopes:   []string{"read", "write"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
+		}
+
+		tokenString, err := createTestToken(privateKey, claims)
+		require.NoError(t, err)
+
+		extractedClaims, err := validator.ValidateToken(tokenString)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, extractedClaims)
+		assert.Equal(t, "user-123", extractedClaims.UserID)
+		assert.Equal(t, "acme_bank", extractedClaims.TenantID)
+
+		tenantID, err := extractedClaims.GetTenantID()
+		assert.NoError(t, err)
+		assert.Equal(t, tenancy.TenantID("acme_bank"), tenantID)
+	})
+
+	t.Run("backward compatibility - tokens without tenant claim still validate", func(t *testing.T) {
+		claims := &Claims{
+			UserID: "user-123",
+			Roles:  []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
+		}
+
+		tokenString, err := createTestToken(privateKey, claims)
+		require.NoError(t, err)
+
+		extractedClaims, err := validator.ValidateToken(tokenString)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, extractedClaims)
+		assert.Equal(t, "user-123", extractedClaims.UserID)
+		assert.Equal(t, "", extractedClaims.TenantID)
+
+		_, err = extractedClaims.GetTenantID()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrTenantClaimMissing)
 	})
 }
