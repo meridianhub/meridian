@@ -414,7 +414,6 @@ Phase 4: Remove legacy types once all services migrated
 * [Go Generics Tutorial](https://go.dev/doc/tutorial/generics) - Official documentation
 * [shopspring/decimal](https://github.com/shopspring/decimal) - Precise decimal arithmetic
 * [samber/mo](https://github.com/samber/mo) - Option/Result types (PR #189)
-* Task Master: `go-compile-time-safety` tag, Task #6
 
 ## Notes
 
@@ -432,7 +431,7 @@ message MoneyAmount {
 // defined in their own proto packages
 ```
 
-### The Valuation Engine (Task 10)
+### The Valuation Engine
 
 This ADR enables the pluggable valuation architecture:
 
