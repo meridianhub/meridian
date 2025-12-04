@@ -34,13 +34,14 @@ Today, Meridian tracks fiat currency. The valuation function is trivial: £1 = �
 But the architecture we've built - Position Keeping, Financial Accounting, Sagas, audit trails -
 applies to *any* quantifiable asset. The only thing that changes is the **valuation function**:
 
-| Asset Type | Position (Native Unit) | Valuation Function | Settlement |
-|------------|----------------------|-------------------|------------|
-| Fiat | £100.00 | Identity (1:1) | £100.00 |
+| Asset Type | Position (Native Unit) | Valuation Function | Settlement (GBP) |
+|------------|----------------------|-------------------|------------------|
+| Same-currency Fiat | £100.00 | Identity (1:1) | £100.00 |
+| Cross-currency Fiat | $100.00 | FX Rate @ Timestamp | £79.00 |
 | Energy | 150 kWh | Tariff × Time-of-Use | £52.50 |
-| Compute | 10 GPU-hours | Spot Price × Region | $25.00 |
-| Inventory | 500 kg Rice | Market Price × Quality | €875.00 |
-| Carbon | 50 tCO2e | Exchange Price × Vintage | €2,750.00 |
+| Compute | 10 GPU-hours | Spot Price × Region | £19.75 |
+| Inventory | 500 kg Rice | Market Price × Quality | £875.00 |
+| Carbon | 50 tCO2e | Exchange Price × Vintage | £2,750.00 |
 
 **Position Keeping is asset-agnostic. Valuation is where complexity lives.**
 
@@ -268,10 +269,15 @@ flowchart TB
     VAL -->|"Valued Position"| FA
 ```
 
-**For fiat currency**: Valuation is the identity function. Position = Settlement.
+**For same-currency fiat**: Valuation is the identity function. £100 GBP = £100 GBP.
 
-**For everything else**: Valuation is where the domain complexity lives. The ledger
-doesn't need to understand it - just route to the right provider.
+**For cross-currency fiat**: Valuation requires FX rate lookup at a specific timestamp.
+$100 USD → £X GBP depends on the exchange rate at valuation time. This is temporal
+pricing, just like energy tariffs - the FX provider is simply another ValuationProvider.
+
+**For non-fiat assets**: Valuation routes to specialized providers (tariff engines,
+market data feeds, custom tenant logic). The ledger doesn't implement the math -
+it just routes to the right provider based on asset class.
 
 ### Why Dimensions, Not Specific Types?
 
