@@ -1,0 +1,64 @@
+name: Schema Validation
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'migrations/**'
+      - 'internal/*/adapters/persistence/*_entity.go'
+      - 'internal/domain/models/**'
+      - 'cmd/atlas-loader/**'
+      - 'atlas*.hcl'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'migrations/**'
+      - 'internal/*/adapters/persistence/*_entity.go'
+      - 'internal/domain/models/**'
+      - 'cmd/atlas-loader/**'
+      - 'atlas*.hcl'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-schema:
+    name: Validate Migrations Match Entities
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Run schema validation tests
+        run: |
+          echo "Running schema validation tests..."
+          echo "This test validates that SQL migrations produce a schema compatible with GORM entities."
+          echo ""
+          go test -v -run TestMigrationsMatchEntities ./internal/platform/testdb/
+        timeout-minutes: 10
+
+      - name: Report schema mismatches
+        if: failure()
+        run: |
+          echo "::error::Schema validation failed. This means there is a mismatch between:"
+          echo "::error::  - SQL migrations in migrations/*/*.sql"
+          echo "::error::  - GORM entities in internal/*/adapters/persistence/*_entity.go"
+          echo "::error::"
+          echo "::error::Common causes:"
+          echo "::error::  1. Entity column names don't match migration column names"
+          echo "::error::  2. Entity field types don't match migration column types"
+          echo "::error::  3. Missing columns in migrations that entities expect"
+          echo "::error::  4. Check constraints that entity values violate"
+          echo "::error::"
+          echo "::error::To fix:"
+          echo "::error::  - Review the test output above for specific errors"
+          echo "::error::  - Either update the entity to match the migration schema"
+          echo "::error::  - Or create a new migration to add missing columns"
+          exit 1

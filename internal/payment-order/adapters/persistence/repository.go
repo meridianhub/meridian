@@ -317,7 +317,7 @@ func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentO
 
 // toEntity converts domain model to database entity
 func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
-	return &PaymentOrderEntity{
+	entity := &PaymentOrderEntity{
 		ID:                    po.ID,
 		DebtorAccountID:       po.DebtorAccountID,
 		CreditorReference:     po.CreditorReference,
@@ -332,9 +332,7 @@ func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
 		IdempotencyKey:        po.IdempotencyKey,
 		FailureReason:         po.FailureReason,
 		ErrorCode:             po.ErrorCode,
-		LienExecutionStatus:   string(po.LienExecutionStatus),
 		LienExecutionAttempts: po.LienExecutionAttempts,
-		LienExecutionError:    po.LienExecutionError,
 		Version:               po.Version,
 		CreatedAt:             po.CreatedAt,
 		UpdatedAt:             po.UpdatedAt,
@@ -345,6 +343,17 @@ func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
 		CancelledAt:           po.CancelledAt,
 		ReversedAt:            po.ReversedAt,
 	}
+
+	// Handle nullable string fields
+	if po.LienExecutionStatus != "" {
+		status := string(po.LienExecutionStatus)
+		entity.LienExecutionStatus = &status
+	}
+	if po.LienExecutionError != "" {
+		entity.LienExecutionError = &po.LienExecutionError
+	}
+
+	return entity
 }
 
 // toDomain converts database entity to domain model
@@ -352,6 +361,17 @@ func toDomain(entity *PaymentOrderEntity) (*domain.PaymentOrder, error) {
 	amount, err := cadomain.NewMoney(entity.Currency, entity.AmountCents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment order amount from database: %w", err)
+	}
+
+	// Handle nullable string fields from database
+	var lienExecutionStatus domain.LienExecutionStatus
+	if entity.LienExecutionStatus != nil {
+		lienExecutionStatus = domain.LienExecutionStatus(*entity.LienExecutionStatus)
+	}
+
+	var lienExecutionError string
+	if entity.LienExecutionError != nil {
+		lienExecutionError = *entity.LienExecutionError
 	}
 
 	return &domain.PaymentOrder{
@@ -368,9 +388,9 @@ func toDomain(entity *PaymentOrderEntity) (*domain.PaymentOrder, error) {
 		IdempotencyKey:        entity.IdempotencyKey,
 		FailureReason:         entity.FailureReason,
 		ErrorCode:             entity.ErrorCode,
-		LienExecutionStatus:   domain.LienExecutionStatus(entity.LienExecutionStatus),
+		LienExecutionStatus:   lienExecutionStatus,
 		LienExecutionAttempts: entity.LienExecutionAttempts,
-		LienExecutionError:    entity.LienExecutionError,
+		LienExecutionError:    lienExecutionError,
 		Version:               entity.Version,
 		CreatedAt:             entity.CreatedAt,
 		UpdatedAt:             entity.UpdatedAt,

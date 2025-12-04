@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
@@ -227,7 +228,9 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, func()) {
 
 func createTestAccount(t *testing.T, repo *persistence.Repository, accountID string) *domain.CurrentAccount {
 	t.Helper()
-	account, err := domain.NewCurrentAccount(accountID, "GB82WEST12345698765432", "CUST-001", "GBP")
+	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
+	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
+	account, err := domain.NewCurrentAccount(accountID, accountID, uuid.New().String(), "GBP")
 	require.NoError(t, err, "Failed to create test account")
 	require.NoError(t, repo.Save(account), "Failed to save test account")
 	return account

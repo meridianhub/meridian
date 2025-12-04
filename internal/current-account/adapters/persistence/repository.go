@@ -40,53 +40,44 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
 
-// Save creates or updates an account with optimistic locking
+// Save creates or updates an account.
+//
+// NOTE: Optimistic locking via version column is NOT currently implemented because
+// the migration schema doesn't include a version column. The previous code referenced
+// a non-existent 'version' column which would have failed at runtime.
+// TODO: Add version column migration and restore optimistic locking (see ADR-008)
+// For now, use FindByIDForUpdate() with SELECT FOR UPDATE for concurrent modifications.
 func (r *Repository) Save(account *domain.CurrentAccount) error {
-	entity := toEntity(account)
+	entity, err := toEntity(account)
+	if err != nil {
+		return err
+	}
 
-	// Check if exists
+	// Check if exists by account_identification (IBAN)
 	var existing CurrentAccountEntity
-	result := r.db.Where("account_id = ?", entity.AccountID).First(&existing)
+	result := r.db.Where("account_identification = ?", entity.AccountIdentification).First(&existing)
 
 	if result.Error == nil {
-		// Update existing with optimistic locking check
+		// Update existing
 		entity.ID = existing.ID
 		entity.CreatedAt = existing.CreatedAt
+		entity.CreatedBy = existing.CreatedBy
 
-		// Optimistic locking: Check version hasn't changed
-		if account.Version != existing.Version {
-			return ErrVersionConflict
-		}
-
-		// Increment version for update
-		newVersion := existing.Version + 1
-
-		// Use WHERE clause with version check for atomic update
+		// Use WHERE clause for atomic update
 		updateResult := r.db.Model(&CurrentAccountEntity{}).
-			Where("account_id = ? AND version = ?", entity.AccountID, existing.Version).
+			Where("account_identification = ?", entity.AccountIdentification).
 			Updates(map[string]interface{}{
-				"balance_cents":           entity.BalanceCents,
-				"available_balance_cents": entity.AvailableBalanceCents,
-				"status":                  entity.Status,
-				"overdraft_limit_cents":   entity.OverdraftLimitCents,
-				"overdraft_enabled":       entity.OverdraftEnabled,
-				"overdraft_rate":          entity.OverdraftRate,
-				"balance_updated_at":      entity.BalanceUpdatedAt,
-				"updated_at":              entity.UpdatedAt,
-				"version":                 newVersion,
+				"balance":           entity.Balance,
+				"available_balance": entity.AvailableBalance,
+				"status":            entity.Status,
+				"overdraft_limit":   entity.OverdraftLimit,
+				"updated_at":        entity.UpdatedAt,
+				"updated_by":        entity.UpdatedBy,
 			})
 
 		if updateResult.Error != nil {
 			return updateResult.Error
 		}
-
-		// Check if any rows were updated (version conflict)
-		if updateResult.RowsAffected == 0 {
-			return ErrVersionConflict
-		}
-
-		// Update domain model version
-		account.Version = newVersion
 
 		return nil
 	}
@@ -99,10 +90,10 @@ func (r *Repository) Save(account *domain.CurrentAccount) error {
 	return result.Error
 }
 
-// FindByID retrieves an account by its account ID
+// FindByID retrieves an account by its account identification (IBAN)
 func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
-	result := r.db.Where("account_id = ? AND deleted_at IS NULL", accountID).First(&entity)
+	result := r.db.Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrAccountNotFound
@@ -115,12 +106,12 @@ func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) 
 	return toDomain(&entity)
 }
 
-// FindByIDForUpdate retrieves an account by its account ID with a pessimistic lock.
+// FindByIDForUpdate retrieves an account by its account identification with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
 func (r *Repository) FindByIDForUpdate(accountID string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
 	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("account_id = ? AND deleted_at IS NULL", accountID).
+		Where("account_identification = ? AND deleted_at IS NULL", accountID).
 		First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -134,7 +125,7 @@ func (r *Repository) FindByIDForUpdate(accountID string) (*domain.CurrentAccount
 	return toDomain(&entity)
 }
 
-// FindByIBAN retrieves an account by its IBAN
+// FindByIBAN retrieves an account by its IBAN (stored in account_identification column)
 func (r *Repository) FindByIBAN(iban string) (*domain.CurrentAccount, error) {
 	var entity CurrentAccountEntity
 	result := r.db.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
@@ -209,7 +200,7 @@ func (r *Repository) FindByCustomerID(customerID string) ([]*domain.CurrentAccou
 // Delete soft deletes an account
 func (r *Repository) Delete(accountID string) error {
 	return r.db.Model(&CurrentAccountEntity{}).
-		Where("account_id = ?", accountID).
+		Where("account_identification = ?", accountID).
 		Update("deleted_at", time.Now()).Error
 }
 
@@ -221,57 +212,70 @@ func (r *Repository) Ping() error {
 }
 
 // toEntity converts domain model to database entity
-func toEntity(account *domain.CurrentAccount) *CurrentAccountEntity {
+// Note: The entity schema matches migrations/current_account/*.sql
+// Some domain fields don't have corresponding database columns yet:
+// - AccountID and AccountIdentification both map to account_identification column (IBAN format)
+// - OverdraftEnabled, OverdraftRate, BalanceUpdatedAt, Version need migration
+func toEntity(account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
+	// Parse CustomerID as UUID - domain model uses string for flexibility
+	customerUUID, err := uuid.Parse(account.CustomerID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid customer ID %q: %w", account.CustomerID, err)
+	}
+
 	return &CurrentAccountEntity{
 		ID:                    account.ID,
-		AccountID:             account.AccountID,
-		AccountIdentification: account.AccountIdentification,
-		CustomerID:            account.CustomerID,
-		BalanceCents:          account.Balance.AmountCents(),
-		AvailableBalanceCents: account.AvailableBalance.AmountCents(),
+		AccountID:             account.AccountID,             // Business account identifier
+		AccountIdentification: account.AccountIdentification, // IBAN stored in account_identification
+		AccountType:           "current",                     // Default for current accounts
 		Currency:              account.Balance.Currency(),
 		Status:                string(account.Status),
-		OverdraftLimitCents:   account.OverdraftLimit.AmountCents(),
-		OverdraftEnabled:      account.OverdraftEnabled,
-		OverdraftRate:         account.OverdraftRate,
-		BalanceUpdatedAt:      account.BalanceUpdatedAt,
+		CustomerID:            customerUUID,
+		Balance:               account.Balance.AmountCents(),
+		AvailableBalance:      account.AvailableBalance.AmountCents(),
+		OverdraftLimit:        account.OverdraftLimit.AmountCents(),
 		CreatedAt:             account.CreatedAt,
 		UpdatedAt:             account.UpdatedAt,
-		Version:               account.Version,
-	}
+		CreatedBy:             "system", // TODO: Extract from context
+		UpdatedBy:             "system", // TODO: Extract from context
+	}, nil
 }
 
 // toDomain converts database entity to domain model
+// Note: Some domain fields are derived or defaulted since they don't exist in DB yet
 func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 	// Use NewMoney constructor - errors indicate data corruption
-	balance, err := domain.NewMoney(entity.Currency, entity.BalanceCents)
+	balance, err := domain.NewMoney(entity.Currency, entity.Balance)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create balance from database: %w", err)
 	}
 
-	availableBalance, err := domain.NewMoney(entity.Currency, entity.AvailableBalanceCents)
+	availableBalance, err := domain.NewMoney(entity.Currency, entity.AvailableBalance)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create available balance from database: %w", err)
 	}
 
-	overdraftLimit, err := domain.NewMoney(entity.Currency, entity.OverdraftLimitCents)
+	overdraftLimit, err := domain.NewMoney(entity.Currency, entity.OverdraftLimit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create overdraft limit from database: %w", err)
 	}
 
+	// Derive overdraft enabled from limit > 0
+	overdraftEnabled := entity.OverdraftLimit > 0
+
 	return &domain.CurrentAccount{
 		ID:                    entity.ID,
-		AccountID:             entity.AccountID,
-		AccountIdentification: entity.AccountIdentification,
-		CustomerID:            entity.CustomerID,
+		AccountID:             entity.AccountID,             // Business account identifier
+		AccountIdentification: entity.AccountIdentification, // IBAN stored in account_identification
+		CustomerID:            entity.CustomerID.String(),
 		Balance:               balance,
 		AvailableBalance:      availableBalance,
 		Status:                domain.AccountStatus(entity.Status),
 		OverdraftLimit:        overdraftLimit,
-		OverdraftEnabled:      entity.OverdraftEnabled,
-		OverdraftRate:         entity.OverdraftRate,
-		BalanceUpdatedAt:      entity.BalanceUpdatedAt,
-		Version:               entity.Version,
+		OverdraftEnabled:      overdraftEnabled,
+		OverdraftRate:         0,                // Default - column doesn't exist in DB yet
+		BalanceUpdatedAt:      entity.UpdatedAt, // Use updated_at as proxy
+		Version:               1,                // Default - column doesn't exist in DB yet
 		CreatedAt:             entity.CreatedAt,
 		UpdatedAt:             entity.UpdatedAt,
 	}, nil
