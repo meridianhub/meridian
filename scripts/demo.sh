@@ -106,23 +106,40 @@ echo -e "${MAGENTA}║  Part 1: Health Checks & Service Readiness               
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-echo -e "${CYAN}► Checking CurrentAccount service health...${NC}"
-HEALTH=$(grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
-echo "$HEALTH" | jq '{service: "current-account", status: .status}'
+ALL_HEALTHY=true
 
-echo -e "\n${CYAN}► Checking PositionKeeping service health...${NC}"
-HEALTH=$(grpcurl -plaintext localhost:50053 grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
-echo "$HEALTH" | jq '{service: "position-keeping", status: .status}'
+check_health() {
+    local service=$1
+    local port=$2
+    echo -e "${CYAN}► Checking $service service health...${NC}"
+    local health
+    health=$(grpcurl -plaintext localhost:$port grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
+    local status
+    status=$(echo "$health" | jq -r '.status')
+    echo "$health" | jq "{service: \"$service\", status: .status}"
 
-echo -e "\n${CYAN}► Checking FinancialAccounting service health...${NC}"
-HEALTH=$(grpcurl -plaintext localhost:50052 grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
-echo "$HEALTH" | jq '{service: "financial-accounting", status: .status}'
+    if [ "$status" != "SERVING" ]; then
+        ALL_HEALTHY=false
+        if [ "$status" = "UNKNOWN" ]; then
+            echo -e "  ${YELLOW}⚠ Service not responding or health check unavailable${NC}"
+        else
+            echo -e "  ${RED}✗ Service not healthy: $status${NC}"
+        fi
+    fi
+    echo ""
+}
 
-echo -e "\n${CYAN}► Checking PaymentOrder service health...${NC}"
-HEALTH=$(grpcurl -plaintext localhost:50054 grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
-echo "$HEALTH" | jq '{service: "payment-order", status: .status}'
+check_health "current-account" 50051
+check_health "position-keeping" 50053
+check_health "financial-accounting" 50052
+check_health "payment-order" 50054
 
-echo -e "\n${GREEN}✓ All services healthy and ready${NC}\n"
+if [ "$ALL_HEALTHY" = true ]; then
+    echo -e "${GREEN}✓ All services healthy and ready${NC}\n"
+else
+    echo -e "${YELLOW}⚠ Some services are not fully healthy. Demo may have issues.${NC}"
+    echo -e "${YELLOW}  Consider waiting for services to start or check logs.${NC}\n"
+fi
 pause
 
 # ════════════════════════════════════════════════════════════════
