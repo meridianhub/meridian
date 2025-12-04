@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/meridianhub/meridian/internal/platform/tenancy"
 )
 
 var (
@@ -20,14 +21,17 @@ var (
 	ErrPublicKeyNil = errors.New("public key cannot be nil")
 	// ErrTokenStringEmpty is returned when an empty token string is provided
 	ErrTokenStringEmpty = errors.New("token string cannot be empty")
+	// ErrTenantClaimMissing is returned when the tenant ID claim is missing from the token
+	ErrTenantClaimMissing = errors.New("meridian_tenant_id claim missing")
 )
 
 // Claims represents the JWT claims extracted from a validated token.
 // It contains standard JWT claims plus custom claims for user identification and authorization.
 type Claims struct {
-	UserID string   `json:"user_id"`
-	Roles  []string `json:"roles"`
-	Scopes []string `json:"scopes"`
+	UserID   string   `json:"user_id"`
+	TenantID string   `json:"meridian_tenant_id"`
+	Roles    []string `json:"roles"`
+	Scopes   []string `json:"scopes"`
 	jwt.RegisteredClaims
 }
 
@@ -88,6 +92,16 @@ func (v *JWTValidator) ValidateToken(tokenString string) (*Claims, error) {
 // Returns an empty string if the user ID claim is not present.
 func (c *Claims) GetUserID() string {
 	return c.UserID
+}
+
+// GetTenantID extracts and validates the tenant ID from the claims.
+// Returns ErrTenantClaimMissing if the meridian_tenant_id claim is absent.
+// Returns tenancy.ErrInvalidTenantID if the format is invalid.
+func (c *Claims) GetTenantID() (tenancy.TenantID, error) {
+	if c.TenantID == "" {
+		return "", ErrTenantClaimMissing
+	}
+	return tenancy.NewTenantID(c.TenantID)
 }
 
 // GetRoles extracts the roles from the validated claims.
