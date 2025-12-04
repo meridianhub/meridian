@@ -2,13 +2,13 @@
 name: adr-013-generic-asset-quantity-types
 description: Generic Quantity[U] type system enabling multi-asset ledger with compile-time unit safety
 triggers:
-  - Extending the ledger to support non-fiat assets (kWh, GPU-hours, carbon credits)
+  - Extending the ledger to support non-fiat assets (loyalty points, tokens, credits)
   - Refactoring Money types across services
   - Implementing temporal pricing or valuation engines
   - Designing multi-asset portfolio or inventory systems
 instructions: |
-  Use Quantity[U] generic type where U is a unit type (Currency, EnergyUnit, ComputeUnit, etc.).
-  All arithmetic operations enforce compile-time unit matching - you cannot add GBP to kWh.
+  Use Quantity[U] generic type where U is a unit type (Currency, LoyaltyUnit, TokenUnit, etc.).
+  All arithmetic operations enforce compile-time unit matching - you cannot add GBP to loyalty points.
   Migrate existing Money types to Quantity[Currency] as the fiat specialization.
   New asset types implement the Unit interface and get type-safe quantities automatically.
 ---
@@ -24,8 +24,8 @@ Proposed
 ## Context
 
 Meridian is evolving from a "Production-Grade Open Banking Ledger" to a "Universal Asset Bank" - a platform
-capable of tracking not just fiat currency, but any quantifiable asset: energy (kWh), compute (GPU-hours),
-carbon credits, loyalty points, or cryptocurrency.
+capable of tracking not just fiat currency, but any quantifiable asset: loyalty points, air miles,
+carbon credits, compute (GPU-hours), or cryptocurrency.
 
 The current implementation has three independent `Money` structs across services:
 
@@ -39,14 +39,14 @@ This creates several problems:
 
 1. **Duplication**: Same logic repeated three times with subtle differences
 2. **Type safety gaps**: Nothing prevents adding GBP to USD at compile time - only runtime checks
-3. **Fiat-only**: The `Currency` type cannot represent kWh or GPU-hours without awkward extensions
+3. **Fiat-only**: The `Currency` type cannot represent loyalty points or air miles without awkward extensions
 4. **Inconsistent precision**: Some services use decimal, others use fixed-point integers
 
-The "Temporal Pricing Engine" roadmap requires:
+The "Universal Asset Bank" roadmap requires:
 
-- Tracking **usage** in native units (e.g., 150 kWh)
-- Applying **tariffs** from market data (e.g., £0.28/kWh at 14:00)
-- Producing **bills** in fiat currency (e.g., £42.00)
+- Tracking **balances** in native units (e.g., 15,000 loyalty points)
+- Applying **valuations** from market data (e.g., 100 points = £1.00)
+- Producing **statements** in fiat currency (e.g., £150.00 equivalent)
 
 This demands a type system that can safely handle multiple asset types and prevent unit mixing.
 
@@ -54,17 +54,17 @@ This demands a type system that can safely handle multiple asset types and preve
 
 * **Compile-time safety**: Catch unit mixing errors at build time, not runtime
 * **Asset agnosticism**: Support arbitrary asset types without modifying core libraries
-* **Precision flexibility**: Different assets need different precision (fiat: 2-4 decimals, crypto: 8+, energy: 3)
+* **Precision flexibility**: Different assets need different precision (fiat: 2-4 decimals, crypto: 8+, points: 0)
 * **Migration path**: Existing Money usage must migrate incrementally without big-bang refactor
 * **Performance**: Generic types should have zero runtime overhead (monomorphization)
 * **Go idioms**: Solution must feel natural to Go developers, not fight the language
 
 ## Considered Options
 
-1. **String-based units**: `Amount{Value: 100, Unit: "kWh"}` - runtime validation only
+1. **String-based units**: `Amount{Value: 100, Unit: "points"}` - runtime validation only
 2. **Interface-based polymorphism**: `type Asset interface { Unit() string }` - runtime dispatch
-3. **Generic Quantity[U] with unit constraints**: `Quantity[Currency]`, `Quantity[EnergyUnit]` - compile-time
-4. **Separate types per asset class**: `Money`, `Energy`, `Compute` - no shared abstraction
+3. **Generic Quantity[U] with unit constraints**: `Quantity[Currency]`, `Quantity[LoyaltyUnit]` - compile-time
+4. **Separate types per asset class**: `Money`, `Points`, `Tokens` - no shared abstraction
 
 ## Decision Outcome
 
@@ -75,9 +75,9 @@ modifying the core quantity library, and produces zero-overhead code through Go'
 ### Type Hierarchy
 
 The `Unit` interface is open for extension. Any type implementing `Unit` can be used with `Quantity[U]`.
-The examples below (Currency, EnergyUnit, ComputeUnit) are illustrative - the system supports arbitrary
-asset classes including loyalty points, air miles, water usage, bandwidth, storage, tokens, or any
-other quantifiable unit a tenant may need.
+The examples below (Currency, LoyaltyUnit) are illustrative - the system supports arbitrary
+asset classes including air miles, carbon credits, compute time, tokens, or any other quantifiable
+unit a tenant may need.
 
 ```
                          ┌─────────────────────┐
@@ -91,27 +91,25 @@ other quantifiable unit a tenant may need.
                     │              │              │
                     ▼              ▼              ▼
              ┌───────────┐  ┌───────────┐  ┌───────────┐
-             │ Currency  │  │EnergyUnit │  │    ...    │
+             │ Currency  │  │LoyaltyUnit│  │    ...    │
              │ (example) │  │ (example) │  │ (custom)  │
              └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
                    │              │              │
                    ▼              ▼              ▼
              ┌───────────┐  ┌───────────┐  ┌───────────┐
              │ Quantity  │  │ Quantity  │  │ Quantity  │
-             │[Currency] │  │[EnergyUnit│  │ [Custom]  │
-             │ = Money   │  │ = Energy  │  │           │
+             │[Currency] │  │[LoyaltyU..]│  │ [Custom]  │
+             │ = Money   │  │ = Points  │  │           │
              └───────────┘  └───────────┘  └───────────┘
 ```
 
 **Example unit types** (not exhaustive):
 - `Currency` - Fiat money (GBP, USD, EUR)
-- `EnergyUnit` - Power consumption (kWh, MWh, Therm)
-- `ComputeUnit` - Processing time (GPU-Hour, CPU-Hour)
-- `CarbonUnit` - Emissions (tCO2e, kgCO2e)
 - `LoyaltyUnit` - Points, miles, rewards
-- `StorageUnit` - Data (GB, TB)
-- `BandwidthUnit` - Transfer (Mbps, GB/month)
 - `TokenUnit` - Crypto or internal tokens
+- `CarbonUnit` - Emissions (tCO2e, kgCO2e)
+- `ComputeUnit` - Processing time (GPU-Hour, CPU-Hour)
+- `StorageUnit` - Data (GB, TB)
 - *...any custom unit a tenant defines*
 
 ### Core Types
@@ -120,11 +118,11 @@ other quantifiable unit a tenant may need.
 // Unit is the constraint interface for all quantity units.
 // Any type implementing Unit can be used with Quantity[U].
 type Unit interface {
-    // Symbol returns the unit identifier (e.g., "GBP", "kWh", "GPU-hr")
+    // Symbol returns the unit identifier (e.g., "GBP", "points", "miles")
     Symbol() string
 
     // Precision returns the number of decimal places for this unit.
-    // GBP: 2, BTC: 8, kWh: 3
+    // GBP: 2, BTC: 8, points: 0
     Precision() int
 }
 
@@ -141,15 +139,15 @@ type Currency struct {
     precision int    // 2 for most, 0 for JPY
 }
 
-// EnergyUnit implements Unit for energy measurements.
-type EnergyUnit struct {
-    symbol    string // "kWh", "MWh", "Therm"
-    precision int    // typically 3
+// LoyaltyUnit implements Unit for loyalty/rewards programs.
+type LoyaltyUnit struct {
+    symbol    string // "points", "miles", "stars"
+    precision int    // typically 0 (whole units)
 }
 
 // Type aliases for common domain usage
 type Money = Quantity[Currency]
-type Energy = Quantity[EnergyUnit]
+type Points = Quantity[LoyaltyUnit]
 ```
 
 ### Compile-Time Safety
@@ -161,14 +159,14 @@ usd := quantity.New(decimal.NewFromInt(50), currency.USD)
 sum, err := gbp.Add(gbp)  // OK: Quantity[Currency] + Quantity[Currency]
 
 // COMPILE ERROR: Different unit types
-kwh := quantity.New(decimal.NewFromInt(150), energy.KWH)
-invalid := gbp.Add(kwh)  // Error: cannot use Quantity[EnergyUnit] as Quantity[Currency]
+points := quantity.New(decimal.NewFromInt(5000), loyalty.Points)
+invalid := gbp.Add(points)  // Error: cannot use Quantity[LoyaltyUnit] as Quantity[Currency]
 
 // RUNTIME CHECK: Same type, different units (GBP vs USD)
 mixed, err := gbp.Add(usd)  // Returns ErrUnitMismatch
 ```
 
-The generic constraint catches type-level errors (adding money to energy) at compile time.
+The generic constraint catches type-level errors (adding money to points) at compile time.
 Same-type but different-unit errors (GBP + USD) are caught at runtime, matching current behavior.
 
 ### Package Structure
@@ -187,13 +185,13 @@ pkg/platform/quantity/
 │   └── codes.go      // ISO 4217 currency codes
 │
 └── examples/         // Reference implementations for other asset classes
-    ├── energy/       // kWh, MWh, Therm, BTU
-    ├── compute/      // GPU-Hour, CPU-Hour
+    ├── loyalty/      // Points, miles, stars
+    ├── token/        // Crypto or internal tokens
     └── carbon/       // tCO2e, kgCO2e
 
 # Tenants define custom units in their own packages:
 # internal/tenant-acme/units/airmiles/
-# internal/tenant-xyz/units/waterusage/
+# internal/tenant-xyz/units/gamecredits/
 ```
 
 ### Migration Strategy
@@ -245,26 +243,26 @@ func Value[A, B Unit](qty Quantity[A], rate Rate[A, B]) Quantity[B]
 
 ```go
 // Rate represents a conversion factor between two unit types.
-// Used for pricing (kWh → GBP) and currency exchange (USD → EUR).
+// Used for valuations (points → GBP) and currency exchange (USD → EUR).
 type Rate[From, To Unit] struct {
     from   From
     to     To
     factor decimal.Decimal
 }
 
-// Example: Electricity tariff
-tariff := rate.New(energy.KWH, currency.GBP, decimal.NewFromFloat(0.28))
-// 150 kWh × £0.28/kWh = £42.00
-bill := quantity.Value(usage, tariff)  // Returns Quantity[Currency]
+// Example: Loyalty points redemption rate
+redemptionRate := rate.New(loyalty.Points, currency.GBP, decimal.NewFromFloat(0.01))
+// 5,000 points × £0.01/point = £50.00
+value := quantity.Value(points, redemptionRate)  // Returns Quantity[Currency]
 ```
 
 ## Positive Consequences
 
-* **Compile-time unit safety**: Cannot add GBP to kWh - caught by compiler
+* **Compile-time unit safety**: Cannot add GBP to loyalty points - caught by compiler
 * **Single source of truth**: One Quantity implementation across all services
-* **Extensible**: New asset types (carbon credits, loyalty points) add Unit implementation only
+* **Extensible**: New asset types (tokens, carbon credits) add Unit implementation only
 * **Zero runtime overhead**: Go monomorphizes generics - no interface dispatch
-* **Temporal pricing enabled**: Rate[Energy, Currency] type models tariffs naturally
+* **Valuation enabled**: Rate[LoyaltyUnit, Currency] type models redemption rates naturally
 * **Precision per unit**: Each unit type defines appropriate decimal places
 
 ## Negative Consequences
@@ -278,11 +276,11 @@ bill := quantity.Value(usage, tariff)  // Returns Quantity[Currency]
 
 ### String-Based Units
 
-`Amount{Value: 100, Unit: "kWh"}`
+`Amount{Value: 100, Unit: "points"}`
 
 * Good, because simple to implement
 * Good, because works with any unit without code changes
-* Bad, because no compile-time checking - "kwh" vs "kWh" vs "KWH" errors
+* Bad, because no compile-time checking - "points" vs "Points" vs "POINTS" errors
 * Bad, because arithmetic operations need runtime unit validation
 * Bad, because precision not tied to unit - must be specified separately
 
@@ -307,7 +305,7 @@ bill := quantity.Value(usage, tariff)  // Returns Quantity[Currency]
 
 ### Separate Types Per Asset Class
 
-`type Money struct{}`, `type Energy struct{}`, `type Compute struct{}`
+`type Money struct{}`, `type Points struct{}`, `type Tokens struct{}`
 
 * Good, because explicit and simple
 * Good, because no generics knowledge required
@@ -336,9 +334,9 @@ message MoneyAmount {
   string currency = 2;    // ISO 4217 code
 }
 
-message EnergyAmount {
+message LoyaltyAmount {
   string amount = 1;
-  string unit = 2;        // "kWh", "MWh", etc.
+  string unit = 2;        // "points", "miles", etc.
 }
 
 // Adapters convert between proto and domain types
@@ -348,14 +346,14 @@ func MoneyToProto(m Money) *pb.MoneyAmount
 
 ### Future: Valuation Engine
 
-This ADR enables the "Temporal Pricing Engine" by providing:
+This ADR enables the valuation engine by providing:
 
-1. `Quantity[EnergyUnit]` - Usage tracking in native units
-2. `Rate[EnergyUnit, Currency]` - Time-varying tariffs from market data
-3. `Quantity[Currency]` - Calculated bills
+1. `Quantity[LoyaltyUnit]` - Balance tracking in native units (points, miles)
+2. `Rate[LoyaltyUnit, Currency]` - Redemption rates from market data
+3. `Quantity[Currency]` - Calculated fiat equivalents
 
 The valuation engine (roadmap Task 10) will subscribe to Position Keeping events and apply
-rates from Market Information service to produce bills.
+rates from Market Information service to produce valuations.
 
 ### Reconsidering This Decision
 
