@@ -53,6 +53,8 @@ Architectural Decision Records) format.
 | [ADR-0010](0010-grpc-client-side-load-balancing.md) | gRPC Client-Side Load Balancing with Headless Services | Accepted | 2025-11-14 |
 | [ADR-0011](0011-iso-20022-compliance-via-adapter-layer.md) | ISO 20022 Compliance via Adapter Layer | Accepted | 2025-11-14 |
 | [ADR-0012](0012-lien-based-fund-reservation.md) | Lien-Based Fund Reservation for Payment Order Saga | Accepted | 2025-11-25 |
+| [ADR-0013](0013-generic-asset-quantity-types.md) | Universal Quantity Type System | Proposed | 2025-12-03 |
+| [ADR-0014](0014-dynamic-asset-registry.md) | Dynamic Asset Registry & Lifecycle | Proposed | 2025-12-04 |
 
 ## Categories
 
@@ -68,6 +70,8 @@ Architectural Decision Records) format.
 - [ADR-0005](0005-adapter-pattern-layer-translation.md) - Adapter Pattern for Layer Translation
 - [ADR-0009](0009-application-level-audit-logging.md) - Application-Level Audit Logging
 - [ADR-0012](0012-lien-based-fund-reservation.md) - Lien-Based Fund Reservation for Payment Order Saga
+- [ADR-0013](0013-generic-asset-quantity-types.md) - Universal Quantity Type System
+- [ADR-0014](0014-dynamic-asset-registry.md) - Dynamic Asset Registry & Lifecycle
 
 ### Development Environment & Infrastructure
 
@@ -100,7 +104,6 @@ details.
 Based on the Meridian project requirements, these ADRs may be created as implementation progresses:
 
 - **Database Choice: CockroachDB vs YugabyteDB** - Distributed SQL database selection
-- **Multi-Currency Decimal Precision** - How we handle money types across currencies
 - **Idempotency Implementation** - Redis-based idempotency strategy
 - **Test Strategy for Financial Systems** - TDD approach for zero-tolerance systems
 - **Service Mesh vs API Gateway** - Cross-cutting concerns for microservices
