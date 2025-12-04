@@ -25,7 +25,9 @@ linters:
     - goconst        # Repeated strings that could be constants
     - gocognit       # Cognitive complexity
     - unconvert      # Remove unnecessary type conversions
-    - unparam        # Unused function parameters
+    # - unparam      # Disabled: panics on Go generics with type constraints (e.g., ~string)
+    #                # See: https://github.com/golangci/golangci-lint/issues/5254
+    #                # revive's unused-parameter rule provides similar coverage
     - nakedret       # Naked returns in long functions
     - prealloc       # Slice preallocation
     - nilerr         # Check for nil error returns
@@ -188,8 +190,7 @@ linters:
     nakedret:
       max-func-lines: 30
 
-    unparam:
-      check-exported: false
+    # unparam settings removed - linter disabled due to Go generics panic
 
     revive:
       confidence: 0.8
