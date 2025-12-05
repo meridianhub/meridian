@@ -24,12 +24,13 @@ COPY . .
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
+ARG TARGETARCH
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -ldflags="-w -s -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
     -a -installsuffix cgo \
     -o meridian \
-    ./cmd/meridian
+    ./utilities/meridian
 
 # Verify the binary exists and is executable
 RUN test -x meridian && echo "Binary built successfully"

@@ -21,25 +21,40 @@ An open source, cloud-native core banking engine following BIAN (Banking Industr
 
 ```text
 meridian/
-├── api/proto/              # Protocol Buffer API definitions
-│   └── meridian/
-│       └── common/v1/      # Common types and error handling
-├── cmd/                    # Application entry points
-├── deployments/            # Kubernetes manifests and deployment configs
-│   └── k8s/base/          # Base Kubernetes resources
-├── docs/                   # Documentation
-│   └── adr/               # Architecture Decision Records
-├── internal/              # Private application code
-└── pkg/                   # Public library code
+├── services/                    # BIAN service domains (domain-centric)
+│   ├── current-account/         # Customer-facing account management
+│   │   ├── cmd/                 # Entry point and Dockerfile
+│   │   ├── domain/              # Business logic and entities
+│   │   ├── adapters/            # Persistence, messaging adapters
+│   │   ├── service/             # gRPC service implementation
+│   │   ├── clients/             # Inter-service clients
+│   │   ├── migrations/          # Database migrations
+│   │   ├── atlas/               # Atlas schema config
+│   │   └── k8s/                 # Kubernetes manifests
+│   ├── position-keeping/        # Pre-ledger transaction log
+│   ├── financial-accounting/    # Double-entry general ledger
+│   └── payment-order/           # Payment execution
+├── shared/                      # Cross-service shared code
+│   ├── platform/                # Infrastructure (auth, db, kafka, observability)
+│   ├── domain/                  # Shared domain models and primitives
+│   └── pkg/                     # Shared utilities (health, idempotency)
+├── utilities/                   # CLI tools
+│   ├── meridian/                # Main CLI
+│   ├── atlas-loader/            # Migration schema loader
+│   └── horizon-demo/            # Demo utility
+├── api/proto/                   # Protocol Buffer API definitions
+├── deployments/k8s/             # Shared Kubernetes resources (base, overlays)
+└── docs/                        # Documentation and ADRs
 ```
 
 ## BIAN Service Domains
 
 This implementation includes the following BIAN service domains:
 
-- **FinancialAccounting**: Double-entry general ledger with audit trail
-- **PositionKeeping**: Pre-ledger transaction log and position tracking
 - **CurrentAccount**: Customer-facing account management
+- **PositionKeeping**: Pre-ledger transaction log and position tracking
+- **FinancialAccounting**: Double-entry general ledger with audit trail
+- **PaymentOrder**: Payment initiation and execution
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
 

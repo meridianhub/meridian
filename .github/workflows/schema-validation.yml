@@ -4,19 +4,19 @@ on:
   push:
     branches: [develop, main]
     paths:
-      - 'migrations/**'
-      - 'internal/*/adapters/persistence/*_entity.go'
-      - 'internal/domain/models/**'
-      - 'cmd/atlas-loader/**'
-      - 'atlas/**'
+      - 'services/*/migrations/**'
+      - 'services/*/adapters/persistence/*_entity.go'
+      - 'shared/domain/models/**'
+      - 'utilities/atlas-loader/**'
+      - 'services/*/atlas/**'
   pull_request:
     branches: [develop, main]
     paths:
-      - 'migrations/**'
-      - 'internal/*/adapters/persistence/*_entity.go'
-      - 'internal/domain/models/**'
-      - 'cmd/atlas-loader/**'
-      - 'atlas/**'
+      - 'services/*/migrations/**'
+      - 'services/*/adapters/persistence/*_entity.go'
+      - 'shared/domain/models/**'
+      - 'utilities/atlas-loader/**'
+      - 'services/*/atlas/**'
 
 permissions:
   contents: read
@@ -41,15 +41,15 @@ jobs:
           echo "Running schema validation tests..."
           echo "This test validates that SQL migrations produce a schema compatible with GORM entities."
           echo ""
-          go test -v -run TestMigrationsMatchEntities ./internal/platform/testdb/
+          go test -v -run TestMigrationsMatchEntities ./shared/platform/testdb/
         timeout-minutes: 10
 
       - name: Report schema mismatches
         if: failure()
         run: |
           echo "::error::Schema validation failed. This means there is a mismatch between:"
-          echo "::error::  - SQL migrations in migrations/*/*.sql"
-          echo "::error::  - GORM entities in internal/*/adapters/persistence/*_entity.go"
+          echo "::error::  - SQL migrations in services/*/migrations/*.sql"
+          echo "::error::  - GORM entities in services/*/adapters/persistence/*_entity.go"
           echo "::error::"
           echo "::error::Common causes:"
           echo "::error::  1. Entity column names don't match migration column names"

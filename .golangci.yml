@@ -71,7 +71,7 @@ linters:
           - govet            # unusedwrite and nilness checks too strict for test scaffolding
 
       # Exclude linters for testdb package (test support utilities)
-      - path: internal/platform/testdb/
+      - path: shared/platform/testdb/
         linters:
           - gocyclo
           - gocognit
@@ -79,31 +79,31 @@ linters:
 
       # Exclude complexity linters for gRPC service implementations
       # These have inherently complex request handling with validation, conversion, and persistence
-      - path: internal/.*/service/.*\.go
+      - path: services/.*/service/.*\.go
         linters:
           - gocyclo
           - gocognit
 
       # Exclude complexity linters for repository implementations (complex query building)
-      - path: internal/.*/repository/.*\.go
+      - path: services/.*/repository/.*\.go
         linters:
           - gocyclo
           - gocognit
 
       # Exclude complexity linters for adapter implementations (mapping logic)
-      - path: internal/.*/adapters/.*\.go
+      - path: services/.*/adapters/.*\.go
         linters:
           - gocyclo
           - gocognit
 
       # Exclude complexity linters for Kafka implementations (complex message handling)
-      - path: internal/platform/kafka/.*\.go
+      - path: shared/platform/kafka/.*\.go
         linters:
           - gocyclo
           - gocognit
 
       # Exclude complexity linters for auth config (complex switch statements for auth modes)
-      - path: internal/platform/auth/.*\.go
+      - path: shared/platform/auth/.*\.go
         linters:
           - gocyclo
           - gocognit
@@ -129,13 +129,13 @@ linters:
           - all
 
       # Allow main() to have unchecked errors for flag parsing
-      - path: cmd/
+      - path: (services/.*/cmd/|utilities/)
         text: "Error return value of.*is not checked"
         linters:
           - errcheck
 
       # Allow long functions in main packages for setup
-      - path: cmd/
+      - path: (services/.*/cmd/|utilities/)
         linters:
           - gocyclo
           - gocognit

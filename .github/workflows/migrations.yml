@@ -4,17 +4,19 @@ on:
   push:
     branches: [develop, main]
     paths:
-      - 'migrations/**'
-      - 'atlas/**'
-      - 'cmd/atlas-loader/**'
-      - 'internal/domain/models/**'
+      - 'services/*/migrations/**'
+      - 'services/*/atlas/**'
+      - 'shared/atlas/**'
+      - 'utilities/atlas-loader/**'
+      - 'shared/domain/models/**'
   pull_request:
     branches: [develop, main]
     paths:
-      - 'migrations/**'
-      - 'atlas/**'
-      - 'cmd/atlas-loader/**'
-      - 'internal/domain/models/**'
+      - 'services/*/migrations/**'
+      - 'services/*/atlas/**'
+      - 'shared/atlas/**'
+      - 'utilities/atlas-loader/**'
+      - 'shared/domain/models/**'
 
 permissions:
   contents: read
@@ -43,6 +45,8 @@ jobs:
       - name: Verify migration checksums
         run: |
           echo "Verifying migration checksums..."
-          atlas migrate hash --env ci --config file://atlas/current_account/atlas.hcl
-          atlas migrate hash --env ci --config file://atlas/position_keeping/atlas.hcl
+          atlas migrate hash --env ci --config file://services/current-account/atlas/atlas.hcl
+          atlas migrate hash --env ci --config file://services/position-keeping/atlas/atlas.hcl
+          atlas migrate hash --env ci --config file://services/financial-accounting/atlas/atlas.hcl
+          atlas migrate hash --env ci --config file://services/payment-order/atlas/atlas.hcl
           echo "✓ All migration checksums verified"
