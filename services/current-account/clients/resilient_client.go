@@ -9,61 +9,36 @@ import (
 
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/sony/gobreaker/v2"
 )
 
-var (
-	// ErrTypeAssertion is returned when a type assertion fails in executeWithResilience
-	ErrTypeAssertion = errors.New("type assertion failed")
-
-	// noRetryConfig disables retries for non-idempotent operations
-	noRetryConfig = RetryConfig{
-		MaxRetries:          0,
-		InitialInterval:     0,
-		MaxInterval:         0,
-		Multiplier:          1.0,
-		RandomizationFactor: 0,
-	}
-)
+// ErrTypeAssertion is returned when a type assertion fails in executeWithResilience.
+// Re-exported from shared package for backward compatibility.
+var ErrTypeAssertion = sharedclients.ErrTypeAssertion
 
 // ResilientPositionKeepingClient wraps PositionKeepingClient with resilience patterns
 type ResilientPositionKeepingClient struct {
 	client         PositionKeepingClient
-	circuitBreaker *CircuitBreaker
-	retryConfig    RetryConfig
+	circuitBreaker *sharedclients.CircuitBreaker
+	retryConfig    sharedclients.RetryConfig
 	logger         *slog.Logger
 }
 
 // ResilientFinancialAccountingClient wraps FinancialAccountingClient with resilience patterns
 type ResilientFinancialAccountingClient struct {
 	client         FinancialAccountingClient
-	circuitBreaker *CircuitBreaker
-	retryConfig    RetryConfig
+	circuitBreaker *sharedclients.CircuitBreaker
+	retryConfig    sharedclients.RetryConfig
 	logger         *slog.Logger
 }
 
-// ResilientClientConfig holds configuration for resilient service clients
-type ResilientClientConfig struct {
-	// Circuit breaker configuration
-	CircuitBreakerName     string
-	CircuitBreakerTimeout  time.Duration
-	CircuitBreakerInterval time.Duration
-	MaxRequests            uint32
-	FailureThreshold       uint32
-
-	// Retry configuration
-	MaxRetries          int
-	InitialInterval     time.Duration
-	MaxInterval         time.Duration
-	Multiplier          float64
-	RandomizationFactor float64
-
-	// Observability
-	Logger *slog.Logger
-}
+// ResilientClientConfig is an alias to the shared implementation.
+// Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
+type ResilientClientConfig = sharedclients.ResilientClientConfig
 
 // applyConfigDefaults applies default values to ResilientClientConfig and returns circuit breaker and retry configs
-func applyConfigDefaults(config *ResilientClientConfig, defaultName string) (CircuitBreakerConfig, RetryConfig) {
+func applyConfigDefaults(config *ResilientClientConfig, defaultName string) (sharedclients.CircuitBreakerConfig, sharedclients.RetryConfig) {
 	// Apply logger default
 	if config.Logger == nil {
 		config.Logger = slog.Default()
@@ -87,7 +62,7 @@ func applyConfigDefaults(config *ResilientClientConfig, defaultName string) (Cir
 	}
 
 	// Create circuit breaker config
-	cbConfig := CircuitBreakerConfig{
+	cbConfig := sharedclients.CircuitBreakerConfig{
 		Name:        config.CircuitBreakerName,
 		MaxRequests: config.MaxRequests,
 		Interval:    config.CircuitBreakerInterval,
@@ -121,7 +96,7 @@ func applyConfigDefaults(config *ResilientClientConfig, defaultName string) (Cir
 	}
 
 	// Create retry config
-	retryConfig := RetryConfig{
+	retryConfig := sharedclients.RetryConfig{
 		MaxRetries:          config.MaxRetries,
 		InitialInterval:     config.InitialInterval,
 		MaxInterval:         config.MaxInterval,
@@ -138,7 +113,7 @@ func NewResilientPositionKeepingClient(
 	config ResilientClientConfig,
 ) *ResilientPositionKeepingClient {
 	cbConfig, retryConfig := applyConfigDefaults(&config, "position-keeping")
-	cb := NewCircuitBreaker(cbConfig, config.Logger)
+	cb := sharedclients.NewCircuitBreaker(cbConfig, config.Logger)
 
 	return &ResilientPositionKeepingClient{
 		client:         client,
@@ -154,7 +129,7 @@ func NewResilientFinancialAccountingClient(
 	config ResilientClientConfig,
 ) *ResilientFinancialAccountingClient {
 	cbConfig, retryConfig := applyConfigDefaults(&config, "financial-accounting")
-	cb := NewCircuitBreaker(cbConfig, config.Logger)
+	cb := sharedclients.NewCircuitBreaker(cbConfig, config.Logger)
 
 	return &ResilientFinancialAccountingClient{
 		client:         client,
@@ -167,8 +142,8 @@ func NewResilientFinancialAccountingClient(
 // executeWithResilience wraps a call with circuit breaker and retry logic
 func executeWithResilience[T any](
 	ctx context.Context,
-	cb *CircuitBreaker,
-	retryConfig RetryConfig,
+	cb *sharedclients.CircuitBreaker,
+	retryConfig sharedclients.RetryConfig,
 	logger *slog.Logger,
 	operationName string,
 	fn func() (T, error),
@@ -176,7 +151,7 @@ func executeWithResilience[T any](
 	var result T
 
 	// Wrap the operation with retry logic
-	err := Retry(ctx, retryConfig, func() error {
+	err := sharedclients.Retry(ctx, retryConfig, func() error {
 		// Execute through circuit breaker
 		res, err := cb.Execute(ctx, func() (any, error) {
 			return fn()
@@ -269,7 +244,7 @@ func (r *ResilientPositionKeepingClient) BulkImportTransactions(
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
-		noRetryConfig, // No retries - not idempotent
+		sharedclients.NoRetryConfig(), // No retries - not idempotent
 		r.logger,
 		"BulkImportTransactions",
 		func() (*positionkeepingv1.BulkImportTransactionsResponse, error) {
@@ -330,7 +305,7 @@ func (r *ResilientFinancialAccountingClient) UpdateFinancialBookingLog(
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
-		noRetryConfig, // No retries - not idempotent
+		sharedclients.NoRetryConfig(), // No retries - not idempotent
 		r.logger,
 		"UpdateFinancialBookingLog",
 		func() (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
@@ -384,7 +359,7 @@ func (r *ResilientFinancialAccountingClient) CaptureLedgerPosting(
 	return executeWithResilience(
 		ctx,
 		r.circuitBreaker,
-		noRetryConfig, // No retries - server-side idempotency not yet confirmed
+		sharedclients.NoRetryConfig(), // No retries - server-side idempotency not yet confirmed
 		r.logger,
 		"CaptureLedgerPosting",
 		func() (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
