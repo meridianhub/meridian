@@ -47,4 +47,6 @@ jobs:
           echo "Verifying migration checksums..."
           atlas migrate hash --env ci --config file://services/current-account/atlas/atlas.hcl
           atlas migrate hash --env ci --config file://services/position-keeping/atlas/atlas.hcl
+          atlas migrate hash --env ci --config file://services/financial-accounting/atlas/atlas.hcl
+          atlas migrate hash --env ci --config file://services/payment-order/atlas/atlas.hcl
           echo "✓ All migration checksums verified"
