@@ -194,6 +194,51 @@ func (r *LedgerRepository) GetBookingLog(ctx context.Context, id uuid.UUID) (*do
 	return toBookingLogDomain(&entity), nil
 }
 
+// SaveBookingLog persists a new financial booking log
+func (r *LedgerRepository) SaveBookingLog(ctx context.Context, log *domain.FinancialBookingLog, idempotencyKey string) error {
+	entity := toBookingLogEntity(log, idempotencyKey)
+	return r.db.WithContext(ctx).Create(&entity).Error
+}
+
+// UpdateBookingLog updates an existing financial booking log
+func (r *LedgerRepository) UpdateBookingLog(ctx context.Context, log *domain.FinancialBookingLog) error {
+	result := r.db.WithContext(ctx).
+		Model(&FinancialBookingLogEntity{}).
+		Where("id = ?", log.ID).
+		Updates(map[string]interface{}{
+			"status":                  string(log.Status),
+			"chart_of_accounts_rules": log.ChartOfAccountsRules,
+			"updated_at":              log.UpdatedAt,
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrBookingLogNotFound
+	}
+
+	return nil
+}
+
+// toBookingLogEntity converts domain model to database entity
+func toBookingLogEntity(log *domain.FinancialBookingLog, idempotencyKey string) FinancialBookingLogEntity {
+	return FinancialBookingLogEntity{
+		ID:                      log.ID,
+		FinancialAccountType:    log.FinancialAccountType,
+		ProductServiceReference: log.ProductServiceReference,
+		BusinessUnitReference:   log.BusinessUnitReference,
+		ChartOfAccountsRules:    log.ChartOfAccountsRules,
+		BaseCurrency:            string(log.BaseCurrency),
+		Status:                  string(log.Status),
+		IdempotencyKey:          idempotencyKey,
+		CreatedAt:               log.CreatedAt,
+		UpdatedAt:               log.UpdatedAt,
+		Version:                 1,
+	}
+}
+
 // ListBookingLogsParams contains parameters for listing booking logs
 type ListBookingLogsParams struct {
 	// PageSize is the number of results to return (default 50, max 1000)

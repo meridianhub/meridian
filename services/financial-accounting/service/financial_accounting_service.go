@@ -629,15 +629,213 @@ func isValidCurrencyCode(code string) bool {
 	return true
 }
 
-// Method implementations to be added in subsequent subtasks:
+// InitiateFinancialBookingLog creates a new financial booking log.
 //
-// Subtask 9.2 - Additional gRPC methods:
-//   - InitiateFinancialBookingLog: Creates new booking log with idempotency
-//   - UpdateFinancialBookingLog: Updates booking log status and rules
-//   - RetrieveFinancialBookingLog: Retrieves booking log by ID
+// Workflow:
+// 1. Check idempotency using request's IdempotencyKey
+// 2. Validate all request fields
+// 3. Create domain entity
+// 4. Persist booking log
+// 5. Return gRPC response with created booking log
 //
-// Subtask 9.5 - List operations:
-//   - ListFinancialBookingLogs: Lists booking logs with filtering/pagination
+// Error mapping:
+// - Invalid request fields -> codes.InvalidArgument
+// - Duplicate idempotency key -> codes.AlreadyExists
+// - Internal errors -> codes.Internal
+func (s *FinancialAccountingService) InitiateFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.InitiateFinancialBookingLogRequest,
+) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+	// Validate idempotency key is provided
+	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
+		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
+	}
+
+	idempotencyKey := idempotency.Key{
+		Namespace: "financial-accounting",
+		Operation: "initiate-booking-log",
+		EntityID:  req.IdempotencyKey.Key,
+		RequestID: req.IdempotencyKey.Key,
+	}
+
+	// Check idempotency
+	result, err := s.idempotency.Check(ctx, idempotencyKey)
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			if result != nil && result.Status == idempotency.StatusCompleted {
+				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+			}
+		}
+		return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+	}
+
+	// Mark as pending to prevent concurrent processing
+	if err := s.idempotency.MarkPending(ctx, idempotencyKey, 3600*time.Second); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+	}
+
+	// Validate account type
+	if req.FinancialAccountType == commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "financial_account_type must be specified")
+	}
+	accountType := fromProtoAccountType(req.FinancialAccountType)
+	if accountType == "" {
+		return nil, status.Error(codes.InvalidArgument, "invalid financial_account_type")
+	}
+
+	// Validate product service reference
+	if req.ProductServiceReference == "" {
+		return nil, status.Error(codes.InvalidArgument, "product_service_reference is required")
+	}
+
+	// Validate business unit reference
+	if req.BusinessUnitReference == "" {
+		return nil, status.Error(codes.InvalidArgument, "business_unit_reference is required")
+	}
+
+	// Validate chart of accounts rules
+	if req.ChartOfAccountsRules == "" {
+		return nil, status.Error(codes.InvalidArgument, "chart_of_accounts_rules is required")
+	}
+
+	// Validate base currency
+	if req.BaseCurrency == commonv1.Currency_CURRENCY_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "base_currency must be specified")
+	}
+	baseCurrency := fromProtoCurrency(req.BaseCurrency)
+	if baseCurrency == "" {
+		return nil, status.Error(codes.InvalidArgument, "invalid base_currency")
+	}
+
+	// Create domain entity
+	bookingLog := domain.NewFinancialBookingLog(
+		accountType,
+		req.ProductServiceReference,
+		req.BusinessUnitReference,
+		req.ChartOfAccountsRules,
+		baseCurrency,
+	)
+
+	// Persist booking log
+	if err := s.repository.SaveBookingLog(ctx, bookingLog, req.IdempotencyKey.Key); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to save booking log: %v", err)
+	}
+
+	// Store idempotency result
+	ttl := 3600 * time.Second
+	if req.IdempotencyKey.TtlSeconds > 0 {
+		ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
+	}
+	idempResult := idempotency.Result{
+		Key:         idempotencyKey,
+		Status:      idempotency.StatusCompleted,
+		Data:        nil,
+		CompletedAt: time.Now(),
+		TTL:         ttl,
+	}
+	_ = s.idempotency.StoreResult(ctx, idempResult)
+
+	// Convert to proto response
+	return &financialaccountingv1.InitiateFinancialBookingLogResponse{
+		FinancialBookingLog: toProtoFinancialBookingLog(bookingLog),
+	}, nil
+}
+
+// RetrieveFinancialBookingLog retrieves a specific booking log by ID.
 //
-// Until implemented, the embedded UnimplementedFinancialAccountingServiceServer
-// will return codes.Unimplemented for all RPC calls.
+// gRPC Error Codes:
+//   - codes.InvalidArgument: Invalid booking log ID format
+//   - codes.NotFound: Booking log does not exist
+//   - codes.Internal: Database or system errors
+func (s *FinancialAccountingService) RetrieveFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.RetrieveFinancialBookingLogRequest,
+) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
+	// Parse and validate booking log ID
+	bookingLogID, err := parseUUID(req.GetId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid booking log id: %v", err)
+	}
+
+	// Retrieve from repository
+	bookingLog, err := s.repository.GetBookingLog(ctx, bookingLogID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
+		}
+		return nil, status.Error(codes.Internal, "failed to retrieve booking log")
+	}
+
+	// Convert to protobuf and return
+	return &financialaccountingv1.RetrieveFinancialBookingLogResponse{
+		FinancialBookingLog: toProtoFinancialBookingLog(bookingLog),
+	}, nil
+}
+
+// UpdateFinancialBookingLog updates an existing booking log's status and rules.
+//
+// Workflow:
+// 1. Parse and validate request fields
+// 2. Retrieve existing booking log by ID
+// 3. Validate state transition rules
+// 4. Apply updates using domain methods
+// 5. Persist updated booking log
+// 6. Return updated booking log
+//
+// Error mapping:
+// - Invalid request fields -> codes.InvalidArgument
+// - Booking log not found -> codes.NotFound
+// - Invalid state transition -> codes.FailedPrecondition
+// - Internal errors -> codes.Internal
+func (s *FinancialAccountingService) UpdateFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
+) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	// Parse booking log ID
+	bookingLogID, err := parseUUID(req.GetId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid id: %v", err)
+	}
+
+	// Validate status
+	if req.Status == commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "status must be specified")
+	}
+	newStatus := fromProtoTransactionStatus(req.Status)
+
+	// Retrieve existing booking log
+	bookingLog, err := s.repository.GetBookingLog(ctx, bookingLogID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve booking log: %v", err)
+	}
+
+	// Validate state transition - cannot modify terminal states
+	if bookingLog.IsTerminal() {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"cannot update booking log in terminal status: %s", bookingLog.Status)
+	}
+
+	// Apply status update
+	updated := bookingLog.WithStatus(newStatus)
+
+	// Apply chart of accounts rules update if provided
+	if req.ChartOfAccountsRules != "" {
+		updated = updated.WithChartOfAccountsRules(req.ChartOfAccountsRules)
+	}
+
+	// Persist updated booking log
+	if err := s.repository.UpdateBookingLog(ctx, &updated); err != nil {
+		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to update booking log: %v", err)
+	}
+
+	// Convert to proto response
+	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
+		FinancialBookingLog: toProtoFinancialBookingLog(&updated),
+	}, nil
+}
