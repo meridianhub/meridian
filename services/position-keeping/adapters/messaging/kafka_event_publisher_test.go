@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

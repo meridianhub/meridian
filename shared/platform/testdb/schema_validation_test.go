@@ -54,8 +54,8 @@ func findProjectRoot() (string, error) {
 
 // TestMigrationsMatchEntities validates that SQL migrations produce a schema
 // compatible with GORM entities. This prevents drift between:
-// - internal/domain/models/* (used by Atlas to generate migrations)
-// - internal/*/adapters/persistence/*_entity.go (used by application code)
+// - shared/domain/models/* (used by Atlas to generate migrations)
+// - services/*/adapters/persistence/*_entity.go (used by application code)
 //
 // Why this matters (ref: GitHub Issue #202):
 // - Unit tests use AutoMigrate which creates schema from entities
@@ -147,23 +147,23 @@ func applyMigrations(ctx context.Context, t *testing.T, db *sql.DB) {
 	projectRoot, err := findProjectRoot()
 	require.NoError(t, err, "Failed to find project root")
 
-	// Schemas to include in migration
-	schemas := []string{
-		"current_account",
-		"position_keeping",
-		"payment_order",
-		"financial_accounting",
+	// Services to include in migration (maps service dir name to schema name)
+	services := map[string]string{
+		"current-account":      "current_account",
+		"position-keeping":     "position_keeping",
+		"payment-order":        "payment_order",
+		"financial-accounting": "financial_accounting",
 	}
 
-	// Collect all migration files from all schemas
+	// Collect all migration files from all services
 	var allMigrations []migrationFile
-	for _, schema := range schemas {
-		migrationDir := filepath.Join(projectRoot, "migrations", schema)
+	for serviceDir, schema := range services {
+		migrationDir := filepath.Join(projectRoot, "services", serviceDir, "migrations")
 
 		entries, err := os.ReadDir(migrationDir)
 		if err != nil {
-			// Schema might not have migrations yet
-			t.Logf("No migrations found for schema %s: %v", schema, err)
+			// Service might not have migrations yet
+			t.Logf("No migrations found for service %s: %v", serviceDir, err)
 			continue
 		}
 

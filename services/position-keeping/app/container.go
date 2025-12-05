@@ -6,10 +6,10 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/meridianhub/meridian/shared/platform/auth"
-	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/services/position-keeping/repository"
+	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/redis/go-redis/v9"
 )
 

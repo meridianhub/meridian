@@ -8,8 +8,8 @@ import (
 	"os"
 
 	"ariga.io/atlas-provider-gorm/gormschema"
-	"github.com/meridianhub/meridian/shared/domain/models"
 	fapersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/domain/models"
 )
 
 const (

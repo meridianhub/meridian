@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/health/grpc_health_v1"

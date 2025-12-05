@@ -7,8 +7,8 @@ import (
 	"time"
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
-	"github.com/meridianhub/meridian/shared/platform/observability"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
