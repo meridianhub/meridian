@@ -1,0 +1,262 @@
+// Package money provides a unified Money type for monetary amounts across all services.
+//
+// This package consolidates the various Money implementations that existed across
+// current-account, financial-accounting, and position-keeping services into a single,
+// currency-aware decimal-based Money type.
+//
+// Key features:
+//   - Decimal-based arithmetic for precision (no floating-point errors)
+//   - Currency-aware decimal places (JPY=0, most others=2)
+//   - Overflow protection when converting to minor units
+//   - Immutable value semantics
+package money
+
+import (
+	"errors"
+	"fmt"
+	"math"
+
+	"github.com/shopspring/decimal"
+)
+
+// Errors for Money operations.
+var (
+	ErrCurrencyMismatch = errors.New("currency mismatch")
+	ErrInvalidCurrency  = errors.New("invalid currency")
+	ErrOverflow         = errors.New("overflow: value exceeds int64 bounds")
+)
+
+// Currency represents an ISO 4217 currency code.
+type Currency string
+
+// Supported currencies following ISO 4217 standard.
+const (
+	CurrencyGBP Currency = "GBP" // British Pound Sterling
+	CurrencyUSD Currency = "USD" // United States Dollar
+	CurrencyEUR Currency = "EUR" // Euro
+	CurrencyJPY Currency = "JPY" // Japanese Yen
+	CurrencyCHF Currency = "CHF" // Swiss Franc
+	CurrencyCAD Currency = "CAD" // Canadian Dollar
+	CurrencyAUD Currency = "AUD" // Australian Dollar
+)
+
+// IsValid checks if the currency is a supported ISO 4217 code.
+func (c Currency) IsValid() bool {
+	switch c {
+	case CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyJPY, CurrencyCHF, CurrencyCAD, CurrencyAUD:
+		return true
+	}
+	return false
+}
+
+// String returns the string representation of the currency.
+func (c Currency) String() string {
+	return string(c)
+}
+
+// DecimalPlaces returns the number of decimal places for the currency.
+// Most currencies use 2 decimal places, but some (like JPY) use 0.
+func (c Currency) DecimalPlaces() int32 {
+	switch c {
+	case CurrencyJPY:
+		return 0
+	case CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyCHF, CurrencyCAD, CurrencyAUD:
+		return 2
+	default:
+		return 2
+	}
+}
+
+// ParseCurrency converts a string to a Currency type with validation.
+func ParseCurrency(s string) (Currency, error) {
+	c := Currency(s)
+	if !c.IsValid() {
+		return "", fmt.Errorf("%w: %s", ErrInvalidCurrency, s)
+	}
+	return c, nil
+}
+
+// Money represents an immutable monetary amount with currency.
+// It uses decimal.Decimal for precise arithmetic operations.
+type Money struct {
+	amount   decimal.Decimal
+	currency Currency
+}
+
+// New creates a Money value with the given amount and currency.
+// Returns an error if the currency is not supported.
+func New(amount decimal.Decimal, currency Currency) (Money, error) {
+	if !currency.IsValid() {
+		return Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, currency)
+	}
+	return Money{
+		amount:   amount,
+		currency: currency,
+	}, nil
+}
+
+// MustNew creates a Money value, panicking if the currency is invalid.
+// Use only in tests or when the currency is known to be valid at compile time.
+func MustNew(amount decimal.Decimal, currency Currency) Money {
+	m, err := New(amount, currency)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
+// NewFromInt64 creates Money from an int64 amount in the currency's major units.
+// For example, NewFromInt64(100, CurrencyGBP) creates £100.00.
+func NewFromInt64(amount int64, currency Currency) (Money, error) {
+	return New(decimal.NewFromInt(amount), currency)
+}
+
+// NewFromMinorUnits creates Money from minor units (cents, pence, etc.).
+// For example, NewFromMinorUnits(10000, CurrencyGBP) creates £100.00.
+func NewFromMinorUnits(minorUnits int64, currency Currency) (Money, error) {
+	if !currency.IsValid() {
+		return Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, currency)
+	}
+	decimalPlaces := currency.DecimalPlaces()
+	amount := decimal.NewFromInt(minorUnits).Shift(-decimalPlaces)
+	return Money{
+		amount:   amount,
+		currency: currency,
+	}, nil
+}
+
+// Zero returns a zero Money value for the given currency.
+func Zero(currency Currency) (Money, error) {
+	return New(decimal.Zero, currency)
+}
+
+// Amount returns the monetary amount as a decimal.
+func (m Money) Amount() decimal.Decimal {
+	return m.amount
+}
+
+// Currency returns the currency of the monetary amount.
+func (m Money) Currency() Currency {
+	return m.currency
+}
+
+// CurrencyCode returns the currency code as a string.
+// This is a convenience method for interoperability with code expecting string currencies.
+func (m Money) CurrencyCode() string {
+	return string(m.currency)
+}
+
+// AmountCents returns the amount in minor units (cents, pence, etc.) as int64.
+// This method uses ToMinorUnitsUnchecked internally - use ToMinorUnits() if you need
+// overflow checking for very large values.
+//
+// Deprecated: Prefer ToMinorUnits() for new code which provides overflow checking.
+func (m Money) AmountCents() int64 {
+	return m.ToMinorUnitsUnchecked()
+}
+
+// Add adds two Money values. They must have the same currency.
+func (m Money) Add(other Money) (Money, error) {
+	if m.currency != other.currency {
+		return Money{}, fmt.Errorf("%w: cannot add %s and %s",
+			ErrCurrencyMismatch, m.currency, other.currency)
+	}
+	return Money{
+		amount:   m.amount.Add(other.amount),
+		currency: m.currency,
+	}, nil
+}
+
+// Subtract subtracts another Money value from this one. They must have the same currency.
+func (m Money) Subtract(other Money) (Money, error) {
+	if m.currency != other.currency {
+		return Money{}, fmt.Errorf("%w: cannot subtract %s and %s",
+			ErrCurrencyMismatch, m.currency, other.currency)
+	}
+	return Money{
+		amount:   m.amount.Sub(other.amount),
+		currency: m.currency,
+	}, nil
+}
+
+// Negate returns the negation of this Money value.
+func (m Money) Negate() Money {
+	return Money{
+		amount:   m.amount.Neg(),
+		currency: m.currency,
+	}
+}
+
+// Abs returns the absolute value of this Money.
+func (m Money) Abs() Money {
+	return Money{
+		amount:   m.amount.Abs(),
+		currency: m.currency,
+	}
+}
+
+// IsZero returns true if the amount is zero.
+func (m Money) IsZero() bool {
+	return m.amount.IsZero()
+}
+
+// IsPositive returns true if the amount is greater than zero.
+func (m Money) IsPositive() bool {
+	return m.amount.GreaterThan(decimal.Zero)
+}
+
+// IsNegative returns true if the amount is less than zero.
+func (m Money) IsNegative() bool {
+	return m.amount.LessThan(decimal.Zero)
+}
+
+// Equals returns true if both Money instances have the same amount and currency.
+func (m Money) Equals(other Money) bool {
+	return m.currency == other.currency && m.amount.Equal(other.amount)
+}
+
+// Compare returns -1 if m < other, 0 if m == other, 1 if m > other.
+// Returns an error if currencies don't match.
+func (m Money) Compare(other Money) (int, error) {
+	if m.currency != other.currency {
+		return 0, fmt.Errorf("%w: cannot compare %s and %s",
+			ErrCurrencyMismatch, m.currency, other.currency)
+	}
+	return m.amount.Cmp(other.amount), nil
+}
+
+// String returns a string representation of the Money value.
+// Format: "123.45 GBP" (always 2 decimal places for display consistency).
+func (m Money) String() string {
+	return fmt.Sprintf("%s %s", m.amount.StringFixed(2), m.currency)
+}
+
+// StringWithPrecision returns a string with the currency's natural precision.
+// For example, JPY shows no decimals: "1000 JPY".
+func (m Money) StringWithPrecision() string {
+	return fmt.Sprintf("%s %s", m.amount.StringFixed(m.currency.DecimalPlaces()), m.currency)
+}
+
+// ToMinorUnits converts the Money amount to minor units (cents, pence, sen, etc.).
+// This is currency-aware: JPY returns the amount as-is (no decimals), while
+// GBP/USD/EUR multiply by 100 to convert to cents/pence.
+// Returns an error if the result would overflow int64.
+func (m Money) ToMinorUnits() (int64, error) {
+	decimalPlaces := m.currency.DecimalPlaces()
+	shifted := m.amount.Shift(decimalPlaces)
+
+	// Check for overflow before converting to int64
+	if shifted.GreaterThan(decimal.NewFromInt(math.MaxInt64)) ||
+		shifted.LessThan(decimal.NewFromInt(math.MinInt64)) {
+		return 0, fmt.Errorf("%w: %s minor units", ErrOverflow, shifted.String())
+	}
+
+	return shifted.IntPart(), nil
+}
+
+// ToMinorUnitsUnchecked converts to minor units without overflow checking.
+// Use only when you're certain the value won't overflow (e.g., validated input).
+func (m Money) ToMinorUnitsUnchecked() int64 {
+	decimalPlaces := m.currency.DecimalPlaces()
+	return m.amount.Shift(decimalPlaces).IntPart()
+}

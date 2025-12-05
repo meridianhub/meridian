@@ -1,3 +1,4 @@
+//nolint:staticcheck // Uses AmountCents() for database persistence (backward compatible)
 package persistence
 
 import (
@@ -252,7 +253,7 @@ func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAcco
 		AccountID:             account.AccountID,             // Business account identifier
 		AccountIdentification: account.AccountIdentification, // IBAN stored in account_identification
 		AccountType:           "current",                     // Default for current accounts
-		Currency:              account.Balance.Currency(),
+		Currency:              string(account.Balance.Currency()),
 		Status:                string(account.Status),
 		CustomerID:            customerUUID,
 		Balance:               account.Balance.AmountCents(),

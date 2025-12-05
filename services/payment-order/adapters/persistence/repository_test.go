@@ -1,3 +1,4 @@
+//nolint:staticcheck // Tests use deprecated AmountCents() for backward compatibility verification
 package persistence
 
 import (
@@ -6,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
+
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -24,7 +25,7 @@ func TestPaymentOrderRepository_Create(t *testing.T) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -70,7 +71,7 @@ func TestPaymentOrderRepository_FindByIdempotencyKey(t *testing.T) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -106,7 +107,7 @@ func TestPaymentOrderRepository_FindByGatewayReferenceID(t *testing.T) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -151,7 +152,7 @@ func TestPaymentOrderRepository_Update_Reserve(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -184,7 +185,7 @@ func TestPaymentOrderRepository_Update_Execute(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -220,7 +221,7 @@ func TestPaymentOrderRepository_Update_Complete(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -259,7 +260,7 @@ func TestPaymentOrderRepository_Update_Fail(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -293,7 +294,7 @@ func TestPaymentOrderRepository_Update_Cancel(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -326,7 +327,7 @@ func TestPaymentOrderRepository_Update_Reverse(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -369,7 +370,7 @@ func TestPaymentOrderRepository_OptimisticLocking(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	// Create initial payment order
@@ -413,7 +414,7 @@ func TestPaymentOrderRepository_IdempotencyKeyUniqueness(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	// Create first payment order
@@ -449,7 +450,7 @@ func TestPaymentOrderRepository_Update_NonExistent_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a payment order in memory but don't save it
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("acc-123", "creditor-ref", amount, "idem-key", "corr-001")
 
 	// Try to update non-existent payment order
@@ -513,7 +514,7 @@ func TestPaymentOrderRepository_CausationID(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := domain.NewPaymentOrder(
@@ -543,7 +544,7 @@ func TestPaymentOrderRepository_FindByDebtorAccountID(t *testing.T) {
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	// Create two payment orders for same account
@@ -605,7 +606,7 @@ func TestPaymentOrderRepository_FindByDebtorAccountID_CorruptedData_ReturnsError
 
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	// Create valid payment order

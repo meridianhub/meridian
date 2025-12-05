@@ -1,12 +1,13 @@
-package domain
+package money
 
 import (
+	"math"
 	"testing"
 
 	"github.com/shopspring/decimal"
 )
 
-func TestNewMoney(t *testing.T) {
+func TestNew(t *testing.T) {
 	tests := []struct {
 		name        string
 		amount      decimal.Decimal
@@ -43,13 +44,13 @@ func TestNewMoney(t *testing.T) {
 			name:     "negative amount",
 			amount:   decimal.NewFromInt(-100),
 			currency: CurrencyGBP,
-			wantErr:  false, // Money can be negative for balances
+			wantErr:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			money, err := NewMoney(tt.amount, tt.currency)
+			money, err := New(tt.amount, tt.currency)
 
 			if tt.wantErr {
 				if err == nil {
@@ -73,10 +74,65 @@ func TestNewMoney(t *testing.T) {
 	}
 }
 
+func TestMustNew(t *testing.T) {
+	t.Run("valid currency succeeds", func(t *testing.T) {
+		m := MustNew(decimal.NewFromInt(100), CurrencyGBP)
+		if !m.Amount().Equal(decimal.NewFromInt(100)) {
+			t.Error("MustNew failed to create money")
+		}
+	})
+
+	t.Run("invalid currency panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("MustNew should panic on invalid currency")
+			}
+		}()
+		MustNew(decimal.NewFromInt(100), Currency("INVALID"))
+	})
+}
+
+func TestNewFromInt64(t *testing.T) {
+	m, err := NewFromInt64(100, CurrencyGBP)
+	if err != nil {
+		t.Fatalf("NewFromInt64 failed: %v", err)
+	}
+	if !m.Amount().Equal(decimal.NewFromInt(100)) {
+		t.Errorf("Expected 100, got %v", m.Amount())
+	}
+}
+
+func TestNewFromMinorUnits(t *testing.T) {
+	tests := []struct {
+		name       string
+		minorUnits int64
+		currency   Currency
+		wantAmount string
+	}{
+		{"GBP 10000 pence = £100.00", 10000, CurrencyGBP, "100"},
+		{"USD 12345 cents = $123.45", 12345, CurrencyUSD, "123.45"},
+		{"JPY 1000 = ¥1000", 1000, CurrencyJPY, "1000"},
+		{"negative pence", -5025, CurrencyGBP, "-50.25"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := NewFromMinorUnits(tt.minorUnits, tt.currency)
+			if err != nil {
+				t.Fatalf("NewFromMinorUnits failed: %v", err)
+			}
+			expected, _ := decimal.NewFromString(tt.wantAmount)
+			if !m.Amount().Equal(expected) {
+				t.Errorf("Expected %s, got %v", tt.wantAmount, m.Amount())
+			}
+		})
+	}
+}
+
 func TestMoney_Add(t *testing.T) {
-	gbp100, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
-	gbp50, _ := NewMoney(decimal.NewFromInt(50), CurrencyGBP)
-	usd100, _ := NewMoney(decimal.NewFromInt(100), CurrencyUSD)
+	gbp100, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	gbp50, _ := New(decimal.NewFromInt(50), CurrencyGBP)
+	usd100, _ := New(decimal.NewFromInt(100), CurrencyUSD)
 
 	tests := []struct {
 		name           string
@@ -123,9 +179,9 @@ func TestMoney_Add(t *testing.T) {
 }
 
 func TestMoney_Subtract(t *testing.T) {
-	gbp100, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
-	gbp50, _ := NewMoney(decimal.NewFromInt(50), CurrencyGBP)
-	usd100, _ := NewMoney(decimal.NewFromInt(100), CurrencyUSD)
+	gbp100, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	gbp50, _ := New(decimal.NewFromInt(50), CurrencyGBP)
+	usd100, _ := New(decimal.NewFromInt(100), CurrencyUSD)
 
 	tests := []struct {
 		name           string
@@ -146,6 +202,13 @@ func TestMoney_Subtract(t *testing.T) {
 			money:   gbp100,
 			other:   usd100,
 			wantErr: true,
+		},
+		{
+			name:           "subtract resulting in negative",
+			money:          gbp50,
+			other:          gbp100,
+			wantErr:        false,
+			expectedAmount: decimal.NewFromInt(-50),
 		},
 	}
 
@@ -171,57 +234,123 @@ func TestMoney_Subtract(t *testing.T) {
 	}
 }
 
+func TestMoney_Negate(t *testing.T) {
+	positive, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	negative, _ := New(decimal.NewFromInt(-100), CurrencyGBP)
+	zero, _ := Zero(CurrencyGBP)
+
+	if !positive.Negate().Amount().Equal(decimal.NewFromInt(-100)) {
+		t.Error("Negate of positive should be negative")
+	}
+	if !negative.Negate().Amount().Equal(decimal.NewFromInt(100)) {
+		t.Error("Negate of negative should be positive")
+	}
+	if !zero.Negate().IsZero() {
+		t.Error("Negate of zero should be zero")
+	}
+}
+
+func TestMoney_Abs(t *testing.T) {
+	positive, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	negative, _ := New(decimal.NewFromInt(-100), CurrencyGBP)
+
+	if !positive.Abs().Amount().Equal(decimal.NewFromInt(100)) {
+		t.Error("Abs of positive should be positive")
+	}
+	if !negative.Abs().Amount().Equal(decimal.NewFromInt(100)) {
+		t.Error("Abs of negative should be positive")
+	}
+}
+
 func TestMoney_IsZero(t *testing.T) {
-	zero, _ := NewMoney(decimal.Zero, CurrencyGBP)
-	positive, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
-	negative, _ := NewMoney(decimal.NewFromInt(-100), CurrencyGBP)
+	zero, _ := Zero(CurrencyGBP)
+	positive, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	negative, _ := New(decimal.NewFromInt(-100), CurrencyGBP)
 
 	if !zero.IsZero() {
 		t.Error("Expected IsZero to be true for zero amount")
 	}
-
 	if positive.IsZero() {
 		t.Error("Expected IsZero to be false for positive amount")
 	}
-
 	if negative.IsZero() {
 		t.Error("Expected IsZero to be false for negative amount")
 	}
 }
 
 func TestMoney_IsPositive(t *testing.T) {
-	zero, _ := NewMoney(decimal.Zero, CurrencyGBP)
-	positive, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
-	negative, _ := NewMoney(decimal.NewFromInt(-100), CurrencyGBP)
+	zero, _ := Zero(CurrencyGBP)
+	positive, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	negative, _ := New(decimal.NewFromInt(-100), CurrencyGBP)
 
 	if zero.IsPositive() {
 		t.Error("Expected IsPositive to be false for zero amount")
 	}
-
 	if !positive.IsPositive() {
 		t.Error("Expected IsPositive to be true for positive amount")
 	}
-
 	if negative.IsPositive() {
 		t.Error("Expected IsPositive to be false for negative amount")
 	}
 }
 
 func TestMoney_IsNegative(t *testing.T) {
-	zero, _ := NewMoney(decimal.Zero, CurrencyGBP)
-	positive, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
-	negative, _ := NewMoney(decimal.NewFromInt(-100), CurrencyGBP)
+	zero, _ := Zero(CurrencyGBP)
+	positive, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	negative, _ := New(decimal.NewFromInt(-100), CurrencyGBP)
 
 	if zero.IsNegative() {
 		t.Error("Expected IsNegative to be false for zero amount")
 	}
-
 	if positive.IsNegative() {
 		t.Error("Expected IsNegative to be false for positive amount")
 	}
-
 	if !negative.IsNegative() {
 		t.Error("Expected IsNegative to be true for negative amount")
+	}
+}
+
+func TestMoney_Equals(t *testing.T) {
+	gbp100a, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	gbp100b, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	gbp50, _ := New(decimal.NewFromInt(50), CurrencyGBP)
+	usd100, _ := New(decimal.NewFromInt(100), CurrencyUSD)
+
+	if !gbp100a.Equals(gbp100b) {
+		t.Error("Same amounts and currency should be equal")
+	}
+	if gbp100a.Equals(gbp50) {
+		t.Error("Different amounts should not be equal")
+	}
+	if gbp100a.Equals(usd100) {
+		t.Error("Different currencies should not be equal")
+	}
+}
+
+func TestMoney_Compare(t *testing.T) {
+	gbp100, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	gbp50, _ := New(decimal.NewFromInt(50), CurrencyGBP)
+	gbp100b, _ := New(decimal.NewFromInt(100), CurrencyGBP)
+	usd100, _ := New(decimal.NewFromInt(100), CurrencyUSD)
+
+	cmp, err := gbp100.Compare(gbp50)
+	if err != nil || cmp != 1 {
+		t.Error("100 > 50")
+	}
+
+	cmp, err = gbp50.Compare(gbp100)
+	if err != nil || cmp != -1 {
+		t.Error("50 < 100")
+	}
+
+	cmp, err = gbp100.Compare(gbp100b)
+	if err != nil || cmp != 0 {
+		t.Error("100 == 100")
+	}
+
+	_, err = gbp100.Compare(usd100)
+	if err == nil {
+		t.Error("Should error on currency mismatch")
 	}
 }
 
@@ -276,6 +405,33 @@ func TestCurrency_DecimalPlaces(t *testing.T) {
 	}
 }
 
+func TestParseCurrency(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    Currency
+		wantErr bool
+	}{
+		{"valid GBP", "GBP", CurrencyGBP, false},
+		{"valid USD", "USD", CurrencyUSD, false},
+		{"invalid", "INVALID", "", true},
+		{"empty", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseCurrency(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseCurrency() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ParseCurrency() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMoney_String(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -292,7 +448,7 @@ func TestMoney_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			money, err := NewMoney(tt.amount, tt.currency)
+			money, err := New(tt.amount, tt.currency)
 			if err != nil {
 				t.Fatalf("Failed to create money: %v", err)
 			}
@@ -305,12 +461,39 @@ func TestMoney_String(t *testing.T) {
 	}
 }
 
+func TestMoney_StringWithPrecision(t *testing.T) {
+	tests := []struct {
+		name     string
+		amount   decimal.Decimal
+		currency Currency
+		expected string
+	}{
+		{"GBP with decimals", decimal.NewFromFloat(123.45), CurrencyGBP, "123.45 GBP"},
+		{"JPY no decimals", decimal.NewFromInt(10000), CurrencyJPY, "10000 JPY"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			money, err := New(tt.amount, tt.currency)
+			if err != nil {
+				t.Fatalf("Failed to create money: %v", err)
+			}
+
+			result := money.StringWithPrecision()
+			if result != tt.expected {
+				t.Errorf("Expected StringWithPrecision() to return %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
 func TestMoney_ToMinorUnits(t *testing.T) {
 	tests := []struct {
 		name     string
 		amount   decimal.Decimal
 		currency Currency
 		want     int64
+		wantErr  bool
 	}{
 		{
 			name:     "GBP 100.00 = 10000 pence",
@@ -358,17 +541,62 @@ func TestMoney_ToMinorUnits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			money, err := NewMoney(tt.amount, tt.currency)
+			money, err := New(tt.amount, tt.currency)
 			if err != nil {
-				t.Fatalf("NewMoney() error = %v", err)
+				t.Fatalf("New() error = %v", err)
 			}
 			got, err := money.ToMinorUnits()
-			if err != nil {
-				t.Fatalf("ToMinorUnits() error = %v", err)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ToMinorUnits() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
 			if got != tt.want {
-				t.Errorf("Money.ToMinorUnits() = %v, want %v", got, tt.want)
+				t.Errorf("ToMinorUnits() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMoney_ToMinorUnits_Overflow(t *testing.T) {
+	// Create a very large amount that would overflow when converted to minor units
+	largeAmount := decimal.NewFromInt(math.MaxInt64).Div(decimal.NewFromInt(10))
+	money, err := New(largeAmount, CurrencyGBP)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = money.ToMinorUnits()
+	if err == nil {
+		t.Error("Expected overflow error for very large amount")
+	}
+
+	// Test negative overflow
+	negLargeAmount := decimal.NewFromInt(math.MinInt64).Div(decimal.NewFromInt(10))
+	money2, err := New(negLargeAmount, CurrencyGBP)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = money2.ToMinorUnits()
+	if err == nil {
+		t.Error("Expected overflow error for very large negative amount")
+	}
+}
+
+func TestZero(t *testing.T) {
+	z, err := Zero(CurrencyGBP)
+	if err != nil {
+		t.Fatalf("Zero() error = %v", err)
+	}
+	if !z.IsZero() {
+		t.Error("Zero should return zero amount")
+	}
+	if z.Currency() != CurrencyGBP {
+		t.Error("Zero should preserve currency")
+	}
+
+	_, err = Zero(Currency("INVALID"))
+	if err == nil {
+		t.Error("Zero should reject invalid currency")
 	}
 }

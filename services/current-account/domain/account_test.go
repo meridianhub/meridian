@@ -1,3 +1,4 @@
+//nolint:staticcheck // Tests intentionally use deprecated AmountCents() to verify backward compatibility
 package domain
 
 import (
@@ -13,7 +14,7 @@ func TestNewCurrentAccount(t *testing.T) {
 
 	assert.Equal(t, "ACC-001", account.AccountID)
 	assert.Equal(t, int64(0), account.Balance.AmountCents())
-	assert.Equal(t, "GBP", account.Balance.Currency())
+	assert.Equal(t, CurrencyGBP, account.Balance.Currency())
 	assert.Equal(t, AccountStatusActive, account.Status)
 }
 
@@ -258,65 +259,68 @@ func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
 	}
 }
 
-// Defensive test per ADR-008: Overflow prevention in SetOverdraftLimit
+// Tests for large values with decimal-based Money implementation
+// Note: The new decimal-based Money implementation does not overflow on arithmetic
+// operations like int64 did. Overflow is now checked when converting to minor units.
 
-func TestSetOverdraftLimit_OverflowPrevention(t *testing.T) {
+func TestSetOverdraftLimit_LargeValues(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
 	require.NoError(t, err)
 
-	// Set balance near max int64
-	largeBalance, err := NewMoney("GBP", 9223372036854775000) // Near MaxInt64
+	// Set a large balance (in minor units - cents/pence)
+	largeBalance, err := NewMoney("GBP", 1000000000000) // 10 billion cents = 100 million GBP
 	require.NoError(t, err)
 	account.Balance = largeBalance
+	account.AvailableBalance = largeBalance
 
-	// Try to set overdraft that would cause overflow
-	largeLimit, err := NewMoney("GBP", 1000)
+	// Set overdraft
+	overdraftLimit, err := NewMoney("GBP", 100000000000) // 1 billion cents
 	require.NoError(t, err)
 
-	err = account.SetOverdraftLimit(largeLimit, 0.1, true)
+	err = account.SetOverdraftLimit(overdraftLimit, 0.1, true)
+	assert.NoError(t, err, "Large values should be handled correctly")
 
-	assert.Error(t, err, "SetOverdraftLimit should reject overdraft that causes overflow")
-	assert.ErrorIs(t, err, ErrAmountOverflow, "Should return ErrAmountOverflow")
+	// Available balance should be sum
+	assert.Equal(t, int64(1100000000000), account.AvailableBalance.AmountCents())
 }
 
-func TestSetOverdraftLimit_DisabledDoesNotCheckOverflow(t *testing.T) {
+func TestSetOverdraftLimit_DisabledDoesNotAddToAvailable(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
 	require.NoError(t, err)
 
-	// Set balance near max int64
-	largeBalance, err := NewMoney("GBP", 9223372036854775000)
+	// Set balance
+	balance, err := NewMoney("GBP", 100000)
 	require.NoError(t, err)
-	account.Balance = largeBalance
+	account.Balance = balance
+	account.AvailableBalance = balance
 
-	// Set overdraft disabled - should succeed even if adding would overflow
-	largeLimit, err := NewMoney("GBP", 1000)
+	// Set overdraft disabled
+	overdraftLimit, err := NewMoney("GBP", 50000)
 	require.NoError(t, err)
 
-	err = account.SetOverdraftLimit(largeLimit, 0.1, false)
+	err = account.SetOverdraftLimit(overdraftLimit, 0.1, false)
+	assert.NoError(t, err)
 
-	assert.NoError(t, err, "SetOverdraftLimit with enabled=false should not check overflow")
+	// Available balance should NOT include overdraft when disabled
+	assert.Equal(t, int64(100000), account.AvailableBalance.AmountCents())
 }
 
-// Nice-to-have tests: Overflow in Deposit/Withdraw operations
-
-func TestDeposit_Overflow_ReturnsError(t *testing.T) {
+// Tests for large deposits
+func TestDeposit_LargeValues(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
 	require.NoError(t, err)
 
-	// Set balance near max
-	largeBalance, err := NewMoney("GBP", 9223372036854775000)
+	// Set initial balance
+	balance, err := NewMoney("GBP", 1000000000000)
 	require.NoError(t, err)
-	account.Balance = largeBalance
+	account.Balance = balance
+	account.AvailableBalance = balance
 
-	// Try to deposit amount that causes overflow
-	deposit, err := NewMoney("GBP", 1000)
+	// Large deposit
+	deposit, err := NewMoney("GBP", 1000000000000)
 	require.NoError(t, err)
 
 	err = account.Deposit(deposit)
-
-	assert.Error(t, err, "Deposit causing overflow should fail")
-	assert.ErrorIs(t, err, ErrAmountOverflow)
+	assert.NoError(t, err, "Large deposits should be handled correctly")
+	assert.Equal(t, int64(2000000000000), account.Balance.AmountCents())
 }
-
-// Note: Withdraw underflow is already covered by Money.Subtract tests
-// This test would be complex to set up due to available balance checks

@@ -1,106 +1,59 @@
+// Package domain re-exports the shared Money type for current-account service.
+//
+// This file provides backward-compatible aliases and constructors for migrating
+// from the previous int64-based Money implementation to the shared decimal-based
+// implementation. The AmountCents() method is preserved for API compatibility.
 package domain
 
-import "errors"
-
-// Money errors
-var (
-	ErrInvalidCurrency  = errors.New("currency cannot be empty")
-	ErrAmountOverflow   = errors.New("amount overflow: operation would exceed int64 bounds")
-	ErrCurrencyMismatch = errors.New("currency mismatch")
+import (
+	"github.com/meridianhub/meridian/shared/domain/money"
 )
 
-// Money represents an immutable monetary amount with currency
-// All fields are unexported to enforce immutability
-// Use NewMoney constructor and methods that return new instances
-type Money struct {
-	amountCents int64
-	currency    string
-}
+// Re-export errors from shared money package
+var (
+	ErrInvalidCurrency  = money.ErrInvalidCurrency
+	ErrCurrencyMismatch = money.ErrCurrencyMismatch
+	ErrAmountOverflow   = money.ErrOverflow
+)
 
-// NewMoney creates a new Money instance with validation
+// Money is an alias for the shared money.Money type.
+// This provides a unified Money type across all services.
+type Money = money.Money
+
+// NewMoney creates a new Money instance from a currency string and amount in minor units (cents).
+// This preserves backward compatibility with the previous int64-based API.
+//
+// Example: NewMoney("GBP", 10000) creates £100.00
 func NewMoney(currency string, amountCents int64) (Money, error) {
-	if currency == "" {
-		return Money{}, ErrInvalidCurrency
+	cur, err := money.ParseCurrency(currency)
+	if err != nil {
+		return Money{}, err
 	}
-
-	return Money{
-		currency:    currency,
-		amountCents: amountCents,
-	}, nil
+	return money.NewFromMinorUnits(amountCents, cur)
 }
 
-// Currency returns the currency code
-func (m Money) Currency() string {
-	return m.currency
-}
-
-// AmountCents returns the amount in cents
-func (m Money) AmountCents() int64 {
-	return m.amountCents
-}
-
-// Add returns a new Money instance with the sum
-// Value receiver ensures immutability
-// Returns ErrAmountOverflow if the operation would exceed int64 bounds
-func (m Money) Add(other Money) (Money, error) {
-	if m.currency != other.currency {
-		return Money{}, ErrCurrencyMismatch
+// NewMoneyFromMajorUnits creates Money from major units (pounds, dollars, etc.).
+// This is the preferred constructor for new code.
+//
+// Example: NewMoneyFromMajorUnits("GBP", 100) creates £100.00
+func NewMoneyFromMajorUnits(currency string, amount int64) (Money, error) {
+	cur, err := money.ParseCurrency(currency)
+	if err != nil {
+		return Money{}, err
 	}
-
-	// Detect signed integer overflow for addition:
-	// Overflow occurs when:
-	// - Adding two positive numbers gives a negative result
-	// - Adding two negative numbers gives a positive result
-	// When operands have different signs, overflow is impossible
-	result := m.amountCents + other.amountCents
-
-	if (other.amountCents > 0 && result < m.amountCents) ||
-		(other.amountCents < 0 && result > m.amountCents) {
-		return Money{}, ErrAmountOverflow
-	}
-
-	return Money{
-		currency:    m.currency,
-		amountCents: result,
-	}, nil
+	return money.NewFromInt64(amount, cur)
 }
 
-// Subtract returns a new Money instance with the difference
-// Returns ErrAmountOverflow if the operation would exceed int64 bounds
-func (m Money) Subtract(other Money) (Money, error) {
-	if m.currency != other.currency {
-		return Money{}, ErrCurrencyMismatch
-	}
+// Currency is an alias for the shared money.Currency type.
+type Currency = money.Currency
 
-	// Detect signed integer overflow for subtraction:
-	// Overflow occurs when:
-	// - Subtracting a negative from a positive gives a negative result
-	// - Subtracting a positive from a negative gives a positive result
-	// When operands have the same sign, overflow is impossible
-	result := m.amountCents - other.amountCents
-
-	if (other.amountCents > 0 && result > m.amountCents) ||
-		(other.amountCents < 0 && result < m.amountCents) {
-		return Money{}, ErrAmountOverflow
-	}
-
-	return Money{
-		currency:    m.currency,
-		amountCents: result,
-	}, nil
-}
-
-// IsPositive returns true if amount is greater than zero
-func (m Money) IsPositive() bool {
-	return m.amountCents > 0
-}
-
-// IsZero returns true if amount is zero
-func (m Money) IsZero() bool {
-	return m.amountCents == 0
-}
-
-// Equals returns true if both money instances have the same amount and currency
-func (m Money) Equals(other Money) bool {
-	return m.currency == other.currency && m.amountCents == other.amountCents
-}
+// Currency constants for supported ISO 4217 currencies.
+const (
+	CurrencyGBP = money.CurrencyGBP
+	CurrencyUSD = money.CurrencyUSD
+	CurrencyEUR = money.CurrencyEUR
+	CurrencyJPY = money.CurrencyJPY
+	CurrencyCHF = money.CurrencyCHF
+	CurrencyCAD = money.CurrencyCAD
+	CurrencyAUD = money.CurrencyAUD
+)

@@ -196,7 +196,7 @@ func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (
 
 	// Calculate new available balance after this lien
 	newAvailableBalance := availableBalance - lienAmount.AmountCents()
-	availableMoney, err := domain.NewMoney(account.Balance.Currency(), newAvailableBalance)
+	availableMoney, err := domain.NewMoney(string(account.Balance.Currency()), newAvailableBalance)
 	if err != nil {
 		// This should never happen if validation passed - log and return without available balance
 		s.logger.Error("failed to create available balance money", "error", err)
@@ -649,7 +649,7 @@ func (s *Service) calculateAvailableBalance(accountID uuid.UUID, currentBalance 
 		return currentBalance // Best effort: return current balance if liens can't be summed
 	}
 	availableBalance := currentBalance.AmountCents() - activeLiensTotal
-	availableMoney, err := domain.NewMoney(currentBalance.Currency(), availableBalance)
+	availableMoney, err := domain.NewMoney(string(currentBalance.Currency()), availableBalance)
 	if err != nil {
 		s.logger.Error("failed to create available balance for response", "error", err)
 		return currentBalance // Best effort

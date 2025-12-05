@@ -1,137 +1,47 @@
+// Package domain re-exports the shared Money type for position-keeping service.
 package domain
 
 import (
-	"errors"
-	"fmt"
-
+	"github.com/meridianhub/meridian/shared/domain/money"
 	"github.com/shopspring/decimal"
 )
 
-// ErrCurrencyMismatch is returned when operations are attempted on different currencies.
-var ErrCurrencyMismatch = errors.New("currency mismatch")
-
-// Currency represents an ISO 4217 currency code.
-type Currency string
-
-// Supported currencies for Position Keeping.
-const (
-	CurrencyGBP Currency = "GBP"
-	CurrencyUSD Currency = "USD"
-	CurrencyEUR Currency = "EUR"
-	CurrencyJPY Currency = "JPY"
-	CurrencyCHF Currency = "CHF"
-	CurrencyCAD Currency = "CAD"
-	CurrencyAUD Currency = "AUD"
+// Re-export errors from shared money package
+var (
+	ErrCurrencyMismatch = money.ErrCurrencyMismatch
+	ErrInvalidCurrency  = money.ErrInvalidCurrency
 )
 
-// ErrInvalidCurrency is returned when an invalid currency is provided.
-var ErrInvalidCurrency = errors.New("invalid currency")
+// Money is an alias for the shared money.Money type.
+type Money = money.Money
 
-// IsValid checks if the currency is valid.
-func (c Currency) IsValid() bool {
-	switch c {
-	case CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyJPY, CurrencyCHF, CurrencyCAD, CurrencyAUD:
-		return true
-	}
-	return false
-}
+// Currency is an alias for the shared money.Currency type.
+type Currency = money.Currency
 
-// String returns the string representation of the currency.
-func (c Currency) String() string {
-	return string(c)
-}
+// Currency constants
+const (
+	CurrencyGBP = money.CurrencyGBP
+	CurrencyUSD = money.CurrencyUSD
+	CurrencyEUR = money.CurrencyEUR
+	CurrencyJPY = money.CurrencyJPY
+	CurrencyCHF = money.CurrencyCHF
+	CurrencyCAD = money.CurrencyCAD
+	CurrencyAUD = money.CurrencyAUD
+)
 
-// Money represents a monetary amount with currency.
-// It uses decimal.Decimal for precise arithmetic operations.
-type Money struct {
-	amount   decimal.Decimal
-	currency Currency
-}
-
-// NewMoney creates a Money value with the given amount and currency.
-// It returns an error wrapping ErrInvalidCurrency that includes the invalid currency if the currency is not supported.
+// NewMoney creates a new Money instance with the given decimal amount and currency.
+// This is the same signature as the previous implementation.
 func NewMoney(amount decimal.Decimal, currency Currency) (Money, error) {
-	if !currency.IsValid() {
-		return Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, currency)
-	}
-	return Money{
-		amount:   amount,
-		currency: currency,
-	}, nil
+	return money.New(amount, money.Currency(currency))
 }
 
-// Amount returns the monetary amount.
-func (m Money) Amount() decimal.Decimal {
-	return m.amount
+// MustNewMoney creates a Money instance, panicking on invalid currency.
+// Use only in tests or when currency is known valid.
+func MustNewMoney(amount decimal.Decimal, currency Currency) Money {
+	return money.MustNew(amount, money.Currency(currency))
 }
 
-// Currency returns the currency of the monetary amount.
-func (m Money) Currency() Currency {
-	return m.currency
-}
-
-// Add adds two Money values. They must have the same currency.
-func (m Money) Add(other Money) (Money, error) {
-	if m.currency != other.currency {
-		return Money{}, fmt.Errorf("%w: cannot add %s and %s",
-			ErrCurrencyMismatch, m.currency, other.currency)
-	}
-	return Money{
-		amount:   m.amount.Add(other.amount),
-		currency: m.currency,
-	}, nil
-}
-
-// Subtract subtracts another Money value from this one. They must have the same currency.
-func (m Money) Subtract(other Money) (Money, error) {
-	if m.currency != other.currency {
-		return Money{}, fmt.Errorf("%w: cannot subtract %s and %s",
-			ErrCurrencyMismatch, m.currency, other.currency)
-	}
-	return Money{
-		amount:   m.amount.Sub(other.amount),
-		currency: m.currency,
-	}, nil
-}
-
-// IsZero checks if the amount is zero.
-func (m Money) IsZero() bool {
-	return m.amount.IsZero()
-}
-
-// IsPositive checks if the amount is positive.
-func (m Money) IsPositive() bool {
-	return m.amount.GreaterThan(decimal.Zero)
-}
-
-// IsNegative checks if the amount is negative.
-func (m Money) IsNegative() bool {
-	return m.amount.LessThan(decimal.Zero)
-}
-
-// String returns a string representation of the Money.
-func (m Money) String() string {
-	return fmt.Sprintf("%s %s", m.amount.StringFixed(2), m.currency)
-}
-
-// DecimalPlaces returns the number of decimal places for the currency.
-// Most currencies use 2 decimal places, but some (like JPY) use 0.
-func (c Currency) DecimalPlaces() int32 {
-	switch c {
-	case CurrencyJPY:
-		return 0
-	case CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyCHF, CurrencyCAD, CurrencyAUD:
-		return 2
-	default:
-		// Future-proof for additional currencies
-		return 2
-	}
-}
-
-// ToMinorUnits converts the Money amount to minor units (cents, pence, sen, etc.)
-// This is currency-aware: JPY returns the amount as-is (no decimals), while
-// GBP/USD/EUR multiply by 100 to convert to cents/pence.
-func (m Money) ToMinorUnits() int64 {
-	decimalPlaces := m.currency.DecimalPlaces()
-	return m.amount.Shift(decimalPlaces).IntPart()
+// Zero returns a zero Money value for the given currency.
+func Zero(currency Currency) (Money, error) {
+	return money.Zero(money.Currency(currency))
 }
