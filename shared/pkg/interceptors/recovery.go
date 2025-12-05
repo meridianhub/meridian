@@ -1,4 +1,4 @@
-// Package interceptors provides gRPC interceptors for the position-keeping service.
+// Package interceptors provides gRPC interceptors for use across all Meridian services.
 package interceptors
 
 import (

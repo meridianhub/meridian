@@ -1,4 +1,5 @@
-package app
+// Package observability provides Prometheus metrics and health checks for the financial-accounting service.
+package observability
 
 import (
 	"context"

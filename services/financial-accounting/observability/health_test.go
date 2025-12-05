@@ -1,82 +1,55 @@
-package app
+package observability
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/lib/pq" // PostgreSQL driver for testing
 	"github.com/meridianhub/meridian/shared/pkg/health"
 )
 
 const testDatabaseName = "database"
 
-func TestPgxPoolChecker_Name(t *testing.T) {
-	// Create minimal config for test pool
-	config := &Config{
-		Database: DatabaseConfig{
-			URL:          "postgres://test:test@localhost:5432/testdb",
-			MaxOpenConns: 5,
-			MaxIdleConns: 2,
-		},
-	}
-
-	poolConfig, err := pgxpool.ParseConfig(config.Database.URL)
+func TestGormDBChecker_Name(t *testing.T) {
+	// Create a minimal database connection for testing
+	db, err := sql.Open("postgres", "postgres://test:test@localhost:5432/testdb?sslmode=disable")
 	if err != nil {
-		t.Fatalf("failed to parse config: %v", err)
+		t.Fatalf("failed to open db: %v", err)
 	}
+	defer func() { _ = db.Close() }()
 
-	// Create pool (won't connect until used)
-	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
-	if err != nil {
-		t.Fatalf("failed to create pool: %v", err)
-	}
-	defer pool.Close()
-
-	checker := NewPgxPoolChecker(pool)
+	checker := NewGormDBChecker(db)
 
 	if got := checker.Name(); got != testDatabaseName {
 		t.Errorf("Name() = %q, want %q", got, testDatabaseName)
 	}
 }
 
-func TestPgxPoolChecker_NilPool(t *testing.T) {
+func TestGormDBChecker_NilDB(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("NewPgxPoolChecker(nil) did not panic")
+			t.Error("NewGormDBChecker(nil) did not panic")
 		}
 	}()
 
-	_ = NewPgxPoolChecker(nil)
+	_ = NewGormDBChecker(nil)
 }
 
-func TestPgxPoolChecker_Check_ReturnsResult(t *testing.T) {
+func TestGormDBChecker_Check_ReturnsResult(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	// Create minimal config for test pool
-	config := &Config{
-		Database: DatabaseConfig{
-			URL:          "postgres://test:test@localhost:5432/testdb",
-			MaxOpenConns: 5,
-			MaxIdleConns: 2,
-		},
-	}
-
-	poolConfig, err := pgxpool.ParseConfig(config.Database.URL)
+	// Create a minimal database connection for testing
+	db, err := sql.Open("postgres", "postgres://test:test@localhost:5432/testdb?sslmode=disable")
 	if err != nil {
-		t.Fatalf("failed to parse config: %v", err)
+		t.Fatalf("failed to open db: %v", err)
 	}
+	defer func() { _ = db.Close() }()
 
-	// Create pool (connection will likely fail without real database)
-	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
-	if err != nil {
-		t.Fatalf("failed to create pool: %v", err)
-	}
-	defer pool.Close()
-
-	checker := NewPgxPoolChecker(pool)
+	checker := NewGormDBChecker(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
