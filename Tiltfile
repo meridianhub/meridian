@@ -884,7 +884,7 @@ local_resource(
 # This minimizes total migration time while respecting schema dependencies
 local_resource(
   'migrate-current-account',
-  cmd='atlas migrate apply --env local --config file://atlas/current_account.hcl --url "{}"'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://atlas/current_account/atlas.hcl --url "{}"'.format(database_url),
   resource_deps=['init-database'],  # Database and user must exist before migrations
   labels=['database'],
   auto_init=True,
@@ -893,7 +893,7 @@ local_resource(
 
 local_resource(
   'migrate-position-keeping',
-  cmd='atlas migrate apply --env local --config file://atlas/position_keeping.hcl --url "{}"'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://atlas/position_keeping/atlas.hcl --url "{}"'.format(database_url),
   resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
   labels=['database'],
   auto_init=True,
@@ -902,7 +902,7 @@ local_resource(
 
 local_resource(
   'migrate-financial-accounting',
-  cmd='atlas migrate apply --env local --config file://atlas/financial_accounting.hcl --url "{}"'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://atlas/financial_accounting/atlas.hcl --url "{}"'.format(database_url),
   resource_deps=['init-database'],  # Independent schema, only needs database to exist
   labels=['database'],
   auto_init=True,
@@ -911,7 +911,7 @@ local_resource(
 
 local_resource(
   'migrate-payment-order',
-  cmd='atlas migrate apply --env local --config file://atlas/payment_order.hcl --url "{}"'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://atlas/payment_order/atlas.hcl --url "{}"'.format(database_url),
   resource_deps=['migrate-current-account'],  # Depends on current_account for account FK reference
   labels=['database'],
   auto_init=True,

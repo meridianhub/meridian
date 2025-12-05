@@ -141,12 +141,17 @@ domain models
 
 ```text
 project-root/
-├── atlas/                              # Atlas configuration directory
-│   ├── current_account.hcl             # Current Account schema config
-│   ├── position_keeping.hcl            # Position Keeping schema config
-│   ├── financial_accounting.hcl        # Financial Accounting schema config
-│   ├── payment_order.hcl               # Payment Order schema config
-│   └── shared.hcl                      # Shared audit factory schema config
+├── atlas/                              # Atlas configuration directory (per-schema)
+│   ├── current_account/
+│   │   └── atlas.hcl                   # Current Account schema config
+│   ├── position_keeping/
+│   │   └── atlas.hcl                   # Position Keeping schema config
+│   ├── financial_accounting/
+│   │   └── atlas.hcl                   # Financial Accounting schema config
+│   ├── payment_order/
+│   │   └── atlas.hcl                   # Payment Order schema config
+│   └── shared/
+│       └── atlas.hcl                   # Shared audit factory schema config
 ├── internal/
 │   ├── domain/
 │   │   └── booking_log.go              # Pure domain models (no persistence tags)
@@ -255,10 +260,10 @@ func (b *FinancialBookingLog) Post() error {
 
 ### Atlas Configuration
 
-Configuration files are located in the `atlas/` directory. Each service domain has its own configuration file
-(e.g., `atlas/financial_accounting.hcl`):
+Configuration files are located in the `atlas/` directory, organized by schema. Each service domain has its own
+subdirectory with an `atlas.hcl` configuration file (e.g., `atlas/financial_accounting/atlas.hcl`):
 
-**atlas/financial_accounting.hcl:**
+**atlas/financial_accounting/atlas.hcl:**
 
 ```hcl
 data "external_schema" "gorm" {
@@ -334,7 +339,7 @@ type BookingLogEntity struct {
 # Atlas inspects database entities and generates migration
 atlas migrate diff add_narrative \
   --env local \
-  --config atlas/financial_accounting.hcl
+  --config atlas/financial_accounting/atlas.hcl
 ```
 
 **Generated migration (migrations/financial_accounting/20250125120000_add_narrative.sql):**
@@ -354,7 +359,7 @@ ALTER TABLE "financial_booking_logs"
 # Catch dangerous changes before deployment
 atlas migrate lint \
   --env local \
-  --config atlas/financial_accounting.hcl \
+  --config atlas/financial_accounting/atlas.hcl \
   --latest 1
 ```
 
@@ -364,7 +369,7 @@ atlas migrate lint \
 # Verify migration checksums
 atlas migrate hash \
   --env local \
-  --config atlas/financial_accounting.hcl
+  --config atlas/financial_accounting/atlas.hcl
 ```
 
 **5. Apply Migration:**
@@ -373,7 +378,7 @@ atlas migrate hash \
 # Deploy to target environment
 atlas migrate apply \
   --env local \
-  --config atlas/financial_accounting.hcl \
+  --config atlas/financial_accounting/atlas.hcl \
   --url "$DATABASE_URL"
 ```
 
@@ -395,8 +400,8 @@ Migration verification uses the schema-specific configs:
 
 ```bash
 # Verify checksums for each schema
-atlas migrate hash --env ci --config file://atlas/current_account.hcl
-atlas migrate hash --env ci --config file://atlas/position_keeping.hcl
+atlas migrate hash --env ci --config file://atlas/current_account/atlas.hcl
+atlas migrate hash --env ci --config file://atlas/position_keeping/atlas.hcl
 ```
 
 ### Immutability Principle
