@@ -12,7 +12,7 @@ type LienEntity struct {
 	// Primary key
 	ID uuid.UUID `gorm:"primaryKey"`
 
-	// Foreign key to current_accounts
+	// Foreign key to current_account.accounts
 	AccountID uuid.UUID `gorm:"not null;index:idx_liens_account_status"`
 
 	// Monetary amount
@@ -37,7 +37,7 @@ type LienEntity struct {
 	Version   int       `gorm:"not null;default:1"`
 }
 
-// TableName overrides the default table name
+// TableName overrides the default table name with schema prefix
 func (LienEntity) TableName() string {
-	return "liens"
+	return "current_account.liens"
 }

@@ -114,12 +114,8 @@ func TestMigrationsMatchEntities(t *testing.T) {
 		testCurrentAccountEntity(t, gormDB)
 	})
 
-	// Note: LienEntity test is skipped because the liens table migration doesn't exist yet.
-	// The LienEntity is defined in internal/current-account/adapters/persistence/lien_entity.go
-	// but there's no corresponding migration in migrations/current_account/
-	// TODO: Add migration for liens table (separate issue)
 	t.Run("CurrentAccount/LienEntity", func(t *testing.T) {
-		t.Skip("Skipping: liens table migration not yet created")
+		testLienEntity(t, gormDB)
 	})
 
 	t.Run("PaymentOrder/PaymentOrderEntity", func(t *testing.T) {
@@ -198,6 +194,156 @@ func applyMigrations(ctx context.Context, t *testing.T, db *sql.DB) {
 
 		t.Logf("Applied migration: [%s] %s", mig.schema, mig.filename)
 	}
+}
+
+// testLienEntity tests that LienEntity works with the migrated schema
+func testLienEntity(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	// First create a customer (accounts have FK to customers)
+	customerID := uuid.New()
+	customerSQL := `
+		INSERT INTO current_account.customers
+		(id, customer_number, first_name, last_name, email, status, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	err := db.Exec(customerSQL, customerID, "CUST-LIEN-001", "Lien", "Test", "lien@example.com", "active", "system", "system").Error
+	require.NoError(t, err, "Failed to create test customer for lien test")
+
+	// Then create an account (liens have FK to accounts)
+	accountID := uuid.New()
+	account := &capersistence.CurrentAccountEntity{
+		ID:                    accountID,
+		AccountID:             "ACC-LIEN-001",
+		AccountIdentification: "GB82WEST12345698765433",
+		AccountType:           "current",
+		Currency:              "GBP",
+		Status:                "active",
+		CustomerID:            customerID,
+		Balance:               50000,
+		AvailableBalance:      40000,
+		OverdraftLimit:        5000,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		CreatedBy:             "system",
+		UpdatedBy:             "system",
+	}
+	err = db.Create(account).Error
+	require.NoError(t, err, "Failed to create test account for lien test")
+
+	// Now create a lien
+	expiresAt := time.Now().Add(24 * time.Hour)
+	entity := &capersistence.LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             accountID,
+		AmountCents:           10000,
+		Currency:              "GBP",
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-LIEN-TEST-001",
+		ExpiresAt:             &expiresAt,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		Version:               1,
+	}
+
+	// Create - will fail if columns don't match
+	err = db.Create(entity).Error
+	if err != nil {
+		t.Fatalf("Failed to create LienEntity - schema mismatch detected: %v", err)
+	}
+
+	// Read back - will fail if columns don't match
+	var retrieved capersistence.LienEntity
+	err = db.First(&retrieved, "id = ?", entity.ID).Error
+	if err != nil {
+		t.Fatalf("Failed to read LienEntity - schema mismatch detected: %v", err)
+	}
+
+	// Verify data integrity
+	assert.Equal(t, entity.AccountID, retrieved.AccountID)
+	assert.Equal(t, entity.AmountCents, retrieved.AmountCents)
+	assert.Equal(t, entity.Currency, retrieved.Currency)
+	assert.Equal(t, entity.Status, retrieved.Status)
+	assert.Equal(t, entity.PaymentOrderReference, retrieved.PaymentOrderReference)
+	assert.NotNil(t, retrieved.ExpiresAt)
+	assert.WithinDuration(t, *entity.ExpiresAt, *retrieved.ExpiresAt, time.Second)
+
+	// Update - verify status transitions work (ACTIVE -> EXECUTED)
+	retrieved.Status = "EXECUTED"
+	retrieved.UpdatedAt = time.Now()
+	err = db.Save(&retrieved).Error
+	if err != nil {
+		t.Fatalf("Failed to update LienEntity - schema mismatch detected: %v", err)
+	}
+
+	// Verify update persisted
+	var updated capersistence.LienEntity
+	err = db.First(&updated, "id = ?", entity.ID).Error
+	require.NoError(t, err)
+	assert.Equal(t, "EXECUTED", updated.Status)
+
+	// Test TERMINATED status transition with termination reason
+	terminatedLien := &capersistence.LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             accountID,
+		AmountCents:           5000,
+		Currency:              "GBP",
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-LIEN-TEST-TERM",
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		Version:               1,
+	}
+	err = db.Create(terminatedLien).Error
+	require.NoError(t, err)
+	terminatedLien.Status = "TERMINATED"
+	terminatedLien.TerminationReason = "Payment order cancelled by user"
+	err = db.Save(terminatedLien).Error
+	assert.NoError(t, err, "TERMINATED status transition should succeed")
+
+	// Constraint validation: amount_cents must be > 0
+	invalidAmountLien := &capersistence.LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             accountID,
+		AmountCents:           0, // Invalid: must be > 0
+		Currency:              "GBP",
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-LIEN-TEST-002",
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		Version:               1,
+	}
+	err = db.Create(invalidAmountLien).Error
+	assert.Error(t, err, "Expected error for amount_cents <= 0 constraint violation")
+
+	// Constraint validation: unique payment_order_reference
+	duplicateLien := &capersistence.LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             accountID,
+		AmountCents:           5000,
+		Currency:              "GBP",
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-LIEN-TEST-001", // Duplicate of first lien
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		Version:               1,
+	}
+	err = db.Create(duplicateLien).Error
+	assert.Error(t, err, "Expected error for duplicate payment_order_reference")
+
+	// Constraint validation: FK to non-existent account
+	orphanLien := &capersistence.LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             uuid.New(), // Non-existent account
+		AmountCents:           5000,
+		Currency:              "GBP",
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-LIEN-TEST-003",
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+		Version:               1,
+	}
+	err = db.Create(orphanLien).Error
+	assert.Error(t, err, "Expected error for FK constraint violation")
 }
 
 // testCurrentAccountEntity tests that CurrentAccountEntity works with the migrated schema
