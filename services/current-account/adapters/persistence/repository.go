@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,14 +43,15 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
 
-// Save creates or updates an account.
+// Save creates or updates an account with optimistic locking.
 // The context is used to extract audit information (user ID) for the created_by/updated_by fields.
 //
-// NOTE: Optimistic locking via version column is NOT currently implemented because
-// the migration schema doesn't include a version column. The previous code referenced
-// a non-existent 'version' column which would have failed at runtime.
-// TODO: Add version column migration and restore optimistic locking (see ADR-008)
-// For now, use FindByIDForUpdate() with SELECT FOR UPDATE for concurrent modifications.
+// For updates, the version in the domain model must match the version in the database.
+// If another transaction has modified the record (incremented the version), this save
+// will fail with ErrVersionConflict. The caller should reload the entity and retry.
+//
+// Alternative: Use FindByIDForUpdate() with SELECT FOR UPDATE for pessimistic locking
+// within a transaction when you need guaranteed exclusive access.
 func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) error {
 	entity, err := toEntity(ctx, account)
 	if err != nil {
@@ -61,14 +63,14 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 	result := r.db.WithContext(ctx).Where("account_identification = ?", entity.AccountIdentification).First(&existing)
 
 	if result.Error == nil {
-		// Update existing
+		// Update existing with optimistic locking
 		entity.ID = existing.ID
 		entity.CreatedAt = existing.CreatedAt
 		entity.CreatedBy = existing.CreatedBy
 
-		// Use WHERE clause for atomic update
+		// Optimistic locking: only update if version matches, then increment
 		updateResult := r.db.WithContext(ctx).Model(&CurrentAccountEntity{}).
-			Where("account_identification = ?", entity.AccountIdentification).
+			Where("account_identification = ? AND version = ?", entity.AccountIdentification, entity.Version).
 			Updates(map[string]interface{}{
 				"balance":            entity.Balance,
 				"available_balance":  entity.AvailableBalance,
@@ -76,6 +78,7 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 				"overdraft_limit":    entity.OverdraftLimit,
 				"overdraft_rate":     entity.OverdraftRate,
 				"balance_updated_at": entity.BalanceUpdatedAt,
+				"version":            entity.Version + 1,
 				"updated_at":         entity.UpdatedAt,
 				"updated_by":         entity.UpdatedBy,
 			})
@@ -84,12 +87,27 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 			return updateResult.Error
 		}
 
+		// If no rows were affected, the version didn't match (concurrent modification)
+		if updateResult.RowsAffected == 0 {
+			return ErrVersionConflict
+		}
+
+		// Update the domain model's version to reflect the new database state
+		account.Version = account.Version + 1
+
 		return nil
 	}
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		// Create new
-		return r.db.WithContext(ctx).Create(&entity).Error
+		// Create new - version starts at 1 (set by toEntity)
+		if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
+			// Handle race condition: another transaction created the same account
+			if isDuplicateKeyError(err) {
+				return ErrAccountExists
+			}
+			return err
+		}
+		return nil
 	}
 
 	return result.Error
@@ -218,9 +236,7 @@ func (r *Repository) Ping() error {
 
 // toEntity converts domain model to database entity
 // Note: The entity schema matches migrations/current_account/*.sql
-// Some domain fields don't have corresponding database columns yet:
-// - OverdraftEnabled is derived from OverdraftLimit > 0
-// - Version needs migration (tracked in #206)
+// OverdraftEnabled is derived from OverdraftLimit > 0
 func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
 	// Parse CustomerID as UUID - domain model uses string for flexibility
 	customerUUID, err := uuid.Parse(account.CustomerID)
@@ -244,6 +260,7 @@ func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAcco
 		OverdraftLimit:        account.OverdraftLimit.AmountCents(),
 		OverdraftRate:         account.OverdraftRate,
 		BalanceUpdatedAt:      &account.BalanceUpdatedAt,
+		Version:               account.Version,
 		CreatedAt:             account.CreatedAt,
 		UpdatedAt:             account.UpdatedAt,
 		CreatedBy:             auditUser,
@@ -253,7 +270,6 @@ func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAcco
 
 // toDomain converts database entity to domain model
 // Note: OverdraftEnabled is derived from OverdraftLimit > 0
-// Version field needs migration (tracked in #206)
 func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 	// Use NewMoney constructor - errors indicate data corruption
 	balance, err := domain.NewMoney(entity.Currency, entity.Balance)
@@ -292,8 +308,24 @@ func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 		OverdraftEnabled:      overdraftEnabled,
 		OverdraftRate:         entity.OverdraftRate,
 		BalanceUpdatedAt:      balanceUpdatedAt,
-		Version:               1, // Default - column doesn't exist in DB yet (tracked in #206)
+		Version:               entity.Version,
 		CreatedAt:             entity.CreatedAt,
 		UpdatedAt:             entity.UpdatedAt,
 	}, nil
+}
+
+// isDuplicateKeyError checks if the error is a PostgreSQL unique constraint violation.
+// This handles the race condition where two concurrent creates attempt to insert
+// the same account_identification (IBAN).
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// PostgreSQL unique violation error code is 23505
+	// GORM wraps this, so we check the error message
+	errStr := err.Error()
+	return errors.Is(err, gorm.ErrDuplicatedKey) ||
+		strings.Contains(errStr, "23505") ||
+		strings.Contains(errStr, "duplicate key") ||
+		strings.Contains(errStr, "unique constraint")
 }
