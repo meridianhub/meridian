@@ -48,8 +48,11 @@ Atlas generates migrations from GORM models via the `cmd/atlas-loader` utility.
 
 **Configuration files:**
 
-- `atlas.current_account.hcl` - Current Account schema config
-- `atlas.position_keeping.hcl` - Position Keeping schema config
+- `atlas/current_account/atlas.hcl` - Current Account schema config
+- `atlas/position_keeping/atlas.hcl` - Position Keeping schema config
+- `atlas/financial_accounting/atlas.hcl` - Financial Accounting schema config
+- `atlas/payment_order/atlas.hcl` - Payment Order schema config
+- `atlas/shared/atlas.hcl` - Shared audit factory schema config
 
 ### Manual SQL (Audit System)
 
@@ -250,7 +253,7 @@ triggers will use these values to track who made changes.
 
 ### Adding a New Schema
 
-1. Create new Atlas config: `atlas.new_schema.hcl`
+1. Create new Atlas config directory: `atlas/new_schema/atlas.hcl`
 2. Update `cmd/atlas-loader/main.go` with new schema filter
 3. Create migration directory: `migrations/new_schema/`
 4. Update `Makefile` with new targets
@@ -277,7 +280,7 @@ make migrate-hash-all
 
 # If checksums mismatch, regenerate sum files
 
-atlas migrate hash --env local --config file://atlas.current_account.hcl
+atlas migrate hash --env local --config file://atlas/current_account/atlas.hcl
 ```
 
 ### Audit Triggers Not Firing

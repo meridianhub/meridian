@@ -271,7 +271,7 @@ migrate-diff-current:
 			exit 1; \
 		fi; \
 	fi; \
-	atlas migrate diff $$MIGRATION_NAME --env local --config atlas.current_account.hcl
+	atlas migrate diff $$MIGRATION_NAME --env local --config atlas/current_account/atlas.hcl
 	@echo "current_account migration generated. Review migrations/current_account/ directory."
 
 ## migrate-diff-position: Generate migration for position_keeping schema
@@ -285,7 +285,7 @@ migrate-diff-position:
 			exit 1; \
 		fi; \
 	fi; \
-	atlas migrate diff $$MIGRATION_NAME --env local --config atlas.position_keeping.hcl
+	atlas migrate diff $$MIGRATION_NAME --env local --config atlas/position_keeping/atlas.hcl
 	@echo "position_keeping migration generated. Review migrations/position_keeping/ directory."
 
 ## migrate-apply-all: Apply all pending migrations
@@ -296,11 +296,11 @@ migrate-apply-all:
 		exit 1; \
 	fi
 	@echo "Applying shared migrations (audit factory)..."
-	@atlas migrate apply --env local --config atlas.shared.hcl --url "$$DATABASE_URL"
+	@atlas migrate apply --env local --config atlas/shared/atlas.hcl --url "$$DATABASE_URL"
 	@echo "Applying current_account migrations (includes current_account_audit)..."
-	@atlas migrate apply --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
+	@atlas migrate apply --env local --config atlas/current_account/atlas.hcl --url "$$DATABASE_URL"
 	@echo "Applying position_keeping migrations (includes position_keeping_audit)..."
-	@atlas migrate apply --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
+	@atlas migrate apply --env local --config atlas/position_keeping/atlas.hcl --url "$$DATABASE_URL"
 	@echo "All schema migrations applied (shared + each service with its own audit schema)."
 
 ## migrate-status-all: Show migration status for all schemas
@@ -311,29 +311,29 @@ migrate-status-all:
 		exit 1; \
 	fi
 	@printf "\n=== shared (audit factory) ===\n"
-	@atlas migrate status --env local --config atlas.shared.hcl --url "$$DATABASE_URL"
+	@atlas migrate status --env local --config atlas/shared/atlas.hcl --url "$$DATABASE_URL"
 	@printf "\n=== current_account schema ===\n"
-	@atlas migrate status --env local --config atlas.current_account.hcl --url "$$DATABASE_URL"
+	@atlas migrate status --env local --config atlas/current_account/atlas.hcl --url "$$DATABASE_URL"
 	@printf "\n=== position_keeping schema ===\n"
-	@atlas migrate status --env local --config atlas.position_keeping.hcl --url "$$DATABASE_URL"
+	@atlas migrate status --env local --config atlas/position_keeping/atlas.hcl --url "$$DATABASE_URL"
 
 ## migrate-lint-all: Lint all migrations for potential issues
 migrate-lint-all:
 	@echo "Linting migrations for all schemas..."
 	@echo "Linting shared migrations..."
-	@atlas migrate lint --env local --config atlas.shared.hcl --latest 1
+	@atlas migrate lint --env local --config atlas/shared/atlas.hcl --latest 1
 	@echo "Linting current_account migrations..."
-	@atlas migrate lint --env local --config atlas.current_account.hcl --latest 1
+	@atlas migrate lint --env local --config atlas/current_account/atlas.hcl --latest 1
 	@echo "Linting position_keeping migrations..."
-	@atlas migrate lint --env local --config atlas.position_keeping.hcl --latest 1
+	@atlas migrate lint --env local --config atlas/position_keeping/atlas.hcl --latest 1
 	@echo "All migrations linted successfully."
 
 ## migrate-hash-all: Verify migration integrity for all schemas
 migrate-hash-all:
 	@echo "Verifying migration checksums for all schemas..."
-	@atlas migrate hash --env local --config atlas.shared.hcl
-	@atlas migrate hash --env local --config atlas.current_account.hcl
-	@atlas migrate hash --env local --config atlas.position_keeping.hcl
+	@atlas migrate hash --env local --config atlas/shared/atlas.hcl
+	@atlas migrate hash --env local --config atlas/current_account/atlas.hcl
+	@atlas migrate hash --env local --config atlas/position_keeping/atlas.hcl
 	@echo "All migration checksums verified."
 
 ## docs: Start local documentation server (pkgsite)

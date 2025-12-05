@@ -140,8 +140,18 @@ domain models
 ### Project Structure
 
 ```text
-services/financial-accounting-service/
-├── atlas.hcl                           # Atlas configuration
+project-root/
+├── atlas/                              # Atlas configuration directory (per-schema)
+│   ├── current_account/
+│   │   └── atlas.hcl                   # Current Account schema config
+│   ├── position_keeping/
+│   │   └── atlas.hcl                   # Position Keeping schema config
+│   ├── financial_accounting/
+│   │   └── atlas.hcl                   # Financial Accounting schema config
+│   ├── payment_order/
+│   │   └── atlas.hcl                   # Payment Order schema config
+│   └── shared/
+│       └── atlas.hcl                   # Shared audit factory schema config
 ├── internal/
 │   ├── domain/
 │   │   └── booking_log.go              # Pure domain models (no persistence tags)
@@ -149,9 +159,14 @@ services/financial-accounting-service/
 │       └── persistence/
 │           ├── booking_log_entity.go   # Database entities (GORM tags, source of truth for DB)
 │           └── booking_log_repository.go
-└── migrations/                         # Generated migrations from entities
-    ├── 20250125120000_initial.sql
-    └── atlas.sum                       # Migration checksums
+└── migrations/                         # Generated migrations from entities (per-schema)
+    ├── current_account/
+    │   ├── 20250125120000_initial.sql
+    │   └── atlas.sum
+    ├── position_keeping/
+    │   └── ...
+    └── financial_accounting/
+        └── ...
 ```
 
 ### Database Entity as Source of Truth for Persistence
@@ -245,32 +260,63 @@ func (b *FinancialBookingLog) Post() error {
 
 ### Atlas Configuration
 
-**atlas.hcl:**
+Configuration files are located in the `atlas/` directory, organized by schema. Each service domain has its own
+subdirectory with an `atlas.hcl` configuration file (e.g., `atlas/financial_accounting/atlas.hcl`):
+
+**atlas/financial_accounting/atlas.hcl:**
 
 ```hcl
-env "local" {
-  src = "file://internal/adapters/persistence"  # Database entities, not domain models
-  dev = "docker://postgres/15/dev"
-  url = "postgres://user:pass@localhost:5432/financial_accounting?sslmode=disable"
+data "external_schema" "gorm" {
+  program = [
+    "go",
+    "run",
+    "-mod=mod",
+    "./cmd/atlas-loader",
+    "--schema=financial_accounting"
+  ]
+}
 
+env "local" {
   migration {
-    dir = "file://migrations"
+    dir = "file://migrations/financial_accounting"
   }
+
+  dev = "docker://postgres/16/dev"
+  src = data.external_schema.gorm.url
+  schemas = ["financial_accounting"]
 
   lint {
     destructive {
       error = true  # Fail on data loss
     }
+    data_depend {
+      error = true
+    }
+    incompatible {
+      error = true
+    }
   }
 }
 
-env "gorm" {
-  src = "gorm://internal/adapters/persistence"  # Scan persistence layer
-  dev = "docker://postgres/15/dev"
-  url = getenv("DATABASE_URL")
-
+env "ci" {
   migration {
-    dir = "file://migrations"
+    dir = "file://migrations/financial_accounting"
+  }
+
+  dev = "docker://postgres/16/dev"
+  src = data.external_schema.gorm.url
+  schemas = ["financial_accounting"]
+
+  lint {
+    destructive {
+      error = true
+    }
+    data_depend {
+      error = true
+    }
+    incompatible {
+      error = true
+    }
   }
 }
 ```
@@ -290,15 +336,13 @@ type BookingLogEntity struct {
 **2. Generate Migration:**
 
 ```bash
-
 # Atlas inspects database entities and generates migration
-
 atlas migrate diff add_narrative \
-  --env gorm \
-  --to "gorm://internal/adapters/persistence"
+  --env local \
+  --config atlas/financial_accounting/atlas.hcl
 ```
 
-**Generated migration (migrations/20250125120000_add_narrative.sql):**
+**Generated migration (migrations/financial_accounting/20250125120000_add_narrative.sql):**
 
 ```sql
 -- Add column "narrative_text" to table: "financial_booking_logs"
@@ -312,88 +356,52 @@ ALTER TABLE "financial_booking_logs"
 **3. Lint Migration:**
 
 ```bash
-
 # Catch dangerous changes before deployment
-
 atlas migrate lint \
-  --env gorm \
+  --env local \
+  --config atlas/financial_accounting/atlas.hcl \
   --latest 1
 ```
 
-**4. Test Migration:**
+**4. Verify Migration Checksums:**
 
 ```bash
-
-# Validate on test database
-
-atlas migrate test \
-  --env gorm \
-  --dev-url "docker://postgres/15/test"
+# Verify migration checksums
+atlas migrate hash \
+  --env local \
+  --config atlas/financial_accounting/atlas.hcl
 ```
 
 **5. Apply Migration:**
 
 ```bash
-
-# Deploy to production
-
+# Deploy to target environment
 atlas migrate apply \
-  --env gorm \
-  --url "$PROD_DATABASE_URL"
+  --env local \
+  --config atlas/financial_accounting/atlas.hcl \
+  --url "$DATABASE_URL"
 ```
 
 ### CI/CD Integration
 
-**.github/workflows/migrate.yml:**
+See `.github/workflows/migrations.yml` for the actual implementation. Key path triggers:
 
 ```yaml
-name: Database Migrations
-
 on:
   pull_request:
     paths:
-
-      - 'internal/adapters/persistence/**'
       - 'migrations/**'
+      - 'atlas/**'
+      - 'cmd/atlas-loader/**'
+      - 'internal/domain/models/**'
+```
 
-jobs:
-  lint-and-test:
-    runs-on: ubuntu-latest
-    steps:
+Migration verification uses the schema-specific configs:
 
-      - uses: actions/checkout@v3
-
-      - name: Install Atlas
-
-        run: |
-          curl -sSf https://atlasgo.sh | sh
-
-      - name: Lint migrations
-
-        run: |
-          atlas migrate lint \
-            --env gorm \
-            --latest 1
-
-      - name: Test migrations
-
-        run: |
-          atlas migrate test \
-            --env gorm \
-            --dev-url "docker://postgres/15/test"
-
-  deploy:
-    needs: lint-and-test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-
-      - name: Apply migrations
-
-        run: |
-          atlas migrate apply \
-            --env gorm \
-            --url "${{ secrets.DATABASE_URL }}"
+```bash
+# Verify checksums for each schema
+atlas migrate hash --env ci --config file://atlas/current_account/atlas.hcl
+atlas migrate hash --env ci --config file://atlas/position_keeping/atlas.hcl
 ```
 
 ### Immutability Principle
