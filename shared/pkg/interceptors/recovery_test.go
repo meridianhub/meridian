@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/meridianhub/meridian/services/position-keeping/interceptors"
+	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// TestRecoveryUnaryInterceptor_NoPanic tests normal operation without panics
+// TestRecoveryUnaryInterceptor_NoPanic tests normal operation without panics.
 func TestRecoveryUnaryInterceptor_NoPanic(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryUnaryInterceptor(logger)
@@ -34,7 +34,7 @@ func TestRecoveryUnaryInterceptor_NoPanic(t *testing.T) {
 	assert.Equal(t, expectedResp, resp)
 }
 
-// TestRecoveryUnaryInterceptor_PanicString tests recovery from string panic
+// TestRecoveryUnaryInterceptor_PanicString tests recovery from string panic.
 func TestRecoveryUnaryInterceptor_PanicString(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryUnaryInterceptor(logger)
@@ -58,7 +58,7 @@ func TestRecoveryUnaryInterceptor_PanicString(t *testing.T) {
 	assert.Contains(t, st.Message(), "internal server error")
 }
 
-// TestRecoveryUnaryInterceptor_PanicError tests recovery from error panic
+// TestRecoveryUnaryInterceptor_PanicError tests recovery from error panic.
 func TestRecoveryUnaryInterceptor_PanicError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryUnaryInterceptor(logger)
@@ -81,7 +81,7 @@ func TestRecoveryUnaryInterceptor_PanicError(t *testing.T) {
 	assert.Equal(t, codes.Internal, st.Code())
 }
 
-// TestRecoveryUnaryInterceptor_PanicNil tests recovery from nil panic
+// TestRecoveryUnaryInterceptor_PanicNil tests recovery from nil panic.
 func TestRecoveryUnaryInterceptor_PanicNil(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryUnaryInterceptor(logger)
@@ -105,7 +105,7 @@ func TestRecoveryUnaryInterceptor_PanicNil(t *testing.T) {
 	assert.Equal(t, codes.Internal, st.Code())
 }
 
-// TestRecoveryUnaryInterceptor_HandlerError tests normal error returns are not affected
+// TestRecoveryUnaryInterceptor_HandlerError tests normal error returns are not affected.
 func TestRecoveryUnaryInterceptor_HandlerError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryUnaryInterceptor(logger)
@@ -126,7 +126,7 @@ func TestRecoveryUnaryInterceptor_HandlerError(t *testing.T) {
 	assert.Equal(t, expectedErr, err)
 }
 
-// TestRecoveryStreamInterceptor_NoPanic tests stream handler without panic
+// TestRecoveryStreamInterceptor_NoPanic tests stream handler without panic.
 func TestRecoveryStreamInterceptor_NoPanic(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryStreamInterceptor(logger)
@@ -144,7 +144,7 @@ func TestRecoveryStreamInterceptor_NoPanic(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestRecoveryStreamInterceptor_Panic tests stream handler with panic
+// TestRecoveryStreamInterceptor_Panic tests stream handler with panic.
 func TestRecoveryStreamInterceptor_Panic(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryStreamInterceptor(logger)
@@ -166,7 +166,7 @@ func TestRecoveryStreamInterceptor_Panic(t *testing.T) {
 	assert.Equal(t, codes.Internal, st.Code())
 }
 
-// TestRecoveryStreamInterceptorWithWrappedStream_SendPanic tests panic in SendMsg
+// TestRecoveryStreamInterceptorWithWrappedStream_SendPanic tests panic in SendMsg.
 func TestRecoveryStreamInterceptorWithWrappedStream_SendPanic(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryStreamInterceptorWithWrappedStream(logger)
@@ -193,7 +193,7 @@ func TestRecoveryStreamInterceptorWithWrappedStream_SendPanic(t *testing.T) {
 	assert.Equal(t, codes.Internal, st.Code())
 }
 
-// TestRecoveryStreamInterceptorWithWrappedStream_RecvPanic tests panic in RecvMsg
+// TestRecoveryStreamInterceptorWithWrappedStream_RecvPanic tests panic in RecvMsg.
 func TestRecoveryStreamInterceptorWithWrappedStream_RecvPanic(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	interceptor := interceptors.RecoveryStreamInterceptorWithWrappedStream(logger)
@@ -221,7 +221,7 @@ func TestRecoveryStreamInterceptorWithWrappedStream_RecvPanic(t *testing.T) {
 	assert.Equal(t, codes.Internal, st.Code())
 }
 
-// mockServerStream implements grpc.ServerStream for testing
+// mockServerStream implements grpc.ServerStream for testing.
 type mockServerStream struct {
 	grpc.ServerStream
 	sendPanic bool
