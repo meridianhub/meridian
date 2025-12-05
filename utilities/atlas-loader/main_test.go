@@ -59,6 +59,7 @@ func TestAtlasLoaderBinary(t *testing.T) {
 				"CREATE SCHEMA IF NOT EXISTS current_account",
 				"customers",
 				"accounts",
+				"liens", // LienEntity for balance holds
 			},
 			wantNotStdout: []string{
 				"financial_position_logs", // position_keeping model should not be included

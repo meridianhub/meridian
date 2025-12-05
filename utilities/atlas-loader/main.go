@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"ariga.io/atlas-provider-gorm/gormschema"
+	capersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	fapersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/domain/models"
 )
@@ -28,9 +29,14 @@ func main() {
 
 	switch *schemaFilter {
 	case schemaCurrentAccount:
+		// Use service-specific entities that match the actual migrations
+		// Customer uses shared model (no service-specific entity yet)
+		// Account uses CurrentAccountEntity which includes Version, OverdraftRate, etc.
+		// Lien uses LienEntity for balance holds
 		modelList = []interface{}{
 			&models.Customer{},
-			&models.Account{},
+			&capersistence.CurrentAccountEntity{},
+			&capersistence.LienEntity{},
 		}
 	case schemaPositionKeeping:
 		// FinancialPositionLog references Account via AccountID, so Account must be included
