@@ -1,4 +1,4 @@
-# Meridian - Multi-Stage Dockerfile for Production Images
+# Current-Account Service - Multi-Stage Dockerfile
 # Optimized for security, size, and performance
 
 # Build stage
@@ -25,14 +25,15 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-arm64} go build \
     -ldflags="-w -s -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
     -a -installsuffix cgo \
-    -o meridian \
-    ./utilities/meridian
+    -o current-account \
+    ./services/current-account/cmd
 
 # Verify the binary exists and is executable
-RUN test -x meridian && echo "Binary built successfully"
+RUN test -x current-account && echo "Binary built successfully"
 
 # Runtime stage - distroless for minimal attack surface
 FROM gcr.io/distroless/static:nonroot
@@ -40,20 +41,20 @@ FROM gcr.io/distroless/static:nonroot
 # Copy CA certificates from builder
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# Copy timezone data from builder (optional, for logging)
+# Copy timezone data from builder
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
 # Copy binary from builder
-COPY --from=builder /build/meridian /meridian
+COPY --from=builder /build/current-account /current-account
 
 # Use non-root user (distroless default: 65532:65532)
 USER nonroot:nonroot
 
-# Expose port (adjust as needed)
-EXPOSE 8080
+# Expose gRPC port
+EXPOSE 50051
 
-# Note: Health checks handled by Kubernetes probes (/health/live, /health/ready, /health/startup)
-# HEALTHCHECK not needed in distroless image (lacks curl/wget)
+# Note: Health checks handled by gRPC health check service
+# HEALTHCHECK not needed in distroless image (lacks grpcurl)
 
 # Run the binary
-ENTRYPOINT ["/meridian"]
+ENTRYPOINT ["/current-account"]

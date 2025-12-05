@@ -569,20 +569,20 @@ docker_build(
   },
   live_update=[
     # Sync Go source code
-    sync('./cmd', '/app/cmd'),
-    sync('./internal', '/app/internal'),
-    sync('./pkg', '/app/pkg'),
+    sync('./utilities', '/app/utilities'),
+    sync('./services', '/app/services'),
+    sync('./shared', '/app/shared'),
     sync('./go.mod', '/app/go.mod'),
     sync('./go.sum', '/app/go.sum'),
 
     # Rebuild binary on changes (fast incremental builds)
     run(
-      'cd /app && go build -o meridian ./cmd/meridian',
-      trigger=['./cmd', './internal', './pkg'],
+      'cd /app && go build -o meridian ./utilities/meridian',
+      trigger=['./utilities', './services', './shared'],
     ),
 
     # Restart the service using HUP signal
-    run('kill -HUP 1', trigger=['./cmd', './internal', './pkg']),
+    run('kill -HUP 1', trigger=['./utilities', './services', './shared']),
   ],
 )
 
@@ -645,7 +645,7 @@ k8s_resource(
 docker_build(
   'current-account',
   context='.',
-  dockerfile='cmd/current-account/Dockerfile',
+  dockerfile='services/current-account/cmd/Dockerfile',
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
@@ -654,10 +654,10 @@ docker_build(
 )
 
 # Deploy Current-Account Kubernetes manifests
-k8s_yaml('deployments/k8s/current-account/secret.yaml')
-k8s_yaml('deployments/k8s/current-account/configmap.yaml')
-k8s_yaml('deployments/k8s/current-account/deployment.yaml')
-k8s_yaml('deployments/k8s/current-account/service.yaml')
+k8s_yaml('services/current-account/k8s/secret.yaml')
+k8s_yaml('services/current-account/k8s/configmap.yaml')
+k8s_yaml('services/current-account/k8s/deployment.yaml')
+k8s_yaml('services/current-account/k8s/service.yaml')
 
 # Set resource dependencies for Current-Account
 k8s_resource(
@@ -677,7 +677,7 @@ k8s_resource(
 docker_build(
   'financial-accounting',
   context='.',
-  dockerfile='cmd/financial-accounting/Dockerfile',
+  dockerfile='services/financial-accounting/cmd/Dockerfile',
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
@@ -686,10 +686,10 @@ docker_build(
 )
 
 # Deploy Financial-Accounting Kubernetes manifests
-k8s_yaml('deployments/k8s/financial-accounting/secret.yaml')
-k8s_yaml('deployments/k8s/financial-accounting/configmap.yaml')
-k8s_yaml('deployments/k8s/financial-accounting/deployment.yaml')
-k8s_yaml('deployments/k8s/financial-accounting/service.yaml')
+k8s_yaml('services/financial-accounting/k8s/secret.yaml')
+k8s_yaml('services/financial-accounting/k8s/configmap.yaml')
+k8s_yaml('services/financial-accounting/k8s/deployment.yaml')
+k8s_yaml('services/financial-accounting/k8s/service.yaml')
 
 # Set resource dependencies for Financial-Accounting
 k8s_resource(
@@ -709,7 +709,7 @@ k8s_resource(
 docker_build(
   'position-keeping',
   context='.',
-  dockerfile='cmd/position-keeping/Dockerfile',
+  dockerfile='services/position-keeping/cmd/Dockerfile',
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
@@ -718,10 +718,10 @@ docker_build(
 )
 
 # Deploy Position-Keeping Kubernetes manifests
-k8s_yaml('deployments/k8s/position-keeping/secret.yaml')
-k8s_yaml('deployments/k8s/position-keeping/configmap.yaml')
-k8s_yaml('deployments/k8s/position-keeping/deployment.yaml')
-k8s_yaml('deployments/k8s/position-keeping/service.yaml')
+k8s_yaml('services/position-keeping/k8s/secret.yaml')
+k8s_yaml('services/position-keeping/k8s/configmap.yaml')
+k8s_yaml('services/position-keeping/k8s/deployment.yaml')
+k8s_yaml('services/position-keeping/k8s/service.yaml')
 
 # Set resource dependencies for Position-Keeping
 k8s_resource(
@@ -741,7 +741,7 @@ k8s_resource(
 docker_build(
   'payment-order',
   context='.',
-  dockerfile='cmd/payment-order/Dockerfile',
+  dockerfile='services/payment-order/cmd/Dockerfile',
   build_args={
     'VERSION': 'dev',
     'COMMIT': local('git rev-parse --short HEAD'),
@@ -750,10 +750,10 @@ docker_build(
 )
 
 # Deploy Payment-Order Kubernetes manifests
-k8s_yaml('deployments/k8s/payment-order/secret.yaml')
-k8s_yaml('deployments/k8s/payment-order/configmap.yaml')
-k8s_yaml('deployments/k8s/payment-order/deployment.yaml')
-k8s_yaml('deployments/k8s/payment-order/service.yaml')
+k8s_yaml('services/payment-order/k8s/secret.yaml')
+k8s_yaml('services/payment-order/k8s/configmap.yaml')
+k8s_yaml('services/payment-order/k8s/deployment.yaml')
+k8s_yaml('services/payment-order/k8s/service.yaml')
 
 # Set resource dependencies for Payment-Order
 k8s_resource(
@@ -835,7 +835,7 @@ k8s_resource(
 local_resource(
   'test',
   cmd='make test',
-  deps=['./cmd', './internal', './pkg', './go.mod'],
+  deps=['./services', './shared', './utilities', './go.mod'],
   resource_deps=['generate-proto'],
   labels=['quality'],
   allow_parallel=True,
@@ -846,7 +846,7 @@ local_resource(
 local_resource(
   'lint',
   cmd='make lint',
-  deps=['./cmd', './internal', './pkg', './go.mod'],
+  deps=['./services', './shared', './utilities', './go.mod'],
   labels=['quality'],
   allow_parallel=True,
   auto_init=False,  # Run manually with 'tilt trigger lint'
@@ -884,7 +884,7 @@ local_resource(
 # This minimizes total migration time while respecting schema dependencies
 local_resource(
   'migrate-current-account',
-  cmd='atlas migrate apply --env local --config file://atlas/current_account/atlas.hcl --url "{}"'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://services/current-account/atlas/atlas.hcl --url "{}"'.format(database_url),
   resource_deps=['init-database'],  # Database and user must exist before migrations
   labels=['database'],
   auto_init=True,
@@ -893,7 +893,7 @@ local_resource(
 
 local_resource(
   'migrate-position-keeping',
-  cmd='atlas migrate apply --env local --config file://atlas/position_keeping/atlas.hcl --url "{}"'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://services/position-keeping/atlas/atlas.hcl --url "{}"'.format(database_url),
   resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
   labels=['database'],
   auto_init=True,
@@ -902,7 +902,7 @@ local_resource(
 
 local_resource(
   'migrate-financial-accounting',
-  cmd='atlas migrate apply --env local --config file://atlas/financial_accounting/atlas.hcl --url "{}"'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://services/financial-accounting/atlas/atlas.hcl --url "{}"'.format(database_url),
   resource_deps=['init-database'],  # Independent schema, only needs database to exist
   labels=['database'],
   auto_init=True,
@@ -911,7 +911,7 @@ local_resource(
 
 local_resource(
   'migrate-payment-order',
-  cmd='atlas migrate apply --env local --config file://atlas/payment_order/atlas.hcl --url "{}"'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://services/payment-order/atlas/atlas.hcl --url "{}"'.format(database_url),
   resource_deps=['migrate-current-account'],  # Depends on current_account for account FK reference
   labels=['database'],
   auto_init=True,

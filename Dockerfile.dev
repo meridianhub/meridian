@@ -31,7 +31,7 @@ ARG BUILD_DATE=unknown
 RUN CGO_ENABLED=0 go build \
     -ldflags="-X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
     -o meridian \
-    ./cmd/meridian
+    ./utilities/meridian
 
 # Switch to non-root user
 USER nonroot:nonroot
