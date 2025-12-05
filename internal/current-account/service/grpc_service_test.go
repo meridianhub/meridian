@@ -77,7 +77,7 @@ func TestExecuteDeposit(t *testing.T) {
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(account); err != nil {
+	if err := repo.Save(context.Background(), account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(account); err != nil {
+	if err := repo.Save(context.Background(), account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(account); err != nil {
+	if err := repo.Save(context.Background(), account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
 
@@ -292,7 +292,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	// Create GBP account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(account); err != nil {
+	if err := repo.Save(context.Background(), account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
 
@@ -431,7 +431,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	require.NoError(t, repo.Save(account))
+	require.NoError(t, repo.Save(context.Background(), account))
 
 	// Test: Units value that would overflow when multiplied by 100
 	tests := []struct {
@@ -496,7 +496,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	require.NoError(t, repo.Save(account))
+	require.NoError(t, repo.Save(context.Background(), account))
 
 	// Test: Large units + nanos uses Money.Add() safely
 	req := &pb.ExecuteDepositRequest{

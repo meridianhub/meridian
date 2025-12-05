@@ -232,7 +232,7 @@ func createTestAccount(t *testing.T, repo *persistence.Repository, accountID str
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
 	account, err := domain.NewCurrentAccount(accountID, accountID, uuid.New().String(), "GBP")
 	require.NoError(t, err, "Failed to create test account")
-	require.NoError(t, repo.Save(account), "Failed to save test account")
+	require.NoError(t, repo.Save(context.Background(), account), "Failed to save test account")
 	return account
 }
 

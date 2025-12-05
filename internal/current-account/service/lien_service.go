@@ -209,7 +209,7 @@ func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (
 }
 
 // ExecuteLien converts a reservation to an actual debit atomically
-func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*pb.ExecuteLienResponse, error) {
+func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (*pb.ExecuteLienResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
@@ -296,8 +296,8 @@ func (s *Service) ExecuteLien(_ context.Context, req *pb.ExecuteLienRequest) (*p
 			return fmt.Errorf("%w: %w", errTxUpdateLien, err)
 		}
 
-		// Save account with balance change
-		if err := txRepo.Save(account); err != nil {
+		// Save account with balance change (context carries audit user info)
+		if err := txRepo.Save(ctx, account); err != nil {
 			return fmt.Errorf("%w: %w", errTxSaveAccount, err)
 		}
 
