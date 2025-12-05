@@ -6,6 +6,7 @@ require (
 	ariga.io/atlas-provider-gorm v0.6.0
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20250912141014-52f32327d4b0.1
 	buf.build/go/protovalidate v1.0.1
+	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/confluentinc/confluent-kafka-go/v2 v2.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.0

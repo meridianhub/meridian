@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/shopspring/decimal"
 )
 
@@ -43,12 +44,16 @@ type DepositEvent struct {
 // Debit: Customer account (increases asset)
 // Credit: Bank cash account (increases liability to customer)
 func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent) error {
+	timer := observability.NewOperationTimer(observability.OperationProcessDeposit)
+
 	bookingLogID := uuid.New()
 
 	// Convert cents to decimal
 	amount := decimalFromCents(event.AmountCents)
 	money, err := domain.NewMoney(amount, domain.Currency(event.Currency))
 	if err != nil {
+		timer.ObserveError(observability.ErrorCategoryValidation)
+		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
 		return fmt.Errorf("failed to create money: %w", err)
 	}
 
@@ -62,6 +67,8 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 		event.CorrelationID,
 	)
 	if err != nil {
+		timer.ObserveError(observability.ErrorCategoryValidation)
+		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
 		return fmt.Errorf("failed to create debit posting: %w", err)
 	}
 
@@ -75,22 +82,38 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 		event.CorrelationID,
 	)
 	if err != nil {
+		timer.ObserveError(observability.ErrorCategoryValidation)
+		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
 		return fmt.Errorf("failed to create credit posting: %w", err)
 	}
 
 	// Post both entries
 	if err := debitPosting.Post("Deposit processed"); err != nil {
+		timer.ObserveError(observability.ErrorCategoryInternal)
+		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
 		return fmt.Errorf("failed to post debit: %w", err)
 	}
 
 	if err := creditPosting.Post("Deposit processed"); err != nil {
+		timer.ObserveError(observability.ErrorCategoryInternal)
+		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
 		return fmt.Errorf("failed to post credit: %w", err)
 	}
 
 	// Save both postings atomically in a transaction
 	if err := s.repo.SavePostingsInTransaction(ctx, []*domain.LedgerPosting{debitPosting, creditPosting}); err != nil {
+		timer.ObserveError(observability.ErrorCategoryDatabase)
+		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
 		return fmt.Errorf("failed to save postings: %w", err)
 	}
+
+	// Record successful metrics
+	timer.ObserveSuccess()
+	observability.RecordDepositProcessed(event.Currency, observability.StatusSuccess)
+	observability.RecordPosting(observability.DirectionDebit, event.Currency)
+	observability.RecordPosting(observability.DirectionCredit, event.Currency)
+	observability.RecordPostingAmount(observability.DirectionDebit, event.Currency, event.AmountCents)
+	observability.RecordPostingAmount(observability.DirectionCredit, event.Currency, event.AmountCents)
 
 	return nil
 }
@@ -106,8 +129,11 @@ func (s *PostingService) GetPostingsByBookingLog(ctx context.Context, bookingLog
 
 // ValidateDoubleEntry checks that debits equal credits for a booking log
 func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID uuid.UUID) (bool, error) {
+	timer := observability.NewOperationTimer(observability.OperationValidateDoubleEntry)
+
 	postings, err := s.repo.GetPostingsByBookingLogID(ctx, bookingLogID)
 	if err != nil {
+		timer.ObserveError(observability.ErrorCategoryDatabase)
 		return false, fmt.Errorf("failed to get postings: %w", err)
 	}
 
@@ -123,5 +149,15 @@ func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID u
 		}
 	}
 
-	return debitTotal.Equal(creditTotal), nil
+	balanced := debitTotal.Equal(creditTotal)
+
+	// Record validation result
+	timer.ObserveSuccess()
+	if balanced {
+		observability.RecordDoubleEntryValidation("balanced")
+	} else {
+		observability.RecordDoubleEntryValidation("unbalanced")
+	}
+
+	return balanced, nil
 }
