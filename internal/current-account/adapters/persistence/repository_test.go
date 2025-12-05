@@ -50,6 +50,28 @@ func TestSaveNewAccount(t *testing.T) {
 	}
 }
 
+func TestSaveNewAccount_InitialVersion(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	customerID := uuid.New().String()
+	iban := "GB82WEST12345698765432"
+
+	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	err = repo.Save(ctx, account)
+	require.NoError(t, err)
+
+	// Verify newly created account has version 1
+	retrieved, err := repo.FindByID(iban)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1), retrieved.Version, "New account should have version 1")
+}
+
 func TestSaveUpdateExisting(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
