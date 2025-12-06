@@ -239,11 +239,11 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Validate currency matches account currency
-	if req.Amount.Amount.CurrencyCode != account.Balance.Currency() {
+	if req.Amount.Amount.CurrencyCode != account.Balance.CurrencyCode() {
 		operationStatus = "currency_mismatch"
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
-			account.Balance.Currency(), req.Amount.Amount.CurrencyCode)
+			account.Balance.CurrencyCode(), req.Amount.Amount.CurrencyCode)
 	}
 
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)

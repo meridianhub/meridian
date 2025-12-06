@@ -404,8 +404,8 @@ func TestToMoneyAmount(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := toMoneyAmount(tt.input)
 
-			if result.Amount.CurrencyCode != tt.input.Currency() {
-				t.Errorf("Expected currency %s, got %s", tt.input.Currency(), result.Amount.CurrencyCode)
+			if result.Amount.CurrencyCode != tt.input.CurrencyCode() {
+				t.Errorf("Expected currency %s, got %s", tt.input.CurrencyCode(), result.Amount.CurrencyCode)
 			}
 
 			if result.Amount.Units != tt.expectedUnits {
