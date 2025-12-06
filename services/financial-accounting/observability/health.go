@@ -1,3 +1,4 @@
+// Package observability provides health checks for the financial-accounting service.
 package observability
 
 import (

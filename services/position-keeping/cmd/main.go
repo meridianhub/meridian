@@ -148,7 +148,7 @@ func run(logger *slog.Logger) error {
 
 	// 1. Metrics (always enabled)
 	unaryInterceptors = append(unaryInterceptors,
-		observability.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
+		interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
 
 	// 2. Tracing (optional if OTLP endpoint configured)
 	if container.Tracer != nil {

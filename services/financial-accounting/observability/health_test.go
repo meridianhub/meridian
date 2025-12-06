@@ -13,7 +13,12 @@ import (
 const testDatabaseName = "database"
 
 func TestGormDBChecker_Name(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that requires database driver in short mode")
+	}
+
 	// Create a minimal database connection for testing
+	// Note: sql.Open doesn't actually connect, it just validates the driver
 	db, err := sql.Open("postgres", "postgres://test:test@localhost:5432/testdb?sslmode=disable")
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)

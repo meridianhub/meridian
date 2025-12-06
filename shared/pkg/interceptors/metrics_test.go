@@ -1,4 +1,4 @@
-package observability
+package interceptors
 
 import (
 	"context"
@@ -11,28 +11,18 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// mockUnaryHandler is a test handler that can be configured to return success or error
-type mockUnaryHandler struct {
-	resp interface{}
-	err  error
-}
-
-func (m *mockUnaryHandler) handle(_ context.Context, _ interface{}) (interface{}, error) {
-	return m.resp, m.err
-}
-
 func TestMetricsInterceptor_Success(t *testing.T) {
 	// Create test metrics
 	requestsTotal := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "test_requests_total",
+			Name: "test_shared_requests_total",
 			Help: "Test counter",
 		},
 		[]string{"method", "status"},
 	)
 	requestDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "test_request_duration_seconds",
+			Name:    "test_shared_request_duration_seconds",
 			Help:    "Test histogram",
 			Buckets: prometheus.DefBuckets,
 		},
@@ -43,9 +33,8 @@ func TestMetricsInterceptor_Success(t *testing.T) {
 	interceptor := MetricsInterceptor(requestsTotal, requestDuration)
 
 	// Mock handler that succeeds
-	handler := &mockUnaryHandler{
-		resp: "success",
-		err:  nil,
+	handler := func(_ context.Context, _ interface{}) (interface{}, error) {
+		return "success", nil
 	}
 
 	// Create test context and info
@@ -55,7 +44,8 @@ func TestMetricsInterceptor_Success(t *testing.T) {
 	}
 
 	// Execute interceptor
-	resp, err := interceptor(ctx, "test-request", info, handler.handle)
+	resp, err := interceptor(ctx, "test-request", info, handler)
+
 	// Verify response
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -65,8 +55,6 @@ func TestMetricsInterceptor_Success(t *testing.T) {
 	}
 
 	// Verify metrics were recorded
-	// Note: We can't easily verify the exact values without accessing internal state,
-	// but we can verify the metrics don't panic and can be collected
 	metric, err := requestsTotal.GetMetricWithLabelValues("/test.Service/TestMethod", "OK")
 	if err != nil {
 		t.Errorf("Failed to get metric: %v", err)
@@ -80,14 +68,14 @@ func TestMetricsInterceptor_Error(t *testing.T) {
 	// Create test metrics
 	requestsTotal := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "test_requests_total_error",
+			Name: "test_shared_requests_total_error",
 			Help: "Test counter",
 		},
 		[]string{"method", "status"},
 	)
 	requestDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "test_request_duration_seconds_error",
+			Name:    "test_shared_request_duration_seconds_error",
 			Help:    "Test histogram",
 			Buckets: prometheus.DefBuckets,
 		},
@@ -99,9 +87,8 @@ func TestMetricsInterceptor_Error(t *testing.T) {
 
 	// Mock handler that returns gRPC error
 	testErr := status.Error(codes.InvalidArgument, "test error")
-	handler := &mockUnaryHandler{
-		resp: nil,
-		err:  testErr,
+	handler := func(_ context.Context, _ interface{}) (interface{}, error) {
+		return nil, testErr
 	}
 
 	// Create test context and info
@@ -111,7 +98,7 @@ func TestMetricsInterceptor_Error(t *testing.T) {
 	}
 
 	// Execute interceptor
-	resp, err := interceptor(ctx, "test-request", info, handler.handle)
+	resp, err := interceptor(ctx, "test-request", info, handler)
 
 	// Verify response
 	if err == nil {
@@ -138,14 +125,14 @@ func TestMetricsInterceptor_RecordsDuration(t *testing.T) {
 	// Create test metrics
 	requestsTotal := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "test_requests_total_duration",
+			Name: "test_shared_requests_total_duration",
 			Help: "Test counter",
 		},
 		[]string{"method", "status"},
 	)
 	requestDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "test_request_duration_seconds_duration",
+			Name:    "test_shared_request_duration_seconds_duration",
 			Help:    "Test histogram",
 			Buckets: prometheus.DefBuckets,
 		},
@@ -156,9 +143,8 @@ func TestMetricsInterceptor_RecordsDuration(t *testing.T) {
 	interceptor := MetricsInterceptor(requestsTotal, requestDuration)
 
 	// Mock handler that succeeds
-	handler := &mockUnaryHandler{
-		resp: "success",
-		err:  nil,
+	handler := func(_ context.Context, _ interface{}) (interface{}, error) {
+		return "success", nil
 	}
 
 	// Create test context and info
@@ -168,7 +154,7 @@ func TestMetricsInterceptor_RecordsDuration(t *testing.T) {
 	}
 
 	// Execute interceptor
-	_, _ = interceptor(ctx, "test-request", info, handler.handle)
+	_, _ = interceptor(ctx, "test-request", info, handler)
 
 	// Verify duration histogram was recorded
 	metric, err := requestDuration.GetMetricWithLabelValues("/test.Service/DurationMethod")
@@ -213,14 +199,14 @@ func TestMetricsInterceptor_StatusCodeMapping(t *testing.T) {
 			// Create test metrics with unique names per test
 			requestsTotal := prometheus.NewCounterVec(
 				prometheus.CounterOpts{
-					Name: "test_requests_total_" + tt.name,
+					Name: "test_shared_requests_total_" + tt.name,
 					Help: "Test counter",
 				},
 				[]string{"method", "status"},
 			)
 			requestDuration := prometheus.NewHistogramVec(
 				prometheus.HistogramOpts{
-					Name:    "test_request_duration_seconds_" + tt.name,
+					Name:    "test_shared_request_duration_seconds_" + tt.name,
 					Help:    "Test histogram",
 					Buckets: prometheus.DefBuckets,
 				},
@@ -231,9 +217,8 @@ func TestMetricsInterceptor_StatusCodeMapping(t *testing.T) {
 			interceptor := MetricsInterceptor(requestsTotal, requestDuration)
 
 			// Mock handler
-			handler := &mockUnaryHandler{
-				resp: "response",
-				err:  tt.handlerErr,
+			handler := func(_ context.Context, _ interface{}) (interface{}, error) {
+				return "response", tt.handlerErr
 			}
 
 			// Create test context and info
@@ -243,7 +228,7 @@ func TestMetricsInterceptor_StatusCodeMapping(t *testing.T) {
 			}
 
 			// Execute interceptor
-			_, _ = interceptor(ctx, "test-request", info, handler.handle)
+			_, _ = interceptor(ctx, "test-request", info, handler)
 
 			// Verify correct status code was recorded
 			metric, err := requestsTotal.GetMetricWithLabelValues("/test.Service/StatusMethod", tt.expectedStatus)

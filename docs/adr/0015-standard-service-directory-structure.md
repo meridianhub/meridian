@@ -150,11 +150,13 @@ services/{service-name}/
 
 ### Repository vs Adapters/Persistence
 
-The `repository/` directory at service root level should **not** be used. Repository implementations belong in `adapters/persistence/`. The domain defines repository interfaces (ports) in `domain/`, and implementations (adapters) live in `adapters/persistence/`.
+The `repository/` directory at service root level should **not** be used for new code. Repository implementations belong in `adapters/persistence/`. The domain defines repository interfaces (ports) in `domain/`, and implementations (adapters) live in `adapters/persistence/`.
 
 This aligns with ADR-005 (Adapter Pattern Layer Translation):
 - `domain/repository.go` - Interface definition (port)
 - `adapters/persistence/repository.go` - Implementation (adapter)
+
+**Note on position-keeping**: The position-keeping service currently has a `repository/` directory with working code. This pre-dates the standard and will be migrated to `adapters/persistence/` in a future PR. New services should not follow this pattern.
 
 ### Observability Location
 
@@ -175,9 +177,11 @@ Simple services should keep initialization logic in `cmd/main.go`.
 ### Shared Libraries
 
 Cross-service utilities should be extracted to `shared/pkg/`:
-- `shared/pkg/interceptors/` - gRPC interceptors (recovery, logging, auth)
+- `shared/pkg/interceptors/` - gRPC interceptors (metrics, recovery, logging, auth)
 - `shared/pkg/health/` - Common health check interfaces
 - `shared/pkg/grpc/` - gRPC utilities
+
+The `MetricsInterceptor` and `RecoveryUnaryInterceptor` in `shared/pkg/interceptors/` should be used by all services instead of defining their own.
 
 ## Migration Plan
 
