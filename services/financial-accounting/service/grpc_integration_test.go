@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,10 +108,11 @@ func setupIntegrationTest(t *testing.T) *testServer {
 	}()
 
 	// Create client connection using NewClient (grpc.DialContext is deprecated)
+	// Note: NewClient creates a lazy client that doesn't connect until first RPC
 	conn, err := grpc.NewClient(address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
-	require.NoError(t, err, "Failed to connect to gRPC server")
+	require.NoError(t, err, "Failed to create gRPC client")
 
 	// Create clients
 	grpcClient := financialaccountingv1.NewFinancialAccountingServiceClient(conn)
@@ -171,12 +173,17 @@ func (n *noopEventPublisher) PublishBatch(_ context.Context, _ []DomainEvent) er
 	return nil
 }
 
-// inMemoryIdempotencyService provides an in-memory idempotency service for integration tests
+// inMemoryIdempotencyService provides a thread-safe in-memory idempotency service for integration tests.
+// Uses sync.RWMutex to allow concurrent reads while ensuring safe writes.
 type inMemoryIdempotencyService struct {
+	mu    sync.RWMutex
 	store map[string]*idempotency.Result
 }
 
 func (s *inMemoryIdempotencyService) Check(_ context.Context, key idempotency.Key) (*idempotency.Result, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	keyStr := key.String()
 	if result, ok := s.store[keyStr]; ok {
 		if result.Status == idempotency.StatusCompleted {
@@ -188,6 +195,9 @@ func (s *inMemoryIdempotencyService) Check(_ context.Context, key idempotency.Ke
 }
 
 func (s *inMemoryIdempotencyService) MarkPending(_ context.Context, key idempotency.Key, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	keyStr := key.String()
 	s.store[keyStr] = &idempotency.Result{
 		Key:    key,
@@ -197,12 +207,18 @@ func (s *inMemoryIdempotencyService) MarkPending(_ context.Context, key idempote
 }
 
 func (s *inMemoryIdempotencyService) StoreResult(_ context.Context, result idempotency.Result) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	keyStr := result.Key.String()
 	s.store[keyStr] = &result
 	return nil
 }
 
 func (s *inMemoryIdempotencyService) Delete(_ context.Context, key idempotency.Key) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	delete(s.store, key.String())
 	return nil
 }
