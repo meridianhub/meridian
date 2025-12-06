@@ -11,6 +11,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+var (
+	errGenericTest = errors.New("generic error")
+	errTestFailure = errors.New("error")
+)
+
 func TestNewResilientClient(t *testing.T) {
 	t.Run("creates client with default config", func(t *testing.T) {
 		config := DefaultResilientClientConfig("test-service")
@@ -73,7 +78,6 @@ func TestExecuteWithResilience(t *testing.T) {
 		result, err := ExecuteWithResilience(ctx, client, "test-op", func() (string, error) {
 			return "success", nil
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -103,7 +107,6 @@ func TestExecuteWithResilience(t *testing.T) {
 			}
 			return 42, nil
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -159,7 +162,7 @@ func TestExecuteWithResilience(t *testing.T) {
 		// Generic Go errors are NOT retryable
 		_, err := ExecuteWithResilience(ctx, client, "no-retry-op", func() (string, error) {
 			atomic.AddInt32(&attempts, 1)
-			return "", errors.New("generic error")
+			return "", errGenericTest
 		})
 
 		if err == nil {
@@ -199,7 +202,6 @@ func TestExecuteWithResilience(t *testing.T) {
 		result, err := ExecuteWithResilience(ctx, client, "struct-op", func() (Response, error) {
 			return Response{ID: 1, Name: "test"}, nil
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -222,7 +224,7 @@ func TestExecuteWithResilienceNoRetry(t *testing.T) {
 		var attempts int32
 		_, err := ExecuteWithResilienceNoRetry(ctx, client, "no-retry-op", func() (string, error) {
 			atomic.AddInt32(&attempts, 1)
-			return "", errors.New("error")
+			return "", errTestFailure
 		})
 
 		if err == nil {
@@ -241,7 +243,6 @@ func TestExecuteWithResilienceNoRetry(t *testing.T) {
 		result, err := ExecuteWithResilienceNoRetry(ctx, client, "success-op", func() (int, error) {
 			return 100, nil
 		})
-
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
