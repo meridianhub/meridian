@@ -228,7 +228,7 @@ func run(logger *slog.Logger) error {
 
 	go func() {
 		logger.Info("starting HTTP server for metrics", "address", httpServer.Addr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("HTTP server error", "error", err)
 		}
 	}()

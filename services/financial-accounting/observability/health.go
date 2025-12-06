@@ -96,12 +96,14 @@ func (h *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthChe
 		for _, comp := range report.Components {
 			var status string
 			switch comp.Status {
+			case health.StatusHealthy:
+				status = "healthy"
 			case health.StatusUnhealthy:
 				status = "unhealthy"
 			case health.StatusDegraded:
 				status = "degraded"
-			default:
-				status = "healthy"
+			case health.StatusUnknown:
+				status = "unknown"
 			}
 			RecordHealthCheck(comp.Name, status)
 		}
