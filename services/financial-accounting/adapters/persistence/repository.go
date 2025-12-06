@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,6 +34,8 @@ var (
 	ErrBookingLogNotFound = errors.New("financial booking log not found")
 	// ErrFractionalCents is returned when an amount has fractional cents
 	ErrFractionalCents = errors.New("amount has fractional cents that cannot be represented")
+	// ErrDuplicateIdempotencyKey is returned when a booking log with the same idempotency key already exists
+	ErrDuplicateIdempotencyKey = errors.New("booking log with this idempotency key already exists")
 )
 
 // LedgerRepository provides persistence operations for ledger postings
@@ -194,10 +197,19 @@ func (r *LedgerRepository) GetBookingLog(ctx context.Context, id uuid.UUID) (*do
 	return toBookingLogDomain(&entity), nil
 }
 
-// SaveBookingLog persists a new financial booking log
+// SaveBookingLog persists a new financial booking log.
+// Returns ErrDuplicateIdempotencyKey if a booking log with the same idempotency key already exists.
 func (r *LedgerRepository) SaveBookingLog(ctx context.Context, log *domain.FinancialBookingLog, idempotencyKey string) error {
 	entity := toBookingLogEntity(log, idempotencyKey)
-	return r.db.WithContext(ctx).Create(&entity).Error
+	err := r.db.WithContext(ctx).Create(&entity).Error
+	if err != nil {
+		// Check for unique constraint violation on idempotency_key
+		if strings.Contains(err.Error(), "duplicate key") && strings.Contains(err.Error(), "idempotency_key") {
+			return ErrDuplicateIdempotencyKey
+		}
+		return err
+	}
+	return nil
 }
 
 // UpdateBookingLog updates an existing financial booking log

@@ -16,6 +16,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -140,13 +141,16 @@ func run(logger *slog.Logger) error {
 	logger.Info("financial accounting service initialized")
 	_ = postingService // Available for internal use
 
-	// Create gRPC server with observability interceptors
+	// Create gRPC server with interceptor chain
+	// Order: tracing → recovery (recovery last to catch all panics)
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			tracer.UnaryServerInterceptor(),
+			interceptors.RecoveryUnaryInterceptor(logger),
 		),
 		grpc.ChainStreamInterceptor(
 			tracer.StreamServerInterceptor(),
+			interceptors.RecoveryStreamInterceptor(logger),
 		),
 	)
 

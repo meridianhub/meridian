@@ -15,6 +15,12 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
+const (
+	// defaultIdempotencyTTL is the default TTL for idempotency keys when not specified by the client.
+	// This should be long enough to allow for retries but short enough to not consume excessive storage.
+	defaultIdempotencyTTL = 1 * time.Hour
+)
+
 // DomainEvent is a marker interface for all financial accounting domain events.
 // Concrete event types will be defined in domain/events.go in subsequent subtasks.
 //
@@ -162,7 +168,7 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		}
 
 		// Mark as pending to prevent concurrent processing
-		if err := s.idempotency.MarkPending(ctx, idempotencyKey, 3600*time.Second); err != nil {
+		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
 		}
 	}
@@ -238,7 +244,7 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 
 	// Store result for idempotency
 	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
-		ttl := 3600 * time.Second // Default 1 hour
+		ttl := defaultIdempotencyTTL
 		if req.IdempotencyKey.TtlSeconds > 0 {
 			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
 		}
@@ -670,7 +676,7 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 	}
 
 	// Mark as pending to prevent concurrent processing
-	if err := s.idempotency.MarkPending(ctx, idempotencyKey, 3600*time.Second); err != nil {
+	if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
 	}
 
@@ -718,11 +724,16 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 
 	// Persist booking log
 	if err := s.repository.SaveBookingLog(ctx, bookingLog, req.IdempotencyKey.Key); err != nil {
+		if errors.Is(err, persistence.ErrDuplicateIdempotencyKey) {
+			return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+		}
 		return nil, status.Errorf(codes.Internal, "failed to save booking log: %v", err)
 	}
 
+	// TODO: Publish FinancialBookingLogInitiatedEvent for inter-service coordination
+
 	// Store idempotency result
-	ttl := 3600 * time.Second
+	ttl := defaultIdempotencyTTL
 	if req.IdempotencyKey.TtlSeconds > 0 {
 		ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
 	}
@@ -818,6 +829,12 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 			"cannot update booking log in terminal status: %s", bookingLog.Status)
 	}
 
+	// Validate specific state transitions
+	if !isValidBookingLogTransition(bookingLog.Status, newStatus) {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"invalid status transition from %s to %s", bookingLog.Status, newStatus)
+	}
+
 	// Apply status update
 	updated := bookingLog.WithStatus(newStatus)
 
@@ -834,8 +851,35 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to update booking log: %v", err)
 	}
 
+	// TODO: Publish FinancialBookingLogUpdatedEvent for inter-service coordination
+
 	// Convert to proto response
 	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
 		FinancialBookingLog: toProtoFinancialBookingLog(&updated),
 	}, nil
+}
+
+// isValidBookingLogTransition validates that a status transition is allowed.
+// Valid transitions from PENDING:
+//   - PENDING -> POSTED (when all postings balance and are processed)
+//   - PENDING -> FAILED (validation or processing error)
+//   - PENDING -> CANCELLED (business cancellation request)
+//
+// REVERSED is not a valid target from PENDING - reversals should only apply
+// to already-posted transactions.
+func isValidBookingLogTransition(from, to domain.TransactionStatus) bool {
+	if from == domain.TransactionStatusPending {
+		switch to {
+		case domain.TransactionStatusPosted,
+			domain.TransactionStatusFailed,
+			domain.TransactionStatusCancelled:
+			return true
+		case domain.TransactionStatusPending,
+			domain.TransactionStatusReversed:
+			// PENDING -> PENDING is a no-op (not useful but not invalid)
+			// PENDING -> REVERSED is invalid (must be POSTED first)
+			return false
+		}
+	}
+	return false
 }

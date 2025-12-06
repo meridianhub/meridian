@@ -19,6 +19,7 @@ import (
 	webhookhttp "github.com/meridianhub/meridian/services/payment-order/adapters/http"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/service"
+	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
@@ -133,13 +134,16 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create payment order service: %w", err)
 	}
 
-	// Create gRPC server
+	// Create gRPC server with interceptor chain
+	// Order: tracing → recovery (recovery last to catch all panics)
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			tracer.UnaryServerInterceptor(),
+			interceptors.RecoveryUnaryInterceptor(logger),
 		),
 		grpc.ChainStreamInterceptor(
 			tracer.StreamServerInterceptor(),
+			interceptors.RecoveryStreamInterceptor(logger),
 		),
 	)
 

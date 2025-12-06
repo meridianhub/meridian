@@ -15,6 +15,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/current-account/service"
+	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -118,13 +119,16 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("service initialized with external clients")
 
-	// Create gRPC server with observability interceptors
+	// Create gRPC server with interceptor chain
+	// Order: tracing → recovery (recovery last to catch all panics)
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			tracer.UnaryServerInterceptor(),
+			interceptors.RecoveryUnaryInterceptor(logger),
 		),
 		grpc.ChainStreamInterceptor(
 			tracer.StreamServerInterceptor(),
+			interceptors.RecoveryStreamInterceptor(logger),
 		),
 	)
 
