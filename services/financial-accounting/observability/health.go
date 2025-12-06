@@ -127,10 +127,17 @@ func (h *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthChe
 			"response_time_ms", componentResult.ResponseTime.Milliseconds(),
 			"message", componentResult.Message)
 
-		// Record metric
-		status := "healthy"
-		if componentResult.Status == health.StatusUnhealthy {
+		// Record metric (use same exhaustive switch as all-components check)
+		var status string
+		switch componentResult.Status {
+		case health.StatusHealthy:
+			status = "healthy"
+		case health.StatusUnhealthy:
 			status = "unhealthy"
+		case health.StatusDegraded:
+			status = "degraded"
+		case health.StatusUnknown:
+			status = "unknown"
 		}
 		RecordHealthCheck(componentResult.Name, status)
 

@@ -8,7 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRecordOperationDuration(_ *testing.T) {
+func TestRecordOperationDuration(t *testing.T) {
+	t.Helper()
+
 	// Record a successful operation - this should not panic
 	RecordOperationDuration(OperationCaptureLedgerPosting, StatusSuccess, 100*time.Millisecond)
 
