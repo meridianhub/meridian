@@ -12,6 +12,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,6 +80,7 @@ func BenchmarkProcessDeposit_Single(b *testing.B) {
 	tc := setupBenchContainer(b)
 	ctx := context.Background()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		event := createBenchDepositEvent(i)
@@ -95,12 +97,12 @@ func BenchmarkProcessDeposit_Parallel(b *testing.B) {
 	tc := setupBenchContainer(b)
 	ctx := context.Background()
 
-	counter := 0
+	var counter atomic.Int64
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			counter++
-			event := createBenchDepositEvent(counter)
+			n := counter.Add(1)
+			event := createBenchDepositEvent(int(n))
 			err := tc.service.ProcessDeposit(ctx, event)
 			if err != nil {
 				b.Fatal(err)
@@ -162,6 +164,7 @@ func BenchmarkValidateDoubleEntry(b *testing.B) {
 		b.Fatal(err)
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		balanced, err := tc.service.ValidateDoubleEntry(ctx, entity.FinancialBookingLogID)

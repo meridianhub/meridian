@@ -13,6 +13,7 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,6 +87,7 @@ func BenchmarkSavePosting_Single(b *testing.B) {
 	tc := setupBenchContainer(b)
 	ctx := context.Background()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
@@ -218,6 +220,7 @@ func BenchmarkGetPostingsByBookingLogID(b *testing.B) {
 		}
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		postings, err := tc.repo.GetPostingsByBookingLogID(ctx, bookingLogID)
@@ -290,22 +293,6 @@ func BenchmarkUpdatePosting(b *testing.B) {
 // BenchmarkListPostings benchmarks paginated list queries with various filters.
 // Target: P99 < 50ms
 func BenchmarkListPostings(b *testing.B) {
-	tc := setupBenchContainer(b)
-	ctx := context.Background()
-
-	// Setup: create diverse postings
-	for i := 0; i < 100; i++ {
-		bookingLogID := uuid.New()
-		direction := domain.PostingDirectionDebit
-		if i%2 == 1 {
-			direction = domain.PostingDirectionCredit
-		}
-		posting := createBenchPosting(b, bookingLogID, direction, fmt.Sprintf("ACC-LIST-%08d", i))
-		if err := tc.repo.SavePosting(ctx, posting); err != nil {
-			b.Fatal(err)
-		}
-	}
-
 	testCases := []struct {
 		name   string
 		params ListPostingsParams
@@ -351,9 +338,9 @@ func BenchmarkListPostings(b *testing.B) {
 		},
 	}
 
-	for _, tc := range testCases {
-		b.Run(tc.name, func(b *testing.B) {
-			container := setupBenchContainer(b)
+	for _, testCase := range testCases {
+		b.Run(testCase.name, func(b *testing.B) {
+			tc := setupBenchContainer(b)
 			ctx := context.Background()
 
 			// Setup data for this sub-benchmark
@@ -364,14 +351,14 @@ func BenchmarkListPostings(b *testing.B) {
 					direction = domain.PostingDirectionCredit
 				}
 				posting := createBenchPosting(b, bookingLogID, direction, fmt.Sprintf("ACC-LIST-%08d", i))
-				if err := container.repo.SavePosting(ctx, posting); err != nil {
+				if err := tc.repo.SavePosting(ctx, posting); err != nil {
 					b.Fatal(err)
 				}
 			}
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, err := container.repo.ListPostings(ctx, tc.params)
+				_, err := tc.repo.ListPostings(ctx, testCase.params)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -503,13 +490,13 @@ func BenchmarkConcurrentWrites(b *testing.B) {
 	tc := setupBenchContainer(b)
 	ctx := context.Background()
 
-	counter := 0
+	var counter atomic.Int64
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			counter++
+			n := counter.Add(1)
 			bookingLogID := uuid.New()
-			posting := createBenchPosting(b, bookingLogID, domain.PostingDirectionDebit, fmt.Sprintf("ACC-CONC-%08d", counter))
+			posting := createBenchPosting(b, bookingLogID, domain.PostingDirectionDebit, fmt.Sprintf("ACC-CONC-%08d", n))
 			if err := tc.repo.SavePosting(ctx, posting); err != nil {
 				b.Fatal(err)
 			}
@@ -568,29 +555,43 @@ func BenchmarkMixedWorkload(b *testing.B) {
 }
 
 // BenchmarkTransactionThroughput measures maximum transaction throughput.
+// Reports postings/sec as a custom metric to measure bulk insert performance.
 func BenchmarkTransactionThroughput(b *testing.B) {
 	tc := setupBenchContainer(b)
 	ctx := context.Background()
-
 	batchSize := 100
-	bookingLogID := uuid.New()
-	postings := make([]*domain.LedgerPosting, batchSize)
-	for i := 0; i < batchSize; i++ {
-		direction := domain.PostingDirectionDebit
-		if i%2 == 1 {
-			direction = domain.PostingDirectionCredit
-		}
-		postings[i] = createBenchPosting(b, bookingLogID, direction, fmt.Sprintf("ACC-THRU-%d", i))
-	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
-	err := tc.repo.SavePostingsInTransaction(ctx, postings)
-	if err != nil {
-		b.Fatal(err)
+
+	totalPostings := 0
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		bookingLogID := uuid.New()
+		postings := make([]*domain.LedgerPosting, batchSize)
+		for j := 0; j < batchSize; j++ {
+			direction := domain.PostingDirectionDebit
+			if j%2 == 1 {
+				direction = domain.PostingDirectionCredit
+			}
+			postings[j] = createBenchPosting(b, bookingLogID, direction, fmt.Sprintf("ACC-THRU-%d-%d", i, j))
+		}
+		b.StartTimer()
+
+		err := tc.repo.SavePostingsInTransaction(ctx, postings)
+		if err != nil {
+			b.Fatal(err)
+		}
+		totalPostings += batchSize
 	}
 
-	// Report transactions per second
-	duration := b.Elapsed()
-	txnPerSec := float64(batchSize) / duration.Seconds()
-	b.ReportMetric(txnPerSec, "postings/sec")
+	b.StopTimer()
+	// Report postings per second as a custom metric
+	if b.N > 0 {
+		duration := b.Elapsed()
+		if duration.Seconds() > 0 {
+			postingsPerSec := float64(totalPostings) / duration.Seconds()
+			b.ReportMetric(postingsPerSec, "postings/sec")
+		}
+	}
 }
