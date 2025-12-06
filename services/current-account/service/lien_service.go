@@ -1,5 +1,6 @@
-//nolint:staticcheck // Uses AmountCents() for balance calculations (deprecated for backward compatibility)
 // Package service implements gRPC services for the current account domain
+//
+//nolint:staticcheck // Uses AmountCents() for balance calculations (deprecated for backward compatibility)
 package service
 
 import (

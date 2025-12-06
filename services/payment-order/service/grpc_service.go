@@ -1,5 +1,6 @@
-//nolint:staticcheck // Uses AmountCents() for payment processing (deprecated for backward compatibility)
 // Package service implements gRPC services for the payment order domain
+//
+//nolint:staticcheck // Uses AmountCents() for payment processing (deprecated for backward compatibility)
 package service
 
 import (
