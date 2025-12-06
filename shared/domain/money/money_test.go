@@ -520,10 +520,10 @@ func TestMoney_ToMinorUnits(t *testing.T) {
 			want:     1000,
 		},
 		{
-			name:     "JPY 1234.56 rounds to 1234 (no decimals)",
+			name:     "JPY 1234.56 rounds to 1235 (no decimals)",
 			amount:   decimal.NewFromFloat(1234.56),
 			currency: CurrencyJPY,
-			want:     1234,
+			want:     1235,
 		},
 		{
 			name:     "negative GBP -50.25 = -5025 pence",
@@ -598,5 +598,140 @@ func TestZero(t *testing.T) {
 	_, err = Zero(Currency("INVALID"))
 	if err == nil {
 		t.Error("Zero should reject invalid currency")
+	}
+}
+
+func TestMoney_ToMinorUnits_BankersRounding(t *testing.T) {
+	// Tests for banker's rounding (round-half-to-even) behavior.
+	// This rounding method is standard for financial calculations as it
+	// reduces cumulative rounding bias over many operations.
+	tests := []struct {
+		name     string
+		amount   string // use string for precise decimal parsing
+		currency Currency
+		want     int64
+	}{
+		// Standard rounding - values clearly closer to one integer
+		{
+			name:     "GBP 100.994 rounds down to 10099 pence",
+			amount:   "100.994",
+			currency: CurrencyGBP,
+			want:     10099,
+		},
+		{
+			name:     "GBP 100.996 rounds up to 10100 pence",
+			amount:   "100.996",
+			currency: CurrencyGBP,
+			want:     10100,
+		},
+		// Banker's rounding tie-breaker: round to even
+		{
+			name:     "GBP 100.995 rounds up to 10100 (even) - banker's rounding",
+			amount:   "100.995",
+			currency: CurrencyGBP,
+			want:     10100, // 10100 is even, 10099 is odd -> round to 10100
+		},
+		{
+			name:     "GBP 100.985 rounds down to 10098 (even) - banker's rounding",
+			amount:   "100.985",
+			currency: CurrencyGBP,
+			want:     10098, // 10098 is even, 10099 is odd -> round to 10098
+		},
+		{
+			name:     "GBP 100.975 rounds up to 10098 (even) - banker's rounding",
+			amount:   "100.975",
+			currency: CurrencyGBP,
+			want:     10098, // 10098 is even, 10097 is odd -> round to 10098
+		},
+		{
+			name:     "GBP 100.965 rounds down to 10096 (even) - banker's rounding",
+			amount:   "100.965",
+			currency: CurrencyGBP,
+			want:     10096, // 10096 is even, 10097 is odd -> round to 10096
+		},
+		// Negative values with banker's rounding
+		{
+			name:     "GBP -100.995 rounds to -10100 (even magnitude) - banker's rounding",
+			amount:   "-100.995",
+			currency: CurrencyGBP,
+			want:     -10100,
+		},
+		{
+			name:     "GBP -100.985 rounds to -10098 (even magnitude) - banker's rounding",
+			amount:   "-100.985",
+			currency: CurrencyGBP,
+			want:     -10098,
+		},
+		// JPY has no decimal places, so rounding applies to major units
+		{
+			name:     "JPY 1234.5 rounds up to 1234 (even) - banker's rounding",
+			amount:   "1234.5",
+			currency: CurrencyJPY,
+			want:     1234, // 1234 is even
+		},
+		{
+			name:     "JPY 1235.5 rounds up to 1236 (even) - banker's rounding",
+			amount:   "1235.5",
+			currency: CurrencyJPY,
+			want:     1236, // 1236 is even
+		},
+		// Edge cases
+		{
+			name:     "exact value needs no rounding",
+			amount:   "123.45",
+			currency: CurrencyGBP,
+			want:     12345,
+		},
+		{
+			name:     "very small fractional part rounds down",
+			amount:   "123.450001",
+			currency: CurrencyGBP,
+			want:     12345,
+		},
+		{
+			name:     "just under .5 rounds down",
+			amount:   "123.454999",
+			currency: CurrencyGBP,
+			want:     12345,
+		},
+		{
+			name:     "just over .5 rounds up",
+			amount:   "123.455001",
+			currency: CurrencyGBP,
+			want:     12346,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			amount, err := decimal.NewFromString(tt.amount)
+			if err != nil {
+				t.Fatalf("Invalid test amount %q: %v", tt.amount, err)
+			}
+			money, err := New(amount, tt.currency)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			got, err := money.ToMinorUnits()
+			if err != nil {
+				t.Fatalf("ToMinorUnits() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("ToMinorUnits() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMoney_ToMinorUnitsUnchecked_BankersRounding(t *testing.T) {
+	// Verify ToMinorUnitsUnchecked also uses banker's rounding
+	amount, _ := decimal.NewFromString("100.995")
+	money, _ := New(amount, CurrencyGBP)
+
+	got := money.ToMinorUnitsUnchecked()
+	want := int64(10100) // banker's rounding to even
+
+	if got != want {
+		t.Errorf("ToMinorUnitsUnchecked() = %v, want %v", got, want)
 	}
 }

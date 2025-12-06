@@ -240,23 +240,33 @@ func (m Money) StringWithPrecision() string {
 // ToMinorUnits converts the Money amount to minor units (cents, pence, sen, etc.).
 // This is currency-aware: JPY returns the amount as-is (no decimals), while
 // GBP/USD/EUR multiply by 100 to convert to cents/pence.
+//
+// Uses banker's rounding (round-half-to-even) to handle fractional minor units,
+// which reduces cumulative rounding bias in financial calculations.
+// For example: 100.995 GBP rounds to 10100 pence (up), 100.985 GBP rounds to 10098 pence (down).
+//
 // Returns an error if the result would overflow int64.
 func (m Money) ToMinorUnits() (int64, error) {
 	decimalPlaces := m.currency.DecimalPlaces()
 	shifted := m.amount.Shift(decimalPlaces)
 
+	// Round to nearest integer using banker's rounding (round-half-to-even)
+	// This is the standard rounding method for financial calculations
+	rounded := shifted.RoundBank(0)
+
 	// Check for overflow before converting to int64
-	if shifted.GreaterThan(decimal.NewFromInt(math.MaxInt64)) ||
-		shifted.LessThan(decimal.NewFromInt(math.MinInt64)) {
-		return 0, fmt.Errorf("%w: %s minor units", ErrOverflow, shifted.String())
+	if rounded.GreaterThan(decimal.NewFromInt(math.MaxInt64)) ||
+		rounded.LessThan(decimal.NewFromInt(math.MinInt64)) {
+		return 0, fmt.Errorf("%w: %s minor units", ErrOverflow, rounded.String())
 	}
 
-	return shifted.IntPart(), nil
+	return rounded.IntPart(), nil
 }
 
 // ToMinorUnitsUnchecked converts to minor units without overflow checking.
+// Uses banker's rounding (round-half-to-even) for fractional minor units.
 // Use only when you're certain the value won't overflow (e.g., validated input).
 func (m Money) ToMinorUnitsUnchecked() int64 {
 	decimalPlaces := m.currency.DecimalPlaces()
-	return m.amount.Shift(decimalPlaces).IntPart()
+	return m.amount.Shift(decimalPlaces).RoundBank(0).IntPart()
 }

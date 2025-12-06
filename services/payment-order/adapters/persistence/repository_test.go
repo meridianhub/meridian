@@ -49,7 +49,7 @@ func TestPaymentOrderRepository_Create(t *testing.T) {
 	assert.Equal(t, "acc-123", retrieved.DebtorAccountID)
 	assert.Equal(t, "creditor-ref", retrieved.CreditorReference)
 	assert.Equal(t, int64(10000), retrieved.Amount.AmountCents())
-	assert.Equal(t, "GBP", retrieved.Amount.Currency())
+	assert.Equal(t, domain.CurrencyGBP, retrieved.Amount.Currency())
 	assert.Equal(t, domain.PaymentOrderStatusInitiated, retrieved.Status)
 	assert.Equal(t, "idem-key-001", retrieved.IdempotencyKey)
 	assert.Equal(t, "corr-001", retrieved.CorrelationID)
