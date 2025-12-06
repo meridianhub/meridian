@@ -32,16 +32,16 @@ const (
 // NewMoney creates a new Money instance with the given decimal amount and currency.
 // This is the same signature as the previous implementation.
 func NewMoney(amount decimal.Decimal, currency Currency) (Money, error) {
-	return money.New(amount, money.Currency(currency))
+	return money.New(amount, currency)
 }
 
 // MustNewMoney creates a Money instance, panicking on invalid currency.
 // Use only in tests or when currency is known valid.
 func MustNewMoney(amount decimal.Decimal, currency Currency) Money {
-	return money.MustNew(amount, money.Currency(currency))
+	return money.MustNew(amount, currency)
 }
 
 // Zero returns a zero Money value for the given currency.
 func Zero(currency Currency) (Money, error) {
-	return money.Zero(money.Currency(currency))
+	return money.Zero(currency)
 }
