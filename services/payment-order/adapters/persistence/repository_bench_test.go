@@ -15,9 +15,22 @@ import (
 // benchTime is a fixed time for consistent benchmark results
 var benchTime = time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
+// setupBenchDB creates a PostgreSQL testcontainer for benchmark tests.
+// Note: Each benchmark spins up a new container for isolation. This adds overhead
+// but ensures benchmarks don't interfere with each other and start with clean state.
+//
+// Known limitation: testdb.SetupPostgres requires *testing.T but benchmarks use *testing.B.
+// We pass a minimal testing.T - if container setup fails, the detached T will call Fatalf
+// which triggers runtime.Goexit(). The benchmark framework catches this appropriately.
+// This is a pragmatic workaround until testdb.SetupPostgres accepts testing.TB.
 func setupBenchDB(b *testing.B) (*gorm.DB, func()) {
 	b.Helper()
-	db, cleanup := testdb.SetupPostgres(&testing.T{}, []interface{}{&PaymentOrderEntity{}})
+	// Use testing.T with Fatalf that properly fails the benchmark
+	t := &testing.T{}
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}})
+	if t.Failed() {
+		b.Fatalf("setupBenchDB: testcontainer setup failed")
+	}
 	return db, cleanup
 }
 
@@ -60,9 +73,17 @@ func BenchmarkRepository_FindByID(b *testing.B) {
 	ctx := context.Background()
 
 	// Create a payment order to retrieve
-	amount, _ := cadomain.NewMoney("GBP", 10000)
-	po, _ := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
-	_ = repo.Create(ctx, po)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	if err != nil {
+		b.Fatalf("setup: NewMoney failed: %v", err)
+	}
+	po, err := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
+	if err != nil {
+		b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+	}
+	if err := repo.Create(ctx, po); err != nil {
+		b.Fatalf("setup: Create failed: %v", err)
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -85,9 +106,17 @@ func BenchmarkRepository_FindByIdempotencyKey(b *testing.B) {
 	ctx := context.Background()
 
 	// Create a payment order to retrieve
-	amount, _ := cadomain.NewMoney("GBP", 10000)
-	po, _ := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "bench-idem-key", "corr-001")
-	_ = repo.Create(ctx, po)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	if err != nil {
+		b.Fatalf("setup: NewMoney failed: %v", err)
+	}
+	po, err := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "bench-idem-key", "corr-001")
+	if err != nil {
+		b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+	}
+	if err := repo.Create(ctx, po); err != nil {
+		b.Fatalf("setup: Create failed: %v", err)
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -110,13 +139,29 @@ func BenchmarkRepository_FindByGatewayReferenceID(b *testing.B) {
 	ctx := context.Background()
 
 	// Create a payment order with gateway reference
-	amount, _ := cadomain.NewMoney("GBP", 10000)
-	po, _ := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
-	_ = repo.Create(ctx, po)
-	_ = po.Reserve("lien-123")
-	_ = repo.Update(ctx, po)
-	_ = po.Execute("bench-gw-ref-001")
-	_ = repo.Update(ctx, po)
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	if err != nil {
+		b.Fatalf("setup: NewMoney failed: %v", err)
+	}
+	po, err := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
+	if err != nil {
+		b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+	}
+	if err := repo.Create(ctx, po); err != nil {
+		b.Fatalf("setup: Create failed: %v", err)
+	}
+	if err := po.Reserve("lien-123"); err != nil {
+		b.Fatalf("setup: Reserve failed: %v", err)
+	}
+	if err := repo.Update(ctx, po); err != nil {
+		b.Fatalf("setup: Update (Reserve) failed: %v", err)
+	}
+	if err := po.Execute("bench-gw-ref-001"); err != nil {
+		b.Fatalf("setup: Execute failed: %v", err)
+	}
+	if err := repo.Update(ctx, po); err != nil {
+		b.Fatalf("setup: Update (Execute) failed: %v", err)
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -130,7 +175,7 @@ func BenchmarkRepository_FindByGatewayReferenceID(b *testing.B) {
 }
 
 // BenchmarkRepository_Update benchmarks the Update operation with optimistic locking.
-// This measures state transition persistence performance.
+// This measures pure state transition persistence performance.
 func BenchmarkRepository_Update(b *testing.B) {
 	db, cleanup := setupBenchDB(b)
 	defer cleanup()
@@ -138,18 +183,32 @@ func BenchmarkRepository_Update(b *testing.B) {
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
 
+	// Pre-generate lien IDs to avoid UUID allocation in the hot path
+	lienIDs := make([]string, b.N)
+	for i := 0; i < b.N; i++ {
+		lienIDs[i] = "lien-" + uuid.New().String()
+	}
+
 	// Create payment orders for update testing
 	paymentOrders := make([]*domain.PaymentOrder, b.N)
 	for i := 0; i < b.N; i++ {
-		amount, _ := cadomain.NewMoney("GBP", 10000)
-		po, _ := domain.NewPaymentOrder(
+		amount, err := cadomain.NewMoney("GBP", 10000)
+		if err != nil {
+			b.Fatalf("setup: NewMoney failed: %v", err)
+		}
+		po, err := domain.NewPaymentOrder(
 			"acc-123",
 			"cred-ref",
 			amount,
 			uuid.New().String(),
 			"corr-001",
 		)
-		_ = repo.Create(ctx, po)
+		if err != nil {
+			b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+		}
+		if err := repo.Create(ctx, po); err != nil {
+			b.Fatalf("setup: Create failed: %v", err)
+		}
 		paymentOrders[i] = po
 	}
 
@@ -158,7 +217,9 @@ func BenchmarkRepository_Update(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		po := paymentOrders[i]
-		_ = po.Reserve("lien-" + uuid.New().String())
+		if err := po.Reserve(lienIDs[i]); err != nil {
+			b.Fatalf("Reserve failed: %v", err)
+		}
 
 		err := repo.Update(ctx, po)
 		if err != nil {
@@ -317,11 +378,23 @@ func BenchmarkCursor_EncodeDecode(b *testing.B) {
 // BenchmarkEntityConversion benchmarks domain<->entity conversion.
 func BenchmarkEntityConversion(b *testing.B) {
 	b.Run("toEntity", func(b *testing.B) {
-		amount, _ := cadomain.NewMoney("GBP", 10000)
-		po, _ := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
-		_ = po.Reserve("lien-123")
-		_ = po.Execute("gw-ref-123")
-		_ = po.Complete("")
+		amount, err := cadomain.NewMoney("GBP", 10000)
+		if err != nil {
+			b.Fatalf("setup: NewMoney failed: %v", err)
+		}
+		po, err := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
+		if err != nil {
+			b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+		}
+		if err := po.Reserve("lien-123"); err != nil {
+			b.Fatalf("setup: Reserve failed: %v", err)
+		}
+		if err := po.Execute("gw-ref-123"); err != nil {
+			b.Fatalf("setup: Execute failed: %v", err)
+		}
+		if err := po.Complete(""); err != nil {
+			b.Fatalf("setup: Complete failed: %v", err)
+		}
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -332,11 +405,23 @@ func BenchmarkEntityConversion(b *testing.B) {
 	})
 
 	b.Run("toDomain", func(b *testing.B) {
-		amount, _ := cadomain.NewMoney("GBP", 10000)
-		po, _ := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
-		_ = po.Reserve("lien-123")
-		_ = po.Execute("gw-ref-123")
-		_ = po.Complete("")
+		amount, err := cadomain.NewMoney("GBP", 10000)
+		if err != nil {
+			b.Fatalf("setup: NewMoney failed: %v", err)
+		}
+		po, err := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
+		if err != nil {
+			b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+		}
+		if err := po.Reserve("lien-123"); err != nil {
+			b.Fatalf("setup: Reserve failed: %v", err)
+		}
+		if err := po.Execute("gw-ref-123"); err != nil {
+			b.Fatalf("setup: Execute failed: %v", err)
+		}
+		if err := po.Complete(""); err != nil {
+			b.Fatalf("setup: Complete failed: %v", err)
+		}
 		entity := toEntity(po)
 
 		b.ResetTimer()
