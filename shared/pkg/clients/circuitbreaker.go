@@ -73,8 +73,14 @@ func NewCircuitBreaker(config CircuitBreakerConfig, logger *slog.Logger) *Circui
 	}
 }
 
-// Execute wraps a function with circuit breaker protection and context awareness
-// It respects context cancellation and deadlines before executing the function
+// Execute wraps a function with circuit breaker protection and context awareness.
+// It respects context cancellation and deadlines before executing the function.
+//
+// Goroutine behavior: When the context is cancelled, Execute returns immediately
+// with the context error. However, the underlying function continues to run in a
+// background goroutine until it completes. The goroutine will exit after fn()
+// returns, but will not be interrupted. Callers should ensure that fn respects
+// context cancellation if early termination is required.
 func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() (any, error)) (any, error) {
 	// Check context before executing
 	if err := ctx.Err(); err != nil {

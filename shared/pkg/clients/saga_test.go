@@ -92,6 +92,7 @@ func TestSagaOrchestrator_Execute_AllStepsSucceed(t *testing.T) {
 	assert.Equal(t, "", result.FailedStep)
 	assert.Equal(t, 0, result.CompensatedSteps)
 	assert.NoError(t, result.Error)
+	assert.Nil(t, result.CompensationErrors)
 	assert.Equal(t, []string{"step1", "step2", "step3"}, executed)
 }
 
@@ -262,6 +263,11 @@ func TestSagaOrchestrator_Execute_CompensationFails(t *testing.T) {
 
 	// Verify both compensations were attempted despite failure
 	assert.Equal(t, []string{"compensate2", "compensate1"}, compensated)
+
+	// Verify compensation errors are tracked
+	assert.Len(t, result.CompensationErrors, 1)
+	assert.Contains(t, result.CompensationErrors[0].Error(), "step2")
+	assert.ErrorIs(t, result.CompensationErrors[0], errCompensationFailed)
 }
 
 // TestSagaOrchestrator_Execute_ContextCancellation verifies handling of context cancellation

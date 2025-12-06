@@ -26,6 +26,9 @@ type SagaResult struct {
 	FailedStep       string
 	CompensatedSteps int
 	Error            error
+	// CompensationErrors contains errors from failed compensation attempts.
+	// Even if some compensations fail, the saga continues compensating remaining steps.
+	CompensationErrors []error
 }
 
 // NewSagaOrchestrator creates a new saga orchestrator
@@ -110,7 +113,9 @@ func (s *SagaOrchestrator) compensate(ctx context.Context, failedAtIndex int, re
 			s.logger.Error("compensation failed",
 				"step", step.Name,
 				"error", err)
-			// Continue compensating remaining steps despite error
+			// Track compensation error and continue with remaining steps
+			result.CompensationErrors = append(result.CompensationErrors,
+				fmt.Errorf("compensation for step %s failed: %w", step.Name, err))
 		} else {
 			result.CompensatedSteps++
 		}
