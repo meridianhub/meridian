@@ -195,9 +195,11 @@ func DecOperationsInFlight(operation string) {
 }
 
 // OperationTimer provides a convenient way to time operations and record metrics.
+// It protects against double-observation which would cause incorrect gauge values.
 type OperationTimer struct {
 	operation string
 	start     time.Time
+	observed  bool
 }
 
 // NewOperationTimer creates a new timer and increments the in-flight gauge.
@@ -206,17 +208,28 @@ func NewOperationTimer(operation string) *OperationTimer {
 	return &OperationTimer{
 		operation: operation,
 		start:     time.Now(),
+		observed:  false,
 	}
 }
 
 // ObserveSuccess records a successful operation and decrements in-flight gauge.
+// Safe to call multiple times; only the first call has effect.
 func (t *OperationTimer) ObserveSuccess() {
+	if t.observed {
+		return
+	}
+	t.observed = true
 	DecOperationsInFlight(t.operation)
 	RecordOperationDuration(t.operation, StatusSuccess, time.Since(t.start))
 }
 
 // ObserveError records a failed operation with error category and decrements in-flight gauge.
+// Safe to call multiple times; only the first call has effect.
 func (t *OperationTimer) ObserveError(errorCategory string) {
+	if t.observed {
+		return
+	}
+	t.observed = true
 	DecOperationsInFlight(t.operation)
 	RecordOperationDuration(t.operation, StatusError, time.Since(t.start))
 	RecordError(errorCategory, t.operation)

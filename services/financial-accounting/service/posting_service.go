@@ -120,10 +120,15 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 
 // GetPostingsByBookingLog retrieves all postings for a booking log
 func (s *PostingService) GetPostingsByBookingLog(ctx context.Context, bookingLogID uuid.UUID) ([]*domain.LedgerPosting, error) {
+	timer := observability.NewOperationTimer(observability.OperationRetrieveLedgerPosting)
+
 	postings, err := s.repo.GetPostingsByBookingLogID(ctx, bookingLogID)
 	if err != nil {
+		timer.ObserveError(observability.ErrorCategoryDatabase)
 		return nil, fmt.Errorf("failed to get postings: %w", err)
 	}
+
+	timer.ObserveSuccess()
 	return postings, nil
 }
 

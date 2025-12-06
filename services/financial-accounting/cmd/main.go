@@ -224,12 +224,14 @@ func run(logger *slog.Logger) error {
 		Addr:              fmt.Sprintf(":%s", metricsPort),
 		Handler:           httpMux,
 		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
 	}
 
 	go func() {
 		logger.Info("starting HTTP server for metrics", "address", httpServer.Addr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("HTTP server error", "error", err)
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
 
