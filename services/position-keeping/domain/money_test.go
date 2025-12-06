@@ -337,10 +337,10 @@ func TestMoney_ToMinorUnits(t *testing.T) {
 			want:     1000,
 		},
 		{
-			name:     "JPY 1234.56 rounds to 1234 (no decimals)",
+			name:     "JPY 1234.56 rounds to 1235 (no decimals)",
 			amount:   decimal.NewFromFloat(1234.56),
 			currency: CurrencyJPY,
-			want:     1234,
+			want:     1235,
 		},
 		{
 			name:     "negative GBP -50.25 = -5025 pence",
