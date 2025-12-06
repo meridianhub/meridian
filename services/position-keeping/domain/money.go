@@ -45,3 +45,16 @@ func MustNewMoney(amount decimal.Decimal, currency Currency) Money {
 func Zero(currency Currency) (Money, error) {
 	return money.Zero(currency)
 }
+
+// NewMoneyFromMinorUnits creates Money from minor units (cents, pence, etc.)
+// and a currency string. This provides compatibility with services using
+// the minor units API (current-account, payment-order).
+//
+// Example: NewMoneyFromMinorUnits("GBP", 10000) creates £100.00
+func NewMoneyFromMinorUnits(currencyCode string, minorUnits int64) (Money, error) {
+	cur, err := money.ParseCurrency(currencyCode)
+	if err != nil {
+		return Money{}, err
+	}
+	return money.NewFromMinorUnits(minorUnits, cur)
+}

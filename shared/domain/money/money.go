@@ -24,6 +24,7 @@ var (
 	ErrCurrencyMismatch = errors.New("currency mismatch")
 	ErrInvalidCurrency  = errors.New("invalid currency")
 	ErrOverflow         = errors.New("overflow: value exceeds int64 bounds")
+	ErrDivisionByZero   = errors.New("division by zero")
 )
 
 // Currency represents an ISO 4217 currency code.
@@ -78,6 +79,13 @@ func ParseCurrency(s string) (Currency, error) {
 
 // Money represents an immutable monetary amount with currency.
 // It uses decimal.Decimal for precise arithmetic operations.
+//
+// Concurrency: Money is safe for concurrent read access. All methods that
+// perform calculations (Add, Subtract, etc.) return new Money instances
+// rather than modifying the receiver, following value semantics.
+// However, the underlying decimal.Decimal is not inherently thread-safe
+// for concurrent writes; since Money values are immutable, this is not
+// a concern for normal usage patterns.
 type Money struct {
 	amount   decimal.Decimal
 	currency Currency
@@ -193,6 +201,29 @@ func (m Money) Abs() Money {
 		amount:   m.amount.Abs(),
 		currency: m.currency,
 	}
+}
+
+// Multiply multiplies the Money amount by a decimal factor.
+// This is useful for applying rates, percentages, or quantities.
+// For example: price.Multiply(decimal.NewFromFloat(1.20)) for a 20% markup.
+func (m Money) Multiply(factor decimal.Decimal) Money {
+	return Money{
+		amount:   m.amount.Mul(factor),
+		currency: m.currency,
+	}
+}
+
+// Divide divides the Money amount by a decimal divisor.
+// Returns an error if the divisor is zero.
+// For example: total.Divide(decimal.NewFromInt(3)) to split evenly.
+func (m Money) Divide(divisor decimal.Decimal) (Money, error) {
+	if divisor.IsZero() {
+		return Money{}, ErrDivisionByZero
+	}
+	return Money{
+		amount:   m.amount.Div(divisor),
+		currency: m.currency,
+	}, nil
 }
 
 // IsZero returns true if the amount is zero.

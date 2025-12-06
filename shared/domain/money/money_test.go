@@ -262,6 +262,149 @@ func TestMoney_Abs(t *testing.T) {
 	}
 }
 
+func TestMoney_Multiply(t *testing.T) {
+	tests := []struct {
+		name           string
+		amount         decimal.Decimal
+		currency       Currency
+		factor         decimal.Decimal
+		expectedAmount decimal.Decimal
+	}{
+		{
+			name:           "multiply by 2",
+			amount:         decimal.NewFromInt(100),
+			currency:       CurrencyGBP,
+			factor:         decimal.NewFromInt(2),
+			expectedAmount: decimal.NewFromInt(200),
+		},
+		{
+			name:           "multiply by 0.5 (halve)",
+			amount:         decimal.NewFromInt(100),
+			currency:       CurrencyGBP,
+			factor:         decimal.NewFromFloat(0.5),
+			expectedAmount: decimal.NewFromInt(50),
+		},
+		{
+			name:           "multiply by 1.20 (20% markup)",
+			amount:         decimal.NewFromInt(100),
+			currency:       CurrencyUSD,
+			factor:         decimal.NewFromFloat(1.20),
+			expectedAmount: decimal.NewFromInt(120),
+		},
+		{
+			name:           "multiply by zero",
+			amount:         decimal.NewFromInt(100),
+			currency:       CurrencyGBP,
+			factor:         decimal.Zero,
+			expectedAmount: decimal.Zero,
+		},
+		{
+			name:           "multiply negative by positive",
+			amount:         decimal.NewFromInt(-100),
+			currency:       CurrencyGBP,
+			factor:         decimal.NewFromInt(2),
+			expectedAmount: decimal.NewFromInt(-200),
+		},
+		{
+			name:           "multiply by negative (reverses sign)",
+			amount:         decimal.NewFromInt(100),
+			currency:       CurrencyGBP,
+			factor:         decimal.NewFromInt(-1),
+			expectedAmount: decimal.NewFromInt(-100),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			money, err := New(tt.amount, tt.currency)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			result := money.Multiply(tt.factor)
+			if !result.Amount().Equal(tt.expectedAmount) {
+				t.Errorf("Multiply() = %v, want %v", result.Amount(), tt.expectedAmount)
+			}
+			if result.Currency() != tt.currency {
+				t.Errorf("Currency changed from %v to %v", tt.currency, result.Currency())
+			}
+		})
+	}
+}
+
+func TestMoney_Divide(t *testing.T) {
+	tests := []struct {
+		name           string
+		amount         decimal.Decimal
+		currency       Currency
+		divisor        decimal.Decimal
+		wantErr        bool
+		expectedAmount decimal.Decimal
+	}{
+		{
+			name:           "divide by 2",
+			amount:         decimal.NewFromInt(100),
+			currency:       CurrencyGBP,
+			divisor:        decimal.NewFromInt(2),
+			wantErr:        false,
+			expectedAmount: decimal.NewFromInt(50),
+		},
+		{
+			name:           "divide by 4 (exact)",
+			amount:         decimal.NewFromInt(100),
+			currency:       CurrencyGBP,
+			divisor:        decimal.NewFromInt(4),
+			wantErr:        false,
+			expectedAmount: decimal.NewFromInt(25),
+		},
+		{
+			name:           "divide by 0.5 (doubles)",
+			amount:         decimal.NewFromInt(100),
+			currency:       CurrencyUSD,
+			divisor:        decimal.NewFromFloat(0.5),
+			wantErr:        false,
+			expectedAmount: decimal.NewFromInt(200),
+		},
+		{
+			name:     "divide by zero - error",
+			amount:   decimal.NewFromInt(100),
+			currency: CurrencyGBP,
+			divisor:  decimal.Zero,
+			wantErr:  true,
+		},
+		{
+			name:           "divide negative by positive",
+			amount:         decimal.NewFromInt(-100),
+			currency:       CurrencyGBP,
+			divisor:        decimal.NewFromInt(2),
+			wantErr:        false,
+			expectedAmount: decimal.NewFromInt(-50),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			money, err := New(tt.amount, tt.currency)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			result, err := money.Divide(tt.divisor)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Divide() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if !result.Amount().Equal(tt.expectedAmount) {
+				t.Errorf("Divide() = %v, want %v", result.Amount(), tt.expectedAmount)
+			}
+			if result.Currency() != tt.currency {
+				t.Errorf("Currency changed from %v to %v", tt.currency, result.Currency())
+			}
+		})
+	}
+}
+
 func TestMoney_IsZero(t *testing.T) {
 	zero, _ := Zero(CurrencyGBP)
 	positive, _ := New(decimal.NewFromInt(100), CurrencyGBP)
