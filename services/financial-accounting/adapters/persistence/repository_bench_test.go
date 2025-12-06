@@ -474,12 +474,18 @@ func BenchmarkConcurrentReads(b *testing.B) {
 		b.Fatal(err)
 	}
 
+	var hasError atomic.Bool
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
+			if hasError.Load() {
+				return
+			}
 			_, err := tc.repo.GetPosting(ctx, posting.ID)
 			if err != nil {
-				b.Fatal(err)
+				hasError.Store(true)
+				b.Error(err)
+				return
 			}
 		}
 	})
@@ -491,14 +497,20 @@ func BenchmarkConcurrentWrites(b *testing.B) {
 	ctx := context.Background()
 
 	var counter atomic.Int64
+	var hasError atomic.Bool
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
+			if hasError.Load() {
+				return
+			}
 			n := counter.Add(1)
 			bookingLogID := uuid.New()
 			posting := createBenchPosting(b, bookingLogID, domain.PostingDirectionDebit, fmt.Sprintf("ACC-CONC-%08d", n))
 			if err := tc.repo.SavePosting(ctx, posting); err != nil {
-				b.Fatal(err)
+				hasError.Store(true)
+				b.Error(err)
+				return
 			}
 		}
 	})

@@ -98,14 +98,20 @@ func BenchmarkProcessDeposit_Parallel(b *testing.B) {
 	ctx := context.Background()
 
 	var counter atomic.Int64
+	var hasError atomic.Bool
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
+			if hasError.Load() {
+				return
+			}
 			n := counter.Add(1)
 			event := createBenchDepositEvent(int(n))
 			err := tc.service.ProcessDeposit(ctx, event)
 			if err != nil {
-				b.Fatal(err)
+				hasError.Store(true)
+				b.Error(err)
+				return
 			}
 		}
 	})
@@ -187,9 +193,12 @@ func BenchmarkValidateDoubleEntry_MultiplePostings(b *testing.B) {
 
 	// Create multiple balanced posting pairs
 	for i := 0; i < 10; i++ {
-		money, _ := domain.NewMoney(decimal.NewFromInt(int64(100+i)), domain.CurrencyGBP)
+		money, err := domain.NewMoney(decimal.NewFromInt(int64(100+i)), domain.CurrencyGBP)
+		if err != nil {
+			b.Fatal(err)
+		}
 
-		debit, _ := domain.NewLedgerPosting(
+		debit, err := domain.NewLedgerPosting(
 			bookingLogID,
 			domain.PostingDirectionDebit,
 			money,
@@ -197,12 +206,17 @@ func BenchmarkValidateDoubleEntry_MultiplePostings(b *testing.B) {
 			time.Now().UTC(),
 			fmt.Sprintf("corr-%d", i),
 		)
-		_ = debit.Post("benchmark")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := debit.Post("benchmark"); err != nil {
+			b.Fatal(err)
+		}
 		if err := tc.repo.SavePosting(ctx, debit); err != nil {
 			b.Fatal(err)
 		}
 
-		credit, _ := domain.NewLedgerPosting(
+		credit, err := domain.NewLedgerPosting(
 			bookingLogID,
 			domain.PostingDirectionCredit,
 			money,
@@ -210,7 +224,12 @@ func BenchmarkValidateDoubleEntry_MultiplePostings(b *testing.B) {
 			time.Now().UTC(),
 			fmt.Sprintf("corr-%d", i),
 		)
-		_ = credit.Post("benchmark")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := credit.Post("benchmark"); err != nil {
+			b.Fatal(err)
+		}
 		if err := tc.repo.SavePosting(ctx, credit); err != nil {
 			b.Fatal(err)
 		}
@@ -271,13 +290,16 @@ func BenchmarkGetPostingsByBookingLog_ManyPostings(b *testing.B) {
 
 			// Create many postings for the same booking log
 			for i := 0; i < postingCount; i++ {
-				money, _ := domain.NewMoney(decimal.NewFromInt(int64(100)), domain.CurrencyGBP)
+				money, err := domain.NewMoney(decimal.NewFromInt(int64(100)), domain.CurrencyGBP)
+				if err != nil {
+					b.Fatal(err)
+				}
 				direction := domain.PostingDirectionDebit
 				if i%2 == 1 {
 					direction = domain.PostingDirectionCredit
 				}
 
-				posting, _ := domain.NewLedgerPosting(
+				posting, err := domain.NewLedgerPosting(
 					bookingLogID,
 					direction,
 					money,
@@ -285,7 +307,12 @@ func BenchmarkGetPostingsByBookingLog_ManyPostings(b *testing.B) {
 					time.Now().UTC(),
 					fmt.Sprintf("corr-%d", i),
 				)
-				_ = posting.Post("benchmark")
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := posting.Post("benchmark"); err != nil {
+					b.Fatal(err)
+				}
 				if err := tc.repo.SavePosting(ctx, posting); err != nil {
 					b.Fatal(err)
 				}
