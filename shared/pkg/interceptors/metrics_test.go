@@ -45,7 +45,6 @@ func TestMetricsInterceptor_Success(t *testing.T) {
 
 	// Execute interceptor
 	resp, err := interceptor(ctx, "test-request", info, handler)
-
 	// Verify response
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)

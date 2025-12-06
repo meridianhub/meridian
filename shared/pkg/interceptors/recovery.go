@@ -1,4 +1,4 @@
-// Package interceptors provides gRPC interceptors for use across all Meridian services.
+// Package interceptors provides shared gRPC interceptors for all Meridian services.
 package interceptors
 
 import (
@@ -72,14 +72,14 @@ func RecoveryStreamInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor
 	}
 }
 
-// wrappedServerStream wraps grpc.ServerStream to add panic recovery to individual stream operations
+// wrappedServerStream wraps grpc.ServerStream to add panic recovery to individual stream operations.
 type wrappedServerStream struct {
 	grpc.ServerStream
 	logger *slog.Logger
 	method string
 }
 
-// SendMsg recovers from panics during message sending
+// SendMsg recovers from panics during message sending.
 func (w *wrappedServerStream) SendMsg(m interface{}) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -93,7 +93,7 @@ func (w *wrappedServerStream) SendMsg(m interface{}) (err error) {
 	return w.ServerStream.SendMsg(m)
 }
 
-// RecvMsg recovers from panics during message receiving
+// RecvMsg recovers from panics during message receiving.
 func (w *wrappedServerStream) RecvMsg(m interface{}) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
