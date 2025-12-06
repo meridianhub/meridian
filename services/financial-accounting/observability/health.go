@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -306,14 +307,12 @@ func (d *GormDatabaseHealthChecker) Check(ctx context.Context) health.ComponentR
 
 	if err != nil {
 		status = health.StatusUnhealthy
-		message = fmt.Sprintf("database ping failed: %v", err)
-	}
-
-	// Check context cancellation (timeout)
-	if checkCtx.Err() != nil {
-		status = health.StatusUnhealthy
-		message = fmt.Sprintf("database check timeout after %s", d.timeout)
-		err = checkCtx.Err()
+		// Prefer timeout message if context was cancelled, otherwise show the ping error
+		if errors.Is(checkCtx.Err(), context.DeadlineExceeded) {
+			message = fmt.Sprintf("database check timeout after %s", d.timeout)
+		} else {
+			message = fmt.Sprintf("database ping failed: %v", err)
+		}
 	}
 
 	return health.ComponentResult{
