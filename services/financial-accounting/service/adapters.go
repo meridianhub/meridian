@@ -196,11 +196,69 @@ func toProtoFinancialBookingLog(log *domain.FinancialBookingLog) *financialaccou
 }
 
 // toProtoAccountType converts domain account type string to protobuf enum.
-func toProtoAccountType(_ string) commonv1.AccountType {
-	// Map string to enum - implementation depends on AccountType enum values
-	// For now, return UNSPECIFIED - this will be implemented when AccountType enum is defined
-	// TODO: Implement proper mapping once AccountType enum values are defined
-	return commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED
+func toProtoAccountType(accountType string) commonv1.AccountType {
+	switch accountType {
+	case string(domain.AccountTypeDebit):
+		return commonv1.AccountType_ACCOUNT_TYPE_DEBIT
+	case string(domain.AccountTypeCredit):
+		return commonv1.AccountType_ACCOUNT_TYPE_CREDIT
+	case string(domain.AccountTypeVostro):
+		return commonv1.AccountType_ACCOUNT_TYPE_VOSTRO
+	case string(domain.AccountTypeNostro):
+		return commonv1.AccountType_ACCOUNT_TYPE_NOSTRO
+	case string(domain.AccountTypeCurrent):
+		return commonv1.AccountType_ACCOUNT_TYPE_CURRENT
+	case string(domain.AccountTypeSavings):
+		return commonv1.AccountType_ACCOUNT_TYPE_SAVINGS
+	default:
+		return commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED
+	}
+}
+
+// fromProtoAccountType converts protobuf AccountType enum to domain string.
+func fromProtoAccountType(accountType commonv1.AccountType) string {
+	switch accountType {
+	case commonv1.AccountType_ACCOUNT_TYPE_UNSPECIFIED:
+		return ""
+	case commonv1.AccountType_ACCOUNT_TYPE_DEBIT:
+		return string(domain.AccountTypeDebit)
+	case commonv1.AccountType_ACCOUNT_TYPE_CREDIT:
+		return string(domain.AccountTypeCredit)
+	case commonv1.AccountType_ACCOUNT_TYPE_VOSTRO:
+		return string(domain.AccountTypeVostro)
+	case commonv1.AccountType_ACCOUNT_TYPE_NOSTRO:
+		return string(domain.AccountTypeNostro)
+	case commonv1.AccountType_ACCOUNT_TYPE_CURRENT:
+		return string(domain.AccountTypeCurrent)
+	case commonv1.AccountType_ACCOUNT_TYPE_SAVINGS:
+		return string(domain.AccountTypeSavings)
+	default:
+		return ""
+	}
+}
+
+// fromProtoCurrency converts protobuf Currency enum to domain Currency.
+func fromProtoCurrency(currency commonv1.Currency) domain.Currency {
+	switch currency {
+	case commonv1.Currency_CURRENCY_UNSPECIFIED:
+		return ""
+	case commonv1.Currency_CURRENCY_GBP:
+		return domain.CurrencyGBP
+	case commonv1.Currency_CURRENCY_USD:
+		return domain.CurrencyUSD
+	case commonv1.Currency_CURRENCY_EUR:
+		return domain.CurrencyEUR
+	case commonv1.Currency_CURRENCY_JPY:
+		return domain.CurrencyJPY
+	case commonv1.Currency_CURRENCY_CHF:
+		return domain.CurrencyCHF
+	case commonv1.Currency_CURRENCY_CAD:
+		return domain.CurrencyCAD
+	case commonv1.Currency_CURRENCY_AUD:
+		return domain.CurrencyAUD
+	default:
+		return ""
+	}
 }
 
 // toProtoCurrency converts domain Currency to protobuf enum.

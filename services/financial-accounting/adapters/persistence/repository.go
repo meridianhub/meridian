@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -33,6 +35,8 @@ var (
 	ErrBookingLogNotFound = errors.New("financial booking log not found")
 	// ErrFractionalCents is returned when an amount has fractional cents
 	ErrFractionalCents = errors.New("amount has fractional cents that cannot be represented")
+	// ErrDuplicateIdempotencyKey is returned when a booking log with the same idempotency key already exists
+	ErrDuplicateIdempotencyKey = errors.New("booking log with this idempotency key already exists")
 )
 
 // LedgerRepository provides persistence operations for ledger postings
@@ -192,6 +196,64 @@ func (r *LedgerRepository) GetBookingLog(ctx context.Context, id uuid.UUID) (*do
 	}
 
 	return toBookingLogDomain(&entity), nil
+}
+
+// SaveBookingLog persists a new financial booking log.
+// Returns ErrDuplicateIdempotencyKey if a booking log with the same idempotency key already exists.
+func (r *LedgerRepository) SaveBookingLog(ctx context.Context, log *domain.FinancialBookingLog, idempotencyKey string) error {
+	entity := toBookingLogEntity(log, idempotencyKey)
+	err := r.db.WithContext(ctx).Create(&entity).Error
+	if err != nil {
+		// Check for unique constraint violation using PostgreSQL error code
+		// 23505 is the SQLSTATE for unique_violation
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if strings.Contains(pgErr.ConstraintName, "idempotency_key") {
+				return ErrDuplicateIdempotencyKey
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+// UpdateBookingLog updates an existing financial booking log
+func (r *LedgerRepository) UpdateBookingLog(ctx context.Context, log *domain.FinancialBookingLog) error {
+	result := r.db.WithContext(ctx).
+		Model(&FinancialBookingLogEntity{}).
+		Where("id = ?", log.ID).
+		Updates(map[string]interface{}{
+			"status":                  string(log.Status),
+			"chart_of_accounts_rules": log.ChartOfAccountsRules,
+			"updated_at":              log.UpdatedAt,
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrBookingLogNotFound
+	}
+
+	return nil
+}
+
+// toBookingLogEntity converts domain model to database entity
+func toBookingLogEntity(log *domain.FinancialBookingLog, idempotencyKey string) FinancialBookingLogEntity {
+	return FinancialBookingLogEntity{
+		ID:                      log.ID,
+		FinancialAccountType:    log.FinancialAccountType,
+		ProductServiceReference: log.ProductServiceReference,
+		BusinessUnitReference:   log.BusinessUnitReference,
+		ChartOfAccountsRules:    log.ChartOfAccountsRules,
+		BaseCurrency:            string(log.BaseCurrency),
+		Status:                  string(log.Status),
+		IdempotencyKey:          idempotencyKey,
+		CreatedAt:               log.CreatedAt,
+		UpdatedAt:               log.UpdatedAt,
+		Version:                 1,
+	}
 }
 
 // ListBookingLogsParams contains parameters for listing booking logs
