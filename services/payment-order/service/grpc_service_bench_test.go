@@ -141,15 +141,23 @@ func BenchmarkListPaymentOrders(b *testing.B) {
 			// Pre-populate payment orders
 			ctx := context.Background()
 			for i := 0; i < bm.numOrders; i++ {
-				amount, _ := cadomain.NewMoney("GBP", int64(1000+i))
-				po, _ := domain.NewPaymentOrder(
+				amount, err := cadomain.NewMoney("GBP", int64(1000+i))
+				if err != nil {
+					b.Fatalf("setup: NewMoney failed: %v", err)
+				}
+				po, err := domain.NewPaymentOrder(
 					"acc-benchmark",
 					"cred-ref",
 					amount,
 					uuid.New().String(),
 					"corr-001",
 				)
-				_ = repo.Create(ctx, po)
+				if err != nil {
+					b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+				}
+				if err := repo.Create(ctx, po); err != nil {
+					b.Fatalf("setup: Create failed: %v", err)
+				}
 			}
 
 			b.ResetTimer()

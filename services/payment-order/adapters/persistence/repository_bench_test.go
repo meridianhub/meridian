@@ -251,15 +251,23 @@ func BenchmarkRepository_FindByDebtorAccountIDWithCursor(b *testing.B) {
 
 			// Pre-populate payment orders
 			for i := 0; i < bm.numOrders; i++ {
-				amount, _ := cadomain.NewMoney("GBP", int64(1000+i))
-				po, _ := domain.NewPaymentOrder(
+				amount, err := cadomain.NewMoney("GBP", int64(1000+i))
+				if err != nil {
+					b.Fatalf("setup: NewMoney failed: %v", err)
+				}
+				po, err := domain.NewPaymentOrder(
 					"acc-benchmark-cursor",
 					"cred-ref",
 					amount,
 					uuid.New().String(),
 					"corr-001",
 				)
-				_ = repo.Create(ctx, po)
+				if err != nil {
+					b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+				}
+				if err := repo.Create(ctx, po); err != nil {
+					b.Fatalf("setup: Create failed: %v", err)
+				}
 			}
 
 			b.ResetTimer()
@@ -289,32 +297,44 @@ func BenchmarkRepository_StateTransitionSequence(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		// Create
-		amount, _ := cadomain.NewMoney("GBP", 10000)
-		po, _ := domain.NewPaymentOrder(
+		amount, err := cadomain.NewMoney("GBP", 10000)
+		if err != nil {
+			b.Fatalf("NewMoney failed: %v", err)
+		}
+		po, err := domain.NewPaymentOrder(
 			"acc-123",
 			"cred-ref",
 			amount,
 			uuid.New().String(),
 			"corr-001",
 		)
+		if err != nil {
+			b.Fatalf("NewPaymentOrder failed: %v", err)
+		}
 		if err := repo.Create(ctx, po); err != nil {
 			b.Fatalf("Create failed: %v", err)
 		}
 
 		// Reserve
-		_ = po.Reserve("lien-" + uuid.New().String())
+		if err := po.Reserve("lien-" + uuid.New().String()); err != nil {
+			b.Fatalf("Reserve failed: %v", err)
+		}
 		if err := repo.Update(ctx, po); err != nil {
 			b.Fatalf("Update (Reserve) failed: %v", err)
 		}
 
 		// Execute
-		_ = po.Execute("gw-ref-" + uuid.New().String())
+		if err := po.Execute("gw-ref-" + uuid.New().String()); err != nil {
+			b.Fatalf("Execute failed: %v", err)
+		}
 		if err := repo.Update(ctx, po); err != nil {
 			b.Fatalf("Update (Execute) failed: %v", err)
 		}
 
 		// Complete
-		_ = po.Complete("")
+		if err := po.Complete(""); err != nil {
+			b.Fatalf("Complete failed: %v", err)
+		}
 		if err := repo.Update(ctx, po); err != nil {
 			b.Fatalf("Update (Complete) failed: %v", err)
 		}
