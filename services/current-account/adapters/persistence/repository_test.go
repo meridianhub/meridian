@@ -1,3 +1,4 @@
+//nolint:staticcheck // Tests use deprecated AmountCents() for backward compatibility verification
 package persistence
 
 import (

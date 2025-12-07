@@ -1,3 +1,4 @@
+//nolint:staticcheck // Tests use deprecated AmountCents() for backward compatibility verification
 package service
 
 import (
@@ -16,7 +17,7 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/current-account/clients"
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
+
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
@@ -513,7 +514,7 @@ func TestRetrievePaymentOrder_Success(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create a payment order first
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = repo.Create(context.Background(), po)
 
@@ -566,7 +567,7 @@ func TestCancelPaymentOrder_Success(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create a payment order in INITIATED state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = repo.Create(context.Background(), po)
 
@@ -588,7 +589,7 @@ func TestCancelPaymentOrder_AlreadyCancelled_Idempotent(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create and cancel a payment order
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Cancel("Already cancelled")
 	_ = repo.Create(context.Background(), po)
@@ -611,7 +612,7 @@ func TestCancelPaymentOrder_NotCancellable(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create a payment order and move it to EXECUTING state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -636,7 +637,7 @@ func TestCancelPaymentOrder_MissingReason(t *testing.T) {
 	repo := NewMockRepository()
 	svc, _ := NewService(repo)
 
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = repo.Create(context.Background(), po)
 
@@ -673,7 +674,7 @@ func TestCancelPaymentOrder_ReleasesLien(t *testing.T) {
 	}
 
 	// Create a payment order in RESERVED state with a lien
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = repo.Create(context.Background(), po)
@@ -713,7 +714,7 @@ func TestUpdatePaymentOrder_Settled(t *testing.T) {
 	}
 
 	// Create a payment order in EXECUTING state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -760,7 +761,7 @@ func TestUpdatePaymentOrder_Settled_LienExecutionStatusTracking(t *testing.T) {
 	}
 
 	// Create a payment order in EXECUTING state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -823,7 +824,7 @@ func TestUpdatePaymentOrder_Rejected(t *testing.T) {
 	}
 
 	// Create a payment order in EXECUTING state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -861,7 +862,7 @@ func TestUpdatePaymentOrder_ByGatewayReferenceID(t *testing.T) {
 	}
 
 	// Create a payment order in EXECUTING state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -927,7 +928,7 @@ func TestUpdatePaymentOrder_Idempotent_Settled(t *testing.T) {
 	}
 
 	// Create a payment order in EXECUTING state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -963,7 +964,7 @@ func TestUpdatePaymentOrder_Idempotent_Rejected(t *testing.T) {
 	}
 
 	// Create a payment order in EXECUTING state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -996,7 +997,7 @@ func TestUpdatePaymentOrder_PendingRejectsStaleCallbacks(t *testing.T) {
 	}
 
 	// Create a payment order that has already completed
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -1025,7 +1026,7 @@ func TestListPaymentOrders_Success(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create some payment orders
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po1, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "key-1", uuid.New().String())
 	po2, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765433", amount, "key-2", uuid.New().String())
 	_ = repo.Create(context.Background(), po1)
@@ -1060,7 +1061,7 @@ func TestListPaymentOrders_Pagination(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create 5 payment orders
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	for i := 0; i < 5; i++ {
 		po, _ := domain.NewPaymentOrder(
 			"ACC-12345678",
@@ -1149,7 +1150,7 @@ func TestListPaymentOrders_PageSizeExceedsMax(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create 3 payment orders
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	for i := 0; i < 3; i++ {
 		po, _ := domain.NewPaymentOrder(
 			"ACC-12345678",
@@ -1180,7 +1181,7 @@ func TestListPaymentOrders_CursorBeyondResults(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create 2 payment orders
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	for i := 0; i < 2; i++ {
 		po, _ := domain.NewPaymentOrder(
 			"ACC-12345678",
@@ -1221,7 +1222,7 @@ func TestReversePaymentOrder_Success(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create a payment order and move it to COMPLETED state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -1247,7 +1248,7 @@ func TestReversePaymentOrder_AlreadyReversed_Idempotent(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create a payment order that's already reversed
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -1273,7 +1274,7 @@ func TestReversePaymentOrder_NotCompleted(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create a payment order in INITIATED state (cannot be reversed)
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = repo.Create(context.Background(), po)
 
@@ -1297,7 +1298,7 @@ func TestReversePaymentOrder_MissingReason(t *testing.T) {
 	repo := NewMockRepository()
 	svc, _ := NewService(repo)
 
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -1324,7 +1325,7 @@ func TestReversePaymentOrder_MissingReversedBy(t *testing.T) {
 	repo := NewMockRepository()
 	svc, _ := NewService(repo)
 
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -1388,7 +1389,7 @@ func TestReversePaymentOrder_InvalidID(t *testing.T) {
 
 // Test proto conversion helpers
 func TestToProto(t *testing.T) {
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", "correlation-123")
 
 	// Add some state
@@ -1532,7 +1533,7 @@ func TestProtoToMoney(t *testing.T) {
 }
 
 func TestToMoneyAmount(t *testing.T) {
-	amount, _ := cadomain.NewMoney("GBP", 10050) // £100.50
+	amount, _ := domain.NewMoney("GBP", 10050) // £100.50
 
 	proto := toMoneyAmount(amount)
 
@@ -2011,7 +2012,7 @@ func TestUpdatePaymentOrder_UnspecifiedStatus(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create an executing payment order first
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder(
 		"ACC-12345678",
 		"GB82WEST12345698765432",
@@ -2066,7 +2067,7 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 	}
 
 	// Create a payment order in EXECUTING state
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
 	_ = po.Reserve("lien-123")
 	_ = po.Execute("gateway-ref-123")
@@ -2118,7 +2119,7 @@ func TestUpdatePaymentOrder_UnknownGatewayStatus(t *testing.T) {
 	svc, _ := NewService(repo)
 
 	// Create an executing payment order
-	amount, _ := cadomain.NewMoney("GBP", 10000)
+	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder(
 		"ACC-12345678",
 		"GB82WEST12345698765432",

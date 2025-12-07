@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
+	"github.com/meridianhub/meridian/services/payment-order/domain"
 )
 
 // Test sentinel errors for resilient gateway tests.
@@ -106,7 +106,7 @@ func newTransientFailureStub(failTimes int, err error) *stubGateway {
 
 func createResilientTestRequest(t *testing.T) gateway.PaymentRequest {
 	t.Helper()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 	return gateway.PaymentRequest{
 		PaymentOrderID:    uuid.New(),

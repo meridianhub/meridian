@@ -1,3 +1,4 @@
+//nolint:staticcheck // Tests use deprecated AmountCents() for backward compatibility verification
 package domain
 
 import (
@@ -6,14 +7,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 )
 
 const testLienID = "lien-001"
 
 func TestNewPaymentOrder_Success(t *testing.T) {
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po, err := NewPaymentOrder(
@@ -29,7 +28,7 @@ func TestNewPaymentOrder_Success(t *testing.T) {
 	assert.Equal(t, "debtor-acc-123", po.DebtorAccountID)
 	assert.Equal(t, "GB82WEST12345698765432", po.CreditorReference)
 	assert.Equal(t, int64(10000), po.Amount.AmountCents())
-	assert.Equal(t, "GBP", po.Amount.Currency())
+	assert.Equal(t, CurrencyGBP, po.Amount.Currency())
 	assert.Equal(t, PaymentOrderStatusInitiated, po.Status)
 	assert.Equal(t, "idem-key-001", po.IdempotencyKey)
 	assert.Equal(t, "corr-id-001", po.CorrelationID)
@@ -39,7 +38,7 @@ func TestNewPaymentOrder_Success(t *testing.T) {
 }
 
 func TestNewPaymentOrder_MissingDebtorAccountID_Fails(t *testing.T) {
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	_, err = NewPaymentOrder("", "GB82WEST12345698765432", amount, "idem-key-001", "corr-id-001")
@@ -48,7 +47,7 @@ func TestNewPaymentOrder_MissingDebtorAccountID_Fails(t *testing.T) {
 }
 
 func TestNewPaymentOrder_MissingCreditorReference_Fails(t *testing.T) {
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	_, err = NewPaymentOrder("debtor-acc-123", "", amount, "idem-key-001", "corr-id-001")
@@ -57,7 +56,7 @@ func TestNewPaymentOrder_MissingCreditorReference_Fails(t *testing.T) {
 }
 
 func TestNewPaymentOrder_ZeroAmount_Fails(t *testing.T) {
-	amount, err := cadomain.NewMoney("GBP", 0)
+	amount, err := NewMoney("GBP", 0)
 	require.NoError(t, err)
 
 	_, err = NewPaymentOrder("debtor-acc-123", "GB82WEST12345698765432", amount, "idem-key-001", "corr-id-001")
@@ -66,7 +65,7 @@ func TestNewPaymentOrder_ZeroAmount_Fails(t *testing.T) {
 }
 
 func TestNewPaymentOrder_NegativeAmount_Fails(t *testing.T) {
-	amount, err := cadomain.NewMoney("GBP", -10000)
+	amount, err := NewMoney("GBP", -10000)
 	require.NoError(t, err)
 
 	_, err = NewPaymentOrder("debtor-acc-123", "GB82WEST12345698765432", amount, "idem-key-001", "corr-id-001")
@@ -75,7 +74,7 @@ func TestNewPaymentOrder_NegativeAmount_Fails(t *testing.T) {
 }
 
 func TestNewPaymentOrder_MissingIdempotencyKey_Fails(t *testing.T) {
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	_, err = NewPaymentOrder("debtor-acc-123", "GB82WEST12345698765432", amount, "", "corr-id-001")
@@ -84,7 +83,7 @@ func TestNewPaymentOrder_MissingIdempotencyKey_Fails(t *testing.T) {
 }
 
 func TestNewPaymentOrder_MissingCorrelationID_Fails(t *testing.T) {
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	_, err = NewPaymentOrder("debtor-acc-123", "GB82WEST12345698765432", amount, "idem-key-001", "")
@@ -503,7 +502,7 @@ func TestPaymentOrder_SetCausationID(t *testing.T) {
 
 func TestPaymentOrder_HappyPathTransitions(t *testing.T) {
 	// Test the complete happy path: INITIATED -> RESERVED -> EXECUTING -> COMPLETED
-	amount, err := cadomain.NewMoney("GBP", 50000)
+	amount, err := NewMoney("GBP", 50000)
 	require.NoError(t, err)
 
 	po, err := NewPaymentOrder(
@@ -556,7 +555,7 @@ func TestPaymentOrder_FailurePathWithCompensation(t *testing.T) {
 // createTestPaymentOrder is a helper to create a payment order with a specific status for testing
 func createTestPaymentOrder(t *testing.T, status PaymentOrderStatus) *PaymentOrder {
 	t.Helper()
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
 	po := &PaymentOrder{

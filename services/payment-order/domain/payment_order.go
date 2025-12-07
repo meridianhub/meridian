@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 )
 
 // PaymentOrder domain errors
@@ -88,7 +86,7 @@ type PaymentOrder struct {
 	ID                 uuid.UUID
 	DebtorAccountID    string
 	CreditorReference  string
-	Amount             cadomain.Money
+	Amount             Money
 	Status             PaymentOrderStatus
 	LienID             string
 	GatewayReferenceID string
@@ -118,7 +116,7 @@ type PaymentOrder struct {
 func NewPaymentOrder(
 	debtorAccountID string,
 	creditorReference string,
-	amount cadomain.Money,
+	amount Money,
 	idempotencyKey string,
 	correlationID string,
 ) (*PaymentOrder, error) {

@@ -1,83 +1,33 @@
+// Package domain re-exports the shared Money type for financial-accounting service.
 package domain
 
 import (
-	"errors"
-	"fmt"
-
+	"github.com/meridianhub/meridian/shared/domain/money"
 	"github.com/shopspring/decimal"
 )
 
-// ErrCurrencyMismatch is returned when operations are attempted on different currencies.
-var ErrCurrencyMismatch = errors.New("currency mismatch")
+// Re-export errors from shared money package
+var (
+	ErrCurrencyMismatch = money.ErrCurrencyMismatch
+	ErrInvalidCurrency  = money.ErrInvalidCurrency
+)
 
-// Money represents a monetary amount with currency.
-// It uses decimal.Decimal for precise arithmetic operations.
-type Money struct {
-	amount   decimal.Decimal
-	currency Currency
-}
+// Money is an alias for the shared money.Money type.
+type Money = money.Money
 
-// NewMoney creates a new Money instance with validation.
+// NewMoney creates a new Money instance with the given decimal amount and currency.
+// This is the same signature as the previous implementation.
 func NewMoney(amount decimal.Decimal, currency Currency) (Money, error) {
-	if !currency.IsValid() {
-		return Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, currency)
-	}
-	return Money{
-		amount:   amount,
-		currency: currency,
-	}, nil
+	return money.New(amount, currency)
 }
 
-// Add adds two Money values. They must have the same currency.
-func (m Money) Add(other Money) (Money, error) {
-	if m.currency != other.currency {
-		return Money{}, fmt.Errorf("%w: cannot add %s and %s",
-			ErrCurrencyMismatch, m.currency, other.currency)
-	}
-	return Money{
-		amount:   m.amount.Add(other.amount),
-		currency: m.currency,
-	}, nil
+// MustNewMoney creates a Money instance, panicking on invalid currency.
+// Use only in tests or when currency is known valid.
+func MustNewMoney(amount decimal.Decimal, currency Currency) Money {
+	return money.MustNew(amount, currency)
 }
 
-// Subtract subtracts another Money value from this one. They must have the same currency.
-func (m Money) Subtract(other Money) (Money, error) {
-	if m.currency != other.currency {
-		return Money{}, fmt.Errorf("%w: cannot subtract %s and %s",
-			ErrCurrencyMismatch, m.currency, other.currency)
-	}
-	return Money{
-		amount:   m.amount.Sub(other.amount),
-		currency: m.currency,
-	}, nil
-}
-
-// IsZero checks if the amount is zero.
-func (m Money) IsZero() bool {
-	return m.amount.IsZero()
-}
-
-// IsPositive checks if the amount is positive.
-func (m Money) IsPositive() bool {
-	return m.amount.GreaterThan(decimal.Zero)
-}
-
-// IsNegative checks if the amount is negative.
-func (m Money) IsNegative() bool {
-	return m.amount.LessThan(decimal.Zero)
-}
-
-// String returns a string representation of the Money.
-func (m Money) String() string {
-	return fmt.Sprintf("%s %s", m.amount.StringFixed(2), m.currency)
-}
-
-// Amount returns the monetary amount.
-func (m Money) Amount() decimal.Decimal {
-	return m.amount
-}
-
-// Currency returns the currency of the monetary amount.
-func (m Money) Currency() Currency {
-	return m.currency
+// Zero returns a zero Money value for the given currency.
+func Zero(currency Currency) (Money, error) {
+	return money.Zero(currency)
 }
