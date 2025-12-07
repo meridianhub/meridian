@@ -183,15 +183,16 @@ func BenchmarkRepository_Update(b *testing.B) {
 	repo := NewPaymentOrderRepository(db)
 	ctx := context.Background()
 
-	// Pre-generate lien IDs to avoid UUID allocation in the hot path
-	lienIDs := make([]string, b.N)
-	for i := 0; i < b.N; i++ {
+	// Pre-create a pool of payment orders for update testing.
+	// Using a fixed pool size avoids OOM when b.N grows to millions during calibration.
+	const poolSize = 1000
+	lienIDs := make([]string, poolSize)
+	for i := 0; i < poolSize; i++ {
 		lienIDs[i] = "lien-" + uuid.New().String()
 	}
 
-	// Create payment orders for update testing
-	paymentOrders := make([]*domain.PaymentOrder, b.N)
-	for i := 0; i < b.N; i++ {
+	paymentOrders := make([]*domain.PaymentOrder, poolSize)
+	for i := 0; i < poolSize; i++ {
 		amount, err := cadomain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
@@ -216,8 +217,9 @@ func BenchmarkRepository_Update(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		po := paymentOrders[i]
-		if err := po.Reserve(lienIDs[i]); err != nil {
+		idx := i % poolSize
+		po := paymentOrders[idx]
+		if err := po.Reserve(lienIDs[idx]); err != nil {
 			b.Fatalf("Reserve failed: %v", err)
 		}
 

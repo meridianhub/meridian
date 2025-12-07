@@ -215,9 +215,11 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 
 	ctx := context.Background()
 
-	// Pre-create payment orders in EXECUTING state (ready for SETTLED callback)
-	paymentOrders := make([]*domain.PaymentOrder, b.N)
-	for i := 0; i < b.N; i++ {
+	// Pre-create a pool of payment orders in EXECUTING state (ready for SETTLED callback).
+	// Using a fixed pool size avoids OOM when b.N grows to millions during calibration.
+	const poolSize = 1000
+	paymentOrders := make([]*domain.PaymentOrder, poolSize)
+	for i := 0; i < poolSize; i++ {
 		amount, err := cadomain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
@@ -249,7 +251,7 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		req := &pb.UpdatePaymentOrderRequest{
-			PaymentOrderId: paymentOrders[i].ID.String(),
+			PaymentOrderId: paymentOrders[i%poolSize].ID.String(),
 			GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
 		}
 
@@ -280,9 +282,11 @@ func BenchmarkCancelPaymentOrder(b *testing.B) {
 
 	ctx := context.Background()
 
-	// Pre-create payment orders in RESERVED state (cancellable)
-	paymentOrders := make([]*domain.PaymentOrder, b.N)
-	for i := 0; i < b.N; i++ {
+	// Pre-create a pool of payment orders in RESERVED state (cancellable).
+	// Using a fixed pool size avoids OOM when b.N grows to millions during calibration.
+	const poolSize = 1000
+	paymentOrders := make([]*domain.PaymentOrder, poolSize)
+	for i := 0; i < poolSize; i++ {
 		amount, err := cadomain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
@@ -311,7 +315,7 @@ func BenchmarkCancelPaymentOrder(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		req := &pb.CancelPaymentOrderRequest{
-			PaymentOrderId:     paymentOrders[i].ID.String(),
+			PaymentOrderId:     paymentOrders[i%poolSize].ID.String(),
 			CancellationReason: "benchmark cancellation",
 			CancelledBy:        "benchmark-user",
 		}
