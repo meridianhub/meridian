@@ -1,4 +1,6 @@
 // Package service implements gRPC services for the payment order domain
+//
+//nolint:staticcheck // Uses AmountCents() for payment processing (deprecated for backward compatibility)
 package service
 
 import (
@@ -15,7 +17,6 @@ import (
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/current-account/clients"
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
@@ -326,7 +327,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		"payment_order_id", po.ID.String(),
 		"debtor_account_id", po.DebtorAccountID,
 		"amount_cents", po.Amount.AmountCents(),
-		"currency", po.Amount.Currency(),
+		"currency", string(po.Amount.Currency()),
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", correlationID)
 
@@ -872,8 +873,8 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 	}
 
 	// Record metrics
-	poobservability.RecordCompletion(po.Amount.Currency())
-	poobservability.RecordPaymentAmount(po.Amount.Currency(), "completed", po.Amount.AmountCents())
+	poobservability.RecordCompletion(string(po.Amount.Currency()))
+	poobservability.RecordPaymentAmount(string(po.Amount.Currency()), "completed", po.Amount.AmountCents())
 
 	// Execute lien asynchronously with retry mechanism
 	// The lien execution status is tracked in the payment order for reconciliation
@@ -906,7 +907,7 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		"payment_order_id", po.ID.String(),
 		"gateway_reference_id", po.GatewayReferenceID,
 		"amount_cents", po.Amount.AmountCents(),
-		"currency", po.Amount.Currency(),
+		"currency", string(po.Amount.Currency()),
 		"lien_id", po.LienID,
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", po.CorrelationID)
@@ -932,8 +933,8 @@ func (s *Service) handleRejectedStatus(ctx context.Context, po *domain.PaymentOr
 	}
 
 	// Record metrics after successful persistence to ensure accuracy
-	poobservability.RecordRejection(po.Amount.Currency(), poobservability.ErrorCategoryGatewayRejected)
-	poobservability.RecordPaymentAmount(po.Amount.Currency(), "rejected", po.Amount.AmountCents())
+	poobservability.RecordRejection(string(po.Amount.Currency()), poobservability.ErrorCategoryGatewayRejected)
+	poobservability.RecordPaymentAmount(string(po.Amount.Currency()), "rejected", po.Amount.AmountCents())
 
 	// Audit log for rejection
 	s.logger.Info("payment order rejected via gateway callback",
@@ -941,7 +942,7 @@ func (s *Service) handleRejectedStatus(ctx context.Context, po *domain.PaymentOr
 		"gateway_reference_id", po.GatewayReferenceID,
 		"gateway_message", gatewayMessage,
 		"amount_cents", po.Amount.AmountCents(),
-		"currency", po.Amount.Currency(),
+		"currency", string(po.Amount.Currency()),
 		"lien_id", po.LienID,
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", po.CorrelationID)
@@ -1049,7 +1050,7 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 		"reason", req.CancellationReason,
 		"cancelled_by", req.CancelledBy,
 		"amount_cents", po.Amount.AmountCents(),
-		"currency", po.Amount.Currency(),
+		"currency", string(po.Amount.Currency()),
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", po.CorrelationID)
 
@@ -1181,7 +1182,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		"reason", req.ReversalReason,
 		"reversed_by", req.ReversedBy,
 		"amount_cents", po.Amount.AmountCents(),
-		"currency", po.Amount.Currency(),
+		"currency", string(po.Amount.Currency()),
 		"original_ledger_booking_id", originalLedgerBookingID,
 		"correlation_id", po.CorrelationID)
 
@@ -1264,7 +1265,7 @@ func toProto(po *domain.PaymentOrder) *pb.PaymentOrder {
 //
 // This is a lossless conversion since cents are exact representations.
 // The inverse operation protoToMoney uses symmetric rounding for any sub-cent precision.
-func toMoneyAmount(m cadomain.Money) *commonpb.MoneyAmount {
+func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 	amountCents := m.AmountCents()
 	units := amountCents / 100
 	remainder := amountCents % 100
@@ -1273,7 +1274,7 @@ func toMoneyAmount(m cadomain.Money) *commonpb.MoneyAmount {
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
-			CurrencyCode: m.Currency(),
+			CurrencyCode: string(m.Currency()),
 			Units:        units,
 			Nanos:        nanos,
 		},
@@ -1281,15 +1282,15 @@ func toMoneyAmount(m cadomain.Money) *commonpb.MoneyAmount {
 }
 
 // protoToMoney converts proto MoneyAmount to domain Money
-func protoToMoney(amount *commonpb.MoneyAmount) (cadomain.Money, error) {
+func protoToMoney(amount *commonpb.MoneyAmount) (domain.Money, error) {
 	if amount == nil || amount.Amount == nil {
-		return cadomain.Money{}, ErrAmountRequired
+		return domain.Money{}, ErrAmountRequired
 	}
 
 	// Validate nanos is within bounds (per Google Money spec)
 	const maxNanos = 999999999
 	if amount.Amount.Nanos < -maxNanos || amount.Amount.Nanos > maxNanos {
-		return cadomain.Money{}, ErrInvalidNanos
+		return domain.Money{}, ErrInvalidNanos
 	}
 
 	// Convert to cents with symmetric rounding (round half away from zero)
@@ -1302,7 +1303,7 @@ func protoToMoney(amount *commonpb.MoneyAmount) (cadomain.Money, error) {
 	}
 	totalCents := unitsCents + nanosCents
 
-	return cadomain.NewMoney(amount.Amount.CurrencyCode, totalCents)
+	return domain.NewMoney(amount.Amount.CurrencyCode, totalCents)
 }
 
 // mapStatusToProto maps domain status to proto status

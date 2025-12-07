@@ -1,3 +1,4 @@
+//nolint:staticcheck // Uses AmountCents() for database persistence (backward compatible)
 package persistence
 
 import (
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"gorm.io/gorm"
 )
@@ -322,7 +322,7 @@ func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
 		DebtorAccountID:       po.DebtorAccountID,
 		CreditorReference:     po.CreditorReference,
 		AmountCents:           po.Amount.AmountCents(),
-		Currency:              po.Amount.Currency(),
+		Currency:              string(po.Amount.Currency()),
 		Status:                string(po.Status),
 		LienID:                po.LienID,
 		GatewayReferenceID:    po.GatewayReferenceID,
@@ -358,7 +358,7 @@ func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
 
 // toDomain converts database entity to domain model
 func toDomain(entity *PaymentOrderEntity) (*domain.PaymentOrder, error) {
-	amount, err := cadomain.NewMoney(entity.Currency, entity.AmountCents)
+	amount, err := domain.NewMoney(entity.Currency, entity.AmountCents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment order amount from database: %w", err)
 	}

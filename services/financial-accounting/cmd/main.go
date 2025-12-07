@@ -7,17 +7,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	serviceobs "github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"gorm.io/driver/postgres"
@@ -162,21 +164,24 @@ func run(logger *slog.Logger) error {
 	// This will be completed in a follow-up commit once the gRPC service wrapper is created
 	_ = postingService // Placeholder until we create the gRPC service wrapper
 
-	// Register health check service
-	healthServer := health.NewServer()
-	// Set health status for both the default service name (used by K8s probes) and the named service
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-	healthServer.SetServingStatus("financial-accounting", grpc_health_v1.HealthCheckResponse_SERVING)
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	// Register health check service with database connectivity check
+	healthChecker := serviceobs.NewHealthChecker(serviceobs.HealthCheckerConfig{
+		DB:           db,
+		Logger:       logger,
+		ServiceName:  "financial-accounting",
+		CheckTimeout: 5 * time.Second,
+	})
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 
 	// Register reflection service for debugging
 	reflection.Register(grpcServer)
 
 	logger.Info("gRPC services registered")
 
-	// Get port from environment
+	// Get ports from environment
 	port := getEnvOrDefault("GRPC_PORT", "50052")
 	address := fmt.Sprintf(":%s", port)
+	metricsPort := getEnvOrDefault("METRICS_PORT", "8082")
 
 	// Create listener
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
@@ -190,6 +195,47 @@ func run(logger *slog.Logger) error {
 		logger.Info("starting gRPC server", "address", address)
 		if err := grpcServer.Serve(listener); err != nil {
 			serverErrors <- err
+		}
+	}()
+
+	// Start HTTP server for metrics and health endpoints
+	httpMux := http.NewServeMux()
+	httpMux.Handle("/metrics", promhttp.Handler())
+	httpMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Simple health endpoint for HTTP probes
+		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{})
+		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("NOT_SERVING"))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("SERVING"))
+	})
+	httpMux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		// Readiness endpoint - checks database connectivity
+		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{Service: "database"})
+		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("NOT_READY"))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("READY"))
+	})
+
+	httpServer := &http.Server{
+		Addr:              fmt.Sprintf(":%s", metricsPort),
+		Handler:           httpMux,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
+
+	go func() {
+		logger.Info("starting HTTP server for metrics", "address", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("HTTP server error", "error", err)
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
 
@@ -207,13 +253,16 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown
 	logger.Info("shutting down server...")
 
-	// Mark service as not serving (both default and named service)
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
-	healthServer.SetServingStatus("financial-accounting", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
-
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Shutdown HTTP server first (faster, allows metrics scraping during gRPC drain)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("HTTP server shutdown error", "error", err)
+	} else {
+		logger.Info("HTTP server stopped")
+	}
 
 	// Gracefully stop gRPC server
 	stopped := make(chan struct{})
@@ -225,7 +274,7 @@ func run(logger *slog.Logger) error {
 	// Wait for graceful stop or timeout
 	select {
 	case <-stopped:
-		logger.Info("server stopped gracefully")
+		logger.Info("gRPC server stopped gracefully")
 	case <-shutdownCtx.Done():
 		logger.Warn("graceful shutdown timeout, forcing stop")
 		grpcServer.Stop()

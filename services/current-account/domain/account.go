@@ -126,7 +126,8 @@ func (a *CurrentAccount) Withdraw(amount Money) error {
 	}
 
 	// Check if sufficient funds (including overdraft)
-	if amount.AmountCents() > a.AvailableBalance.AmountCents() {
+	cmp, _ := amount.Compare(a.AvailableBalance) // Same currency already verified above
+	if cmp > 0 {
 		return ErrInsufficientFunds
 	}
 

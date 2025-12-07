@@ -65,7 +65,7 @@ func BenchmarkMoneyToMinorUnits(b *testing.B) {
 			money, _ := domain.NewMoney(decimal.NewFromFloat(123.45), tt.currency)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = money.ToMinorUnits()
+				_, _ = money.ToMinorUnits()
 			}
 		})
 	}

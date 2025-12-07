@@ -1,8 +1,7 @@
-// Package domain re-exports the shared Money type for current-account service.
+// Package domain re-exports the shared Money type for payment-order service.
 //
-// This file provides backward-compatible aliases and constructors for migrating
-// from the previous int64-based Money implementation to the shared decimal-based
-// implementation. The AmountCents() method is preserved for API compatibility.
+// This replaces the previous cross-service import from current-account/domain,
+// providing a unified Money type that all services share.
 package domain
 
 import (
@@ -14,41 +13,16 @@ import (
 var (
 	ErrInvalidCurrency  = money.ErrInvalidCurrency
 	ErrCurrencyMismatch = money.ErrCurrencyMismatch
-	ErrAmountOverflow   = money.ErrOverflow
+	ErrOverflow         = money.ErrOverflow
 )
 
 // Money is an alias for the shared money.Money type.
-// This provides a unified Money type across all services.
 type Money = money.Money
-
-// NewMoney creates a new Money instance from a currency string and amount in minor units (cents).
-// This preserves backward compatibility with the previous int64-based API.
-//
-// Example: NewMoney("GBP", 10000) creates £100.00
-func NewMoney(currency string, amountCents int64) (Money, error) {
-	cur, err := money.ParseCurrency(currency)
-	if err != nil {
-		return Money{}, err
-	}
-	return money.NewFromMinorUnits(amountCents, cur)
-}
-
-// NewMoneyFromMajorUnits creates Money from major units (pounds, dollars, etc.).
-// This is the preferred constructor for new code.
-//
-// Example: NewMoneyFromMajorUnits("GBP", 100) creates £100.00
-func NewMoneyFromMajorUnits(currency string, amount int64) (Money, error) {
-	cur, err := money.ParseCurrency(currency)
-	if err != nil {
-		return Money{}, err
-	}
-	return money.NewFromInt64(amount, cur)
-}
 
 // Currency is an alias for the shared money.Currency type.
 type Currency = money.Currency
 
-// Currency constants for supported ISO 4217 currencies.
+// Currency constants
 const (
 	CurrencyGBP = money.CurrencyGBP
 	CurrencyUSD = money.CurrencyUSD
@@ -58,6 +32,20 @@ const (
 	CurrencyCAD = money.CurrencyCAD
 	CurrencyAUD = money.CurrencyAUD
 )
+
+// NewMoney creates a new Money instance from a currency string and amount in minor units (cents).
+func NewMoney(currency string, amountCents int64) (Money, error) {
+	cur, err := money.ParseCurrency(currency)
+	if err != nil {
+		return Money{}, err
+	}
+	return money.NewFromMinorUnits(amountCents, cur)
+}
+
+// ParseCurrency converts a string to a Currency type with validation.
+func ParseCurrency(s string) (Currency, error) {
+	return money.ParseCurrency(s)
+}
 
 // NewMoneyDecimal creates Money from a decimal amount and Currency type.
 // This provides compatibility with services using the decimal-based API
