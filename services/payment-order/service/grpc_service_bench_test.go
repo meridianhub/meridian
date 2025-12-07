@@ -189,7 +189,12 @@ func BenchmarkListPaymentOrders(b *testing.B) {
 }
 
 // BenchmarkUpdatePaymentOrder_Settled benchmarks the UpdatePaymentOrder RPC
-// for SETTLED gateway callbacks (the completion hot path).
+// for SETTLED gateway callbacks.
+//
+// Note: This benchmark uses a pool of 1000 payment orders. After the first pass through
+// the pool, orders transition to COMPLETED state and subsequent iterations measure the
+// idempotent handling path (early return for already-completed orders). This is realistic
+// as webhook callbacks may be delivered multiple times for the same payment.
 func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 	repo := NewMockRepository()
 	mockCA := &MockCurrentAccountClient{
@@ -263,6 +268,11 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 }
 
 // BenchmarkCancelPaymentOrder benchmarks the CancelPaymentOrder RPC.
+//
+// Note: This benchmark uses a pool of 1000 payment orders. After the first pass through
+// the pool, orders transition to CANCELLED state and subsequent iterations measure the
+// idempotent handling path (early return for already-cancelled orders). This is realistic
+// as cancellation requests may be retried due to network issues.
 func BenchmarkCancelPaymentOrder(b *testing.B) {
 	repo := NewMockRepository()
 	mockCA := &MockCurrentAccountClient{
