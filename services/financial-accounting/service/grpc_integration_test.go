@@ -5,7 +5,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -102,9 +101,9 @@ func setupIntegrationTest(t *testing.T) *testServer {
 
 	// Start server in background
 	go func() {
-		if err := grpcServer.Serve(listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			t.Logf("gRPC server error: %v", err)
-		}
+		// Note: Cannot use t.Logf here as test may have already finished
+		// Server errors during graceful shutdown are expected and can be ignored
+		_ = grpcServer.Serve(listener)
 	}()
 
 	// Create client connection using NewClient (grpc.DialContext is deprecated)
