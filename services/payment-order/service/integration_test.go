@@ -1,5 +1,7 @@
 // Package service provides integration tests for the payment order service.
 // These tests use testcontainers to simulate a production-like environment.
+//
+//nolint:staticcheck // Uses AmountCents() for test assertions (deprecated for backward compatibility)
 package service
 
 import (

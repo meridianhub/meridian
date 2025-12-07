@@ -1,3 +1,4 @@
+//nolint:staticcheck // Uses AmountCents() for test assertions (deprecated for backward compatibility)
 package service
 
 import (

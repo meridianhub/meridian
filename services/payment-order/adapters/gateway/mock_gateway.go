@@ -1,3 +1,4 @@
+//nolint:staticcheck // Uses AmountCents() for mock gateway testing logic
 package gateway
 
 import (

@@ -399,6 +399,11 @@ func TestFinancialBookingLog_IsTerminal(t *testing.T) {
 			status:         TransactionStatusCancelled,
 			expectTerminal: true,
 		},
+		{
+			name:           "REVERSED is not terminal for booking log",
+			status:         TransactionStatusReversed,
+			expectTerminal: false,
+		},
 	}
 
 	for _, tt := range tests {

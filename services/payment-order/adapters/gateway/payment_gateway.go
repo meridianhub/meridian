@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/services/payment-order/domain"
 )
 
 // Status represents the response status from the external payment gateway.
@@ -27,7 +27,7 @@ type PaymentRequest struct {
 	PaymentOrderID    uuid.UUID
 	DebtorAccountID   string
 	CreditorReference string
-	Amount            cadomain.Money
+	Amount            domain.Money
 	IdempotencyKey    string
 }
 

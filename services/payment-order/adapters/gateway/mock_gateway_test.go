@@ -11,13 +11,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
+	"github.com/meridianhub/meridian/services/payment-order/domain"
 )
 
 func createTestPaymentRequest(t *testing.T, amountCents int64) gateway.PaymentRequest {
 	t.Helper()
-	amount, err := cadomain.NewMoney("GBP", amountCents)
+	amount, err := domain.NewMoney("GBP", amountCents)
 	require.NoError(t, err)
 	return gateway.PaymentRequest{
 		PaymentOrderID:    uuid.New(),
