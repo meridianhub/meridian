@@ -16,6 +16,7 @@ env "local" {
   // Schema-specific migration directory
   migration {
     dir = "file://services/position-keeping/migrations"
+    revisions_schema = "position_keeping_revisions"
   }
 
   // Dev database
@@ -46,6 +47,7 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/position-keeping/migrations"
+    revisions_schema = "position_keeping_revisions"
   }
 
   dev = "docker://postgres/16/dev"
@@ -73,6 +75,7 @@ env "production" {
 
   migration {
     dir = "file://services/position-keeping/migrations"
+    revisions_schema = "position_keeping_revisions"
   }
 
   schemas = ["position_keeping"]
