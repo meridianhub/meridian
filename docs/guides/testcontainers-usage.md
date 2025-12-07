@@ -1,7 +1,10 @@
-# Repository Test Helpers
+# Testcontainers Usage Guide
 
-This package provides reusable testcontainers infrastructure for PostgreSQL integration tests in the position-keeping
-repository layer.
+This guide describes how to use testcontainers for PostgreSQL integration tests across Meridian services.
+
+**Shared utility**: `shared/platform/testdb/` - Provides reusable testcontainer setup for all services.
+
+The examples below use position-keeping but the pattern applies to all services.
 
 ## Overview
 

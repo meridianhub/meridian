@@ -1,6 +1,8 @@
-# Financial Accounting Service - Protocol Buffer Schemas
+# Financial Accounting Service - Protocol Buffer Guide
 
-This directory contains the Protocol Buffer definitions for the Financial Accounting service, following the BIAN
+**Location**: `api/proto/meridian/financial_accounting/v1/`
+
+This guide covers the Protocol Buffer definitions for the Financial Accounting service, following the BIAN
 (Banking Industry Architecture Network) Financial Accounting service domain.
 
 ## Schema Structure

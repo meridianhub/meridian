@@ -1,19 +1,22 @@
 ---
 name: adr-015-standard-service-directory-structure
-description: Standardized directory structure for all microservices in the Meridian platform
+description: Standardized directory structure for the Meridian platform including root layout and microservices
 triggers:
   - Creating a new microservice
   - Restructuring an existing service
   - Adding new functionality to a service (where to place files)
   - Reviewing service organization or architecture
+  - Adding documentation (where should it go?)
+  - Working with API definitions (proto, OpenAPI)
 instructions: |
-  Follow the standard directory structure: cmd/, domain/, adapters/, service/, observability/.
+  Root layout: api/ for proto/OpenAPI, docs/ for all documentation, services/ for microservices, shared/ for libraries.
+  Service structure: cmd/, domain/, adapters/, service/, observability/.
   Place persistence code in adapters/persistence/, messaging in adapters/messaging/.
   Use observability/ for metrics and health checks. Use clients/ for inter-service clients.
-  The app/ directory pattern is optional for complex services needing DI containers.
+  All documentation belongs in docs/ - not scattered in service directories.
 ---
 
-# 15. Standard Service Directory Structure
+# 15. Standard Project and Service Directory Structure
 
 Date: 2025-12-05
 
@@ -57,9 +60,87 @@ These inconsistencies create confusion about where to place new code, make onboa
 
 Chosen option: **Flexible standard with required core**, because it provides consistency for essential components while allowing services to evolve based on their needs.
 
-### Standard Directory Structure
+### Root Project Structure
 
+The Meridian monorepo follows this root-level organization:
+
+```text
+meridian-main/
+├── api/                    # API definitions (proto + OpenAPI)
+│   ├── proto/             # Protocol Buffer definitions
+│   │   ├── buf.yaml       # Buf configuration
+│   │   └── meridian/      # Service-specific protos
+│   │       ├── common/v1/
+│   │       ├── current_account/v1/
+│   │       ├── financial_accounting/v1/
+│   │       ├── payment_order/v1/
+│   │       ├── position_keeping/v1/
+│   │       ├── events/v1/
+│   │       └── platform/v1/
+│   └── openapi/           # Generated OpenAPI specs
+│       ├── current-account.swagger.json
+│       ├── financial-accounting.swagger.json
+│       ├── payment-order.swagger.json
+│       └── position-keeping.swagger.json
+│
+├── docs/                   # All documentation
+│   ├── adr/               # Architecture Decision Records
+│   ├── architecture/      # Architecture diagrams and docs
+│   ├── guides/            # Usage guides and how-tos
+│   ├── runbooks/          # Operational runbooks
+│   └── testing/           # Testing guides
+│
+├── services/              # Microservices (see below)
+│   ├── current-account/
+│   ├── financial-accounting/
+│   ├── payment-order/
+│   └── position-keeping/
+│
+├── shared/                # Shared libraries
+│   ├── domain/           # Shared domain types (Money, etc.)
+│   ├── platform/         # Platform utilities (auth, observability)
+│   ├── pkg/              # Shared packages
+│   └── migrations/       # Shared migration utilities
+│
+├── deployments/           # Kubernetes manifests
+│   └── k8s/
+│
+├── scripts/               # Build and tooling scripts
+│
+├── utilities/             # Standalone utility programs
+│
+└── tests/                 # Integration test suites
 ```
+
+#### Root Directory Guidelines
+
+| Directory | Purpose | What Goes Here |
+|-----------|---------|----------------|
+| `api/` | API contracts | Proto definitions, generated OpenAPI specs |
+| `docs/` | All documentation | ADRs, guides, runbooks, architecture docs |
+| `services/` | Microservices | One directory per BIAN service domain |
+| `shared/` | Shared code | Libraries used by multiple services |
+| `deployments/` | Infrastructure | Kubernetes manifests, Helm charts |
+| `scripts/` | Tooling | Build scripts, analysis tools |
+| `utilities/` | Utilities | Standalone programs (demo tools, loaders) |
+
+#### Documentation Location Rules
+
+**All documentation belongs in `docs/`**, not scattered in service directories:
+
+| Document Type | Location | Example |
+|--------------|----------|---------|
+| Architecture decisions | `docs/adr/` | `0015-standard-service-directory-structure.md` |
+| Usage guides | `docs/guides/` | `circuit-breaker-usage.md` |
+| Operational runbooks | `docs/runbooks/` | `incident-response.md` |
+| Architecture diagrams | `docs/architecture/` | `service-coupling-analysis.md` |
+| Testing guides | `docs/testing/` | `COVERAGE_ANALYSIS.md` |
+
+**Exceptions**: README.md files may exist at package roots to document package purpose (Go convention), but substantial documentation belongs in `docs/`.
+
+### Service Directory Structure
+
+```text
 services/{service-name}/
 ├── cmd/                    # REQUIRED: Entry point and Dockerfile
 │   ├── main.go            # Application entry point
