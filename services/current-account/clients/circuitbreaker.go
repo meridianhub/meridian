@@ -1,104 +1,49 @@
+// Package clients provides gRPC client wrappers with resilience patterns.
+//
+// This package re-exports types from shared/pkg/clients for backward compatibility.
+// New code should import directly from github.com/meridianhub/meridian/shared/pkg/clients.
 package clients
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
-	"time"
-
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/sony/gobreaker/v2"
 )
 
-// CircuitBreakerConfig holds configuration for circuit breaker
-type CircuitBreakerConfig struct {
-	Name          string
-	MaxRequests   uint32
-	Interval      time.Duration
-	Timeout       time.Duration
-	ReadyToTrip   func(counts gobreaker.Counts) bool
-	OnStateChange func(name string, from gobreaker.State, to gobreaker.State)
-}
+// CircuitBreakerConfig is an alias to the shared implementation.
+// Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
+type CircuitBreakerConfig = sharedclients.CircuitBreakerConfig
 
-// CircuitBreaker wraps sony/gobreaker with context support and logging
-type CircuitBreaker struct {
-	cb     *gobreaker.CircuitBreaker[any]
-	logger *slog.Logger
-}
+// CircuitBreaker is an alias to the shared implementation.
+// Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
+type CircuitBreaker = sharedclients.CircuitBreaker
 
-// DefaultCircuitBreakerConfig returns a circuit breaker configuration with sensible defaults
+// DefaultCircuitBreakerConfig returns a circuit breaker configuration with sensible defaults.
+// Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
 func DefaultCircuitBreakerConfig(name string) CircuitBreakerConfig {
-	return CircuitBreakerConfig{
-		Name:        name,
-		MaxRequests: 1,
-		Interval:    60 * time.Second,
-		Timeout:     30 * time.Second,
-		ReadyToTrip: func(counts gobreaker.Counts) bool {
-			// Trip circuit after 5 consecutive failures
-			return counts.ConsecutiveFailures >= 5
-		},
-		OnStateChange: nil, // No default callback
-	}
+	return sharedclients.DefaultCircuitBreakerConfig(name)
 }
 
-// NewCircuitBreaker creates a new circuit breaker with the given configuration
-func NewCircuitBreaker(config CircuitBreakerConfig, logger *slog.Logger) *CircuitBreaker {
-	settings := gobreaker.Settings{
-		Name:        config.Name,
-		MaxRequests: config.MaxRequests,
-		Interval:    config.Interval,
-		Timeout:     config.Timeout,
-		ReadyToTrip: config.ReadyToTrip,
-		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			logger.Info("circuit breaker state changed",
-				"name", name,
-				"from", from.String(),
-				"to", to.String(),
-			)
-			if config.OnStateChange != nil {
-				config.OnStateChange(name, from, to)
-			}
-		},
-	}
+// NewCircuitBreaker creates a new circuit breaker with the given configuration.
+// Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
+var NewCircuitBreaker = sharedclients.NewCircuitBreaker
 
-	return &CircuitBreaker{
-		cb:     gobreaker.NewCircuitBreaker[any](settings),
-		logger: logger,
-	}
-}
+// Re-export gobreaker types for convenience
+type (
+	// State is the circuit breaker state type from gobreaker.
+	State = gobreaker.State
+	// Counts holds circuit breaker statistics.
+	Counts = gobreaker.Counts
+)
 
-// Execute wraps a function with circuit breaker protection and context awareness
-// It respects context cancellation and deadlines before executing the function
-func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() (any, error)) (any, error) {
-	// Check context before executing
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context error before execution: %w", err)
-	}
+// Circuit breaker states
+const (
+	StateClosed   = gobreaker.StateClosed
+	StateHalfOpen = gobreaker.StateHalfOpen
+	StateOpen     = gobreaker.StateOpen
+)
 
-	// Create a channel to receive the result
-	type result struct {
-		value any
-		err   error
-	}
-	resultChan := make(chan result, 1)
-
-	// Execute the function with circuit breaker protection
-	go func() {
-		value, err := cb.cb.Execute(fn)
-		resultChan <- result{value: value, err: err}
-	}()
-
-	// Wait for either the result or context cancellation
-	select {
-	case <-ctx.Done():
-		// Context cancelled or timed out
-		return nil, fmt.Errorf("context cancelled during execution: %w", ctx.Err())
-	case res := <-resultChan:
-		// Function completed
-		return res.value, res.err
-	}
-}
-
-// State returns the current state of the circuit breaker
-func (cb *CircuitBreaker) State() gobreaker.State {
-	return cb.cb.State()
-}
+// Circuit breaker errors
+var (
+	ErrOpenState       = gobreaker.ErrOpenState
+	ErrTooManyRequests = gobreaker.ErrTooManyRequests
+)
