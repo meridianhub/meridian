@@ -1,6 +1,8 @@
 # Circuit Breaker Usage Guide
 
-This document describes how to use the circuit breaker implementation in the Current Account service.
+This document describes how to use the circuit breaker pattern for inter-service gRPC calls in Meridian services.
+
+**Location**: `services/{service}/clients/` - Each service that calls other services should use circuit breakers.
 
 ## Overview
 
