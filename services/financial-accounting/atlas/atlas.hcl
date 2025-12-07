@@ -16,6 +16,8 @@ env "local" {
   // Schema-specific migration directory
   migration {
     dir = "file://services/financial-accounting/migrations"
+    // Use schema-specific revisions table to avoid conflicts with other services
+    revisions_schema = "financial_accounting_revisions"
   }
 
   // Dev database
@@ -44,6 +46,7 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/financial-accounting/migrations"
+    revisions_schema = "financial_accounting_revisions"
   }
 
   dev = "docker://postgres/16/dev"
@@ -71,6 +74,7 @@ env "production" {
 
   migration {
     dir = "file://services/financial-accounting/migrations"
+    revisions_schema = "financial_accounting_revisions"
   }
 
   schemas = ["financial_accounting"]

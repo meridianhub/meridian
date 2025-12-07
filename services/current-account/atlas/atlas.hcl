@@ -16,6 +16,8 @@ env "local" {
   // Schema-specific migration directory
   migration {
     dir = "file://services/current-account/migrations"
+    // Use schema-specific revisions table to avoid conflicts with other services
+    revisions_schema = "current_account_revisions"
   }
 
   // Dev database - include current_account schema in search path
@@ -44,6 +46,7 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/current-account/migrations"
+    revisions_schema = "current_account_revisions"
   }
 
   dev = "docker://postgres/16/dev"
@@ -71,6 +74,7 @@ env "production" {
 
   migration {
     dir = "file://services/current-account/migrations"
+    revisions_schema = "current_account_revisions"
   }
 
   schemas = ["current_account"]

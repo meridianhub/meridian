@@ -16,6 +16,7 @@ env "local" {
   // Schema-specific migration directory
   migration {
     dir = "file://services/payment-order/migrations"
+    revisions_schema = "payment_order_revisions"
   }
 
   // Dev database - include payment_order schema in search path
@@ -44,6 +45,7 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/payment-order/migrations"
+    revisions_schema = "payment_order_revisions"
   }
 
   dev = "docker://postgres/16/dev"
@@ -71,6 +73,7 @@ env "production" {
 
   migration {
     dir = "file://services/payment-order/migrations"
+    revisions_schema = "payment_order_revisions"
   }
 
   schemas = ["payment_order"]
