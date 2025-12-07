@@ -1,19 +1,22 @@
 ---
 name: adr-015-standard-service-directory-structure
-description: Standardized directory structure for all microservices in the Meridian platform
+description: Standardized directory structure for the Meridian platform including root layout and microservices
 triggers:
   - Creating a new microservice
   - Restructuring an existing service
   - Adding new functionality to a service (where to place files)
   - Reviewing service organization or architecture
+  - Adding documentation (where should it go?)
+  - Working with API definitions (proto, OpenAPI)
 instructions: |
-  Follow the standard directory structure: cmd/, domain/, adapters/, service/, observability/.
+  Root layout: api/ for proto/OpenAPI, docs/ for all documentation, services/ for microservices, shared/ for libraries.
+  Service structure: cmd/, domain/, adapters/, service/, observability/.
   Place persistence code in adapters/persistence/, messaging in adapters/messaging/.
   Use observability/ for metrics and health checks. Use clients/ for inter-service clients.
-  The app/ directory pattern is optional for complex services needing DI containers.
+  All documentation belongs in docs/ - not scattered in service directories.
 ---
 
-# 15. Standard Service Directory Structure
+# 15. Standard Project and Service Directory Structure
 
 Date: 2025-12-05
 
@@ -57,9 +60,100 @@ These inconsistencies create confusion about where to place new code, make onboa
 
 Chosen option: **Flexible standard with required core**, because it provides consistency for essential components while allowing services to evolve based on their needs.
 
-### Standard Directory Structure
+### Root Project Structure
 
+The Meridian monorepo follows this root-level organization:
+
+```text
+meridian-main/
+├── api/                    # API definitions (proto + OpenAPI)
+│   ├── proto/             # Protocol Buffer definitions
+│   │   ├── buf.yaml       # Buf configuration
+│   │   └── meridian/      # Service-specific protos
+│   │       ├── common/v1/
+│   │       ├── current_account/v1/
+│   │       ├── financial_accounting/v1/
+│   │       ├── payment_order/v1/
+│   │       ├── position_keeping/v1/
+│   │       ├── events/v1/
+│   │       └── platform/v1/
+│   └── openapi/           # Generated OpenAPI specs
+│       ├── current-account.swagger.json
+│       ├── financial-accounting.swagger.json
+│       ├── payment-order.swagger.json
+│       └── position-keeping.swagger.json
+│
+├── docs/                   # All documentation
+│   ├── adr/               # Architecture Decision Records
+│   ├── architecture/      # Architecture diagrams and docs
+│   ├── guides/            # Usage guides and how-tos
+│   ├── runbooks/          # Operational runbooks
+│   └── testing/           # Testing guides
+│
+├── services/              # Microservices (see below)
+│   ├── current-account/
+│   ├── financial-accounting/
+│   ├── payment-order/
+│   └── position-keeping/
+│
+├── shared/                # Shared libraries
+│   ├── domain/           # Shared domain types (Money, etc.)
+│   ├── platform/         # Platform utilities (auth, observability)
+│   ├── pkg/              # Shared packages
+│   └── migrations/       # Shared migration utilities
+│
+├── deployments/           # Kubernetes manifests
+│   └── k8s/
+│
+├── scripts/               # Build and tooling scripts
+│
+├── utilities/             # Standalone utility programs
+│
+└── tests/                 # Integration test suites
 ```
+
+#### Root Directory Guidelines
+
+| Directory | Purpose | What Goes Here |
+|-----------|---------|----------------|
+| `api/` | API contracts | Proto definitions, generated OpenAPI specs (see note below) |
+| `docs/` | All documentation | ADRs, guides, runbooks, architecture docs |
+| `services/` | Microservices | One directory per BIAN service domain |
+| `shared/` | Shared code | Libraries used by multiple services |
+| `deployments/` | Infrastructure | Kubernetes manifests, Helm charts |
+| `scripts/` | Tooling | Build scripts, analysis tools |
+| `utilities/` | Utilities | Standalone programs (demo tools, loaders) |
+
+#### Why Centralized `api/` at Root?
+
+We use a centralized `api/proto/` directory rather than placing proto files inside each service for several reasons:
+
+1. **Shared types** - Common types (`common/v1/`, `events/v1/`) are used across multiple services. Centralized location avoids circular dependencies.
+2. **Contract-first development** - Protos define contracts between services. Having them together makes the API surface visible at a glance.
+3. **Buf tooling** - Single `buf.yaml` workspace simplifies linting, breaking change detection, and code generation.
+4. **BIAN domain pattern** - Banking services share domain concepts (Money, Account references) that naturally live together.
+
+This follows industry practice for Go monorepos with interdependent services. See [References](#references) for supporting documentation.
+
+**When per-service protos make sense**: If services are truly independent (different teams, no shared types, could be separate repos), consider placing protos inside each service.
+
+#### Documentation Location Rules
+
+**All documentation belongs in `docs/`**, not scattered in service directories:
+
+| Document Type | Location | Example |
+|--------------|----------|---------|
+| Architecture decisions | `docs/adr/` | `0015-standard-service-directory-structure.md` |
+| Usage guides | `docs/guides/` | `circuit-breaker-usage.md` |
+| Operational runbooks | `docs/runbooks/` | `incident-response.md` |
+| Architecture diagrams | `docs/architecture/` | `service-coupling-analysis.md` |
+| Testing guides | `docs/testing/` | `COVERAGE_ANALYSIS.md` |
+
+**Exceptions**: README.md files may exist at package roots to document package purpose (Go convention), but substantial documentation belongs in `docs/`.
+
+### Service Directory Structure
+
+```text
 services/{service-name}/
 ├── cmd/                    # REQUIRED: Entry point and Dockerfile
 │   ├── main.go            # Application entry point
@@ -197,6 +291,15 @@ The `MetricsInterceptor` and `RecoveryUnaryInterceptor` in `shared/pkg/intercept
 * [GitHub Issue #221](https://github.com/meridianhub/meridian/issues/221) - Standardize service directory structure
 * [ADR-002](0002-microservices-per-bian-domain.md) - Microservices per BIAN domain
 * [ADR-005](0005-adapter-pattern-layer-translation.md) - Adapter pattern layer translation
+
+## References
+
+Industry best practices supporting centralized API definitions in Go monorepos:
+
+* [Buf: Files and Packages](https://buf.build/docs/reference/protobuf-files-and-packages/) - Official buf.build guidance on proto file organization
+* [Structuring repositories with protocol buffers](https://dev.to/davidsbond/golang-structuring-repositories-with-protocol-buffers-3012) - Go-specific patterns for proto organization
+* [golang/protobuf Issue #391](https://github.com/golang/protobuf/issues/391) - Community discussion on project structure with multiple services
+* [gRPC organization in microservices (Stack Overflow)](https://stackoverflow.com/questions/56082458/grpc-organization-in-microservices) - Centralized vs distributed proto patterns
 
 ## Notes
 
