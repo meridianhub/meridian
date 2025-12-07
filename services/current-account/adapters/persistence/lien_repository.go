@@ -1,3 +1,4 @@
+//nolint:staticcheck // Uses AmountCents() for database persistence (backward compatible)
 package persistence
 
 import (
@@ -209,7 +210,7 @@ func toLienEntity(lien *domain.Lien) *LienEntity {
 		ID:                    lien.ID,
 		AccountID:             lien.AccountID,
 		AmountCents:           lien.Amount.AmountCents(),
-		Currency:              lien.Amount.Currency(),
+		Currency:              string(lien.Amount.Currency()),
 		Status:                string(lien.Status),
 		PaymentOrderReference: lien.PaymentOrderReference,
 		TerminationReason:     lien.TerminationReason,

@@ -1,4 +1,6 @@
 // Package service implements gRPC services for the current account domain
+//
+//nolint:staticcheck // Uses AmountCents() for balance/deposit operations (deprecated for backward compatibility)
 package service
 
 import (
@@ -239,11 +241,11 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Validate currency matches account currency
-	if req.Amount.Amount.CurrencyCode != account.Balance.Currency() {
+	if req.Amount.Amount.CurrencyCode != account.Balance.CurrencyCode() {
 		operationStatus = "currency_mismatch"
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
-			account.Balance.Currency(), req.Amount.Amount.CurrencyCode)
+			account.Balance.CurrencyCode(), req.Amount.Amount.CurrencyCode)
 	}
 
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
@@ -306,8 +308,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		}
 
 		// Record business metrics
-		caobservability.RecordDeposit(account.Balance.Currency())
-		caobservability.RecordBalance(account.Balance.AmountCents(), account.Balance.Currency())
+		caobservability.RecordDeposit(string(account.Balance.Currency()))
+		caobservability.RecordBalance(account.Balance.AmountCents(), string(account.Balance.Currency()))
 
 		return &pb.ExecuteDepositResponse{
 			AccountId:        account.AccountID,
@@ -326,8 +328,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Record business metrics on success
-	caobservability.RecordDeposit(account.Balance.Currency())
-	caobservability.RecordBalance(account.Balance.AmountCents(), account.Balance.Currency())
+	caobservability.RecordDeposit(string(account.Balance.Currency()))
+	caobservability.RecordBalance(account.Balance.AmountCents(), string(account.Balance.Currency()))
 
 	return resp, nil
 }
@@ -642,7 +644,7 @@ func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility 
 		AccountId:             account.AccountID,
 		AccountIdentification: account.AccountIdentification,
 		AccountStatus:         mapStatusToProto(account.Status),
-		BaseCurrency:          mapCurrencyToProto(account.Balance.Currency()),
+		BaseCurrency:          mapCurrencyToProto(string(account.Balance.Currency())),
 		CreatedAt:             timestamppb.New(account.CreatedAt),
 		UpdatedAt:             timestamppb.New(account.UpdatedAt),
 		// #nosec G115 - Version is bounded by database constraints
@@ -676,7 +678,7 @@ func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
-			CurrencyCode: m.Currency(),
+			CurrencyCode: string(m.Currency()),
 			Units:        units,
 			Nanos:        nanos,
 		},

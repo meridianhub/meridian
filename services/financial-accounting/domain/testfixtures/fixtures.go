@@ -95,7 +95,10 @@ type PostingBuilder struct {
 
 // NewPostingBuilder creates a builder with sensible defaults.
 func NewPostingBuilder() *PostingBuilder {
-	money, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	money, err := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	if err != nil {
+		panic("testfixtures: invalid default money: " + err.Error())
+	}
 	return &PostingBuilder{
 		bookingLogID:  uuid.New(),
 		direction:     domain.PostingDirectionDebit,
@@ -126,7 +129,10 @@ func (b *PostingBuilder) WithAmount(amount domain.Money) *PostingBuilder {
 
 // WithAmountCents sets the posting amount from cents (assumes GBP).
 func (b *PostingBuilder) WithAmountCents(cents int64) *PostingBuilder {
-	money, _ := domain.NewMoney(decimal.NewFromInt(cents).Div(decimal.NewFromInt(100)), domain.CurrencyGBP)
+	money, err := domain.NewMoney(decimal.NewFromInt(cents).Div(decimal.NewFromInt(100)), domain.CurrencyGBP)
+	if err != nil {
+		panic("testfixtures: invalid amount cents: " + err.Error())
+	}
 	b.amount = money
 	return b
 }
@@ -182,34 +188,58 @@ func NewMoneyFixture() *MoneyFixture {
 
 // GBP creates Money in GBP.
 func (m *MoneyFixture) GBP(amount string) domain.Money {
-	dec, _ := decimal.NewFromString(amount)
-	money, _ := domain.NewMoney(dec, domain.CurrencyGBP)
+	dec, err := decimal.NewFromString(amount)
+	if err != nil {
+		panic("testfixtures: invalid GBP amount " + amount + ": " + err.Error())
+	}
+	money, err := domain.NewMoney(dec, domain.CurrencyGBP)
+	if err != nil {
+		panic("testfixtures: failed to construct GBP Money: " + err.Error())
+	}
 	return money
 }
 
 // USD creates Money in USD.
 func (m *MoneyFixture) USD(amount string) domain.Money {
-	dec, _ := decimal.NewFromString(amount)
-	money, _ := domain.NewMoney(dec, domain.CurrencyUSD)
+	dec, err := decimal.NewFromString(amount)
+	if err != nil {
+		panic("testfixtures: invalid USD amount " + amount + ": " + err.Error())
+	}
+	money, err := domain.NewMoney(dec, domain.CurrencyUSD)
+	if err != nil {
+		panic("testfixtures: failed to construct USD Money: " + err.Error())
+	}
 	return money
 }
 
 // EUR creates Money in EUR.
 func (m *MoneyFixture) EUR(amount string) domain.Money {
-	dec, _ := decimal.NewFromString(amount)
-	money, _ := domain.NewMoney(dec, domain.CurrencyEUR)
+	dec, err := decimal.NewFromString(amount)
+	if err != nil {
+		panic("testfixtures: invalid EUR amount " + amount + ": " + err.Error())
+	}
+	money, err := domain.NewMoney(dec, domain.CurrencyEUR)
+	if err != nil {
+		panic("testfixtures: failed to construct EUR Money: " + err.Error())
+	}
 	return money
 }
 
 // GBPCents creates Money in GBP from cents.
 func (m *MoneyFixture) GBPCents(cents int64) domain.Money {
-	money, _ := domain.NewMoney(decimal.NewFromInt(cents).Div(decimal.NewFromInt(100)), domain.CurrencyGBP)
+	money, err := domain.NewMoney(decimal.NewFromInt(cents).Div(decimal.NewFromInt(100)), domain.CurrencyGBP)
+	if err != nil {
+		panic("testfixtures: failed to construct GBP Money from cents: " + err.Error())
+	}
 	return money
 }
 
 // USDCents creates Money in USD from cents.
 func (m *MoneyFixture) USDCents(cents int64) domain.Money {
-	money, _ := domain.NewMoney(decimal.NewFromInt(cents).Div(decimal.NewFromInt(100)), domain.CurrencyUSD)
+	money, err := domain.NewMoney(decimal.NewFromInt(cents).Div(decimal.NewFromInt(100)), domain.CurrencyUSD)
+	if err != nil {
+		panic("testfixtures: failed to construct USD Money from cents: " + err.Error())
+	}
 	return money
 }
 
