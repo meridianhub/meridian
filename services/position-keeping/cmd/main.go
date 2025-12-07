@@ -15,6 +15,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/app"
+	"github.com/meridianhub/meridian/services/position-keeping/observability"
 	"github.com/meridianhub/meridian/services/position-keeping/service"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
@@ -147,7 +148,7 @@ func run(logger *slog.Logger) error {
 
 	// 1. Metrics (always enabled)
 	unaryInterceptors = append(unaryInterceptors,
-		app.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
+		interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
 
 	// 2. Tracing (optional if OTLP endpoint configured)
 	if container.Tracer != nil {
@@ -179,11 +180,11 @@ func run(logger *slog.Logger) error {
 
 	// Create health check aggregator (used by both gRPC and HTTP)
 	healthCheckers := []health.Checker{
-		app.NewPgxPoolChecker(container.DBPool),
+		observability.NewPgxPoolChecker(container.DBPool),
 	}
 	// Add Redis health checker if Redis is enabled
 	if container.RedisClient != nil {
-		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+		healthCheckers = append(healthCheckers, observability.NewRedisChecker(container.RedisClient))
 	}
 	healthAggregator := health.NewAggregator(healthCheckers)
 

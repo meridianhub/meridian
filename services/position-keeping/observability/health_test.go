@@ -1,4 +1,4 @@
-package app
+package observability
 
 import (
 	"context"
@@ -13,15 +13,7 @@ const testDatabaseName = "database"
 
 func TestPgxPoolChecker_Name(t *testing.T) {
 	// Create minimal config for test pool
-	config := &Config{
-		Database: DatabaseConfig{
-			URL:          "postgres://test:test@localhost:5432/testdb",
-			MaxOpenConns: 5,
-			MaxIdleConns: 2,
-		},
-	}
-
-	poolConfig, err := pgxpool.ParseConfig(config.Database.URL)
+	poolConfig, err := pgxpool.ParseConfig("postgres://test:test@localhost:5432/testdb")
 	if err != nil {
 		t.Fatalf("failed to parse config: %v", err)
 	}
@@ -56,15 +48,7 @@ func TestPgxPoolChecker_Check_ReturnsResult(t *testing.T) {
 	}
 
 	// Create minimal config for test pool
-	config := &Config{
-		Database: DatabaseConfig{
-			URL:          "postgres://test:test@localhost:5432/testdb",
-			MaxOpenConns: 5,
-			MaxIdleConns: 2,
-		},
-	}
-
-	poolConfig, err := pgxpool.ParseConfig(config.Database.URL)
+	poolConfig, err := pgxpool.ParseConfig("postgres://test:test@localhost:5432/testdb")
 	if err != nil {
 		t.Fatalf("failed to parse config: %v", err)
 	}

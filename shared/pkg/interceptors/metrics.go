@@ -1,4 +1,4 @@
-package app
+package interceptors
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 )
 
 // MetricsInterceptor creates a gRPC unary interceptor that records Prometheus metrics.
+// It tracks request counts (by method and status code) and request duration.
 func MetricsInterceptor(requestsTotal *prometheus.CounterVec, requestDuration *prometheus.HistogramVec) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		start := time.Now()

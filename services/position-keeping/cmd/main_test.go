@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/position-keeping/app"
+	"github.com/meridianhub/meridian/services/position-keeping/observability"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
@@ -69,10 +70,10 @@ func TestHealthServer_Check_WithHealthyDatabase(t *testing.T) {
 
 	// Create health aggregator and server
 	healthCheckers := []health.Checker{
-		app.NewPgxPoolChecker(container.DBPool),
+		observability.NewPgxPoolChecker(container.DBPool),
 	}
 	if container.RedisClient != nil {
-		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+		healthCheckers = append(healthCheckers, observability.NewRedisChecker(container.RedisClient))
 	}
 	healthAggregator := health.NewAggregator(healthCheckers)
 	healthSrv := newHealthServer(healthAggregator, logger)
@@ -122,9 +123,9 @@ func TestHealthServer_Check_ReturnsResponse(t *testing.T) {
 		_ = container.Close(shutdownCtx)
 	}()
 
-	healthCheckers := []health.Checker{app.NewPgxPoolChecker(container.DBPool)}
+	healthCheckers := []health.Checker{observability.NewPgxPoolChecker(container.DBPool)}
 	if container.RedisClient != nil {
-		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+		healthCheckers = append(healthCheckers, observability.NewRedisChecker(container.RedisClient))
 	}
 	healthAggregator := health.NewAggregator(healthCheckers)
 	healthSrv := newHealthServer(healthAggregator, logger)
@@ -174,9 +175,9 @@ func TestHealthServer_Watch_SendsInitialStatus(t *testing.T) {
 		_ = container.Close(shutdownCtx)
 	}()
 
-	healthCheckers := []health.Checker{app.NewPgxPoolChecker(container.DBPool)}
+	healthCheckers := []health.Checker{observability.NewPgxPoolChecker(container.DBPool)}
 	if container.RedisClient != nil {
-		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+		healthCheckers = append(healthCheckers, observability.NewRedisChecker(container.RedisClient))
 	}
 	healthAggregator := health.NewAggregator(healthCheckers)
 	healthSrv := newHealthServer(healthAggregator, logger)
@@ -246,9 +247,9 @@ func TestHealthServer_Watch_RespectsContext(t *testing.T) {
 		_ = container.Close(shutdownCtx)
 	}()
 
-	healthCheckers := []health.Checker{app.NewPgxPoolChecker(container.DBPool)}
+	healthCheckers := []health.Checker{observability.NewPgxPoolChecker(container.DBPool)}
 	if container.RedisClient != nil {
-		healthCheckers = append(healthCheckers, app.NewRedisChecker(container.RedisClient))
+		healthCheckers = append(healthCheckers, observability.NewRedisChecker(container.RedisClient))
 	}
 	healthAggregator := health.NewAggregator(healthCheckers)
 	healthSrv := newHealthServer(healthAggregator, logger)
