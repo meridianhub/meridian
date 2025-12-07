@@ -97,10 +97,18 @@ func BenchmarkRetrievePaymentOrder(b *testing.B) {
 	}
 
 	// Create a payment order to retrieve
-	amount, _ := cadomain.NewMoney("GBP", 10000)
-	po, _ := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	if err != nil {
+		b.Fatalf("setup: NewMoney failed: %v", err)
+	}
+	po, err := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
+	if err != nil {
+		b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+	}
 	ctx := context.Background()
-	_ = repo.Create(ctx, po)
+	if err := repo.Create(ctx, po); err != nil {
+		b.Fatalf("setup: Create failed: %v", err)
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -210,17 +218,29 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 	// Pre-create payment orders in EXECUTING state (ready for SETTLED callback)
 	paymentOrders := make([]*domain.PaymentOrder, b.N)
 	for i := 0; i < b.N; i++ {
-		amount, _ := cadomain.NewMoney("GBP", 10000)
-		po, _ := domain.NewPaymentOrder(
+		amount, err := cadomain.NewMoney("GBP", 10000)
+		if err != nil {
+			b.Fatalf("setup: NewMoney failed: %v", err)
+		}
+		po, err := domain.NewPaymentOrder(
 			"acc-123",
 			"cred-ref",
 			amount,
 			uuid.New().String(),
 			"corr-001",
 		)
-		_ = po.Reserve("lien-" + uuid.New().String())
-		_ = po.Execute("gw-ref-" + uuid.New().String())
-		_ = repo.Create(ctx, po)
+		if err != nil {
+			b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+		}
+		if err := po.Reserve("lien-" + uuid.New().String()); err != nil {
+			b.Fatalf("setup: Reserve failed: %v", err)
+		}
+		if err := po.Execute("gw-ref-" + uuid.New().String()); err != nil {
+			b.Fatalf("setup: Execute failed: %v", err)
+		}
+		if err := repo.Create(ctx, po); err != nil {
+			b.Fatalf("setup: Create failed: %v", err)
+		}
 		paymentOrders[i] = po
 	}
 
@@ -263,16 +283,26 @@ func BenchmarkCancelPaymentOrder(b *testing.B) {
 	// Pre-create payment orders in RESERVED state (cancellable)
 	paymentOrders := make([]*domain.PaymentOrder, b.N)
 	for i := 0; i < b.N; i++ {
-		amount, _ := cadomain.NewMoney("GBP", 10000)
-		po, _ := domain.NewPaymentOrder(
+		amount, err := cadomain.NewMoney("GBP", 10000)
+		if err != nil {
+			b.Fatalf("setup: NewMoney failed: %v", err)
+		}
+		po, err := domain.NewPaymentOrder(
 			"acc-123",
 			"cred-ref",
 			amount,
 			uuid.New().String(),
 			"corr-001",
 		)
-		_ = po.Reserve("lien-" + uuid.New().String())
-		_ = repo.Create(ctx, po)
+		if err != nil {
+			b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+		}
+		if err := po.Reserve("lien-" + uuid.New().String()); err != nil {
+			b.Fatalf("setup: Reserve failed: %v", err)
+		}
+		if err := repo.Create(ctx, po); err != nil {
+			b.Fatalf("setup: Create failed: %v", err)
+		}
 		paymentOrders[i] = po
 	}
 
@@ -317,7 +347,10 @@ func BenchmarkMoneyConversion(b *testing.B) {
 	})
 
 	b.Run("toMoneyAmount", func(b *testing.B) {
-		amount, _ := cadomain.NewMoney("GBP", 1234567)
+		amount, err := cadomain.NewMoney("GBP", 1234567)
+		if err != nil {
+			b.Fatalf("setup: NewMoney failed: %v", err)
+		}
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -331,11 +364,23 @@ func BenchmarkMoneyConversion(b *testing.B) {
 // BenchmarkToProto benchmarks the domain-to-proto conversion.
 // This is called on every response path.
 func BenchmarkToProto(b *testing.B) {
-	amount, _ := cadomain.NewMoney("GBP", 10000)
-	po, _ := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
-	_ = po.Reserve("lien-123")
-	_ = po.Execute("gw-ref-123")
-	_ = po.Complete("")
+	amount, err := cadomain.NewMoney("GBP", 10000)
+	if err != nil {
+		b.Fatalf("setup: NewMoney failed: %v", err)
+	}
+	po, err := domain.NewPaymentOrder("acc-123", "cred-ref", amount, "idem-key", "corr-001")
+	if err != nil {
+		b.Fatalf("setup: NewPaymentOrder failed: %v", err)
+	}
+	if err := po.Reserve("lien-123"); err != nil {
+		b.Fatalf("setup: Reserve failed: %v", err)
+	}
+	if err := po.Execute("gw-ref-123"); err != nil {
+		b.Fatalf("setup: Execute failed: %v", err)
+	}
+	if err := po.Complete(""); err != nil {
+		b.Fatalf("setup: Complete failed: %v", err)
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
