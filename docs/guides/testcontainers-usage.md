@@ -111,10 +111,9 @@ deleted.
    ```go
    tc := testhelpers.SetupTestContainer(t)
    defer tc.Cleanup(t)
+   ```
 
-```text
-
-1. **Run tests in parallel** (when safe):
+2. **Run tests in parallel** (when safe):
 
    ```go
    func TestConcurrentOperations(t *testing.T) {
@@ -122,9 +121,9 @@ deleted.
        tc := testhelpers.SetupTestContainer(t)
        defer tc.Cleanup(t)
    }
-```
+   ```
 
-1. **Cache test data creation**:
+3. **Cache test data creation**:
 
    ```go
    var testLog *domain.FinancialPositionLog
@@ -135,8 +134,7 @@ deleted.
        }
        return testLog
    }
-
-```text
+   ```
 
 ## Examples
 
@@ -305,6 +303,9 @@ func TestNewWay(t *testing.T) {
 
 ## See Also
 
-- [postgres_repository_test.go](../postgres_repository_test.go) - Example integration tests
-- [postgres_repository_bench_test.go](../postgres_repository_bench_test.go) - Example benchmarks
+- [postgres_repository_test.go][repo-test] - Example integration tests
+- [postgres_repository_bench_test.go][repo-bench] - Example benchmarks
 - [testcontainers-go docs](https://golang.testcontainers.org/) - Official documentation
+
+[repo-test]: ../../services/position-keeping/repository/postgres_repository_test.go
+[repo-bench]: ../../services/position-keeping/repository/postgres_repository_bench_test.go

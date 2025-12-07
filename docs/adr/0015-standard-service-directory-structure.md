@@ -116,13 +116,26 @@ meridian-main/
 
 | Directory | Purpose | What Goes Here |
 |-----------|---------|----------------|
-| `api/` | API contracts | Proto definitions, generated OpenAPI specs |
+| `api/` | API contracts | Proto definitions, generated OpenAPI specs (see note below) |
 | `docs/` | All documentation | ADRs, guides, runbooks, architecture docs |
 | `services/` | Microservices | One directory per BIAN service domain |
 | `shared/` | Shared code | Libraries used by multiple services |
 | `deployments/` | Infrastructure | Kubernetes manifests, Helm charts |
 | `scripts/` | Tooling | Build scripts, analysis tools |
 | `utilities/` | Utilities | Standalone programs (demo tools, loaders) |
+
+#### Why Centralized `api/` at Root?
+
+We use a centralized `api/proto/` directory rather than placing proto files inside each service for several reasons:
+
+1. **Shared types** - Common types (`common/v1/`, `events/v1/`) are used across multiple services. Centralized location avoids circular dependencies.
+2. **Contract-first development** - Protos define contracts between services. Having them together makes the API surface visible at a glance.
+3. **Buf tooling** - Single `buf.yaml` workspace simplifies linting, breaking change detection, and code generation.
+4. **BIAN domain pattern** - Banking services share domain concepts (Money, Account references) that naturally live together.
+
+This follows industry practice for Go monorepos with interdependent services. See [References](#references) for supporting documentation.
+
+**When per-service protos make sense**: If services are truly independent (different teams, no shared types, could be separate repos), consider placing protos inside each service.
 
 #### Documentation Location Rules
 
@@ -278,6 +291,15 @@ The `MetricsInterceptor` and `RecoveryUnaryInterceptor` in `shared/pkg/intercept
 * [GitHub Issue #221](https://github.com/meridianhub/meridian/issues/221) - Standardize service directory structure
 * [ADR-002](0002-microservices-per-bian-domain.md) - Microservices per BIAN domain
 * [ADR-005](0005-adapter-pattern-layer-translation.md) - Adapter pattern layer translation
+
+## References
+
+Industry best practices supporting centralized API definitions in Go monorepos:
+
+* [Buf: Files and Packages](https://buf.build/docs/reference/protobuf-files-and-packages/) - Official buf.build guidance on proto file organization
+* [Structuring repositories with protocol buffers](https://dev.to/davidsbond/golang-structuring-repositories-with-protocol-buffers-3012) - Go-specific patterns for proto organization
+* [golang/protobuf Issue #391](https://github.com/golang/protobuf/issues/391) - Community discussion on project structure with multiple services
+* [gRPC organization in microservices (Stack Overflow)](https://stackoverflow.com/questions/56082458/grpc-organization-in-microservices) - Centralized vs distributed proto patterns
 
 ## Notes
 
