@@ -1,4 +1,5 @@
-package app
+// Package observability provides health checks and metrics for the position-keeping service.
+package observability
 
 import (
 	"context"
