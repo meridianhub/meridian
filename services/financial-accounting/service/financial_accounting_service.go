@@ -823,15 +823,10 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to retrieve booking log: %v", err)
 	}
 
-	// Validate state transition - cannot modify terminal states
-	if bookingLog.IsTerminal() {
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"cannot update booking log in terminal status: %s", bookingLog.Status)
-	}
-
-	// Validate specific state transitions
+	// Validate state transition using the state machine
+	// This handles all valid transitions including POSTED -> REVERSED for reversals
 	if !isValidBookingLogTransition(bookingLog.Status, newStatus) {
-		return nil, status.Errorf(codes.InvalidArgument,
+		return nil, status.Errorf(codes.FailedPrecondition,
 			"invalid status transition from %s to %s", bookingLog.Status, newStatus)
 	}
 
@@ -860,26 +855,42 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 }
 
 // isValidBookingLogTransition validates that a status transition is allowed.
-// Valid transitions from PENDING:
-//   - PENDING -> POSTED (when all postings balance and are processed)
-//   - PENDING -> FAILED (validation or processing error)
-//   - PENDING -> CANCELLED (business cancellation request)
 //
-// REVERSED is not a valid target from PENDING - reversals should only apply
-// to already-posted transactions.
+// Valid transitions:
+//
+//	From PENDING:
+//	  - PENDING -> PENDING (no-op, valid but does nothing)
+//	  - PENDING -> POSTED (when all postings balance and are processed)
+//	  - PENDING -> FAILED (validation or processing error)
+//	  - PENDING -> CANCELLED (business cancellation request)
+//
+//	From POSTED:
+//	  - POSTED -> REVERSED (for correcting errors via reversal entries)
+//
+// Invalid transitions:
+//   - PENDING -> REVERSED (must be POSTED first to reverse)
+//   - Any transition from terminal states (FAILED, CANCELLED, REVERSED)
 func isValidBookingLogTransition(from, to domain.TransactionStatus) bool {
-	if from == domain.TransactionStatusPending {
+	switch from {
+	case domain.TransactionStatusPending:
 		switch to {
-		case domain.TransactionStatusPosted,
+		case domain.TransactionStatusPending, // No-op but valid
+			domain.TransactionStatusPosted,
 			domain.TransactionStatusFailed,
 			domain.TransactionStatusCancelled:
 			return true
-		case domain.TransactionStatusPending,
-			domain.TransactionStatusReversed:
-			// PENDING -> PENDING is a no-op (not useful but not invalid)
+		case domain.TransactionStatusReversed:
 			// PENDING -> REVERSED is invalid (must be POSTED first)
 			return false
 		}
+	case domain.TransactionStatusPosted:
+		// Only REVERSED is valid from POSTED
+		return to == domain.TransactionStatusReversed
+	case domain.TransactionStatusFailed,
+		domain.TransactionStatusCancelled,
+		domain.TransactionStatusReversed:
+		// Terminal states - no transitions allowed
+		return false
 	}
 	return false
 }

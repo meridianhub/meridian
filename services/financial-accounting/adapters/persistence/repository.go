@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -203,9 +204,13 @@ func (r *LedgerRepository) SaveBookingLog(ctx context.Context, log *domain.Finan
 	entity := toBookingLogEntity(log, idempotencyKey)
 	err := r.db.WithContext(ctx).Create(&entity).Error
 	if err != nil {
-		// Check for unique constraint violation on idempotency_key
-		if strings.Contains(err.Error(), "duplicate key") && strings.Contains(err.Error(), "idempotency_key") {
-			return ErrDuplicateIdempotencyKey
+		// Check for unique constraint violation using PostgreSQL error code
+		// 23505 is the SQLSTATE for unique_violation
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if strings.Contains(pgErr.ConstraintName, "idempotency_key") {
+				return ErrDuplicateIdempotencyKey
+			}
 		}
 		return err
 	}
