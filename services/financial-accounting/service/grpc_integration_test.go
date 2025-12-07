@@ -1,0 +1,1140 @@
+// Package service provides gRPC integration tests for the financial-accounting service.
+// These tests use testcontainers to spin up real PostgreSQL instances,
+// verifying end-to-end gRPC behavior with actual database operations.
+package service
+
+import (
+	"context"
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/genproto/googleapis/type/money"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
+
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
+)
+
+// testServer holds the test gRPC server and its dependencies
+type testServer struct {
+	db         *gorm.DB
+	repo       *persistence.LedgerRepository
+	server     *grpc.Server
+	listener   net.Listener
+	address    string
+	cleanup    func()
+	healthSrv  *health.Server
+	grpcClient financialaccountingv1.FinancialAccountingServiceClient
+	healthCli  grpc_health_v1.HealthClient
+	conn       *grpc.ClientConn
+}
+
+// setupIntegrationTest creates a complete test environment with:
+// - PostgreSQL testcontainer
+// - gRPC server with FinancialAccountingService
+// - Health check service
+// - gRPC client connections
+func setupIntegrationTest(t *testing.T) *testServer {
+	t.Helper()
+
+	// Create PostgreSQL testcontainer with schema and migrations
+	db, dbCleanup := testdb.SetupPostgres(t, []interface{}{
+		&persistence.FinancialBookingLogEntity{},
+		&persistence.LedgerPostingEntity{},
+	})
+
+	// Manually create FK constraint since GORM AutoMigrate doesn't create them
+	err := db.Exec(`
+		ALTER TABLE financial_accounting.ledger_postings
+		ADD CONSTRAINT fk_ledger_postings_booking_log
+		FOREIGN KEY (financial_booking_log_id)
+		REFERENCES financial_accounting.financial_booking_logs(id)
+		ON DELETE RESTRICT
+	`).Error
+	require.NoError(t, err, "Failed to create FK constraint")
+
+	// Create repository
+	repo := persistence.NewLedgerRepository(db)
+
+	// Create service dependencies
+	eventPublisher := &noopEventPublisher{}
+	idempotencySvc := &inMemoryIdempotencyService{
+		store: make(map[string]*idempotency.Result),
+	}
+
+	// Create the financial accounting service
+	service := NewFinancialAccountingService(repo, eventPublisher, idempotencySvc)
+
+	// Create gRPC server
+	grpcServer := grpc.NewServer()
+	financialaccountingv1.RegisterFinancialAccountingServiceServer(grpcServer, service)
+
+	// Create and register health service
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	healthServer.SetServingStatus("financial-accounting", grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+
+	// Create listener on random available port using ListenConfig for context support
+	var lc net.ListenConfig
+	listener, err := lc.Listen(context.Background(), "tcp", "localhost:0")
+	require.NoError(t, err, "Failed to create listener")
+
+	address := listener.Addr().String()
+
+	// Start server in background
+	go func() {
+		// Note: Cannot use t.Logf here as test may have already finished
+		// Server errors during graceful shutdown are expected and can be ignored
+		_ = grpcServer.Serve(listener)
+	}()
+
+	// Create client connection using NewClient (grpc.DialContext is deprecated)
+	// Note: NewClient creates a lazy client that doesn't connect until first RPC
+	conn, err := grpc.NewClient(address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err, "Failed to create gRPC client")
+
+	// Create clients
+	grpcClient := financialaccountingv1.NewFinancialAccountingServiceClient(conn)
+	healthClient := grpc_health_v1.NewHealthClient(conn)
+
+	ts := &testServer{
+		db:         db,
+		repo:       repo,
+		server:     grpcServer,
+		listener:   listener,
+		address:    address,
+		healthSrv:  healthServer,
+		grpcClient: grpcClient,
+		healthCli:  healthClient,
+		conn:       conn,
+	}
+
+	ts.cleanup = func() {
+		conn.Close()
+		grpcServer.GracefulStop()
+		dbCleanup()
+	}
+
+	return ts
+}
+
+// createTestBookingLog creates a booking log in the database for testing
+func createTestBookingLog(t *testing.T, db *gorm.DB) uuid.UUID {
+	t.Helper()
+
+	bookingLogID := uuid.New()
+	bookingLog := &persistence.FinancialBookingLogEntity{
+		ID:                      bookingLogID,
+		FinancialAccountType:    "DEBIT",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "ACTIVE",
+		IdempotencyKey:          "test-key-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.Create(bookingLog).Error)
+
+	return bookingLogID
+}
+
+// noopEventPublisher is a no-op implementation for testing
+type noopEventPublisher struct{}
+
+func (n *noopEventPublisher) Publish(_ context.Context, _ DomainEvent) error {
+	return nil
+}
+
+func (n *noopEventPublisher) PublishBatch(_ context.Context, _ []DomainEvent) error {
+	return nil
+}
+
+// inMemoryIdempotencyService provides a thread-safe in-memory idempotency service for integration tests.
+// Uses sync.RWMutex to allow concurrent reads while ensuring safe writes.
+type inMemoryIdempotencyService struct {
+	mu    sync.RWMutex
+	store map[string]*idempotency.Result
+}
+
+func (s *inMemoryIdempotencyService) Check(_ context.Context, key idempotency.Key) (*idempotency.Result, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	keyStr := key.String()
+	if result, ok := s.store[keyStr]; ok {
+		if result.Status == idempotency.StatusCompleted {
+			return result, idempotency.ErrOperationAlreadyProcessed
+		}
+		return result, nil
+	}
+	return nil, idempotency.ErrResultNotFound
+}
+
+func (s *inMemoryIdempotencyService) MarkPending(_ context.Context, key idempotency.Key, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	keyStr := key.String()
+	s.store[keyStr] = &idempotency.Result{
+		Key:    key,
+		Status: idempotency.StatusPending,
+	}
+	return nil
+}
+
+func (s *inMemoryIdempotencyService) StoreResult(_ context.Context, result idempotency.Result) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	keyStr := result.Key.String()
+	s.store[keyStr] = &result
+	return nil
+}
+
+func (s *inMemoryIdempotencyService) Delete(_ context.Context, key idempotency.Key) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.store, key.String())
+	return nil
+}
+
+func (s *inMemoryIdempotencyService) Acquire(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
+	return nil
+}
+
+func (s *inMemoryIdempotencyService) Release(_ context.Context, _ idempotency.Key, _ string) error {
+	return nil
+}
+
+func (s *inMemoryIdempotencyService) Refresh(_ context.Context, _ idempotency.Key, _ string, _ time.Duration) error {
+	return nil
+}
+
+func (s *inMemoryIdempotencyService) IsHeld(_ context.Context, _ idempotency.Key) (bool, error) {
+	return false, nil
+}
+
+// ============================================================================
+// Health Check Integration Tests
+// ============================================================================
+
+func TestHealthCheck_Integration_DefaultService(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Test default service health check (used by K8s probes)
+	resp, err := ts.healthCli.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
+}
+
+func TestHealthCheck_Integration_NamedService(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Test named service health check
+	resp, err := ts.healthCli.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "financial-accounting",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
+}
+
+func TestHealthCheck_Integration_UnknownService(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Test unknown service health check
+	_, err := ts.healthCli.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "unknown-service",
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestHealthCheck_Integration_StatusChange(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Initially SERVING
+	resp, err := ts.healthCli.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "financial-accounting",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
+
+	// Simulate shutdown - change to NOT_SERVING
+	ts.healthSrv.SetServingStatus("financial-accounting", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+
+	// Verify status changed
+	resp, err = ts.healthCli.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: "financial-accounting",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, resp.Status)
+}
+
+// ============================================================================
+// CaptureLedgerPosting Integration Tests
+// ============================================================================
+
+func TestCaptureLedgerPosting_Integration_Success(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create a booking log first (required for FK constraint)
+	bookingLogID := createTestBookingLog(t, ts.db)
+
+	// Create posting request
+	req := &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID.String(),
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        100,
+			Nanos:        500000000, // 100.50 GBP
+		},
+		AccountId: "ACC-123",
+		ValueDate: timestamppb.Now(),
+	}
+
+	// Execute
+	resp, err := ts.grpcClient.CaptureLedgerPosting(ctx, req)
+
+	// Verify
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.LedgerPosting)
+
+	assert.NotEmpty(t, resp.LedgerPosting.Id, "posting ID should be generated")
+	assert.Equal(t, bookingLogID.String(), resp.LedgerPosting.FinancialBookingLogId)
+	assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_DEBIT, resp.LedgerPosting.PostingDirection)
+	assert.Equal(t, "ACC-123", resp.LedgerPosting.AccountId)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, resp.LedgerPosting.Status)
+
+	// Verify posting was persisted in database
+	postingID, err := uuid.Parse(resp.LedgerPosting.Id)
+	require.NoError(t, err)
+
+	savedPosting, err := ts.repo.GetPosting(ctx, postingID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.PostingDirectionDebit, savedPosting.Direction)
+	assert.Equal(t, "ACC-123", savedPosting.AccountID)
+}
+
+func TestCaptureLedgerPosting_Integration_CreditDirection(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+
+	req := &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID.String(),
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        50,
+			Nanos:        0,
+		},
+		AccountId: "ACC-456",
+		ValueDate: timestamppb.Now(),
+	}
+
+	resp, err := ts.grpcClient.CaptureLedgerPosting(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_CREDIT, resp.LedgerPosting.PostingDirection)
+}
+
+func TestCaptureLedgerPosting_Integration_WithIdempotencyKey(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+
+	req := &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID.String(),
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        100,
+			Nanos:        0,
+		},
+		AccountId: "ACC-123",
+		ValueDate: timestamppb.Now(),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key:        "unique-key-" + uuid.New().String(),
+			TtlSeconds: 3600,
+		},
+	}
+
+	// First request should succeed
+	resp1, err := ts.grpcClient.CaptureLedgerPosting(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp1)
+
+	// Second request with same idempotency key should fail
+	_, err = ts.grpcClient.CaptureLedgerPosting(ctx, req)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.AlreadyExists, st.Code())
+}
+
+func TestCaptureLedgerPosting_Integration_InvalidBookingLogID(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: "not-a-uuid",
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        100,
+			Nanos:        0,
+		},
+		AccountId: "ACC-123",
+		ValueDate: timestamppb.Now(),
+	}
+
+	_, err := ts.grpcClient.CaptureLedgerPosting(ctx, req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+func TestCaptureLedgerPosting_Integration_ZeroAmount(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+
+	req := &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID.String(),
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        0,
+			Nanos:        0,
+		},
+		AccountId: "ACC-123",
+		ValueDate: timestamppb.Now(),
+	}
+
+	_, err := ts.grpcClient.CaptureLedgerPosting(ctx, req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+func TestCaptureLedgerPosting_Integration_MissingAccountID(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+
+	req := &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID.String(),
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        100,
+			Nanos:        0,
+		},
+		AccountId: "", // Missing
+		ValueDate: timestamppb.Now(),
+	}
+
+	_, err := ts.grpcClient.CaptureLedgerPosting(ctx, req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// ============================================================================
+// RetrieveLedgerPosting Integration Tests
+// ============================================================================
+
+func TestRetrieveLedgerPosting_Integration_Success(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create booking log and posting
+	bookingLogID := createTestBookingLog(t, ts.db)
+	amount, _ := domain.NewMoney(decimal.NewFromFloat(100.50), domain.CurrencyGBP)
+	posting := &domain.LedgerPosting{
+		ID:                    uuid.New(),
+		FinancialBookingLogID: bookingLogID,
+		Direction:             domain.PostingDirectionDebit,
+		Amount:                amount,
+		AccountID:             "ACC-123",
+		ValueDate:             time.Now(),
+		Status:                domain.TransactionStatusPending,
+		CreatedAt:             time.Now(),
+	}
+	require.NoError(t, ts.repo.SavePosting(ctx, posting))
+
+	// Retrieve via gRPC
+	resp, err := ts.grpcClient.RetrieveLedgerPosting(ctx, &financialaccountingv1.RetrieveLedgerPostingRequest{
+		Id: posting.ID.String(),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.LedgerPosting)
+
+	assert.Equal(t, posting.ID.String(), resp.LedgerPosting.Id)
+	assert.Equal(t, bookingLogID.String(), resp.LedgerPosting.FinancialBookingLogId)
+	assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_DEBIT, resp.LedgerPosting.PostingDirection)
+	assert.Equal(t, "ACC-123", resp.LedgerPosting.AccountId)
+}
+
+func TestRetrieveLedgerPosting_Integration_NotFound(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Try to retrieve non-existent posting
+	_, err := ts.grpcClient.RetrieveLedgerPosting(ctx, &financialaccountingv1.RetrieveLedgerPostingRequest{
+		Id: uuid.New().String(),
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestRetrieveLedgerPosting_Integration_InvalidUUID(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := ts.grpcClient.RetrieveLedgerPosting(ctx, &financialaccountingv1.RetrieveLedgerPostingRequest{
+		Id: "not-a-uuid",
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// ============================================================================
+// UpdateLedgerPosting Integration Tests
+// ============================================================================
+
+func TestUpdateLedgerPosting_Integration_PendingToPosted(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create booking log and pending posting
+	bookingLogID := createTestBookingLog(t, ts.db)
+	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	posting := &domain.LedgerPosting{
+		ID:                    uuid.New(),
+		FinancialBookingLogID: bookingLogID,
+		Direction:             domain.PostingDirectionDebit,
+		Amount:                amount,
+		AccountID:             "ACC-123",
+		ValueDate:             time.Now(),
+		Status:                domain.TransactionStatusPending,
+		CreatedAt:             time.Now(),
+	}
+	require.NoError(t, ts.repo.SavePosting(ctx, posting))
+
+	// Update to POSTED
+	resp, err := ts.grpcClient.UpdateLedgerPosting(ctx, &financialaccountingv1.UpdateLedgerPostingRequest{
+		Id:            posting.ID.String(),
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		PostingResult: "Successfully posted to ledger",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, resp.LedgerPosting.Status)
+	assert.Equal(t, "Successfully posted to ledger", resp.LedgerPosting.PostingResult)
+
+	// Verify persisted in database
+	savedPosting, err := ts.repo.GetPosting(ctx, posting.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.TransactionStatusPosted, savedPosting.Status)
+}
+
+func TestUpdateLedgerPosting_Integration_PendingToFailed(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	posting := &domain.LedgerPosting{
+		ID:                    uuid.New(),
+		FinancialBookingLogID: bookingLogID,
+		Direction:             domain.PostingDirectionDebit,
+		Amount:                amount,
+		AccountID:             "ACC-123",
+		ValueDate:             time.Now(),
+		Status:                domain.TransactionStatusPending,
+		CreatedAt:             time.Now(),
+	}
+	require.NoError(t, ts.repo.SavePosting(ctx, posting))
+
+	resp, err := ts.grpcClient.UpdateLedgerPosting(ctx, &financialaccountingv1.UpdateLedgerPostingRequest{
+		Id:            posting.ID.String(),
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED,
+		PostingResult: "Insufficient funds",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED, resp.LedgerPosting.Status)
+}
+
+func TestUpdateLedgerPosting_Integration_InvalidTransition(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create already POSTED posting
+	bookingLogID := createTestBookingLog(t, ts.db)
+	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	posting := &domain.LedgerPosting{
+		ID:                    uuid.New(),
+		FinancialBookingLogID: bookingLogID,
+		Direction:             domain.PostingDirectionDebit,
+		Amount:                amount,
+		AccountID:             "ACC-123",
+		ValueDate:             time.Now(),
+		Status:                domain.TransactionStatusPosted, // Already posted
+		PostingResult:         "Previously posted",
+		CreatedAt:             time.Now(),
+	}
+	require.NoError(t, ts.repo.SavePosting(ctx, posting))
+
+	// Try to fail an already posted transaction
+	_, err := ts.grpcClient.UpdateLedgerPosting(ctx, &financialaccountingv1.UpdateLedgerPostingRequest{
+		Id:            posting.ID.String(),
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED,
+		PostingResult: "Trying to fail posted",
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+}
+
+func TestUpdateLedgerPosting_Integration_NotFound(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := ts.grpcClient.UpdateLedgerPosting(ctx, &financialaccountingv1.UpdateLedgerPostingRequest{
+		Id:            uuid.New().String(),
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		PostingResult: "test",
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+// ============================================================================
+// ListLedgerPostings Integration Tests
+// ============================================================================
+
+func TestListLedgerPostings_Integration_Success(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create booking log and multiple postings
+	bookingLogID := createTestBookingLog(t, ts.db)
+	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+
+	for i := 0; i < 5; i++ {
+		posting := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                amount,
+			AccountID:             "ACC-123",
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+		time.Sleep(time.Millisecond) // Ensure different timestamps
+	}
+
+	// List all postings
+	resp, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		Pagination: &commonv1.Pagination{
+			PageSize: 10,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.LedgerPostings, 5)
+}
+
+func TestListLedgerPostings_Integration_FilterByBookingLogID(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create two booking logs
+	bookingLogID1 := createTestBookingLog(t, ts.db)
+	bookingLogID2 := createTestBookingLog(t, ts.db)
+
+	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+
+	// Create 3 postings for first booking log
+	for i := 0; i < 3; i++ {
+		posting := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID1,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                amount,
+			AccountID:             "ACC-123",
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+	}
+
+	// Create 2 postings for second booking log
+	for i := 0; i < 2; i++ {
+		posting := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID2,
+			Direction:             domain.PostingDirectionCredit,
+			Amount:                amount,
+			AccountID:             "ACC-456",
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+	}
+
+	// List postings for first booking log only
+	resp, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		FinancialBookingLogId: bookingLogID1.String(),
+		Pagination: &commonv1.Pagination{
+			PageSize: 10,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.LedgerPostings, 3)
+
+	// Verify all returned postings belong to the first booking log
+	for _, posting := range resp.LedgerPostings {
+		assert.Equal(t, bookingLogID1.String(), posting.FinancialBookingLogId)
+	}
+}
+
+func TestListLedgerPostings_Integration_FilterByDirection(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+
+	// Create 2 debit and 3 credit postings
+	for i := 0; i < 2; i++ {
+		posting := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                amount,
+			AccountID:             "ACC-123",
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+	}
+
+	for i := 0; i < 3; i++ {
+		posting := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionCredit,
+			Amount:                amount,
+			AccountID:             "ACC-456",
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+	}
+
+	// Filter by debit only
+	resp, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		Pagination: &commonv1.Pagination{
+			PageSize: 10,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.LedgerPostings, 2)
+
+	for _, posting := range resp.LedgerPostings {
+		assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_DEBIT, posting.PostingDirection)
+	}
+}
+
+func TestListLedgerPostings_Integration_Pagination(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+
+	// Create 10 postings
+	for i := 0; i < 10; i++ {
+		posting := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                amount,
+			AccountID:             "ACC-123",
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+		time.Sleep(time.Millisecond)
+	}
+
+	// Get first page
+	resp1, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		Pagination: &commonv1.Pagination{
+			PageSize: 5,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp1)
+	assert.Len(t, resp1.LedgerPostings, 5)
+	assert.NotEmpty(t, resp1.Pagination.NextPageToken, "should have next page token")
+
+	// Note: The repository's cursor-based pagination parsing is not yet implemented
+	// (see TODO in persistence/repository.go ListPostings). The PageToken is generated
+	// but not parsed, so the second page returns the same results as the first.
+	// This test verifies the pagination response structure is correct.
+	// Full cursor-based pagination will be implemented in a future iteration.
+
+	// Get second page - verify API accepts page token
+	resp2, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		Pagination: &commonv1.Pagination{
+			PageSize:  5,
+			PageToken: resp1.Pagination.NextPageToken,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp2)
+	assert.Len(t, resp2.LedgerPostings, 5)
+
+	// Verify total count reflects all records
+	assert.Equal(t, int64(10), resp1.Pagination.TotalCount)
+}
+
+func TestListLedgerPostings_Integration_InvalidPageSize(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Page size 0 should fail
+	_, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		Pagination: &commonv1.Pagination{
+			PageSize: 0,
+		},
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+// ============================================================================
+// ListFinancialBookingLogs Integration Tests
+// ============================================================================
+
+func TestListFinancialBookingLogs_Integration_Success(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create multiple booking logs
+	for i := 0; i < 3; i++ {
+		createTestBookingLog(t, ts.db)
+	}
+
+	resp, err := ts.grpcClient.ListFinancialBookingLogs(ctx, &financialaccountingv1.ListFinancialBookingLogsRequest{
+		Pagination: &commonv1.Pagination{
+			PageSize: 10,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.FinancialBookingLogs, 3)
+}
+
+func TestListFinancialBookingLogs_Integration_FilterByBusinessUnit(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create booking logs with different business units
+	bookingLog1 := &persistence.FinancialBookingLogEntity{
+		ID:                      uuid.New(),
+		FinancialAccountType:    "DEBIT",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-RETAIL",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "ACTIVE",
+		IdempotencyKey:          "test-key-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, ts.db.Create(bookingLog1).Error)
+
+	bookingLog2 := &persistence.FinancialBookingLogEntity{
+		ID:                      uuid.New(),
+		FinancialAccountType:    "DEBIT",
+		ProductServiceReference: "PROD-002",
+		BusinessUnitReference:   "BU-CORPORATE",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "ACTIVE",
+		IdempotencyKey:          "test-key-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, ts.db.Create(bookingLog2).Error)
+
+	// Filter by business unit
+	resp, err := ts.grpcClient.ListFinancialBookingLogs(ctx, &financialaccountingv1.ListFinancialBookingLogsRequest{
+		BusinessUnitReference: "BU-RETAIL",
+		Pagination: &commonv1.Pagination{
+			PageSize: 10,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.FinancialBookingLogs, 1)
+	assert.Equal(t, "BU-RETAIL", resp.FinancialBookingLogs[0].BusinessUnitReference)
+}
+
+// ============================================================================
+// End-to-End Workflow Tests
+// ============================================================================
+
+func TestEndToEnd_CreateAndRetrievePosting(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+
+	// Step 1: Create posting
+	createResp, err := ts.grpcClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID.String(),
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        250,
+			Nanos:        750000000,
+		},
+		AccountId: "ACC-E2E-TEST",
+		ValueDate: timestamppb.Now(),
+	})
+	require.NoError(t, err)
+	postingID := createResp.LedgerPosting.Id
+
+	// Step 2: Retrieve posting
+	retrieveResp, err := ts.grpcClient.RetrieveLedgerPosting(ctx, &financialaccountingv1.RetrieveLedgerPostingRequest{
+		Id: postingID,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, postingID, retrieveResp.LedgerPosting.Id)
+	assert.Equal(t, "ACC-E2E-TEST", retrieveResp.LedgerPosting.AccountId)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, retrieveResp.LedgerPosting.Status)
+}
+
+func TestEndToEnd_PostingLifecycle(t *testing.T) {
+	ts := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db)
+
+	// Step 1: Create posting (PENDING)
+	createResp, err := ts.grpcClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID.String(),
+		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount: &money.Money{
+			CurrencyCode: "GBP",
+			Units:        500,
+			Nanos:        0,
+		},
+		AccountId: "ACC-LIFECYCLE",
+		ValueDate: timestamppb.Now(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, createResp.LedgerPosting.Status)
+
+	postingID := createResp.LedgerPosting.Id
+
+	// Step 2: Update to POSTED
+	updateResp, err := ts.grpcClient.UpdateLedgerPosting(ctx, &financialaccountingv1.UpdateLedgerPostingRequest{
+		Id:            postingID,
+		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		PostingResult: "Posted successfully via lifecycle test",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, updateResp.LedgerPosting.Status)
+
+	// Step 3: Verify via retrieve
+	retrieveResp, err := ts.grpcClient.RetrieveLedgerPosting(ctx, &financialaccountingv1.RetrieveLedgerPostingRequest{
+		Id: postingID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, retrieveResp.LedgerPosting.Status)
+	assert.Equal(t, "Posted successfully via lifecycle test", retrieveResp.LedgerPosting.PostingResult)
+
+	// Step 4: Verify in list
+	listResp, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		FinancialBookingLogId: bookingLogID.String(),
+		Pagination: &commonv1.Pagination{
+			PageSize: 10,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, listResp.LedgerPostings, 1)
+	assert.Equal(t, postingID, listResp.LedgerPostings[0].Id)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, listResp.LedgerPostings[0].Status)
+}
