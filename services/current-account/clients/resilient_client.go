@@ -8,6 +8,7 @@ import (
 	"time"
 
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/sony/gobreaker/v2"
@@ -28,6 +29,14 @@ type ResilientPositionKeepingClient struct {
 // ResilientFinancialAccountingClient wraps FinancialAccountingClient with resilience patterns
 type ResilientFinancialAccountingClient struct {
 	client         FinancialAccountingClient
+	circuitBreaker *sharedclients.CircuitBreaker
+	retryConfig    sharedclients.RetryConfig
+	logger         *slog.Logger
+}
+
+// ResilientPartyClient wraps PartyClient with resilience patterns
+type ResilientPartyClient struct {
+	client         PartyClient
 	circuitBreaker *sharedclients.CircuitBreaker
 	retryConfig    sharedclients.RetryConfig
 	logger         *slog.Logger
@@ -132,6 +141,22 @@ func NewResilientFinancialAccountingClient(
 	cb := sharedclients.NewCircuitBreaker(cbConfig, config.Logger)
 
 	return &ResilientFinancialAccountingClient{
+		client:         client,
+		circuitBreaker: cb,
+		retryConfig:    retryConfig,
+		logger:         config.Logger,
+	}
+}
+
+// NewResilientPartyClient creates a resilient wrapper around PartyClient
+func NewResilientPartyClient(
+	client PartyClient,
+	config ResilientClientConfig,
+) *ResilientPartyClient {
+	cbConfig, retryConfig := applyConfigDefaults(&config, "party")
+	cb := sharedclients.NewCircuitBreaker(cbConfig, config.Logger)
+
+	return &ResilientPartyClient{
 		client:         client,
 		circuitBreaker: cb,
 		retryConfig:    retryConfig,
@@ -389,6 +414,43 @@ func (r *ResilientFinancialAccountingClient) RetrieveLedgerPosting(
 func (r *ResilientFinancialAccountingClient) Close() error {
 	if err := r.client.Close(); err != nil {
 		return fmt.Errorf("failed to close financial accounting client: %w", err)
+	}
+	return nil
+}
+
+// ValidateParty checks if a party exists and is active with resilience
+func (r *ResilientPartyClient) ValidateParty(ctx context.Context, partyID string) error {
+	_, err := executeWithResilience(
+		ctx,
+		r.circuitBreaker,
+		r.retryConfig,
+		r.logger,
+		"ValidateParty",
+		func() (struct{}, error) {
+			return struct{}{}, r.client.ValidateParty(ctx, partyID)
+		},
+	)
+	return err
+}
+
+// GetParty retrieves full party details by ID with resilience
+func (r *ResilientPartyClient) GetParty(ctx context.Context, partyID string) (*partyv1.Party, error) {
+	return executeWithResilience(
+		ctx,
+		r.circuitBreaker,
+		r.retryConfig,
+		r.logger,
+		"GetParty",
+		func() (*partyv1.Party, error) {
+			return r.client.GetParty(ctx, partyID)
+		},
+	)
+}
+
+// Close closes the underlying client connection
+func (r *ResilientPartyClient) Close() error {
+	if err := r.client.Close(); err != nil {
+		return fmt.Errorf("failed to close party client: %w", err)
 	}
 	return nil
 }
