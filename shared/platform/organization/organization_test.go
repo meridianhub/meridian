@@ -211,3 +211,45 @@ func TestContextIsolation(t *testing.T) {
 		t.Errorf("Child context has wrong organization: got %q, want %q", got, org)
 	}
 }
+
+func TestRequireFromContext_Success(t *testing.T) {
+	expected := organization.MustNewOrganizationID("test_org")
+	ctx := organization.WithOrganization(context.Background(), expected)
+
+	got, err := organization.RequireFromContext(ctx)
+	if err != nil {
+		t.Errorf("RequireFromContext returned unexpected error: %v", err)
+	}
+	if got != expected {
+		t.Errorf("RequireFromContext returned %q, want %q", got, expected)
+	}
+}
+
+func TestRequireFromContext_Missing(t *testing.T) {
+	ctx := context.Background()
+
+	orgID, err := organization.RequireFromContext(ctx)
+	if err == nil {
+		t.Error("RequireFromContext expected error for context without organization")
+	}
+	if !errors.Is(err, organization.ErrMissingOrganizationContext) {
+		t.Errorf("RequireFromContext error = %v, want ErrMissingOrganizationContext", err)
+	}
+	if !orgID.IsEmpty() {
+		t.Errorf("RequireFromContext returned non-empty OrganizationID %q on error", orgID)
+	}
+}
+
+func TestRequireFromContext_NilContext(t *testing.T) {
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
+	orgID, err := organization.RequireFromContext(nil)
+	if err == nil {
+		t.Error("RequireFromContext expected error for nil context")
+	}
+	if !errors.Is(err, organization.ErrMissingOrganizationContext) {
+		t.Errorf("RequireFromContext error = %v, want ErrMissingOrganizationContext", err)
+	}
+	if !orgID.IsEmpty() {
+		t.Errorf("RequireFromContext returned non-empty OrganizationID %q for nil context", orgID)
+	}
+}

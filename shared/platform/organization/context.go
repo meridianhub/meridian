@@ -34,3 +34,14 @@ func MustFromContext(ctx context.Context) OrganizationID {
 	}
 	return org
 }
+
+// RequireFromContext extracts the organization ID from the context.
+// Returns ErrMissingOrganizationContext if the organization context is missing.
+// Use this when you want to handle missing context gracefully rather than panicking.
+func RequireFromContext(ctx context.Context) (OrganizationID, error) {
+	org, ok := FromContext(ctx)
+	if !ok {
+		return "", ErrMissingOrganizationContext
+	}
+	return org, nil
+}
