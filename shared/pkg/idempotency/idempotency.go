@@ -38,6 +38,12 @@ var (
 
 // Key represents an idempotency key with namespace and operation context
 type Key struct {
+	// OrganizationID is the organization identifier for multi-organization isolation.
+	// When set, keys are prefixed with the organization ID to ensure isolation.
+	// When empty, keys are generated without an organization prefix (single-org mode).
+	// Must not contain colons (':') to avoid key parsing ambiguity.
+	OrganizationID string
+
 	// Namespace groups related operations (e.g., "current-account")
 	Namespace string
 
@@ -51,13 +57,20 @@ type Key struct {
 	RequestID string
 }
 
-// String returns the Redis key format: {namespace}:{operation}:{entity}:{request}
+// String returns the Redis key format.
+// With OrganizationID: {org_id}:idempotency:{namespace}:{operation}:{entity}:{request}
+// Without OrganizationID: idempotency:{namespace}:{operation}:{entity}:{request}
 // Note: Field values must not contain colons to avoid ambiguous key representations
 func (k Key) String() string {
-	if k.RequestID != "" {
-		return k.Namespace + ":" + k.Operation + ":" + k.EntityID + ":" + k.RequestID
+	var prefix string
+	if k.OrganizationID != "" {
+		prefix = k.OrganizationID + ":"
 	}
-	return k.Namespace + ":" + k.Operation + ":" + k.EntityID
+
+	if k.RequestID != "" {
+		return prefix + "idempotency:" + k.Namespace + ":" + k.Operation + ":" + k.EntityID + ":" + k.RequestID
+	}
+	return prefix + "idempotency:" + k.Namespace + ":" + k.Operation + ":" + k.EntityID
 }
 
 // Validate checks if the key has all required fields and that none contain colons
@@ -67,8 +80,9 @@ func (k Key) Validate() error {
 	}
 
 	// Prevent colon characters in fields to avoid key collisions
-	if containsColon(k.Namespace) || containsColon(k.Operation) ||
-		containsColon(k.EntityID) || containsColon(k.RequestID) {
+	if containsColon(k.OrganizationID) || containsColon(k.Namespace) ||
+		containsColon(k.Operation) || containsColon(k.EntityID) ||
+		containsColon(k.RequestID) {
 		return ErrInvalidKey
 	}
 
