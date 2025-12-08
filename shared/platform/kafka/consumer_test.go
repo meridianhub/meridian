@@ -2,8 +2,11 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -166,4 +169,118 @@ func TestProtoConsumer_StopAndClose(t *testing.T) {
 	if err != nil {
 		t.Errorf("Close() error = %v", err)
 	}
+}
+
+func TestExtractOrganizationHeader(t *testing.T) {
+	topic := "test-topic"
+
+	t.Run("valid organization header", func(t *testing.T) {
+		msg := &kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic},
+			Headers: []kafka.Header{
+				{Key: organization.OrgIDKey, Value: []byte("acme_bank")},
+			},
+		}
+
+		orgID, err := ExtractOrganizationHeader(msg)
+		if err != nil {
+			t.Errorf("ExtractOrganizationHeader() unexpected error: %v", err)
+		}
+		if orgID.String() != "acme_bank" {
+			t.Errorf("ExtractOrganizationHeader() = %q, want %q", orgID.String(), "acme_bank")
+		}
+	})
+
+	t.Run("missing organization header", func(t *testing.T) {
+		msg := &kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic},
+			Headers:        []kafka.Header{},
+		}
+
+		orgID, err := ExtractOrganizationHeader(msg)
+		if !errors.Is(err, ErrMissingOrganizationHeader) {
+			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrMissingOrganizationHeader", err)
+		}
+		if orgID != "" {
+			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+		}
+	})
+
+	t.Run("invalid organization header format", func(t *testing.T) {
+		msg := &kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic},
+			Headers: []kafka.Header{
+				{Key: organization.OrgIDKey, Value: []byte("invalid-org-id!")},
+			},
+		}
+
+		orgID, err := ExtractOrganizationHeader(msg)
+		if !errors.Is(err, organization.ErrInvalidOrganizationID) {
+			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrInvalidOrganizationID", err)
+		}
+		if orgID != "" {
+			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+		}
+	})
+
+	t.Run("organization header with other headers", func(t *testing.T) {
+		msg := &kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic},
+			Headers: []kafka.Header{
+				{Key: "correlation-id", Value: []byte("12345")},
+				{Key: organization.OrgIDKey, Value: []byte("motive_financial")},
+				{Key: "trace-id", Value: []byte("abcdef")},
+			},
+		}
+
+		orgID, err := ExtractOrganizationHeader(msg)
+		if err != nil {
+			t.Errorf("ExtractOrganizationHeader() unexpected error: %v", err)
+		}
+		if orgID.String() != "motive_financial" {
+			t.Errorf("ExtractOrganizationHeader() = %q, want %q", orgID.String(), "motive_financial")
+		}
+	})
+
+	t.Run("nil headers", func(t *testing.T) {
+		msg := &kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic},
+			Headers:        nil,
+		}
+
+		orgID, err := ExtractOrganizationHeader(msg)
+		if !errors.Is(err, ErrMissingOrganizationHeader) {
+			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrMissingOrganizationHeader", err)
+		}
+		if orgID != "" {
+			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+		}
+	})
+
+	t.Run("empty organization header value", func(t *testing.T) {
+		msg := &kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic},
+			Headers: []kafka.Header{
+				{Key: organization.OrgIDKey, Value: []byte("")},
+			},
+		}
+
+		orgID, err := ExtractOrganizationHeader(msg)
+		if !errors.Is(err, organization.ErrInvalidOrganizationID) {
+			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrInvalidOrganizationID", err)
+		}
+		if orgID != "" {
+			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+		}
+	})
+
+	t.Run("nil message", func(t *testing.T) {
+		orgID, err := ExtractOrganizationHeader(nil)
+		if !errors.Is(err, ErrMissingOrganizationHeader) {
+			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrMissingOrganizationHeader", err)
+		}
+		if orgID != "" {
+			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+		}
+	})
 }
