@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -44,8 +46,22 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
 
+// withOrganizationScope returns a GORM DB instance scoped to the organization from context.
+// If organization context is present (multi-org mode), it sets the PostgreSQL search_path.
+// If organization context is missing (single-tenant mode), it returns the DB unchanged.
+//
+// This must be called within a transaction for the search_path setting to work correctly.
+func (r *Repository) withOrganizationScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
+	if _, ok := organization.FromContext(ctx); ok {
+		return db.WithGormOrganizationScope(ctx, tx)
+	}
+	// Single-tenant mode: no organization scope needed
+	return tx, nil
+}
+
 // Save creates or updates an account with optimistic locking.
 // The context is used to extract audit information (user ID) for the created_by/updated_by fields.
+// In multi-org mode, the context must contain the organization ID for schema routing.
 //
 // For updates, the version in the domain model must match the version in the database.
 // If another transaction has modified the record (incremented the version), this save
@@ -59,173 +75,286 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 		return err
 	}
 
-	// Check if exists by account_identification (IBAN)
-	var existing CurrentAccountEntity
-	result := r.db.WithContext(ctx).Where("account_identification = ?", entity.AccountIdentification).First(&existing)
-
-	if result.Error == nil {
-		// Update existing with optimistic locking
-		entity.ID = existing.ID
-		entity.CreatedAt = existing.CreatedAt
-		entity.CreatedBy = existing.CreatedBy
-
-		// Optimistic locking: only update if version matches, then increment
-		updateResult := r.db.WithContext(ctx).Model(&CurrentAccountEntity{}).
-			Where("account_identification = ? AND version = ?", entity.AccountIdentification, entity.Version).
-			Updates(map[string]interface{}{
-				"balance":            entity.Balance,
-				"available_balance":  entity.AvailableBalance,
-				"status":             entity.Status,
-				"overdraft_limit":    entity.OverdraftLimit,
-				"overdraft_rate":     entity.OverdraftRate,
-				"balance_updated_at": entity.BalanceUpdatedAt,
-				"version":            entity.Version + 1,
-				"updated_at":         entity.UpdatedAt,
-				"updated_by":         entity.UpdatedBy,
-			})
-
-		if updateResult.Error != nil {
-			return updateResult.Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Set organization scope if in multi-org mode
+		tx, err := r.withOrganizationScope(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to set organization scope: %w", err)
 		}
 
-		// If no rows were affected, the version didn't match (concurrent modification)
-		if updateResult.RowsAffected == 0 {
-			return ErrVersionConflict
-		}
+		// Check if exists by account_identification (IBAN)
+		var existing CurrentAccountEntity
+		result := tx.Where("account_identification = ?", entity.AccountIdentification).First(&existing)
 
-		// Update the domain model's version to reflect the new database state
-		account.Version = account.Version + 1
+		if result.Error == nil {
+			// Update existing with optimistic locking
+			entity.ID = existing.ID
+			entity.CreatedAt = existing.CreatedAt
+			entity.CreatedBy = existing.CreatedBy
 
-		return nil
-	}
+			// Optimistic locking: only update if version matches, then increment
+			updateResult := tx.Model(&CurrentAccountEntity{}).
+				Where("account_identification = ? AND version = ?", entity.AccountIdentification, entity.Version).
+				Updates(map[string]interface{}{
+					"balance":            entity.Balance,
+					"available_balance":  entity.AvailableBalance,
+					"status":             entity.Status,
+					"overdraft_limit":    entity.OverdraftLimit,
+					"overdraft_rate":     entity.OverdraftRate,
+					"balance_updated_at": entity.BalanceUpdatedAt,
+					"version":            entity.Version + 1,
+					"updated_at":         entity.UpdatedAt,
+					"updated_by":         entity.UpdatedBy,
+				})
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		// Create new - version starts at 1 (set by toEntity)
-		if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
-			// Handle race condition: another transaction created the same account
-			if isDuplicateKeyError(err) {
-				return ErrAccountExists
+			if updateResult.Error != nil {
+				return updateResult.Error
 			}
-			return err
-		}
-		return nil
-	}
 
-	return result.Error
+			// If no rows were affected, the version didn't match (concurrent modification)
+			if updateResult.RowsAffected == 0 {
+				return ErrVersionConflict
+			}
+
+			// Update the domain model's version to reflect the new database state
+			account.Version = account.Version + 1
+
+			return nil
+		}
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			// Create new - version starts at 1 (set by toEntity)
+			if err := tx.Create(&entity).Error; err != nil {
+				// Handle race condition: another transaction created the same account
+				if isDuplicateKeyError(err) {
+					return ErrAccountExists
+				}
+				return err
+			}
+			return nil
+		}
+
+		return result.Error
+	})
 }
 
-// FindByID retrieves an account by its account identification (IBAN)
-func (r *Repository) FindByID(accountID string) (*domain.CurrentAccount, error) {
-	var entity CurrentAccountEntity
-	result := r.db.Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
+// FindByID retrieves an account by its account identification (IBAN).
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
+	var account *domain.CurrentAccount
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrAccountNotFound
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Set organization scope if in multi-org mode
+		var err error
+		tx, err = r.withOrganizationScope(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to set organization scope: %w", err)
+		}
+
+		var entity CurrentAccountEntity
+		result := tx.Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrAccountNotFound
+		}
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		account, err = toDomain(&entity)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return toDomain(&entity)
+	return account, nil
 }
 
 // FindByIDForUpdate retrieves an account by its account identification with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
-func (r *Repository) FindByIDForUpdate(accountID string) (*domain.CurrentAccount, error) {
-	var entity CurrentAccountEntity
-	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("account_identification = ? AND deleted_at IS NULL", accountID).
-		First(&entity)
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
+	var account *domain.CurrentAccount
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrAccountNotFound
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		tx, err = r.withOrganizationScope(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to set organization scope: %w", err)
+		}
+
+		var entity CurrentAccountEntity
+		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("account_identification = ? AND deleted_at IS NULL", accountID).
+			First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrAccountNotFound
+		}
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		account, err = toDomain(&entity)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return toDomain(&entity)
+	return account, nil
 }
 
-// FindByIBAN retrieves an account by its IBAN (stored in account_identification column)
-func (r *Repository) FindByIBAN(iban string) (*domain.CurrentAccount, error) {
-	var entity CurrentAccountEntity
-	result := r.db.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
+// FindByIBAN retrieves an account by its IBAN (stored in account_identification column).
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.CurrentAccount, error) {
+	var account *domain.CurrentAccount
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrAccountNotFound
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		tx, err = r.withOrganizationScope(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to set organization scope: %w", err)
+		}
+
+		var entity CurrentAccountEntity
+		result := tx.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrAccountNotFound
+		}
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		account, err = toDomain(&entity)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return toDomain(&entity)
+	return account, nil
 }
 
-// FindByUUID retrieves an account by its internal UUID
-func (r *Repository) FindByUUID(id uuid.UUID) (*domain.CurrentAccount, error) {
-	var entity CurrentAccountEntity
-	result := r.db.Where("id = ? AND deleted_at IS NULL", id).First(&entity)
+// FindByUUID retrieves an account by its internal UUID.
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
+	var account *domain.CurrentAccount
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrAccountNotFound
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		tx, err = r.withOrganizationScope(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to set organization scope: %w", err)
+		}
+
+		var entity CurrentAccountEntity
+		result := tx.Where("id = ? AND deleted_at IS NULL", id).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrAccountNotFound
+		}
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		account, err = toDomain(&entity)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return toDomain(&entity)
+	return account, nil
 }
 
 // FindByUUIDForUpdate retrieves an account by its internal UUID with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
-func (r *Repository) FindByUUIDForUpdate(id uuid.UUID) (*domain.CurrentAccount, error) {
-	var entity CurrentAccountEntity
-	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND deleted_at IS NULL", id).
-		First(&entity)
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
+	var account *domain.CurrentAccount
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrAccountNotFound
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		tx, err = r.withOrganizationScope(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to set organization scope: %w", err)
+		}
+
+		var entity CurrentAccountEntity
+		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND deleted_at IS NULL", id).
+			First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrAccountNotFound
+		}
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		account, err = toDomain(&entity)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return toDomain(&entity)
+	return account, nil
 }
 
-// FindByCustomerID retrieves all accounts for a customer
-func (r *Repository) FindByCustomerID(customerID string) ([]*domain.CurrentAccount, error) {
-	var entities []CurrentAccountEntity
-	result := r.db.Where("customer_id = ? AND deleted_at IS NULL", customerID).Find(&entities)
+// FindByCustomerID retrieves all accounts for a customer.
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) FindByCustomerID(ctx context.Context, customerID string) ([]*domain.CurrentAccount, error) {
+	var accounts []*domain.CurrentAccount
 
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	accounts := make([]*domain.CurrentAccount, 0, len(entities))
-	for _, entity := range entities {
-		account, err := toDomain(&entity)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		tx, err = r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("failed to set organization scope: %w", err)
 		}
-		accounts = append(accounts, account)
-	}
 
+		var entities []CurrentAccountEntity
+		result := tx.Where("customer_id = ? AND deleted_at IS NULL", customerID).Find(&entities)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		accounts = make([]*domain.CurrentAccount, 0, len(entities))
+		for _, entity := range entities {
+			account, err := toDomain(&entity)
+			if err != nil {
+				return err
+			}
+			accounts = append(accounts, account)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return accounts, nil
 }
 
-// Delete soft deletes an account
-func (r *Repository) Delete(accountID string) error {
-	return r.db.Model(&CurrentAccountEntity{}).
-		Where("account_identification = ?", accountID).
-		Update("deleted_at", time.Now()).Error
+// Delete soft deletes an account.
+// In multi-org mode, the context must contain the organization ID for schema routing.
+func (r *Repository) Delete(ctx context.Context, accountID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		tx, err = r.withOrganizationScope(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to set organization scope: %w", err)
+		}
+
+		return tx.Model(&CurrentAccountEntity{}).
+			Where("account_identification = ?", accountID).
+			Update("deleted_at", time.Now()).Error
+	})
 }
 
 // Ping checks database connectivity without triggering record-not-found logging.

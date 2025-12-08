@@ -74,7 +74,7 @@ const (
 )
 
 // InitiateLien creates a fund reservation on an account
-func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (*pb.InitiateLienResponse, error) {
+func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest) (*pb.InitiateLienResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
@@ -88,7 +88,7 @@ func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (
 	}
 
 	// Check for idempotency using PaymentOrderReference
-	if idempotentResp, found, err := s.checkLienIdempotency(req.PaymentOrderReference); err != nil {
+	if idempotentResp, found, err := s.checkLienIdempotency(ctx, req.PaymentOrderReference); err != nil {
 		operationStatus = opStatusRetrieveFailed
 		return nil, err
 	} else if found {
@@ -120,7 +120,7 @@ func (s *Service) InitiateLien(_ context.Context, req *pb.InitiateLienRequest) (
 
 		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
 		var txErr error
-		account, txErr = txRepo.FindByIDForUpdate(req.AccountId)
+		account, txErr = txRepo.FindByIDForUpdate(ctx, req.AccountId)
 		if txErr != nil {
 			return txErr
 		}
@@ -245,7 +245,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	// Check if already executed (idempotent) - no transaction needed for read-only
 	if lien.Status == domain.LienStatusExecuted {
 		s.logger.Info("lien already executed (idempotent)", "lien_id", lien.ID.String())
-		resp, err := s.buildExecuteLienIdempotentResponse(lien)
+		resp, err := s.buildExecuteLienIdempotentResponse(ctx, lien)
 		if err != nil {
 			operationStatus = opStatusRetrieveAccountFailed
 			return nil, err
@@ -278,7 +278,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		}
 
 		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
-		account, txErr = txRepo.FindByUUIDForUpdate(lien.AccountID)
+		account, txErr = txRepo.FindByUUIDForUpdate(ctx, lien.AccountID)
 		if txErr != nil {
 			return fmt.Errorf("%w: %w", errTxSaveAccount, txErr)
 		}
@@ -342,7 +342,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	// Handle case where lien was already executed by concurrent request
 	if account == nil {
 		s.logger.Info("lien executed by concurrent request (idempotent)", "lien_id", lien.ID.String())
-		resp, err := s.buildExecuteLienIdempotentResponse(lien)
+		resp, err := s.buildExecuteLienIdempotentResponse(ctx, lien)
 		if err != nil {
 			operationStatus = opStatusRetrieveAccountFailed
 			return nil, err
@@ -367,7 +367,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 }
 
 // TerminateLien releases a reservation without executing
-func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest) (*pb.TerminateLienResponse, error) {
+func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienRequest) (*pb.TerminateLienResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
@@ -404,7 +404,7 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 			"lien_id", lien.ID.String())
 
 		// Calculate available balance - errors logged but don't fail idempotent response
-		account, acctErr := s.repo.FindByUUID(lien.AccountID)
+		account, acctErr := s.repo.FindByUUID(ctx, lien.AccountID)
 		if acctErr != nil {
 			s.logger.Error("failed to find account for idempotent response", "error", acctErr)
 			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
@@ -490,7 +490,7 @@ func (s *Service) TerminateLien(_ context.Context, req *pb.TerminateLienRequest)
 	}
 
 	// Calculate new available balance (funds released)
-	account, err := s.repo.FindByUUID(lien.AccountID)
+	account, err := s.repo.FindByUUID(ctx, lien.AccountID)
 	if err != nil {
 		operationStatus = opStatusRetrieveAccountFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
@@ -593,8 +593,8 @@ func mapLienStatusToProto(status domain.LienStatus) pb.LienStatus {
 }
 
 // buildExecuteLienIdempotentResponse builds an idempotent response for an already-executed lien.
-func (s *Service) buildExecuteLienIdempotentResponse(lien *domain.Lien) (*pb.ExecuteLienResponse, error) {
-	account, err := s.repo.FindByUUID(lien.AccountID)
+func (s *Service) buildExecuteLienIdempotentResponse(ctx context.Context, lien *domain.Lien) (*pb.ExecuteLienResponse, error) {
+	account, err := s.repo.FindByUUID(ctx, lien.AccountID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
@@ -611,7 +611,7 @@ func (s *Service) buildExecuteLienIdempotentResponse(lien *domain.Lien) (*pb.Exe
 // checkLienIdempotency checks if a lien with the given PaymentOrderReference already exists.
 // Returns (response, true) if idempotent response should be returned, (nil, false) otherwise.
 // Returns error status if a non-recoverable error occurs.
-func (s *Service) checkLienIdempotency(paymentOrderRef string) (*pb.InitiateLienResponse, bool, error) {
+func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef string) (*pb.InitiateLienResponse, bool, error) {
 	if paymentOrderRef == "" {
 		return nil, false, nil
 	}
@@ -630,7 +630,7 @@ func (s *Service) checkLienIdempotency(paymentOrderRef string) (*pb.InitiateLien
 		"payment_order_ref", paymentOrderRef)
 
 	// Retrieve account for available balance calculation
-	account, acctErr := s.repo.FindByUUID(existingLien.AccountID)
+	account, acctErr := s.repo.FindByUUID(ctx, existingLien.AccountID)
 	if acctErr != nil {
 		s.logger.Error("failed to retrieve account for idempotent response", "error", acctErr)
 		return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, true, nil

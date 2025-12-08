@@ -40,7 +40,7 @@ func TestSaveNewAccount(t *testing.T) {
 	}
 
 	// Verify account was saved - FindByID now searches by account_number (IBAN)
-	retrieved, err := repo.FindByID(iban)
+	retrieved, err := repo.FindByID(ctx, iban)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify newly created account has version 1
-	retrieved, err := repo.FindByID(iban)
+	retrieved, err := repo.FindByID(ctx, iban)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(1), retrieved.Version, "New account should have version 1")
@@ -103,7 +103,7 @@ func TestSaveUpdateExisting(t *testing.T) {
 	}
 
 	// Verify balance was updated
-	retrieved, err := repo.FindByID(iban)
+	retrieved, err := repo.FindByID(ctx, iban)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
@@ -123,8 +123,9 @@ func TestFindByIDNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
+	ctx := context.Background()
 
-	_, err := repo.FindByID("ACC-NONEXISTENT")
+	_, err := repo.FindByID(ctx, "ACC-NONEXISTENT")
 	if !errors.Is(err, ErrAccountNotFound) {
 		t.Errorf("Expected ErrAccountNotFound, got %v", err)
 	}
@@ -146,7 +147,7 @@ func TestFindByIBAN(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	retrieved, err := repo.FindByIBAN(iban)
+	retrieved, err := repo.FindByIBAN(ctx, iban)
 	if err != nil {
 		t.Fatalf("FindByIBAN failed: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestFindByCustomerID(t *testing.T) {
 		t.Fatalf("Save account2 failed: %v", err)
 	}
 
-	accounts, err := repo.FindByCustomerID(customerID)
+	accounts, err := repo.FindByCustomerID(ctx, customerID)
 	if err != nil {
 		t.Fatalf("FindByCustomerID failed: %v", err)
 	}
@@ -208,12 +209,12 @@ func TestDeleteAccount(t *testing.T) {
 	}
 
 	// Delete account by IBAN
-	if err := repo.Delete(iban); err != nil {
+	if err := repo.Delete(ctx, iban); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
 	// Should not be found after soft delete
-	_, err = repo.FindByID(iban)
+	_, err = repo.FindByID(ctx, iban)
 	if !errors.Is(err, ErrAccountNotFound) {
 		t.Errorf("Expected ErrAccountNotFound after delete, got %v", err)
 	}
@@ -237,12 +238,12 @@ func TestOptimisticLocking(t *testing.T) {
 	}
 
 	// Load same account in two "transactions"
-	account2, err := repo.FindByID(iban)
+	account2, err := repo.FindByID(ctx, iban)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	account3, err := repo.FindByID(iban)
+	account3, err := repo.FindByID(ctx, iban)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
@@ -274,7 +275,7 @@ func TestOptimisticLocking(t *testing.T) {
 	}
 
 	// Verify first transaction's changes persisted
-	final, err := repo.FindByID(iban)
+	final, err := repo.FindByID(ctx, iban)
 	if err != nil {
 		t.Fatalf("Final FindByID failed: %v", err)
 	}
@@ -327,6 +328,7 @@ func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
+	ctx := context.Background()
 
 	// Manually insert corrupted data (empty currency) into database
 	entity := &CurrentAccountEntity{
@@ -349,7 +351,7 @@ func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
 	require.NoError(t, result.Error, "Setup: Should be able to insert corrupted data")
 
 	// Now try to retrieve it - should fail gracefully
-	_, err := repo.FindByID(entity.AccountIdentification)
+	_, err := repo.FindByID(ctx, entity.AccountIdentification)
 
 	assert.Error(t, err, "FindByID should fail with corrupted currency")
 	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
@@ -365,6 +367,7 @@ func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
+	ctx := context.Background()
 
 	// Create a shared customer ID for both accounts
 	customerID := uuid.New()
@@ -406,7 +409,7 @@ func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
 	require.NoError(t, db.Create(corruptedEntity).Error)
 
 	// FindByCustomerID should fail on first corrupted record
-	_, err := repo.FindByCustomerID(customerID.String())
+	_, err := repo.FindByCustomerID(ctx, customerID.String())
 
 	assert.Error(t, err, "FindByCustomerID should fail when any account is corrupted")
 	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
