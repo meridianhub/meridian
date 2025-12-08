@@ -368,26 +368,27 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			// Propagate correlation ID
 			stepCtx = clients.PropagateCorrelationID(stepCtx)
 
-			// Generate entry ID for idempotency
-			entryID := uuid.New().String()
-
-			// Call PositionKeeping service
-			resp, err := s.posKeepingClient.UpdateFinancialPositionLog(stepCtx,
-				&positionkeepingv1.UpdateFinancialPositionLogRequest{
-					LogId: account.AccountID, // Use account ID as position log ID
-					NewEntry: &positionkeepingv1.TransactionLogEntry{
-						EntryId:       entryID,
+			// Call PositionKeeping service to initiate a new financial position log
+			// with the initial transaction entry
+			resp, err := s.posKeepingClient.InitiateFinancialPositionLog(stepCtx,
+				&positionkeepingv1.InitiateFinancialPositionLogRequest{
+					AccountId: account.AccountIdentification, // Use IBAN for FK constraint
+					InitialEntry: &positionkeepingv1.TransactionLogEntry{
+						EntryId:       uuid.New().String(),
 						TransactionId: transactionID,
-						AccountId:     account.AccountID,
+						AccountId:     account.AccountIdentification,
 						Amount:        toMoneyAmount(amount),
 						Direction:     commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
 						Timestamp:     timestamppb.Now(),
 						Description:   fmt.Sprintf("Deposit to account %s", account.AccountID),
 					},
+					IdempotencyKey: &commonpb.IdempotencyKey{
+						Key: fmt.Sprintf("deposit-%s-%s", account.AccountID, transactionID),
+					},
 				},
 			)
 			if err != nil {
-				caobservability.RecordExternalServiceError("position_keeping", "update_log")
+				caobservability.RecordExternalServiceError("position_keeping", "initiate_log")
 				return fmt.Errorf("failed to log position: %w", err)
 			}
 
@@ -399,7 +400,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 
 			return nil
 		},
-		// Compensate: Reverse position log entry
+		// Compensate: Mark position log as cancelled
 		func(stepCtx context.Context) error {
 			s.logger.Info("compensating log_position step",
 				"position_log_id", positionLogID,
@@ -413,22 +414,26 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			// Propagate correlation ID
 			stepCtx = clients.PropagateCorrelationID(stepCtx)
 
-			// Generate entry ID for compensation
-			compEntryID := uuid.New().String()
-			compTransactionID := fmt.Sprintf("COMP-%s", transactionID)
-
-			// Create compensating entry (debit to reverse the credit)
+			// Update the position log status to cancelled with audit entry
+			// Version is 1 since we just created the log
 			_, err := s.posKeepingClient.UpdateFinancialPositionLog(stepCtx,
 				&positionkeepingv1.UpdateFinancialPositionLogRequest{
-					LogId: positionLogID,
-					NewEntry: &positionkeepingv1.TransactionLogEntry{
-						EntryId:       compEntryID,
-						TransactionId: compTransactionID,
-						AccountId:     account.AccountID,
-						Amount:        toMoneyAmount(amount),
-						Direction:     commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-						Timestamp:     timestamppb.Now(),
-						Description:   fmt.Sprintf("Compensation for deposit transaction %s", transactionID),
+					LogId:   positionLogID,
+					Version: 1, // Newly created log starts at version 1
+					StatusUpdate: &positionkeepingv1.StatusTracking{
+						CurrentStatus:   commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
+						StatusUpdatedAt: timestamppb.Now(),
+						StatusReason:    fmt.Sprintf("Saga compensation for failed deposit transaction %s", transactionID),
+					},
+					AuditEntry: &positionkeepingv1.AuditTrailEntry{
+						AuditId:   uuid.New().String(),
+						Timestamp: timestamppb.Now(),
+						UserId:    "system",
+						Action:    "saga_compensation",
+						Details:   fmt.Sprintf("Cancelled position log due to deposit saga failure for transaction %s", transactionID),
+					},
+					IdempotencyKey: &commonpb.IdempotencyKey{
+						Key: fmt.Sprintf("compensate-deposit-%s-%s", account.AccountID, transactionID),
 					},
 				},
 			)

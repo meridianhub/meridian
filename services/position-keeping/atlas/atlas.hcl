@@ -26,8 +26,7 @@ env "local" {
   src = data.external_schema.gorm.url
 
   // Schema configuration
-  // NOTE: position_keeping depends on current_account schema existing (for FK constraints)
-  // Apply current_account migrations before position_keeping migrations
+  // Position-keeping is independent per BIAN domain (ADR-002) - no cross-schema dependencies
   schemas = ["position_keeping"]
 
   // Lint configuration to catch dangerous changes
