@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/meridianhub/meridian/shared/platform/tenancy"
+	"github.com/meridianhub/meridian/shared/platform/organization"
 )
 
 var (
@@ -21,18 +21,18 @@ var (
 	ErrPublicKeyNil = errors.New("public key cannot be nil")
 	// ErrTokenStringEmpty is returned when an empty token string is provided
 	ErrTokenStringEmpty = errors.New("token string cannot be empty")
-	// ErrTenantClaimMissing is returned when the tenant ID claim is missing from the token
-	ErrTenantClaimMissing = errors.New("meridian_tenant_id claim missing")
+	// ErrOrganizationClaimMissing is returned when the organization ID claim is missing from the token
+	ErrOrganizationClaimMissing = errors.New("x-org-id claim missing")
 )
 
 // Claims represents the JWT claims extracted from a validated token.
 // It contains standard JWT claims plus custom claims for user identification and authorization.
 type Claims struct {
 	UserID string `json:"user_id"`
-	// TenantID is the tenant identifier extracted from the meridian_tenant_id JWT claim.
-	TenantID string   `json:"meridian_tenant_id"`
-	Roles    []string `json:"roles"`
-	Scopes   []string `json:"scopes"`
+	// OrganizationID is the organization identifier extracted from the x-org-id JWT claim.
+	OrganizationID string   `json:"x-org-id"`
+	Roles          []string `json:"roles"`
+	Scopes         []string `json:"scopes"`
 	jwt.RegisteredClaims
 }
 
@@ -95,20 +95,20 @@ func (c *Claims) GetUserID() string {
 	return c.UserID
 }
 
-// GetTenantID extracts and validates the tenant ID from the claims.
-// Returns ErrTenantClaimMissing if the meridian_tenant_id claim is absent.
-// Returns tenancy.ErrInvalidTenantID if the format is invalid.
-func (c *Claims) GetTenantID() (tenancy.TenantID, error) {
-	if c.TenantID == "" {
-		return "", ErrTenantClaimMissing
+// GetOrganizationID extracts and validates the organization ID from the claims.
+// Returns ErrOrganizationClaimMissing if the x-org-id claim is absent.
+// Returns organization.ErrInvalidOrganizationID if the format is invalid.
+func (c *Claims) GetOrganizationID() (organization.OrganizationID, error) {
+	if c.OrganizationID == "" {
+		return "", ErrOrganizationClaimMissing
 	}
-	return tenancy.NewTenantID(c.TenantID)
+	return organization.NewOrganizationID(c.OrganizationID)
 }
 
-// HasTenantID returns true if the tenant ID claim is present.
-// Use this for quick presence checks before calling GetTenantID().
-func (c *Claims) HasTenantID() bool {
-	return c.TenantID != ""
+// HasOrganizationID returns true if the organization ID claim is present.
+// Use this for quick presence checks before calling GetOrganizationID().
+func (c *Claims) HasOrganizationID() bool {
+	return c.OrganizationID != ""
 }
 
 // GetRoles extracts the roles from the validated claims.
