@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/meridianhub/meridian/shared/platform/organization"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -33,6 +37,10 @@ const (
 	ScopesContextKey contextKey = "scopes"
 	// ClaimsContextKey is the context key for full claims
 	ClaimsContextKey contextKey = "claims"
+
+	// MultiOrgModeEnvVar is the environment variable that enables multi-organization mode.
+	// When set to "true", organization claims are required in JWT tokens.
+	MultiOrgModeEnvVar = "MULTI_ORG_MODE"
 )
 
 // Interceptor provides gRPC interceptors for JWT authentication
@@ -153,6 +161,23 @@ func (a *Interceptor) authenticate(ctx context.Context) (context.Context, error)
 	ctx = context.WithValue(ctx, ScopesContextKey, claims.Scopes)
 	ctx = context.WithValue(ctx, ClaimsContextKey, claims)
 
+	// Organization context injection
+	multiOrgMode := os.Getenv(MultiOrgModeEnvVar) == "true"
+	if multiOrgMode {
+		orgID, err := claims.GetOrganizationID()
+		if err != nil {
+			if errors.Is(err, ErrOrganizationClaimMissing) {
+				return nil, status.Error(codes.Unauthenticated, "organization_id claim required")
+			}
+			return nil, status.Error(codes.InvalidArgument, "invalid organization_id format")
+		}
+		ctx = organization.WithOrganization(ctx, orgID)
+
+		// Add organization to OpenTelemetry span attributes
+		span := trace.SpanFromContext(ctx)
+		span.SetAttributes(attribute.String("organization.id", orgID.String()))
+	}
+
 	return ctx, nil
 }
 
@@ -214,6 +239,12 @@ func GetScopesFromContext(ctx context.Context) ([]string, bool) {
 func GetClaimsFromContext(ctx context.Context) (*Claims, bool) {
 	claims, ok := ctx.Value(ClaimsContextKey).(*Claims)
 	return claims, ok
+}
+
+// IsMultiOrgModeEnabled returns true if multi-organization mode is enabled.
+// Multi-org mode requires organization claims in JWT tokens.
+func IsMultiOrgModeEnabled() bool {
+	return os.Getenv(MultiOrgModeEnvVar) == "true"
 }
 
 // RequireRole creates an interceptor that requires specific roles

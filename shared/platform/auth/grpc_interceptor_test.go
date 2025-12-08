@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -606,5 +607,225 @@ func TestRequireScope(t *testing.T) {
 		st, ok := status.FromError(err)
 		assert.True(t, ok)
 		assert.Equal(t, codes.Internal, st.Code())
+	})
+}
+
+func TestMultiOrgMode(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	validator, err := NewJWTValidator(publicKey)
+	require.NoError(t, err)
+
+	t.Run("multi-org mode enabled injects organization into context", func(t *testing.T) {
+		t.Setenv(MultiOrgModeEnvVar, "true")
+
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with organization claim
+		claims := &Claims{
+			UserID:         "user-123",
+			OrganizationID: "acme_bank",
+			Roles:          []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Verify organization was injected into context
+		resultCtx := resp.(context.Context)
+		orgID, ok := organization.FromContext(resultCtx)
+		assert.True(t, ok)
+		assert.Equal(t, organization.OrganizationID("acme_bank"), orgID)
+	})
+
+	t.Run("multi-org mode enabled rejects token without organization claim", func(t *testing.T) {
+		t.Setenv(MultiOrgModeEnvVar, "true")
+
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token without organization claim
+		claims := &Claims{
+			UserID: "user-123",
+			Roles:  []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+		assert.Contains(t, st.Message(), "organization_id claim required")
+	})
+
+	t.Run("multi-org mode enabled rejects token with invalid organization format", func(t *testing.T) {
+		t.Setenv(MultiOrgModeEnvVar, "true")
+
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with invalid organization format (spaces not allowed)
+		claims := &Claims{
+			UserID:         "user-123",
+			OrganizationID: "invalid org!",
+			Roles:          []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "invalid organization_id format")
+	})
+
+	t.Run("single-org mode (default) allows token without organization claim", func(t *testing.T) {
+		// Ensure MULTI_ORG_MODE is not set
+		t.Setenv(MultiOrgModeEnvVar, "false")
+
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token without organization claim
+		claims := &Claims{
+			UserID: "user-123",
+			Roles:  []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Organization should not be in context
+		resultCtx := resp.(context.Context)
+		_, ok := organization.FromContext(resultCtx)
+		assert.False(t, ok)
+	})
+
+	t.Run("single-org mode does not inject organization even if present in token", func(t *testing.T) {
+		// Ensure MULTI_ORG_MODE is not set
+		t.Setenv(MultiOrgModeEnvVar, "")
+
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with organization claim
+		claims := &Claims{
+			UserID:         "user-123",
+			OrganizationID: "acme_bank",
+			Roles:          []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Organization should not be in context in single-org mode
+		resultCtx := resp.(context.Context)
+		_, ok := organization.FromContext(resultCtx)
+		assert.False(t, ok)
+	})
+}
+
+func TestIsMultiOrgModeEnabled(t *testing.T) {
+	t.Run("returns true when MULTI_ORG_MODE is true", func(t *testing.T) {
+		t.Setenv(MultiOrgModeEnvVar, "true")
+		assert.True(t, IsMultiOrgModeEnabled())
+	})
+
+	t.Run("returns false when MULTI_ORG_MODE is false", func(t *testing.T) {
+		t.Setenv(MultiOrgModeEnvVar, "false")
+		assert.False(t, IsMultiOrgModeEnabled())
+	})
+
+	t.Run("returns false when MULTI_ORG_MODE is empty", func(t *testing.T) {
+		t.Setenv(MultiOrgModeEnvVar, "")
+		assert.False(t, IsMultiOrgModeEnabled())
+	})
+
+	t.Run("returns false when MULTI_ORG_MODE is not set", func(t *testing.T) {
+		// Unset the env var by setting to empty (t.Setenv doesn't support unsetting)
+		t.Setenv(MultiOrgModeEnvVar, "")
+		assert.False(t, IsMultiOrgModeEnabled())
 	})
 }
