@@ -33,24 +33,40 @@ jobs:
     if: github.event_name == 'pull_request'
 
     steps:
+      - name: Check for breaking-change label
+        id: check-label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            const hasLabel = labels.includes('breaking-change');
+            core.setOutput('skip', hasLabel ? 'true' : 'false');
+            if (hasLabel) {
+              core.notice('Skipping breaking change detection: PR has "breaking-change" label');
+            }
+
       - name: Checkout code
+        if: steps.check-label.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Fetch develop branch
+        if: steps.check-label.outputs.skip != 'true'
         run: git fetch origin develop:develop
 
       - name: Set up buf
+        if: steps.check-label.outputs.skip != 'true'
         uses: bufbuild/buf-setup-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for breaking proto changes
+        if: steps.check-label.outputs.skip != 'true'
         run: buf breaking --against '.git#branch=develop'
 
       - name: Comment on PR if breaking changes detected
-        if: failure()
+        if: failure() && steps.check-label.outputs.skip != 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -58,7 +74,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '⚠️ **Breaking Proto Changes Detected**\n\nThis PR contains breaking changes to protobuf definitions. Please review the changes carefully and consider:\n- Incrementing to v2 if this is a major breaking change\n- Using field deprecation instead of removal\n- Adding new fields with new field numbers\n\nRun `make proto-breaking` locally for details.'
+              body: '⚠️ **Breaking Proto Changes Detected**\n\nThis PR contains breaking changes to protobuf definitions. Please review the changes carefully and consider:\n- Incrementing to v2 if this is a major breaking change\n- Using field deprecation instead of removal\n- Adding new fields with new field numbers\n\nRun `make proto-breaking` locally for details.\n\n💡 **Tip:** If this is an intentional breaking change, add the `breaking-change` label to skip this check.'
             })
 
   proto-validate:
