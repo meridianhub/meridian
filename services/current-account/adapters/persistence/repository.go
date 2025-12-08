@@ -46,13 +46,19 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
 
+// hasOrganizationContext checks if organization context is present (multi-org mode).
+func (r *Repository) hasOrganizationContext(ctx context.Context) bool {
+	_, ok := organization.FromContext(ctx)
+	return ok
+}
+
 // withOrganizationScope returns a GORM DB instance scoped to the organization from context.
 // If organization context is present (multi-org mode), it sets the PostgreSQL search_path.
 // If organization context is missing (single-tenant mode), it returns the DB unchanged.
 //
 // This must be called within a transaction for the search_path setting to work correctly.
 func (r *Repository) withOrganizationScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
-	if _, ok := organization.FromContext(ctx); ok {
+	if r.hasOrganizationContext(ctx) {
 		return db.WithGormOrganizationScope(ctx, tx)
 	}
 	// Single-tenant mode: no organization scope needed
@@ -79,7 +85,7 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 		// Set organization scope if in multi-org mode
 		tx, err := r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization scope: %w", err)
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
 		}
 
 		// Check if exists by account_identification (IBAN)
@@ -141,14 +147,27 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 // FindByID retrieves an account by its account identification (IBAN).
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
-	var account *domain.CurrentAccount
+	// Single-tenant mode: skip transaction overhead for simple reads
+	if !r.hasOrganizationContext(ctx) {
+		var entity CurrentAccountEntity
+		result := r.db.WithContext(ctx).Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
 
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrAccountNotFound
+		}
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		return toDomain(&entity)
+	}
+
+	// Multi-org mode: use transaction for search_path scoping
+	var account *domain.CurrentAccount
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Set organization scope if in multi-org mode
 		var err error
 		tx, err = r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization scope: %w", err)
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
 		}
 
 		var entity CurrentAccountEntity
@@ -157,7 +176,6 @@ func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.Cu
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return ErrAccountNotFound
 		}
-
 		if result.Error != nil {
 			return result.Error
 		}
@@ -174,6 +192,7 @@ func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.Cu
 // FindByIDForUpdate retrieves an account by its account identification with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
 // In multi-org mode, the context must contain the organization ID for schema routing.
+// Note: FOR UPDATE requires a transaction, so we always use one regardless of org context.
 func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
 
@@ -181,7 +200,7 @@ func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*
 		var err error
 		tx, err = r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization scope: %w", err)
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
 		}
 
 		var entity CurrentAccountEntity
@@ -209,13 +228,27 @@ func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*
 // FindByIBAN retrieves an account by its IBAN (stored in account_identification column).
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.CurrentAccount, error) {
-	var account *domain.CurrentAccount
+	// Single-tenant mode: skip transaction overhead for simple reads
+	if !r.hasOrganizationContext(ctx) {
+		var entity CurrentAccountEntity
+		result := r.db.WithContext(ctx).Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
 
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrAccountNotFound
+		}
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		return toDomain(&entity)
+	}
+
+	// Multi-org mode: use transaction for search_path scoping
+	var account *domain.CurrentAccount
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
 		tx, err = r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization scope: %w", err)
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
 		}
 
 		var entity CurrentAccountEntity
@@ -224,7 +257,6 @@ func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.Curre
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return ErrAccountNotFound
 		}
-
 		if result.Error != nil {
 			return result.Error
 		}
@@ -241,13 +273,27 @@ func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.Curre
 // FindByUUID retrieves an account by its internal UUID.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
-	var account *domain.CurrentAccount
+	// Single-tenant mode: skip transaction overhead for simple reads
+	if !r.hasOrganizationContext(ctx) {
+		var entity CurrentAccountEntity
+		result := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).First(&entity)
 
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrAccountNotFound
+		}
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		return toDomain(&entity)
+	}
+
+	// Multi-org mode: use transaction for search_path scoping
+	var account *domain.CurrentAccount
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
 		tx, err = r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization scope: %w", err)
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
 		}
 
 		var entity CurrentAccountEntity
@@ -256,7 +302,6 @@ func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.Curr
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return ErrAccountNotFound
 		}
-
 		if result.Error != nil {
 			return result.Error
 		}
@@ -273,6 +318,7 @@ func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.Curr
 // FindByUUIDForUpdate retrieves an account by its internal UUID with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
 // In multi-org mode, the context must contain the organization ID for schema routing.
+// Note: FOR UPDATE requires a transaction, so we always use one regardless of org context.
 func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
 
@@ -280,7 +326,7 @@ func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*do
 		var err error
 		tx, err = r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization scope: %w", err)
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
 		}
 
 		var entity CurrentAccountEntity
@@ -308,13 +354,33 @@ func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*do
 // FindByCustomerID retrieves all accounts for a customer.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByCustomerID(ctx context.Context, customerID string) ([]*domain.CurrentAccount, error) {
-	var accounts []*domain.CurrentAccount
+	// Single-tenant mode: skip transaction overhead for simple reads
+	if !r.hasOrganizationContext(ctx) {
+		var entities []CurrentAccountEntity
+		result := r.db.WithContext(ctx).Where("customer_id = ? AND deleted_at IS NULL", customerID).Find(&entities)
 
+		if result.Error != nil {
+			return nil, result.Error
+		}
+
+		accounts := make([]*domain.CurrentAccount, 0, len(entities))
+		for _, entity := range entities {
+			account, err := toDomain(&entity)
+			if err != nil {
+				return nil, err
+			}
+			accounts = append(accounts, account)
+		}
+		return accounts, nil
+	}
+
+	// Multi-org mode: use transaction for search_path scoping
+	var accounts []*domain.CurrentAccount
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
 		tx, err = r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization scope: %w", err)
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
 		}
 
 		var entities []CurrentAccountEntity
@@ -344,11 +410,19 @@ func (r *Repository) FindByCustomerID(ctx context.Context, customerID string) ([
 // Delete soft deletes an account.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) Delete(ctx context.Context, accountID string) error {
+	// Single-tenant mode: skip transaction overhead
+	if !r.hasOrganizationContext(ctx) {
+		return r.db.WithContext(ctx).Model(&CurrentAccountEntity{}).
+			Where("account_identification = ?", accountID).
+			Update("deleted_at", time.Now()).Error
+	}
+
+	// Multi-org mode: use transaction for search_path scoping
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
 		tx, err = r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization scope: %w", err)
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
 		}
 
 		return tx.Model(&CurrentAccountEntity{}).
