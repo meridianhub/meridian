@@ -18,8 +18,9 @@ CREATE TABLE "position_keeping"."financial_position_logs" (
   "status_reason" text NOT NULL,
   "failure_reason" text NULL,
   "reconciliation_status" character varying(20) NOT NULL,
-  PRIMARY KEY ("id"),
-  CONSTRAINT "fk_position_keeping_financial_position_logs_account" FOREIGN KEY ("account_id") REFERENCES "current_account"."accounts" ("account_number") ON UPDATE NO ACTION ON DELETE RESTRICT
+  PRIMARY KEY ("id")
+  -- Note: No FK to current_account schema - services are independent per BIAN domain (ADR-002)
+  -- Account validation is done at the application level via gRPC
 );
 -- Create index "idx_position_keeping_financial_position_logs_account_id" to table: "financial_position_logs"
 CREATE INDEX "idx_position_keeping_financial_position_logs_account_id" ON "position_keeping"."financial_position_logs" ("account_id");
@@ -103,8 +104,8 @@ CREATE TABLE "position_keeping"."transaction_log_entries" (
   "reference" character varying(100) NULL,
   "source" character varying(50) NOT NULL,
   PRIMARY KEY ("id"),
-  CONSTRAINT "fk_position_keeping_financial_position_logs_transaction_adbf542" FOREIGN KEY ("financial_position_log_id") REFERENCES "position_keeping"."financial_position_logs" ("id") ON UPDATE NO ACTION ON DELETE CASCADE,
-  CONSTRAINT "fk_position_keeping_transaction_log_entries_account" FOREIGN KEY ("account_id") REFERENCES "current_account"."accounts" ("account_number") ON UPDATE NO ACTION ON DELETE RESTRICT
+  CONSTRAINT "fk_position_keeping_financial_position_logs_transaction_adbf542" FOREIGN KEY ("financial_position_log_id") REFERENCES "position_keeping"."financial_position_logs" ("id") ON UPDATE NO ACTION ON DELETE CASCADE
+  -- Note: No FK to current_account schema - services are independent per BIAN domain (ADR-002)
 );
 -- Create index "idx_position_keeping_transaction_log_entries_deleted_at" to table: "transaction_log_entries"
 CREATE INDEX "idx_position_keeping_transaction_log_entries_deleted_at" ON "position_keeping"."transaction_log_entries" ("deleted_at");
