@@ -1,0 +1,208 @@
+syntax = "proto3";
+
+package meridian.party.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/party/v1;partyv1";
+
+// OpenAPI specification metadata for Party Reference Data Directory Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Party Reference Data Directory Service API"
+    version: "1.0"
+    description: "BIAN-compliant party reference data management for customers, "
+                 "counterparties, and other legal entities involved in banking operations."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+  security_definitions: {
+    security: {
+      key: "Bearer"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+        description: "Bearer token authentication"
+      }
+    }
+  }
+  security: {
+    security_requirement: {
+      key: "Bearer"
+      value: {}
+    }
+  }
+};
+
+// PartyType defines the legal classification of a party per BIAN specification.
+enum PartyType {
+  // PARTY_TYPE_UNSPECIFIED means the party type is unknown.
+  PARTY_TYPE_UNSPECIFIED = 0;
+  // PARTY_TYPE_PERSON is a natural person (individual).
+  PARTY_TYPE_PERSON = 1;
+  // PARTY_TYPE_ORGANISATION is a legal entity (company, partnership, etc.).
+  PARTY_TYPE_ORGANISATION = 2;
+}
+
+// PartyStatus defines the lifecycle state of a party in the reference data directory.
+enum PartyStatus {
+  // PARTY_STATUS_UNSPECIFIED means the status is unknown.
+  PARTY_STATUS_UNSPECIFIED = 0;
+  // PARTY_STATUS_ACTIVE means the party is active and can participate in banking operations.
+  PARTY_STATUS_ACTIVE = 1;
+  // PARTY_STATUS_RESTRICTED means the party has limited access (e.g., pending KYC review).
+  PARTY_STATUS_RESTRICTED = 2;
+  // PARTY_STATUS_TERMINATED means the party relationship has ended.
+  PARTY_STATUS_TERMINATED = 3;
+}
+
+// ExternalReferenceType defines the type of external identifier for a party.
+enum ExternalReferenceType {
+  // EXTERNAL_REFERENCE_TYPE_UNSPECIFIED means the reference type is unknown.
+  EXTERNAL_REFERENCE_TYPE_UNSPECIFIED = 0;
+  // EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE is a UK Companies House registration number.
+  EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE = 1;
+  // EXTERNAL_REFERENCE_TYPE_NATIONAL_ID is a national identity document number.
+  EXTERNAL_REFERENCE_TYPE_NATIONAL_ID = 2;
+  // EXTERNAL_REFERENCE_TYPE_LEI is a Legal Entity Identifier (ISO 17442).
+  EXTERNAL_REFERENCE_TYPE_LEI = 3;
+  // EXTERNAL_REFERENCE_TYPE_TAX_ID is a tax identification number.
+  EXTERNAL_REFERENCE_TYPE_TAX_ID = 4;
+}
+
+// Party represents a legal entity in the BIAN Party Reference Data Directory.
+// A party can be a person (natural) or organisation (legal entity).
+message Party {
+  // party_id is the unique identifier for this party (alphanumeric with hyphens/underscores).
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // party_type is the legal classification of the party.
+  PartyType party_type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+
+  // legal_name is the official registered name of the party.
+  string legal_name = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // display_name is a shorter name for UI display purposes (optional).
+  string display_name = 4 [(buf.validate.field).string = {max_len: 100}];
+
+  // status is the current lifecycle state of the party.
+  PartyStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+
+  // external_reference is the identifier from an external system (e.g., Companies House number).
+  string external_reference = 6 [(buf.validate.field).string = {max_len: 100}];
+
+  // external_reference_type indicates the type of external reference provided.
+  ExternalReferenceType external_reference_type = 7 [(buf.validate.field).enum = {defined_only: true}];
+
+  // created_at is when the party was registered in the directory.
+  google.protobuf.Timestamp created_at = 8;
+
+  // updated_at is when the party record was last modified.
+  google.protobuf.Timestamp updated_at = 9;
+
+  // version is for optimistic locking.
+  int32 version = 10 [(buf.validate.field).int32 = {gte: 0}];
+}
+
+// RegisterPartyRequest is the request to register a new party in the directory.
+message RegisterPartyRequest {
+  // party_type is the legal classification of the party.
+  PartyType party_type = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+
+  // legal_name is the official registered name of the party.
+  string legal_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // display_name is a shorter name for UI display purposes (optional).
+  string display_name = 3 [(buf.validate.field).string = {max_len: 100}];
+
+  // external_reference is the identifier from an external system (optional).
+  string external_reference = 4 [(buf.validate.field).string = {max_len: 100}];
+
+  // external_reference_type indicates the type of external reference provided.
+  ExternalReferenceType external_reference_type = 5 [(buf.validate.field).enum = {defined_only: true}];
+}
+
+// RegisterPartyResponse is the response after registering a party.
+message RegisterPartyResponse {
+  // party is the newly registered party.
+  Party party = 1 [(buf.validate.field).required = true];
+}
+
+// RetrievePartyRequest is the request to retrieve a party by ID.
+message RetrievePartyRequest {
+  // party_id is the unique identifier of the party to retrieve.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrievePartyResponse is the response containing the requested party.
+message RetrievePartyResponse {
+  // party is the requested party.
+  Party party = 1 [(buf.validate.field).required = true];
+}
+
+// PartyService provides BIAN-compliant party reference data management.
+//
+// Design Notes:
+// - DELETE operations are intentionally not provided. Parties are managed
+//   through status transitions (Active → Restricted → Terminated) for audit compliance.
+// - This service follows the BIAN Party Reference Data Directory pattern.
+service PartyService {
+  // RegisterParty creates a new party in the reference data directory.
+  rpc RegisterParty(RegisterPartyRequest) returns (RegisterPartyResponse) {
+    option (google.api.http) = {
+      post: "/v1/parties"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Party registered successfully"
+        }
+      }
+    };
+  }
+
+  // RetrieveParty gets party details by ID.
+  rpc RetrieveParty(RetrievePartyRequest) returns (RetrievePartyResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{party_id}"
+    };
+  }
+}
