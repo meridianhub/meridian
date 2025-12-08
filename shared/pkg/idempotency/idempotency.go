@@ -41,6 +41,7 @@ type Key struct {
 	// OrganizationID is the organization identifier for multi-organization isolation.
 	// When set, keys are prefixed with the organization ID to ensure isolation.
 	// When empty, keys are generated without an organization prefix (single-org mode).
+	// Must not contain colons (':') to avoid key parsing ambiguity.
 	OrganizationID string
 
 	// Namespace groups related operations (e.g., "current-account")
