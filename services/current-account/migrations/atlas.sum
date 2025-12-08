@@ -1,4 +1,4 @@
-h1:E3m2Fn8EM5SSWdD7jTFMI/Qv9YawcI5QNtcaQCJV5GQ=
+h1:XuAqHbAAmDsdboA8dWjS2plWcVwQuD3JWAA7GRARdF4=
 20251103181626_initial.sql h1:h/E+atJE/78Q5siTomcLIzYZMRACtxiIVRQgemMtax4=
 20251103181700_audit_system.sql h1:QLSvHru32NeU2bNflvmF8JWG8Fcmv8GJdvxv9QCJ7PU=
 20251204130000_add_account_id.sql h1:5RWRS5Tx0wchOUWpXniGRAm4GisEAl1PzoHFsZw6M28=
@@ -9,3 +9,4 @@ h1:E3m2Fn8EM5SSWdD7jTFMI/Qv9YawcI5QNtcaQCJV5GQ=
 20251204160001_add_version_column.sql h1:REznhd5N1aWOeuaraoR0+ZonkoXCGKIqoSfFWAS8qVc=
 20251204204800_create_liens_table.sql h1:4ZdOqXNJoGxGEE287jlBzm5exDKr85CDGA1/IusT6FU=
 20251207150000_backfill_balance_updated_at.sql h1:XQyXF2cB5qlv3p8zOwt21EQGJbmzxq+lRxsg2/xeHm0=
+20251208180700_remove_customers_table.sql h1:XULLiU858MoUYg4WN1ayJy4EUCOeItZMUrZVG/P9mjE=
