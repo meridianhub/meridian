@@ -247,9 +247,12 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 //
 // Returns:
 // - The organization ID if the header is present and valid
-// - ErrMissingOrganizationHeader if the header is not present
+// - ErrMissingOrganizationHeader if the message is nil or the header is not present
 // - organization.ErrInvalidOrganizationID if the header value is invalid
 func ExtractOrganizationHeader(msg *kafka.Message) (organization.OrganizationID, error) {
+	if msg == nil {
+		return "", ErrMissingOrganizationHeader
+	}
 	for _, h := range msg.Headers {
 		if h.Key == organization.OrgIDKey {
 			return organization.NewOrganizationID(string(h.Value))
@@ -266,6 +269,9 @@ func ExtractOrganizationHeader(msg *kafka.Message) (organization.OrganizationID,
 // 4. Calls the handler with organization context and configured timeout
 //
 // Returns an error if header extraction, deserialization, or handler execution fails.
+// Note: Errors returned here bubble up through processMessageWithRetry, which handles
+// DLQ routing after exhausting retries. Messages with missing/invalid organization
+// headers will eventually be sent to DLQ if configured.
 func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 	// Extract organization header
 	orgID, err := ExtractOrganizationHeader(kafkaMsg)

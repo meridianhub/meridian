@@ -273,4 +273,14 @@ func TestExtractOrganizationHeader(t *testing.T) {
 			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
 		}
 	})
+
+	t.Run("nil message", func(t *testing.T) {
+		orgID, err := ExtractOrganizationHeader(nil)
+		if !errors.Is(err, ErrMissingOrganizationHeader) {
+			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrMissingOrganizationHeader", err)
+		}
+		if orgID != "" {
+			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+		}
+	})
 }
