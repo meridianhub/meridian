@@ -98,7 +98,7 @@ func RunPreFlight(ctx context.Context, clients *Clients, cfg *PreFlightConfig) (
 
 	// Step 2: Create the test account
 	createResp, err := clients.CurrentAccount.InitiateCurrentAccount(ctx, &currentaccountv1.InitiateCurrentAccountRequest{
-		CustomerId:            accountID, // Use account ID as customer ID for demo
+		PartyId:               accountID, // Use account ID as party ID for demo
 		AccountIdentification: iban,
 		BaseCurrency:          commonv1.Currency_CURRENCY_GBP,
 	})
