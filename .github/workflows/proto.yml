@@ -38,7 +38,13 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const labels = context.payload.pull_request.labels.map(l => l.name);
+            // Fetch current PR labels via API (not from event payload which is stale)
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            const labels = pr.labels.map(l => l.name);
             const hasLabel = labels.includes('breaking-change');
             core.setOutput('skip', hasLabel ? 'true' : 'false');
             if (hasLabel) {
