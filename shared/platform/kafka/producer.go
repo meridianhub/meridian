@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -167,4 +168,78 @@ func (p *ProtoProducer) Flush(timeoutMs int) int {
 // messages - call Flush() first if needed.
 func (p *ProtoProducer) Close() {
 	p.producer.Close()
+}
+
+// PublishWithOrganization sends a protobuf message with organization context to the specified Kafka topic.
+// The organization ID is extracted from the context and injected as a Kafka header (x-org-id).
+// This ensures organization isolation for multi-tenant event processing.
+//
+// The key is used for partitioning - messages with the same key go to the same partition.
+// This method blocks until the message is confirmed by the Kafka broker or the context is cancelled.
+//
+// Parameters:
+// - ctx: Context containing organization ID (via organization.WithOrganization) for cancellation and timeout
+// - topic: Target Kafka topic name (must not be empty)
+// - key: Partition key as string (empty key will be null in Kafka)
+// - msg: Protocol Buffer message to serialize and send (must not be nil)
+//
+// Panics if the organization context is missing - this is a fail-fast strategy to prevent
+// events without organization attribution from being published.
+//
+// Returns an error if:
+// - topic is empty
+// - msg is nil
+// - protobuf marshaling fails
+// - message production fails
+// - delivery confirmation indicates failure
+// - context is cancelled before delivery confirmation
+func (p *ProtoProducer) PublishWithOrganization(ctx context.Context, topic string, key string, msg proto.Message) error {
+	// Extract organization from context - panic if missing (fail-fast)
+	orgID := organization.MustFromContext(ctx)
+
+	if topic == "" {
+		return ErrEmptyTopic
+	}
+	if msg == nil {
+		return ErrNilMessage
+	}
+
+	// Serialize protobuf message to bytes
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal protobuf message: %w", err)
+	}
+
+	// Create Kafka message with organization header
+	kafkaMsg := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
+		Key:            []byte(key),
+		Value:          data,
+		Headers: []kafka.Header{
+			{Key: organization.OrgIDKey, Value: []byte(orgID.String())},
+		},
+		Timestamp: time.Now(),
+	}
+
+	// Publish with delivery report channel
+	deliveryChan := make(chan kafka.Event, 1)
+	err = p.producer.Produce(kafkaMsg, deliveryChan)
+	if err != nil {
+		return fmt.Errorf("failed to produce message: %w", err)
+	}
+
+	// Wait for delivery confirmation or context cancellation
+	select {
+	case e := <-deliveryChan:
+		m, ok := e.(*kafka.Message)
+		if !ok {
+			return fmt.Errorf("%w: %T", ErrUnexpectedEvent, e)
+		}
+		if m.TopicPartition.Error != nil {
+			return fmt.Errorf("delivery failed: %w", m.TopicPartition.Error)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("publish cancelled: %w", ctx.Err())
+	}
 }

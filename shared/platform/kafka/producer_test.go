@@ -2,9 +2,11 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -142,4 +144,63 @@ func TestProtoProducer_Close(t *testing.T) {
 
 	// Close should not panic
 	producer.Close()
+}
+
+func TestProtoProducer_PublishWithOrganization(t *testing.T) {
+	producer, err := NewProtoProducer(ProducerConfig{
+		BootstrapServers: "localhost:9092",
+		ClientID:         "test-producer",
+	})
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer producer.Close()
+
+	t.Run("empty topic returns error", func(t *testing.T) {
+		orgID := organization.MustNewOrganizationID("acme_bank")
+		ctx := organization.WithOrganization(context.Background(), orgID)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		err := producer.PublishWithOrganization(ctx, "", "test-key", timestamppb.Now())
+		if !errors.Is(err, ErrEmptyTopic) {
+			t.Errorf("PublishWithOrganization() error = %v, want ErrEmptyTopic", err)
+		}
+	})
+
+	t.Run("nil message returns error", func(t *testing.T) {
+		orgID := organization.MustNewOrganizationID("acme_bank")
+		ctx := organization.WithOrganization(context.Background(), orgID)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		err := producer.PublishWithOrganization(ctx, "test-topic", "test-key", nil)
+		if !errors.Is(err, ErrNilMessage) {
+			t.Errorf("PublishWithOrganization() error = %v, want ErrNilMessage", err)
+		}
+	})
+}
+
+func TestProtoProducer_PublishWithOrganization_MissingContext(t *testing.T) {
+	producer, err := NewProtoProducer(ProducerConfig{
+		BootstrapServers: "localhost:9092",
+		ClientID:         "test-producer",
+	})
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer producer.Close()
+
+	// Test that missing organization context causes panic (fail-fast)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("PublishWithOrganization did not panic for context without organization")
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// This should panic because organization context is missing
+	_ = producer.PublishWithOrganization(ctx, "test-topic", "test-key", timestamppb.Now())
 }
