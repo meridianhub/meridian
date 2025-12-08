@@ -41,6 +41,8 @@ type mockPositionKeepingClient struct {
 	updateResponses []*positionkeepingv1.UpdateFinancialPositionLogResponse
 	compensateCalls int
 	initiateCalls   int
+	failOnInitiate  bool
+	initiateError   error
 	retrieveCalls   int
 	bulkImportCalls int
 	listCalls       int
@@ -48,6 +50,12 @@ type mockPositionKeepingClient struct {
 
 func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
 	m.initiateCalls++
+	if m.failOnInitiate {
+		if m.initiateError != nil {
+			return nil, m.initiateError
+		}
+		return nil, errPositionKeepingUnavailable
+	}
 	return &positionkeepingv1.InitiateFinancialPositionLogResponse{
 		Log: &positionkeepingv1.FinancialPositionLog{
 			LogId: "POS-LOG-001",
@@ -65,23 +73,39 @@ func (m *mockPositionKeepingClient) UpdateFinancialPositionLog(_ context.Context
 		return nil, errPositionKeepingUnavailable
 	}
 
-	// Check if this is a compensation call (debit direction indicates reversal)
+	// Check if this is a compensation call (status update to CANCELLED indicates saga compensation)
+	if req.StatusUpdate != nil && req.StatusUpdate.CurrentStatus == commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED {
+		m.compensateCalls++
+	}
+
+	// Also count as compensation if debit direction (legacy behavior)
 	if req.NewEntry != nil && req.NewEntry.Direction == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT {
 		m.compensateCalls++
 	}
 
+	currentStatus := commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED
+	if req.StatusUpdate != nil {
+		currentStatus = req.StatusUpdate.CurrentStatus
+	}
+
 	resp := &positionkeepingv1.UpdateFinancialPositionLogResponse{
 		Log: &positionkeepingv1.FinancialPositionLog{
-			LogId:                 req.LogId,
-			AccountId:             req.NewEntry.AccountId,
-			TransactionLogEntries: []*positionkeepingv1.TransactionLogEntry{req.NewEntry},
+			LogId:     req.LogId,
+			AccountId: "ACC-001", // Default account ID for mock
 			StatusTracking: &positionkeepingv1.StatusTracking{
-				CurrentStatus:   commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				CurrentStatus:   currentStatus,
 				StatusUpdatedAt: timestamppb.Now(),
 			},
 			CreatedAt: timestamppb.Now(),
 			UpdatedAt: timestamppb.Now(),
+			Version:   req.Version + 1,
 		},
+	}
+
+	// Add transaction log entry if provided
+	if req.NewEntry != nil {
+		resp.Log.AccountId = req.NewEntry.AccountId
+		resp.Log.TransactionLogEntries = []*positionkeepingv1.TransactionLogEntry{req.NewEntry}
 	}
 
 	if len(m.updateResponses) > 0 {
@@ -303,7 +327,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	assert.Equal(t, int64(10050), updatedAccount.Balance.AmountCents(), "Balance should be £100.50 = 10050 cents")
 
 	// Verify service calls
-	assert.Equal(t, 1, mockPosKeeping.updateCalls, "PositionKeeping UpdateFinancialPositionLog should be called once")
+	assert.Equal(t, 1, mockPosKeeping.initiateCalls, "PositionKeeping InitiateFinancialPositionLog should be called once")
 	assert.Equal(t, 1, mockFinAcct.captureCalls, "FinancialAccounting CaptureLedgerPosting should be called once")
 
 	// Verify no compensation occurred
@@ -317,7 +341,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 // when the PositionKeeping service fails.
 //
 // Expected behavior:
-// 1. PositionKeeping UpdateFinancialPositionLog fails (step 1 fails)
+// 1. PositionKeeping InitiateFinancialPositionLog fails (step 1 fails)
 // 2. FinancialAccounting CaptureLedgerPosting is never called (step 2 not reached)
 // 3. Account save is never called (step 3 not reached)
 // 4. No compensation needed (no steps completed)
@@ -331,10 +355,10 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	account := createTestAccount(t, repo, "ACC-002")
 	originalBalance := account.Balance.AmountCents()
 
-	// Create mock clients - PositionKeeping configured to fail
+	// Create mock clients - PositionKeeping configured to fail on initiate
 	mockPosKeeping := &mockPositionKeepingClient{
-		failOnUpdate: true,
-		failureError: errPositionKeepingUnavailable,
+		failOnInitiate: true,
+		initiateError:  errPositionKeepingUnavailable,
 	}
 	mockFinAcct := &mockFinancialAccountingClient{}
 
@@ -371,7 +395,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 		"Account balance should remain unchanged when external services fail")
 
 	// Verify service calls
-	assert.Equal(t, 1, mockPosKeeping.updateCalls, "PositionKeeping should be called once (and fail)")
+	assert.Equal(t, 1, mockPosKeeping.initiateCalls, "PositionKeeping should be called once (and fail)")
 	assert.Equal(t, 0, mockFinAcct.captureCalls, "FinancialAccounting should never be called (step not reached)")
 
 	// Verify compensation was triggered (no compensation for position keeping since it didn't succeed)
@@ -384,11 +408,11 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 // when the FinancialAccounting service fails after PositionKeeping succeeds.
 //
 // Expected behavior:
-// 1. PositionKeeping UpdateFinancialPositionLog succeeds (step 1 succeeds)
+// 1. PositionKeeping InitiateFinancialPositionLog succeeds (step 1 succeeds)
 // 2. FinancialAccounting CaptureLedgerPosting fails (step 2 fails)
 // 3. Account save is never called (step 3 not reached)
 // 4. Saga triggers compensation in reverse order:
-//   - Compensate step 1: Create reversing position entry (debit)
+//   - Compensate step 1: Update position log status to CANCELLED
 //
 // 5. Transaction fails with appropriate error
 func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.T) {
@@ -439,8 +463,11 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 		"Account balance should remain unchanged when external services fail")
 
 	// Verify service calls
-	assert.Equal(t, 2, mockPosKeeping.updateCalls, "PositionKeeping should be called twice (action + compensation)")
-	assert.Equal(t, 1, mockPosKeeping.compensateCalls, "PositionKeeping compensation should create reversing entry")
+	// InitiateFinancialPositionLog called once for the action
+	// UpdateFinancialPositionLog called once for compensation (status update to CANCELLED)
+	assert.Equal(t, 1, mockPosKeeping.initiateCalls, "PositionKeeping InitiateFinancialPositionLog should be called once (action)")
+	assert.Equal(t, 1, mockPosKeeping.updateCalls, "PositionKeeping UpdateFinancialPositionLog should be called once (compensation)")
+	assert.Equal(t, 1, mockPosKeeping.compensateCalls, "PositionKeeping compensation should cancel position log")
 	assert.Equal(t, 1, mockFinAcct.captureCalls, "FinancialAccounting should be called once (and fail)")
 	assert.Equal(t, 0, mockFinAcct.compensateCalls, "No ledger compensation (it never succeeded)")
 }
