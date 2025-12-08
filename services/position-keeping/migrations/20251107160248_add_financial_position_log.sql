@@ -1,4 +1,4 @@
--- Note: This migration assumes current_account schema already exists (created by current_account migrations)
+-- Position-keeping schema is independent per BIAN domain (ADR-002) - no cross-schema dependencies
 -- Add new schema named "position_keeping"
 CREATE SCHEMA IF NOT EXISTS "position_keeping";
 -- Create "financial_position_logs" table
