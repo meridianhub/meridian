@@ -121,14 +121,13 @@ func (r *Repository) UpdateStatus(ctx context.Context, id organization.Organizat
 
 	if result.RowsAffected == 0 {
 		// Check if organization exists
-		var exists bool
+		var count int64
 		r.db.WithContext(ctx).
 			Model(&OrganizationEntity{}).
-			Select("1").
 			Where("id = ?", id.String()).
-			Take(&exists)
+			Count(&count)
 
-		if !exists {
+		if count == 0 {
 			return nil, ErrOrganizationNotFound
 		}
 		return nil, ErrVersionConflict

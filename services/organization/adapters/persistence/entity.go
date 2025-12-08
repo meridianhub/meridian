@@ -21,7 +21,7 @@ type OrganizationEntity struct {
 	Status          string     `gorm:"column:status;not null;default:active"`
 	CreatedAt       time.Time  `gorm:"column:created_at;not null;autoCreateTime;index:idx_organizations_created_at,sort:desc"`
 	DeprovisionedAt *time.Time `gorm:"column:deprovisioned_at"`
-	Metadata        JSONMap    `gorm:"column:metadata;type:text;default:'{}'"`
+	Metadata        JSONMap    `gorm:"column:metadata;type:jsonb;default:'{}'"`
 	Version         int        `gorm:"column:version;not null;default:1"`
 }
 
@@ -36,7 +36,7 @@ type JSONMap map[string]interface{}
 // Value implements the driver.Valuer interface for GORM.
 func (j JSONMap) Value() (driver.Value, error) {
 	if j == nil {
-		return "{}", nil
+		return []byte("{}"), nil
 	}
 	return json.Marshal(j)
 }
