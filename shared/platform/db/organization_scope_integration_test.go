@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/organization"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,19 +42,21 @@ func setupOrgScopeTestContainer(ctx context.Context, t *testing.T) (*PostgresPoo
 	require.NoError(t, err, "failed to create postgres pool")
 
 	// Create organization schemas with identical table structure
+	// Use pq.QuoteIdentifier for consistency with production code philosophy
 	schemas := []string{"org_test_a", "org_test_b"}
 	for _, schema := range schemas {
-		_, err = pool.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+schema)
+		quotedSchema := pq.QuoteIdentifier(schema)
+		_, err = pool.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quotedSchema))
 		require.NoError(t, err, "failed to create schema %s", schema)
 
-		_, err = pool.ExecContext(ctx, `
-			CREATE TABLE IF NOT EXISTS `+schema+`.accounts (
+		_, err = pool.ExecContext(ctx, fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s.accounts (
 				id SERIAL PRIMARY KEY,
 				account_id VARCHAR(50) UNIQUE NOT NULL,
 				name VARCHAR(100) NOT NULL,
 				balance DECIMAL(15,2) NOT NULL DEFAULT 0.00
 			)
-		`)
+		`, quotedSchema))
 		require.NoError(t, err, "failed to create accounts table in schema %s", schema)
 	}
 
