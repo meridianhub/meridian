@@ -608,3 +608,59 @@ func TestParty_CreatedAtDoesNotChange(t *testing.T) {
 	// CreatedAt should remain unchanged
 	assert.Equal(t, originalCreatedAt, party.CreatedAt())
 }
+
+func TestParty_VersionIncrementsOnMutation(t *testing.T) {
+	party, err := NewParty(PartyTypePerson, "Test Person")
+	require.NoError(t, err)
+
+	// Initial version should be 1
+	assert.Equal(t, int64(1), party.Version())
+
+	// SetDisplayName should increment version
+	err = party.SetDisplayName("New Name")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), party.Version())
+
+	// Restrict should increment version
+	err = party.Restrict()
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), party.Version())
+
+	// Activate should increment version
+	err = party.Activate()
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), party.Version())
+
+	// Terminate should increment version
+	err = party.Terminate()
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), party.Version())
+}
+
+func TestParty_VersionIncrementsOnSetExternalReference(t *testing.T) {
+	party, err := NewParty(PartyTypeOrganization, "Test Corp")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1), party.Version())
+
+	err = party.SetExternalReference("12345678", ExternalReferenceTypeCompaniesHouse)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), party.Version())
+}
+
+func TestParty_VersionDoesNotIncrementOnFailedMutation(t *testing.T) {
+	party, err := NewParty(PartyTypePerson, "Test Person")
+	require.NoError(t, err)
+
+	// Terminate the party
+	err = party.Terminate()
+	require.NoError(t, err)
+	versionAfterTerminate := party.Version()
+
+	// Attempting to activate a terminated party should fail
+	err = party.Activate()
+	assert.Error(t, err)
+
+	// Version should not have changed
+	assert.Equal(t, versionAfterTerminate, party.Version())
+}

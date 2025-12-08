@@ -60,7 +60,13 @@ const (
 	ExternalReferenceTypeTaxID          ExternalReferenceType = "TAX_ID"
 )
 
-// Party represents a BIAN Party Reference Data Directory domain model
+// Party represents a BIAN Party Reference Data Directory domain model.
+//
+// The Version field implements optimistic concurrency control to prevent lost updates
+// in concurrent scenarios. The persistence layer should use this field in UPDATE
+// statements (e.g., WHERE party_id = ? AND version = ?) to detect conflicts.
+// Version is incremented on all state-modifying operations (status transitions,
+// setting display name, and setting external references).
 type Party struct {
 	id                    uuid.UUID
 	partyType             PartyType
@@ -182,6 +188,7 @@ func (p *Party) SetDisplayName(displayName string) error {
 
 	p.displayName = displayName
 	p.updatedAt = time.Now()
+	p.version++
 	return nil
 }
 
@@ -198,6 +205,7 @@ func (p *Party) SetExternalReference(reference string, refType ExternalReference
 	p.externalReference = reference
 	p.externalReferenceType = refType
 	p.updatedAt = time.Now()
+	p.version++
 	return nil
 }
 
@@ -209,6 +217,7 @@ func (p *Party) Restrict() error {
 
 	p.status = PartyStatusRestricted
 	p.updatedAt = time.Now()
+	p.version++
 	return nil
 }
 
@@ -217,6 +226,7 @@ func (p *Party) Terminate() error {
 	// Termination is allowed from any state
 	p.status = PartyStatusTerminated
 	p.updatedAt = time.Now()
+	p.version++
 	return nil
 }
 
@@ -229,6 +239,7 @@ func (p *Party) Activate() error {
 
 	p.status = PartyStatusActive
 	p.updatedAt = time.Now()
+	p.version++
 	return nil
 }
 
