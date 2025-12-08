@@ -200,17 +200,10 @@ func applyMigrations(ctx context.Context, t *testing.T, db *sql.DB) {
 func testLienEntity(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
-	// First create a customer (accounts have FK to customers)
-	customerID := uuid.New()
-	customerSQL := `
-		INSERT INTO current_account.customers
-		(id, customer_number, first_name, last_name, email, status, created_by, updated_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
-	err := db.Exec(customerSQL, customerID, "CUST-LIEN-001", "Lien", "Test", "lien@example.com", "active", "system", "system").Error
-	require.NoError(t, err, "Failed to create test customer for lien test")
-
-	// Then create an account (liens have FK to accounts)
+	// Create an account (liens have FK to accounts)
+	// Note: customer_id is now a reference to Party Service (no FK constraint)
 	accountID := uuid.New()
+	partyID := uuid.New() // References a party in Party Service (no local FK)
 	account := &capersistence.CurrentAccountEntity{
 		ID:                    accountID,
 		AccountID:             "ACC-LIEN-001",
@@ -218,7 +211,7 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		AccountType:           "current",
 		Currency:              "GBP",
 		Status:                "active",
-		CustomerID:            customerID,
+		CustomerID:            partyID,
 		Balance:               50000,
 		AvailableBalance:      40000,
 		OverdraftLimit:        5000,
@@ -227,7 +220,7 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		CreatedBy:             "system",
 		UpdatedBy:             "system",
 	}
-	err = db.Create(account).Error
+	err := db.Create(account).Error
 	require.NoError(t, err, "Failed to create test account for lien test")
 
 	// Now create a lien
@@ -350,14 +343,9 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
-	// First create a customer (accounts have FK to customers)
-	customerID := uuid.New()
-	customerSQL := `
-		INSERT INTO current_account.customers
-		(id, customer_number, first_name, last_name, email, status, created_by, updated_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
-	err := db.Exec(customerSQL, customerID, "CUST-TEST-001", "Test", "User", "test@example.com", "active", "system", "system").Error
-	require.NoError(t, err, "Failed to create test customer")
+	// Note: customer_id is now a reference to Party Service (no local FK constraint)
+	// The customers table has been removed - party data is managed by Party Service
+	partyID := uuid.New() // References a party in Party Service
 
 	// Entity fields must match migration schema columns exactly
 	entity := &capersistence.CurrentAccountEntity{
@@ -367,7 +355,7 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 		AccountType:           "current",
 		Currency:              "GBP",
 		Status:                "active",
-		CustomerID:            customerID,
+		CustomerID:            partyID,
 		Balance:               10000,
 		AvailableBalance:      8000,
 		OverdraftLimit:        5000,
@@ -378,7 +366,7 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 	}
 
 	// Create - will fail if columns don't match
-	err = db.Create(entity).Error
+	err := db.Create(entity).Error
 	if err != nil {
 		t.Fatalf("Failed to create CurrentAccountEntity - schema mismatch detected: %v", err)
 	}
