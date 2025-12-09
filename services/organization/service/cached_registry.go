@@ -16,11 +16,11 @@ import (
 // The cache is refreshed periodically in the background.
 type CachedRegistry struct {
 	repo            *persistence.Repository
-	cache           sync.Map // organization.OrganizationID -> *domain.Organization
 	refreshInterval time.Duration
 	logger          *slog.Logger
 
 	mu          sync.RWMutex
+	cache       map[organization.OrganizationID]*domain.Organization
 	lastRefresh time.Time
 	refreshErr  error
 }
@@ -50,6 +50,7 @@ func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig
 
 	return &CachedRegistry{
 		repo:            repo,
+		cache:           make(map[organization.OrganizationID]*domain.Organization),
 		refreshInterval: config.RefreshInterval,
 		logger:          config.Logger,
 	}
@@ -85,11 +86,12 @@ func (r *CachedRegistry) Start(ctx context.Context) {
 // Uses the cache for fast lookups, falls back to database if cache miss.
 func (r *CachedRegistry) IsActive(ctx context.Context, id organization.OrganizationID) (bool, error) {
 	// Try cache first
-	if cached, ok := r.cache.Load(id); ok {
-		org, valid := cached.(*domain.Organization)
-		if valid {
-			return org.Status == domain.StatusActive, nil
-		}
+	r.mu.RLock()
+	org, ok := r.cache[id]
+	r.mu.RUnlock()
+
+	if ok {
+		return org.Status == domain.StatusActive, nil
 	}
 
 	// Cache miss - check database directly
@@ -105,13 +107,9 @@ func (r *CachedRegistry) IsActive(ctx context.Context, id organization.Organizat
 // GetOrganization retrieves an organization from the cache.
 // Returns nil if not found in cache (caller should query database if needed).
 func (r *CachedRegistry) GetOrganization(id organization.OrganizationID) *domain.Organization {
-	if cached, ok := r.cache.Load(id); ok {
-		org, valid := cached.(*domain.Organization)
-		if valid {
-			return org
-		}
-	}
-	return nil
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.cache[id]
 }
 
 // refresh reloads all organizations from the database into the cache.
@@ -125,33 +123,22 @@ func (r *CachedRegistry) refresh(ctx context.Context) error {
 		return err
 	}
 
-	// Clear and reload cache
-	// Using a new map and swapping would be cleaner but sync.Map doesn't support that
-	// Instead, we track what we've seen and delete anything not in the new list
-	seen := make(map[organization.OrganizationID]bool)
-
+	// Build new cache map atomically
+	newCache := make(map[organization.OrganizationID]*domain.Organization, len(orgs))
 	for _, org := range orgs {
-		r.cache.Store(org.ID, org)
-		seen[org.ID] = true
+		newCache[org.ID] = org
 	}
 
-	// Remove organizations that no longer exist
-	r.cache.Range(func(key, _ interface{}) bool {
-		id, ok := key.(organization.OrganizationID)
-		if ok && !seen[id] {
-			r.cache.Delete(id)
-		}
-		return true
-	})
-
 	r.mu.Lock()
+	r.cache = newCache
 	r.lastRefresh = time.Now()
 	r.refreshErr = nil
+	refreshTime := r.lastRefresh
 	r.mu.Unlock()
 
 	r.logger.Debug("organization cache refreshed",
 		"count", len(orgs),
-		"timestamp", r.lastRefresh)
+		"timestamp", refreshTime)
 
 	return nil
 }
@@ -172,10 +159,7 @@ func (r *CachedRegistry) LastRefreshError() error {
 
 // Count returns the number of organizations in the cache.
 func (r *CachedRegistry) Count() int {
-	count := 0
-	r.cache.Range(func(_, _ interface{}) bool {
-		count++
-		return true
-	})
-	return count
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.cache)
 }

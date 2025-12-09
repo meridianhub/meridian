@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strconv"
 	"testing"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/organization/v1"
@@ -282,8 +283,8 @@ func TestService_ListOrganizations(t *testing.T) {
 	// Create 5 organizations
 	for i := 0; i < 5; i++ {
 		req := &pb.InitiateOrganizationRequest{
-			OrganizationId:  "list_org_" + string(rune('a'+i)),
-			DisplayName:     "List Org " + string(rune('A'+i)),
+			OrganizationId:  "list_org_" + strconv.Itoa(i),
+			DisplayName:     "List Org " + strconv.Itoa(i),
 			SettlementAsset: "GBP",
 		}
 		_, err := svc.InitiateOrganization(ctx, req)
@@ -308,8 +309,8 @@ func TestService_ListOrganizations_WithStatusFilter(t *testing.T) {
 	// Create 3 active organizations
 	for i := 0; i < 3; i++ {
 		req := &pb.InitiateOrganizationRequest{
-			OrganizationId:  "active_" + string(rune('a'+i)),
-			DisplayName:     "Active " + string(rune('A'+i)),
+			OrganizationId:  "active_" + strconv.Itoa(i),
+			DisplayName:     "Active " + strconv.Itoa(i),
 			SettlementAsset: "GBP",
 		}
 		_, err := svc.InitiateOrganization(ctx, req)
@@ -319,7 +320,7 @@ func TestService_ListOrganizations_WithStatusFilter(t *testing.T) {
 	// Suspend 2 of them
 	for i := 0; i < 2; i++ {
 		updateReq := &pb.UpdateOrganizationStatusRequest{
-			OrganizationId: "active_" + string(rune('a'+i)),
+			OrganizationId: "active_" + strconv.Itoa(i),
 			Status:         pb.OrganizationStatus_ORGANIZATION_STATUS_SUSPENDED,
 		}
 		_, err := svc.UpdateOrganizationStatus(ctx, updateReq)
@@ -346,8 +347,8 @@ func TestService_ListOrganizations_Pagination(t *testing.T) {
 	// Create 10 organizations
 	for i := 0; i < 10; i++ {
 		req := &pb.InitiateOrganizationRequest{
-			OrganizationId:  "page_org_" + string(rune('a'+i)),
-			DisplayName:     "Page Org " + string(rune('A'+i)),
+			OrganizationId:  "page_org_" + strconv.Itoa(i),
+			DisplayName:     "Page Org " + strconv.Itoa(i),
 			SettlementAsset: "GBP",
 		}
 		_, err := svc.InitiateOrganization(ctx, req)

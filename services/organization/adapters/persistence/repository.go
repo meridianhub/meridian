@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/organization/domain"
 	"github.com/meridianhub/meridian/shared/platform/organization"
 	"gorm.io/gorm"
@@ -263,9 +264,21 @@ func isDuplicateKeyError(err error) bool {
 	if err == nil {
 		return false
 	}
+
+	// Check for GORM's duplicate key error
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	// Check for PostgreSQL-specific unique constraint violation (code 23505)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return true
+	}
+
+	// Fallback to string matching for other drivers or wrapped errors
 	errStr := err.Error()
-	return errors.Is(err, gorm.ErrDuplicatedKey) ||
-		strings.Contains(errStr, "23505") ||
+	return strings.Contains(errStr, "23505") ||
 		strings.Contains(errStr, "duplicate key") ||
 		strings.Contains(errStr, "unique constraint")
 }
