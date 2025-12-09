@@ -282,8 +282,8 @@ message Lien {
 
 // Request to initiate a new current account
 message InitiateCurrentAccountRequest {
-  // customer_id is the customer who owns this account
-  string customer_id = 1 [(buf.validate.field).string = {
+  // party_id references the Party Service for account ownership
+  string party_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
   }];

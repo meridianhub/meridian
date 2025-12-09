@@ -41,7 +41,7 @@ func TestInitiateCurrentAccount(t *testing.T) {
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
-		CustomerId:            uuid.New().String(),
+		PartyId:               uuid.New().String(),
 		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
 	}
 
@@ -336,7 +336,7 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
-		CustomerId:            uuid.New().String(),
+		PartyId:               uuid.New().String(),
 		BaseCurrency:          commonpb.Currency_CURRENCY_JPY,
 	}
 
