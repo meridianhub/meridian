@@ -56,7 +56,9 @@ func WithGormOrganizationScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, erro
 	// pq.QuoteIdentifier handles special characters safely
 	schemaName := pq.QuoteIdentifier(orgID.SchemaName())
 
-	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback
+	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback.
+	// fmt.Sprintf is safe here because schemaName is already quoted by pq.QuoteIdentifier above,
+	// which properly escapes any special characters including quotes and null bytes.
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
 	if err := tx.Exec(query).Error; err != nil {
 		slog.ErrorContext(ctx, "organization scope: failed to set search_path",
