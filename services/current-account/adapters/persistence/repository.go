@@ -42,6 +42,26 @@ func (r *Repository) DB() *gorm.DB {
 
 // WithTx returns a new Repository that uses the provided transaction.
 // This enables multiple repository operations within a single transaction.
+//
+// IMPORTANT: In multi-org mode, the repository methods (FindByIDForUpdate,
+// FindByUUIDForUpdate, etc.) will automatically set the organization scope
+// on the transaction. However, for optimal performance and correct behavior,
+// consider setting the org scope once at the start of your transaction using
+// db.WithGormOrganizationScope() rather than relying on per-operation scoping.
+//
+// Example:
+//
+//	err := repo.DB().Transaction(func(tx *gorm.DB) error {
+//	    // Set org scope once for the entire transaction
+//	    tx, err := db.WithGormOrganizationScope(ctx, tx)
+//	    if err != nil {
+//	        return err
+//	    }
+//	    txRepo := repo.WithTx(tx)
+//	    // All operations now use the scoped transaction
+//	    account, err := txRepo.FindByIDForUpdate(ctx, accountID)
+//	    // ...
+//	})
 func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
@@ -81,8 +101,11 @@ func (r *Repository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.
 // isInTransaction checks if the repository's db connection is already within a transaction.
 // This is used to avoid creating nested transactions when the caller has already established one.
 func (r *Repository) isInTransaction() bool {
+	// Guard against uninitialized Statement (can happen if no query has been executed yet)
+	if r.db.Statement == nil || r.db.Statement.ConnPool == nil {
+		return false
+	}
 	// GORM sets ConnPool to a transaction object when in transaction mode.
-	// We check if the underlying database is a transaction by attempting to get the DB.
 	// In a transaction, Statement.ConnPool will be of type *sql.Tx (or GORM's tx wrapper).
 	committer, ok := r.db.Statement.ConnPool.(gorm.TxCommitter)
 	return ok && committer != nil

@@ -2,12 +2,22 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"log/slog"
 
 	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/organization"
 	"gorm.io/gorm"
 )
+
+// hashOrgID creates a short, privacy-preserving hash of the org ID for logging.
+// This allows correlation in logs without exposing the actual org ID.
+func hashOrgID(orgID organization.OrganizationID) string {
+	h := sha256.Sum256([]byte(orgID))
+	return hex.EncodeToString(h[:8]) // First 8 bytes = 16 hex chars
+}
 
 // WithGormOrganizationScope sets the PostgreSQL search_path for multi-tenant isolation using GORM.
 // This must be called at the start of a transaction to ensure the search_path is transaction-scoped.
@@ -38,6 +48,7 @@ import (
 func WithGormOrganizationScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
 	orgID, ok := organization.FromContext(ctx)
 	if !ok {
+		slog.DebugContext(ctx, "organization scope: missing org context, returning error")
 		return nil, organization.ErrMissingOrganizationContext
 	}
 
@@ -48,9 +59,14 @@ func WithGormOrganizationScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, erro
 	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
 	if err := tx.Exec(query).Error; err != nil {
+		slog.ErrorContext(ctx, "organization scope: failed to set search_path",
+			"org_hash", hashOrgID(orgID),
+			"error", err)
 		return nil, fmt.Errorf("failed to set organization schema scope: %w", err)
 	}
 
+	slog.DebugContext(ctx, "organization scope: search_path set successfully",
+		"org_hash", hashOrgID(orgID))
 	return tx, nil
 }
 

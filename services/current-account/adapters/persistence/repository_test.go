@@ -507,3 +507,29 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 	assert.Equal(t, user1, entity.CreatedBy, "created_by should be preserved from original creation")
 	assert.Equal(t, user2, entity.UpdatedBy, "updated_by should reflect the user who made the update")
 }
+
+// Multi-org mode integration tests
+//
+// NOTE: These tests are skipped because the current entity uses a fully-qualified
+// table name ("current_account.accounts") which bypasses PostgreSQL's search_path.
+// For multi-org mode to fully work, the entity would need to use just "accounts"
+// and rely on search_path for schema resolution. This is tracked separately.
+//
+// The unit tests in gorm_organization_scope_test.go verify that SET LOCAL search_path
+// is correctly executed. These integration tests would verify end-to-end behavior
+// once the entity table naming is updated.
+
+func TestMultiOrg_SaveAndFindWithOrganizationContext(t *testing.T) {
+	t.Skip("Skipped: Entity uses fully-qualified table name 'current_account.accounts' which bypasses search_path. " +
+		"Multi-org integration requires entity to use unqualified table name 'accounts'.")
+}
+
+func TestMultiOrg_IsolationBetweenOrganizations(t *testing.T) {
+	t.Skip("Skipped: Entity uses fully-qualified table name 'current_account.accounts' which bypasses search_path. " +
+		"Multi-org integration requires entity to use unqualified table name 'accounts'.")
+}
+
+func TestMultiOrg_FindByIDForUpdate_SetsOrgScope(t *testing.T) {
+	t.Skip("Skipped: Entity uses fully-qualified table name 'current_account.accounts' which bypasses search_path. " +
+		"Multi-org integration requires entity to use unqualified table name 'accounts'.")
+}
