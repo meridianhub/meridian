@@ -86,6 +86,74 @@ func TestMustWithGormOrganizationScope_MissingContext_Panics(t *testing.T) {
 	})
 }
 
+func TestWithGormOrganizationTransaction_SetsSearchPathAndExecutes(t *testing.T) {
+	// Create mock database
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// Create GORM instance with mock
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Setup context with organization
+	orgID := organization.OrganizationID("acme_bank")
+	ctx := organization.WithOrganization(context.Background(), orgID)
+
+	// Expect transaction begin, SET LOCAL, and commit
+	mock.ExpectBegin()
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	// Execute
+	executed := false
+	err = WithGormOrganizationTransaction(ctx, gormDB, func(_ *gorm.DB) error {
+		executed = true
+		return nil
+	})
+
+	// Assert
+	require.NoError(t, err)
+	assert.True(t, executed, "transaction function should have been executed")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestWithGormOrganizationTransaction_MissingContext_ReturnsError(t *testing.T) {
+	// Create mock database
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// Create GORM instance with mock
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Context without organization
+	ctx := context.Background()
+
+	// Expect transaction begin and rollback (due to error)
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	// Execute
+	executed := false
+	err = WithGormOrganizationTransaction(ctx, gormDB, func(_ *gorm.DB) error {
+		executed = true
+		return nil
+	})
+
+	// Assert
+	require.Error(t, err)
+	assert.False(t, executed, "transaction function should not have been executed")
+	assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestWithGormOrganizationScope_SpecialCharacters_QuotedProperly(t *testing.T) {
 	testCases := []struct {
 		name           string

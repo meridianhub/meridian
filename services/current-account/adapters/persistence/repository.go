@@ -65,6 +65,25 @@ func (r *Repository) withOrganizationScope(ctx context.Context, tx *gorm.DB) (*g
 	return tx, nil
 }
 
+// withOptionalOrgScope executes the given function with optional organization scoping.
+// In single-tenant mode (no org context), it runs the function directly without a transaction.
+// In multi-org mode, it wraps the function in a transaction and sets the search_path.
+// This helper reduces code duplication across repository methods.
+func (r *Repository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if !r.hasOrganizationContext(ctx) {
+		// Single-tenant mode: run directly without transaction overhead
+		return fn(r.db.WithContext(ctx))
+	}
+	// Multi-org mode: wrap in transaction for search_path scoping
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		tx, err := r.withOrganizationScope(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to set organization schema scope: %w", err)
+		}
+		return fn(tx)
+	})
+}
+
 // Save creates or updates an account with optimistic locking.
 // The context is used to extract audit information (user ID) for the created_by/updated_by fields.
 // In multi-org mode, the context must contain the organization ID for schema routing.
@@ -147,29 +166,8 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 // FindByID retrieves an account by its account identification (IBAN).
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
-	// Single-tenant mode: skip transaction overhead for simple reads
-	if !r.hasOrganizationContext(ctx) {
-		var entity CurrentAccountEntity
-		result := r.db.WithContext(ctx).Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
-
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrAccountNotFound
-		}
-		if result.Error != nil {
-			return nil, result.Error
-		}
-		return toDomain(&entity)
-	}
-
-	// Multi-org mode: use transaction for search_path scoping
 	var account *domain.CurrentAccount
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		tx, err = r.withOrganizationScope(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
-		}
-
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
 
@@ -180,6 +178,7 @@ func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.Cu
 			return result.Error
 		}
 
+		var err error
 		account, err = toDomain(&entity)
 		return err
 	})
@@ -228,29 +227,8 @@ func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*
 // FindByIBAN retrieves an account by its IBAN (stored in account_identification column).
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.CurrentAccount, error) {
-	// Single-tenant mode: skip transaction overhead for simple reads
-	if !r.hasOrganizationContext(ctx) {
-		var entity CurrentAccountEntity
-		result := r.db.WithContext(ctx).Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
-
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrAccountNotFound
-		}
-		if result.Error != nil {
-			return nil, result.Error
-		}
-		return toDomain(&entity)
-	}
-
-	// Multi-org mode: use transaction for search_path scoping
 	var account *domain.CurrentAccount
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		tx, err = r.withOrganizationScope(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
-		}
-
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
 
@@ -261,6 +239,7 @@ func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.Curre
 			return result.Error
 		}
 
+		var err error
 		account, err = toDomain(&entity)
 		return err
 	})
@@ -273,29 +252,8 @@ func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.Curre
 // FindByUUID retrieves an account by its internal UUID.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
-	// Single-tenant mode: skip transaction overhead for simple reads
-	if !r.hasOrganizationContext(ctx) {
-		var entity CurrentAccountEntity
-		result := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).First(&entity)
-
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrAccountNotFound
-		}
-		if result.Error != nil {
-			return nil, result.Error
-		}
-		return toDomain(&entity)
-	}
-
-	// Multi-org mode: use transaction for search_path scoping
 	var account *domain.CurrentAccount
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		tx, err = r.withOrganizationScope(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
-		}
-
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("id = ? AND deleted_at IS NULL", id).First(&entity)
 
@@ -306,6 +264,7 @@ func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.Curr
 			return result.Error
 		}
 
+		var err error
 		account, err = toDomain(&entity)
 		return err
 	})
@@ -354,35 +313,8 @@ func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*do
 // FindByCustomerID retrieves all accounts for a customer.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByCustomerID(ctx context.Context, customerID string) ([]*domain.CurrentAccount, error) {
-	// Single-tenant mode: skip transaction overhead for simple reads
-	if !r.hasOrganizationContext(ctx) {
-		var entities []CurrentAccountEntity
-		result := r.db.WithContext(ctx).Where("customer_id = ? AND deleted_at IS NULL", customerID).Find(&entities)
-
-		if result.Error != nil {
-			return nil, result.Error
-		}
-
-		accounts := make([]*domain.CurrentAccount, 0, len(entities))
-		for _, entity := range entities {
-			account, err := toDomain(&entity)
-			if err != nil {
-				return nil, err
-			}
-			accounts = append(accounts, account)
-		}
-		return accounts, nil
-	}
-
-	// Multi-org mode: use transaction for search_path scoping
 	var accounts []*domain.CurrentAccount
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		tx, err = r.withOrganizationScope(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
-		}
-
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
 		var entities []CurrentAccountEntity
 		result := tx.Where("customer_id = ? AND deleted_at IS NULL", customerID).Find(&entities)
 
@@ -398,7 +330,6 @@ func (r *Repository) FindByCustomerID(ctx context.Context, customerID string) ([
 			}
 			accounts = append(accounts, account)
 		}
-
 		return nil
 	})
 	if err != nil {
@@ -410,21 +341,7 @@ func (r *Repository) FindByCustomerID(ctx context.Context, customerID string) ([
 // Delete soft deletes an account.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) Delete(ctx context.Context, accountID string) error {
-	// Single-tenant mode: skip transaction overhead
-	if !r.hasOrganizationContext(ctx) {
-		return r.db.WithContext(ctx).Model(&CurrentAccountEntity{}).
-			Where("account_identification = ?", accountID).
-			Update("deleted_at", time.Now()).Error
-	}
-
-	// Multi-org mode: use transaction for search_path scoping
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		tx, err = r.withOrganizationScope(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
-		}
-
+	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
 		return tx.Model(&CurrentAccountEntity{}).
 			Where("account_identification = ?", accountID).
 			Update("deleted_at", time.Now()).Error
