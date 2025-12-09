@@ -17,6 +17,7 @@ import (
 type CachedRegistry struct {
 	repo            *persistence.Repository
 	refreshInterval time.Duration
+	refreshTimeout  time.Duration
 	logger          *slog.Logger
 
 	mu          sync.RWMutex
@@ -28,6 +29,7 @@ type CachedRegistry struct {
 // CachedRegistryConfig holds configuration for the cached registry.
 type CachedRegistryConfig struct {
 	RefreshInterval time.Duration
+	RefreshTimeout  time.Duration
 	Logger          *slog.Logger
 }
 
@@ -35,6 +37,7 @@ type CachedRegistryConfig struct {
 func DefaultCachedRegistryConfig() CachedRegistryConfig {
 	return CachedRegistryConfig{
 		RefreshInterval: 60 * time.Second,
+		RefreshTimeout:  30 * time.Second,
 		Logger:          slog.Default(),
 	}
 }
@@ -44,6 +47,9 @@ func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig
 	if config.RefreshInterval <= 0 {
 		config.RefreshInterval = 60 * time.Second
 	}
+	if config.RefreshTimeout <= 0 {
+		config.RefreshTimeout = 30 * time.Second
+	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
@@ -52,6 +58,7 @@ func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig
 		repo:            repo,
 		cache:           make(map[organization.OrganizationID]*domain.Organization),
 		refreshInterval: config.RefreshInterval,
+		refreshTimeout:  config.RefreshTimeout,
 		logger:          config.Logger,
 	}
 }
@@ -114,8 +121,12 @@ func (r *CachedRegistry) GetOrganization(id organization.OrganizationID) *domain
 
 // refresh reloads all organizations from the database into the cache.
 // Uses fail-open strategy: if refresh fails, continue using stale cache.
+// Uses a per-refresh timeout to prevent slow queries from blocking the refresh loop.
 func (r *CachedRegistry) refresh(ctx context.Context) error {
-	orgs, err := r.repo.GetAll(ctx)
+	refreshCtx, cancel := context.WithTimeout(ctx, r.refreshTimeout)
+	defer cancel()
+
+	orgs, err := r.repo.GetAll(refreshCtx)
 	if err != nil {
 		r.mu.Lock()
 		r.refreshErr = err
