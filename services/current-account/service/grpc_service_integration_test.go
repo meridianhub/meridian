@@ -253,11 +253,12 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, func()) {
 
 func createTestAccount(t *testing.T, repo *persistence.Repository, accountID string) *domain.CurrentAccount {
 	t.Helper()
+	ctx := context.Background()
 	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
 	account, err := domain.NewCurrentAccount(accountID, accountID, uuid.New().String(), "GBP")
 	require.NoError(t, err, "Failed to create test account")
-	require.NoError(t, repo.Save(context.Background(), account), "Failed to save test account")
+	require.NoError(t, repo.Save(ctx, account), "Failed to save test account")
 	return account
 }
 
@@ -322,7 +323,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	assert.Equal(t, int32(500000000), resp.NewBalance.Amount.Nanos)
 
 	// Verify account persisted correctly
-	updatedAccount, err := repo.FindByID("ACC-001")
+	updatedAccount, err := repo.FindByID(context.Background(), "ACC-001")
 	require.NoError(t, err)
 	assert.Equal(t, int64(10050), updatedAccount.Balance.AmountCents(), "Balance should be £100.50 = 10050 cents")
 
@@ -388,7 +389,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	// Verify account state after failure
 	// With the fixed saga ordering, the account is never saved if external services fail,
 	// so the balance should remain unchanged
-	updatedAccount, err := repo.FindByID("ACC-002")
+	updatedAccount, err := repo.FindByID(context.Background(), "ACC-002")
 	require.NoError(t, err)
 	// Account balance should be unchanged because save_account is the final step
 	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
@@ -457,7 +458,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 	// Verify account state after failure
 	// With the fixed saga ordering, the account is never saved if external services fail,
 	// so the balance should remain unchanged
-	updatedAccount, err := repo.FindByID("ACC-003")
+	updatedAccount, err := repo.FindByID(context.Background(), "ACC-003")
 	require.NoError(t, err)
 	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
 		"Account balance should remain unchanged when external services fail")
@@ -666,7 +667,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 
 	// Verify account state after failure
 	// With the fixed saga ordering, the account is never saved if external services fail
-	updatedAccount, err := repo.FindByID("ACC-004")
+	updatedAccount, err := repo.FindByID(context.Background(), "ACC-004")
 	require.NoError(t, err)
 	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
 		"Account balance should remain unchanged when external services fail")
@@ -743,7 +744,7 @@ func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
 	assert.Equal(t, int64(200), resp.NewBalance.Amount.Units)
 
 	// Verify account persisted
-	updatedAccount, err := repo.FindByID("ACC-006")
+	updatedAccount, err := repo.FindByID(context.Background(), "ACC-006")
 	require.NoError(t, err)
 	assert.Equal(t, int64(20000), updatedAccount.Balance.AmountCents())
 }

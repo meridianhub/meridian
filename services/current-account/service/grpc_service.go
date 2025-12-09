@@ -229,8 +229,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		caobservability.RecordOperationDuration("execute_deposit", operationStatus, time.Since(start))
 	}()
 
-	// Retrieve account
-	account, err := s.repo.FindByID(req.AccountId)
+	// Retrieve account (context carries organization for multi-tenant routing)
+	account, err := s.repo.FindByID(ctx, req.AccountId)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
 			operationStatus = "account_not_found"
@@ -620,14 +620,15 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 }
 
 // RetrieveCurrentAccount gets current account details
-func (s *Service) RetrieveCurrentAccount(_ context.Context, req *pb.RetrieveCurrentAccountRequest) (*pb.RetrieveCurrentAccountResponse, error) {
+func (s *Service) RetrieveCurrentAccount(ctx context.Context, req *pb.RetrieveCurrentAccountRequest) (*pb.RetrieveCurrentAccountResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
 		caobservability.RecordOperationDuration("retrieve_account", operationStatus, time.Since(start))
 	}()
 
-	account, err := s.repo.FindByID(req.AccountId)
+	// Context carries organization for multi-tenant routing
+	account, err := s.repo.FindByID(ctx, req.AccountId)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
 			operationStatus = "account_not_found"

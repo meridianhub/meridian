@@ -1,0 +1,363 @@
+package db
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+// Test error sentinels for simulating database failures.
+var (
+	errDatabaseConnectionLost = errors.New("database connection lost")
+	errSchemaDoesNotExist     = errors.New("schema does not exist")
+)
+
+func TestWithGormOrganizationScope_SetsSearchPath(t *testing.T) {
+	// Create mock database
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// Create GORM instance with mock
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Setup context with organization
+	orgID := organization.OrganizationID("acme_bank")
+	ctx := organization.WithOrganization(context.Background(), orgID)
+
+	// Expect the SET LOCAL query
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	// Execute
+	result, err := WithGormOrganizationScope(ctx, gormDB)
+
+	// Assert
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestWithGormOrganizationScope_MissingContext_ReturnsError(t *testing.T) {
+	// Create mock database
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// Create GORM instance with mock
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Context without organization
+	ctx := context.Background()
+
+	// Execute
+	result, err := WithGormOrganizationScope(ctx, gormDB)
+
+	// Assert
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+}
+
+func TestMustWithGormOrganizationScope_MissingContext_Panics(t *testing.T) {
+	// Create mock database
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// Create GORM instance with mock
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Context without organization
+	ctx := context.Background()
+
+	// Assert panic
+	assert.Panics(t, func() {
+		MustWithGormOrganizationScope(ctx, gormDB)
+	})
+}
+
+func TestWithGormOrganizationTransaction_SetsSearchPathAndExecutes(t *testing.T) {
+	// Create mock database
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// Create GORM instance with mock
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Setup context with organization
+	orgID := organization.OrganizationID("acme_bank")
+	ctx := organization.WithOrganization(context.Background(), orgID)
+
+	// Expect transaction begin, SET LOCAL, and commit
+	mock.ExpectBegin()
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	// Execute
+	executed := false
+	err = WithGormOrganizationTransaction(ctx, gormDB, func(_ *gorm.DB) error {
+		executed = true
+		return nil
+	})
+
+	// Assert
+	require.NoError(t, err)
+	assert.True(t, executed, "transaction function should have been executed")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestWithGormOrganizationTransaction_MissingContext_ReturnsError(t *testing.T) {
+	// Create mock database
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// Create GORM instance with mock
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Context without organization
+	ctx := context.Background()
+
+	// Expect transaction begin and rollback (due to error)
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	// Execute
+	executed := false
+	err = WithGormOrganizationTransaction(ctx, gormDB, func(_ *gorm.DB) error {
+		executed = true
+		return nil
+	})
+
+	// Assert
+	require.Error(t, err)
+	assert.False(t, executed, "transaction function should not have been executed")
+	assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestWithGormOrganizationScope_SpecialCharacters_QuotedProperly(t *testing.T) {
+	testCases := []struct {
+		name           string
+		orgID          string
+		expectedSchema string
+	}{
+		{
+			name:           "simple org id",
+			orgID:          "acme",
+			expectedSchema: `"org_acme"`,
+		},
+		{
+			name:           "org id with underscore",
+			orgID:          "acme_bank",
+			expectedSchema: `"org_acme_bank"`,
+		},
+		{
+			name:           "org id with numbers",
+			orgID:          "bank123",
+			expectedSchema: `"org_bank123"`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mock database
+			mockDB, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer mockDB.Close()
+
+			// Create GORM instance with mock
+			gormDB, err := gorm.Open(postgres.New(postgres.Config{
+				Conn: mockDB,
+			}), &gorm.Config{})
+			require.NoError(t, err)
+
+			// Setup context
+			orgID := organization.OrganizationID(tc.orgID)
+			ctx := organization.WithOrganization(context.Background(), orgID)
+
+			// Expect the SET LOCAL query with properly quoted schema
+			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
+			mock.ExpectExec(expected).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+
+			// Execute
+			result, err := WithGormOrganizationScope(ctx, gormDB)
+
+			// Assert
+			require.NoError(t, err)
+			assert.NotNil(t, result)
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestWithGormOrganizationScope_DatabaseError_ReturnsError(t *testing.T) {
+	// This tests the error path when SET LOCAL search_path fails (e.g., database connection issue)
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Setup context with organization
+	orgID := organization.OrganizationID("acme_bank")
+	ctx := organization.WithOrganization(context.Background(), orgID)
+
+	// Simulate database error on SET LOCAL query
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+		WillReturnError(errDatabaseConnectionLost)
+
+	// Execute
+	result, err := WithGormOrganizationScope(ctx, gormDB)
+
+	// Assert - should return error when SET LOCAL fails
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "failed to set organization schema scope")
+	assert.ErrorIs(t, err, errDatabaseConnectionLost)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestWithGormOrganizationTransaction_DatabaseError_ReturnsError(t *testing.T) {
+	// This tests the error propagation through WithGormOrganizationTransaction
+	// when SET LOCAL search_path fails
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Setup context with organization
+	orgID := organization.OrganizationID("acme_bank")
+	ctx := organization.WithOrganization(context.Background(), orgID)
+
+	// Expect transaction begin, SET LOCAL failure, and rollback
+	mock.ExpectBegin()
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+		WillReturnError(errSchemaDoesNotExist)
+	mock.ExpectRollback()
+
+	// Execute
+	executed := false
+	err = WithGormOrganizationTransaction(ctx, gormDB, func(_ *gorm.DB) error {
+		executed = true
+		return nil
+	})
+
+	// Assert - function should not have been executed, error should propagate
+	require.Error(t, err)
+	assert.False(t, executed, "transaction function should not have been executed")
+	assert.Contains(t, err.Error(), "failed to set organization schema scope")
+	assert.ErrorIs(t, err, errSchemaDoesNotExist)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestWithGormOrganizationScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) {
+	// These test cases verify that pq.QuoteIdentifier properly escapes
+	// potentially malicious organization IDs to prevent SQL injection.
+	// Note: pq.QuoteIdentifier truncates at null bytes and uses lowercase.
+	testCases := []struct {
+		name           string
+		orgID          string
+		expectedSchema string // pq.QuoteIdentifier output
+	}{
+		{
+			name:  "SQL injection attempt with quote",
+			orgID: `evil"; drop table users; --`,
+			// pq.QuoteIdentifier escapes double quotes by doubling them
+			expectedSchema: `"org_evil""; drop table users; --"`,
+		},
+		{
+			name:           "SQL injection attempt with semicolon",
+			orgID:          "evil; drop table users",
+			expectedSchema: `"org_evil; drop table users"`,
+		},
+		{
+			name:  "null byte injection",
+			orgID: "evil\x00attack",
+			// pq.QuoteIdentifier truncates at the null byte
+			expectedSchema: `"org_evil"`,
+		},
+		{
+			name:           "unicode escape sequence for double quote",
+			orgID:          "evil\u0022injection",
+			expectedSchema: `"org_evil""injection"`, // \u0022 is a double quote, escaped by doubling
+		},
+		{
+			name:           "schema traversal attempt with dot",
+			orgID:          "public.accounts",
+			expectedSchema: `"org_public.accounts"`,
+		},
+		{
+			name:           "backslash injection",
+			orgID:          `evil\ninjection`,
+			expectedSchema: `"org_evil\ninjection"`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mock database with QueryMatcherEqual to avoid regex interpretation
+			mockDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+			require.NoError(t, err)
+			defer mockDB.Close()
+
+			// Create GORM instance with mock
+			gormDB, err := gorm.Open(postgres.New(postgres.Config{
+				Conn: mockDB,
+			}), &gorm.Config{})
+			require.NoError(t, err)
+
+			// Setup context with potentially malicious org ID
+			orgID := organization.OrganizationID(tc.orgID)
+			ctx := organization.WithOrganization(context.Background(), orgID)
+
+			// Expect the SET LOCAL query with properly escaped schema
+			// The schema should be safely quoted by pq.QuoteIdentifier
+			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
+			mock.ExpectExec(expected).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+
+			// Execute
+			result, err := WithGormOrganizationScope(ctx, gormDB)
+
+			// Assert - even with malicious input, the function should work
+			// because pq.QuoteIdentifier properly escapes the schema name
+			require.NoError(t, err)
+			assert.NotNil(t, result)
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
