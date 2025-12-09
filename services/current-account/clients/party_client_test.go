@@ -470,9 +470,9 @@ func TestPartyClient_GetParty_Success(t *testing.T) {
 	t.Parallel()
 
 	expectedParty := &partyv1.Party{
-		PartyId:     "party-123",
-		LegalName:   "Test Company Ltd",
-		DisplayName: "Test Company",
+		PartyId:           "party-123",
+		LegalName:         "Test Company Ltd",
+		DisplayName:       "Test Company",
 		PartyType:         partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
 		Status:            partyv1.PartyStatus_PARTY_STATUS_ACTIVE,
 		ExternalReference: "CH12345678",
