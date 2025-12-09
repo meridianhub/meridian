@@ -26,11 +26,11 @@ func TestSaveNewAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
 	// AccountID is now mapped to IBAN in the database (account_number column)
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -56,10 +56,10 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -78,10 +78,10 @@ func TestSaveUpdateExisting(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -136,10 +136,10 @@ func TestFindByIBAN(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -158,20 +158,20 @@ func TestFindByIBAN(t *testing.T) {
 	}
 }
 
-func TestFindByCustomerID(t *testing.T) {
+func TestFindByPartyID(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 
-	// Create two accounts for same customer
+	// Create two accounts for same party
 	iban1 := "GB82WEST12345698765432"
 	iban2 := "GB82WEST98765432123456"
 
-	account1, err := domain.NewCurrentAccount(iban1, iban1, customerID, "GBP")
+	account1, err := domain.NewCurrentAccount(iban1, iban1, partyID, "GBP")
 	require.NoError(t, err)
-	account2, err := domain.NewCurrentAccount(iban2, iban2, customerID, "EUR")
+	account2, err := domain.NewCurrentAccount(iban2, iban2, partyID, "EUR")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -182,9 +182,9 @@ func TestFindByCustomerID(t *testing.T) {
 		t.Fatalf("Save account2 failed: %v", err)
 	}
 
-	accounts, err := repo.FindByCustomerID(ctx, customerID)
+	accounts, err := repo.FindByPartyID(ctx, partyID)
 	if err != nil {
-		t.Fatalf("FindByCustomerID failed: %v", err)
+		t.Fatalf("FindByPartyID failed: %v", err)
 	}
 
 	if len(accounts) != 2 {
@@ -197,10 +197,10 @@ func TestDeleteAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -225,13 +225,13 @@ func TestOptimisticLocking(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
 	ctx := context.Background()
 
 	// Create initial account
-	account1, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account1, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 	if err := repo.Save(ctx, account1); err != nil {
 		t.Fatalf("Initial save failed: %v", err)
@@ -298,7 +298,7 @@ func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
 		ID:                    uuid.New(),
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
-		CustomerID:            uuid.New(),
+		PartyID:               uuid.New(),
 		Balance:               10000,
 		AvailableBalance:      10000,
 		Currency:              "", // Invalid: empty currency
@@ -335,7 +335,7 @@ func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
 		ID:                    uuid.New(),
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
-		CustomerID:            uuid.New(),
+		PartyID:               uuid.New(),
 		Balance:               10000,
 		AvailableBalance:      10000,
 		Currency:              "", // Corrupted: empty currency
@@ -357,7 +357,7 @@ func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
 }
 
-func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
+func TestFindByPartyID_PartialCorruption_ReturnsError(t *testing.T) {
 	// Note: With the new schema using char(3) for currency, truly empty currencies
 	// are not possible. This test is skipped as database constraints now prevent
 	// the kind of corruption we were testing for.
@@ -369,15 +369,15 @@ func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
 	repo := NewRepository(db)
 	ctx := context.Background()
 
-	// Create a shared customer ID for both accounts
-	customerID := uuid.New()
+	// Create a shared party ID for both accounts
+	partyID := uuid.New()
 
 	// Insert one valid account
 	validEntity := &CurrentAccountEntity{
 		ID:                    uuid.New(),
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
-		CustomerID:            customerID,
+		PartyID:               partyID,
 		Balance:               10000,
 		AvailableBalance:      10000,
 		Currency:              "GBP",
@@ -390,12 +390,12 @@ func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
 	}
 	require.NoError(t, db.Create(validEntity).Error)
 
-	// Manually insert corrupted account with same customer
+	// Manually insert corrupted account with same party
 	corruptedEntity := &CurrentAccountEntity{
 		ID:                    uuid.New(),
 		AccountIdentification: "GB82WEST99999999999999",
 		AccountType:           "current",
-		CustomerID:            customerID, // Same customer
+		PartyID:               partyID, // Same party
 		Balance:               5000,
 		AvailableBalance:      5000,
 		Currency:              "", // Corrupted
@@ -408,10 +408,10 @@ func TestFindByCustomerID_PartialCorruption_ReturnsError(t *testing.T) {
 	}
 	require.NoError(t, db.Create(corruptedEntity).Error)
 
-	// FindByCustomerID should fail on first corrupted record
-	_, err := repo.FindByCustomerID(ctx, customerID.String())
+	// FindByPartyID should fail on first corrupted record
+	_, err := repo.FindByPartyID(ctx, partyID.String())
 
-	assert.Error(t, err, "FindByCustomerID should fail when any account is corrupted")
+	assert.Error(t, err, "FindByPartyID should fail when any account is corrupted")
 	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
 }
 
@@ -422,10 +422,10 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Create context with authenticated user
@@ -450,10 +450,10 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Use empty context (no user)
@@ -477,10 +477,10 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Create with user1

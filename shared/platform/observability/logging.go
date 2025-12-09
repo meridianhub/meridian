@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -31,13 +32,14 @@ const (
 
 // LogEntry represents a structured log entry
 type LogEntry struct {
-	Timestamp     string                 `json:"timestamp"`
-	Level         LogLevel               `json:"level"`
-	Message       string                 `json:"message"`
-	CorrelationID string                 `json:"correlation_id,omitempty"`
-	TraceID       string                 `json:"trace_id,omitempty"`
-	SpanID        string                 `json:"span_id,omitempty"`
-	Fields        map[string]interface{} `json:"fields,omitempty"`
+	Timestamp      string                 `json:"timestamp"`
+	Level          LogLevel               `json:"level"`
+	Message        string                 `json:"message"`
+	OrganizationID string                 `json:"organization_id,omitempty"`
+	CorrelationID  string                 `json:"correlation_id,omitempty"`
+	TraceID        string                 `json:"trace_id,omitempty"`
+	SpanID         string                 `json:"span_id,omitempty"`
+	Fields         map[string]interface{} `json:"fields,omitempty"`
 }
 
 // NewLogger creates a new JSON logger
@@ -104,8 +106,14 @@ func (l *Logger) log(ctx context.Context, level LogLevel, msg string, fields ...
 		Message:   msg,
 	}
 
-	// Extract correlation ID from context
+	// Extract context values
 	if ctx != nil {
+		// Extract organization ID from context
+		if orgID, ok := organization.FromContext(ctx); ok && !orgID.IsEmpty() {
+			entry.OrganizationID = orgID.String()
+		}
+
+		// Extract correlation ID from context
 		if correlationID := GetCorrelationID(ctx); correlationID != "" {
 			entry.CorrelationID = correlationID
 		}

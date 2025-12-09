@@ -368,13 +368,13 @@ func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*do
 	return account, nil
 }
 
-// FindByCustomerID retrieves all accounts for a customer.
+// FindByPartyID retrieves all accounts for a party.
 // In multi-org mode, the context must contain the organization ID for schema routing.
-func (r *Repository) FindByCustomerID(ctx context.Context, customerID string) ([]*domain.CurrentAccount, error) {
+func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]*domain.CurrentAccount, error) {
 	var accounts []*domain.CurrentAccount
 	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
 		var entities []CurrentAccountEntity
-		result := tx.Where("customer_id = ? AND deleted_at IS NULL", customerID).Find(&entities)
+		result := tx.Where("party_id = ? AND deleted_at IS NULL", partyID).Find(&entities)
 
 		if result.Error != nil {
 			return result.Error
@@ -417,10 +417,10 @@ func (r *Repository) Ping() error {
 // Note: The entity schema matches migrations/current_account/*.sql
 // OverdraftEnabled is derived from OverdraftLimit > 0
 func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
-	// Parse CustomerID as UUID - domain model uses string for flexibility
-	customerUUID, err := uuid.Parse(account.CustomerID)
+	// Parse PartyID as UUID - domain model uses string for flexibility
+	partyUUID, err := uuid.Parse(account.PartyID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid customer ID %q: %w", account.CustomerID, err)
+		return nil, fmt.Errorf("invalid party ID %q: %w", account.PartyID, err)
 	}
 
 	// Extract audit user from context (falls back to "system" if not available)
@@ -433,7 +433,7 @@ func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAcco
 		AccountType:           "current",                     // Default for current accounts
 		Currency:              string(account.Balance.Currency()),
 		Status:                string(account.Status),
-		CustomerID:            customerUUID,
+		PartyID:               partyUUID,
 		Balance:               account.Balance.AmountCents(),
 		AvailableBalance:      account.AvailableBalance.AmountCents(),
 		OverdraftLimit:        account.OverdraftLimit.AmountCents(),
@@ -479,7 +479,7 @@ func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 		ID:                    entity.ID,
 		AccountID:             entity.AccountID,             // Business account identifier
 		AccountIdentification: entity.AccountIdentification, // IBAN stored in account_identification
-		CustomerID:            entity.CustomerID.String(),
+		PartyID:               entity.PartyID.String(),
 		Balance:               balance,
 		AvailableBalance:      availableBalance,
 		Status:                domain.AccountStatus(entity.Status),
