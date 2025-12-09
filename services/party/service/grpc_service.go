@@ -87,6 +87,13 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 		}
 	}
 
+	// Validate external reference and type consistency
+	if req.ExternalReferenceType != pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED && req.ExternalReference == "" {
+		s.logger.Error("external reference type provided without reference",
+			"external_reference_type", req.ExternalReferenceType.String())
+		return nil, status.Errorf(codes.InvalidArgument, "external reference required when type is specified")
+	}
+
 	// Set optional external reference
 	if req.ExternalReference != "" {
 		extRefType, err := protoToExternalRefType(req.ExternalReferenceType)

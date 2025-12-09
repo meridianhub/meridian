@@ -245,6 +245,48 @@ func TestRegisterParty(t *testing.T) {
 		assert.Equal(t, codes.InvalidArgument, st.Code())
 	})
 
+	t.Run("returns InvalidArgument for external reference type without reference", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		req := &pb.RegisterPartyRequest{
+			PartyType:             pb.PartyType_PARTY_TYPE_ORGANISATION, //nolint:misspell // Proto uses British spelling
+			LegalName:             "Test Corp",
+			ExternalReference:     "",
+			ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+		}
+
+		resp, err := svc.RegisterParty(ctx, req)
+		assert.Nil(t, resp)
+		assert.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "external reference required when type is specified")
+	})
+
+	t.Run("returns Internal when external reference check fails", func(t *testing.T) {
+		mock := newMockRepository()
+		mock.findByExternalRefErr = errDatabaseFailed
+		svc := newTestService(mock)
+
+		req := &pb.RegisterPartyRequest{
+			PartyType:             pb.PartyType_PARTY_TYPE_ORGANISATION, //nolint:misspell // Proto uses British spelling
+			LegalName:             "Test Corp",
+			ExternalReference:     "12345678",
+			ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+		}
+
+		resp, err := svc.RegisterParty(ctx, req)
+		assert.Nil(t, resp)
+		assert.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Internal, st.Code())
+	})
+
 	t.Run("returns Internal on repository save error", func(t *testing.T) {
 		mock := newMockRepository()
 		mock.saveErr = errDatabaseFailed
