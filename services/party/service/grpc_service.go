@@ -71,7 +71,6 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 	party, err := domain.NewParty(partyType, req.LegalName)
 	if err != nil {
 		s.logger.Error("failed to create party",
-			"legal_name", req.LegalName,
 			"party_type", partyType,
 			"error", err)
 		return nil, status.Errorf(codes.InvalidArgument, "failed to create party: %v", err)
@@ -81,7 +80,6 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 	if req.DisplayName != "" {
 		if err := party.SetDisplayName(req.DisplayName); err != nil {
 			s.logger.Error("invalid display name",
-				"display_name", req.DisplayName,
 				"error", err)
 			return nil, status.Errorf(codes.InvalidArgument, "invalid display name: %v", err)
 		}
@@ -108,23 +106,21 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 		existing, err := s.repo.FindByExternalReference(req.ExternalReference, string(extRefType))
 		if err != nil && !errors.Is(err, persistence.ErrPartyNotFound) {
 			s.logger.Error("failed to check external reference uniqueness",
-				"external_reference", req.ExternalReference,
+				"external_reference_type", extRefType,
 				"error", err)
 			return nil, status.Errorf(codes.Internal, "failed to check external reference: %v", err)
 		}
 		if existing != nil {
 			s.logger.Warn("duplicate external reference",
-				"external_reference", req.ExternalReference,
 				"external_reference_type", extRefType,
 				"existing_party_id", existing.ID().String())
 			return nil, status.Errorf(codes.AlreadyExists,
-				"party with external reference %s (%s) already exists",
-				req.ExternalReference, extRefType)
+				"party with external reference of type %s already exists",
+				extRefType)
 		}
 
 		if err := party.SetExternalReference(req.ExternalReference, extRefType); err != nil {
 			s.logger.Error("invalid external reference",
-				"external_reference", req.ExternalReference,
 				"external_reference_type", extRefType,
 				"error", err)
 			return nil, status.Errorf(codes.InvalidArgument, "invalid external reference: %v", err)
