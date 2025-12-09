@@ -33,7 +33,7 @@ func TestSaveNewParty(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify party was saved
-	retrieved, err := repo.FindByID(party.ID())
+	retrieved, err := repo.FindByID(ctx, party.ID())
 	require.NoError(t, err)
 	assert.Equal(t, party.ID(), retrieved.ID())
 	assert.Equal(t, "John Doe", retrieved.LegalName())
@@ -55,7 +55,7 @@ func TestSaveNewParty_InitialVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify newly created party has version 1
-	retrieved, err := repo.FindByID(party.ID())
+	retrieved, err := repo.FindByID(ctx, party.ID())
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), retrieved.Version(), "New party should have version 1")
 }
@@ -82,7 +82,7 @@ func TestSaveUpdateExisting(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify display name was updated
-	retrieved, err := repo.FindByID(party.ID())
+	retrieved, err := repo.FindByID(ctx, party.ID())
 	require.NoError(t, err)
 	assert.Equal(t, "Johnny D", retrieved.DisplayName())
 
@@ -95,8 +95,9 @@ func TestFindByIDNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
+	ctx := context.Background()
 
-	_, err := repo.FindByID(uuid.New())
+	_, err := repo.FindByID(ctx, uuid.New())
 	assert.True(t, errors.Is(err, ErrPartyNotFound))
 }
 
@@ -116,7 +117,7 @@ func TestFindByExternalReference(t *testing.T) {
 	err = repo.Save(ctx, party)
 	require.NoError(t, err)
 
-	retrieved, err := repo.FindByExternalReference("12345678", string(domain.ExternalReferenceTypeCompaniesHouse))
+	retrieved, err := repo.FindByExternalReference(ctx, "12345678", string(domain.ExternalReferenceTypeCompaniesHouse))
 	require.NoError(t, err)
 	assert.Equal(t, party.ID(), retrieved.ID())
 	assert.Equal(t, "12345678", retrieved.ExternalReference())
@@ -127,8 +128,9 @@ func TestFindByExternalReferenceNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
+	ctx := context.Background()
 
-	_, err := repo.FindByExternalReference("NONEXISTENT", string(domain.ExternalReferenceTypeCompaniesHouse))
+	_, err := repo.FindByExternalReference(ctx, "NONEXISTENT", string(domain.ExternalReferenceTypeCompaniesHouse))
 	assert.True(t, errors.Is(err, ErrPartyNotFound))
 }
 
@@ -174,7 +176,7 @@ func TestDeleteParty(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should not be found after soft delete
-	_, err = repo.FindByID(party.ID())
+	_, err = repo.FindByID(ctx, party.ID())
 	assert.True(t, errors.Is(err, ErrPartyNotFound))
 }
 
@@ -193,10 +195,10 @@ func TestOptimisticLocking(t *testing.T) {
 	require.NoError(t, err)
 
 	// Load same party in two "transactions"
-	party2, err := repo.FindByID(party1.ID())
+	party2, err := repo.FindByID(ctx, party1.ID())
 	require.NoError(t, err)
 
-	party3, err := repo.FindByID(party1.ID())
+	party3, err := repo.FindByID(ctx, party1.ID())
 	require.NoError(t, err)
 
 	// Both should have same version
@@ -217,7 +219,7 @@ func TestOptimisticLocking(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrVersionConflict))
 
 	// Verify first transaction's changes persisted
-	final, err := repo.FindByID(party1.ID())
+	final, err := repo.FindByID(ctx, party1.ID())
 	require.NoError(t, err)
 	assert.Equal(t, "John D", final.DisplayName())
 

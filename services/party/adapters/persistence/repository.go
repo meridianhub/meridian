@@ -107,10 +107,11 @@ func (r *Repository) Save(ctx context.Context, party *domain.Party) error {
 	return result.Error
 }
 
-// FindByID retrieves a party by its UUID
-func (r *Repository) FindByID(partyID uuid.UUID) (*domain.Party, error) {
+// FindByID retrieves a party by its UUID.
+// The context is used for cancellation, timeout, and tracing support.
+func (r *Repository) FindByID(ctx context.Context, partyID uuid.UUID) (*domain.Party, error) {
 	var entity PartyEntity
-	result := r.db.Where("id = ? AND deleted_at IS NULL", partyID).First(&entity)
+	result := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", partyID).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrPartyNotFound
@@ -125,9 +126,10 @@ func (r *Repository) FindByID(partyID uuid.UUID) (*domain.Party, error) {
 
 // FindByIDForUpdate retrieves a party by its UUID with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
-func (r *Repository) FindByIDForUpdate(partyID uuid.UUID) (*domain.Party, error) {
+// The context is used for cancellation, timeout, and tracing support.
+func (r *Repository) FindByIDForUpdate(ctx context.Context, partyID uuid.UUID) (*domain.Party, error) {
 	var entity PartyEntity
-	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+	result := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ? AND deleted_at IS NULL", partyID).
 		First(&entity)
 
@@ -142,10 +144,11 @@ func (r *Repository) FindByIDForUpdate(partyID uuid.UUID) (*domain.Party, error)
 	return toDomain(&entity), nil
 }
 
-// FindByExternalReference retrieves a party by its external reference and type
-func (r *Repository) FindByExternalReference(ref, refType string) (*domain.Party, error) {
+// FindByExternalReference retrieves a party by its external reference and type.
+// The context is used for cancellation, timeout, and tracing support.
+func (r *Repository) FindByExternalReference(ctx context.Context, ref, refType string) (*domain.Party, error) {
 	var entity PartyEntity
-	result := r.db.Where("external_reference = ? AND external_reference_type = ? AND deleted_at IS NULL", ref, refType).First(&entity)
+	result := r.db.WithContext(ctx).Where("external_reference = ? AND external_reference_type = ? AND deleted_at IS NULL", ref, refType).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrPartyNotFound
