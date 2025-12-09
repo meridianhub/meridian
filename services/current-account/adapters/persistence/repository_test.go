@@ -26,11 +26,11 @@ func TestSaveNewAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
 	// AccountID is now mapped to IBAN in the database (account_number column)
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -56,10 +56,10 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -78,10 +78,10 @@ func TestSaveUpdateExisting(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -135,10 +135,10 @@ func TestFindByIBAN(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -196,10 +196,10 @@ func TestDeleteAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -224,13 +224,13 @@ func TestOptimisticLocking(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
 	ctx := context.Background()
 
 	// Create initial account
-	account1, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account1, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 	if err := repo.Save(ctx, account1); err != nil {
 		t.Fatalf("Initial save failed: %v", err)
@@ -419,10 +419,10 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Create context with authenticated user
@@ -447,10 +447,10 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Use empty context (no user)
@@ -474,10 +474,10 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	customerID := uuid.New().String()
+	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, customerID, "GBP")
+	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Create with user1
