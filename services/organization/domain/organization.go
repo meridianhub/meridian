@@ -78,3 +78,25 @@ func (o *Organization) CanOperate() bool {
 func (o *Organization) SchemaName() string {
 	return o.ID.SchemaName()
 }
+
+// CanTransitionTo returns true if the organization can transition to the given status.
+// Valid transitions:
+//   - active → suspended, deprovisioned
+//   - suspended → active, deprovisioned
+//   - deprovisioned → (none, terminal state)
+func (o *Organization) CanTransitionTo(newStatus Status) bool {
+	if o.Status == newStatus {
+		return true // No-op transitions are allowed
+	}
+
+	switch o.Status {
+	case StatusActive:
+		return newStatus == StatusSuspended || newStatus == StatusDeprovisioned
+	case StatusSuspended:
+		return newStatus == StatusActive || newStatus == StatusDeprovisioned
+	case StatusDeprovisioned:
+		return false // Deprovisioned is a terminal state
+	default:
+		return false
+	}
+}

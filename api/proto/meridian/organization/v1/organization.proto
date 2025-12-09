@@ -154,6 +154,12 @@ message RetrieveOrganizationResponse {
 }
 
 // UpdateOrganizationStatusRequest is the request to change organization status (BIAN: Update).
+// This operation uses optimistic locking. If the organization was modified by another request,
+// an ABORTED error is returned. Clients should retry the operation in this case.
+// Valid status transitions:
+//   - active -> suspended, deprovisioned
+//   - suspended -> active, deprovisioned
+//   - deprovisioned -> (none, terminal state)
 message UpdateOrganizationStatusRequest {
   // organization_id is the unique identifier of the organization to update.
   string organization_id = 1 [(buf.validate.field).string = {

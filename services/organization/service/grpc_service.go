@@ -124,7 +124,7 @@ func (s *Service) UpdateOrganizationStatus(ctx context.Context, req *pb.UpdateOr
 		return nil, status.Errorf(codes.InvalidArgument, "invalid status: %v", err)
 	}
 
-	// Get current organization to get version
+	// Get current organization to get version and validate transition
 	currentOrg, err := s.repo.GetByID(ctx, orgID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrOrganizationNotFound) {
@@ -134,6 +134,12 @@ func (s *Service) UpdateOrganizationStatus(ctx context.Context, req *pb.UpdateOr
 			"organization_id", req.OrganizationId,
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to update organization status")
+	}
+
+	// Validate status transition
+	if !currentOrg.CanTransitionTo(domainStatus) {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"invalid status transition from %s to %s", currentOrg.Status, domainStatus)
 	}
 
 	// Update status

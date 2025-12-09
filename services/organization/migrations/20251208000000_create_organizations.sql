@@ -41,6 +41,9 @@ CREATE TABLE platform.organizations (
 -- Index for filtering by status (common query pattern)
 CREATE INDEX idx_organizations_status ON platform.organizations(status);
 
+-- Composite index for filtered + sorted queries (List with status filter)
+CREATE INDEX idx_organizations_status_created_at ON platform.organizations(status, created_at DESC);
+
 -- Unique index for subdomain (only when not null)
 CREATE UNIQUE INDEX idx_organizations_subdomain ON platform.organizations(subdomain)
     WHERE subdomain IS NOT NULL;

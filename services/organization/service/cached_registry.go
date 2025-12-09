@@ -57,7 +57,7 @@ func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig
 }
 
 // Start begins the background cache refresh loop.
-// Call Stop() to stop the refresh loop.
+// The refresh loop stops automatically when the provided context is cancelled.
 func (r *CachedRegistry) Start(ctx context.Context) {
 	// Initial load
 	if err := r.refresh(ctx); err != nil {
