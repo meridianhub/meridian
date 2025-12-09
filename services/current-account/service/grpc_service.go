@@ -197,7 +197,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	account, err := domain.NewCurrentAccount(
 		accountID,
 		req.AccountIdentification,
-		req.CustomerId,
+		req.PartyId,
 		currency,
 	)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"ariga.io/atlas-provider-gorm/gormschema"
 	capersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	fapersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	partypersistence "github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/domain/models"
 )
 
@@ -17,11 +18,12 @@ const (
 	schemaCurrentAccount      = "current_account"
 	schemaPositionKeeping     = "position_keeping"
 	schemaFinancialAccounting = "financial_accounting"
+	schemaParty               = "party"
 )
 
 func main() {
 	// Parse schema filter flag
-	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping, financial_accounting)")
+	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping, financial_accounting, party)")
 	flag.Parse()
 
 	// Determine which models to load based on schema filter
@@ -53,6 +55,11 @@ func main() {
 		modelList = []interface{}{
 			&fapersistence.FinancialBookingLogEntity{},
 			&fapersistence.LedgerPostingEntity{},
+		}
+	case schemaParty:
+		// Party service for customer/organization identity management
+		modelList = []interface{}{
+			&partypersistence.PartyEntity{},
 		}
 	case "":
 		// No filter - load all models (for backward compatibility)
