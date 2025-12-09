@@ -34,7 +34,7 @@ type CurrentAccount struct {
 	ID                    uuid.UUID
 	AccountID             string
 	AccountIdentification string // IBAN
-	CustomerID            string
+	PartyID               string
 	Balance               Money
 	AvailableBalance      Money
 	Status                AccountStatus
@@ -48,7 +48,7 @@ type CurrentAccount struct {
 }
 
 // NewCurrentAccount creates a new current account
-func NewCurrentAccount(accountID, iban, customerID, currency string) (*CurrentAccount, error) {
+func NewCurrentAccount(accountID, iban, partyID, currency string) (*CurrentAccount, error) {
 	now := time.Now()
 	zeroMoney, err := NewMoney(currency, 0)
 	if err != nil {
@@ -59,7 +59,7 @@ func NewCurrentAccount(accountID, iban, customerID, currency string) (*CurrentAc
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AccountIdentification: iban,
-		CustomerID:            customerID,
+		PartyID:               partyID,
 		Balance:               zeroMoney,
 		AvailableBalance:      zeroMoney,
 		Status:                AccountStatusActive,

@@ -201,7 +201,7 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
 	// Create an account (liens have FK to accounts)
-	// Note: customer_id is now a reference to Party Service (no FK constraint)
+	// Note: party_id is a reference to Party Service (no FK constraint)
 	accountID := uuid.New()
 	partyID := uuid.New() // References a party in Party Service (no local FK)
 	account := &capersistence.CurrentAccountEntity{
@@ -211,7 +211,7 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		AccountType:           "current",
 		Currency:              "GBP",
 		Status:                "active",
-		CustomerID:            partyID,
+		PartyID:               partyID,
 		Balance:               50000,
 		AvailableBalance:      40000,
 		OverdraftLimit:        5000,
@@ -343,7 +343,7 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
-	// Note: customer_id is now a reference to Party Service (no local FK constraint)
+	// Note: party_id is a reference to Party Service (no local FK constraint)
 	// The customers table has been removed - party data is managed by Party Service
 	partyID := uuid.New() // References a party in Party Service
 
@@ -355,7 +355,7 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 		AccountType:           "current",
 		Currency:              "GBP",
 		Status:                "active",
-		CustomerID:            partyID,
+		PartyID:               partyID,
 		Balance:               10000,
 		AvailableBalance:      8000,
 		OverdraftLimit:        5000,
