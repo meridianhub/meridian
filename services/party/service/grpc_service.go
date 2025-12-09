@@ -26,11 +26,12 @@ var (
 	ErrUnknownExternalRefType = errors.New("unknown external reference type")
 )
 
-// Repository defines the interface for party persistence operations
+// Repository defines the interface for party persistence operations.
+// All methods accept context for cancellation, timeout, and tracing support.
 type Repository interface {
 	Save(ctx context.Context, party *domain.Party) error
-	FindByID(partyID uuid.UUID) (*domain.Party, error)
-	FindByExternalReference(ref, refType string) (*domain.Party, error)
+	FindByID(ctx context.Context, partyID uuid.UUID) (*domain.Party, error)
+	FindByExternalReference(ctx context.Context, ref, refType string) (*domain.Party, error)
 }
 
 // Service implements the PartyService gRPC service
@@ -103,7 +104,7 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 		}
 
 		// Check for duplicate external reference
-		existing, err := s.repo.FindByExternalReference(req.ExternalReference, string(extRefType))
+		existing, err := s.repo.FindByExternalReference(ctx, req.ExternalReference, string(extRefType))
 		if err != nil && !errors.Is(err, persistence.ErrPartyNotFound) {
 			s.logger.Error("failed to check external reference uniqueness",
 				"external_reference_type", extRefType,
@@ -151,7 +152,7 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 }
 
 // RetrieveParty gets party details by ID
-func (s *Service) RetrieveParty(_ context.Context, req *pb.RetrievePartyRequest) (*pb.RetrievePartyResponse, error) {
+func (s *Service) RetrieveParty(ctx context.Context, req *pb.RetrievePartyRequest) (*pb.RetrievePartyResponse, error) {
 	// Parse party ID as UUID
 	partyID, err := uuid.Parse(req.PartyId)
 	if err != nil {
@@ -162,7 +163,7 @@ func (s *Service) RetrieveParty(_ context.Context, req *pb.RetrievePartyRequest)
 	}
 
 	// Retrieve party
-	party, err := s.repo.FindByID(partyID)
+	party, err := s.repo.FindByID(ctx, partyID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPartyNotFound) {
 			s.logger.Warn("party not found",

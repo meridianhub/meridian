@@ -52,7 +52,7 @@ func (m *mockRepository) Save(_ context.Context, party *domain.Party) error {
 	return nil
 }
 
-func (m *mockRepository) FindByID(id uuid.UUID) (*domain.Party, error) {
+func (m *mockRepository) FindByID(_ context.Context, id uuid.UUID) (*domain.Party, error) {
 	if m.findByIDErr != nil {
 		return nil, m.findByIDErr
 	}
@@ -63,7 +63,7 @@ func (m *mockRepository) FindByID(id uuid.UUID) (*domain.Party, error) {
 	return party, nil
 }
 
-func (m *mockRepository) FindByExternalReference(ref, refType string) (*domain.Party, error) {
+func (m *mockRepository) FindByExternalReference(_ context.Context, ref, refType string) (*domain.Party, error) {
 	if m.findByExternalRefErr != nil {
 		return nil, m.findByExternalRefErr
 	}
