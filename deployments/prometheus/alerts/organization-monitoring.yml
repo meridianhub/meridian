@@ -1,0 +1,132 @@
+# Organization Monitoring Alert Rules
+#
+# These alerts provide organization-scoped monitoring for multi-tenant deployments.
+# Alerts are tagged with the organization label for targeted notification routing.
+
+groups:
+  - name: organization_monitoring
+    interval: 30s
+    rules:
+      # High error rate for a specific organization
+      - alert: OrganizationHighErrorRate
+        expr: |
+          sum(rate(grpc_server_handled_total{organization!="unknown", grpc_code!="OK"}[5m])) by (organization)
+          / sum(rate(grpc_server_handled_total{organization!="unknown"}[5m])) by (organization)
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Organization {{ $labels.organization }} has error rate > 5%"
+          description: "The error rate for organization {{ $labels.organization }} has exceeded 5% over the last 5 minutes. Current rate: {{ $value | humanizePercentage }}"
+          runbook_url: "https://docs.meridian.io/runbooks/organization-high-error-rate"
+
+      # Critical error rate threshold
+      - alert: OrganizationCriticalErrorRate
+        expr: |
+          sum(rate(grpc_server_handled_total{organization!="unknown", grpc_code!="OK"}[5m])) by (organization)
+          / sum(rate(grpc_server_handled_total{organization!="unknown"}[5m])) by (organization)
+          > 0.10
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Organization {{ $labels.organization }} has critical error rate > 10%"
+          description: "The error rate for organization {{ $labels.organization }} has exceeded 10% over the last 3 minutes. Current rate: {{ $value | humanizePercentage }}. Immediate investigation required."
+          runbook_url: "https://docs.meridian.io/runbooks/organization-critical-error-rate"
+
+      # High latency for a specific organization
+      - alert: OrganizationHighLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{organization!="unknown"}[5m])) by (organization, le)
+          ) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Organization {{ $labels.organization }} has p99 latency > 1s"
+          description: "The p99 latency for organization {{ $labels.organization }} has exceeded 1 second for the last 10 minutes. Current p99: {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.meridian.io/runbooks/organization-high-latency"
+
+      # Very high latency threshold
+      - alert: OrganizationCriticalLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{organization!="unknown"}[5m])) by (organization, le)
+          ) > 3.0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Organization {{ $labels.organization }} has critical p99 latency > 3s"
+          description: "The p99 latency for organization {{ $labels.organization }} has exceeded 3 seconds for the last 5 minutes. Service is likely degraded. Current p99: {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.meridian.io/runbooks/organization-critical-latency"
+
+      # Noisy neighbor detection - organization generating excessive load
+      - alert: NoisyNeighborDetected
+        expr: |
+          sum(rate(grpc_server_handled_total{organization!="unknown"}[5m])) by (organization)
+          > 2 * avg(sum(rate(grpc_server_handled_total{organization!="unknown"}[5m])) by (organization))
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Organization {{ $labels.organization }} is generating 2x average load"
+          description: "Organization {{ $labels.organization }} is generating more than twice the average request rate across all organizations. This may impact other tenants. Consider investigating usage patterns or implementing rate limiting."
+          runbook_url: "https://docs.meridian.io/runbooks/noisy-neighbor-detection"
+
+      # Severe noisy neighbor - organization dominating resources
+      - alert: NoisyNeighborCritical
+        expr: |
+          sum(rate(grpc_server_handled_total{organization!="unknown"}[5m])) by (organization)
+          > 5 * avg(sum(rate(grpc_server_handled_total{organization!="unknown"}[5m])) by (organization))
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Organization {{ $labels.organization }} is generating 5x average load"
+          description: "Organization {{ $labels.organization }} is generating more than 5 times the average request rate. This is likely impacting other tenants and may indicate a runaway process or misconfiguration."
+          runbook_url: "https://docs.meridian.io/runbooks/noisy-neighbor-critical"
+
+      # High database query latency for organization
+      - alert: OrganizationHighDBLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(db_query_duration_seconds_bucket{organization!="unknown"}[5m])) by (organization, le)
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Organization {{ $labels.organization }} has high DB query latency"
+          description: "The p99 database query latency for organization {{ $labels.organization }} has exceeded 500ms for the last 10 minutes. This may indicate missing indexes or heavy queries. Current p99: {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.meridian.io/runbooks/organization-high-db-latency"
+
+      # Kafka message processing issues for organization
+      - alert: OrganizationKafkaErrors
+        expr: |
+          sum(rate(kafka_messages_published_total{organization!="unknown", status="error"}[5m])) by (organization)
+          / sum(rate(kafka_messages_published_total{organization!="unknown"}[5m])) by (organization)
+          > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Organization {{ $labels.organization }} has Kafka publishing errors"
+          description: "The Kafka message error rate for organization {{ $labels.organization }} has exceeded 1% over the last 5 minutes. This may indicate connectivity issues or message serialization problems."
+          runbook_url: "https://docs.meridian.io/runbooks/organization-kafka-errors"
+
+      # Organization suddenly stopped generating traffic (potential outage indicator)
+      - alert: OrganizationNoTraffic
+        expr: |
+          sum(rate(grpc_server_handled_total{organization!="unknown"}[5m])) by (organization) == 0
+          and
+          sum(rate(grpc_server_handled_total{organization!="unknown"}[1h] offset 1h)) by (organization) > 0
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Organization {{ $labels.organization }} has no recent traffic"
+          description: "Organization {{ $labels.organization }} had traffic in the previous hour but has had zero requests in the last 15 minutes. This may indicate a client-side issue or planned maintenance."
+          runbook_url: "https://docs.meridian.io/runbooks/organization-no-traffic"

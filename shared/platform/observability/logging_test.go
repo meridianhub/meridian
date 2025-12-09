@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"go.opentelemetry.io/otel"
 )
 
@@ -102,6 +103,63 @@ func TestLogger_InfoContext_CorrelationID(t *testing.T) {
 
 	if entry.CorrelationID != "correlation-123" {
 		t.Errorf("Expected correlation ID correlation-123, got %s", entry.CorrelationID)
+	}
+}
+
+func TestLogger_InfoContext_OrganizationID(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewLogger(buf, LogLevelInfo)
+
+	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	logger.InfoContext(ctx, "test message with organization")
+
+	var entry LogEntry
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatalf("Failed to parse log entry: %v", err)
+	}
+
+	if entry.OrganizationID != "acme_bank" {
+		t.Errorf("Expected organization ID acme_bank, got %s", entry.OrganizationID)
+	}
+}
+
+func TestLogger_InfoContext_WithoutOrganization(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewLogger(buf, LogLevelInfo)
+
+	logger.InfoContext(context.Background(), "test message without organization")
+
+	var entry LogEntry
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatalf("Failed to parse log entry: %v", err)
+	}
+
+	if entry.OrganizationID != "" {
+		t.Errorf("Expected empty organization ID, got %s", entry.OrganizationID)
+	}
+}
+
+func TestLogger_InfoContext_AllContextValues(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewLogger(buf, LogLevelInfo)
+
+	// Create context with both organization and correlation ID
+	ctx := context.Background()
+	ctx = organization.WithOrganization(ctx, organization.MustNewOrganizationID("motive"))
+	ctx = WithCorrelationID(ctx, "request-456")
+
+	logger.InfoContext(ctx, "test message with all context")
+
+	var entry LogEntry
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatalf("Failed to parse log entry: %v", err)
+	}
+
+	if entry.OrganizationID != "motive" {
+		t.Errorf("Expected organization ID motive, got %s", entry.OrganizationID)
+	}
+	if entry.CorrelationID != "request-456" {
+		t.Errorf("Expected correlation ID request-456, got %s", entry.CorrelationID)
 	}
 }
 
