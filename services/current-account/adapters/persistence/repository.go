@@ -200,10 +200,10 @@ func (r *Repository) FindByUUIDForUpdate(id uuid.UUID) (*domain.CurrentAccount, 
 	return toDomain(&entity)
 }
 
-// FindByCustomerID retrieves all accounts for a customer
-func (r *Repository) FindByCustomerID(customerID string) ([]*domain.CurrentAccount, error) {
+// FindByPartyID retrieves all accounts for a party
+func (r *Repository) FindByPartyID(partyID string) ([]*domain.CurrentAccount, error) {
 	var entities []CurrentAccountEntity
-	result := r.db.Where("customer_id = ? AND deleted_at IS NULL", customerID).Find(&entities)
+	result := r.db.Where("party_id = ? AND deleted_at IS NULL", partyID).Find(&entities)
 
 	if result.Error != nil {
 		return nil, result.Error
@@ -239,10 +239,10 @@ func (r *Repository) Ping() error {
 // Note: The entity schema matches migrations/current_account/*.sql
 // OverdraftEnabled is derived from OverdraftLimit > 0
 func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
-	// Parse CustomerID as UUID - domain model uses string for flexibility
-	customerUUID, err := uuid.Parse(account.CustomerID)
+	// Parse PartyID as UUID - domain model uses string for flexibility
+	partyUUID, err := uuid.Parse(account.PartyID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid customer ID %q: %w", account.CustomerID, err)
+		return nil, fmt.Errorf("invalid party ID %q: %w", account.PartyID, err)
 	}
 
 	// Extract audit user from context (falls back to "system" if not available)
@@ -255,7 +255,7 @@ func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAcco
 		AccountType:           "current",                     // Default for current accounts
 		Currency:              string(account.Balance.Currency()),
 		Status:                string(account.Status),
-		CustomerID:            customerUUID,
+		PartyID:               partyUUID,
 		Balance:               account.Balance.AmountCents(),
 		AvailableBalance:      account.AvailableBalance.AmountCents(),
 		OverdraftLimit:        account.OverdraftLimit.AmountCents(),
@@ -301,7 +301,7 @@ func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 		ID:                    entity.ID,
 		AccountID:             entity.AccountID,             // Business account identifier
 		AccountIdentification: entity.AccountIdentification, // IBAN stored in account_identification
-		CustomerID:            entity.CustomerID.String(),
+		PartyID:               entity.PartyID.String(),
 		Balance:               balance,
 		AvailableBalance:      availableBalance,
 		Status:                domain.AccountStatus(entity.Status),
