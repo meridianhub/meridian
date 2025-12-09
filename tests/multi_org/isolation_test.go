@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -345,13 +346,14 @@ func TestOrganizationSchemaNameQuoting(t *testing.T) {
 	// Verify pq.QuoteIdentifier is used for schema names
 	// This ensures safe identifier handling even if validation is bypassed
 
+	// All organization IDs are lowercased in schema names per PostgreSQL identifier conventions
 	testCases := []struct {
 		orgID              string
 		expectedSchemaName string
 	}{
-		{"acme_bank", "org_acme_bank"},
-		{"UPPERCASE", "org_uppercase"}, // Lowercase conversion
-		{"Mixed_Case", "org_mixed_case"},
+		{"acme_bank", "org_acme_bank"},   // Already lowercase
+		{"UPPERCASE", "org_uppercase"},   // Converted to lowercase
+		{"Mixed_Case", "org_mixed_case"}, // Converted to lowercase
 	}
 
 	for _, tc := range testCases {
@@ -912,7 +914,7 @@ func TestConcurrentOrganizationAccess(t *testing.T) {
 					if err := tx.QueryRowContext(ctxA, "SHOW search_path").Scan(&searchPath); err != nil {
 						return err
 					}
-					if !containsString(searchPath, "org_concurrent_a") {
+					if !strings.Contains(searchPath, "org_concurrent_a") {
 						return fmt.Errorf("%w: expected org_concurrent_a, got %s", errWrongSearchPath, searchPath)
 					}
 
@@ -943,7 +945,7 @@ func TestConcurrentOrganizationAccess(t *testing.T) {
 					if err := tx.QueryRowContext(ctxB, "SHOW search_path").Scan(&searchPath); err != nil {
 						return err
 					}
-					if !containsString(searchPath, "org_concurrent_b") {
+					if !strings.Contains(searchPath, "org_concurrent_b") {
 						return fmt.Errorf("%w: expected org_concurrent_b, got %s", errWrongSearchPath, searchPath)
 					}
 
@@ -984,9 +986,4 @@ func TestConcurrentOrganizationAccess(t *testing.T) {
 		assert.GreaterOrEqual(t, countA, 1, "org A should have its own records")
 		assert.Equal(t, 0, countB, "org A should not see org B's records")
 	})
-}
-
-// containsString checks if a string contains a substring
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && (s[:len(substr)] == substr || containsString(s[1:], substr)))
 }
