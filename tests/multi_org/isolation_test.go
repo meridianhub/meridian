@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -27,15 +26,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// errWrongSearchPath indicates the search_path was not set correctly for the organization.
+// errWrongSearchPath is a sentinel error for schema search path validation in concurrent tests.
 var errWrongSearchPath = errors.New("wrong search_path for organization")
-
-// TestMain sets up shared test infrastructure (containers) for all tests in this package.
-func TestMain(m *testing.M) {
-	// Run tests
-	code := m.Run()
-	os.Exit(code)
-}
 
 // =============================================================================
 // Test Infrastructure Setup
@@ -73,7 +65,7 @@ func setupPostgresWithOrgSchemas(ctx context.Context, t *testing.T, orgs ...stri
 
 	cfg := db.DefaultConfig(connStr)
 	cfg.MaxConnections = 10
-	cfg.MinConnections = 2
+	cfg.MinConnections = 1
 
 	pool, err := db.NewPostgresPool(ctx, cfg)
 	require.NoError(t, err, "failed to create postgres pool")
@@ -369,6 +361,23 @@ func TestOrganizationSchemaNameQuoting(t *testing.T) {
 			assert.Contains(t, quoted, schemaName)
 		})
 	}
+
+	// Test case-insensitive schema name collision handling
+	// PostgreSQL identifiers are case-insensitive by default, so ACME and acme
+	// must resolve to the same schema to prevent accidental cross-org access
+	t.Run("case_insensitive_schema_names_handled", func(t *testing.T) {
+		orgUpper := organization.MustNewOrganizationID("ACME")
+		orgLower := organization.MustNewOrganizationID("acme")
+		orgMixed := organization.MustNewOrganizationID("Acme")
+
+		// All case variants should produce identical schema names
+		assert.Equal(t, orgUpper.SchemaName(), orgLower.SchemaName(),
+			"ACME and acme should produce the same schema name")
+		assert.Equal(t, orgLower.SchemaName(), orgMixed.SchemaName(),
+			"acme and Acme should produce the same schema name")
+		assert.Equal(t, "org_acme", orgUpper.SchemaName(),
+			"schema name should be lowercase with org_ prefix")
+	})
 }
 
 // =============================================================================
