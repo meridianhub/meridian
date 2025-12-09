@@ -1,4 +1,3 @@
-//nolint:misspell // Proto uses British spelling for ORGANISATION
 package service
 
 import (
@@ -126,7 +125,7 @@ func TestRegisterParty(t *testing.T) {
 		svc := newTestService(mock)
 
 		req := &pb.RegisterPartyRequest{
-			PartyType:   pb.PartyType_PARTY_TYPE_ORGANISATION, //nolint:misspell // Proto uses British spelling
+			PartyType:   pb.PartyType_PARTY_TYPE_ORGANIZATION,
 			LegalName:   "Acme Corporation Ltd",
 			DisplayName: "Acme Corp",
 		}
@@ -136,7 +135,7 @@ func TestRegisterParty(t *testing.T) {
 		require.NotNil(t, resp)
 		require.NotNil(t, resp.Party)
 
-		assert.Equal(t, pb.PartyType_PARTY_TYPE_ORGANISATION, resp.Party.PartyType) //nolint:misspell // Proto uses British spelling
+		assert.Equal(t, pb.PartyType_PARTY_TYPE_ORGANIZATION, resp.Party.PartyType)
 		assert.Equal(t, "Acme Corporation Ltd", resp.Party.LegalName)
 		assert.Equal(t, "Acme Corp", resp.Party.DisplayName)
 	})
@@ -146,7 +145,7 @@ func TestRegisterParty(t *testing.T) {
 		svc := newTestService(mock)
 
 		req := &pb.RegisterPartyRequest{
-			PartyType:             pb.PartyType_PARTY_TYPE_ORGANISATION, //nolint:misspell // Proto uses British spelling
+			PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
 			LegalName:             "Tech Company Ltd",
 			ExternalReference:     "12345678",
 			ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
@@ -210,7 +209,7 @@ func TestRegisterParty(t *testing.T) {
 
 		// Attempt duplicate registration
 		req := &pb.RegisterPartyRequest{
-			PartyType:             pb.PartyType_PARTY_TYPE_ORGANISATION, //nolint:misspell // Proto uses British spelling
+			PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
 			LegalName:             "New Corp",
 			ExternalReference:     "12345678",
 			ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
@@ -230,7 +229,7 @@ func TestRegisterParty(t *testing.T) {
 		svc := newTestService(mock)
 
 		req := &pb.RegisterPartyRequest{
-			PartyType:             pb.PartyType_PARTY_TYPE_ORGANISATION, //nolint:misspell // Proto uses British spelling
+			PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
 			LegalName:             "Test Corp",
 			ExternalReference:     "12345678",
 			ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED,
@@ -250,7 +249,7 @@ func TestRegisterParty(t *testing.T) {
 		svc := newTestService(mock)
 
 		req := &pb.RegisterPartyRequest{
-			PartyType:             pb.PartyType_PARTY_TYPE_ORGANISATION, //nolint:misspell // Proto uses British spelling
+			PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
 			LegalName:             "Test Corp",
 			ExternalReference:     "",
 			ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
@@ -272,7 +271,7 @@ func TestRegisterParty(t *testing.T) {
 		svc := newTestService(mock)
 
 		req := &pb.RegisterPartyRequest{
-			PartyType:             pb.PartyType_PARTY_TYPE_ORGANISATION, //nolint:misspell // Proto uses British spelling
+			PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
 			LegalName:             "Test Corp",
 			ExternalReference:     "12345678",
 			ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
@@ -408,13 +407,15 @@ func TestRetrieveParty(t *testing.T) {
 func TestPartyTypeConversions(t *testing.T) {
 	t.Run("protoToPartyType", func(t *testing.T) {
 		tests := []struct {
+			name     string
 			input    pb.PartyType
 			expected domain.PartyType
 			wantErr  bool
 		}{
-			{pb.PartyType_PARTY_TYPE_PERSON, domain.PartyTypePerson, false},
-			{pb.PartyType_PARTY_TYPE_ORGANISATION, domain.PartyTypeOrganization, false},
-			{pb.PartyType_PARTY_TYPE_UNSPECIFIED, "", true},
+			{"person type", pb.PartyType_PARTY_TYPE_PERSON, domain.PartyTypePerson, false},
+			{"organization type", pb.PartyType_PARTY_TYPE_ORGANIZATION, domain.PartyTypeOrganization, false},
+			{"unspecified type returns error", pb.PartyType_PARTY_TYPE_UNSPECIFIED, "", true},
+			{"unknown enum value returns error", pb.PartyType(999), "", true},
 		}
 
 		for _, tt := range tests {
@@ -434,7 +435,7 @@ func TestPartyTypeConversions(t *testing.T) {
 			expected pb.PartyType
 		}{
 			{domain.PartyTypePerson, pb.PartyType_PARTY_TYPE_PERSON},
-			{domain.PartyTypeOrganization, pb.PartyType_PARTY_TYPE_ORGANISATION},
+			{domain.PartyTypeOrganization, pb.PartyType_PARTY_TYPE_ORGANIZATION},
 			{"UNKNOWN", pb.PartyType_PARTY_TYPE_UNSPECIFIED},
 		}
 
@@ -507,6 +508,11 @@ func TestExternalRefTypeConversions(t *testing.T) {
 }
 
 func TestDomainToProto(t *testing.T) {
+	t.Run("returns nil for nil party", func(t *testing.T) {
+		result := domainToProto(nil)
+		assert.Nil(t, result)
+	})
+
 	t.Run("converts party with all fields", func(t *testing.T) {
 		party, err := domain.NewParty(domain.PartyTypeOrganization, "Test Corp Ltd")
 		require.NoError(t, err)
@@ -520,7 +526,7 @@ func TestDomainToProto(t *testing.T) {
 		protoParty := domainToProto(party)
 
 		assert.Equal(t, party.ID().String(), protoParty.PartyId)
-		assert.Equal(t, pb.PartyType_PARTY_TYPE_ORGANISATION, protoParty.PartyType)
+		assert.Equal(t, pb.PartyType_PARTY_TYPE_ORGANIZATION, protoParty.PartyType)
 		assert.Equal(t, "Test Corp Ltd", protoParty.LegalName)
 		assert.Equal(t, "Test Corp", protoParty.DisplayName)
 		assert.Equal(t, pb.PartyStatus_PARTY_STATUS_ACTIVE, protoParty.Status)

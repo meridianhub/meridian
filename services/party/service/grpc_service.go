@@ -59,7 +59,9 @@ func NewService(repo Repository, logger *slog.Logger) (*Service, error) {
 
 // RegisterParty creates a new party in the reference data directory
 func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyRequest) (*pb.RegisterPartyResponse, error) {
-	// Map proto party type to domain type
+	// === Input validation (fail-fast) ===
+
+	// Validate party type
 	partyType, err := protoToPartyType(req.PartyType)
 	if err != nil {
 		s.logger.Error("invalid party type",
@@ -68,7 +70,27 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party type: %v", err)
 	}
 
-	// Create domain party
+	// Validate external reference and type consistency
+	if req.ExternalReferenceType != pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED && req.ExternalReference == "" {
+		s.logger.Error("external reference type provided without reference",
+			"external_reference_type", req.ExternalReferenceType.String())
+		return nil, status.Errorf(codes.InvalidArgument, "external reference required when type is specified")
+	}
+
+	// Validate external reference type if external reference is provided
+	var extRefType domain.ExternalReferenceType
+	if req.ExternalReference != "" {
+		extRefType, err = protoToExternalRefType(req.ExternalReferenceType)
+		if err != nil {
+			s.logger.Error("invalid external reference type",
+				"external_reference_type", req.ExternalReferenceType.String(),
+				"error", err)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid external reference type: %v", err)
+		}
+	}
+
+	// === Domain object creation ===
+
 	party, err := domain.NewParty(partyType, req.LegalName)
 	if err != nil {
 		s.logger.Error("failed to create party",
@@ -86,23 +108,9 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 		}
 	}
 
-	// Validate external reference and type consistency
-	if req.ExternalReferenceType != pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED && req.ExternalReference == "" {
-		s.logger.Error("external reference type provided without reference",
-			"external_reference_type", req.ExternalReferenceType.String())
-		return nil, status.Errorf(codes.InvalidArgument, "external reference required when type is specified")
-	}
+	// === External reference handling ===
 
-	// Set optional external reference
 	if req.ExternalReference != "" {
-		extRefType, err := protoToExternalRefType(req.ExternalReferenceType)
-		if err != nil {
-			s.logger.Error("invalid external reference type",
-				"external_reference_type", req.ExternalReferenceType.String(),
-				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "invalid external reference type: %v", err)
-		}
-
 		// Check for duplicate external reference
 		existing, err := s.repo.FindByExternalReference(ctx, req.ExternalReference, string(extRefType))
 		if err != nil && !errors.Is(err, persistence.ErrPartyNotFound) {
@@ -181,8 +189,12 @@ func (s *Service) RetrieveParty(ctx context.Context, req *pb.RetrievePartyReques
 	}, nil
 }
 
-// domainToProto converts a domain Party to a proto Party message
+// domainToProto converts a domain Party to a proto Party message.
+// Returns nil if the input party is nil.
 func domainToProto(party *domain.Party) *pb.Party {
+	if party == nil {
+		return nil
+	}
 	return &pb.Party{
 		PartyId:               party.ID().String(),
 		PartyType:             partyTypeToProto(party.PartyType()),
@@ -203,7 +215,7 @@ func protoToPartyType(pt pb.PartyType) (domain.PartyType, error) {
 	switch pt {
 	case pb.PartyType_PARTY_TYPE_PERSON:
 		return domain.PartyTypePerson, nil
-	case pb.PartyType_PARTY_TYPE_ORGANISATION: //nolint:misspell // Proto uses British spelling
+	case pb.PartyType_PARTY_TYPE_ORGANIZATION:
 		return domain.PartyTypeOrganization, nil
 	case pb.PartyType_PARTY_TYPE_UNSPECIFIED:
 		return "", domain.ErrInvalidPartyType
@@ -218,7 +230,7 @@ func partyTypeToProto(pt domain.PartyType) pb.PartyType {
 	case domain.PartyTypePerson:
 		return pb.PartyType_PARTY_TYPE_PERSON
 	case domain.PartyTypeOrganization:
-		return pb.PartyType_PARTY_TYPE_ORGANISATION //nolint:misspell // Proto uses British spelling
+		return pb.PartyType_PARTY_TYPE_ORGANIZATION
 	default:
 		return pb.PartyType_PARTY_TYPE_UNSPECIFIED
 	}

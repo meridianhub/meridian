@@ -53,8 +53,8 @@ enum PartyType {
   PARTY_TYPE_UNSPECIFIED = 0;
   // PARTY_TYPE_PERSON is a natural person (individual).
   PARTY_TYPE_PERSON = 1;
-  // PARTY_TYPE_ORGANISATION is a legal entity (company, partnership, etc.).
-  PARTY_TYPE_ORGANISATION = 2;
+  // PARTY_TYPE_ORGANIZATION is a legal entity (company, partnership, etc.).
+  PARTY_TYPE_ORGANIZATION = 2;
 }
 
 // PartyStatus defines the lifecycle state of a party in the reference data directory.
@@ -84,7 +84,7 @@ enum ExternalReferenceType {
 }
 
 // Party represents a legal entity in the BIAN Party Reference Data Directory.
-// A party can be a person (natural) or organisation (legal entity).
+// A party can be a person (natural) or organization (legal entity).
 message Party {
   // party_id is the unique identifier for this party (alphanumeric with hyphens/underscores).
   string party_id = 1 [(buf.validate.field).string = {
