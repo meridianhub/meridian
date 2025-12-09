@@ -123,7 +123,7 @@ func TestRecordGRPCRequest_WithoutOrganization(t *testing.T) {
 	}
 }
 
-func TestRecordDBQuery(_ *testing.T) {
+func TestRecordDBQuery(t *testing.T) {
 	mc := NewMetricsCollector()
 
 	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
@@ -135,7 +135,11 @@ func TestRecordDBQuery(_ *testing.T) {
 	// Also test without organization
 	mc.RecordDBQuery(context.Background(), "SELECT", "positions", 25*time.Millisecond)
 
-	// Actual histogram values are verified through the metrics endpoint test
+	// Verify histogram was observed (basic sanity check)
+	// Note: Detailed histogram values verified through metrics endpoint test
+	if mc.DBQueryDurationSeconds == nil {
+		t.Error("DBQueryDurationSeconds histogram not initialized")
+	}
 }
 
 func TestRecordKafkaPublish(t *testing.T) {

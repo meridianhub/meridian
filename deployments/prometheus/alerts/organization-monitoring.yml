@@ -104,11 +104,16 @@ groups:
           runbook_url: "https://docs.meridian.io/runbooks/organization-high-db-latency"
 
       # Kafka message processing issues for organization
+      # Minimum traffic guard (0.1 msg/s) prevents alerts from low-traffic noise
       - alert: OrganizationKafkaErrors
         expr: |
-          sum(rate(kafka_messages_published_total{organization!="unknown", status="error"}[5m])) by (organization)
-          / sum(rate(kafka_messages_published_total{organization!="unknown"}[5m])) by (organization)
-          > 0.01
+          (
+            sum(rate(kafka_messages_published_total{organization!="unknown", status="error"}[5m])) by (organization)
+            / sum(rate(kafka_messages_published_total{organization!="unknown"}[5m])) by (organization)
+            > 0.01
+          )
+          and
+          sum(rate(kafka_messages_published_total{organization!="unknown"}[5m])) by (organization) > 0.1
         for: 5m
         labels:
           severity: warning
