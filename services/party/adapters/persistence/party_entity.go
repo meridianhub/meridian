@@ -15,12 +15,12 @@ type PartyEntity struct {
 	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 
 	// Business fields
-	PartyType             string  `gorm:"column:party_type;type:varchar(20);not null"`
+	PartyType             string  `gorm:"column:party_type;type:varchar(20);not null;index:idx_parties_party_type"`
 	LegalName             string  `gorm:"column:legal_name;type:varchar(255);not null"`
 	DisplayName           *string `gorm:"column:display_name;type:varchar(255)"`
-	Status                string  `gorm:"column:status;type:varchar(20);not null;default:'ACTIVE'"`
-	ExternalReference     *string `gorm:"column:external_reference;type:varchar(50);uniqueIndex:idx_party_external_ref,where:external_reference IS NOT NULL"`
-	ExternalReferenceType *string `gorm:"column:external_reference_type;type:varchar(30)"`
+	Status                string  `gorm:"column:status;type:varchar(20);not null;default:'ACTIVE';index:idx_parties_status"`
+	ExternalReference     *string `gorm:"column:external_reference;type:varchar(100);uniqueIndex:idx_party_external_ref,where:external_reference IS NOT NULL AND deleted_at IS NULL"`
+	ExternalReferenceType *string `gorm:"column:external_reference_type;type:varchar(30);uniqueIndex:idx_party_external_ref,where:external_reference IS NOT NULL AND deleted_at IS NULL"`
 
 	// Optimistic locking
 	Version int64 `gorm:"column:version;not null;default:1"`
