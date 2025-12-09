@@ -29,6 +29,7 @@ type mockRepository struct {
 	externalRefs         map[string]*domain.Party
 	saveErr              error
 	findByIDErr          error
+	findByIDForUpdateErr error
 	findByExternalRefErr error
 }
 
@@ -62,6 +63,17 @@ func (m *mockRepository) FindByID(_ context.Context, id uuid.UUID) (*domain.Part
 	return party, nil
 }
 
+func (m *mockRepository) FindByIDForUpdate(_ context.Context, id uuid.UUID) (*domain.Party, error) {
+	if m.findByIDForUpdateErr != nil {
+		return nil, m.findByIDForUpdateErr
+	}
+	party, ok := m.parties[id]
+	if !ok {
+		return nil, persistence.ErrPartyNotFound
+	}
+	return party, nil
+}
+
 func (m *mockRepository) FindByExternalReference(_ context.Context, ref, refType string) (*domain.Party, error) {
 	if m.findByExternalRefErr != nil {
 		return nil, m.findByExternalRefErr
@@ -81,6 +93,8 @@ func newTestService(mock *mockRepository) *Service {
 }
 
 func TestNewService(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns error when repository is nil", func(t *testing.T) {
 		svc, err := NewService(nil, nil)
 		assert.Nil(t, svc)
@@ -97,6 +111,8 @@ func TestNewService(t *testing.T) {
 }
 
 func TestRegisterParty(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	t.Run("registers person party successfully", func(t *testing.T) {
@@ -326,6 +342,8 @@ func TestRegisterParty(t *testing.T) {
 }
 
 func TestRetrieveParty(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	t.Run("retrieves existing party successfully", func(t *testing.T) {
@@ -405,6 +423,8 @@ func TestRetrieveParty(t *testing.T) {
 }
 
 func TestPartyTypeConversions(t *testing.T) {
+	t.Parallel()
+
 	t.Run("protoToPartyType", func(t *testing.T) {
 		tests := []struct {
 			name     string
@@ -447,6 +467,8 @@ func TestPartyTypeConversions(t *testing.T) {
 }
 
 func TestPartyStatusConversions(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		input    domain.PartyStatus
 		expected pb.PartyStatus
@@ -464,6 +486,8 @@ func TestPartyStatusConversions(t *testing.T) {
 }
 
 func TestExternalRefTypeConversions(t *testing.T) {
+	t.Parallel()
+
 	t.Run("protoToExternalRefType", func(t *testing.T) {
 		tests := []struct {
 			input    pb.ExternalReferenceType
@@ -508,6 +532,8 @@ func TestExternalRefTypeConversions(t *testing.T) {
 }
 
 func TestDomainToProto(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns nil for nil party", func(t *testing.T) {
 		result := domainToProto(nil)
 		assert.Nil(t, result)

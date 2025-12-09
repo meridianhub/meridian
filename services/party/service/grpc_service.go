@@ -31,6 +31,7 @@ var (
 type Repository interface {
 	Save(ctx context.Context, party *domain.Party) error
 	FindByID(ctx context.Context, partyID uuid.UUID) (*domain.Party, error)
+	FindByIDForUpdate(ctx context.Context, partyID uuid.UUID) (*domain.Party, error)
 	FindByExternalReference(ctx context.Context, ref, refType string) (*domain.Party, error)
 }
 
