@@ -74,12 +74,46 @@ func (r *Repository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.
 		// Single-tenant mode: run directly without transaction overhead
 		return fn(r.db.WithContext(ctx))
 	}
-	// Multi-org mode: wrap in transaction for search_path scoping
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		tx, err := r.withOrganizationScope(ctx, tx)
+	// Multi-org mode: use the shared helper that handles transaction + org scope
+	return db.WithGormOrganizationTransaction(ctx, r.db, fn)
+}
+
+// isInTransaction checks if the repository's db connection is already within a transaction.
+// This is used to avoid creating nested transactions when the caller has already established one.
+func (r *Repository) isInTransaction() bool {
+	// GORM sets ConnPool to a transaction object when in transaction mode.
+	// We check if the underlying database is a transaction by attempting to get the DB.
+	// In a transaction, Statement.ConnPool will be of type *sql.Tx (or GORM's tx wrapper).
+	committer, ok := r.db.Statement.ConnPool.(gorm.TxCommitter)
+	return ok && committer != nil
+}
+
+// withForUpdateScope executes the given function with FOR UPDATE locking support.
+// If already in a transaction (via WithTx), it uses the existing transaction directly
+// with org scope set. If not in a transaction, it creates a new one with org scope.
+//
+// This prevents the security issue where nested transactions would have search_path
+// set only on the inner transaction, while the outer transaction operates without it.
+func (r *Repository) withForUpdateScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if r.isInTransaction() {
+		// Already in a transaction (via WithTx) - use it directly with org scope
+		// The caller (e.g., lien_service.go) is responsible for the outer transaction,
+		// but we still need to set the org scope for this operation.
+		// Note: withOrganizationScope returns already-wrapped errors, so don't re-wrap.
+		tx, err := r.withOrganizationScope(ctx, r.db.WithContext(ctx))
 		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
+			return err
 		}
+		return fn(tx)
+	}
+
+	// Not in a transaction - use the shared helper that handles transaction + org scope
+	if r.hasOrganizationContext(ctx) {
+		return db.WithGormOrganizationTransaction(ctx, r.db, fn)
+	}
+
+	// Single-tenant mode: still need a transaction for FOR UPDATE, but no org scope
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(tx)
 	})
 }
@@ -102,9 +136,10 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Set organization scope if in multi-org mode
+		// Note: withOrganizationScope returns already-wrapped errors from db.WithGormOrganizationScope
 		tx, err := r.withOrganizationScope(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
+			return err
 		}
 
 		// Check if exists by account_identification (IBAN)
@@ -191,17 +226,16 @@ func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.Cu
 // FindByIDForUpdate retrieves an account by its account identification with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
 // In multi-org mode, the context must contain the organization ID for schema routing.
-// Note: FOR UPDATE requires a transaction, so we always use one regardless of org context.
+//
+// IMPORTANT: This method expects to be called within an existing transaction that already
+// has the organization scope set. When using WithTx(), the caller is responsible for setting
+// the org scope on the outer transaction. This method will set the org scope if not already
+// in a transaction, but when called via WithTx(), it uses the existing transaction directly.
 func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
 
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		tx, err = r.withOrganizationScope(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
-		}
-
+	// Perform the FOR UPDATE query, wrapping in org-scoped transaction if needed
+	err := r.withForUpdateScope(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("account_identification = ? AND deleted_at IS NULL", accountID).
@@ -215,6 +249,7 @@ func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*
 			return result.Error
 		}
 
+		var err error
 		account, err = toDomain(&entity)
 		return err
 	})
@@ -277,17 +312,16 @@ func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.Curr
 // FindByUUIDForUpdate retrieves an account by its internal UUID with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
 // In multi-org mode, the context must contain the organization ID for schema routing.
-// Note: FOR UPDATE requires a transaction, so we always use one regardless of org context.
+//
+// IMPORTANT: This method expects to be called within an existing transaction that already
+// has the organization scope set. When using WithTx(), the caller is responsible for setting
+// the org scope on the outer transaction. This method will set the org scope if not already
+// in a transaction, but when called via WithTx(), it uses the existing transaction directly.
 func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
 
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		tx, err = r.withOrganizationScope(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("failed to set organization schema scope: %w", err)
-		}
-
+	// Perform the FOR UPDATE query, wrapping in org-scoped transaction if needed
+	err := r.withForUpdateScope(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND deleted_at IS NULL", id).
@@ -301,6 +335,7 @@ func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*do
 			return result.Error
 		}
 
+		var err error
 		account, err = toDomain(&entity)
 		return err
 	})

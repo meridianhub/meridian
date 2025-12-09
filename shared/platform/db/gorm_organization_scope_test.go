@@ -209,3 +209,81 @@ func TestWithGormOrganizationScope_SpecialCharacters_QuotedProperly(t *testing.T
 		})
 	}
 }
+
+func TestWithGormOrganizationScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) {
+	// These test cases verify that pq.QuoteIdentifier properly escapes
+	// potentially malicious organization IDs to prevent SQL injection.
+	// Note: pq.QuoteIdentifier truncates at null bytes and uses lowercase.
+	testCases := []struct {
+		name           string
+		orgID          string
+		expectedSchema string // pq.QuoteIdentifier output
+	}{
+		{
+			name:  "SQL injection attempt with quote",
+			orgID: `evil"; drop table users; --`,
+			// pq.QuoteIdentifier escapes double quotes by doubling them
+			expectedSchema: `"org_evil""; drop table users; --"`,
+		},
+		{
+			name:           "SQL injection attempt with semicolon",
+			orgID:          "evil; drop table users",
+			expectedSchema: `"org_evil; drop table users"`,
+		},
+		{
+			name:  "null byte injection",
+			orgID: "evil\x00attack",
+			// pq.QuoteIdentifier truncates at the null byte
+			expectedSchema: `"org_evil"`,
+		},
+		{
+			name:           "unicode escape sequence for double quote",
+			orgID:          "evil\u0022injection",
+			expectedSchema: `"org_evil""injection"`, // \u0022 is a double quote, escaped by doubling
+		},
+		{
+			name:           "schema traversal attempt with dot",
+			orgID:          "public.accounts",
+			expectedSchema: `"org_public.accounts"`,
+		},
+		{
+			name:           "backslash injection",
+			orgID:          `evil\ninjection`,
+			expectedSchema: `"org_evil\ninjection"`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mock database with QueryMatcherEqual to avoid regex interpretation
+			mockDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+			require.NoError(t, err)
+			defer mockDB.Close()
+
+			// Create GORM instance with mock
+			gormDB, err := gorm.Open(postgres.New(postgres.Config{
+				Conn: mockDB,
+			}), &gorm.Config{})
+			require.NoError(t, err)
+
+			// Setup context with potentially malicious org ID
+			orgID := organization.OrganizationID(tc.orgID)
+			ctx := organization.WithOrganization(context.Background(), orgID)
+
+			// Expect the SET LOCAL query with properly escaped schema
+			// The schema should be safely quoted by pq.QuoteIdentifier
+			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
+			mock.ExpectExec(expected).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+
+			// Execute
+			result, err := WithGormOrganizationScope(ctx, gormDB)
+
+			// Assert - even with malicious input, the function should work
+			// because pq.QuoteIdentifier properly escapes the schema name
+			require.NoError(t, err)
+			assert.NotNil(t, result)
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
