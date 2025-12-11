@@ -148,9 +148,8 @@ func (h *HealthChecker) Watch(req *grpc_health_v1.HealthCheckRequest, stream grp
 	for {
 		select {
 		case <-ctx.Done():
-			// Client disconnected - this is normal behavior, not an error
 			h.logger.Debug("health watch stream closed", "reason", ctx.Err())
-			return nil
+			return fmt.Errorf("health watch context cancelled: %w", ctx.Err())
 
 		case <-ticker.C:
 			resp, err := h.Check(ctx, req)
