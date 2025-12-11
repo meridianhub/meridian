@@ -28,6 +28,29 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SERVICE_FILTER=""
 DRY_RUN=false
 
+show_help() {
+    cat <<EOF
+Usage: $0 [OPTIONS]
+
+Apply Atlas migrations to all active organization schemas.
+
+Options:
+  --service SERVICE  Apply migrations only for specified service (e.g., current-account)
+  --dry-run          Show what would be done without executing
+  -h, --help         Show this help message
+
+Environment Variables:
+  DATABASE_URL             Required. PostgreSQL connection string
+  ORGANIZATION_SERVICE_URL Optional. gRPC address (default: localhost:9090)
+
+Examples:
+  $0                           # Migrate all services for all active orgs
+  $0 --service current-account # Migrate only current-account service
+  $0 --dry-run                 # Preview what would be migrated
+EOF
+    exit 0
+}
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --service)
@@ -38,18 +61,38 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=true
             shift
             ;;
+        -h|--help)
+            show_help
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--service SERVICE] [--dry-run]"
+            echo "Usage: $0 [--service SERVICE] [--dry-run] [-h|--help]"
             exit 1
             ;;
     esac
 done
 
+# Function to mask credentials in database URL for logging
+mask_db_url() {
+    # Remove user:password@ portion from URL for safe logging
+    echo "$1" | sed -E 's|(postgres(ql)?://)([^:]+:[^@]+@)|\1***:***@|'
+}
+
+# Function to build URL with search_path parameter
+build_url_with_schema() {
+    local base_url="$1"
+    local schema="$2"
+    if [[ "$base_url" == *"?"* ]]; then
+        echo "${base_url}&search_path=${schema}"
+    else
+        echo "${base_url}?search_path=${schema}"
+    fi
+}
+
 echo "============================================"
 echo "Multi-Organization Atlas Migration"
 echo "============================================"
-echo "Database URL: ${DB_URL%%\?*}..."  # Hide credentials
+echo "Database URL: $(mask_db_url "$DB_URL")"
 echo "Organization Service: $ORG_SERVICE_URL"
 echo "Dry run: $DRY_RUN"
 echo ""
@@ -149,7 +192,7 @@ for CONFIG in "${CONFIGS[@]}"; do
         if atlas migrate apply \
             --env local \
             --config "$CONFIG" \
-            --url "${DB_URL}&search_path=${ORG_SCHEMA}" \
+            --url "$(build_url_with_schema "$DB_URL" "$ORG_SCHEMA")" \
             --tx-mode none 2>&1; then
             echo "    ✓ $ORG_SCHEMA complete"
             SUCCESS_ORGS+=("$ORG_ID:$SERVICE")
