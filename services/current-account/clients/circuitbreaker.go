@@ -10,20 +10,24 @@ import (
 )
 
 // CircuitBreakerConfig is an alias to the shared implementation.
+//
 // Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
 type CircuitBreakerConfig = sharedclients.CircuitBreakerConfig
 
 // CircuitBreaker is an alias to the shared implementation.
+//
 // Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
 type CircuitBreaker = sharedclients.CircuitBreaker
 
 // DefaultCircuitBreakerConfig returns a circuit breaker configuration with sensible defaults.
+//
 // Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
 func DefaultCircuitBreakerConfig(name string) CircuitBreakerConfig {
 	return sharedclients.DefaultCircuitBreakerConfig(name)
 }
 
 // NewCircuitBreaker creates a new circuit breaker with the given configuration.
+//
 // Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
 var NewCircuitBreaker = sharedclients.NewCircuitBreaker
 

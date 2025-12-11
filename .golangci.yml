@@ -1,7 +1,7 @@
 # golangci-lint configuration for Meridian
 # Production-grade Go linting with strict quality standards
 
-version: 2
+version: "2"
 
 run:
   timeout: 5m
@@ -140,6 +140,18 @@ linters:
           - gocyclo
           - gocognit
 
+      # Exclude var-naming for http adapter packages (intentionally named 'http' for clarity)
+      - path: services/.*/adapters/http/
+        text: "var-naming: avoid package names that conflict"
+        linters:
+          - revive
+
+      # Exclude deprecatedComment for current-account clients (backward compat layer)
+      - path: services/current-account/clients/
+        text: "deprecatedComment"
+        linters:
+          - gocritic
+
       # Exclude misspell for protobuf enum references (CANCELLED is the official enum name)
       - text: "CANCELLED.*is a misspelling of.*CANCELED"
         linters:
@@ -244,8 +256,5 @@ formatters:
 
 output:
   formats:
-    colored-line-number:
+    text:
       path: stdout
-  print-issued-lines: true
-  print-linter-name: true
-  sort-results: true

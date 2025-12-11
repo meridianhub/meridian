@@ -209,7 +209,7 @@ jobs:
           .
 
     - name: Generate SBOM with Syft
-      uses: anchore/sbom-action@v0
+      uses: anchore/sbom-action@v0.20.11
       with:
         image: meridian:sbom
         format: spdx-json
