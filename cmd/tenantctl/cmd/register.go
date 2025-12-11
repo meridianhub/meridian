@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	organizationv1 "github.com/meridianhub/meridian/api/proto/meridian/organization/v1"
+	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -20,25 +20,25 @@ var (
 
 var registerCmd = &cobra.Command{
 	Use:   "register",
-	Short: "Register a new organization",
-	Long: `Register a new organization in the Meridian platform.
+	Short: "Register a new tenant",
+	Long: `Register a new tenant in the Meridian platform.
 
-This command creates a new organization entry in the platform registry. The organization
+This command creates a new tenant entry in the platform registry. The tenant
 ID must be unique and follow the pattern: alphanumeric characters and underscores only,
 1-50 characters.
 
-The operation is idempotent - registering an existing organization ID will succeed
+The operation is idempotent - registering an existing tenant ID will succeed
 without creating a duplicate.
 
 Examples:
   # Register a bank with GBP settlement
-  orgctl register --id=acme_bank --name="Acme Bank" --settlement-asset=GBP
+  tenantctl register --id=acme_bank --name="Acme Bank" --settlement-asset=GBP
 
   # Register with custom settlement asset
-  orgctl register --id=un_wfp --name="UN World Food Program" --settlement-asset=RICE-VOUCHER
+  tenantctl register --id=un_wfp --name="UN World Food Program" --settlement-asset=RICE-VOUCHER
 
   # Register with subdomain and metadata
-  orgctl register --id=test_org --name="Test Org" --settlement-asset=USD \
+  tenantctl register --id=test_org --name="Test Org" --settlement-asset=USD \
     --subdomain=test.demo.meridian.io --metadata tier=enterprise`,
 	RunE: runRegister,
 }
@@ -46,7 +46,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(registerCmd)
 
-	registerCmd.Flags().StringVar(&registerID, "id", "", "Organization ID (required, alphanumeric + underscore, 1-50 chars)")
+	registerCmd.Flags().StringVar(&registerID, "id", "", "Tenant ID (required, alphanumeric + underscore, 1-50 chars)")
 	registerCmd.Flags().StringVar(&registerName, "name", "", "Display name (required)")
 	registerCmd.Flags().StringVar(&registerSettlementAsset, "settlement-asset", "", "Primary settlement asset (required, e.g., GBP, USD, GPU-HOUR)")
 	registerCmd.Flags().StringVar(&registerSubdomain, "subdomain", "", "API subdomain (optional)")
@@ -58,12 +58,12 @@ func init() {
 }
 
 func runRegister(_ *cobra.Command, _ []string) error {
-	orgClient, err := newClient()
+	tenantClient, err := newClient()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to create client: %v\n", err)
 		return err
 	}
-	defer func() { _ = orgClient.Close() }()
+	defer func() { _ = tenantClient.Close() }()
 
 	// Convert metadata to protobuf Struct
 	var metadata *structpb.Struct
@@ -80,31 +80,31 @@ func runRegister(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	req := &organizationv1.InitiateOrganizationRequest{
-		OrganizationId:  registerID,
+	req := &tenantv1.InitiateTenantRequest{
+		TenantId:        registerID,
 		DisplayName:     registerName,
 		SettlementAsset: registerSettlementAsset,
 		Subdomain:       registerSubdomain,
 		Metadata:        metadata,
 	}
 
-	resp, err := orgClient.InitiateOrganization(context.Background(), req)
-	exitCode := handleGRPCError(err, "register organization")
+	resp, err := tenantClient.InitiateTenant(context.Background(), req)
+	exitCode := handleGRPCError(err, "register tenant")
 	if exitCode != 0 && err != nil {
 		return err
 	}
 
-	if resp != nil && resp.Organization != nil {
-		org := resp.Organization
-		fmt.Printf("Organization registered successfully:\n")
-		fmt.Printf("  ID:               %s\n", org.OrganizationId)
-		fmt.Printf("  Name:             %s\n", org.DisplayName)
-		fmt.Printf("  Settlement Asset: %s\n", org.SettlementAsset)
-		fmt.Printf("  Status:           %s\n", org.Status.String())
-		if org.Subdomain != "" {
-			fmt.Printf("  Subdomain:        %s\n", org.Subdomain)
+	if resp != nil && resp.Tenant != nil {
+		tenant := resp.Tenant
+		fmt.Printf("Tenant registered successfully:\n")
+		fmt.Printf("  ID:               %s\n", tenant.TenantId)
+		fmt.Printf("  Name:             %s\n", tenant.DisplayName)
+		fmt.Printf("  Settlement Asset: %s\n", tenant.SettlementAsset)
+		fmt.Printf("  Status:           %s\n", tenant.Status.String())
+		if tenant.Subdomain != "" {
+			fmt.Printf("  Subdomain:        %s\n", tenant.Subdomain)
 		}
-		fmt.Printf("  Created At:       %s\n", org.CreatedAt.AsTime().Format("2006-01-02 15:04:05 UTC"))
+		fmt.Printf("  Created At:       %s\n", tenant.CreatedAt.AsTime().Format("2006-01-02 15:04:05 UTC"))
 	}
 
 	return nil

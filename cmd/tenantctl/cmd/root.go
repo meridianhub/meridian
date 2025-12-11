@@ -1,4 +1,4 @@
-// Package cmd implements the orgctl CLI commands.
+// Package cmd implements the tenantctl CLI commands.
 package cmd
 
 import (
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridianhub/meridian/cmd/orgctl/client"
+	"github.com/meridianhub/meridian/cmd/tenantctl/client"
 	"github.com/spf13/cobra"
 )
 
@@ -17,12 +17,12 @@ import (
 var (
 	// ErrConfirmRequired is returned when the --confirm flag is not provided.
 	ErrConfirmRequired = errors.New("--confirm flag required")
-	// ErrOrganizationNotFound is returned when an organization cannot be found.
-	ErrOrganizationNotFound = errors.New("organization not found")
+	// ErrTenantNotFound is returned when a tenant cannot be found.
+	ErrTenantNotFound = errors.New("tenant not found")
 )
 
 var (
-	// serviceURL is the organization service URL (e.g., "localhost:50056").
+	// serviceURL is the tenant service URL (e.g., "localhost:50056").
 	serviceURL string
 	// timeout is the gRPC call timeout.
 	timeout time.Duration
@@ -30,26 +30,26 @@ var (
 
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
-	Use:   "orgctl",
-	Short: "Organization management CLI for Meridian platform",
-	Long: `orgctl is a command-line tool for managing organizations in the Meridian platform.
+	Use:   "tenantctl",
+	Short: "Tenant management CLI for Meridian platform",
+	Long: `tenantctl is a command-line tool for managing tenants in the Meridian platform.
 
 It provides commands to register, retrieve, list, and manage the lifecycle of
-organizations. Organizations represent tenants in the multi-tenant platform,
+tenants. Tenants represent platform tenants in the multi-tenant platform,
 each with their own isolated PostgreSQL schema (org_{id}).
 
 Examples:
-  # Register a new organization
-  orgctl register --id=acme_bank --name="Acme Bank" --settlement-asset=GBP
+  # Register a new tenant
+  tenantctl register --id=acme_bank --name="Acme Bank" --settlement-asset=GBP
 
-  # List all active organizations
-  orgctl list --status=active
+  # List all active tenants
+  tenantctl list --status=active
 
-  # Get organization details
-  orgctl get acme_bank
+  # Get tenant details
+  tenantctl get acme_bank
 
-  # Deprovision an organization (mark as deprovisioned)
-  orgctl deprovision acme_bank --confirm`,
+  # Deprovision a tenant (mark as deprovisioned)
+  tenantctl deprovision acme_bank --confirm`,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -60,7 +60,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&serviceURL, "service-url", getEnvOrDefault("ORGANIZATION_SERVICE_URL", "localhost:50056"), "Organization service URL")
+	rootCmd.PersistentFlags().StringVar(&serviceURL, "service-url", getEnvOrDefault("TENANT_SERVICE_URL", "localhost:50056"), "Tenant service URL")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "gRPC call timeout")
 }
 
@@ -72,13 +72,13 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-// newClient creates a new OrganizationClient using the global flags.
-func newClient() (*client.OrganizationClient, error) {
+// newClient creates a new TenantClient using the global flags.
+func newClient() (*client.TenantClient, error) {
 	cfg := client.Config{
 		ServiceURL: serviceURL,
 		Timeout:    timeout,
 	}
-	return client.NewOrganizationClient(context.Background(), cfg)
+	return client.NewTenantClient(context.Background(), cfg)
 }
 
 // handleGRPCError handles gRPC errors and prints user-friendly messages.
@@ -105,7 +105,7 @@ func handleGRPCError(err error, operation string) int {
 		fmt.Fprintf(os.Stderr, "Error: Operation not allowed for %s: %v\n", operation, err)
 		return 1
 	case strings.Contains(errStr, "Unavailable"):
-		fmt.Fprintf(os.Stderr, "Error: Organization service unavailable: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: Tenant service unavailable: %v\n", err)
 		return 1
 	case strings.Contains(errStr, "DeadlineExceeded"):
 		fmt.Fprintf(os.Stderr, "Error: Request timeout for %s\n", operation)

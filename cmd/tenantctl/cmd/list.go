@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	organizationv1 "github.com/meridianhub/meridian/api/proto/meridian/organization/v1"
+	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -23,27 +23,27 @@ var (
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all organizations",
-	Long: `List all organizations in the Meridian platform.
+	Short: "List all tenants",
+	Long: `List all tenants in the Meridian platform.
 
-This command retrieves and displays all registered organizations. You can filter
-by status to show only active, suspended, or deprovisioned organizations.
+This command retrieves and displays all registered tenants. You can filter
+by status to show only active, suspended, or deprovisioned tenants.
 
 Examples:
-  # List all organizations
-  orgctl list
+  # List all tenants
+  tenantctl list
 
-  # List only active organizations
-  orgctl list --status=active
+  # List only active tenants
+  tenantctl list --status=active
 
-  # List suspended organizations
-  orgctl list --status=suspended
+  # List suspended tenants
+  tenantctl list --status=suspended
 
   # List with custom page size
-  orgctl list --page-size=100
+  tenantctl list --page-size=100
 
   # Fetch next page using page token
-  orgctl list --page-token=<token>`,
+  tenantctl list --page-token=<token>`,
 	RunE: runList,
 }
 
@@ -56,14 +56,14 @@ func init() {
 }
 
 func runList(_ *cobra.Command, _ []string) error {
-	orgClient, err := newClient()
+	tenantClient, err := newClient()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to create client: %v\n", err)
 		return err
 	}
-	defer func() { _ = orgClient.Close() }()
+	defer func() { _ = tenantClient.Close() }()
 
-	req := &organizationv1.ListOrganizationsRequest{
+	req := &tenantv1.ListTenantsRequest{
 		PageSize:  listPageSize,
 		PageToken: listPageToken,
 	}
@@ -78,14 +78,14 @@ func runList(_ *cobra.Command, _ []string) error {
 		req.StatusFilter = status
 	}
 
-	resp, err := orgClient.ListOrganizations(context.Background(), req)
-	exitCode := handleGRPCError(err, "list organizations")
+	resp, err := tenantClient.ListTenants(context.Background(), req)
+	exitCode := handleGRPCError(err, "list tenants")
 	if exitCode != 0 && err != nil {
 		return err
 	}
 
-	if resp == nil || len(resp.Organizations) == 0 {
-		fmt.Println("No organizations found")
+	if resp == nil || len(resp.Tenants) == 0 {
+		fmt.Println("No tenants found")
 		return nil
 	}
 
@@ -94,16 +94,16 @@ func runList(_ *cobra.Command, _ []string) error {
 	_, _ = fmt.Fprintln(w, "ID\tNAME\tSTATUS\tSETTLEMENT ASSET\tCREATED AT")
 	_, _ = fmt.Fprintln(w, "--\t----\t------\t----------------\t----------")
 
-	for _, org := range resp.Organizations {
+	for _, tenant := range resp.Tenants {
 		createdAt := ""
-		if org.CreatedAt != nil {
-			createdAt = org.CreatedAt.AsTime().Format("2006-01-02 15:04:05")
+		if tenant.CreatedAt != nil {
+			createdAt = tenant.CreatedAt.AsTime().Format("2006-01-02 15:04:05")
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			org.OrganizationId,
-			org.DisplayName,
-			formatStatus(org.Status),
-			org.SettlementAsset,
+			tenant.TenantId,
+			tenant.DisplayName,
+			formatStatus(tenant.Status),
+			tenant.SettlementAsset,
 			createdAt,
 		)
 	}
@@ -117,31 +117,31 @@ func runList(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-// parseStatus converts a string status to protobuf OrganizationStatus.
-func parseStatus(s string) (organizationv1.OrganizationStatus, error) {
+// parseStatus converts a string status to protobuf TenantStatus.
+func parseStatus(s string) (tenantv1.TenantStatus, error) {
 	switch strings.ToLower(s) {
 	case "active":
-		return organizationv1.OrganizationStatus_ORGANIZATION_STATUS_ACTIVE, nil
+		return tenantv1.TenantStatus_TENANT_STATUS_ACTIVE, nil
 	case "suspended":
-		return organizationv1.OrganizationStatus_ORGANIZATION_STATUS_SUSPENDED, nil
+		return tenantv1.TenantStatus_TENANT_STATUS_SUSPENDED, nil
 	case "deprovisioned":
-		return organizationv1.OrganizationStatus_ORGANIZATION_STATUS_DEPROVISIONED, nil
+		return tenantv1.TenantStatus_TENANT_STATUS_DEPROVISIONED, nil
 	default:
-		return organizationv1.OrganizationStatus_ORGANIZATION_STATUS_UNSPECIFIED,
+		return tenantv1.TenantStatus_TENANT_STATUS_UNSPECIFIED,
 			fmt.Errorf("%w: got '%s'", ErrInvalidStatus, s)
 	}
 }
 
-// formatStatus converts protobuf OrganizationStatus to a display string.
-func formatStatus(s organizationv1.OrganizationStatus) string {
+// formatStatus converts protobuf TenantStatus to a display string.
+func formatStatus(s tenantv1.TenantStatus) string {
 	switch s {
-	case organizationv1.OrganizationStatus_ORGANIZATION_STATUS_ACTIVE:
+	case tenantv1.TenantStatus_TENANT_STATUS_ACTIVE:
 		return "active"
-	case organizationv1.OrganizationStatus_ORGANIZATION_STATUS_SUSPENDED:
+	case tenantv1.TenantStatus_TENANT_STATUS_SUSPENDED:
 		return "suspended"
-	case organizationv1.OrganizationStatus_ORGANIZATION_STATUS_DEPROVISIONED:
+	case tenantv1.TenantStatus_TENANT_STATUS_DEPROVISIONED:
 		return "deprovisioned"
-	case organizationv1.OrganizationStatus_ORGANIZATION_STATUS_UNSPECIFIED:
+	case tenantv1.TenantStatus_TENANT_STATUS_UNSPECIFIED:
 		return "unspecified"
 	default:
 		return "unknown"

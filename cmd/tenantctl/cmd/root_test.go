@@ -26,19 +26,19 @@ func TestHandleGRPCError_Nil(t *testing.T) {
 }
 
 func TestHandleGRPCError_AlreadyExists(t *testing.T) {
-	err := fmt.Errorf("%w desc = organization already exists", errAlreadyExists)
+	err := fmt.Errorf("%w desc = tenant already exists", errAlreadyExists)
 	exitCode := handleGRPCError(err, "register")
 	assert.Equal(t, 0, exitCode, "AlreadyExists should return 0 (idempotent success)")
 }
 
 func TestHandleGRPCError_NotFound(t *testing.T) {
-	err := fmt.Errorf("%w desc = organization not found", errNotFound)
+	err := fmt.Errorf("%w desc = tenant not found", errNotFound)
 	exitCode := handleGRPCError(err, "deprovision")
 	assert.Equal(t, 0, exitCode, "NotFound should return 0 (idempotent success)")
 }
 
 func TestHandleGRPCError_InvalidArgument(t *testing.T) {
-	err := fmt.Errorf("%w desc = invalid organization ID", errInvalidArgument)
+	err := fmt.Errorf("%w desc = invalid tenant ID", errInvalidArgument)
 	exitCode := handleGRPCError(err, "register")
 	assert.Equal(t, 1, exitCode, "InvalidArgument should return 1")
 }

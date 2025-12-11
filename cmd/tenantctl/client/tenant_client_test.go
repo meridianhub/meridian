@@ -11,7 +11,7 @@ func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
 	assert.Equal(t, "localhost:50056", cfg.ServiceURL)
-	assert.Equal(t, "organization", cfg.ServiceName)
+	assert.Equal(t, "tenant", cfg.ServiceName)
 	assert.Equal(t, "default", cfg.Namespace)
 	assert.Equal(t, 50056, cfg.Port)
 	assert.Equal(t, 30*time.Second, cfg.Timeout)
