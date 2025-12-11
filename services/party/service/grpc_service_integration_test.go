@@ -1,0 +1,433 @@
+package service
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"testing"
+
+	"github.com/google/uuid"
+	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
+)
+
+// setupIntegrationTest creates a PostgreSQL testcontainer with the party schema
+// and returns a configured Service for integration testing.
+func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, func()) {
+	t.Helper()
+
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{
+		&persistence.PartyEntity{},
+	})
+
+	repo := persistence.NewRepository(db)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	svc, err := NewService(repo, logger)
+	require.NoError(t, err, "Failed to create service")
+
+	return svc, db, cleanup
+}
+
+// TestRegisterParty_Person verifies successful registration of a person party
+// with a Companies House reference number.
+//
+// Flow:
+// 1. Register person with legal name and Companies House number
+// 2. Verify response contains party_id and correct fields
+// 3. Retrieve by ID and verify fields match
+func TestRegisterParty_Person(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register a person party
+	registerReq := &pb.RegisterPartyRequest{
+		PartyType:             pb.PartyType_PARTY_TYPE_PERSON,
+		LegalName:             "John Smith",
+		DisplayName:           "J. Smith",
+		ExternalReference:     "12345678",
+		ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+	}
+
+	registerResp, err := svc.RegisterParty(ctx, registerReq)
+	require.NoError(t, err, "RegisterParty should succeed")
+	require.NotNil(t, registerResp.Party, "Response should contain party")
+
+	// Verify registration response
+	party := registerResp.Party
+	assert.NotEmpty(t, party.PartyId, "Party ID should be generated")
+	assert.Equal(t, pb.PartyType_PARTY_TYPE_PERSON, party.PartyType)
+	assert.Equal(t, "John Smith", party.LegalName)
+	assert.Equal(t, "J. Smith", party.DisplayName)
+	assert.Equal(t, pb.PartyStatus_PARTY_STATUS_ACTIVE, party.Status, "Default status should be ACTIVE")
+	assert.Equal(t, "12345678", party.ExternalReference)
+	assert.Equal(t, pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE, party.ExternalReferenceType)
+	assert.NotNil(t, party.CreatedAt, "CreatedAt should be set")
+	assert.NotNil(t, party.UpdatedAt, "UpdatedAt should be set")
+	// Version is 3 because domain model increments on: 1) NewParty, 2) SetDisplayName, 3) SetExternalReference
+	assert.Equal(t, int32(3), party.Version, "Version should be 3 after setting display name and external reference")
+
+	// Retrieve and verify persistence
+	retrieveReq := &pb.RetrievePartyRequest{
+		PartyId: party.PartyId,
+	}
+
+	retrieveResp, err := svc.RetrieveParty(ctx, retrieveReq)
+	require.NoError(t, err, "RetrieveParty should succeed")
+
+	retrievedParty := retrieveResp.Party
+	assert.Equal(t, party.PartyId, retrievedParty.PartyId)
+	assert.Equal(t, party.PartyType, retrievedParty.PartyType)
+	assert.Equal(t, party.LegalName, retrievedParty.LegalName)
+	assert.Equal(t, party.DisplayName, retrievedParty.DisplayName)
+	assert.Equal(t, party.Status, retrievedParty.Status)
+	assert.Equal(t, party.ExternalReference, retrievedParty.ExternalReference)
+	assert.Equal(t, party.ExternalReferenceType, retrievedParty.ExternalReferenceType)
+}
+
+// TestRegisterParty_Organization verifies successful registration of an organization
+// party with an LEI (Legal Entity Identifier).
+//
+// Flow:
+// 1. Register organization with LEI
+// 2. Verify status is ACTIVE by default
+// 3. Retrieve by ID
+func TestRegisterParty_Organization(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register an organization party with LEI
+	registerReq := &pb.RegisterPartyRequest{
+		PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName:             "Acme Corporation Ltd",
+		DisplayName:           "Acme Corp",
+		ExternalReference:     "ABCD1234567890EFGH12", // 20 alphanumeric chars for LEI
+		ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_LEI,
+	}
+
+	registerResp, err := svc.RegisterParty(ctx, registerReq)
+	require.NoError(t, err, "RegisterParty should succeed")
+	require.NotNil(t, registerResp.Party)
+
+	party := registerResp.Party
+	assert.NotEmpty(t, party.PartyId)
+	assert.Equal(t, pb.PartyType_PARTY_TYPE_ORGANIZATION, party.PartyType)
+	assert.Equal(t, "Acme Corporation Ltd", party.LegalName)
+	assert.Equal(t, pb.PartyStatus_PARTY_STATUS_ACTIVE, party.Status, "Default status should be ACTIVE")
+	assert.Equal(t, "ABCD1234567890EFGH12", party.ExternalReference)
+	assert.Equal(t, pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_LEI, party.ExternalReferenceType)
+
+	// Retrieve by ID to verify persistence
+	retrieveResp, err := svc.RetrieveParty(ctx, &pb.RetrievePartyRequest{PartyId: party.PartyId})
+	require.NoError(t, err)
+	assert.Equal(t, party.PartyId, retrieveResp.Party.PartyId)
+}
+
+// TestRegisterParty_DuplicateExternalReference verifies that attempting to register
+// a party with an external reference that already exists returns AlreadyExists error.
+//
+// Flow:
+// 1. Register party with external reference
+// 2. Attempt duplicate registration with same reference
+// 3. Verify AlreadyExists error (gRPC code 6)
+func TestRegisterParty_DuplicateExternalReference(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// First registration
+	firstReq := &pb.RegisterPartyRequest{
+		PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName:             "First Company Ltd",
+		ExternalReference:     "AB123456", // Valid Companies House format
+		ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+	}
+
+	firstResp, err := svc.RegisterParty(ctx, firstReq)
+	require.NoError(t, err, "First registration should succeed")
+	require.NotNil(t, firstResp.Party)
+
+	// Attempt duplicate registration with same external reference
+	duplicateReq := &pb.RegisterPartyRequest{
+		PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName:             "Second Company Ltd",
+		ExternalReference:     "AB123456", // Same external reference
+		ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+	}
+
+	duplicateResp, err := svc.RegisterParty(ctx, duplicateReq)
+
+	// Verify AlreadyExists error
+	require.Error(t, err, "Duplicate registration should fail")
+	assert.Nil(t, duplicateResp, "Response should be nil on error")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Error should be a gRPC status error")
+	assert.Equal(t, codes.AlreadyExists, st.Code(), "Error code should be AlreadyExists (6)")
+	assert.Contains(t, st.Message(), "already exists", "Error message should mention already exists")
+}
+
+// TestRegisterParty_NoExternalReference verifies that parties can be registered
+// without an external reference (external reference is optional).
+func TestRegisterParty_NoExternalReference(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register party without external reference
+	registerReq := &pb.RegisterPartyRequest{
+		PartyType: pb.PartyType_PARTY_TYPE_PERSON,
+		LegalName: "Jane Doe",
+		// No external reference - should be allowed
+	}
+
+	registerResp, err := svc.RegisterParty(ctx, registerReq)
+	require.NoError(t, err, "Registration without external reference should succeed")
+	require.NotNil(t, registerResp.Party)
+
+	party := registerResp.Party
+	assert.NotEmpty(t, party.PartyId)
+	assert.Equal(t, "Jane Doe", party.LegalName)
+	assert.Empty(t, party.ExternalReference, "External reference should be empty")
+	assert.Equal(t, pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED, party.ExternalReferenceType)
+}
+
+// TestRetrieveParty_NotFound verifies that retrieving a non-existent party
+// returns NotFound error (gRPC code 5).
+func TestRetrieveParty_NotFound(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Generate a random UUID that doesn't exist
+	nonExistentID := uuid.New().String()
+
+	retrieveReq := &pb.RetrievePartyRequest{
+		PartyId: nonExistentID,
+	}
+
+	resp, err := svc.RetrieveParty(ctx, retrieveReq)
+
+	// Verify NotFound error
+	require.Error(t, err, "Retrieve of non-existent party should fail")
+	assert.Nil(t, resp, "Response should be nil on error")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Error should be a gRPC status error")
+	assert.Equal(t, codes.NotFound, st.Code(), "Error code should be NotFound (5)")
+	assert.Contains(t, st.Message(), "not found", "Error message should mention not found")
+}
+
+// TestRetrieveParty_InvalidUUID verifies that retrieving a party with a malformed
+// party_id returns InvalidArgument error (gRPC code 3).
+func TestRetrieveParty_InvalidUUID(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	testCases := []struct {
+		name    string
+		partyID string
+	}{
+		{"empty string", ""},
+		{"not a uuid", "not-a-valid-uuid"},
+		{"partial uuid", "550e8400-e29b-41d4"},
+		{"uuid with extra chars", "550e8400-e29b-41d4-a716-446655440000xyz"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			retrieveReq := &pb.RetrievePartyRequest{
+				PartyId: tc.partyID,
+			}
+
+			resp, err := svc.RetrieveParty(ctx, retrieveReq)
+
+			// Verify InvalidArgument error
+			require.Error(t, err, "Retrieve with invalid UUID should fail")
+			assert.Nil(t, resp, "Response should be nil on error")
+
+			st, ok := status.FromError(err)
+			require.True(t, ok, "Error should be a gRPC status error")
+			assert.Equal(t, codes.InvalidArgument, st.Code(), "Error code should be InvalidArgument (3)")
+		})
+	}
+}
+
+// TestRegisterParty_ValidationErrors verifies that invalid requests are rejected
+// with InvalidArgument errors.
+func TestRegisterParty_ValidationErrors(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	testCases := []struct {
+		name        string
+		req         *pb.RegisterPartyRequest
+		errContains string
+	}{
+		{
+			name: "empty legal name",
+			req: &pb.RegisterPartyRequest{
+				PartyType: pb.PartyType_PARTY_TYPE_PERSON,
+				LegalName: "", // Empty - should fail
+			},
+			errContains: "legal name",
+		},
+		{
+			name: "unspecified party type",
+			req: &pb.RegisterPartyRequest{
+				PartyType: pb.PartyType_PARTY_TYPE_UNSPECIFIED, // Invalid
+				LegalName: "Test Party",
+			},
+			errContains: "party type",
+		},
+		{
+			name: "external reference type without reference",
+			req: &pb.RegisterPartyRequest{
+				PartyType:             pb.PartyType_PARTY_TYPE_PERSON,
+				LegalName:             "Test Party",
+				ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_LEI,
+				// ExternalReference not set - should fail
+			},
+			errContains: "external reference",
+		},
+		{
+			name: "invalid external reference format for LEI",
+			req: &pb.RegisterPartyRequest{
+				PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
+				LegalName:             "Test Org",
+				ExternalReference:     "invalid", // Not 20 alphanumeric chars
+				ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_LEI,
+			},
+			errContains: "external reference",
+		},
+		{
+			name: "invalid external reference format for Companies House",
+			req: &pb.RegisterPartyRequest{
+				PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
+				LegalName:             "Test Org",
+				ExternalReference:     "invalid-format!", // Not valid Companies House format
+				ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+			},
+			errContains: "external reference",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := svc.RegisterParty(ctx, tc.req)
+
+			require.Error(t, err, "Invalid request should fail")
+			assert.Nil(t, resp, "Response should be nil on error")
+
+			st, ok := status.FromError(err)
+			require.True(t, ok, "Error should be a gRPC status error")
+			assert.Equal(t, codes.InvalidArgument, st.Code(), "Error code should be InvalidArgument (3)")
+			assert.Contains(t, st.Message(), tc.errContains, "Error message should contain expected text")
+		})
+	}
+}
+
+// TestRegisterParty_DifferentExternalRefTypes verifies that parties can have
+// the same external reference value if the types are different.
+func TestRegisterParty_DifferentExternalRefTypes(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register party with Companies House reference
+	firstReq := &pb.RegisterPartyRequest{
+		PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName:             "Company One",
+		ExternalReference:     "12345678",
+		ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
+	}
+
+	firstResp, err := svc.RegisterParty(ctx, firstReq)
+	require.NoError(t, err, "First registration should succeed")
+	require.NotNil(t, firstResp.Party)
+
+	// Register party with National ID - same reference value but different type
+	// This should succeed because uniqueness is per reference type
+	secondReq := &pb.RegisterPartyRequest{
+		PartyType:             pb.PartyType_PARTY_TYPE_PERSON,
+		LegalName:             "Person One",
+		ExternalReference:     "12345678", // Same value
+		ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_NATIONAL_ID,
+	}
+
+	secondResp, err := svc.RegisterParty(ctx, secondReq)
+	require.NoError(t, err, "Registration with same reference but different type should succeed")
+	require.NotNil(t, secondResp.Party)
+
+	// Verify both parties exist and have different IDs
+	assert.NotEqual(t, firstResp.Party.PartyId, secondResp.Party.PartyId)
+}
+
+// TestRegisterAndRetrieve_EndToEnd performs a complete end-to-end flow:
+// Register → Retrieve → Verify all fields
+func TestRegisterAndRetrieve_EndToEnd(t *testing.T) {
+	svc, _, cleanup := setupIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register a comprehensive party (LEI must be 20 uppercase alphanumeric chars)
+	registerReq := &pb.RegisterPartyRequest{
+		PartyType:             pb.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName:             "Meridian Financial Services Limited",
+		DisplayName:           "Meridian FS",
+		ExternalReference:     "MERI123456789012345A", // 20 char uppercase alphanumeric LEI
+		ExternalReferenceType: pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_LEI,
+	}
+
+	registerResp, err := svc.RegisterParty(ctx, registerReq)
+	require.NoError(t, err)
+
+	registeredParty := registerResp.Party
+	partyID := registeredParty.PartyId
+
+	// Retrieve and verify complete data integrity
+	retrieveResp, err := svc.RetrieveParty(ctx, &pb.RetrievePartyRequest{PartyId: partyID})
+	require.NoError(t, err)
+
+	retrieved := retrieveResp.Party
+	assert.Equal(t, partyID, retrieved.PartyId)
+	assert.Equal(t, pb.PartyType_PARTY_TYPE_ORGANIZATION, retrieved.PartyType)
+	assert.Equal(t, "Meridian Financial Services Limited", retrieved.LegalName)
+	assert.Equal(t, "Meridian FS", retrieved.DisplayName)
+	assert.Equal(t, pb.PartyStatus_PARTY_STATUS_ACTIVE, retrieved.Status)
+	assert.Equal(t, "MERI123456789012345A", retrieved.ExternalReference)
+	assert.Equal(t, pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_LEI, retrieved.ExternalReferenceType)
+	// Version is 3: 1) NewParty, 2) SetDisplayName, 3) SetExternalReference
+	assert.Equal(t, int32(3), retrieved.Version)
+	assert.NotNil(t, retrieved.CreatedAt)
+	assert.NotNil(t, retrieved.UpdatedAt)
+}
+
+// TestNewService_NilRepository verifies that creating a service with nil repository
+// returns an error.
+func TestNewService_NilRepository(t *testing.T) {
+	svc, err := NewService(nil, nil)
+
+	require.Error(t, err, "Creating service with nil repository should fail")
+	assert.Nil(t, svc, "Service should be nil")
+	assert.ErrorIs(t, err, ErrRepositoryNil)
+}
