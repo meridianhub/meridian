@@ -81,25 +81,28 @@ register_organization() {
 
     echo -e "${CYAN}► Registering organization: ${id}${NC}"
 
-    local cmd="${PROJECT_ROOT}/orgctl register --id=${id} --name=\"${name}\" --settlement-asset=${asset}"
+    # Build command arguments as an array for safety (avoids eval)
+    local cmd_args=("register" "--id=${id}" "--name=${name}" "--settlement-asset=${asset}")
 
     if [ -n "${subdomain}" ]; then
-        cmd="${cmd} --subdomain=${subdomain}"
+        cmd_args+=("--subdomain=${subdomain}")
     fi
 
     if [ -n "${metadata}" ]; then
-        cmd="${cmd} --metadata ${metadata}"
+        cmd_args+=("--metadata" "${metadata}")
     fi
 
     # Execute the command
-    if eval "${cmd}" 2>&1; then
+    local result
+    if result=$("${PROJECT_ROOT}/orgctl" "${cmd_args[@]}" 2>&1); then
         echo -e "${GREEN}  ✓ Organization '${id}' registered successfully${NC}"
     else
         # Check if it's an AlreadyExists error (which is fine for idempotency)
-        if eval "${cmd}" 2>&1 | grep -q "AlreadyExists\|already exists"; then
+        if echo "$result" | grep -q "AlreadyExists\|already exists"; then
             echo -e "${YELLOW}  ℹ Organization '${id}' already exists (idempotent)${NC}"
         else
             echo -e "${RED}  ✗ Failed to register organization '${id}'${NC}"
+            echo -e "${RED}    Error: ${result}${NC}"
             return 1
         fi
     fi
