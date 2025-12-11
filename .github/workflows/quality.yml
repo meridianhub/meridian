@@ -34,14 +34,11 @@ jobs:
       - name: Generate protobuf files
         run: buf generate
 
-      - name: Install golangci-lint v2
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.7.2
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
       - name: Run golangci-lint
-        run: |
-          golangci-lint run --timeout=5m --config=.golangci.yml
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.7.2
+          args: --timeout=5m --config=.golangci.yml
 
   tiltfile-syntax:
     name: Tiltfile Syntax
@@ -54,8 +51,18 @@ jobs:
       - name: Install Tilt
         run: |
           # Pin to v0.35.2 for reproducible CI builds
-          curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/v0.35.2/scripts/install.sh | bash
-        timeout-minutes: 2
+          # Retry up to 3 times to handle transient GitHub release download issues
+          for i in 1 2 3; do
+            if curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/v0.35.2/scripts/install.sh | bash; then
+              echo "Tilt installed successfully on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10 seconds..."
+            sleep 10
+          done
+          echo "Failed to install Tilt after 3 attempts"
+          exit 1
+        timeout-minutes: 3
 
       - name: Create minimal kubeconfig
         run: |
