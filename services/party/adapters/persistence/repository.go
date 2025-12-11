@@ -185,9 +185,10 @@ func (r *Repository) Delete(partyID uuid.UUID) error {
 
 // Ping checks database connectivity without triggering record-not-found logging.
 // This is used by health checks to verify the database is reachable.
-func (r *Repository) Ping() error {
+// The context is used for cancellation and timeout support.
+func (r *Repository) Ping(ctx context.Context) error {
 	var result int
-	return r.db.Raw("SELECT 1").Scan(&result).Error
+	return r.db.WithContext(ctx).Raw("SELECT 1").Scan(&result).Error
 }
 
 // toEntity converts domain model to database entity

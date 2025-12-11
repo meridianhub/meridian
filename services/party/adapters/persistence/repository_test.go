@@ -435,7 +435,7 @@ func TestPing(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	err := repo.Ping()
+	err := repo.Ping(context.Background())
 	assert.NoError(t, err)
 }
 

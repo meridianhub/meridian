@@ -255,7 +255,7 @@ func (d *DatabaseHealthChecker) Check(ctx context.Context) health.ComponentResul
 	defer cancel()
 
 	// Use Ping() which executes SELECT 1 - no record-not-found logging
-	err := d.repo.Ping()
+	err := d.repo.Ping(checkCtx)
 
 	responseTime := time.Since(start)
 

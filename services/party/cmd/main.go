@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,9 +32,10 @@ var (
 )
 
 func main() {
-	// Initialize structured logging
+	// Initialize structured logging with configurable log level
+	logLevel := parseLogLevel(os.Getenv("LOG_LEVEL"))
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
 
@@ -289,4 +291,19 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return value
+}
+
+// parseLogLevel converts a string log level to slog.Level.
+// Supports: debug, info, warn, error (case-insensitive). Defaults to info.
+func parseLogLevel(levelStr string) slog.Level {
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
