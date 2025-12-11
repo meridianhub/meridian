@@ -15,6 +15,7 @@ cleanup_tilt() {
 
 # Colors for output
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
@@ -71,12 +72,12 @@ if ! tilt get uisession >/dev/null 2>&1; then
     TIMEOUT=180
     ELAPSED=0
     while [ $ELAPSED -lt $TIMEOUT ]; do
-        READY_COUNT=$(kubectl get pods -o json | jq '[.items[] | select(.metadata.name | test("current-account|position-keeping|financial-accounting")) | select(.status.phase == "Running")] | length')
-        if [ "$READY_COUNT" -ge 3 ]; then
+        READY_COUNT=$(kubectl get pods -o json | jq '[.items[] | select(.metadata.name | test("current-account|position-keeping|financial-accounting|party")) | select(.status.phase == "Running")] | length')
+        if [ "$READY_COUNT" -ge 4 ]; then
             echo -e "${GREEN}✓ All services ready${NC}"
             break
         fi
-        echo -e "${YELLOW}  Waiting for services... ($READY_COUNT/3 ready)${NC}"
+        echo -e "${YELLOW}  Waiting for services... ($READY_COUNT/4 ready)${NC}"
         sleep 5
         ELAPSED=$((ELAPSED + 5))
     done
@@ -92,7 +93,7 @@ echo ""
 
 # Verify services are running
 echo -e "${YELLOW}Verifying services...${NC}"
-kubectl get pods | grep -E "(current-account|position-keeping|financial-accounting)" || {
+kubectl get pods | grep -E "(current-account|position-keeping|financial-accounting|party)" || {
     echo "Services not healthy. Check: tilt status";
     exit 1;
 }
@@ -133,6 +134,7 @@ check_health "current-account" 50051
 check_health "position-keeping" 50053
 check_health "financial-accounting" 50052
 check_health "payment-order" 50054
+check_health "party" 50055
 
 if [ "$ALL_HEALTHY" = true ]; then
     echo -e "${GREEN}✓ All services healthy and ready${NC}\n"
@@ -150,11 +152,36 @@ echo -e "${MAGENTA}║  Part 2: Saga Pattern - Distributed Transaction          
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-echo -e "${CYAN}► Step 1: Initiate Current Account${NC}"
+echo -e "${CYAN}► Step 1: Register Party (Customer)${NC}"
+echo -e "${YELLOW}  Party Service provides customer reference data for multi-tenancy${NC}"
 TIMESTAMP=$(date +%s)
+PARTY_RESPONSE=$(grpcurl -plaintext -d '{
+  "party_type": "PARTY_TYPE_PERSON",
+  "legal_name": "Demo User",
+  "display_name": "Demo Customer"
+}' localhost:50055 meridian.party.v1.PartyService/RegisterParty)
+
+PARTY_ID=$(echo "$PARTY_RESPONSE" | jq -r '.party.partyId')
+if [ -z "$PARTY_ID" ] || [ "$PARTY_ID" = "null" ]; then
+    echo -e "${RED}✗ Failed to create party${NC}"
+    echo "$PARTY_RESPONSE"
+    exit 1
+fi
+echo -e "${GREEN}✓ Party Created:${NC} $PARTY_ID"
+echo "$PARTY_RESPONSE" | jq '{
+  party_id: .party.partyId,
+  type: .party.partyType,
+  legal_name: .party.legalName,
+  display_name: .party.displayName,
+  status: .party.status
+}'
+echo ""
+
+echo -e "${CYAN}► Step 2: Initiate Current Account${NC}"
+echo -e "${YELLOW}  Account linked to Party for ownership and validation${NC}"
 CREATE_RESPONSE=$(grpcurl -plaintext -d "{
-  \"account_identification\": \"ACC-DEMO-$TIMESTAMP\",
-  \"customer_id\": \"CUST-DEMO-001\",
+  \"account_identification\": \"GB29NWBK$TIMESTAMP\",
+  \"party_id\": \"$PARTY_ID\",
   \"base_currency\": \"CURRENCY_GBP\"
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount)
 
@@ -168,7 +195,7 @@ echo "$CREATE_RESPONSE" | jq '{
 }'
 echo ""
 
-echo -e "${CYAN}► Step 2: Execute Deposit - Saga Orchestration${NC}"
+echo -e "${CYAN}► Step 3: Execute Deposit - Saga Orchestration${NC}"
 echo -e "${YELLOW}  Saga Steps:${NC}"
 echo -e "${YELLOW}    1. Log position in PositionKeeping     (via gRPC)${NC}"
 echo -e "${YELLOW}    2. Post ledger in FinancialAccounting  (via gRPC)${NC}"
@@ -451,7 +478,8 @@ echo -e "  Balance:      £$FINAL_BALANCE"
 echo -e "  Available:    £$AVAILABLE"
 echo ""
 echo -e "${CYAN}Architecture Features Demonstrated:${NC}"
-echo -e "  ${GREEN}✓${NC} BIAN-compliant microservices (3 domains)"
+echo -e "  ${GREEN}✓${NC} BIAN-compliant microservices (4 domains including Party)"
+echo -e "  ${GREEN}✓${NC} Party validation for account ownership"
 echo -e "  ${GREEN}✓${NC} Saga pattern with automatic compensation"
 echo -e "  ${GREEN}✓${NC} DNS-based client-side load balancing (round_robin)"
 echo -e "  ${GREEN}✓${NC} Distributed tracing (OpenTelemetry)"
