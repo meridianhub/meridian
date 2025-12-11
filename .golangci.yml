@@ -146,6 +146,12 @@ linters:
         linters:
           - revive
 
+      # Exclude deprecatedComment for current-account clients (backward compat layer)
+      - path: services/current-account/clients/
+        text: "deprecatedComment"
+        linters:
+          - gocritic
+
       # Exclude misspell for protobuf enum references (CANCELLED is the official enum name)
       - text: "CANCELLED.*is a misspelling of.*CANCELED"
         linters:
