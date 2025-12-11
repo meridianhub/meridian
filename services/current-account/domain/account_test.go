@@ -9,10 +9,11 @@ import (
 )
 
 func TestNewCurrentAccount(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
 	assert.Equal(t, "ACC-001", account.AccountID)
+	assert.Equal(t, "PARTY-001", account.PartyID)
 	assert.Equal(t, int64(0), account.Balance.AmountCents())
 	assert.Equal(t, CurrencyGBP, account.Balance.Currency())
 	assert.Equal(t, AccountStatusActive, account.Status)
@@ -51,7 +52,7 @@ func TestDeposit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+			account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 			require.NoError(t, err)
 			// Set initial balance using immutable Money
 			account.Balance, _ = NewMoney("GBP", tt.initialBal)
@@ -72,7 +73,7 @@ func TestDeposit(t *testing.T) {
 }
 
 func TestDepositWhenFrozen(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 	_ = account.Freeze()
 
@@ -84,7 +85,7 @@ func TestDepositWhenFrozen(t *testing.T) {
 }
 
 func TestDepositWhenClosed(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 	_ = account.Close()
 
@@ -130,7 +131,7 @@ func TestWithdraw(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+			account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 			require.NoError(t, err)
 			account.Balance, _ = NewMoney("GBP", tt.initialBal)
 			account.AvailableBalance, _ = NewMoney("GBP", tt.initialBal)
@@ -154,7 +155,7 @@ func TestWithdraw(t *testing.T) {
 }
 
 func TestWithdrawWithOverdraft(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 	account.Balance, _ = NewMoney("GBP", 1000)
 
@@ -172,7 +173,7 @@ func TestWithdrawWithOverdraft(t *testing.T) {
 }
 
 func TestStatusTransitions(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
 	// Active -> Frozen
@@ -197,7 +198,7 @@ func TestStatusTransitions(t *testing.T) {
 }
 
 func TestSetOverdraftLimit(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 	account.Balance, _ = NewMoney("GBP", 1000)
 
@@ -212,7 +213,7 @@ func TestSetOverdraftLimit(t *testing.T) {
 }
 
 func TestCurrencyMismatch(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
 	depositMoney, _ := NewMoney("USD", 1000)
@@ -247,7 +248,7 @@ func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", tt.currency)
+			_, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", tt.currency)
 
 			if tt.wantErr {
 				assert.Error(t, err, tt.rationale)
@@ -264,7 +265,7 @@ func TestNewCurrentAccount_InvalidCurrency_ReturnsError(t *testing.T) {
 // operations like int64 did. Overflow is now checked when converting to minor units.
 
 func TestSetOverdraftLimit_LargeValues(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
 	// Set a large balance (in minor units - cents/pence)
@@ -285,7 +286,7 @@ func TestSetOverdraftLimit_LargeValues(t *testing.T) {
 }
 
 func TestSetOverdraftLimit_DisabledDoesNotAddToAvailable(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
 	// Set balance
@@ -307,7 +308,7 @@ func TestSetOverdraftLimit_DisabledDoesNotAddToAvailable(t *testing.T) {
 
 // Tests for large deposits
 func TestDeposit_LargeValues(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "CUST-001", "GBP")
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
 	// Set initial balance
