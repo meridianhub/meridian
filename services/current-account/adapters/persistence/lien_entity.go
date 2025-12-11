@@ -12,7 +12,7 @@ type LienEntity struct {
 	// Primary key
 	ID uuid.UUID `gorm:"primaryKey"`
 
-	// Foreign key to current_account.accounts
+	// Foreign key to accounts table (routed via search_path)
 	AccountID uuid.UUID `gorm:"not null;index:idx_liens_account_status"`
 
 	// Monetary amount
