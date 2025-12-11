@@ -771,6 +771,38 @@ k8s_resource(
   labels=['microservices'],
 )
 
+# Tenant Service - gRPC microservice for platform tenant registry
+docker_build(
+  'tenant',
+  context='.',
+  dockerfile='services/tenant/cmd/Dockerfile',
+  build_args={
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+  },
+)
+
+# Deploy Tenant Kubernetes manifests
+k8s_yaml('services/tenant/k8s/secret.yaml')
+k8s_yaml('services/tenant/k8s/configmap.yaml')
+k8s_yaml('services/tenant/k8s/deployment.yaml')
+k8s_yaml('services/tenant/k8s/service.yaml')
+
+# Set resource dependencies for Tenant
+k8s_resource(
+  'tenant',
+  port_forwards=[
+    '50056:50056',  # gRPC API
+  ],
+  resource_deps=[
+    'generate-proto',
+    'cockroachdb',
+    'migrate-tenant',
+  ],
+  labels=['microservices'],
+)
+
 # =============================================================================
 # Resource Configuration
 # =============================================================================
@@ -918,6 +950,15 @@ local_resource(
   trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
+local_resource(
+  'migrate-tenant',
+  cmd='atlas migrate apply --env local --config file://services/tenant/atlas/atlas.hcl --url "{}" --allow-dirty'.format(database_url),
+  resource_deps=['init-database'],  # Independent schema (platform), only needs database to exist
+  labels=['database'],
+  auto_init=True,
+  trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
 local_resource(
   'kafka-health',
@@ -975,6 +1016,7 @@ Microservices:
   • Financial-Accounting   → localhost:50052 (gRPC)
   • Position-Keeping       → localhost:50053 (gRPC)
   • Payment-Order          → localhost:50054 (gRPC)
+  • Tenant                 → localhost:50056 (gRPC)
 
 Backing Services:
   • CockroachDB            → localhost:26257
@@ -999,12 +1041,13 @@ Tilt UI                    → http://localhost:10350
 Hot reload: Edit Go code and see changes in ~3 seconds
 
 Database Migrations:
-  • Migrations run automatically on startup (4 resources):
+  • Migrations run automatically on startup (5 resources):
     1. current_account (customers, accounts, current_account_audit)
     2. financial_accounting (general_ledger, financial_accounting_audit)
     3. position_keeping (transactions, position_keeping_audit)
     4. payment_order (payment orders, saga state)
-  • Parallel execution: current_account + financial_accounting run together after init-database
+    5. tenant (platform.tenants - platform tenant registry)
+  • Parallel execution: current_account + financial_accounting + tenant run together after init-database
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
     - payment_order waits for current_account (Account FK)
@@ -1016,6 +1059,7 @@ Database Migrations:
     - tilt trigger migrate-financial-accounting
     - tilt trigger migrate-position-keeping
     - tilt trigger migrate-payment-order
+    - tilt trigger migrate-tenant
   • Check status:
     - make migrate-status-all (requires DATABASE_URL env var)
 

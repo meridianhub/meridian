@@ -1,0 +1,103 @@
+// Package domain contains the tenant domain model for the platform Tenant Lifecycle Management service.
+package domain
+
+import (
+	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/organization"
+)
+
+// Status represents the lifecycle state of a tenant.
+type Status string
+
+const (
+	// StatusActive means the tenant is active and can operate.
+	StatusActive Status = "active"
+	// StatusSuspended means the tenant is temporarily suspended.
+	StatusSuspended Status = "suspended"
+	// StatusDeprovisioned means the tenant has been deprovisioned.
+	StatusDeprovisioned Status = "deprovisioned"
+)
+
+// IsValid returns true if the status is a valid tenant status.
+func (s Status) IsValid() bool {
+	switch s {
+	case StatusActive, StatusSuspended, StatusDeprovisioned:
+		return true
+	default:
+		return false
+	}
+}
+
+// Tenant represents a platform tenant for multi-tenant infrastructure.
+// Tenants own their own data in isolated PostgreSQL schemas.
+// Note: This is distinct from BIAN Party.Organization which represents legal entities.
+type Tenant struct {
+	// ID is the unique identifier (alphanumeric + underscore, 1-50 chars).
+	// Used for schema routing (org_{id} schema) and API subdomain.
+	ID organization.OrganizationID
+
+	// DisplayName is the human-readable name of the tenant.
+	DisplayName string
+
+	// SettlementAsset is the primary asset for this tenant (e.g., GBP, USD, GPU-HOUR).
+	SettlementAsset string
+
+	// Subdomain is the API subdomain for this tenant (e.g., acme-bank.demo.meridian.io).
+	// Optional - not all tenants need a subdomain.
+	Subdomain string
+
+	// Status is the current lifecycle state of the tenant.
+	Status Status
+
+	// CreatedAt is when the tenant was registered.
+	CreatedAt time.Time
+
+	// DeprovisionedAt is when the tenant was deprovisioned (nil if active/suspended).
+	DeprovisionedAt *time.Time
+
+	// Metadata contains flexible configuration (features, quotas, tenant-specific settings).
+	Metadata map[string]interface{}
+
+	// Version is for optimistic locking.
+	Version int
+}
+
+// IsActive returns true if the tenant is in active status.
+func (t *Tenant) IsActive() bool {
+	return t.Status == StatusActive
+}
+
+// CanOperate returns true if the tenant can perform operations.
+// Only active tenants can operate.
+func (t *Tenant) CanOperate() bool {
+	return t.Status == StatusActive
+}
+
+// SchemaName returns the PostgreSQL schema name for this tenant's data.
+// Uses the convention "org_" + lowercase(tenant ID).
+func (t *Tenant) SchemaName() string {
+	return t.ID.SchemaName()
+}
+
+// CanTransitionTo returns true if the tenant can transition to the given status.
+// Valid transitions:
+//   - active → suspended, deprovisioned
+//   - suspended → active, deprovisioned
+//   - deprovisioned → (none, terminal state)
+func (t *Tenant) CanTransitionTo(newStatus Status) bool {
+	if t.Status == newStatus {
+		return true // No-op transitions are allowed
+	}
+
+	switch t.Status {
+	case StatusActive:
+		return newStatus == StatusSuspended || newStatus == StatusDeprovisioned
+	case StatusSuspended:
+		return newStatus == StatusActive || newStatus == StatusDeprovisioned
+	case StatusDeprovisioned:
+		return false // Deprovisioned is a terminal state
+	default:
+		return false
+	}
+}
