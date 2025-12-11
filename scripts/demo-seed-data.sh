@@ -224,8 +224,8 @@ seed_motive() {
         local party_id="MOT-PROV-$(printf '%05d' $i)"
         local iban="GB82MOTI1234500000$(printf '%03d' $i)"
 
-        # Note: GPU-HOUR is a non-standard currency, we use USD as proxy
-        # In a real system, you'd have a custom asset ledger
+        # Note: GPU-HOUR is a non-standard currency, we use USD as proxy.
+        # In production, use actual asset codes from the Dynamic Asset Registry.
         create_account_with_deposit \
             "${org_id}" \
             "${acc_id}" \
@@ -254,18 +254,20 @@ seed_un_wfp() {
         local party_id="WFP-BEN-$(printf '%05d' $i)"
         local iban="GB82UNWF1234500000$(printf '%03d' $i)"
 
-        # Note: RICE-VOUCHER is a non-standard currency, we use USD as proxy
+        # Note: RICE-VOUCHER is a non-standard currency, we use USD as proxy.
+        # In production, use actual asset codes from the Dynamic Asset Registry.
+        # Balance of 1000 supports the cross-org settlement demo (500 voucher transaction).
         create_account_with_deposit \
             "${org_id}" \
             "${acc_id}" \
             "${party_id}" \
             "${iban}" \
             "CURRENCY_USD" \
-            50 \
-            "Initial rice voucher allocation for beneficiary ${i} (50 vouchers)"
+            1000 \
+            "Initial rice voucher allocation for beneficiary ${i} (1000 vouchers)"
     done
 
-    echo -e "${GREEN}✓ UN WFP seeding complete: 10 accounts with 50 vouchers each${NC}"
+    echo -e "${GREEN}✓ UN WFP seeding complete: 10 accounts with 1,000 vouchers each${NC}"
     echo ""
 }
 
@@ -300,7 +302,7 @@ display_summary() {
     echo -e "${GREEN}Accounts created:${NC}"
     echo -e "  ${CYAN}post_office${NC}  - 5 customer accounts × £1,000 = £5,000 total"
     echo -e "  ${CYAN}motive${NC}       - 3 provider accounts × 100 GPU-hours = 300 GPU-hours"
-    echo -e "  ${CYAN}un_wfp${NC}       - 10 beneficiary accounts × 50 vouchers = 500 vouchers"
+    echo -e "  ${CYAN}un_wfp${NC}       - 10 beneficiary accounts × 1,000 vouchers = 10,000 vouchers"
     echo -e "  ${CYAN}meridian${NC}     - 1 treasury account = \$1,000,000"
     echo ""
     echo -e "${YELLOW}Data Isolation:${NC}"

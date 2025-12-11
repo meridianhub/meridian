@@ -35,11 +35,11 @@ POSITION_KEEPING_URL="${POSITION_KEEPING_URL:-localhost:50053}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Demo accounts (from seed data)
-UN_WFP_ACCOUNT="wfp-beneficiary-1"      # Has 50 RICE-VOUCHER (USD proxy)
+UN_WFP_ACCOUNT="wfp-beneficiary-1"      # Has 1000 RICE-VOUCHER (USD proxy)
 MOTIVE_ACCOUNT="motive-provider-1"       # Has 100 GPU-HOUR (USD proxy)
 
-# Swap parameters
-SWAP_ID="swap-$(date +%s)"
+# Swap parameters - include random component to avoid collisions in rapid executions
+SWAP_ID="swap-$(date +%s)-${RANDOM}"
 GPU_HOURS_TO_BUY=10
 VOUCHERS_TO_PAY=500  # Exchange rate: 50 vouchers per GPU-hour
 

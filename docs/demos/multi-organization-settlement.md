@@ -124,7 +124,7 @@ Creates demo accounts and balances:
 |--------------|----------|-----------------|
 | `post_office` | 5 customer accounts | GBP 1,000 each |
 | `motive` | 3 provider accounts | 100 GPU-hours each |
-| `un_wfp` | 10 beneficiary accounts | 50 vouchers each |
+| `un_wfp` | 10 beneficiary accounts | 1,000 vouchers each |
 | `meridian` | 1 treasury account | USD 1,000,000 |
 
 ### Cross-Organization Settlement
