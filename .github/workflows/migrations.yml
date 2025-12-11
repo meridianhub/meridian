@@ -90,6 +90,7 @@ jobs:
 
       - name: Build orgctl CLI
         run: |
+          go mod download
           go build -o dist/orgctl ./cmd/orgctl
           echo "${{ github.workspace }}/dist" >> $GITHUB_PATH
 
