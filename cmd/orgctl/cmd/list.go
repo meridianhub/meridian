@@ -16,8 +16,9 @@ import (
 var ErrInvalidStatus = errors.New("invalid status: must be one of: active, suspended, deprovisioned")
 
 var (
-	listStatus   string
-	listPageSize int32
+	listStatus    string
+	listPageSize  int32
+	listPageToken string
 )
 
 var listCmd = &cobra.Command{
@@ -39,7 +40,10 @@ Examples:
   orgctl list --status=suspended
 
   # List with custom page size
-  orgctl list --page-size=100`,
+  orgctl list --page-size=100
+
+  # Fetch next page using page token
+  orgctl list --page-token=<token>`,
 	RunE: runList,
 }
 
@@ -48,6 +52,7 @@ func init() {
 
 	listCmd.Flags().StringVar(&listStatus, "status", "", "Filter by status (active, suspended, deprovisioned)")
 	listCmd.Flags().Int32Var(&listPageSize, "page-size", 50, "Number of results per page (max 1000)")
+	listCmd.Flags().StringVar(&listPageToken, "page-token", "", "Page token from a previous list response")
 }
 
 func runList(_ *cobra.Command, _ []string) error {
@@ -59,7 +64,8 @@ func runList(_ *cobra.Command, _ []string) error {
 	defer func() { _ = orgClient.Close() }()
 
 	req := &organizationv1.ListOrganizationsRequest{
-		PageSize: listPageSize,
+		PageSize:  listPageSize,
+		PageToken: listPageToken,
 	}
 
 	// Parse status filter

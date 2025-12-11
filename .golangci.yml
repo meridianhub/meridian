@@ -141,7 +141,7 @@ linters:
           - gocognit
 
       # Exclude var-naming for http adapter packages (intentionally named 'http' for clarity)
-      - path: adapters/http/
+      - path: services/.*/adapters/http/
         text: "var-naming: avoid package names that conflict"
         linters:
           - revive

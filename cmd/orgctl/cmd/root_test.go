@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,7 +66,8 @@ func TestHandleGRPCError_Unknown(t *testing.T) {
 	assert.Equal(t, 1, exitCode, "Unknown errors should return 1")
 }
 
-func TestContains(t *testing.T) {
+func TestStringsContains(t *testing.T) {
+	// Verify that strings.Contains works as expected for our use cases
 	tests := []struct {
 		name     string
 		s        string
@@ -85,7 +87,7 @@ func TestContains(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := contains(tt.s, tt.substr)
+			result := strings.Contains(tt.s, tt.substr)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

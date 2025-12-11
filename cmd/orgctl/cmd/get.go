@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var getOutputJSON bool
+var getOutputFormat string
 
 var getCmd = &cobra.Command{
 	Use:   "get <organization-id>",
@@ -25,7 +25,8 @@ Examples:
   orgctl get acme_bank
 
   # Get organization details as JSON
-  orgctl get acme_bank --output=json`,
+  orgctl get acme_bank --output json
+  orgctl get acme_bank -o json`,
 	Args: cobra.ExactArgs(1),
 	RunE: runGet,
 }
@@ -33,8 +34,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(getCmd)
 
-	getCmd.Flags().BoolVar(&getOutputJSON, "output", false, "Output as JSON")
-	getCmd.Flags().Lookup("output").NoOptDefVal = "true"
+	getCmd.Flags().StringVarP(&getOutputFormat, "output", "o", "text", "Output format (text or json)")
 }
 
 func runGet(_ *cobra.Command, args []string) error {
@@ -64,7 +64,7 @@ func runGet(_ *cobra.Command, args []string) error {
 
 	org := resp.Organization
 
-	if getOutputJSON {
+	if getOutputFormat == "json" {
 		return outputJSON(org)
 	}
 

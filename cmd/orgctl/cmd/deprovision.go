@@ -23,9 +23,6 @@ required to prevent accidental deprovisioning.
 The operation is idempotent - deprovisioning a non-existent or already deprovisioned
 organization will succeed without error.
 
-Note: This operation cannot be retried automatically due to its non-idempotent nature.
-If the operation fails due to a transient error, you must manually retry.
-
 Examples:
   # Deprovision an organization
   orgctl deprovision acme_bank --confirm

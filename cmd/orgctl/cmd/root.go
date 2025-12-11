@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/meridianhub/meridian/cmd/orgctl/client"
@@ -91,40 +92,26 @@ func handleGRPCError(err error, operation string) int {
 	errStr := err.Error()
 
 	switch {
-	case contains(errStr, "AlreadyExists"):
+	case strings.Contains(errStr, "AlreadyExists"):
 		fmt.Fprintf(os.Stderr, "Info: %s already exists (idempotent operation)\n", operation)
 		return 0 // Idempotent success
-	case contains(errStr, "NotFound"):
+	case strings.Contains(errStr, "NotFound"):
 		fmt.Fprintf(os.Stderr, "Warning: %s not found (idempotent operation)\n", operation)
 		return 0 // Idempotent success
-	case contains(errStr, "InvalidArgument"):
+	case strings.Contains(errStr, "InvalidArgument"):
 		fmt.Fprintf(os.Stderr, "Error: Invalid input for %s: %v\n", operation, err)
 		return 1
-	case contains(errStr, "FailedPrecondition"):
+	case strings.Contains(errStr, "FailedPrecondition"):
 		fmt.Fprintf(os.Stderr, "Error: Operation not allowed for %s: %v\n", operation, err)
 		return 1
-	case contains(errStr, "Unavailable"):
+	case strings.Contains(errStr, "Unavailable"):
 		fmt.Fprintf(os.Stderr, "Error: Organization service unavailable: %v\n", err)
 		return 1
-	case contains(errStr, "DeadlineExceeded"):
+	case strings.Contains(errStr, "DeadlineExceeded"):
 		fmt.Fprintf(os.Stderr, "Error: Request timeout for %s\n", operation)
 		return 1
 	default:
 		fmt.Fprintf(os.Stderr, "Error: %s failed: %v\n", operation, err)
 		return 1
 	}
-}
-
-// contains checks if a string contains a substring.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
