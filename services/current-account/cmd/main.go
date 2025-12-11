@@ -364,12 +364,33 @@ func createServiceWithClients(
 		},
 	)
 
+	// Create Party client with DNS-based load balancing
+	partyGRPCClient, err := clients.NewPartyClient(&clients.PartyClientConfig{
+		ServiceName: "party",
+		Namespace:   namespace,
+		Port:        50054,
+		Timeout:     30 * time.Second,
+		Tracer:      tracer,
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create party client: %w", err)
+	}
+
+	// Wrap with resilience patterns (circuit breaker + retry)
+	resilientPartyClient := clients.NewResilientPartyClient(
+		partyGRPCClient,
+		clients.ResilientClientConfig{
+			Logger: logger,
+		},
+	)
+
 	// Create service with the pre-created clients
 	svc, err := service.NewServiceWithExistingClients(
 		repo,
 		lienRepo,
 		resilientPosKeepingClient,
 		resilientFinAcctClient,
+		resilientPartyClient,
 		logger,
 		tracer,
 	)

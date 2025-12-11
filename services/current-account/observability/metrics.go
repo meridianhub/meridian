@@ -78,6 +78,16 @@ var (
 		},
 		[]string{"service", "operation"},
 	)
+
+	// Party validation metrics
+	partyValidationDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "current_account_party_validation_duration_seconds",
+			Help:    "Duration of party validation calls in seconds",
+			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5},
+		},
+		[]string{"success"},
+	)
 )
 
 // RecordOperationDuration records the duration of a current account operation
@@ -118,4 +128,13 @@ func RecordSagaDuration(operation, status string, duration time.Duration) {
 // RecordExternalServiceError records an external service error
 func RecordExternalServiceError(service, operation string) {
 	externalServiceErrors.WithLabelValues(service, operation).Inc()
+}
+
+// RecordPartyValidationDuration records the duration of a party validation call
+func RecordPartyValidationDuration(duration time.Duration, success bool) {
+	successLabel := "false"
+	if success {
+		successLabel = "true"
+	}
+	partyValidationDuration.WithLabelValues(successLabel).Observe(duration.Seconds())
 }
