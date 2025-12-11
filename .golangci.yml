@@ -140,6 +140,12 @@ linters:
           - gocyclo
           - gocognit
 
+      # Exclude var-naming for http adapter packages (intentionally named 'http' for clarity)
+      - path: adapters/http/
+        text: "var-naming: avoid package names that conflict"
+        linters:
+          - revive
+
       # Exclude misspell for protobuf enum references (CANCELLED is the official enum name)
       - text: "CANCELLED.*is a misspelling of.*CANCELED"
         linters:
