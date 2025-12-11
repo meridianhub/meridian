@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/meridianhub/meridian/services/organization/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 

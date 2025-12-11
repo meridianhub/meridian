@@ -7,25 +7,25 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/meridianhub/meridian/services/organization/domain"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/organization"
 	"gorm.io/gorm"
 )
 
 // Repository errors.
 var (
-	ErrOrganizationNotFound = errors.New("organization not found")
-	ErrOrganizationExists   = errors.New("organization already exists")
-	ErrVersionConflict      = errors.New("version conflict: organization was modified by another transaction")
-	ErrSubdomainTaken       = errors.New("subdomain already taken by another organization")
+	ErrTenantNotFound  = errors.New("tenant not found")
+	ErrTenantExists    = errors.New("tenant already exists")
+	ErrVersionConflict = errors.New("version conflict: tenant was modified by another transaction")
+	ErrSubdomainTaken  = errors.New("subdomain already taken by another tenant")
 )
 
-// Repository provides persistence operations for organizations.
+// Repository provides persistence operations for tenants.
 type Repository struct {
 	db *gorm.DB
 }
 
-// NewRepository creates a new organization repository.
+// NewRepository creates a new tenant repository.
 func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
@@ -40,34 +40,34 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
 
-// Create registers a new organization (BIAN: Initiate).
-func (r *Repository) Create(ctx context.Context, org *domain.Organization) error {
-	entity := toEntity(org)
+// Create registers a new tenant (BIAN: Initiate).
+func (r *Repository) Create(ctx context.Context, tenant *domain.Tenant) error {
+	entity := toEntity(tenant)
 
 	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
 		if isDuplicateKeyError(err) {
 			if strings.Contains(err.Error(), "subdomain") {
 				return ErrSubdomainTaken
 			}
-			return ErrOrganizationExists
+			return ErrTenantExists
 		}
 		return err
 	}
 
 	// Update domain model with created timestamp
-	org.CreatedAt = entity.CreatedAt
-	org.Version = entity.Version
+	tenant.CreatedAt = entity.CreatedAt
+	tenant.Version = entity.Version
 
 	return nil
 }
 
-// GetByID retrieves an organization by ID (BIAN: Retrieve).
-func (r *Repository) GetByID(ctx context.Context, id organization.OrganizationID) (*domain.Organization, error) {
-	var entity OrganizationEntity
+// GetByID retrieves a tenant by ID (BIAN: Retrieve).
+func (r *Repository) GetByID(ctx context.Context, id organization.OrganizationID) (*domain.Tenant, error) {
+	var entity TenantEntity
 	result := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrOrganizationNotFound
+		return nil, ErrTenantNotFound
 	}
 
 	if result.Error != nil {
@@ -77,18 +77,18 @@ func (r *Repository) GetByID(ctx context.Context, id organization.OrganizationID
 	return toDomain(&entity)
 }
 
-// IsActive checks if an organization exists and is active.
+// IsActive checks if a tenant exists and is active.
 // This is optimized for validation middleware - returns only what's needed.
 func (r *Repository) IsActive(ctx context.Context, id organization.OrganizationID) (bool, error) {
 	var status string
 	result := r.db.WithContext(ctx).
-		Model(&OrganizationEntity{}).
+		Model(&TenantEntity{}).
 		Select("status").
 		Where("id = ?", id.String()).
 		Take(&status)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return false, ErrOrganizationNotFound
+		return false, ErrTenantNotFound
 	}
 
 	if result.Error != nil {
@@ -98,8 +98,8 @@ func (r *Repository) IsActive(ctx context.Context, id organization.OrganizationI
 	return status == string(domain.StatusActive), nil
 }
 
-// UpdateStatus changes the organization status (BIAN: Update).
-func (r *Repository) UpdateStatus(ctx context.Context, id organization.OrganizationID, status domain.Status, currentVersion int) (*domain.Organization, error) {
+// UpdateStatus changes the tenant status (BIAN: Update).
+func (r *Repository) UpdateStatus(ctx context.Context, id organization.OrganizationID, status domain.Status, currentVersion int) (*domain.Tenant, error) {
 	updates := map[string]interface{}{
 		"status":  status,
 		"version": currentVersion + 1,
@@ -112,7 +112,7 @@ func (r *Repository) UpdateStatus(ctx context.Context, id organization.Organizat
 	}
 
 	result := r.db.WithContext(ctx).
-		Model(&OrganizationEntity{}).
+		Model(&TenantEntity{}).
 		Where("id = ? AND version = ?", id.String(), currentVersion).
 		Updates(updates)
 
@@ -121,25 +121,25 @@ func (r *Repository) UpdateStatus(ctx context.Context, id organization.Organizat
 	}
 
 	if result.RowsAffected == 0 {
-		// Check if organization exists
+		// Check if tenant exists
 		var count int64
 		r.db.WithContext(ctx).
-			Model(&OrganizationEntity{}).
+			Model(&TenantEntity{}).
 			Where("id = ?", id.String()).
 			Count(&count)
 
 		if count == 0 {
-			return nil, ErrOrganizationNotFound
+			return nil, ErrTenantNotFound
 		}
 		return nil, ErrVersionConflict
 	}
 
-	// Fetch and return the updated organization
+	// Fetch and return the updated tenant
 	return r.GetByID(ctx, id)
 }
 
-// List returns organizations with optional status filter (BIAN: Control).
-func (r *Repository) List(ctx context.Context, statusFilter *domain.Status, pageSize int, pageToken string) ([]*domain.Organization, string, error) {
+// List returns tenants with optional status filter (BIAN: Control).
+func (r *Repository) List(ctx context.Context, statusFilter *domain.Status, pageSize int, pageToken string) ([]*domain.Tenant, string, error) {
 	if pageSize <= 0 {
 		pageSize = 50
 	}
@@ -147,7 +147,7 @@ func (r *Repository) List(ctx context.Context, statusFilter *domain.Status, page
 		pageSize = 1000
 	}
 
-	query := r.db.WithContext(ctx).Model(&OrganizationEntity{})
+	query := r.db.WithContext(ctx).Model(&TenantEntity{})
 
 	// Apply status filter if provided
 	if statusFilter != nil {
@@ -163,7 +163,7 @@ func (r *Repository) List(ctx context.Context, statusFilter *domain.Status, page
 	// Order by created_at descending (newest first) and limit
 	query = query.Order("created_at DESC").Limit(pageSize + 1) // +1 to check if there's a next page
 
-	var entities []OrganizationEntity
+	var entities []TenantEntity
 	if err := query.Find(&entities).Error; err != nil {
 		return nil, "", err
 	}
@@ -177,35 +177,35 @@ func (r *Repository) List(ctx context.Context, statusFilter *domain.Status, page
 	}
 
 	// Convert to domain models
-	orgs := make([]*domain.Organization, 0, len(entities))
+	tenants := make([]*domain.Tenant, 0, len(entities))
 	for i := range entities {
-		org, err := toDomain(&entities[i])
+		tenant, err := toDomain(&entities[i])
 		if err != nil {
 			return nil, "", err
 		}
-		orgs = append(orgs, org)
+		tenants = append(tenants, tenant)
 	}
 
-	return orgs, nextPageToken, nil
+	return tenants, nextPageToken, nil
 }
 
-// GetAll returns all organizations (for cache initialization).
-func (r *Repository) GetAll(ctx context.Context) ([]*domain.Organization, error) {
-	var entities []OrganizationEntity
+// GetAll returns all tenants (for cache initialization).
+func (r *Repository) GetAll(ctx context.Context) ([]*domain.Tenant, error) {
+	var entities []TenantEntity
 	if err := r.db.WithContext(ctx).Find(&entities).Error; err != nil {
 		return nil, err
 	}
 
-	orgs := make([]*domain.Organization, 0, len(entities))
+	tenants := make([]*domain.Tenant, 0, len(entities))
 	for i := range entities {
-		org, err := toDomain(&entities[i])
+		tenant, err := toDomain(&entities[i])
 		if err != nil {
 			return nil, err
 		}
-		orgs = append(orgs, org)
+		tenants = append(tenants, tenant)
 	}
 
-	return orgs, nil
+	return tenants, nil
 }
 
 // Ping checks database connectivity.
@@ -215,34 +215,34 @@ func (r *Repository) Ping(ctx context.Context) error {
 }
 
 // toEntity converts domain model to database entity.
-func toEntity(org *domain.Organization) *OrganizationEntity {
-	entity := &OrganizationEntity{
-		ID:              org.ID.String(),
-		DisplayName:     org.DisplayName,
-		SettlementAsset: org.SettlementAsset,
-		Status:          string(org.Status),
-		CreatedAt:       org.CreatedAt,
-		DeprovisionedAt: org.DeprovisionedAt,
-		Metadata:        JSONMap(org.Metadata),
-		Version:         org.Version,
+func toEntity(tenant *domain.Tenant) *TenantEntity {
+	entity := &TenantEntity{
+		ID:              tenant.ID.String(),
+		DisplayName:     tenant.DisplayName,
+		SettlementAsset: tenant.SettlementAsset,
+		Status:          string(tenant.Status),
+		CreatedAt:       tenant.CreatedAt,
+		DeprovisionedAt: tenant.DeprovisionedAt,
+		Metadata:        JSONMap(tenant.Metadata),
+		Version:         tenant.Version,
 	}
 
-	if org.Subdomain != "" {
-		entity.Subdomain = &org.Subdomain
+	if tenant.Subdomain != "" {
+		entity.Subdomain = &tenant.Subdomain
 	}
 
 	return entity
 }
 
 // toDomain converts database entity to domain model.
-func toDomain(entity *OrganizationEntity) (*domain.Organization, error) {
-	orgID, err := organization.NewOrganizationID(entity.ID)
+func toDomain(entity *TenantEntity) (*domain.Tenant, error) {
+	tenantID, err := organization.NewOrganizationID(entity.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	org := &domain.Organization{
-		ID:              orgID,
+	tenant := &domain.Tenant{
+		ID:              tenantID,
 		DisplayName:     entity.DisplayName,
 		SettlementAsset: entity.SettlementAsset,
 		Status:          domain.Status(entity.Status),
@@ -253,10 +253,10 @@ func toDomain(entity *OrganizationEntity) (*domain.Organization, error) {
 	}
 
 	if entity.Subdomain != nil {
-		org.Subdomain = *entity.Subdomain
+		tenant.Subdomain = *entity.Subdomain
 	}
 
-	return org, nil
+	return tenant, nil
 }
 
 // isDuplicateKeyError checks if the error is a PostgreSQL unique constraint violation.

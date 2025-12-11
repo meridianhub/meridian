@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/meridianhub/meridian/services/organization/adapters/persistence"
-	"github.com/meridianhub/meridian/services/organization/domain"
+	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/organization"
 )
 
-// CachedRegistry provides an in-memory cache for organization validation.
-// It caches organization status to avoid database queries on every request.
+// CachedRegistry provides an in-memory cache for tenant validation.
+// It caches tenant status to avoid database queries on every request.
 // The cache is refreshed periodically in the background.
 type CachedRegistry struct {
 	repo            *persistence.Repository
@@ -21,7 +21,7 @@ type CachedRegistry struct {
 	logger          *slog.Logger
 
 	mu          sync.RWMutex
-	cache       map[organization.OrganizationID]*domain.Organization
+	cache       map[organization.OrganizationID]*domain.Tenant
 	lastRefresh time.Time
 	refreshErr  error
 }
@@ -42,7 +42,7 @@ func DefaultCachedRegistryConfig() CachedRegistryConfig {
 	}
 }
 
-// NewCachedRegistry creates a new cached organization registry.
+// NewCachedRegistry creates a new cached tenant registry.
 func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig) *CachedRegistry {
 	if config.RefreshInterval <= 0 {
 		config.RefreshInterval = 60 * time.Second
@@ -56,7 +56,7 @@ func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig
 
 	return &CachedRegistry{
 		repo:            repo,
-		cache:           make(map[organization.OrganizationID]*domain.Organization),
+		cache:           make(map[organization.OrganizationID]*domain.Tenant),
 		refreshInterval: config.RefreshInterval,
 		refreshTimeout:  config.RefreshTimeout,
 		logger:          config.Logger,
@@ -82,27 +82,27 @@ func (r *CachedRegistry) Start(ctx context.Context) {
 				return
 			case <-ticker.C:
 				if err := r.refresh(ctx); err != nil {
-					r.logger.Error("failed to refresh organization cache", "error", err)
+					r.logger.Error("failed to refresh tenant cache", "error", err)
 				}
 			}
 		}
 	}()
 }
 
-// IsActive checks if an organization exists and is active.
+// IsActive checks if a tenant exists and is active.
 // Uses the cache for fast lookups, falls back to database if cache miss.
 func (r *CachedRegistry) IsActive(ctx context.Context, id organization.OrganizationID) (bool, error) {
 	// Try cache first
 	r.mu.RLock()
-	org, ok := r.cache[id]
+	tenant, ok := r.cache[id]
 	r.mu.RUnlock()
 
 	if ok {
-		return org.Status == domain.StatusActive, nil
+		return tenant.Status == domain.StatusActive, nil
 	}
 
 	// Cache miss - check database directly
-	// This handles newly created organizations before cache refresh
+	// This handles newly created tenants before cache refresh
 	active, err := r.repo.IsActive(ctx, id)
 	if err != nil {
 		return false, err
@@ -111,22 +111,22 @@ func (r *CachedRegistry) IsActive(ctx context.Context, id organization.Organizat
 	return active, nil
 }
 
-// GetOrganization retrieves an organization from the cache.
+// GetTenant retrieves a tenant from the cache.
 // Returns nil if not found in cache (caller should query database if needed).
-func (r *CachedRegistry) GetOrganization(id organization.OrganizationID) *domain.Organization {
+func (r *CachedRegistry) GetTenant(id organization.OrganizationID) *domain.Tenant {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.cache[id]
 }
 
-// refresh reloads all organizations from the database into the cache.
+// refresh reloads all tenants from the database into the cache.
 // Uses fail-open strategy: if refresh fails, continue using stale cache.
 // Uses a per-refresh timeout to prevent slow queries from blocking the refresh loop.
 func (r *CachedRegistry) refresh(ctx context.Context) error {
 	refreshCtx, cancel := context.WithTimeout(ctx, r.refreshTimeout)
 	defer cancel()
 
-	orgs, err := r.repo.GetAll(refreshCtx)
+	tenants, err := r.repo.GetAll(refreshCtx)
 	if err != nil {
 		r.mu.Lock()
 		r.refreshErr = err
@@ -135,9 +135,9 @@ func (r *CachedRegistry) refresh(ctx context.Context) error {
 	}
 
 	// Build new cache map atomically
-	newCache := make(map[organization.OrganizationID]*domain.Organization, len(orgs))
-	for _, org := range orgs {
-		newCache[org.ID] = org
+	newCache := make(map[organization.OrganizationID]*domain.Tenant, len(tenants))
+	for _, tenant := range tenants {
+		newCache[tenant.ID] = tenant
 	}
 
 	r.mu.Lock()
@@ -147,8 +147,8 @@ func (r *CachedRegistry) refresh(ctx context.Context) error {
 	refreshTime := r.lastRefresh
 	r.mu.Unlock()
 
-	r.logger.Debug("organization cache refreshed",
-		"count", len(orgs),
+	r.logger.Debug("tenant cache refreshed",
+		"count", len(tenants),
 		"timestamp", refreshTime)
 
 	return nil
@@ -168,7 +168,7 @@ func (r *CachedRegistry) LastRefreshError() error {
 	return r.refreshErr
 }
 
-// Count returns the number of organizations in the cache.
+// Count returns the number of tenants in the cache.
 func (r *CachedRegistry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

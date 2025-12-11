@@ -1,4 +1,4 @@
-// Package persistence provides PostgreSQL persistence for organizations.
+// Package persistence provides PostgreSQL persistence for tenants.
 package persistence
 
 import (
@@ -11,23 +11,23 @@ import (
 // ErrJSONMapScanFailed indicates the JSONMap column value could not be scanned.
 var ErrJSONMapScanFailed = errors.New("failed to scan JSONMap: value is neither []byte nor string")
 
-// OrganizationEntity is the database representation of an organization.
-// Stored in the platform.organizations table.
-type OrganizationEntity struct {
+// TenantEntity is the database representation of a tenant.
+// Stored in the platform.tenants table.
+type TenantEntity struct {
 	ID              string     `gorm:"column:id;primaryKey"`
 	DisplayName     string     `gorm:"column:display_name;not null"`
 	SettlementAsset string     `gorm:"column:settlement_asset;not null"`
-	Subdomain       *string    `gorm:"column:subdomain;uniqueIndex:idx_organizations_subdomain"`
+	Subdomain       *string    `gorm:"column:subdomain;uniqueIndex:idx_tenants_subdomain"`
 	Status          string     `gorm:"column:status;not null;default:active"`
-	CreatedAt       time.Time  `gorm:"column:created_at;not null;autoCreateTime;index:idx_organizations_created_at,sort:desc"`
+	CreatedAt       time.Time  `gorm:"column:created_at;not null;autoCreateTime;index:idx_tenants_created_at,sort:desc"`
 	DeprovisionedAt *time.Time `gorm:"column:deprovisioned_at"`
 	Metadata        JSONMap    `gorm:"column:metadata;type:jsonb;default:'{}'"`
 	Version         int        `gorm:"column:version;not null;default:1"`
 }
 
 // TableName returns the table name for GORM.
-func (OrganizationEntity) TableName() string {
-	return "platform.organizations"
+func (TenantEntity) TableName() string {
+	return "platform.tenants"
 }
 
 // JSONMap is a custom type for JSONB columns.

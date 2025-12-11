@@ -1,4 +1,4 @@
-// Package main is the entry point for the Organization service.
+// Package main is the entry point for the Tenant service.
 package main
 
 import (
@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	pb "github.com/meridianhub/meridian/api/proto/meridian/organization/v1"
-	"github.com/meridianhub/meridian/services/organization/adapters/persistence"
-	"github.com/meridianhub/meridian/services/organization/service"
+	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
+	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
@@ -37,7 +37,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting organization service",
+	logger.Info("starting tenant service",
 		"version", Version,
 		"commit", Commit,
 		"build_date", BuildDate)
@@ -62,7 +62,7 @@ func run(logger *slog.Logger) error {
 
 	// Override service name and version from build info
 	tracerConfig = tracerConfig.
-		WithServiceName("organization-service").
+		WithServiceName("tenant-service").
 		WithServiceVersion(Version)
 
 	tracer, err := observability.NewTracer(ctx, tracerConfig)
@@ -96,7 +96,7 @@ func run(logger *slog.Logger) error {
 	repo := persistence.NewRepository(db)
 
 	// Create gRPC service
-	organizationService := service.NewService(repo, logger)
+	tenantService := service.NewService(repo, logger)
 
 	// Create cached registry for validation middleware
 	cachedRegistry := service.NewCachedRegistry(repo, service.CachedRegistryConfig{
@@ -105,7 +105,7 @@ func run(logger *slog.Logger) error {
 	})
 	cachedRegistry.Start(ctx)
 
-	logger.Info("cached organization registry started",
+	logger.Info("cached tenant registry started",
 		"refresh_interval", "60s")
 
 	// Create gRPC server with interceptor chain
@@ -122,13 +122,13 @@ func run(logger *slog.Logger) error {
 	)
 
 	// Register services
-	pb.RegisterOrganizationServiceServer(grpcServer, organizationService)
+	pb.RegisterTenantServiceServer(grpcServer, tenantService)
 
 	// Register health check service
 	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
 		Repository:  repo,
 		Logger:      logger,
-		ServiceName: "organization",
+		ServiceName: "tenant",
 		Timeout:     5 * time.Second,
 	})
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
