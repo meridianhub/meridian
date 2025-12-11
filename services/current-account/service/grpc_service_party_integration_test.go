@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ var (
 
 // mockPartyClient implements clients.PartyClient for testing
 type mockPartyClient struct {
+	mu              sync.Mutex
 	validateCalls   int
 	getCalls        int
 	validateError   error
@@ -47,28 +49,35 @@ type mockPartyClient struct {
 }
 
 func (m *mockPartyClient) ValidateParty(ctx context.Context, partyID string) error {
+	m.mu.Lock()
 	m.validateCalls++
 	m.lastValidatedID = partyID
+	simulateTimeout := m.simulateTimeout
+	timeoutDuration := m.timeoutDuration
+	validateError := m.validateError
+	partyExists := m.partyExists
+	partyStatus := m.partyStatus
+	m.mu.Unlock()
 
 	// Simulate timeout if configured
-	if m.simulateTimeout {
+	if simulateTimeout {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(m.timeoutDuration):
+		case <-time.After(timeoutDuration):
 			return errPartyServiceTimeout
 		}
 	}
 
-	if m.validateError != nil {
-		return m.validateError
+	if validateError != nil {
+		return validateError
 	}
 
-	if !m.partyExists {
+	if !partyExists {
 		return clients.ErrPartyNotFound
 	}
 
-	if m.partyStatus != partyv1.PartyStatus_PARTY_STATUS_ACTIVE {
+	if partyStatus != partyv1.PartyStatus_PARTY_STATUS_ACTIVE {
 		return clients.ErrPartyNotActive
 	}
 
@@ -76,26 +85,33 @@ func (m *mockPartyClient) ValidateParty(ctx context.Context, partyID string) err
 }
 
 func (m *mockPartyClient) GetParty(_ context.Context, partyID string) (*partyv1.Party, error) {
+	m.mu.Lock()
 	m.getCalls++
 	m.lastRetrievedID = partyID
+	getError := m.getError
+	partyExists := m.partyExists
+	partyStatus := m.partyStatus
+	m.mu.Unlock()
 
-	if m.getError != nil {
-		return nil, m.getError
+	if getError != nil {
+		return nil, getError
 	}
 
-	if !m.partyExists {
+	if !partyExists {
 		return nil, clients.ErrPartyNotFound
 	}
 
 	return &partyv1.Party{
 		PartyId:   partyID,
 		LegalName: "Test Party",
-		Status:    m.partyStatus,
+		Status:    partyStatus,
 	}, nil
 }
 
 func (m *mockPartyClient) Close() error {
+	m.mu.Lock()
 	m.closeCalls++
+	m.mu.Unlock()
 	return nil
 }
 
