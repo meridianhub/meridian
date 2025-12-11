@@ -6,6 +6,7 @@ This directory contains how-to guides and usage documentation for Meridian devel
 
 | Guide | Description |
 |-------|-------------|
+| [New BIAN Service Checklist](new-bian-service-checklist.md) | Complete checklist for creating a new BIAN service domain |
 | [Circuit Breaker Usage](circuit-breaker-usage.md) | Using circuit breakers for resilient inter-service calls |
 | [Testcontainers Usage](testcontainers-usage.md) | PostgreSQL testcontainers for integration testing |
 | [Financial Accounting Proto](financial-accounting-proto.md) | Protocol buffer schemas for Financial Accounting service |
