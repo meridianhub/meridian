@@ -88,12 +88,6 @@ jobs:
           atlas version
         timeout-minutes: 5
 
-      - name: Build orgctl CLI
-        run: |
-          go mod download
-          go build -o dist/orgctl ./cmd/orgctl
-          echo "${{ github.workspace }}/dist" >> $GITHUB_PATH
-
       - name: Create test organization schemas
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/meridian_test?sslmode=disable
