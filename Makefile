@@ -29,7 +29,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all docs
+.PHONY: all help build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs
 
 # Default target
 all: help
@@ -70,6 +70,8 @@ help:
 	@echo "  make migrate-status-all        - Show migration status for all schemas"
 	@echo "  make migrate-lint-all          - Lint all migrations"
 	@echo "  make migrate-hash-all          - Verify all migration checksums"
+	@echo "  make migrate-apply-orgs        - Apply migrations to all organization schemas"
+	@echo "  make migrate-status-orgs       - Show migration status for all organization schemas"
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION=$(VERSION)"
@@ -334,6 +336,42 @@ migrate-hash-all:
 	@atlas migrate hash --env local --config services/current-account/atlas/atlas.hcl
 	@atlas migrate hash --env local --config services/position-keeping/atlas/atlas.hcl
 	@echo "All migration checksums verified."
+
+## migrate-apply-orgs: Apply migrations to all organization schemas
+migrate-apply-orgs:
+	@echo "Applying migrations to all active organizations..."
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "Error: DATABASE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	@if [ -z "$$ORGANIZATION_SERVICE_URL" ]; then \
+		echo "Error: ORGANIZATION_SERVICE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	@chmod +x scripts/migrate-all-orgs.sh
+	@./scripts/migrate-all-orgs.sh
+
+## migrate-status-orgs: Show migration status for all organization schemas
+migrate-status-orgs:
+	@echo "Checking migration status for all organizations..."
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "Error: DATABASE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	@if [ -z "$$ORGANIZATION_SERVICE_URL" ]; then \
+		echo "Error: ORGANIZATION_SERVICE_URL environment variable not set"; \
+		exit 1; \
+	fi
+	@ORGS=$$(orgctl list --status=active 2>&1 | tail -n +3 | awk '{print $$1}' | grep -v '^$$'); \
+	for ORG in $$ORGS; do \
+		echo ""; \
+		echo "=== Organization: $$ORG ==="; \
+		for CONFIG in services/*/atlas/atlas.hcl; do \
+			SERVICE=$$(basename $$(dirname $$(dirname $$CONFIG))); \
+			echo "Service: $$SERVICE"; \
+			atlas migrate status --env local --config $$CONFIG --url "$$DATABASE_URL&search_path=org_$$ORG" || true; \
+		done; \
+	done
 
 ## docs: Start local documentation server (pkgsite)
 docs:
