@@ -27,8 +27,8 @@ This command creates a new tenant entry in the platform registry. The tenant
 ID must be unique and follow the pattern: alphanumeric characters and underscores only,
 1-50 characters.
 
-The operation is idempotent - registering an existing tenant ID will succeed
-without creating a duplicate.
+The CLI treats duplicate registrations as idempotent - if the tenant already
+exists, the command exits successfully without error.
 
 Examples:
   # Register a bank with GBP settlement

@@ -52,9 +52,13 @@ func runGet(_ *cobra.Command, args []string) error {
 	}
 
 	resp, err := tenantClient.RetrieveTenant(context.Background(), req)
-	exitCode := handleGRPCError(err, fmt.Sprintf("get tenant '%s'", tenantID))
-	if exitCode != 0 && err != nil {
-		return err
+	if err != nil {
+		exitCode := handleGRPCError(err, fmt.Sprintf("get tenant '%s'", tenantID))
+		if exitCode != 0 {
+			return err
+		}
+		// NotFound is treated as idempotent success by handleGRPCError (already logged)
+		return nil
 	}
 
 	if resp == nil || resp.Tenant == nil {
