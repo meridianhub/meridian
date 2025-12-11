@@ -36,6 +36,10 @@ var (
 	ErrOriginalAccountStateNotFound   = errors.New("original account state not available for compensation")
 	ErrPositionLogIDNotFound          = errors.New("position log ID not available for compensation")
 	ErrLedgerPostingIDNotFound        = errors.New("ledger posting ID not available for compensation")
+
+	// Party validation errors (re-exported from clients package for convenience)
+	ErrPartyNotFound  = clients.ErrPartyNotFound
+	ErrPartyNotActive = clients.ErrPartyNotActive
 )
 
 // Operation status constants for consistency across the service
@@ -51,6 +55,7 @@ type Service struct {
 	lienRepo         *persistence.LienRepository
 	posKeepingClient clients.PositionKeepingClient
 	finAcctClient    clients.FinancialAccountingClient
+	partyClient      clients.PartyClient
 	logger           *slog.Logger
 	tracer           *observability.Tracer
 }
@@ -61,6 +66,7 @@ type Config struct {
 	LienRepository            *persistence.LienRepository
 	PositionKeepingTarget     string // e.g., "positionkeeping-service:50051"
 	FinancialAccountingTarget string // e.g., "financialaccounting-service:50052"
+	PartyServiceTarget        string // e.g., "party-service:50054"
 	Logger                    *slog.Logger
 	Tracer                    *observability.Tracer
 }
@@ -86,6 +92,7 @@ func NewServiceWithExistingClients(
 	lienRepo *persistence.LienRepository,
 	posKeepingClient clients.PositionKeepingClient,
 	finAcctClient clients.FinancialAccountingClient,
+	partyClient clients.PartyClient,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
 ) (*Service, error) {
@@ -103,6 +110,7 @@ func NewServiceWithExistingClients(
 		lienRepo:         lienRepo,
 		posKeepingClient: posKeepingClient,
 		finAcctClient:    finAcctClient,
+		partyClient:      partyClient,
 		logger:           logger,
 		tracer:           tracer,
 	}, nil
@@ -165,11 +173,32 @@ func NewServiceWithClients(config Config) (*Service, error) {
 		},
 	)
 
+	// Create Party client (optional - nil client provides backward compatibility)
+	var resilientPartyClient clients.PartyClient
+	if config.PartyServiceTarget != "" {
+		partyGRPCClient, err := clients.NewPartyClient(&clients.PartyClientConfig{
+			Target:  config.PartyServiceTarget,
+			Timeout: 30 * time.Second,
+			Tracer:  config.Tracer,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create party client: %w", err)
+		}
+
+		resilientPartyClient = clients.NewResilientPartyClient(
+			partyGRPCClient,
+			clients.ResilientClientConfig{
+				Logger: logger,
+			},
+		)
+	}
+
 	return &Service{
 		repo:             config.Repository,
 		lienRepo:         config.LienRepository,
 		posKeepingClient: resilientPosKeepingClient,
 		finAcctClient:    resilientFinAcctClient,
+		partyClient:      resilientPartyClient,
 		logger:           logger,
 		tracer:           config.Tracer,
 	}, nil
@@ -191,6 +220,45 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	if currency == "" {
 		operationStatus = operationStatusInvalidCurrency
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported currency: %v", req.BaseCurrency)
+	}
+
+	// Validate party exists and is active (if party client is configured)
+	if s.partyClient != nil {
+		partyValidationStart := time.Now()
+		s.logger.Info("validating party for account creation",
+			"party_id", req.PartyId,
+			"account_id", accountID)
+
+		if err := s.partyClient.ValidateParty(ctx, req.PartyId); err != nil {
+			caobservability.RecordPartyValidationDuration(time.Since(partyValidationStart), false)
+
+			if errors.Is(err, ErrPartyNotFound) {
+				operationStatus = "party_not_found"
+				s.logger.Warn("party not found during account creation",
+					"party_id", req.PartyId,
+					"account_id", accountID)
+				return nil, status.Errorf(codes.InvalidArgument, "party not found: %s", req.PartyId)
+			}
+			if errors.Is(err, ErrPartyNotActive) {
+				operationStatus = "party_not_active"
+				s.logger.Warn("party not active during account creation",
+					"party_id", req.PartyId,
+					"account_id", accountID)
+				return nil, status.Errorf(codes.FailedPrecondition, "party not active: %s", req.PartyId)
+			}
+			operationStatus = "party_validation_failed"
+			s.logger.Error("party validation failed during account creation",
+				"party_id", req.PartyId,
+				"account_id", accountID,
+				"error", err)
+			caobservability.RecordExternalServiceError("party", "validate_party")
+			return nil, status.Errorf(codes.Internal, "party validation failed: %v", err)
+		}
+
+		caobservability.RecordPartyValidationDuration(time.Since(partyValidationStart), true)
+		s.logger.Info("party validated successfully",
+			"party_id", req.PartyId,
+			"account_id", accountID)
 	}
 
 	// Create domain model
