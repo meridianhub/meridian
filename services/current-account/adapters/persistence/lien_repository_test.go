@@ -2,6 +2,7 @@
 package persistence
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestLienRepository_Create(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify lien was saved
-	retrieved, err := repo.FindByID(lien.ID)
+	retrieved, err := repo.FindByID(context.Background(), lien.ID)
 	require.NoError(t, err)
 
 	assert.Equal(t, lien.ID, retrieved.ID)
@@ -52,7 +53,7 @@ func TestLienRepository_FindByID_NotFound(t *testing.T) {
 
 	repo := NewLienRepository(db)
 
-	_, err := repo.FindByID(uuid.New())
+	_, err := repo.FindByID(context.Background(), uuid.New())
 	assert.ErrorIs(t, err, ErrLienNotFound)
 }
 
@@ -163,7 +164,7 @@ func TestLienRepository_FindByPaymentOrderReference(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(lien))
 
-	retrieved, err := repo.FindByPaymentOrderReference("PO-UNIQUE-123")
+	retrieved, err := repo.FindByPaymentOrderReference(context.Background(), "PO-UNIQUE-123")
 	require.NoError(t, err)
 
 	assert.Equal(t, lien.ID, retrieved.ID)
@@ -175,7 +176,7 @@ func TestLienRepository_FindByPaymentOrderReference_NotFound(t *testing.T) {
 
 	repo := NewLienRepository(db)
 
-	_, err := repo.FindByPaymentOrderReference("PO-NONEXISTENT")
+	_, err := repo.FindByPaymentOrderReference(context.Background(), "PO-NONEXISTENT")
 	assert.ErrorIs(t, err, ErrLienNotFound)
 }
 
@@ -197,7 +198,7 @@ func TestLienRepository_Update_Execute(t *testing.T) {
 	require.NoError(t, repo.Update(lien))
 
 	// Verify status was updated
-	retrieved, err := repo.FindByID(lien.ID)
+	retrieved, err := repo.FindByID(context.Background(), lien.ID)
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.LienStatusExecuted, retrieved.Status)
@@ -222,7 +223,7 @@ func TestLienRepository_Update_Terminate(t *testing.T) {
 	require.NoError(t, repo.Update(lien))
 
 	// Verify status and reason were updated
-	retrieved, err := repo.FindByID(lien.ID)
+	retrieved, err := repo.FindByID(context.Background(), lien.ID)
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.LienStatusTerminated, retrieved.Status)
@@ -245,10 +246,10 @@ func TestLienRepository_OptimisticLocking(t *testing.T) {
 	require.NoError(t, repo.Create(lien))
 
 	// Load same lien twice (simulating concurrent access)
-	lien1, err := repo.FindByID(lien.ID)
+	lien1, err := repo.FindByID(context.Background(), lien.ID)
 	require.NoError(t, err)
 
-	lien2, err := repo.FindByID(lien.ID)
+	lien2, err := repo.FindByID(context.Background(), lien.ID)
 	require.NoError(t, err)
 
 	// First update succeeds
@@ -261,7 +262,7 @@ func TestLienRepository_OptimisticLocking(t *testing.T) {
 	assert.ErrorIs(t, err, ErrLienVersionConflict)
 
 	// Verify first transaction's changes persisted
-	final, err := repo.FindByID(lien.ID)
+	final, err := repo.FindByID(context.Background(), lien.ID)
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.LienStatusExecuted, final.Status)
@@ -292,7 +293,7 @@ func TestLienRepository_SumActiveAmountByAccountID(t *testing.T) {
 	require.NoError(t, repo.Update(lien3))
 
 	// Sum should only include active non-expired liens
-	total, err := repo.SumActiveAmountByAccountID(accountID)
+	total, err := repo.SumActiveAmountByAccountID(context.Background(), accountID)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(35000), total) // £200 + £150 = £350
@@ -317,7 +318,7 @@ func TestLienRepository_SumActiveAmountByAccountID_ExcludesExpired(t *testing.T)
 	require.NoError(t, repo.Create(lien2))
 
 	// Sum should only include non-expired active liens
-	total, err := repo.SumActiveAmountByAccountID(accountID)
+	total, err := repo.SumActiveAmountByAccountID(context.Background(), accountID)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(20000), total) // Only £200, expired lien excluded
@@ -350,7 +351,7 @@ func TestLienRepository_SumActiveAmountByAccountID_CurrencyInconsistency(t *test
 	require.NoError(t, db.Create(corruptedEntity).Error)
 
 	// Sum should return currency inconsistency error
-	_, err := repo.SumActiveAmountByAccountID(accountID)
+	_, err := repo.SumActiveAmountByAccountID(context.Background(), accountID)
 	assert.ErrorIs(t, err, ErrLienCurrencyInconsistent)
 }
 
@@ -361,7 +362,7 @@ func TestLienRepository_SumActiveAmountByAccountID_NoLiens(t *testing.T) {
 	repo := NewLienRepository(db)
 	accountID := uuid.New()
 
-	total, err := repo.SumActiveAmountByAccountID(accountID)
+	total, err := repo.SumActiveAmountByAccountID(context.Background(), accountID)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(0), total)
@@ -381,7 +382,7 @@ func TestLienRepository_CreateWithExpiration(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(lien))
 
-	retrieved, err := repo.FindByID(lien.ID)
+	retrieved, err := repo.FindByID(context.Background(), lien.ID)
 	require.NoError(t, err)
 
 	require.NotNil(t, retrieved.ExpiresAt)
@@ -429,7 +430,7 @@ func TestLienRepository_FindByID_CorruptedData_ReturnsError(t *testing.T) {
 	}
 	require.NoError(t, db.Create(corruptedEntity).Error)
 
-	_, err := repo.FindByID(corruptedEntity.ID)
+	_, err := repo.FindByID(context.Background(), corruptedEntity.ID)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "database")
