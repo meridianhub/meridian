@@ -34,7 +34,9 @@ type Account struct {
 	ClosedAt *time.Time `gorm:"index" json:"closed_at,omitempty"`
 }
 
-// TableName overrides the table name used by Account to `current_account.accounts`
+// TableName overrides the table name.
+// Uses unqualified name to allow PostgreSQL search_path to route queries
+// to organization-specific schemas (e.g., org_acme_bank.accounts).
 func (Account) TableName() string {
-	return "current_account.accounts"
+	return "accounts"
 }

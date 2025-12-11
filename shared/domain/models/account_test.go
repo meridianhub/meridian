@@ -9,8 +9,8 @@ import (
 
 func TestAccount_TableName(t *testing.T) {
 	account := Account{}
-	if account.TableName() != "current_account.accounts" {
-		t.Errorf("TableName() = %v, want %v", account.TableName(), "current_account.accounts")
+	if account.TableName() != "accounts" {
+		t.Errorf("TableName() = %v, want %v", account.TableName(), "accounts")
 	}
 }
 

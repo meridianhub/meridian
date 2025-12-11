@@ -12,7 +12,7 @@ type LienEntity struct {
 	// Primary key
 	ID uuid.UUID `gorm:"primaryKey"`
 
-	// Foreign key to current_account.accounts
+	// Foreign key to accounts table (routed via search_path)
 	AccountID uuid.UUID `gorm:"not null;index:idx_liens_account_status"`
 
 	// Monetary amount
@@ -37,7 +37,9 @@ type LienEntity struct {
 	Version   int       `gorm:"not null;default:1"`
 }
 
-// TableName overrides the default table name with schema prefix
+// TableName overrides the default table name.
+// Uses unqualified name to allow PostgreSQL search_path to route queries
+// to organization-specific schemas (e.g., org_acme_bank.liens).
 func (LienEntity) TableName() string {
-	return "current_account.liens"
+	return "liens"
 }

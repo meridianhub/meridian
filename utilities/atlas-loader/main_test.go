@@ -160,9 +160,13 @@ func TestOutputFormat(t *testing.T) {
 		assert.Contains(t, output, "CREATE TABLE", "output should contain CREATE TABLE")
 		assert.Contains(t, output, "PRIMARY KEY", "output should contain PRIMARY KEY")
 
-		// Verify schema qualification (with quotes)
-		assert.Contains(t, output, `"current_account"."customers"`, "table should be schema-qualified")
-		assert.Contains(t, output, `"current_account"."accounts"`, "table should be schema-qualified")
+		// Verify schema qualification for schema-bound tables
+		assert.Contains(t, output, `"current_account"."customers"`, "customers table should be schema-qualified")
+
+		// Verify unqualified table names for multi-org tables (accounts, liens)
+		// These use unqualified names to allow PostgreSQL search_path routing
+		assert.Contains(t, output, `CREATE TABLE "accounts"`, "accounts table should be unqualified for search_path routing")
+		assert.Contains(t, output, `CREATE TABLE "liens"`, "liens table should be unqualified for search_path routing")
 
 		// Verify no SQL syntax errors (basic check)
 		assert.NotContains(t, output, ";;", "should not have double semicolons")
