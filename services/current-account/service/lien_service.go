@@ -136,7 +136,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Calculate available balance (within the lock)
-		activeLiensTotal, err := txLienRepo.SumActiveAmountByAccountID(account.ID)
+		activeLiensTotal, err := txLienRepo.SumActiveAmountByAccountID(ctx, account.ID)
 		if err != nil {
 			return fmt.Errorf("%w: %w", errTxSumLiensFailed, err)
 		}
@@ -232,7 +232,8 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	}
 
 	// First, check for idempotency without locking (read-only check)
-	lien, err := s.lienRepo.FindByID(lienID)
+	// Note: Context is passed to enable organization scoping in multi-org mode
+	lien, err := s.lienRepo.FindByID(ctx, lienID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
 			operationStatus = opStatusLienNotFound
@@ -357,7 +358,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		"amount_cents", lien.Amount.AmountCents(),
 		"transaction_id", transactionID)
 
-	availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
+	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance)
 	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
 		NewBalance:       toMoneyAmount(account.Balance),
@@ -388,7 +389,8 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	}
 
 	// First, check for idempotency without locking (read-only check)
-	lien, err := s.lienRepo.FindByID(lienID)
+	// Note: Context is passed to enable organization scoping in multi-org mode
+	lien, err := s.lienRepo.FindByID(ctx, lienID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
 			operationStatus = opStatusLienNotFound
@@ -409,7 +411,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 			s.logger.Error("failed to find account for idempotent response", "error", acctErr)
 			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
 		}
-		availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
+		availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance)
 		return &pb.TerminateLienResponse{
 			Lien:             toLienProto(lien),
 			AvailableBalance: toMoneyAmount(availableMoney),
@@ -496,7 +498,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
+	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance)
 	return &pb.TerminateLienResponse{
 		Lien:             toLienProto(lien),
 		AvailableBalance: toMoneyAmount(availableMoney),
@@ -504,7 +506,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 }
 
 // RetrieveLien gets lien details
-func (s *Service) RetrieveLien(_ context.Context, req *pb.RetrieveLienRequest) (*pb.RetrieveLienResponse, error) {
+func (s *Service) RetrieveLien(ctx context.Context, req *pb.RetrieveLienRequest) (*pb.RetrieveLienResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
@@ -524,8 +526,8 @@ func (s *Service) RetrieveLien(_ context.Context, req *pb.RetrieveLienRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "invalid lien ID: %v", err)
 	}
 
-	// Retrieve lien
-	lien, err := s.lienRepo.FindByID(lienID)
+	// Retrieve lien (context is passed for organization scoping in multi-org mode)
+	lien, err := s.lienRepo.FindByID(ctx, lienID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
 			operationStatus = opStatusLienNotFound
@@ -599,7 +601,7 @@ func (s *Service) buildExecuteLienIdempotentResponse(ctx context.Context, lien *
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	availableMoney := s.calculateAvailableBalance(lien.AccountID, account.Balance)
+	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance)
 	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
 		NewBalance:       toMoneyAmount(account.Balance),
@@ -616,7 +618,7 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 		return nil, false, nil
 	}
 
-	existingLien, err := s.lienRepo.FindByPaymentOrderReference(paymentOrderRef)
+	existingLien, err := s.lienRepo.FindByPaymentOrderReference(ctx, paymentOrderRef)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
 			return nil, false, nil // Not found - continue with creation
@@ -635,7 +637,7 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 		s.logger.Error("failed to retrieve account for idempotent response", "error", acctErr)
 		return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, true, nil
 	}
-	availableMoney := s.calculateAvailableBalance(existingLien.AccountID, account.Balance)
+	availableMoney := s.calculateAvailableBalance(ctx, existingLien.AccountID, account.Balance)
 	return &pb.InitiateLienResponse{
 		Lien:             toLienProto(existingLien),
 		AvailableBalance: toMoneyAmount(availableMoney),
@@ -644,8 +646,9 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 
 // calculateAvailableBalance calculates available balance with active liens.
 // Logs errors but returns best-effort values since primary operations already succeeded.
-func (s *Service) calculateAvailableBalance(accountID uuid.UUID, currentBalance domain.Money) domain.Money {
-	activeLiensTotal, err := s.lienRepo.SumActiveAmountByAccountID(accountID)
+// Context is required for organization scoping in multi-org mode.
+func (s *Service) calculateAvailableBalance(ctx context.Context, accountID uuid.UUID, currentBalance domain.Money) domain.Money {
+	activeLiensTotal, err := s.lienRepo.SumActiveAmountByAccountID(ctx, accountID)
 	if err != nil {
 		s.logger.Error("failed to sum active liens for response", "error", err)
 		return currentBalance // Best effort: return current balance if liens can't be summed

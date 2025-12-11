@@ -2,12 +2,15 @@
 package persistence
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -35,23 +38,50 @@ func (r *LienRepository) WithTx(tx *gorm.DB) *LienRepository {
 	return &LienRepository{db: tx}
 }
 
+// hasOrganizationContext checks if organization context is present (multi-org mode).
+func (r *LienRepository) hasOrganizationContext(ctx context.Context) bool {
+	_, ok := organization.FromContext(ctx)
+	return ok
+}
+
+// withOptionalOrgScope executes the given function with optional organization scoping.
+// In single-tenant mode (no org context), it runs the function directly without a transaction.
+// In multi-org mode, it wraps the function in a transaction and sets the search_path.
+// This helper reduces code duplication across repository methods.
+func (r *LienRepository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if !r.hasOrganizationContext(ctx) {
+		// Single-tenant mode: run directly without transaction overhead
+		return fn(r.db.WithContext(ctx))
+	}
+	// Multi-org mode: use the shared helper that handles transaction + org scope
+	return db.WithGormOrganizationTransaction(ctx, r.db, fn)
+}
+
 // Create inserts a new lien
 func (r *LienRepository) Create(lien *domain.Lien) error {
 	entity := toLienEntity(lien)
 	return r.db.Create(entity).Error
 }
 
-// FindByID retrieves a lien by its UUID
-func (r *LienRepository) FindByID(id uuid.UUID) (*domain.Lien, error) {
+// FindByID retrieves a lien by its UUID.
+// In multi-org mode, this query is scoped to the organization from context.
+func (r *LienRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Lien, error) {
 	var entity LienEntity
-	result := r.db.Where("id = ?", id).First(&entity)
+	var queryErr error
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrLienNotFound
-	}
-
-	if result.Error != nil {
-		return nil, result.Error
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		result := tx.Where("id = ?", id).First(&entity)
+		if result.Error != nil {
+			queryErr = result.Error
+			return result.Error
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			return nil, ErrLienNotFound
+		}
+		return nil, err
 	}
 
 	return toLienDomain(&entity)
@@ -122,17 +152,25 @@ func (r *LienRepository) FindActiveByAccountID(accountID uuid.UUID) ([]*domain.L
 	return liens, nil
 }
 
-// FindByPaymentOrderReference retrieves a lien by its payment order reference
-func (r *LienRepository) FindByPaymentOrderReference(reference string) (*domain.Lien, error) {
+// FindByPaymentOrderReference retrieves a lien by its payment order reference.
+// In multi-org mode, this query is scoped to the organization from context.
+func (r *LienRepository) FindByPaymentOrderReference(ctx context.Context, reference string) (*domain.Lien, error) {
 	var entity LienEntity
-	result := r.db.Where("payment_order_reference = ?", reference).First(&entity)
+	var queryErr error
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrLienNotFound
-	}
-
-	if result.Error != nil {
-		return nil, result.Error
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		result := tx.Where("payment_order_reference = ?", reference).First(&entity)
+		if result.Error != nil {
+			queryErr = result.Error
+			return result.Error
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			return nil, ErrLienNotFound
+		}
+		return nil, err
 	}
 
 	return toLienDomain(&entity)
@@ -169,36 +207,40 @@ func (r *LienRepository) Update(lien *domain.Lien) error {
 // SumActiveAmountByAccountID returns the total amount of active non-expired liens for an account in cents.
 // Returns ErrLienCurrencyInconsistent if liens with different currencies exist (indicates data corruption).
 // Currency validation is enforced at the service layer when creating liens (InitiateLien).
-func (r *LienRepository) SumActiveAmountByAccountID(accountID uuid.UUID) (int64, error) {
+// In multi-org mode, this query is scoped to the organization from context.
+func (r *LienRepository) SumActiveAmountByAccountID(ctx context.Context, accountID uuid.UUID) (int64, error) {
 	// Capture timestamp once to ensure consistency between the two queries
 	now := time.Now()
-
-	// First, check for currency consistency (defensive check for data corruption)
 	var currencyCount int64
-	countResult := r.db.Model(&LienEntity{}).
-		Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
-			accountID, string(domain.LienStatusActive), now).
-		Select("COUNT(DISTINCT currency)").
-		Scan(&currencyCount)
-
-	if countResult.Error != nil {
-		return 0, countResult.Error
-	}
-
-	if currencyCount > 1 {
-		return 0, ErrLienCurrencyInconsistent
-	}
-
-	// Sum active non-expired liens
 	var totalCents int64
-	result := r.db.Model(&LienEntity{}).
-		Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
-			accountID, string(domain.LienStatusActive), now).
-		Select("COALESCE(SUM(amount_cents), 0)").
-		Scan(&totalCents)
 
-	if result.Error != nil {
-		return 0, result.Error
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		// First, check for currency consistency (defensive check for data corruption)
+		countResult := tx.Model(&LienEntity{}).
+			Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+				accountID, string(domain.LienStatusActive), now).
+			Select("COUNT(DISTINCT currency)").
+			Scan(&currencyCount)
+
+		if countResult.Error != nil {
+			return countResult.Error
+		}
+
+		if currencyCount > 1 {
+			return ErrLienCurrencyInconsistent
+		}
+
+		// Sum active non-expired liens
+		result := tx.Model(&LienEntity{}).
+			Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+				accountID, string(domain.LienStatusActive), now).
+			Select("COALESCE(SUM(amount_cents), 0)").
+			Scan(&totalCents)
+
+		return result.Error
+	})
+	if err != nil {
+		return 0, err
 	}
 
 	return totalCents, nil
