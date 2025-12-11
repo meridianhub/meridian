@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
+	"io"
 	"log/slog"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -27,7 +27,7 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, func()) {
 	})
 
 	repo := persistence.NewRepository(db)
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	svc, err := NewService(repo, logger)
 	require.NoError(t, err, "Failed to create service")
@@ -344,8 +344,8 @@ func TestRegisterParty_ValidationErrors(t *testing.T) {
 	}
 }
 
-// TestRegisterParty_MultiplePartiesWithDifferentExternalRefTypes verifies that
-// parties can have the same external reference value if the types are different.
+// TestRegisterParty_DifferentExternalRefTypes verifies that parties can have
+// the same external reference value if the types are different.
 func TestRegisterParty_DifferentExternalRefTypes(t *testing.T) {
 	svc, _, cleanup := setupIntegrationTest(t)
 	defer cleanup()
