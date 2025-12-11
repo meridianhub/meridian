@@ -508,28 +508,21 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 	assert.Equal(t, user2, entity.UpdatedBy, "updated_by should reflect the user who made the update")
 }
 
-// Multi-org mode integration tests
+// Multi-org integration tests
 //
-// NOTE: These tests are skipped because the current entity uses a fully-qualified
-// table name ("current_account.accounts") which bypasses PostgreSQL's search_path.
-// For multi-org mode to fully work, the entity would need to use just "accounts"
-// and rely on search_path for schema resolution. This is tracked separately.
+// Comprehensive multi-organization isolation tests are located in:
+// tests/multi_org/isolation_test.go
 //
-// The unit tests in gorm_organization_scope_test.go verify that SET LOCAL search_path
-// is correctly executed. These integration tests would verify end-to-end behavior
-// once the entity table naming is updated.
-
-func TestMultiOrg_SaveAndFindWithOrganizationContext(t *testing.T) {
-	t.Skip("Skipped: Entity uses fully-qualified table name 'current_account.accounts' which bypasses search_path. " +
-		"Multi-org integration requires entity to use unqualified table name 'accounts'.")
-}
-
-func TestMultiOrg_IsolationBetweenOrganizations(t *testing.T) {
-	t.Skip("Skipped: Entity uses fully-qualified table name 'current_account.accounts' which bypasses search_path. " +
-		"Multi-org integration requires entity to use unqualified table name 'accounts'.")
-}
-
-func TestMultiOrg_FindByIDForUpdate_SetsOrgScope(t *testing.T) {
-	t.Skip("Skipped: Entity uses fully-qualified table name 'current_account.accounts' which bypasses search_path. " +
-		"Multi-org integration requires entity to use unqualified table name 'accounts'.")
-}
+// These tests verify:
+// - Organization database isolation via search_path
+// - Cross-organization data isolation
+// - Concurrent access from multiple organizations
+// - Redis key prefixing per organization
+// - Kafka header propagation
+//
+// The entity now uses unqualified table name "accounts" which allows
+// PostgreSQL's search_path mechanism to route queries to organization-specific
+// schemas (e.g., org_acme_bank.accounts, org_motive_corp.accounts).
+//
+// See: shared/platform/db/gorm_organization_scope.go for the implementation
+// See: shared/platform/db/gorm_organization_scope_test.go for unit tests

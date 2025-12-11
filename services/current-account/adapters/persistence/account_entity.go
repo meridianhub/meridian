@@ -40,7 +40,9 @@ type CurrentAccountEntity struct {
 	DeletedAt *time.Time `gorm:"column:deleted_at;index"`
 }
 
-// TableName overrides the default table name with schema prefix
+// TableName overrides the default table name.
+// Uses unqualified name to allow PostgreSQL search_path to route queries
+// to organization-specific schemas (e.g., org_acme_bank.accounts).
 func (CurrentAccountEntity) TableName() string {
-	return "current_account.accounts"
+	return "accounts"
 }
