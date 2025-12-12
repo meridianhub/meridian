@@ -212,22 +212,6 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		caobservability.RecordOperationDuration("initiate_account", operationStatus, time.Since(start))
 	}()
 
-	// Validate party exists and is active (if party client is configured)
-	if s.partyClient != nil {
-		if err := s.partyClient.ValidateParty(ctx, req.PartyId); err != nil {
-			if errors.Is(err, clients.ErrPartyNotFound) {
-				operationStatus = "party_not_found"
-				return nil, status.Errorf(codes.InvalidArgument, "party not found: %s", req.PartyId)
-			}
-			if errors.Is(err, clients.ErrPartyNotActive) {
-				operationStatus = "party_not_active"
-				return nil, status.Errorf(codes.FailedPrecondition, "party not active: %s", req.PartyId)
-			}
-			operationStatus = "party_validation_failed"
-			return nil, status.Errorf(codes.Internal, "party validation failed: %v", err)
-		}
-	}
-
 	// Generate account ID
 	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
 
