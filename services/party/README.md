@@ -131,6 +131,10 @@ External references are write-once and unique per type:
 | `NATIONAL_ID` | `^[A-Z0-9]{5,20}$` | `AB12345` |
 | `TAX_ID` | `^[A-Z0-9]{5,20}$` | `TB123456789` |
 
+**Note:** Validation is format-only (regex pattern matching). LEI checksum (ISO 17442 MOD 97-10)
+and Companies House registry lookups are not performed. External validation should be done
+upstream before registration if required.
+
 ## Database Schema
 
 **Schema**: `party`
@@ -148,6 +152,7 @@ erDiagram
         bigint version "optimistic lock"
         timestamptz created_at
         timestamptz updated_at
+        timestamptz deleted_at "nullable, soft-delete"
     }
 ```
 
@@ -155,7 +160,8 @@ erDiagram
 
 - `idx_parties_party_type`: Query by type
 - `idx_parties_status`: Query by status
-- `idx_party_external_ref`: Unique on (reference, type) where not deleted
+- `idx_party_external_ref`: Unique on (reference, type) where `deleted_at IS NULL`
+- `idx_party_parties_deleted_at`: Query active (non-deleted) records
 
 ## Configuration
 

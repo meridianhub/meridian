@@ -175,6 +175,28 @@ erDiagram
 
 ## Key Patterns
 
+### Retry Idempotency
+
+**Safe to Retry (Idempotent):**
+
+| Method | Idempotency Key | Behavior |
+|--------|-----------------|----------|
+| `InitiateLien` | `PaymentOrderReference` | Returns existing lien if key matches |
+| `ExecuteLien` | Lien ID (path param) | No-op if already EXECUTED |
+| `TerminateLien` | Lien ID (path param) | No-op if already TERMINATED |
+| `ExecuteDeposit` | `IdempotencyKey` header | Returns existing result if key matches |
+
+**Retry Guidance:**
+
+- Always include `IdempotencyKey` header for `ExecuteDeposit` to prevent duplicate credits
+- `InitiateLien` uses `PaymentOrderReference` as natural idempotency key (unique per payment)
+- Terminal state transitions (EXECUTED, TERMINATED) are no-ops on retry
+- Use exponential backoff: 100ms → 200ms → 400ms (max 3 retries)
+
+**Non-Idempotent Operations:**
+
+- `InitiateCurrentAccount`: Creating duplicate accounts requires unique party/IBAN
+
 ### Overdraft Facility
 
 ```text

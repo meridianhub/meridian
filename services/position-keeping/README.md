@@ -188,6 +188,18 @@ stateDiagram-v2
 - Partition key = LogID (ensures ordering per aggregate)
 - Protobuf serialization
 
+**Fire-and-Forget Semantics:**
+
+Events are published asynchronously after the database transaction commits:
+
+- **Best-effort delivery**: Publish failures are logged but don't fail the request
+- **No transactional outbox**: Events may be lost if the service crashes after DB commit but before publish
+- **Trade-off**: Lower latency vs potential event loss during failures
+
+For use cases requiring guaranteed event delivery (e.g., regulatory audit),
+consider the [Audit Outbox Pattern](../README.md#audit-outbox-pattern) or
+implement a transactional outbox with a separate publisher worker.
+
 ## Database Schema
 
 **Schema**: `position_keeping`

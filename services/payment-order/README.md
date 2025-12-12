@@ -150,7 +150,35 @@ stateDiagram-v2
 | Header | `X-Webhook-Signature` |
 | Timestamp | Max 5 minutes age |
 | Rate Limiting | 100 req/sec per IP |
-| Idempotency | Deterministic key from (gateway_ref + status + gateway_event_ts) |
+
+**Idempotency Handling:**
+
+Webhooks are deduplicated using a deterministic idempotency key:
+
+```text
+idempotency_key = hash(gateway_reference_id + status + gateway_event_ts)
+```
+
+- `gateway_event_ts`: Timestamp from webhook payload (not receipt time)
+- Prefer gateway's `event_id` if provided (more reliable than timestamp)
+- Duplicate webhooks (same key) return 200 OK without re-processing
+
+**Rate Limiting with Reverse Proxy:**
+
+When behind a reverse proxy (nginx, AWS ALB, etc.), configure `X-Forwarded-For` handling:
+
+```text
+# Ensure the proxy sets X-Forwarded-For
+# PaymentOrder service uses client IP from:
+# 1. X-Forwarded-For header (first IP in chain)
+# 2. Direct connection IP if header absent
+
+# Trust only your proxy's IP to prevent spoofing
+TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
+```
+
+Without proper proxy configuration, all requests may share the gateway's IP,
+causing legitimate traffic to be rate-limited.
 
 ## Service Dependencies
 

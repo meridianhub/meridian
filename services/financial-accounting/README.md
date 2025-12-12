@@ -146,6 +146,17 @@ while the credit increases the liability to the customer.
 
 Consumes deposit events and creates balanced debit/credit postings automatically.
 
+**Idempotency Handling:**
+
+| Source Field | Maps To | Purpose |
+|--------------|---------|---------|
+| `event_id` | `idempotency_key` | Dedupe on consumer restart/redelivery |
+| `correlation_id` | `correlation_id` | Distributed tracing |
+
+- Duplicate events (same `event_id`) are silently dropped
+- Partial failures: If booking log created but posting fails, retry creates posting only
+- Consumer commits offset only after successful DB transaction
+
 **Supported Currencies**: GBP, USD, EUR, JPY, CHF, CAD, AUD
 
 ## Database Schema
