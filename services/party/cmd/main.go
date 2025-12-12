@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -365,9 +366,13 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 	cacheTTL := getEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour)
 	refreshTTL := getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
 
-	// Create JWKS provider
+	// Create JWKS provider with HTTP client
+	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	jwksConfig := &auth.JWKSProviderConfig{
 		URL:        jwksURL,
+		Client:     httpClient,
 		CacheTTL:   cacheTTL,
 		RefreshTTL: refreshTTL,
 	}
