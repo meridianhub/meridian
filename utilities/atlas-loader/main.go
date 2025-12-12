@@ -83,6 +83,8 @@ func main() {
 	}
 
 	// Prepend CREATE SCHEMA statements for all referenced schemas
+	// Note: party schema uses unqualified table names for multi-tenant support,
+	// so no CREATE SCHEMA is prepended - the schema is set via search_path
 	output := stmts
 	if *schemaFilter != "" {
 		var schemaStmt string
@@ -92,6 +94,11 @@ func main() {
 			schemaStmt = "CREATE SCHEMA IF NOT EXISTS current_account;\nCREATE SCHEMA IF NOT EXISTS position_keeping;\n\n"
 		case schemaFinancialAccounting:
 			schemaStmt = "CREATE SCHEMA IF NOT EXISTS financial_accounting;\n\n"
+		case schemaParty:
+			// Party uses unqualified table names for multi-tenant schema routing.
+			// Schema is created externally during org provisioning or set via search_path.
+			// No CREATE SCHEMA prepended here.
+			schemaStmt = ""
 		default:
 			schemaStmt = fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s;\n\n", *schemaFilter)
 		}

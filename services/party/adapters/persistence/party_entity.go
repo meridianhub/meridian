@@ -33,7 +33,9 @@ type PartyEntity struct {
 	DeletedAt *time.Time `gorm:"column:deleted_at;index"`
 }
 
-// TableName overrides the default table name with schema prefix
+// TableName overrides the default table name.
+// Uses unqualified name to allow PostgreSQL search_path to route queries
+// to organization-specific schemas (e.g., org_acme_bank.parties).
 func (PartyEntity) TableName() string {
-	return "party.parties"
+	return "parties"
 }

@@ -1,7 +1,9 @@
--- Create party schema
-CREATE SCHEMA IF NOT EXISTS "party";
+-- Party Service initial migration
+-- Uses unqualified table names for multi-tenant schema routing.
+-- Tables are created in whichever schema is set via search_path (e.g., org_acme_bank).
+
 -- Create "parties" table
-CREATE TABLE "party"."parties" (
+CREATE TABLE "parties" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "party_type" character varying(20) NOT NULL,
   "legal_name" character varying(255) NOT NULL,
@@ -18,10 +20,10 @@ CREATE TABLE "party"."parties" (
   PRIMARY KEY ("id")
 );
 -- Create index "idx_parties_party_type" to table: "parties"
-CREATE INDEX "idx_parties_party_type" ON "party"."parties" ("party_type");
+CREATE INDEX "idx_parties_party_type" ON "parties" ("party_type");
 -- Create index "idx_parties_status" to table: "parties"
-CREATE INDEX "idx_parties_status" ON "party"."parties" ("status");
+CREATE INDEX "idx_parties_status" ON "parties" ("status");
 -- Create index "idx_party_external_ref" to table: "parties"
-CREATE UNIQUE INDEX "idx_party_external_ref" ON "party"."parties" ("external_reference", "external_reference_type") WHERE ((external_reference IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX "idx_party_external_ref" ON "parties" ("external_reference", "external_reference_type") WHERE ((external_reference IS NOT NULL) AND (deleted_at IS NULL));
 -- Create index "idx_party_parties_deleted_at" to table: "parties"
-CREATE INDEX "idx_party_parties_deleted_at" ON "party"."parties" ("deleted_at");
+CREATE INDEX "idx_party_parties_deleted_at" ON "parties" ("deleted_at");
