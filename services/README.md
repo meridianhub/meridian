@@ -8,7 +8,7 @@ protocols, infrastructure dependencies, and data flows.
 The diagram below shows how services communicate at runtime across all protocols.
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph External["External Systems"]
         User["User/Client"]
         Gateway["Payment Gateway"]
@@ -26,8 +26,8 @@ flowchart TB
 
         subgraph Infrastructure["Infrastructure"]
             DB[("CockroachDB<br/>:26257")]
-            Kafka["Kafka<br/>:9092"]
-            Redis["Redis<br/>:6379"]
+            Kafka[("Kafka<br/>:9092")]
+            Redis[("Redis<br/>:6379")]
         end
     end
 
@@ -44,8 +44,8 @@ flowchart TB
     Tenant -.->|"RegisterParty (gRPC, optional)"| Party
 
     %% Kafka event streaming
-    PK -->|"Publish Events (Kafka)"| Kafka
-    Kafka -->|"Consume Events (Kafka)"| FA
+    PK -->|"Publish Events"| Kafka
+    Kafka -->|"Consume Events"| FA
 
     %% Database connections
     CA -->|"SQL"| DB
@@ -56,16 +56,16 @@ flowchart TB
     Tenant -->|"SQL"| DB
 
     %% Redis (optional idempotency)
-    PK -.->|"Idempotency (optional)"| Redis
-    FA -.->|"Idempotency (optional)"| Redis
-    PO -.->|"Idempotency (optional)"| Redis
+    PK -.->|"Idempotency"| Redis
+    FA -.->|"Idempotency"| Redis
+    PO -.->|"Idempotency"| Redis
 
     classDef service fill:#4a90d9,stroke:#2d5a87,color:#fff
-    classDef infra fill:#50c878,stroke:#2d7a4a,color:#fff
+    classDef storage fill:#50c878,stroke:#2d7a4a,color:#fff
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
 
     class CA,PK,FA,Party,PO,Tenant service
-    class DB,Kafka,Redis infra
+    class DB,Kafka,Redis storage
     class User,Gateway external
 ```
 
@@ -74,7 +74,7 @@ flowchart TB
 - Solid arrows (`-->`) = Required runtime dependency
 - Dashed arrows (`-.->`) = Optional runtime dependency
 - Blue boxes = Microservices
-- Green boxes = Infrastructure components
+- Cylinders `[(" ")]` = Storage/infrastructure (database, message queue, cache)
 - Orange boxes = External systems
 
 ## Communication Protocols
@@ -202,6 +202,37 @@ Aggregated health endpoints check:
 - Redis connectivity (if enabled)
 - Downstream service availability
 
+## Cross-Cutting Concerns
+
+### Audit Outbox Pattern
+
+The transactional outbox pattern provides guaranteed audit logging with eventual delivery.
+See [ADR-0009](../docs/adr/0009-application-level-audit-logging.md) for architecture rationale.
+
+**Implementation Status:**
+
+| Service | Audit Schema | Outbox Table | GORM Hooks | Worker |
+|---------|:------------:|:------------:|:----------:|:------:|
+| CurrentAccount | ✅ | ✅ | ❌ | ❌ |
+| PositionKeeping | ✅ (per-aggregate) | ❌ | ❌ | ❌ |
+| FinancialAccounting | ❌ | ❌ | ❌ | ❌ |
+| Party | ❌ | ❌ | ❌ | ❌ |
+| PaymentOrder | ❌ | ❌ | ❌ | ❌ |
+| Tenant | ❌ | ❌ | ❌ | ❌ |
+
+**Pattern Components:**
+
+1. **Audit Schema**: Dedicated `{service}_audit` schema with `audit_log` table
+2. **Outbox Table**: `audit_outbox` table written atomically with business transaction
+3. **GORM Hooks**: `AfterCreate`, `BeforeUpdate`, `AfterUpdate`, `AfterDelete` hooks
+4. **Worker**: Background goroutine processing outbox → audit_log
+
+**Key Guarantees:**
+
+- Atomicity: Audit intent committed with business operation
+- No lost audits: Outbox survives application crashes
+- Idempotency: Retry-safe processing without duplicates
+
 ## Service Directory Structure
 
 Each service follows hexagonal architecture:
@@ -226,4 +257,5 @@ services/<service-name>/
 - [Protocol Buffer API Definitions](../api/proto/README.md) - gRPC service interfaces
 - [ADR-0002: Microservices per BIAN Domain](../docs/adr/0002-microservices-per-bian-domain.md)
 - [ADR-0004: Event Schema Evolution](../docs/adr/0004-event-schema-evolution.md)
+- [ADR-0009: Application-Level Audit Logging](../docs/adr/0009-application-level-audit-logging.md)
 - [Tilt Development Guide](../docs/skills/tilt.md) - Local development
