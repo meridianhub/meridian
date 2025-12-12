@@ -14,6 +14,10 @@ flowchart LR
         Gateway["Payment Gateway"]
     end
 
+    subgraph Admin["Admin Tools"]
+        TenantCtl["tenantctl<br/>(CLI)"]
+    end
+
     subgraph Platform["Meridian Platform"]
         subgraph Services["Microservices"]
             CA["CurrentAccount<br/>:50057"]
@@ -30,6 +34,9 @@ flowchart LR
             Redis@{ shape: das, label: "Redis :6379" }
         end
     end
+
+    %% Admin tool connections
+    TenantCtl -->|"gRPC"| Tenant
 
     %% External connections
     User -->|"gRPC / REST"| CA
@@ -63,10 +70,12 @@ flowchart LR
     classDef service fill:#4a90d9,stroke:#2d5a87,color:#fff
     classDef storage fill:#50c878,stroke:#2d7a4a,color:#fff
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
+    classDef admin fill:#9c27b0,stroke:#6a1b9a,color:#fff
 
     class CA,PK,FA,Party,PO,Tenant service
     class DB,Kafka,Redis storage
     class User,Gateway external
+    class TenantCtl admin
 ```
 
 **Legend:**
@@ -74,6 +83,7 @@ flowchart LR
 - Solid arrows (`-->`) = Required runtime dependency
 - Dashed arrows (`-.->`) = Optional runtime dependency
 - Blue boxes = Microservices
+- Purple boxes = Admin tools (CLI)
 - Vertical cylinder `[(" ")]` = Database (CockroachDB)
 - Horizontal cylinder `@{ shape: das }` = Direct access storage (Kafka, Redis)
 - Orange boxes = External systems
@@ -252,6 +262,49 @@ services/<service-name>/
 ├── migrations/             # Database migrations
 └── k8s/                    # Kubernetes manifests
 ```
+
+## Admin Tools
+
+### tenantctl
+
+Command-line interface for tenant lifecycle management. Communicates with the Tenant service via gRPC.
+
+**Build:**
+
+```bash
+go build -o tenantctl ./cmd/tenantctl
+```
+
+**Commands:**
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `register` | Create new tenant | `tenantctl register --id=acme_bank --name="Acme Bank" --settlement-asset=GBP` |
+| `list` | List tenants | `tenantctl list --status=active` |
+| `get` | Retrieve tenant details | `tenantctl get acme_bank -o json` |
+| `deprovision` | Deactivate tenant | `tenantctl deprovision acme_bank --confirm` |
+
+**Configuration:**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `TENANT_SERVICE_URL` | `localhost:50056` | Tenant service address |
+
+**Global Flags:**
+
+- `--service-url` - Override service address
+- `--timeout` - Request timeout (default: 30s)
+- `-o, --output` - Output format (`text`, `json`)
+
+**Demo Provisioning:**
+
+The `scripts/demo-provision-organizations.sh` script provisions demo tenants for local development:
+
+```bash
+./scripts/demo-provision-organizations.sh
+```
+
+This creates: `meridian`, `post_office`, `motive`, `un_wfp`
 
 ## References
 
