@@ -31,9 +31,11 @@ meridian/
 │   │   ├── migrations/          # Database migrations
 │   │   ├── atlas/               # Atlas schema config
 │   │   └── k8s/                 # Kubernetes manifests
-│   ├── position-keeping/        # Pre-ledger transaction log
 │   ├── financial-accounting/    # Double-entry general ledger
-│   └── payment-order/           # Payment execution
+│   ├── party/                   # Customer and party reference data
+│   ├── payment-order/           # Payment execution
+│   ├── position-keeping/        # Pre-ledger transaction log
+│   └── tenant/                  # Multi-tenant platform management
 ├── shared/                      # Cross-service shared code
 │   ├── platform/                # Infrastructure (auth, db, kafka, observability)
 │   ├── domain/                  # Shared domain models and primitives
@@ -51,14 +53,40 @@ meridian/
 
 This implementation includes the following BIAN service domains:
 
-- **CurrentAccount**: Customer-facing account management
-- **PositionKeeping**: Pre-ledger transaction log and position tracking
-- **FinancialAccounting**: Double-entry general ledger with audit trail
-- **PaymentOrder**: Payment initiation and execution
+| Service | BIAN Domain | Purpose | Standalone | BIAN Spec |
+|---------|-------------|---------|:----------:|-----------|
+| [**CurrentAccount**][svc-ca] | Current Account | Customer-facing account management and transaction orchestration | No | [OAS3][bian-ca] |
+| [**FinancialAccounting**][svc-fa] | Financial Standard Management | Double-entry bookkeeping and general ledger | Yes | [OAS3][bian-fa] |
+| [**Party**][svc-party] | Party Reference Data Directory | Customer and party reference data management | Yes | [OAS3][bian-party] |
+| [**PaymentOrder**][svc-po] | Payment Order | Payment initiation, saga orchestration, and settlement | No | [OAS3][bian-po] |
+| [**PositionKeeping**][svc-pk] | Position Keeping | Pre-ledger transaction log and position tracking | Yes | [OAS3][bian-pk] |
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
+Services marked as "Standalone" can operate independently; others require upstream dependencies.
 
-Reference specifications: BIAN Service Landscape 13.0.0
+Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bian-official/public/tree/main/release13.0.0)
+
+[bian-ca]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/CurrentAccount.yaml
+[bian-fa]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/FinancialAccounting.yaml
+[bian-party]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PartyReferenceDataDirectory.yaml
+[bian-po]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PaymentOrder.yaml
+[bian-pk]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PositionKeeping.yaml
+[svc-ca]: services/current-account/
+[svc-fa]: services/financial-accounting/
+[svc-party]: services/party/
+[svc-po]: services/payment-order/
+[svc-pk]: services/position-keeping/
+[svc-tenant]: services/tenant/
+
+### Infrastructure Services
+
+| Service | Purpose | Standalone |
+|---------|---------|:----------:|
+| [**Tenant**][svc-tenant] | Multi-tenant platform management with PostgreSQL schema-per-tenant isolation | Yes |
+
+The Tenant service is not part of the BIAN standard but is essential for shared-cluster deployments
+requiring data isolation between organizations. It provides schema-based multi-tenancy where each
+tenant's data is isolated in a dedicated PostgreSQL schema (`org_{tenant_id}`).
 
 ## Technology Stack
 
@@ -149,6 +177,12 @@ skill](docs/skills/schema-evolution.md)
 - Event schema evolution with protobuf
 - Adapter pattern for layer translation
 - Local development with Tilt
+- Standard service directory structure
+
+**Architecture diagrams:**
+
+- [Service API Interfaces](api/proto/README.md#service-architecture) - gRPC methods and service dependencies
+- [Runtime Architecture](services/README.md) - All protocols (gRPC, Kafka, HTTP, Database, Redis)
 
 See [docs/adr/README.md](docs/adr/README.md) for the complete catalog.
 
