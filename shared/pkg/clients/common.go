@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -57,4 +58,34 @@ func WithTimeout(ctx context.Context, timeout time.Duration) (context.Context, c
 		return context.WithTimeout(ctx, timeout)
 	}
 	return ctx, func() {}
+}
+
+// PropagateOrganization extracts organization ID from context and adds it to gRPC metadata.
+// Returns the same context if org is missing or empty (graceful degradation for single-tenant or bootstrap calls).
+// Usage pattern:
+//
+//	ctx = clients.PropagateCorrelationID(ctx)
+//	ctx = clients.PropagateOrganization(ctx)
+//	resp, err := client.SomeMethod(ctx, req)
+func PropagateOrganization(ctx context.Context) context.Context {
+	if ctx == nil {
+		return nil
+	}
+
+	orgID, ok := organization.FromContext(ctx)
+	if !ok || orgID.IsEmpty() {
+		// No org in context or empty org - return unchanged (single-tenant or bootstrap call)
+		return ctx
+	}
+
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		md = metadata.New(nil)
+	} else {
+		md = md.Copy()
+	}
+
+	// Add org to outgoing metadata using standard header name
+	md.Set(organization.OrgIDKey, orgID.String())
+	return metadata.NewOutgoingContext(ctx, md)
 }
