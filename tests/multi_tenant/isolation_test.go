@@ -426,19 +426,19 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 	t.Run("key_includes_organization_prefix", func(t *testing.T) {
 		keyOrgA := idempotency.Key{
-			TenantID: "acme_bank",
-			Namespace:      "current-account",
-			Operation:      "deposit",
-			EntityID:       "ACC-123",
-			RequestID:      "req-001",
+			TenantID:  "acme_bank",
+			Namespace: "current-account",
+			Operation: "deposit",
+			EntityID:  "ACC-123",
+			RequestID: "req-001",
 		}
 
 		keyOrgB := idempotency.Key{
-			TenantID: "motive_corp",
-			Namespace:      "current-account",
-			Operation:      "deposit",
-			EntityID:       "ACC-123",
-			RequestID:      "req-001",
+			TenantID:  "motive_corp",
+			Namespace: "current-account",
+			Operation: "deposit",
+			EntityID:  "ACC-123",
+			RequestID: "req-001",
 		}
 
 		// Keys should be different due to organization prefix
@@ -454,11 +454,11 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 	t.Run("key_format_with_organization", func(t *testing.T) {
 		key := idempotency.Key{
-			TenantID: "acme_bank",
-			Namespace:      "current-account",
-			Operation:      "create",
-			EntityID:       "ACC-123",
-			RequestID:      "req-abc",
+			TenantID:  "acme_bank",
+			Namespace: "current-account",
+			Operation: "create",
+			EntityID:  "ACC-123",
+			RequestID: "req-abc",
 		}
 
 		expected := "acme_bank:idempotency:current-account:create:ACC-123:req-abc"
@@ -467,11 +467,11 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 	t.Run("key_format_without_organization_single_org_mode", func(t *testing.T) {
 		key := idempotency.Key{
-			TenantID: "", // Single-tenant mode
-			Namespace:      "current-account",
-			Operation:      "create",
-			EntityID:       "ACC-123",
-			RequestID:      "req-abc",
+			TenantID:  "", // Single-tenant mode
+			Namespace: "current-account",
+			Operation: "create",
+			EntityID:  "ACC-123",
+			RequestID: "req-abc",
 		}
 
 		expected := "idempotency:current-account:create:ACC-123:req-abc"
@@ -480,10 +480,10 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 	t.Run("key_validation_rejects_colon_in_org_id", func(t *testing.T) {
 		key := idempotency.Key{
-			TenantID: "org:with:colons",
-			Namespace:      "test",
-			Operation:      "test",
-			EntityID:       "123",
+			TenantID:  "org:with:colons",
+			Namespace: "test",
+			Operation: "test",
+			EntityID:  "123",
 		}
 
 		err := key.Validate()
@@ -505,19 +505,19 @@ func TestIdempotencyKeyOrganizationIsolation_Integration(t *testing.T) {
 
 	// Same request ID but different organizations
 	keyOrgA := idempotency.Key{
-		TenantID: "acme_bank",
-		Namespace:      "test",
-		Operation:      "create",
-		EntityID:       "entity-1",
-		RequestID:      "req-001",
+		TenantID:  "acme_bank",
+		Namespace: "test",
+		Operation: "create",
+		EntityID:  "entity-1",
+		RequestID: "req-001",
 	}
 
 	keyOrgB := idempotency.Key{
-		TenantID: "motive_corp",
-		Namespace:      "test",
-		Operation:      "create",
-		EntityID:       "entity-1",
-		RequestID:      "req-001",
+		TenantID:  "motive_corp",
+		Namespace: "test",
+		Operation: "create",
+		EntityID:  "entity-1",
+		RequestID: "req-001",
 	}
 
 	// Mark org A key as pending
