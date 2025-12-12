@@ -173,7 +173,10 @@ skill](docs/skills/schema-evolution.md)
 - Local development with Tilt
 - Standard service directory structure
 
-For service API interfaces and dependencies, see the [Service Architecture diagram](api/proto/README.md#service-architecture).
+**Architecture diagrams:**
+
+- [Service API Interfaces](api/proto/README.md#service-architecture) - gRPC methods and service dependencies
+- [Runtime Architecture](services/README.md) - All protocols (gRPC, Kafka, HTTP, Database, Redis)
 
 See [docs/adr/README.md](docs/adr/README.md) for the complete catalog.
 
