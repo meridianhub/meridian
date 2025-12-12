@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
@@ -85,7 +89,7 @@ func (s *PositionKeepingService) UpdateFinancialPositionLog(
 
 	// Update status if provided using domain lifecycle methods
 	if req.StatusUpdate != nil {
-		if err := applyStatusTransition(log, req); err != nil {
+		if err := applyStatusTransition(ctx, log, req); err != nil {
 			return nil, err
 		}
 		statusChanged = true
@@ -93,7 +97,7 @@ func (s *PositionKeepingService) UpdateFinancialPositionLog(
 
 	// Add audit trail entry if provided (and not already added by status lifecycle method)
 	if req.AuditEntry != nil && !statusChanged {
-		auditEntry, err := protoAuditEntryToDomain(req.AuditEntry)
+		auditEntry, err := protoAuditEntryToDomain(ctx, req.AuditEntry)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid audit_entry: %v", err)
 		}
@@ -224,9 +228,9 @@ func storeUpdateIdempotencyResult(
 }
 
 // applyStatusTransition applies a status transition to the log using domain lifecycle methods
-func applyStatusTransition(log *domain.FinancialPositionLog, req *positionkeepingv1.UpdateFinancialPositionLogRequest) error {
+func applyStatusTransition(ctx context.Context, log *domain.FinancialPositionLog, req *positionkeepingv1.UpdateFinancialPositionLogRequest) error {
 	newStatus := fromProtoTransactionStatus(req.StatusUpdate.CurrentStatus)
-	auditEntry, err := protoAuditEntryToDomain(req.AuditEntry)
+	auditEntry, err := protoAuditEntryToDomain(ctx, req.AuditEntry)
 	if err != nil {
 		return status.Errorf(codes.InvalidArgument, "invalid audit_entry: %v", err)
 	}
@@ -262,17 +266,15 @@ func applyStatusTransition(log *domain.FinancialPositionLog, req *positionkeepin
 }
 
 // protoAuditEntryToDomain converts proto AuditTrailEntry to domain.
+// Extracts IP address and system context from gRPC context for audit trail enrichment.
 // Returns (nil, nil) for nil input to handle optional proto fields.
-func protoAuditEntryToDomain(proto *positionkeepingv1.AuditTrailEntry) (*domain.AuditTrailEntry, error) {
+func protoAuditEntryToDomain(ctx context.Context, proto *positionkeepingv1.AuditTrailEntry) (*domain.AuditTrailEntry, error) {
 	if proto == nil {
 		return nil, nil //nolint:nilnil // Intentional: nil input returns nil output for optional field handling
 	}
 
-	// TODO: Extract IP address from gRPC context/metadata
-	ipAddress := ""
-
-	// TODO: Extract system context from gRPC context/metadata
-	systemContext := make(map[string]string)
+	ipAddress := extractIPAddress(ctx)
+	systemContext := extractSystemContext(ctx)
 
 	return domain.NewAuditTrailEntry(
 		proto.UserId,
@@ -283,6 +285,80 @@ func protoAuditEntryToDomain(proto *positionkeepingv1.AuditTrailEntry) (*domain.
 	)
 }
 
+// extractIPAddress extracts client IP from gRPC context.
+// Checks x-forwarded-for header first (for proxied requests), then falls back to peer address.
+func extractIPAddress(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+
+	// Check metadata for forwarded IP (common in Kubernetes/Istio environments)
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		// x-forwarded-for may contain multiple IPs (client, proxy1, proxy2...)
+		// First IP is the original client
+		if vals := md.Get("x-forwarded-for"); len(vals) > 0 && vals[0] != "" {
+			// Split on comma and take first IP
+			if ips := strings.Split(vals[0], ","); len(ips) > 0 {
+				return strings.TrimSpace(ips[0])
+			}
+		}
+		// Fallback to x-real-ip header
+		if vals := md.Get("x-real-ip"); len(vals) > 0 && vals[0] != "" {
+			return vals[0]
+		}
+	}
+
+	// Fallback to peer address (direct gRPC connection)
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		// Extract just the IP portion (peer address may include port like "192.168.1.1:50051")
+		addr := p.Addr.String()
+		if idx := strings.LastIndex(addr, ":"); idx > 0 {
+			return addr[:idx]
+		}
+		return addr
+	}
+
+	return "" // Empty string is acceptable for system operations
+}
+
+// extractSystemContext extracts service metadata from gRPC context.
+// Includes service name, correlation ID, and organization ID for multi-tenant tracking.
+func extractSystemContext(ctx context.Context) map[string]string {
+	systemCtx := map[string]string{
+		"service": "position-keeping",
+	}
+
+	if ctx == nil {
+		return systemCtx
+	}
+
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		// Add correlation ID if present
+		if vals := md.Get("x-correlation-id"); len(vals) > 0 && vals[0] != "" {
+			systemCtx["correlation_id"] = vals[0]
+		}
+		// Also check other common correlation ID header names
+		if _, exists := systemCtx["correlation_id"]; !exists {
+			for _, key := range []string{"correlation-id", "x-request-id", "request-id"} {
+				if vals := md.Get(key); len(vals) > 0 && vals[0] != "" {
+					systemCtx["correlation_id"] = vals[0]
+					break
+				}
+			}
+		}
+		// Add organization ID if present (multi-tenant context)
+		if vals := md.Get("x-org-id"); len(vals) > 0 && vals[0] != "" {
+			systemCtx["organization_id"] = vals[0]
+		}
+		// Add user agent if present
+		if vals := md.Get("user-agent"); len(vals) > 0 && vals[0] != "" {
+			systemCtx["user_agent"] = vals[0]
+		}
+	}
+
+	return systemCtx
+}
+
 // publishUpdateEvents publishes domain events for update operations
 func (s *PositionKeepingService) publishUpdateEvents(
 	ctx context.Context,
@@ -291,13 +367,15 @@ func (s *PositionKeepingService) publishUpdateEvents(
 	newEntryAdded *domain.TransactionLogEntry,
 	statusChanged bool,
 ) {
+	correlationID := clients.ExtractCorrelationID(ctx)
+
 	if newEntryAdded != nil {
 		event := &domain.TransactionAmended{
 			LogID:         log.LogID,
 			AccountID:     log.AccountID,
 			Reason:        "Transaction entry added",
 			AmendedBy:     req.AuditEntry.GetUserId(),
-			CorrelationID: "", // TODO: Extract from context
+			CorrelationID: correlationID,
 			Timestamp:     time.Now().UTC(),
 			Version:       log.Version,
 		}
@@ -305,7 +383,7 @@ func (s *PositionKeepingService) publishUpdateEvents(
 	}
 
 	if statusChanged {
-		s.publishStatusChangeEvent(ctx, log, req)
+		s.publishStatusChangeEvent(ctx, log, req, correlationID)
 	}
 }
 
@@ -314,6 +392,7 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 	ctx context.Context,
 	log *domain.FinancialPositionLog,
 	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
+	correlationID string,
 ) {
 	switch req.StatusUpdate.CurrentStatus {
 	case commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED:
@@ -323,7 +402,7 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			PostingReference: "", // TODO: Add to proto if needed
 			Reason:           req.StatusUpdate.StatusReason,
 			PostedBy:         req.AuditEntry.GetUserId(),
-			CorrelationID:    "",
+			CorrelationID:    correlationID,
 			Timestamp:        time.Now().UTC(),
 			Version:          log.Version,
 		}
@@ -334,7 +413,7 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			AccountID:     log.AccountID,
 			FailureReason: req.StatusUpdate.StatusReason,
 			ErrorCode:     "", // TODO: Add to proto if needed
-			CorrelationID: "",
+			CorrelationID: correlationID,
 			Timestamp:     time.Now().UTC(),
 			Version:       log.Version,
 		}
@@ -345,7 +424,7 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			AccountID:     log.AccountID,
 			Reason:        req.StatusUpdate.StatusReason,
 			CancelledBy:   req.AuditEntry.GetUserId(),
-			CorrelationID: "",
+			CorrelationID: correlationID,
 			Timestamp:     time.Now().UTC(),
 			Version:       log.Version,
 		}
