@@ -55,11 +55,11 @@ This implementation includes the following BIAN service domains:
 
 | Service | BIAN Domain | Purpose | Standalone | BIAN Spec |
 |---------|-------------|---------|:----------:|-----------|
-| **CurrentAccount** | Current Account | Customer-facing account management and transaction orchestration | No | [OAS3][bian-ca] |
-| **FinancialAccounting** | Financial Standard Management | Double-entry bookkeeping and general ledger | Yes | [OAS3][bian-fa] |
-| **Party** | Party Reference Data Directory | Customer and party reference data management | Yes | [OAS3][bian-party] |
-| **PaymentOrder** | Payment Order | Payment initiation, saga orchestration, and settlement | No | [OAS3][bian-po] |
-| **PositionKeeping** | Position Keeping | Pre-ledger transaction log and position tracking | Yes | [OAS3][bian-pk] |
+| [**CurrentAccount**][svc-ca] | Current Account | Customer-facing account management and transaction orchestration | No | [OAS3][bian-ca] |
+| [**FinancialAccounting**][svc-fa] | Financial Standard Management | Double-entry bookkeeping and general ledger | Yes | [OAS3][bian-fa] |
+| [**Party**][svc-party] | Party Reference Data Directory | Customer and party reference data management | Yes | [OAS3][bian-party] |
+| [**PaymentOrder**][svc-po] | Payment Order | Payment initiation, saga orchestration, and settlement | No | [OAS3][bian-po] |
+| [**PositionKeeping**][svc-pk] | Position Keeping | Pre-ledger transaction log and position tracking | Yes | [OAS3][bian-pk] |
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
 Services marked as "Standalone" can operate independently; others require upstream dependencies.
@@ -71,12 +71,18 @@ Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bia
 [bian-party]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PartyReferenceDataDirectory.yaml
 [bian-po]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PaymentOrder.yaml
 [bian-pk]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PositionKeeping.yaml
+[svc-ca]: services/current-account/
+[svc-fa]: services/financial-accounting/
+[svc-party]: services/party/
+[svc-po]: services/payment-order/
+[svc-pk]: services/position-keeping/
+[svc-tenant]: services/tenant/
 
 ### Infrastructure Services
 
 | Service | Purpose | Standalone |
 |---------|---------|:----------:|
-| **Tenant** | Multi-tenant platform management with PostgreSQL schema-per-tenant isolation | Yes |
+| [**Tenant**][svc-tenant] | Multi-tenant platform management with PostgreSQL schema-per-tenant isolation | Yes |
 
 The Tenant service is not part of the BIAN standard but is essential for shared-cluster deployments
 requiring data isolation between organizations. It provides schema-based multi-tenancy where each

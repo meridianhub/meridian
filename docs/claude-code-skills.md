@@ -36,6 +36,20 @@ For detailed information about creating and using skills, see [docs/skills/READM
 - Incident response procedures
 - Disaster recovery procedures
 
+**Service Documentation** (in `services/*/`):
+
+BIAN service domains:
+
+- [CurrentAccount](../services/current-account/README.md) - Customer-facing account management
+- [FinancialAccounting](../services/financial-accounting/README.md) - Double-entry general ledger
+- [Party](../services/party/README.md) - Customer and party reference data
+- [PaymentOrder](../services/payment-order/README.md) - Payment execution and settlement
+- [PositionKeeping](../services/position-keeping/README.md) - Pre-ledger transaction log
+
+Infrastructure services:
+
+- [Tenant](../services/tenant/README.md) - Multi-tenant platform management
+
 ## Skill Metadata Format
 
 All skills use YAML frontmatter:
