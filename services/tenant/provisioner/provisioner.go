@@ -107,7 +107,7 @@ type SchemaProvisioner interface {
 	// The function performs:
 	//  1. Validates tenant is deprovisioned and retention period elapsed
 	//  2. DROP SCHEMA org_{tenant_id} CASCADE (removes all objects)
-	//  3. Updates provisioning status to record purge timestamp
+	//  3. Removes the provisioning status record (purge completes the lifecycle)
 	//
 	// Returns ErrRetentionPeriodNotElapsed if called before retention period.
 	// Returns ErrNotDeprovisioned if tenant is still active.
@@ -174,7 +174,7 @@ type ProvisioningStatus struct {
 	State ProvisioningState
 
 	// Services contains the provisioning status for each service's schema.
-	// Key is the service name (e.g., "party", "current-account").
+	// Ordered by provisioning sequence (same order as Config.Services).
 	Services []ServiceSchemaStatus
 
 	// ErrorMessage contains details if State is StateFailed.
