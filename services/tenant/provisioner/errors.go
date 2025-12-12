@@ -4,11 +4,6 @@ import "errors"
 
 // Provisioner errors.
 var (
-	// ErrTestDatabaseConnectionFailed is a test error for simulating database failures.
-	ErrTestDatabaseConnectionFailed = errors.New("test: database connection failed")
-
-	// ErrTestGeneric is a test error for simulating generic failures.
-	ErrTestGeneric = errors.New("test: generic error")
 	// ErrProvisioningStatusNotFound indicates no provisioning record exists for the tenant.
 	// This occurs when:
 	//  - The tenant has never been provisioned
@@ -49,4 +44,21 @@ var (
 	// ErrAlreadyDeprovisioned indicates the tenant has already been deprovisioned.
 	// This is informational - deprovisioning is idempotent.
 	ErrAlreadyDeprovisioned = errors.New("tenant is already deprovisioned")
+
+	// Config validation errors.
+
+	// ErrNoServicesConfigured indicates no services were configured for provisioning.
+	ErrNoServicesConfigured = errors.New("at least one service must be configured")
+
+	// ErrInvalidProvisioningTimeout indicates the provisioning timeout is not positive.
+	ErrInvalidProvisioningTimeout = errors.New("provisioning timeout must be positive")
+
+	// ErrInvalidRetentionPeriod indicates the data retention period is negative.
+	ErrInvalidRetentionPeriod = errors.New("data retention period cannot be negative")
+
+	// ErrEmptyServiceName indicates a service has an empty name.
+	ErrEmptyServiceName = errors.New("service has empty name")
+
+	// ErrEmptyMigrationPath indicates a service has an empty migration path.
+	ErrEmptyMigrationPath = errors.New("service has empty migration path")
 )

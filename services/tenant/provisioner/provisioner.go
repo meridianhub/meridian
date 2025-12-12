@@ -53,6 +53,7 @@ package provisioner
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/organization"
@@ -152,7 +153,14 @@ func (s ProvisioningState) IsValid() bool {
 	}
 }
 
-// IsTerminal returns true if the state is a final state that cannot transition further.
+// IsTerminal returns true if the state is a final state with no automatic transitions.
+// Terminal states:
+//   - StateActive: provisioning complete, schema is ready (can transition to deprovisioned)
+//   - StateFailed: provisioning failed (can transition to active via ProvisionSchemas retry)
+//   - StateDeprovisioned: soft deleted (permanent, no further transitions)
+//
+// Note: "terminal" refers to the automatic state machine, not immutability.
+// Manual operations like retry (failed→active) or deprovision (active→deprovisioned) are allowed.
 func (s ProvisioningState) IsTerminal() bool {
 	return s == StateActive || s == StateFailed || s == StateDeprovisioned
 }
@@ -248,6 +256,29 @@ type Config struct {
 	// regulations (e.g., financial record keeping requirements).
 	// Default: 7 years (2555 days) for financial services compliance.
 	DataRetentionPeriod time.Duration
+}
+
+// Validate checks that the configuration is valid.
+// Returns an error describing the first invalid field found.
+func (c *Config) Validate() error {
+	if len(c.Services) == 0 {
+		return ErrNoServicesConfigured
+	}
+	if c.ProvisioningTimeout <= 0 {
+		return ErrInvalidProvisioningTimeout
+	}
+	if c.DataRetentionPeriod < 0 {
+		return ErrInvalidRetentionPeriod
+	}
+	for _, svc := range c.Services {
+		if svc.Name == "" {
+			return ErrEmptyServiceName
+		}
+		if svc.MigrationPath == "" {
+			return fmt.Errorf("%w: %s", ErrEmptyMigrationPath, svc.Name)
+		}
+	}
+	return nil
 }
 
 // DefaultConfig returns a configuration with standard BIAN services.

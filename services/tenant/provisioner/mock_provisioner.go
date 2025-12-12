@@ -69,7 +69,15 @@ func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID organiz
 	// Record the call
 	m.ProvisioningCalls = append(m.ProvisioningCalls, tenantID)
 
-	// Simulate delay if configured
+	// Check for concurrent provisioning attempt
+	if status, exists := m.statuses[tenantID.String()]; exists && status.State == StateInProgress {
+		return ErrProvisioningInProgress
+	}
+
+	// Simulate delay if configured.
+	// NOTE: Lock is held during sleep intentionally for test simplicity.
+	// This prevents concurrent test access but may cause test timeouts if delay is long.
+	// For production implementations, consider releasing lock during I/O operations.
 	if m.ProvisioningDelay > 0 {
 		select {
 		case <-ctx.Done():

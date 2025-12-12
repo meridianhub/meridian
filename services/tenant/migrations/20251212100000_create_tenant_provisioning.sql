@@ -34,6 +34,9 @@ CREATE TABLE platform.tenant_provisioning (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deprovisioned_at TIMESTAMPTZ,
 
+    -- Optimistic locking version to prevent concurrent update conflicts
+    version INTEGER NOT NULL DEFAULT 1,
+
     -- Constraints
     CONSTRAINT valid_provisioning_state CHECK (state IN ('pending', 'in_progress', 'active', 'failed', 'deprovisioned')),
     CONSTRAINT deprovisioned_at_required CHECK (

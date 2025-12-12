@@ -89,6 +89,38 @@ func TestSchemaProvisioner_ProvisionSchemas_Failure(t *testing.T) {
 	assert.Contains(t, status.ErrorMessage, "database connection failed")
 }
 
+func TestSchemaProvisioner_ProvisionSchemas_RetryAfterFailure(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "services/party/migrations"},
+	}
+	provisioner := NewMockProvisioner(services)
+
+	tenantID := organization.MustNewOrganizationID("retry_tenant")
+
+	// Configure initial failure
+	provisioner.FailProvisioningFor[tenantID.String()] = ErrTestDatabaseConnectionFailed
+
+	// First attempt fails
+	err := provisioner.ProvisionSchemas(context.Background(), tenantID)
+	require.Error(t, err)
+
+	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateFailed, status.State)
+
+	// Remove failure configuration to simulate issue resolved
+	delete(provisioner.FailProvisioningFor, tenantID.String())
+
+	// Retry should succeed
+	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Verify status is now active
+	status, err = provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateActive, status.State)
+}
+
 func TestSchemaProvisioner_DeprovisionSchemas_SoftDelete(t *testing.T) {
 	services := []ServiceConfig{
 		{Name: "party", MigrationPath: "services/party/migrations"},
@@ -282,6 +314,9 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 30*time.Second, config.ProvisioningTimeout)
 	assert.Equal(t, 7*365*24*time.Hour, config.DataRetentionPeriod) // 7 years
 
+	// Default config should be valid
+	require.NoError(t, config.Validate())
+
 	// Verify expected services
 	serviceNames := make([]string, len(config.Services))
 	for i, svc := range config.Services {
@@ -292,6 +327,56 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Contains(t, serviceNames, "position-keeping")
 	assert.Contains(t, serviceNames, "financial-accounting")
 	assert.Contains(t, serviceNames, "payment-order")
+}
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr error
+	}{
+		{
+			name:    "empty services",
+			config:  &Config{Services: nil, ProvisioningTimeout: time.Second},
+			wantErr: ErrNoServicesConfigured,
+		},
+		{
+			name:    "zero timeout",
+			config:  &Config{Services: []ServiceConfig{{Name: "test", MigrationPath: "/path"}}, ProvisioningTimeout: 0},
+			wantErr: ErrInvalidProvisioningTimeout,
+		},
+		{
+			name:    "negative retention",
+			config:  &Config{Services: []ServiceConfig{{Name: "test", MigrationPath: "/path"}}, ProvisioningTimeout: time.Second, DataRetentionPeriod: -1},
+			wantErr: ErrInvalidRetentionPeriod,
+		},
+		{
+			name:    "empty service name",
+			config:  &Config{Services: []ServiceConfig{{Name: "", MigrationPath: "/path"}}, ProvisioningTimeout: time.Second},
+			wantErr: ErrEmptyServiceName,
+		},
+		{
+			name:    "empty migration path",
+			config:  &Config{Services: []ServiceConfig{{Name: "test", MigrationPath: ""}}, ProvisioningTimeout: time.Second},
+			wantErr: ErrEmptyMigrationPath,
+		},
+		{
+			name:    "valid config",
+			config:  &Config{Services: []ServiceConfig{{Name: "test", MigrationPath: "/path"}}, ProvisioningTimeout: time.Second},
+			wantErr: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr == nil {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestMockProvisioner_Reset(t *testing.T) {
