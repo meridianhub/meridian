@@ -88,6 +88,13 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID org
 		defer cancel()
 	}
 
+	// Check context before expensive operations
+	if ctx.Err() != nil {
+		logger.Warn("context cancelled before schema creation")
+		p.markProvisioningFailed(ctx, status, "cancelled before schema creation")
+		return ErrProvisioningTimeout
+	}
+
 	// Create the schema
 	schemaName := tenantID.SchemaName()
 	if err := p.createSchema(ctx, schemaName); err != nil {
@@ -178,7 +185,9 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 		// Update service status to created
 		status.Services[i].State = ServiceStateCreated
 		status.UpdatedAt = time.Now()
-		_ = p.saveProvisioningStatus(ctx, status)
+		if err := p.saveProvisioningStatus(ctx, status); err != nil {
+			logger.Warn("failed to save intermediate status", "error", err, "service", svc.Name)
+		}
 
 		// Apply migrations
 		version, err := p.applyServiceMigrations(ctx, schemaName, svc)
@@ -194,7 +203,9 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 		status.Services[i].State = ServiceStateMigrated
 		status.Services[i].MigrationVersion = version
 		status.UpdatedAt = time.Now()
-		_ = p.saveProvisioningStatus(ctx, status)
+		if err := p.saveProvisioningStatus(ctx, status); err != nil {
+			logger.Warn("failed to save migration status", "error", err, "service", svc.Name)
+		}
 	}
 	return nil
 }
@@ -204,7 +215,11 @@ func (p *PostgresProvisioner) markProvisioningFailed(ctx context.Context, status
 	status.State = StateFailed
 	status.ErrorMessage = errorMsg
 	status.UpdatedAt = time.Now()
-	_ = p.saveProvisioningStatus(ctx, status) // Best effort save
+	if err := p.saveProvisioningStatus(ctx, status); err != nil {
+		p.logger.Warn("failed to save failed status",
+			"tenant_id", status.TenantID.String(),
+			"error", err)
+	}
 }
 
 // DeprovisionSchemas marks the tenant schemas as deprovisioned (soft delete).
