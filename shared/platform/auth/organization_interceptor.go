@@ -15,6 +15,9 @@ import (
 // Use case: Service A calls Service B with organization in metadata. Service B
 // extracts the org from metadata and injects it into context, enabling multi-hop
 // call chains to propagate organization context.
+//
+// Security: The organization ID is validated before being added to context.
+// Invalid org IDs are silently ignored (context remains unchanged).
 func OrganizationExtractionInterceptor() grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -31,8 +34,12 @@ func OrganizationExtractionInterceptor() grpc.UnaryServerInterceptor {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if ok {
 			if vals := md.Get(organization.OrgIDKey); len(vals) > 0 {
-				orgID := organization.OrganizationID(vals[0])
-				ctx = organization.WithOrganization(ctx, orgID)
+				// Validate org ID to prevent malformed values from untrusted callers
+				orgID, err := organization.NewOrganizationID(vals[0])
+				if err == nil {
+					ctx = organization.WithOrganization(ctx, orgID)
+				}
+				// Invalid org IDs are silently ignored - context unchanged
 			}
 		}
 
@@ -45,6 +52,9 @@ func OrganizationExtractionInterceptor() grpc.UnaryServerInterceptor {
 // OrganizationExtractionInterceptor.
 //
 // If organization is already in context (from JWT auth), this is a no-op.
+//
+// Security: The organization ID is validated before being added to context.
+// Invalid org IDs are silently ignored (context remains unchanged).
 func OrganizationExtractionStreamInterceptor() grpc.StreamServerInterceptor {
 	return func(
 		srv interface{},
@@ -63,16 +73,20 @@ func OrganizationExtractionStreamInterceptor() grpc.StreamServerInterceptor {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if ok {
 			if vals := md.Get(organization.OrgIDKey); len(vals) > 0 {
-				orgID := organization.OrganizationID(vals[0])
-				ctx = organization.WithOrganization(ctx, orgID)
+				// Validate org ID to prevent malformed values from untrusted callers
+				orgID, err := organization.NewOrganizationID(vals[0])
+				if err == nil {
+					ctx = organization.WithOrganization(ctx, orgID)
 
-				// Wrap stream with the new context containing organization
-				wrappedStream := &wrappedServerStream{
-					ServerStream: ss,
-					ctx:          ctx,
+					// Wrap stream with the new context containing organization
+					wrappedStream := &wrappedServerStream{
+						ServerStream: ss,
+						ctx:          ctx,
+					}
+
+					return handler(srv, wrappedStream)
 				}
-
-				return handler(srv, wrappedStream)
+				// Invalid org IDs are silently ignored - use original stream
 			}
 		}
 

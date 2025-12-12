@@ -112,6 +112,25 @@ func TestOrganizationExtractionInterceptor(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, organization.OrganizationID("first_org"), orgID)
 	})
+
+	t.Run("ignores invalid org ID format in metadata", func(t *testing.T) {
+		// Invalid org ID with special characters (validation fails)
+		md := metadata.Pairs(organization.OrgIDKey, "invalid org!")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		interceptor := OrganizationExtractionInterceptor()
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+
+		resp, err := interceptor(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Org should NOT be in context due to validation failure
+		resultCtx := resp.(context.Context)
+		_, ok := organization.FromContext(resultCtx)
+		assert.False(t, ok)
+	})
 }
 
 func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
@@ -240,5 +259,29 @@ func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
 		orgID, ok := organization.FromContext(capturedCtx)
 		assert.True(t, ok)
 		assert.Equal(t, organization.OrganizationID("first_org"), orgID)
+	})
+
+	t.Run("ignores invalid org ID format in metadata", func(t *testing.T) {
+		// Invalid org ID with special characters (validation fails)
+		md := metadata.Pairs(organization.OrgIDKey, "invalid org!")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		stream := &mockServerStream{ctx: ctx}
+		info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
+
+		var capturedCtx context.Context
+		handler := func(_ interface{}, ss grpc.ServerStream) error {
+			capturedCtx = ss.Context()
+			return nil
+		}
+
+		interceptor := OrganizationExtractionStreamInterceptor()
+		err := interceptor(nil, stream, info, handler)
+
+		assert.NoError(t, err)
+
+		// Org should NOT be in context due to validation failure
+		_, ok := organization.FromContext(capturedCtx)
+		assert.False(t, ok)
 	})
 }
