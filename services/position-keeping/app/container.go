@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/redis/go-redis/v9"
 )
@@ -23,6 +26,7 @@ type Container struct {
 	RedisClient     *redis.Client
 	Tracer          *observability.Tracer
 	AuthInterceptor *auth.Interceptor
+	kafkaProducer   *kafka.ProtoProducer // internal, for cleanup
 
 	// Adapters
 	EventPublisher domain.EventPublisher
@@ -228,10 +232,37 @@ func (c *Container) initializeEventPublisher() {
 		return
 	}
 
-	// For now, use no-op publisher until Kafka integration is fully wired
-	// TODO: Implement Kafka producer initialization when Kafka config is ready
-	c.Logger.Info("kafka producer not yet implemented, using no-op event publisher")
-	c.EventPublisher = domain.NewNoOpEventPublisher()
+	// Create Kafka producer with organization header support
+	producerConfig := kafka.ProducerConfig{
+		BootstrapServers: strings.Join(c.Config.Kafka.Brokers, ","),
+		ClientID:         "position-keeping-service",
+		Acks:             "all",    // Wait for full replication
+		Retries:          3,        // Retry failed sends
+		Compression:      "snappy", // Efficient compression
+	}
+
+	kafkaProducer, err := kafka.NewProtoProducer(producerConfig)
+	if err != nil {
+		c.Logger.Error("failed to create kafka producer, using no-op publisher", "error", err)
+		c.EventPublisher = domain.NewNoOpEventPublisher()
+		return
+	}
+
+	// Wrap with Position-Keeping event publisher adapter
+	topicConfig := messaging.DefaultTopicConfig()
+	eventPublisher, err := messaging.NewKafkaEventPublisher(kafkaProducer, topicConfig)
+	if err != nil {
+		c.Logger.Error("failed to create event publisher, using no-op publisher", "error", err)
+		kafkaProducer.Close()
+		c.EventPublisher = domain.NewNoOpEventPublisher()
+		return
+	}
+
+	c.kafkaProducer = kafkaProducer
+	c.EventPublisher = eventPublisher
+	c.Logger.Info("kafka event publisher initialized",
+		"brokers", c.Config.Kafka.Brokers,
+		"client_id", producerConfig.ClientID)
 }
 
 // initializeRepositories initializes domain repositories
@@ -247,6 +278,16 @@ func (c *Container) Close(ctx context.Context) error {
 	c.Logger.Info("closing container resources...")
 
 	var errs []error
+
+	// Close Kafka producer (flush outstanding messages first)
+	if c.kafkaProducer != nil {
+		remaining := c.kafkaProducer.Flush(5000) // 5 second timeout
+		if remaining > 0 {
+			c.Logger.Warn("kafka producer flush incomplete", "remaining_messages", remaining)
+		}
+		c.kafkaProducer.Close()
+		c.Logger.Info("kafka producer closed")
+	}
 
 	// Close database pool
 	if c.DBPool != nil {
