@@ -349,11 +349,17 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 // Returns nil if AUTH_ENABLED is false (default), allowing unauthenticated requests.
 //
 // Environment variables:
-// - AUTH_ENABLED: Set to "true" to enable JWT authentication (default: false)
-// - JWKS_URL: JWKS endpoint URL for JWT validation (required when enabled)
-// - JWKS_CACHE_TTL: How long to cache JWKS keys (default: 1h)
-// - JWKS_REFRESH_TTL: Background refresh interval for JWKS (default: 30m)
-// - MULTI_ORG_MODE: Set to "true" to require organization_id claim in JWT
+//   - AUTH_ENABLED: Set to "true" to enable JWT authentication (default: false)
+//   - JWKS_URL: JWKS endpoint URL for JWT validation (required when enabled)
+//   - JWKS_CACHE_TTL: How long to cache JWKS keys (default: 1h)
+//   - JWKS_REFRESH_TTL: Background refresh interval for JWKS (default: 30m)
+//   - JWKS_HTTP_TIMEOUT: HTTP client timeout for JWKS fetch (default: 10s)
+//   - MULTI_ORG_MODE: Set to "true" to require organization_id claim in JWT
+//     (read directly by interceptor via auth.MultiOrgModeEnvVar at request time)
+//
+// Note: The JWKS provider starts a background refresh goroutine. This follows the
+// existing pattern in other services (e.g., position-keeping) where the provider
+// is not explicitly closed during shutdown, relying on process termination.
 func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, error) {
 	enabled := getEnvAsBool("AUTH_ENABLED", false)
 	if !enabled {
@@ -367,8 +373,9 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 	refreshTTL := getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
 
 	// Create JWKS provider with HTTP client
+	httpTimeout := getEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
 	httpClient := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: httpTimeout,
 	}
 	jwksConfig := &auth.JWKSProviderConfig{
 		URL:        jwksURL,
@@ -404,12 +411,15 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 		return nil, fmt.Errorf("failed to create auth interceptor: %w", err)
 	}
 
-	// Log multi-org mode status (this is checked in the interceptor itself via env var)
+	// Log multi-org mode status for visibility.
+	// Note: The auth interceptor reads MULTI_ORG_MODE directly from the environment
+	// via os.Getenv(auth.MultiOrgModeEnvVar) at request time, not from config passed here.
 	multiOrgMode := getEnvAsBool("MULTI_ORG_MODE", false)
-	logger.Info("auth interceptor initialized",
+	logger.Debug("auth interceptor initialized",
 		"jwks_url", jwksURL,
 		"cache_ttl", cacheTTL,
 		"refresh_ttl", refreshTTL,
+		"http_timeout", httpTimeout,
 		"multi_org_mode", multiOrgMode,
 		"bypass_methods", len(interceptorConfig.BypassMethods))
 

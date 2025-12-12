@@ -128,8 +128,8 @@ func TestInitAuth_Disabled(t *testing.T) {
 	}
 }
 
-func TestInitAuth_DisabledByDefault(t *testing.T) {
-	// Ensure AUTH_ENABLED is not set (use empty string to simulate unset)
+func TestInitAuth_DisabledWithEmptyValue(t *testing.T) {
+	// Set AUTH_ENABLED to empty string - treated same as unset (defaults to false)
 	t.Setenv("AUTH_ENABLED", "")
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -145,7 +145,7 @@ func TestInitAuth_DisabledByDefault(t *testing.T) {
 	}
 
 	if interceptor != nil {
-		t.Errorf("initAuth() returned non-nil interceptor when AUTH_ENABLED not set")
+		t.Errorf("initAuth() returned non-nil interceptor when AUTH_ENABLED is empty")
 	}
 }
 
@@ -188,6 +188,7 @@ func TestInitAuth_UsesConfiguredValues(t *testing.T) {
 	t.Setenv("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
 	t.Setenv("JWKS_CACHE_TTL", "2h")
 	t.Setenv("JWKS_REFRESH_TTL", "45m")
+	t.Setenv("JWKS_HTTP_TIMEOUT", "15s")
 	t.Setenv("MULTI_ORG_MODE", "true")
 
 	// Verify environment variables are read correctly
@@ -203,6 +204,11 @@ func TestInitAuth_UsesConfiguredValues(t *testing.T) {
 	refreshTTL := getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
 	if refreshTTL != 45*time.Minute {
 		t.Errorf("JWKS_REFRESH_TTL = %v, want 45m", refreshTTL)
+	}
+
+	httpTimeout := getEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
+	if httpTimeout != 15*time.Second {
+		t.Errorf("JWKS_HTTP_TIMEOUT = %v, want 15s", httpTimeout)
 	}
 
 	multiOrgMode := getEnvAsBool("MULTI_ORG_MODE", false)
