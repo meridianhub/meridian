@@ -7,15 +7,114 @@ This directory contains Protocol Buffer (protobuf) definitions for all Meridian 
 ```text
 api/proto/
 ├── meridian/
-│   ├── common/v1/              # Common types shared across services
-│   ├── financial_accounting/v1/  # FinancialAccounting BIAN service
-│   ├── position_keeping/v1/      # PositionKeeping BIAN service
+│   ├── common/v1/                # Common types shared across services
 │   ├── current_account/v1/       # CurrentAccount BIAN service
-│   └── events/                   # Kafka event schemas
-│       ├── financial_accounting/v1/
-│       ├── position_keeping/v1/
-│       └── current_account/v1/
+│   ├── financial_accounting/v1/  # FinancialAccounting BIAN service
+│   ├── party/v1/                 # Party BIAN service
+│   ├── payment_order/v1/         # PaymentOrder BIAN service
+│   ├── platform/v1/              # Platform services (idempotency)
+│   ├── position_keeping/v1/      # PositionKeeping BIAN service
+│   ├── tenant/v1/                # Tenant infrastructure service
+│   └── events/v1/                # Kafka event schemas
 ```
+
+## Service Architecture
+
+The diagram below shows the gRPC service interfaces and their runtime dependencies.
+Banks adopting BIAN standards can integrate services individually or as a complete suite.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class PartyService {
+        <<BIAN: Party Reference Data>>
+        +RegisterParty()
+        +RetrieveParty()
+    }
+
+    class PositionKeepingService {
+        <<BIAN: Position Keeping>>
+        +InitiateFinancialPositionLog()
+        +UpdateFinancialPositionLog()
+        +RetrieveFinancialPositionLog()
+        +ListFinancialPositionLogs()
+        +InitiateFinancialPositionLogBatch()
+        +BulkImportTransactions()
+    }
+
+    class FinancialAccountingService {
+        <<BIAN: Financial Standard Mgmt>>
+        +InitiateFinancialBookingLog()
+        +UpdateFinancialBookingLog()
+        +RetrieveFinancialBookingLog()
+        +ListFinancialBookingLogs()
+        +CaptureLedgerPosting()
+        +UpdateLedgerPosting()
+        +RetrieveLedgerPosting()
+        +ListLedgerPostings()
+    }
+
+    class CurrentAccountService {
+        <<BIAN: Current Account>>
+        +InitiateCurrentAccount()
+        +RetrieveCurrentAccount()
+        +ExecuteDeposit()
+        +InitiateLien()
+        +ExecuteLien()
+        +TerminateLien()
+        +RetrieveLien()
+    }
+
+    class PaymentOrderService {
+        <<BIAN: Payment Order>>
+        +InitiatePaymentOrder()
+        +RetrievePaymentOrder()
+        +UpdatePaymentOrder()
+        +CancelPaymentOrder()
+        +ReversePaymentOrder()
+        +ListPaymentOrders()
+    }
+
+    class TenantService {
+        <<Infrastructure>>
+        +InitiateTenant()
+        +RetrieveTenant()
+        +UpdateTenantStatus()
+        +ListTenants()
+    }
+
+    CurrentAccountService --> PartyService : validates party_id
+    CurrentAccountService --> PositionKeepingService : logs transactions
+    CurrentAccountService --> FinancialAccountingService : ledger postings
+    PaymentOrderService --> CurrentAccountService : InitiateLien/ExecuteLien
+    TenantService ..> PartyService : registers organization
+
+    TenantService <.. PartyService : schema isolation
+    TenantService <.. PositionKeepingService : schema isolation
+    TenantService <.. FinancialAccountingService : schema isolation
+    TenantService <.. CurrentAccountService : schema isolation
+    TenantService <.. PaymentOrderService : schema isolation
+```
+
+**Key:**
+
+- Solid arrows (`-->`) = runtime gRPC dependencies (service calls another)
+- Dashed arrows (`..>`) = optional runtime dependencies (graceful degradation if unavailable)
+- Reverse dashed arrows (`<..`) = infrastructure dependencies (multi-tenancy schema isolation)
+
+**Standalone Services** (can operate independently):
+
+- PartyService, PositionKeepingService, FinancialAccountingService
+
+**Optional Dependencies:**
+
+- TenantService → Party (optional: registers organization Party on tenant creation)
+
+**Dependent Services** (require upstream services):
+
+- CurrentAccountService → Party, PositionKeeping, FinancialAccounting
+- PaymentOrderService → CurrentAccount (for fund reservations via Lien)
 
 ## Tooling
 

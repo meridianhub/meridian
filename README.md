@@ -31,9 +31,11 @@ meridian/
 │   │   ├── migrations/          # Database migrations
 │   │   ├── atlas/               # Atlas schema config
 │   │   └── k8s/                 # Kubernetes manifests
-│   ├── position-keeping/        # Pre-ledger transaction log
 │   ├── financial-accounting/    # Double-entry general ledger
-│   └── payment-order/           # Payment execution
+│   ├── party/                   # Customer and party reference data
+│   ├── payment-order/           # Payment execution
+│   ├── position-keeping/        # Pre-ledger transaction log
+│   └── tenant/                  # Multi-tenant platform management
 ├── shared/                      # Cross-service shared code
 │   ├── platform/                # Infrastructure (auth, db, kafka, observability)
 │   ├── domain/                  # Shared domain models and primitives
@@ -51,12 +53,17 @@ meridian/
 
 This implementation includes the following BIAN service domains:
 
-- **CurrentAccount**: Customer-facing account management
-- **PositionKeeping**: Pre-ledger transaction log and position tracking
-- **FinancialAccounting**: Double-entry general ledger with audit trail
-- **PaymentOrder**: Payment initiation and execution
+| Service | BIAN Domain | Purpose | Standalone |
+|---------|-------------|---------|:----------:|
+| **CurrentAccount** | Current Account | Customer-facing account management and transaction orchestration | No |
+| **FinancialAccounting** | Financial Standard Management | Double-entry bookkeeping and general ledger | Yes |
+| **Party** | Party Reference Data Directory | Customer and party reference data management | Yes |
+| **PaymentOrder** | Payment Order | Payment initiation, saga orchestration, and settlement | No |
+| **PositionKeeping** | Position Keeping | Pre-ledger transaction log and position tracking | Yes |
+| **Tenant** | *(Infrastructure)* | Multi-tenant platform management and data isolation | Yes |
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
+Services marked as "Standalone" can operate independently; others require upstream dependencies.
 
 Reference specifications: BIAN Service Landscape 13.0.0
 
@@ -149,6 +156,9 @@ skill](docs/skills/schema-evolution.md)
 - Event schema evolution with protobuf
 - Adapter pattern for layer translation
 - Local development with Tilt
+- Standard service directory structure
+
+For service API interfaces and dependencies, see the [Service Architecture diagram](api/proto/README.md#service-architecture).
 
 See [docs/adr/README.md](docs/adr/README.md) for the complete catalog.
 
