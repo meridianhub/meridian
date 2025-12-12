@@ -111,6 +111,47 @@ func (r *Repository) UpdateStatus(ctx context.Context, id organization.Organizat
 		updates["deprovisioned_at"] = &now
 	}
 
+	// Clear error message when status is not a failure state
+	if status != domain.StatusProvisioningFailed {
+		updates["error_message"] = nil
+	}
+
+	result := r.db.WithContext(ctx).
+		Model(&TenantEntity{}).
+		Where("id = ? AND version = ?", id.String(), currentVersion).
+		Updates(updates)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		// Check if tenant exists
+		var count int64
+		r.db.WithContext(ctx).
+			Model(&TenantEntity{}).
+			Where("id = ?", id.String()).
+			Count(&count)
+
+		if count == 0 {
+			return nil, ErrTenantNotFound
+		}
+		return nil, ErrVersionConflict
+	}
+
+	// Fetch and return the updated tenant
+	return r.GetByID(ctx, id)
+}
+
+// UpdateStatusWithError changes the tenant status and sets an error message.
+// Used for recording provisioning failures.
+func (r *Repository) UpdateStatusWithError(ctx context.Context, id organization.OrganizationID, status domain.Status, errorMessage string, currentVersion int) (*domain.Tenant, error) {
+	updates := map[string]interface{}{
+		"status":        status,
+		"error_message": errorMessage,
+		"version":       currentVersion + 1,
+	}
+
 	result := r.db.WithContext(ctx).
 		Model(&TenantEntity{}).
 		Where("id = ? AND version = ?", id.String(), currentVersion).
@@ -235,6 +276,10 @@ func toEntity(tenant *domain.Tenant) *TenantEntity {
 		entity.PartyID = &tenant.PartyID
 	}
 
+	if tenant.ErrorMessage != "" {
+		entity.ErrorMessage = &tenant.ErrorMessage
+	}
+
 	return entity
 }
 
@@ -262,6 +307,10 @@ func toDomain(entity *TenantEntity) (*domain.Tenant, error) {
 
 	if entity.PartyID != nil {
 		tenant.PartyID = *entity.PartyID
+	}
+
+	if entity.ErrorMessage != nil {
+		tenant.ErrorMessage = *entity.ErrorMessage
 	}
 
 	return tenant, nil

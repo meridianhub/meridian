@@ -58,6 +58,10 @@ enum TenantStatus {
   TENANT_STATUS_SUSPENDED = 2;
   // TENANT_STATUS_DEPROVISIONED means the tenant has been deprovisioned.
   TENANT_STATUS_DEPROVISIONED = 3;
+  // TENANT_STATUS_PROVISIONING means the tenant is being provisioned (schemas being created).
+  TENANT_STATUS_PROVISIONING = 4;
+  // TENANT_STATUS_PROVISIONING_FAILED means schema provisioning failed.
+  TENANT_STATUS_PROVISIONING_FAILED = 5;
 }
 
 // Tenant represents a platform tenant for multi-tenant infrastructure.
@@ -114,6 +118,10 @@ message Tenant {
     pattern: "^[a-zA-Z0-9_-]*$"
     max_len: 100
   }];
+
+  // error_message contains details if status is PROVISIONING_FAILED.
+  // Empty string for successfully provisioned tenants.
+  string error_message = 11 [(buf.validate.field).string = {max_len: 2000}];
 }
 
 // InitiateTenantRequest is the request to create a new tenant (BIAN: Initiate).
@@ -170,6 +178,8 @@ message RetrieveTenantResponse {
 // This operation uses optimistic locking. If the tenant was modified by another request,
 // an ABORTED error is returned. Clients should retry the operation in this case.
 // Valid status transitions:
+//   - provisioning -> active, provisioning_failed
+//   - provisioning_failed -> provisioning (retry)
 //   - active -> suspended, deprovisioned
 //   - suspended -> active, deprovisioned
 //   - deprovisioned -> (none, terminal state)

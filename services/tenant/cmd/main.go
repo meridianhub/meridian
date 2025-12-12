@@ -14,6 +14,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/clients"
+	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -96,6 +97,24 @@ func run(logger *slog.Logger) error {
 	// Create repository
 	repo := persistence.NewRepository(db)
 
+	// Initialize schema provisioner (optional - skipped if SCHEMA_PROVISIONING_ENABLED is not "true")
+	var schemaProvisioner provisioner.SchemaProvisioner
+	provisioningEnabled := getEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false")
+	if provisioningEnabled == "true" {
+		config := provisioner.DefaultConfig()
+		prov, err := provisioner.NewPostgresProvisioner(db, config)
+		if err != nil {
+			return fmt.Errorf("failed to create schema provisioner: %w", err)
+		}
+		schemaProvisioner = prov
+		logger.Info("schema provisioner initialized",
+			"services", len(config.Services),
+			"provisioning_timeout", config.ProvisioningTimeout)
+	} else {
+		logger.Warn("schema provisioning not enabled - tenant creation will not provision schemas",
+			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable schema provisioning")
+	}
+
 	// Initialize Party client (optional - skipped if PARTY_SERVICE_TARGET not set)
 	var partyClient clients.PartyClient
 	partyTarget := getEnvOrDefault("PARTY_SERVICE_TARGET", "")
@@ -121,7 +140,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create gRPC service
-	tenantService := service.NewService(repo, partyClient, logger)
+	tenantService := service.NewService(repo, schemaProvisioner, partyClient, logger)
 
 	// Create cached registry for validation middleware
 	cachedRegistry := service.NewCachedRegistry(repo, service.CachedRegistryConfig{
