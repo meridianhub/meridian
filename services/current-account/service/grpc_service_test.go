@@ -2,14 +2,12 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
-	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -528,218 +526,12 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	}
 }
 
-// Mock Party Client for testing party validation scenarios
-
-type mockPartyClient struct {
-	validatePartyFn func(ctx context.Context, partyID string) error
-}
-
-func (m *mockPartyClient) ValidateParty(ctx context.Context, partyID string) error {
-	if m.validatePartyFn != nil {
-		return m.validatePartyFn(ctx, partyID)
-	}
-	return nil
-}
-
-func (m *mockPartyClient) GetParty(_ context.Context, _ string) (*partyv1.Party, error) {
-	return nil, nil
-}
-
-func (m *mockPartyClient) Close() error {
-	return nil
-}
-
-// Party validation tests
-
-func TestInitiateCurrentAccount_WithPartyValidation_Success(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	partyID := uuid.New().String()
-
-	// Create mock party client that validates successfully
-	mockParty := &mockPartyClient{
-		validatePartyFn: func(_ context.Context, id string) error {
-			if id == partyID {
-				return nil
-			}
-			return ErrPartyNotFound
-		},
-	}
-
-	svc, err := NewServiceWithExistingClients(
-		repo,
-		nil, // lienRepo
-		nil, // posKeepingClient
-		nil, // finAcctClient
-		mockParty,
-		nil, // logger
-		nil, // tracer
-	)
-	require.NoError(t, err)
-
-	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               partyID,
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-	}
-
-	resp, err := svc.InitiateCurrentAccount(context.Background(), req)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.NotEmpty(t, resp.AccountId)
-	require.NotNil(t, resp.Facility)
-	require.Equal(t, pb.AccountStatus_ACCOUNT_STATUS_ACTIVE, resp.Facility.AccountStatus)
-}
-
-func TestInitiateCurrentAccount_PartyNotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	partyID := uuid.New().String()
-
-	// Create mock party client that returns party not found
-	mockParty := &mockPartyClient{
-		validatePartyFn: func(_ context.Context, _ string) error {
-			return ErrPartyNotFound
-		},
-	}
-
-	svc, err := NewServiceWithExistingClients(
-		repo,
-		nil,
-		nil,
-		nil,
-		mockParty,
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-
-	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               partyID,
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-	}
-
-	_, err = svc.InitiateCurrentAccount(context.Background(), req)
-	require.Error(t, err)
-
-	st, ok := status.FromError(err)
-	require.True(t, ok, "Expected gRPC status error")
-	require.Equal(t, codes.InvalidArgument, st.Code())
-	require.Contains(t, st.Message(), "party not found")
-}
-
-func TestInitiateCurrentAccount_PartyNotActive(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	partyID := uuid.New().String()
-
-	// Create mock party client that returns party not active
-	mockParty := &mockPartyClient{
-		validatePartyFn: func(_ context.Context, _ string) error {
-			return ErrPartyNotActive
-		},
-	}
-
-	svc, err := NewServiceWithExistingClients(
-		repo,
-		nil,
-		nil,
-		nil,
-		mockParty,
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-
-	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               partyID,
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-	}
-
-	_, err = svc.InitiateCurrentAccount(context.Background(), req)
-	require.Error(t, err)
-
-	st, ok := status.FromError(err)
-	require.True(t, ok, "Expected gRPC status error")
-	require.Equal(t, codes.FailedPrecondition, st.Code())
-	require.Contains(t, st.Message(), "party not active")
-}
-
-func TestInitiateCurrentAccount_PartyValidationError(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	partyID := uuid.New().String()
-
-	// Create mock party client that returns internal error
-	mockParty := &mockPartyClient{
-		validatePartyFn: func(_ context.Context, _ string) error {
-			return fmt.Errorf("connection timeout: %w", context.DeadlineExceeded)
-		},
-	}
-
-	svc, err := NewServiceWithExistingClients(
-		repo,
-		nil,
-		nil,
-		nil,
-		mockParty,
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-
-	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               partyID,
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-	}
-
-	_, err = svc.InitiateCurrentAccount(context.Background(), req)
-	require.Error(t, err)
-
-	st, ok := status.FromError(err)
-	require.True(t, ok, "Expected gRPC status error")
-	require.Equal(t, codes.Internal, st.Code())
-	require.Contains(t, st.Message(), "party validation failed")
-}
-
-func TestInitiateCurrentAccount_NilPartyClient_BackwardCompatibility(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-
-	// Create service with nil party client (backward compatibility)
-	svc, err := NewServiceWithExistingClients(
-		repo,
-		nil,
-		nil,
-		nil,
-		nil, // nil party client - should skip validation
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-
-	req := &pb.InitiateCurrentAccountRequest{
-		AccountIdentification: "GB82WEST12345698765432",
-		PartyId:               uuid.New().String(),
-		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
-	}
-
-	// Should succeed without party validation
-	resp, err := svc.InitiateCurrentAccount(context.Background(), req)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.NotEmpty(t, resp.AccountId)
-}
+// NOTE: Party validation tests are in grpc_service_party_integration_test.go
+// That file contains comprehensive tests for party validation scenarios including:
+// - TestInitiateCurrentAccount_WithPartyValidation_Success
+// - TestInitiateCurrentAccount_PartyNotFound
+// - TestInitiateCurrentAccount_PartyNotActive
+// - TestInitiateCurrentAccount_PartyServiceUnavailable
+// - TestInitiateCurrentAccount_PartyServiceTimeout
+// - TestInitiateCurrentAccount_NilPartyClient_BackwardCompatibility
+// - etc.
