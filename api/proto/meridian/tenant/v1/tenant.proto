@@ -106,6 +106,10 @@ message Tenant {
   // party_id is the reference to the corresponding Party in the BIAN Party Reference Data Directory.
   // Automatically populated when the tenant is created via PartyService.RegisterParty.
   // This links platform infrastructure (Tenant) to BIAN domain entities (Party.Organization).
+  //
+  // Optional: May be empty for tenants created before party integration was added,
+  // or when the Party service is not configured. The pattern uses * (not +) to allow
+  // empty strings for backward compatibility with existing tenants.
   string party_id = 10 [(buf.validate.field).string = {
     pattern: "^[a-zA-Z0-9_-]*$"
     max_len: 100

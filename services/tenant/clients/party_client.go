@@ -1,4 +1,10 @@
 // Package clients provides gRPC client wrappers for external service communication.
+//
+// TODO: The PartyClient implementation shares significant code with
+// services/current-account/clients/party_client.go. Consider extracting shared
+// connection setup logic to shared/pkg/clients in a future refactoring effort.
+// The clients have different interfaces (Tenant uses RegisterParty, CurrentAccount
+// uses ValidateParty/GetParty), but the connection initialization is duplicated.
 package clients
 
 import (
@@ -23,6 +29,10 @@ var (
 	ErrPartyTargetRequired = errors.New("target address is required")
 	// ErrPartyRegistrationFailed is returned when party registration fails.
 	ErrPartyRegistrationFailed = errors.New("party registration failed")
+	// ErrPartyServiceUnavailable is returned when the party service is temporarily unavailable.
+	ErrPartyServiceUnavailable = errors.New("party service unavailable")
+	// ErrPartyServiceTimeout is returned when the party service request times out.
+	ErrPartyServiceTimeout = errors.New("party service timeout")
 )
 
 // PartyClient defines the interface for communicating with the Party service.
@@ -49,7 +59,7 @@ type PartyGRPCClient struct {
 
 // PartyClientConfig holds configuration for the Party client.
 type PartyClientConfig struct {
-	// Target is the gRPC server address (e.g., "localhost:50054" or "party-service:50054").
+	// Target is the gRPC server address (e.g., "localhost:50055" or "party-service:50055").
 	//
 	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
 	Target string
@@ -93,7 +103,7 @@ type PartyClientConfig struct {
 // 2. Legacy direct connection (for backward compatibility):
 //
 //	config := &PartyClientConfig{
-//	    Target:  "party-service:50054",
+//	    Target:  "party-service:50055",
 //	    Timeout: 30 * time.Second,
 //	}
 func NewPartyClient(cfg *PartyClientConfig) (*PartyGRPCClient, error) {
@@ -172,6 +182,12 @@ func (c *PartyGRPCClient) RegisterParty(ctx context.Context, req *partyv1.Regist
 				return nil, fmt.Errorf("%w: party already exists", ErrPartyRegistrationFailed)
 			case codes.InvalidArgument:
 				return nil, fmt.Errorf("%w: %s", ErrPartyRegistrationFailed, st.Message())
+			case codes.Unavailable:
+				// Transient error - service temporarily unavailable, may be retried
+				return nil, fmt.Errorf("%w: %w", ErrPartyServiceUnavailable, err)
+			case codes.DeadlineExceeded:
+				// Transient error - request timed out, may be retried
+				return nil, fmt.Errorf("%w: %w", ErrPartyServiceTimeout, err)
 			}
 		}
 		return nil, fmt.Errorf("%w: %w", ErrPartyRegistrationFailed, err)
