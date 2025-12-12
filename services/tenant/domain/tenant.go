@@ -11,6 +11,10 @@ import (
 type Status string
 
 const (
+	// StatusProvisioning means the tenant is being provisioned (schemas being created).
+	StatusProvisioning Status = "provisioning"
+	// StatusProvisioningFailed means schema provisioning failed.
+	StatusProvisioningFailed Status = "provisioning_failed"
 	// StatusActive means the tenant is active and can operate.
 	StatusActive Status = "active"
 	// StatusSuspended means the tenant is temporarily suspended.
@@ -22,7 +26,7 @@ const (
 // IsValid returns true if the status is a valid tenant status.
 func (s Status) IsValid() bool {
 	switch s {
-	case StatusActive, StatusSuspended, StatusDeprovisioned:
+	case StatusProvisioning, StatusProvisioningFailed, StatusActive, StatusSuspended, StatusDeprovisioned:
 		return true
 	default:
 		return false
@@ -66,6 +70,10 @@ type Tenant struct {
 	// Automatically populated when the tenant is created via PartyService.RegisterParty.
 	// This links platform infrastructure (Tenant) to BIAN domain entities (Party.Organization).
 	PartyID string
+
+	// ErrorMessage contains details if Status is provisioning_failed.
+	// Empty string for successfully provisioned tenants.
+	ErrorMessage string
 }
 
 // IsActive returns true if the tenant is in active status.
@@ -87,6 +95,8 @@ func (t *Tenant) SchemaName() string {
 
 // CanTransitionTo returns true if the tenant can transition to the given status.
 // Valid transitions:
+//   - provisioning → active, provisioning_failed
+//   - provisioning_failed → provisioning (retry)
 //   - active → suspended, deprovisioned
 //   - suspended → active, deprovisioned
 //   - deprovisioned → (none, terminal state)
@@ -96,6 +106,10 @@ func (t *Tenant) CanTransitionTo(newStatus Status) bool {
 	}
 
 	switch t.Status {
+	case StatusProvisioning:
+		return newStatus == StatusActive || newStatus == StatusProvisioningFailed
+	case StatusProvisioningFailed:
+		return newStatus == StatusProvisioning // Allow retry
 	case StatusActive:
 		return newStatus == StatusSuspended || newStatus == StatusDeprovisioned
 	case StatusSuspended:

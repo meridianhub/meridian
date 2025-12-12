@@ -18,12 +18,13 @@ type TenantEntity struct {
 	DisplayName     string     `gorm:"column:display_name;not null"`
 	SettlementAsset string     `gorm:"column:settlement_asset;not null"`
 	Subdomain       *string    `gorm:"column:subdomain;uniqueIndex:idx_tenants_subdomain"`
-	Status          string     `gorm:"column:status;not null;default:active"`
+	Status          string     `gorm:"column:status;not null;default:provisioning"`
 	CreatedAt       time.Time  `gorm:"column:created_at;not null;autoCreateTime;index:idx_tenants_created_at,sort:desc"`
 	DeprovisionedAt *time.Time `gorm:"column:deprovisioned_at"`
 	Metadata        JSONMap    `gorm:"column:metadata;type:jsonb;default:'{}'"`
 	Version         int        `gorm:"column:version;not null;default:1"`
 	PartyID         *string    `gorm:"column:party_id;index:idx_tenants_party_id"`
+	ErrorMessage    *string    `gorm:"column:error_message"`
 }
 
 // TableName returns the table name for GORM.

@@ -11,6 +11,7 @@ import (
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,8 +26,8 @@ func setupTest(t *testing.T) (*Service, *gorm.DB, func()) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	// Pass nil for partyClient - party registration is skipped in tests without Party service
-	svc := NewService(repo, nil, logger)
+	// Pass nil for provisioner and partyClient - skipped in basic tests
+	svc := NewService(repo, nil, nil, logger)
 	return svc, db, cleanup
 }
 
@@ -402,7 +403,16 @@ func setupTestWithPartyClient(t *testing.T, partyClient *mockPartyClient) (*Serv
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	svc := NewService(repo, partyClient, logger)
+	svc := NewService(repo, nil, partyClient, logger)
+	return svc, db, cleanup
+}
+
+func setupTestWithProvisioner(t *testing.T, mockProv *provisioner.MockProvisioner) (*Service, *gorm.DB, func()) {
+	t.Helper()
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	repo := persistence.NewRepository(db)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	svc := NewService(repo, mockProv, nil, logger)
 	return svc, db, cleanup
 }
 
@@ -468,4 +478,95 @@ func TestService_InitiateTenant_PartyRegistrationFailure(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.Internal, st.Code())
 	assert.Contains(t, st.Message(), "failed to register party")
+}
+
+// Tests for schema provisioning integration
+
+func TestService_InitiateTenant_WithProvisioningSuccess(t *testing.T) {
+	// Create mock provisioner that succeeds
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "testdata/migrations"},
+		{Name: "current-account", MigrationPath: "testdata/migrations"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "provisioned_tenant",
+		DisplayName:     "Provisioned Tenant",
+		SettlementAsset: "GBP",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Tenant)
+
+	// Tenant should be active after successful provisioning
+	assert.Equal(t, "provisioned_tenant", resp.Tenant.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+	assert.Equal(t, int32(2), resp.Tenant.Version) // Created with version 1, updated to active (version 2)
+
+	// Verify provisioner was called
+	require.Len(t, mockProv.ProvisioningCalls, 1)
+	assert.Equal(t, "provisioned_tenant", mockProv.ProvisioningCalls[0].String())
+}
+
+// errProvisioningFailed is a test error for simulating provisioning failures.
+var errProvisioningFailed = errors.New("provisioning failed: database connection error")
+
+func TestService_InitiateTenant_WithProvisioningFailure(t *testing.T) {
+	// Create mock provisioner that fails
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "testdata/migrations"},
+	})
+	mockProv.FailProvisioningFor["prov_fail_tenant"] = errProvisioningFailed
+
+	svc, db, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "prov_fail_tenant",
+		DisplayName:     "Provisioning Fail Tenant",
+		SettlementAsset: "GBP",
+	}
+
+	_, err := svc.InitiateTenant(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "schema provisioning failed")
+
+	// Verify the tenant was created with provisioning_failed status
+	var entity persistence.TenantEntity
+	result := db.Where("id = ?", "prov_fail_tenant").First(&entity)
+	require.NoError(t, result.Error)
+	assert.Equal(t, "provisioning_failed", entity.Status)
+	require.NotNil(t, entity.ErrorMessage)
+	assert.Contains(t, *entity.ErrorMessage, "provisioning failed")
+}
+
+func TestService_InitiateTenant_WithoutProvisioner(t *testing.T) {
+	// Service without provisioner - tenant should be created as active directly
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "no_prov_tenant",
+		DisplayName:     "No Provisioning Tenant",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Tenant)
+
+	// Should be active immediately (no provisioning)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+	assert.Equal(t, int32(1), resp.Tenant.Version) // Only one version (created)
 }
