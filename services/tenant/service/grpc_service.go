@@ -12,6 +12,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,21 +27,25 @@ var ErrUnknownStatus = errors.New("unspecified or unknown tenant status")
 type Service struct {
 	pb.UnimplementedTenantServiceServer
 	repo        *persistence.Repository
+	provisioner provisioner.SchemaProvisioner
 	partyClient clients.PartyClient
 	logger      *slog.Logger
 }
 
 // NewService creates a new TenantService.
+// The provisioner parameter is optional; if nil, schema provisioning is skipped during tenant creation.
 // The partyClient parameter is optional; if nil, party registration is skipped during tenant creation.
-func NewService(repo *persistence.Repository, partyClient clients.PartyClient, logger *slog.Logger) *Service {
+func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner, partyClient clients.PartyClient, logger *slog.Logger) *Service {
 	return &Service{
 		repo:        repo,
+		provisioner: prov,
 		partyClient: partyClient,
 		logger:      logger,
 	}
 }
 
 // InitiateTenant creates a new tenant in the platform registry (BIAN: Initiate).
+// If a provisioner is configured, this also provisions schemas for the tenant.
 // If a Party client is configured, this also registers a corresponding Party in the
 // BIAN Party Reference Data Directory, establishing the link between platform
 // infrastructure (Tenant) and BIAN domain entities (Party.Organization).
@@ -57,13 +62,19 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		metadata = req.Metadata.AsMap()
 	}
 
+	// Determine initial status based on whether provisioning is configured
+	initialStatus := domain.StatusActive
+	if s.provisioner != nil {
+		initialStatus = domain.StatusProvisioning
+	}
+
 	// Create domain tenant
 	tenant := &domain.Tenant{
 		ID:              tenantID,
 		DisplayName:     req.DisplayName,
 		SettlementAsset: req.SettlementAsset,
 		Subdomain:       req.Subdomain,
-		Status:          domain.StatusActive,
+		Status:          initialStatus,
 		CreatedAt:       time.Now(),
 		Metadata:        metadata,
 		Version:         1,
@@ -97,7 +108,7 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 			"tenant_id", req.TenantId)
 	}
 
-	// Persist tenant
+	// Persist tenant with initial status (provisioning or active)
 	if err := s.repo.Create(ctx, tenant); err != nil {
 		if errors.Is(err, persistence.ErrTenantExists) {
 			return nil, status.Errorf(codes.AlreadyExists, "tenant %s already exists", req.TenantId)
@@ -115,7 +126,50 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		"tenant_id", tenant.ID.String(),
 		"display_name", tenant.DisplayName,
 		"settlement_asset", tenant.SettlementAsset,
+		"status", tenant.Status,
 		"party_id", tenant.PartyID)
+
+	// Provision schemas if provisioner is configured
+	if s.provisioner != nil {
+		s.logger.Info("provisioning schemas for tenant",
+			"tenant_id", tenant.ID.String())
+
+		provErr := s.provisioner.ProvisionSchemas(ctx, tenant.ID)
+		if provErr != nil {
+			// Mark tenant as provisioning_failed
+			s.logger.Error("schema provisioning failed",
+				"tenant_id", tenant.ID.String(),
+				"error", provErr)
+
+			_, updateErr := s.repo.UpdateStatusWithError(ctx, tenant.ID, domain.StatusProvisioningFailed, provErr.Error(), tenant.Version)
+			if updateErr != nil {
+				s.logger.Error("failed to update tenant status after provisioning failure",
+					"tenant_id", tenant.ID.String(),
+					"error", updateErr)
+			}
+
+			// Update local tenant state for response
+			tenant.Status = domain.StatusProvisioningFailed
+			tenant.ErrorMessage = provErr.Error()
+			tenant.Version++
+
+			return nil, status.Errorf(codes.Internal, "schema provisioning failed: %v", provErr)
+		}
+
+		// Activate tenant after successful provisioning
+		updatedTenant, updateErr := s.repo.UpdateStatus(ctx, tenant.ID, domain.StatusActive, tenant.Version)
+		if updateErr != nil {
+			s.logger.Error("failed to activate tenant after provisioning",
+				"tenant_id", tenant.ID.String(),
+				"error", updateErr)
+			return nil, status.Errorf(codes.Internal, "failed to activate tenant after provisioning")
+		}
+
+		tenant = updatedTenant
+		s.logger.Info("tenant provisioned and activated",
+			"tenant_id", tenant.ID.String(),
+			"status", tenant.Status)
+	}
 
 	return &pb.InitiateTenantResponse{
 		Tenant: s.toProto(tenant),
@@ -249,6 +303,7 @@ func (s *Service) toProto(tenant *domain.Tenant) *pb.Tenant {
 		CreatedAt:       timestamppb.New(tenant.CreatedAt),
 		Version:         int32(tenant.Version),
 		PartyId:         tenant.PartyID,
+		ErrorMessage:    tenant.ErrorMessage,
 	}
 
 	if tenant.DeprovisionedAt != nil {
@@ -267,6 +322,10 @@ func (s *Service) toProto(tenant *domain.Tenant) *pb.Tenant {
 // toProtoStatus converts domain status to protobuf status.
 func (s *Service) toProtoStatus(status domain.Status) pb.TenantStatus {
 	switch status {
+	case domain.StatusProvisioning:
+		return pb.TenantStatus_TENANT_STATUS_PROVISIONING
+	case domain.StatusProvisioningFailed:
+		return pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED
 	case domain.StatusActive:
 		return pb.TenantStatus_TENANT_STATUS_ACTIVE
 	case domain.StatusSuspended:
@@ -281,6 +340,10 @@ func (s *Service) toProtoStatus(status domain.Status) pb.TenantStatus {
 // toDomainStatus converts protobuf status to domain status.
 func (s *Service) toDomainStatus(status pb.TenantStatus) (domain.Status, error) {
 	switch status {
+	case pb.TenantStatus_TENANT_STATUS_PROVISIONING:
+		return domain.StatusProvisioning, nil
+	case pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED:
+		return domain.StatusProvisioningFailed, nil
 	case pb.TenantStatus_TENANT_STATUS_ACTIVE:
 		return domain.StatusActive, nil
 	case pb.TenantStatus_TENANT_STATUS_SUSPENDED:
