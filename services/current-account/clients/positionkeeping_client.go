@@ -162,6 +162,7 @@ func (c *PositionKeepingGRPCClient) InitiateFinancialPositionLog(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.InitiateFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -180,6 +181,7 @@ func (c *PositionKeepingGRPCClient) UpdateFinancialPositionLog(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.UpdateFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -198,6 +200,7 @@ func (c *PositionKeepingGRPCClient) RetrieveFinancialPositionLog(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.RetrieveFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -216,6 +219,7 @@ func (c *PositionKeepingGRPCClient) BulkImportTransactions(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.BulkImportTransactions(ctx, req)
 	if err != nil {
@@ -234,6 +238,7 @@ func (c *PositionKeepingGRPCClient) ListFinancialPositionLogs(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.ListFinancialPositionLogs(ctx, req)
 	if err != nil {

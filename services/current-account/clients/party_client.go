@@ -204,6 +204,7 @@ func (c *PartyGRPCClient) GetParty(ctx context.Context, partyID string) (*partyv
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.RetrieveParty(ctx, &partyv1.RetrievePartyRequest{
 		PartyId: partyID,

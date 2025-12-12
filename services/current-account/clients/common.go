@@ -29,3 +29,10 @@ func ExtractCorrelationID(ctx context.Context) string {
 func WithTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	return sharedclients.WithTimeout(ctx, timeout)
 }
+
+// PropagateOrganization extracts organization ID from context and adds it to gRPC metadata.
+// Returns the same context if org is missing or empty (graceful degradation for single-tenant or bootstrap calls).
+// Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
+func PropagateOrganization(ctx context.Context) context.Context {
+	return sharedclients.PropagateOrganization(ctx)
+}

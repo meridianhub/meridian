@@ -172,6 +172,7 @@ func (c *PartyGRPCClient) RegisterParty(ctx context.Context, req *partyv1.Regist
 	defer cancel()
 
 	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.RegisterParty(ctx, req)
 	if err != nil {

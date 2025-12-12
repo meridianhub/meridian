@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 )
@@ -296,4 +297,56 @@ func TestWithTimeout_NegativeTimeout(t *testing.T) {
 	// Should not have a deadline
 	_, ok := resultCtx.Deadline()
 	assert.False(t, ok, "should not have deadline")
+}
+
+// TestPropagateOrganization_Success verifies organization ID is added to outgoing metadata
+func TestPropagateOrganization_Success(t *testing.T) {
+	t.Parallel()
+
+	orgID := organization.MustNewOrganizationID("acme_bank")
+	ctx := organization.WithOrganization(context.Background(), orgID)
+
+	result := clients.PropagateOrganization(ctx)
+
+	// Verify organization ID was added to outgoing metadata
+	md, ok := metadata.FromOutgoingContext(result)
+	assert.True(t, ok, "should have outgoing metadata")
+	assert.Equal(t, []string{"acme_bank"}, md.Get(organization.OrgIDKey))
+}
+
+// TestPropagateOrganization_NoOrganization verifies context is unchanged when no organization exists
+func TestPropagateOrganization_NoOrganization(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	result := clients.PropagateOrganization(ctx)
+
+	// Context should be returned unchanged
+	assert.Equal(t, ctx, result)
+
+	// Should not have outgoing metadata
+	_, ok := metadata.FromOutgoingContext(result)
+	assert.False(t, ok, "should not have outgoing metadata")
+}
+
+// TestPropagateOrganization_ChainWithCorrelationID verifies both propagation functions work together
+func TestPropagateOrganization_ChainWithCorrelationID(t *testing.T) {
+	t.Parallel()
+
+	// Create context with both correlation ID and organization
+	//nolint:revive,staticcheck // Using string key as expected by ExtractCorrelationID implementation
+	ctx := context.WithValue(context.Background(), "x-correlation-id", "corr-123")
+	orgID := organization.MustNewOrganizationID("chain_test")
+	ctx = organization.WithOrganization(ctx, orgID)
+
+	// Apply both propagation functions
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Verify both headers are present
+	md, ok := metadata.FromOutgoingContext(ctx)
+	assert.True(t, ok, "should have outgoing metadata")
+	assert.Equal(t, []string{"corr-123"}, md.Get("x-correlation-id"), "should have correlation ID")
+	assert.Equal(t, []string{"chain_test"}, md.Get(organization.OrgIDKey), "should have organization ID")
 }
