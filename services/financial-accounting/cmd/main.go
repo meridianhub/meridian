@@ -482,6 +482,10 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 //   - JWKS_HTTP_TIMEOUT: HTTP client timeout for JWKS fetch (default: 10s)
 //   - MULTI_ORG_MODE: Set to "true" to require organization_id claim in JWT
 //     (read directly by interceptor via auth.MultiOrgModeEnvVar at request time)
+//
+// Note: The JWKS provider starts a background refresh goroutine. This follows the
+// existing pattern in other services (e.g., position-keeping) where the provider
+// is not explicitly closed during shutdown, relying on process termination.
 func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, error) {
 	enabled := getEnvAsBool("AUTH_ENABLED", false)
 	if !enabled {
