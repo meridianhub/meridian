@@ -1,4 +1,4 @@
-package repository_test
+package persistence_test
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
-	"github.com/meridianhub/meridian/services/position-keeping/repository"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,7 +25,7 @@ const (
 type testContainer struct {
 	container *postgres.PostgresContainer
 	pool      *pgxpool.Pool
-	repo      *repository.PostgresRepository
+	repo      *persistence.PostgresRepository
 }
 
 // setupTestContainer creates a PostgreSQL testcontainer with the schema loaded
@@ -62,7 +62,7 @@ func setupTestContainer(t *testing.T) *testContainer {
 	loadSchema(t, pool)
 
 	// Create repository
-	repo := repository.NewPostgresRepository(pool)
+	repo := persistence.NewPostgresRepository(pool)
 
 	return &testContainer{
 		container: pgContainer,
@@ -283,7 +283,7 @@ func TestPostgresRepository_Create(t *testing.T) {
 
 	// Test nil log
 	err = tc.repo.Create(ctx, nil)
-	assert.ErrorIs(t, err, repository.ErrNilLog)
+	assert.ErrorIs(t, err, persistence.ErrNilLog)
 }
 
 func TestPostgresRepository_CreateBatch(t *testing.T) {
@@ -400,7 +400,7 @@ func TestPostgresRepository_Update(t *testing.T) {
 
 	// Test nil log
 	err = tc.repo.Update(ctx, nil)
-	assert.ErrorIs(t, err, repository.ErrNilLog)
+	assert.ErrorIs(t, err, persistence.ErrNilLog)
 }
 
 func TestPostgresRepository_List(t *testing.T) {
@@ -466,7 +466,7 @@ func TestPostgresRepository_List(t *testing.T) {
 		Limit: 0,
 	}
 	_, err = tc.repo.List(ctx, filter)
-	assert.ErrorIs(t, err, repository.ErrInvalidLimit)
+	assert.ErrorIs(t, err, persistence.ErrInvalidLimit)
 }
 
 func TestPostgresRepository_FindPendingForReconciliation(t *testing.T) {

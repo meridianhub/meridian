@@ -1,5 +1,5 @@
-// Package repository provides PostgreSQL persistence implementation for Position Keeping domain.
-package repository
+// Package persistence provides PostgreSQL persistence implementation for Position Keeping domain.
+package persistence
 
 import (
 	"context"
