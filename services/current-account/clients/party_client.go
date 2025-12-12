@@ -76,7 +76,7 @@ type PartyClientConfig struct {
 	Namespace string
 
 	// Port is the service port number
-	// Party service uses port 50054 (configured in deployments/k8s/party/service.yaml)
+	// Party service uses port 50055 (configured in services/party/k8s/service.yaml)
 	// Only used when ServiceName is specified.
 	Port int
 
