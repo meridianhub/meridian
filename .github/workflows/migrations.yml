@@ -111,11 +111,15 @@ jobs:
             for CONFIG in services/financial-accounting/atlas/atlas.hcl services/party/atlas/atlas.hcl services/payment-order/atlas/atlas.hcl services/position-keeping/atlas/atlas.hcl; do
               SERVICE=$(basename $(dirname $(dirname "$CONFIG")))
               echo "  Service: $SERVICE"
+              # --allow-dirty allows multiple services to share the same org schema
+              # Each service creates its own tables with unqualified names, so
+              # other services' tables may exist in the schema
               if ! atlas migrate apply \
                 --env ci \
                 --config "file://$CONFIG" \
                 --url "${DATABASE_URL}&search_path=${ORG_SCHEMA}" \
-                --tx-mode none; then
+                --tx-mode none \
+                --allow-dirty; then
                 echo "    ✗ Migration failed for $SERVICE in $ORG_SCHEMA"
                 FAILED=1
               fi
