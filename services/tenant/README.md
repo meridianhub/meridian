@@ -50,21 +50,34 @@ infrastructure for shared-cluster deployments requiring data isolation between o
 
 ## Domain Model
 
-### Tenant
+```mermaid
+classDiagram
+    class Tenant {
+        +string ID
+        +string DisplayName
+        +string SettlementAsset
+        +string Subdomain
+        +TenantStatus Status
+        +Time CreatedAt
+        +Time DeprovisionedAt
+        +JSON Metadata
+        +int Version
+    }
 
-```text
-Tenant {
-  ID: OrganizationID (alphanumeric + underscore, 1-50 chars)
-  DisplayName: string (1-255 chars)
-  SettlementAsset: string (e.g., GBP, USD, GPU-HOUR)
-  Subdomain: string (optional, unique)
-  Status: ACTIVE | SUSPENDED | DEPROVISIONED
-  CreatedAt: time.Time
-  DeprovisionedAt: *time.Time
-  Metadata: map[string]interface{} (JSONB)
-  Version: int
-}
+    class TenantStatus {
+        <<enumeration>>
+        ACTIVE
+        SUSPENDED
+        DEPROVISIONED
+    }
+
+    Tenant --> TenantStatus
 ```
+
+**Field Notes:**
+
+- `ID`: Alphanumeric + underscore, 1-50 chars (used for schema name `org_{id}`)
+- `SettlementAsset`: e.g., GBP, USD, GPU-HOUR
 
 ### Tenant Status
 
@@ -74,12 +87,18 @@ Tenant {
 | `SUSPENDED` | Temporarily disabled (recoverable) |
 | `DEPROVISIONED` | Terminal state (no operations) |
 
+**Note:** API enum uses uppercase (ACTIVE), DB stores lowercase (active).
+
 **Status Transitions:**
 
-```text
-ACTIVE ──→ SUSPENDED ──→ DEPROVISIONED
-   │                          ↑
-   └──────────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> ACTIVE
+    ACTIVE --> SUSPENDED
+    ACTIVE --> DEPROVISIONED
+    SUSPENDED --> ACTIVE
+    SUSPENDED --> DEPROVISIONED
+    DEPROVISIONED --> [*]
 ```
 
 - DEPROVISIONED is terminal (cannot be reactivated)
@@ -101,27 +120,26 @@ The tenant registry itself is stored in the shared `platform` schema.
 
 **Schema**: `platform`
 
-### tenants Table
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | VARCHAR(50) | Primary key (tenant ID) |
-| `display_name` | VARCHAR(255) | Human-readable name |
-| `settlement_asset` | VARCHAR(20) | Primary currency/asset |
-| `subdomain` | VARCHAR(255) | API subdomain (unique) |
-| `status` | VARCHAR(20) | Lifecycle state |
-| `created_at` | TIMESTAMPTZ | Registration time |
-| `deprovisioned_at` | TIMESTAMPTZ | Deprovisioning time |
-| `metadata` | JSONB | Flexible configuration |
-| `version` | INTEGER | Optimistic locking |
+```mermaid
+erDiagram
+    tenants {
+        varchar(50) id PK "alphanumeric + underscore"
+        varchar(255) display_name
+        varchar(20) settlement_asset
+        varchar(255) subdomain UK "nullable"
+        varchar(20) status "active, suspended, deprovisioned"
+        timestamptz created_at
+        timestamptz deprovisioned_at "nullable"
+        jsonb metadata "flexible config"
+        integer version "optimistic lock"
+    }
+```
 
 **Constraints:**
 
 - `valid_status`: status IN ('active', 'suspended', 'deprovisioned')
 - `valid_org_id`: id matches `^[a-zA-Z0-9_]{1,50}$`
 - Subdomain unique when not null
-
-**Note**: API enum uses uppercase (ACTIVE), DB stores lowercase (active).
 
 ## Cached Registry
 

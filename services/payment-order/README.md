@@ -64,43 +64,66 @@ BIAN-compliant payment order service with saga orchestration for distributed tra
 
 ## Domain Model
 
-### PaymentOrder
+```mermaid
+classDiagram
+    class PaymentOrder {
+        +UUID ID
+        +string DebtorAccountID
+        +string CreditorReference
+        +Money Amount
+        +PaymentStatus Status
+        +string LienID
+        +string GatewayReferenceID
+        +string IdempotencyKey
+        +string FailureReason
+        +LienExecutionStatus LienExecutionStatus
+        +int LienExecutionAttempts
+        +int Version
+    }
 
-```text
-PaymentOrder {
-  ID: UUID
-  DebtorAccountID: string
-  CreditorReference: string (IBAN)
-  Amount: Money
-  Status: INITIATED | RESERVED | EXECUTING | COMPLETED | FAILED | CANCELLED | REVERSED
-  LienID: string
-  GatewayReferenceID: string
-  IdempotencyKey: string
-  FailureReason: string
-  LienExecutionStatus: PENDING | SUCCEEDED | FAILED
-  LienExecutionAttempts: int (max 5)
-  Version: int
-}
+    class PaymentStatus {
+        <<enumeration>>
+        INITIATED
+        RESERVED
+        EXECUTING
+        COMPLETED
+        FAILED
+        CANCELLED
+        REVERSED
+    }
+
+    class LienExecutionStatus {
+        <<enumeration>>
+        PENDING
+        SUCCEEDED
+        FAILED
+    }
+
+    PaymentOrder --> PaymentStatus
+    PaymentOrder --> LienExecutionStatus
 ```
+
+**Field Notes:**
+
+- `CreditorReference`: IBAN format
+- `LienExecutionAttempts`: max 5 retries
 
 ## Payment Saga State Machine
 
-```text
-INITIATED
-    │
-    ├──→ RESERVED (funds reserved via InitiateLien)
-    │        │
-    │        ├──→ EXECUTING (sent to gateway)
-    │        │        │
-    │        │        ├──→ COMPLETED (gateway settled)
-    │        │        │        │
-    │        │        │        └──→ REVERSED (post-completion reversal)
-    │        │        │
-    │        │        └──→ FAILED (gateway rejected, lien released)
-    │        │
-    │        └──→ CANCELLED (user cancelled, lien released)
-    │
-    └──→ FAILED (reservation failed)
+```mermaid
+stateDiagram-v2
+    [*] --> INITIATED
+    INITIATED --> RESERVED : InitiateLien success
+    INITIATED --> FAILED : reservation failed
+    RESERVED --> EXECUTING : sent to gateway
+    RESERVED --> CANCELLED : user cancelled
+    EXECUTING --> COMPLETED : gateway settled
+    EXECUTING --> FAILED : gateway rejected
+    COMPLETED --> REVERSED : post-completion reversal
+    CANCELLED --> [*]
+    FAILED --> [*]
+    COMPLETED --> [*]
+    REVERSED --> [*]
 ```
 
 ## Saga Orchestration Flow
@@ -139,22 +162,26 @@ INITIATED
 
 **Schema**: `payment_order`
 
-### payment_orders Table
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | UUID | Primary key |
-| `debtor_account_id` | VARCHAR(255) | Account to debit |
-| `creditor_reference` | VARCHAR(255) | Target IBAN |
-| `amount_cents` | BIGINT | Amount in cents |
-| `currency` | CHAR(3) | ISO 4217 |
-| `status` | VARCHAR(20) | Saga state |
-| `lien_id` | VARCHAR(255) | CurrentAccount reservation |
-| `gateway_reference_id` | VARCHAR(255) | External transaction ID |
-| `idempotency_key` | VARCHAR(255) | Unique constraint |
-| `lien_execution_status` | VARCHAR(20) | PENDING, SUCCEEDED, FAILED |
-| `lien_execution_attempts` | INT | Retry counter |
-| `version` | INT | Optimistic locking |
+```mermaid
+erDiagram
+    payment_orders {
+        uuid id PK
+        varchar(255) debtor_account_id
+        varchar(255) creditor_reference "IBAN"
+        bigint amount_cents
+        char(3) currency "ISO 4217"
+        varchar(20) status "saga state"
+        varchar(255) lien_id "CurrentAccount reservation"
+        varchar(255) gateway_reference_id "external txn ID"
+        varchar(255) idempotency_key UK
+        varchar(255) failure_reason
+        varchar(20) lien_execution_status "PENDING, SUCCEEDED, FAILED"
+        int lien_execution_attempts "max 5"
+        int version "optimistic lock"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+```
 
 ## Kafka Events
 

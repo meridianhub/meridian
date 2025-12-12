@@ -61,35 +61,62 @@ BIAN-compliant financial accounting microservice for double-entry bookkeeping.
 
 ## Domain Model
 
-### FinancialBookingLog (Aggregate Root)
+```mermaid
+classDiagram
+    class FinancialBookingLog {
+        +UUID ID
+        +string FinancialAccountType
+        +string ProductServiceReference
+        +string BusinessUnitReference
+        +string ChartOfAccountsRules
+        +string BaseCurrency
+        +BookingLogStatus Status
+        +int64 Version
+    }
 
-```text
-FinancialBookingLog {
-  ID: UUID
-  FinancialAccountType: string
-  ProductServiceReference: string
-  BusinessUnitReference: string
-  ChartOfAccountsRules: string
-  BaseCurrency: string (ISO 4217)
-  Status: PENDING | POSTED | FAILED | CANCELLED | REVERSED
-  postings: []LedgerPosting
-}
+    class LedgerPosting {
+        +UUID ID
+        +UUID FinancialBookingLogID
+        +PostingDirection Direction
+        +Money Amount
+        +string AccountID
+        +Time ValueDate
+        +PostingStatus Status
+        +string CorrelationID
+    }
+
+    class BookingLogStatus {
+        <<enumeration>>
+        PENDING
+        POSTED
+        FAILED
+        CANCELLED
+        REVERSED
+    }
+
+    class PostingDirection {
+        <<enumeration>>
+        DEBIT
+        CREDIT
+    }
+
+    class PostingStatus {
+        <<enumeration>>
+        PENDING
+        POSTED
+        FAILED
+    }
+
+    FinancialBookingLog "1" --> "*" LedgerPosting : contains
+    FinancialBookingLog --> BookingLogStatus
+    LedgerPosting --> PostingDirection
+    LedgerPosting --> PostingStatus
 ```
 
-### LedgerPosting
+**Field Notes:**
 
-```text
-LedgerPosting {
-  ID: UUID
-  FinancialBookingLogID: UUID
-  Direction: DEBIT | CREDIT
-  Amount: Money
-  AccountID: string
-  ValueDate: time.Time
-  Status: PENDING | POSTED | FAILED
-  CorrelationID: string
-}
-```
+- `BaseCurrency`: ISO 4217 currency code (GBP, USD, EUR, etc.)
+- `CorrelationID`: Trace ID for distributed tracing
 
 ## Double-Entry Bookkeeping
 
@@ -124,29 +151,34 @@ Consumes deposit events and creates balanced debit/credit postings automatically
 
 **Schema**: `financial_accounting`
 
-### financial_booking_logs Table
+```mermaid
+erDiagram
+    financial_booking_logs {
+        uuid id PK
+        varchar(50) financial_account_type
+        varchar(100) product_service_reference
+        varchar(100) business_unit_reference
+        varchar(255) chart_of_accounts_rules
+        varchar(3) base_currency "ISO 4217"
+        varchar(50) status "PENDING, POSTED, FAILED, etc."
+        varchar(255) idempotency_key UK
+        bigint version "optimistic lock"
+    }
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | UUID | Primary key |
-| `financial_account_type` | VARCHAR(50) | Account type |
-| `base_currency` | VARCHAR(3) | ISO 4217 code |
-| `status` | VARCHAR(50) | Lifecycle state |
-| `idempotency_key` | VARCHAR(255) | Exactly-once (unique) |
-| `version` | BIGINT | Optimistic locking |
+    ledger_postings {
+        uuid id PK
+        uuid financial_booking_log_id FK
+        varchar(10) posting_direction "DEBIT, CREDIT"
+        bigint amount_cents
+        varchar(3) currency "ISO 4217"
+        varchar(255) account_id
+        timestamptz value_date
+        varchar(50) status "PENDING, POSTED, FAILED"
+        varchar(255) correlation_id "trace ID"
+    }
 
-### ledger_postings Table
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | UUID | Primary key |
-| `financial_booking_log_id` | UUID | Parent reference |
-| `posting_direction` | VARCHAR(10) | DEBIT or CREDIT |
-| `amount_cents` | BIGINT | Amount in cents |
-| `currency` | VARCHAR(3) | ISO 4217 code |
-| `account_id` | VARCHAR(255) | Target account |
-| `value_date` | TIMESTAMPTZ | Effective date |
-| `correlation_id` | VARCHAR(255) | Trace ID |
+    financial_booking_logs ||--o{ ledger_postings : "contains"
+```
 
 ## Configuration
 

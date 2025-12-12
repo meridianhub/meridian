@@ -52,68 +52,110 @@ BIAN-compliant position keeping service for immutable financial transaction hist
 
 ## Domain Model
 
-### FinancialPositionLog (Aggregate Root)
+```mermaid
+classDiagram
+    class FinancialPositionLog {
+        +UUID LogID
+        +string AccountID
+        +int64 Version
+        +TransactionStatus CurrentStatus
+        +TransactionStatus PreviousStatus
+        +ReconciliationStatus ReconciliationStatus
+        +string StatusReason
+        +string FailureReason
+        +TransactionLineage Lineage
+    }
 
-```text
-FinancialPositionLog {
-  LogID: UUID
-  AccountID: string (max 34 chars)
-  Version: int64
-  CurrentStatus: TransactionStatus
-  PreviousStatus: TransactionStatus
-  ReconciliationStatus: ReconciliationStatus
-  StatusReason: string
-  FailureReason: string
-  Entries: []TransactionLogEntry (max 10,000)
-  AuditTrail: []AuditTrailEntry (max 10,000)
-  Lineage: TransactionLineage
-}
+    class TransactionLogEntry {
+        +UUID EntryID
+        +UUID TransactionID
+        +string AccountID
+        +Money Amount
+        +Direction Direction
+        +Time Timestamp
+        +string Description
+        +string Reference
+        +TransactionSource Source
+    }
+
+    class AuditTrailEntry {
+        +UUID AuditID
+        +string UserID
+        +string Action
+        +string IPAddress
+        +JSON Details
+        +Time Timestamp
+    }
+
+    class TransactionLineage {
+        +UUID TransactionID
+        +UUID ParentTransactionID
+        +UUID[] ChildTransactionIDs
+        +UUID[] RelatedTransactionIDs
+        +string TransactionType
+    }
+
+    class TransactionStatus {
+        <<enumeration>>
+        PENDING
+        RECONCILED
+        POSTED
+        AMENDED
+        FAILED
+        REJECTED
+        CANCELLED
+        REVERSED
+    }
+
+    class ReconciliationStatus {
+        <<enumeration>>
+        UNRECONCILED
+        MATCHED
+        MISMATCHED
+        RESOLVED
+    }
+
+    class TransactionSource {
+        <<enumeration>>
+        API
+        BATCH
+        MANUAL
+        SYSTEM
+        IMPORT
+        MIGRATION
+        CORRECTION
+    }
+
+    FinancialPositionLog "1" --> "*" TransactionLogEntry : entries
+    FinancialPositionLog "1" --> "*" AuditTrailEntry : auditTrail
+    FinancialPositionLog "1" --> "1" TransactionLineage : lineage
+    FinancialPositionLog --> TransactionStatus
+    FinancialPositionLog --> ReconciliationStatus
+    TransactionLogEntry --> TransactionSource
 ```
 
-### TransactionLogEntry
+**Capacity Limits:**
 
-```text
-TransactionLogEntry {
-  EntryID: UUID
-  TransactionID: UUID
-  AccountID: string
-  Amount: Money
-  Direction: DEBIT | CREDIT
-  Timestamp: time.Time
-  Description: string
-  Reference: string
-  Source: API | BATCH | MANUAL | SYSTEM | IMPORT | MIGRATION | CORRECTION
-}
-```
-
-### TransactionLineage
-
-```text
-TransactionLineage {
-  TransactionID: UUID
-  ParentTransactionID: *UUID
-  ChildTransactionIDs: []UUID
-  RelatedTransactionIDs: []UUID
-  TransactionType: string
-}
-```
+- `Entries`: max 10,000 per log
+- `AuditTrail`: max 10,000 per log
 
 ## Transaction Status State Machine
 
-```text
-PENDING
-    │
-    ├──→ RECONCILED (matched with external system)
-    │        │
-    │        ├──→ POSTED (final, immutable)
-    │        │        │
-    │        │        └──→ REVERSED (special case)
-    │        │
-    │        └──→ AMENDED (modifications while reconciled)
-    │
-    ├──→ FAILED
-    ├──→ REJECTED
-    └──→ CANCELLED
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> RECONCILED
+    PENDING --> FAILED
+    PENDING --> REJECTED
+    PENDING --> CANCELLED
+    RECONCILED --> POSTED
+    RECONCILED --> AMENDED
+    POSTED --> REVERSED
+    POSTED --> [*]
+    FAILED --> [*]
+    REJECTED --> [*]
+    CANCELLED --> [*]
+    REVERSED --> [*]
 ```
 
 ### Reconciliation Status
@@ -150,39 +192,56 @@ PENDING
 
 **Schema**: `position_keeping`
 
-### financial_position_logs Table
+```mermaid
+erDiagram
+    financial_position_logs {
+        uuid log_id PK
+        varchar(34) account_id
+        bigint version "optimistic lock"
+        varchar(20) current_status
+        varchar(20) previous_status
+        varchar(20) reconciliation_status
+        text status_reason
+        text failure_reason
+        timestamptz created_at
+        timestamptz updated_at
+    }
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `log_id` | UUID | Primary key |
-| `account_id` | VARCHAR(34) | Account reference |
-| `version` | BIGINT | Optimistic locking |
-| `current_status` | VARCHAR(20) | Transaction state |
-| `reconciliation_status` | VARCHAR(20) | Matching state |
-| `status_reason` | TEXT | Transition reason |
+    transaction_log_entries {
+        uuid entry_id PK
+        uuid financial_position_log_id FK
+        uuid transaction_id
+        bigint amount_cents
+        char(3) currency "ISO 4217"
+        varchar(10) direction "debit, credit"
+        varchar(20) source "API, BATCH, etc."
+        varchar(255) description
+        varchar(255) reference
+        timestamptz timestamp
+    }
 
-### transaction_log_entries Table
+    audit_trail_entries {
+        uuid audit_id PK
+        uuid financial_position_log_id FK
+        varchar(100) user_id
+        varchar(100) action
+        varchar(45) ip_address
+        jsonb details
+        timestamptz timestamp
+    }
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `entry_id` | UUID | Primary key |
-| `financial_position_log_id` | UUID | Parent reference |
-| `transaction_id` | UUID | Transaction identifier |
-| `amount_cents` | BIGINT | Amount in minor units |
-| `currency` | CHAR(3) | ISO 4217 |
-| `direction` | VARCHAR(10) | debit or credit |
-| `source` | VARCHAR(20) | Transaction source |
+    transaction_lineage {
+        uuid id PK
+        uuid financial_position_log_id FK
+        uuid transaction_id
+        uuid parent_transaction_id "nullable"
+        varchar(50) transaction_type
+    }
 
-### audit_trail_entries Table
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `audit_id` | UUID | Primary key |
-| `financial_position_log_id` | UUID | Parent reference |
-| `user_id` | VARCHAR(100) | Actor |
-| `action` | VARCHAR(100) | Action taken |
-| `ip_address` | VARCHAR(45) | Client IP |
-| `details` | JSONB | Additional context |
+    financial_position_logs ||--o{ transaction_log_entries : "entries"
+    financial_position_logs ||--o{ audit_trail_entries : "auditTrail"
+    financial_position_logs ||--o| transaction_lineage : "lineage"
+```
 
 ## Capacity Limits
 

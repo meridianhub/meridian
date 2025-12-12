@@ -49,31 +49,55 @@ BIAN-compliant party reference data directory for managing customer and counterp
 
 ## Domain Model
 
-### Party
+```mermaid
+classDiagram
+    class Party {
+        +UUID ID
+        +PartyType PartyType
+        +string LegalName
+        +string DisplayName
+        +PartyStatus Status
+        +string ExternalReference
+        +ExternalReferenceType ExternalReferenceType
+        +int64 Version
+        +Time CreatedAt
+        +Time UpdatedAt
+    }
 
-```text
-Party {
-  ID: UUID
-  PartyType: PERSON | ORGANIZATION
-  LegalName: string (1-255 chars)
-  DisplayName: string (optional, max 255)
-  Status: ACTIVE | RESTRICTED | TERMINATED
-  ExternalReference: string (optional, write-once)
-  ExternalReferenceType: COMPANIES_HOUSE | NATIONAL_ID | LEI | TAX_ID
-  Version: int64
-  CreatedAt: time.Time
-  UpdatedAt: time.Time
-}
+    class PartyType {
+        <<enumeration>>
+        PERSON
+        ORGANIZATION
+    }
+
+    class PartyStatus {
+        <<enumeration>>
+        ACTIVE
+        RESTRICTED
+        TERMINATED
+    }
+
+    class ExternalReferenceType {
+        <<enumeration>>
+        COMPANIES_HOUSE
+        NATIONAL_ID
+        LEI
+        TAX_ID
+    }
+
+    Party --> PartyType
+    Party --> PartyStatus
+    Party --> ExternalReferenceType
 ```
 
-### Party Types
+**Party Types:**
 
 | Type | Description |
 |------|-------------|
 | `PERSON` | Natural person (individual) |
 | `ORGANIZATION` | Legal entity (company, partnership) |
 
-### Party Status
+**Party Status:**
 
 | Status | Description |
 |--------|-------------|
@@ -83,10 +107,14 @@ Party {
 
 **Status Transitions:**
 
-```text
-ACTIVE ──→ RESTRICTED ──→ TERMINATED
-   │                          ↑
-   └──────────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> ACTIVE
+    ACTIVE --> RESTRICTED
+    ACTIVE --> TERMINATED
+    RESTRICTED --> ACTIVE
+    RESTRICTED --> TERMINATED
+    TERMINATED --> [*]
 ```
 
 - TERMINATED is terminal (cannot be reactivated)
@@ -107,18 +135,21 @@ External references are write-once and unique per type:
 
 **Schema**: `party`
 
-### parties Table
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | UUID | Primary key |
-| `party_type` | VARCHAR(20) | PERSON or ORGANIZATION |
-| `legal_name` | VARCHAR(255) | Official registered name |
-| `display_name` | VARCHAR(255) | Short display name (optional) |
-| `status` | VARCHAR(20) | ACTIVE, RESTRICTED, TERMINATED |
-| `external_reference` | VARCHAR(100) | External system ID |
-| `external_reference_type` | VARCHAR(30) | Reference type |
-| `version` | BIGINT | Optimistic locking |
+```mermaid
+erDiagram
+    parties {
+        uuid id PK
+        varchar(20) party_type "PERSON, ORGANIZATION"
+        varchar(255) legal_name
+        varchar(255) display_name "nullable"
+        varchar(20) status "ACTIVE, RESTRICTED, TERMINATED"
+        varchar(100) external_reference "nullable, write-once"
+        varchar(30) external_reference_type "nullable"
+        bigint version "optimistic lock"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+```
 
 **Indexes:**
 

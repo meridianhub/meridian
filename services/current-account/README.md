@@ -60,36 +60,55 @@ BIAN-compliant current account facility microservice with lien-based payment res
 
 ## Domain Model
 
-### CurrentAccount
+```mermaid
+classDiagram
+    class CurrentAccount {
+        +UUID ID
+        +string AccountID
+        +string AccountIdentification
+        +UUID PartyID
+        +Money Balance
+        +Money AvailableBalance
+        +AccountStatus Status
+        +Money OverdraftLimit
+        +bool OverdraftEnabled
+        +int64 Version
+    }
 
-```text
-CurrentAccount {
-  ID: UUID
-  AccountID: string (ACC-{uuid[:8]})
-  AccountIdentification: string (IBAN)
-  PartyID: UUID
-  Balance: Money
-  AvailableBalance: Money
-  Status: ACTIVE | FROZEN | CLOSED
-  OverdraftLimit: Money
-  OverdraftEnabled: bool
-  Version: int64
-}
+    class Lien {
+        +UUID ID
+        +UUID AccountID
+        +Money Amount
+        +LienStatus Status
+        +string PaymentOrderReference
+        +Time ExpiresAt
+        +int Version
+    }
+
+    class AccountStatus {
+        <<enumeration>>
+        ACTIVE
+        FROZEN
+        CLOSED
+    }
+
+    class LienStatus {
+        <<enumeration>>
+        ACTIVE
+        EXECUTED
+        TERMINATED
+    }
+
+    CurrentAccount "1" --> "*" Lien : has
+    CurrentAccount --> AccountStatus
+    Lien --> LienStatus
 ```
 
-### Lien (Fund Reservation)
+**Field Notes:**
 
-```text
-Lien {
-  ID: UUID
-  AccountID: UUID
-  Amount: Money
-  Status: ACTIVE | EXECUTED | TERMINATED
-  PaymentOrderReference: string (idempotency key)
-  ExpiresAt: *time.Time
-  Version: int
-}
-```
+- `AccountID`: Business ID format `ACC-{uuid[:8]}`
+- `AccountIdentification`: IBAN format
+- `PaymentOrderReference`: Idempotency key for payment orders
 
 ## Lien Lifecycle
 
@@ -119,30 +138,31 @@ All clients use circuit breaker with exponential backoff retry (3 retries).
 
 **Schema**: `current_account`
 
-### accounts Table
+```mermaid
+erDiagram
+    accounts {
+        uuid id PK
+        varchar(100) account_id UK "ACC-xxxxxxxx"
+        varchar(34) account_identification UK "IBAN"
+        uuid party_id FK
+        bigint balance "cents"
+        bigint available_balance "cents"
+        varchar(20) status "ACTIVE, FROZEN, CLOSED"
+        bigint overdraft_limit "cents"
+        bigint version "optimistic lock"
+    }
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | UUID | Primary key |
-| `account_id` | VARCHAR(100) | Business ID (ACC-xxxxxxxx) |
-| `account_identification` | VARCHAR(34) | IBAN |
-| `party_id` | UUID | Owner reference |
-| `balance` | BIGINT | Current balance (cents) |
-| `available_balance` | BIGINT | Balance minus active liens |
-| `status` | VARCHAR(20) | ACTIVE, FROZEN, CLOSED |
-| `overdraft_limit` | BIGINT | Facility amount (cents) |
-| `version` | BIGINT | Optimistic locking |
+    liens {
+        uuid id PK
+        uuid account_id FK
+        bigint amount_cents
+        varchar(20) status "ACTIVE, EXECUTED, TERMINATED"
+        varchar(255) payment_order_reference UK "idempotency key"
+        timestamptz expires_at "nullable"
+    }
 
-### liens Table
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `id` | UUID | Primary key |
-| `account_id` | UUID | Foreign key to accounts |
-| `amount_cents` | BIGINT | Reserved amount |
-| `status` | VARCHAR(20) | ACTIVE, EXECUTED, TERMINATED |
-| `payment_order_reference` | VARCHAR(255) | Idempotency key (unique) |
-| `expires_at` | TIMESTAMPTZ | Optional expiration |
+    accounts ||--o{ liens : "has"
+```
 
 ## Configuration
 
