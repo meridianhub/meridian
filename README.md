@@ -60,12 +60,21 @@ This implementation includes the following BIAN service domains:
 | **Party** | Party Reference Data Directory | Customer and party reference data management | Yes |
 | **PaymentOrder** | Payment Order | Payment initiation, saga orchestration, and settlement | No |
 | **PositionKeeping** | Position Keeping | Pre-ledger transaction log and position tracking | Yes |
-| **Tenant** | *(Infrastructure)* | Multi-tenant platform management and data isolation | Yes |
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
 Services marked as "Standalone" can operate independently; others require upstream dependencies.
 
 Reference specifications: BIAN Service Landscape 13.0.0
+
+### Infrastructure Services
+
+| Service | Purpose | Standalone |
+|---------|---------|:----------:|
+| **Tenant** | Multi-tenant platform management with PostgreSQL schema-per-tenant isolation | Yes |
+
+The Tenant service is not part of the BIAN standard but is essential for shared-cluster deployments
+requiring data isolation between organizations. It provides schema-based multi-tenancy where each
+tenant's data is isolated in a dedicated PostgreSQL schema (`org_{tenant_id}`).
 
 ## Technology Stack
 
