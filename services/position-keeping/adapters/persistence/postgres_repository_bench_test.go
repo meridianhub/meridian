@@ -1,4 +1,4 @@
-// Package repository_test provides performance benchmarks for PostgreSQL repository operations.
+// Package persistence_test provides performance benchmarks for PostgreSQL repository operations.
 //
 // These benchmarks measure repository persistence operations with real PostgreSQL instances.
 // Target metrics from requirements:
@@ -13,7 +13,7 @@
 //   - Large batch operations (1000 records)
 //
 // Run with: go test -bench=BenchmarkPostgres -benchmem -benchtime=10s
-package repository_test
+package persistence_test
 
 import (
 	"context"

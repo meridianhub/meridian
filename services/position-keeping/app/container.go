@@ -6,8 +6,8 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
-	"github.com/meridianhub/meridian/services/position-keeping/repository"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/redis/go-redis/v9"
@@ -237,7 +237,7 @@ func (c *Container) initializeEventPublisher() {
 // initializeRepositories initializes domain repositories
 func (c *Container) initializeRepositories() {
 	// Create PostgreSQL repository
-	c.PositionLogRepository = repository.NewPostgresRepository(c.DBPool)
+	c.PositionLogRepository = persistence.NewPostgresRepository(c.DBPool)
 
 	c.Logger.Info("repositories initialized")
 }

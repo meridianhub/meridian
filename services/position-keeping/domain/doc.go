@@ -450,6 +450,6 @@
 //
 // Related Packages:
 //   - github.com/meridianhub/meridian/services/position-keeping/service (gRPC service layer)
-//   - github.com/meridianhub/meridian/services/position-keeping/repository (persistence)
+//   - github.com/meridianhub/meridian/services/position-keeping/adapters/persistence (persistence)
 //   - github.com/meridianhub/meridian/api/proto/meridian/positionkeeping/v1 (protobuf contracts)
 package domain

@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/meridianhub/meridian/services/position-keeping/repository"
+	"github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -39,7 +39,7 @@ import (
 type TestContainer struct {
 	container *postgres.PostgresContainer
 	Pool      *pgxpool.Pool
-	Repo      *repository.PostgresRepository
+	Repo      *persistence.PostgresRepository
 }
 
 // SetupTestContainer creates a PostgreSQL testcontainer with the position_keeping schema loaded.
@@ -99,7 +99,7 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 	loadSchema(t, pool)
 
 	// Create repository
-	repo := repository.NewPostgresRepository(pool)
+	repo := persistence.NewPostgresRepository(pool)
 
 	return &TestContainer{
 		container: pgContainer,
