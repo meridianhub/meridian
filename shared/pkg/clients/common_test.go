@@ -330,6 +330,36 @@ func TestPropagateOrganization_NoOrganization(t *testing.T) {
 	assert.False(t, ok, "should not have outgoing metadata")
 }
 
+// TestPropagateOrganization_NilContext verifies nil context does not panic
+func TestPropagateOrganization_NilContext(t *testing.T) {
+	t.Parallel()
+
+	//nolint:staticcheck // Testing nil context handling intentionally
+	var nilCtx context.Context
+
+	assert.NotPanics(t, func() {
+		result := clients.PropagateOrganization(nilCtx)
+		assert.Nil(t, result, "should return nil for nil context")
+	})
+}
+
+// TestPropagateOrganization_EmptyOrganizationID verifies empty org ID returns unchanged context
+func TestPropagateOrganization_EmptyOrganizationID(t *testing.T) {
+	t.Parallel()
+
+	// Create context with empty organization ID
+	ctx := organization.WithOrganization(context.Background(), organization.OrganizationID(""))
+
+	result := clients.PropagateOrganization(ctx)
+
+	// Context should be returned unchanged (empty org ID treated as missing)
+	assert.Equal(t, ctx, result)
+
+	// Should not have outgoing metadata with org ID
+	_, ok := metadata.FromOutgoingContext(result)
+	assert.False(t, ok, "should not have outgoing metadata for empty org ID")
+}
+
 // TestPropagateOrganization_ExistingMetadata verifies existing metadata is preserved
 func TestPropagateOrganization_ExistingMetadata(t *testing.T) {
 	t.Parallel()

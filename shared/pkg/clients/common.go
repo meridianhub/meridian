@@ -61,16 +61,20 @@ func WithTimeout(ctx context.Context, timeout time.Duration) (context.Context, c
 }
 
 // PropagateOrganization extracts organization ID from context and adds it to gRPC metadata.
-// Returns the same context if org is missing (graceful degradation for single-tenant or bootstrap calls).
+// Returns the same context if org is missing or empty (graceful degradation for single-tenant or bootstrap calls).
 // Usage pattern:
 //
 //	ctx = clients.PropagateCorrelationID(ctx)
 //	ctx = clients.PropagateOrganization(ctx)
 //	resp, err := client.SomeMethod(ctx, req)
 func PropagateOrganization(ctx context.Context) context.Context {
+	if ctx == nil {
+		return nil
+	}
+
 	orgID, ok := organization.FromContext(ctx)
-	if !ok {
-		// No org in context - return unchanged (single-tenant or bootstrap call)
+	if !ok || orgID.IsEmpty() {
+		// No org in context or empty org - return unchanged (single-tenant or bootstrap call)
 		return ctx
 	}
 
