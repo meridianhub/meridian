@@ -87,7 +87,7 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 			"tenant_id", req.TenantId,
 			"party_id", tenant.PartyID)
 	} else {
-		s.logger.Warn("party client not configured - skipping party registration",
+		s.logger.Debug("party client not configured - skipping party registration",
 			"tenant_id", req.TenantId)
 	}
 

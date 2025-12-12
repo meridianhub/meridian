@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"strconv"
 	"testing"
 
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -377,4 +379,92 @@ func TestService_ListTenants_Pagination(t *testing.T) {
 			assert.NotEqual(t, tenant1.TenantId, tenant2.TenantId, "Pages should not overlap")
 		}
 	}
+}
+
+// mockPartyClient is a test implementation of the PartyClient interface.
+type mockPartyClient struct {
+	registerPartyFunc func(ctx context.Context, req *partyv1.RegisterPartyRequest) (*partyv1.Party, error)
+}
+
+func (m *mockPartyClient) RegisterParty(ctx context.Context, req *partyv1.RegisterPartyRequest) (*partyv1.Party, error) {
+	if m.registerPartyFunc != nil {
+		return m.registerPartyFunc(ctx, req)
+	}
+	return nil, nil
+}
+
+func (m *mockPartyClient) Close() error {
+	return nil
+}
+
+func setupTestWithPartyClient(t *testing.T, partyClient *mockPartyClient) (*Service, *gorm.DB, func()) {
+	t.Helper()
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	repo := persistence.NewRepository(db)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	svc := NewService(repo, partyClient, logger)
+	return svc, db, cleanup
+}
+
+func TestService_InitiateTenant_WithPartyRegistration(t *testing.T) {
+	mockClient := &mockPartyClient{
+		registerPartyFunc: func(_ context.Context, req *partyv1.RegisterPartyRequest) (*partyv1.Party, error) {
+			// Verify the request contains expected data
+			assert.Equal(t, partyv1.PartyType_PARTY_TYPE_ORGANIZATION, req.PartyType)
+			assert.NotEmpty(t, req.LegalName)
+			return &partyv1.Party{
+				PartyId:           "party_123",
+				PartyType:         partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
+				LegalName:         req.LegalName,
+				ExternalReference: req.ExternalReference,
+				Status:            partyv1.PartyStatus_PARTY_STATUS_ACTIVE,
+			}, nil
+		},
+	}
+
+	svc, _, cleanup := setupTestWithPartyClient(t, mockClient)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "party_linked_tenant",
+		DisplayName:     "Party Linked Tenant",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Tenant)
+
+	assert.Equal(t, "party_linked_tenant", resp.Tenant.TenantId)
+	assert.Equal(t, "party_123", resp.Tenant.PartyId)
+}
+
+// errPartyServiceUnavailable is a test error for simulating party service failures.
+var errPartyServiceUnavailable = errors.New("party service unavailable")
+
+func TestService_InitiateTenant_PartyRegistrationFailure(t *testing.T) {
+	mockClient := &mockPartyClient{
+		registerPartyFunc: func(_ context.Context, _ *partyv1.RegisterPartyRequest) (*partyv1.Party, error) {
+			return nil, errPartyServiceUnavailable
+		},
+	}
+
+	svc, _, cleanup := setupTestWithPartyClient(t, mockClient)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "party_fail_tenant",
+		DisplayName:     "Party Fail Tenant",
+		SettlementAsset: "GBP",
+	}
+
+	_, err := svc.InitiateTenant(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to register party")
 }
