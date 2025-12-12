@@ -84,37 +84,27 @@ classDiagram
         +ListTenants()
     }
 
-    CurrentAccountService --> PartyService : validates party_id
-    CurrentAccountService --> PositionKeepingService : logs transactions
-    CurrentAccountService --> FinancialAccountingService : ledger postings
-    PaymentOrderService --> CurrentAccountService : InitiateLien/ExecuteLien
-    TenantService ..> PartyService : registers organization
-
-    TenantService <.. PartyService : schema isolation
-    TenantService <.. PositionKeepingService : schema isolation
-    TenantService <.. FinancialAccountingService : schema isolation
-    TenantService <.. CurrentAccountService : schema isolation
-    TenantService <.. PaymentOrderService : schema isolation
+    CurrentAccountService --> PartyService : RetrieveParty (gRPC)
+    CurrentAccountService --> PositionKeepingService : InitiateFinancialPositionLog (gRPC)
+    CurrentAccountService --> FinancialAccountingService : CaptureLedgerPosting (gRPC)
+    PaymentOrderService --> CurrentAccountService : InitiateLien (gRPC)
+    TenantService ..> PartyService : RegisterParty (gRPC, optional)
 ```
 
 **Key:**
 
-- Solid arrows (`-->`) = runtime gRPC dependencies (service calls another)
-- Dashed arrows (`..>`) = optional runtime dependencies (graceful degradation if unavailable)
-- Reverse dashed arrows (`<..`) = infrastructure dependencies (multi-tenancy schema isolation)
+- Solid arrows (`-->`) = required runtime dependency
+- Dashed arrows (`..>`) = optional runtime dependency (graceful degradation if unavailable)
 
 **Standalone Services** (can operate independently):
 
-- PartyService, PositionKeepingService, FinancialAccountingService
-
-**Optional Dependencies:**
-
-- TenantService → Party (optional: registers organization Party on tenant creation)
+- PartyService, PositionKeepingService, FinancialAccountingService, TenantService
 
 **Dependent Services** (require upstream services):
 
 - CurrentAccountService → Party, PositionKeeping, FinancialAccounting
 - PaymentOrderService → CurrentAccount (for fund reservations via Lien)
+- TenantService → Party (optional: registers organization Party on tenant creation)
 
 ## Tooling
 

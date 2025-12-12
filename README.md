@@ -53,18 +53,24 @@ meridian/
 
 This implementation includes the following BIAN service domains:
 
-| Service | BIAN Domain | Purpose | Standalone |
-|---------|-------------|---------|:----------:|
-| **CurrentAccount** | Current Account | Customer-facing account management and transaction orchestration | No |
-| **FinancialAccounting** | Financial Standard Management | Double-entry bookkeeping and general ledger | Yes |
-| **Party** | Party Reference Data Directory | Customer and party reference data management | Yes |
-| **PaymentOrder** | Payment Order | Payment initiation, saga orchestration, and settlement | No |
-| **PositionKeeping** | Position Keeping | Pre-ledger transaction log and position tracking | Yes |
+| Service | BIAN Domain | Purpose | Standalone | BIAN Spec |
+|---------|-------------|---------|:----------:|-----------|
+| **CurrentAccount** | Current Account | Customer-facing account management and transaction orchestration | No | [OAS3][bian-ca] |
+| **FinancialAccounting** | Financial Standard Management | Double-entry bookkeeping and general ledger | Yes | [OAS3][bian-fa] |
+| **Party** | Party Reference Data Directory | Customer and party reference data management | Yes | [OAS3][bian-party] |
+| **PaymentOrder** | Payment Order | Payment initiation, saga orchestration, and settlement | No | [OAS3][bian-po] |
+| **PositionKeeping** | Position Keeping | Pre-ledger transaction log and position tracking | Yes | [OAS3][bian-pk] |
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
 Services marked as "Standalone" can operate independently; others require upstream dependencies.
 
-Reference specifications: BIAN Service Landscape 13.0.0
+Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bian-official/public/tree/main/release13.0.0)
+
+[bian-ca]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/CurrentAccount.yaml
+[bian-fa]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/FinancialAccounting.yaml
+[bian-party]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PartyReferenceDataDirectory.yaml
+[bian-po]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PaymentOrder.yaml
+[bian-pk]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PositionKeeping.yaml
 
 ### Infrastructure Services
 
