@@ -201,9 +201,25 @@ erDiagram
 |----------|---------|---------|
 | `GRPC_PORT` | 50054 | gRPC server port |
 | `HTTP_PORT` | 8080 | Webhook server port |
-| `WEBHOOK_HMAC_SECRET` | - | Signature validation |
+| `WEBHOOK_HMAC_SECRET` | (required) | Signature validation secret |
 | `HTTP_RATE_LIMIT_PER_SECOND` | 100 | Rate limit |
 | `HTTP_RATE_LIMIT_BURST` | 200 | Burst allowance |
+
+**HMAC Secret Configuration:**
+
+- **Required:** Service will not start without a valid secret
+- **Minimum length:** 32 bytes recommended for security
+- **Generate:** `openssl rand -base64 32`
+- **Kubernetes:** Store in Secret, reference via `secretKeyRef`
+
+```bash
+# Generate secure secret
+openssl rand -base64 32
+
+# Example Kubernetes secret
+kubectl create secret generic payment-order-webhook \
+  --from-literal=hmac-secret="$(openssl rand -base64 32)"
+```
 
 ## References
 

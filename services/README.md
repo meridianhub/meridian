@@ -44,7 +44,7 @@ flowchart LR
     Gateway -->|"HTTP Webhook"| PO
 
     %% gRPC inter-service calls
-    CA -->|"ValidateParty (gRPC)"| Party
+    CA -->|"RetrieveParty (gRPC)"| Party
     CA -->|"InitiateFinancialPositionLog (gRPC)"| PK
     CA -->|"CaptureLedgerPosting (gRPC)"| FA
     PO -->|"InitiateLien (gRPC)"| CA
@@ -96,11 +96,14 @@ All inter-service communication uses gRPC with Protocol Buffers:
 
 | Source | Target | Method | Purpose |
 |--------|--------|--------|---------|
-| CurrentAccount | Party | `ValidateParty()` | Verify party exists and is active |
+| CurrentAccount | Party | `RetrieveParty()` | Verify party exists and is active |
 | CurrentAccount | PositionKeeping | `InitiateFinancialPositionLog()` | Create position log for account |
 | CurrentAccount | FinancialAccounting | `CaptureLedgerPosting()` | Record double-entry posting |
 | PaymentOrder | CurrentAccount | `InitiateLien()` | Reserve funds for payment |
 | Tenant | Party | `RegisterParty()` | Register org party (optional) |
+
+**Note:** CurrentAccount uses a `ValidateParty()` client wrapper that calls `RetrieveParty()` and
+validates the party status is ACTIVE.
 
 **Configuration:**
 
@@ -175,6 +178,20 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 - **Configuration:** Disabled by default (`REDIS_ENABLED=false`)
 - **Fallback:** Services degrade gracefully when Redis unavailable
 
+**When to enable Redis idempotency:**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Single replica deployment | Not needed (in-memory sufficient) |
+| Multi-replica with load balancer | Recommended (distributed state) |
+| High retry/duplicate risk | Recommended (payment workflows) |
+| Development/testing | Not needed (simpler setup) |
+
+**Trade-offs:**
+
+- **With Redis:** Stronger exactly-once guarantees across replicas, additional infrastructure dependency
+- **Without Redis:** Simpler deployment, per-instance idempotency only (request retries may hit different pods)
+
 ## Service Ports
 
 | Service | gRPC Port | HTTP Port | Metrics Port |
@@ -220,7 +237,7 @@ Aggregated health endpoints check:
 The transactional outbox pattern provides guaranteed audit logging with eventual delivery.
 See [ADR-0009](../docs/adr/0009-application-level-audit-logging.md) for architecture rationale.
 
-**Implementation Status:**
+**Implementation Status:** (tracked in [#288](https://github.com/meridianhub/meridian/issues/288))
 
 | Service | Audit Schema | Outbox Table | GORM Hooks | Worker |
 |---------|:------------:|:------------:|:----------:|:------:|
@@ -268,6 +285,8 @@ services/<service-name>/
 ### tenantctl
 
 Command-line interface for tenant lifecycle management. Communicates with the Tenant service via gRPC.
+
+**Source:** [`cmd/tenantctl/`](../cmd/tenantctl/)
 
 **Build:**
 
