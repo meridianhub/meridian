@@ -50,7 +50,7 @@ func TestNewPartyClient_ServiceNameMode(t *testing.T) {
 	client, err := NewPartyClient(&PartyClientConfig{
 		ServiceName: "party-service",
 		Namespace:   "default",
-		Port:        50054,
+		Port:        50055,
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, client)

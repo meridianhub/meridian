@@ -412,6 +412,7 @@ func TestService_InitiateTenant_WithPartyRegistration(t *testing.T) {
 			// Verify the request contains expected data
 			assert.Equal(t, partyv1.PartyType_PARTY_TYPE_ORGANIZATION, req.PartyType)
 			assert.NotEmpty(t, req.LegalName)
+			assert.Equal(t, "party_linked_tenant", req.ExternalReference) // Bidirectional link
 			return &partyv1.Party{
 				PartyId:           "party_123",
 				PartyType:         partyv1.PartyType_PARTY_TYPE_ORGANIZATION,

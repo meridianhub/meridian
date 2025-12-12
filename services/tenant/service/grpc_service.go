@@ -69,12 +69,18 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		Version:         1,
 	}
 
-	// Register corresponding Party in BIAN Party Reference Data Directory (if client configured)
+	// Register corresponding Party in BIAN Party Reference Data Directory (if client configured).
+	//
+	// Note: If Party registration succeeds but tenant creation fails, an orphaned Party record
+	// may exist. This is acceptable eventual consistency - orphaned parties can be cleaned up
+	// operationally via the Party service, and the ExternalReference field allows correlation.
+	// A saga pattern with compensation could be added if stricter atomicity is required.
 	if s.partyClient != nil {
 		party, err := s.partyClient.RegisterParty(ctx, &partyv1.RegisterPartyRequest{
-			PartyType:   partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
-			LegalName:   req.DisplayName,
-			DisplayName: req.DisplayName,
+			PartyType:         partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
+			LegalName:         req.DisplayName,
+			DisplayName:       req.DisplayName,
+			ExternalReference: req.TenantId, // Bidirectional link: Party -> Tenant
 		})
 		if err != nil {
 			s.logger.Error("failed to register party for tenant",

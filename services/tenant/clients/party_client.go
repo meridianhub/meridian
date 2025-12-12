@@ -63,7 +63,7 @@ type PartyClientConfig struct {
 	Namespace string
 
 	// Port is the service port number.
-	// Party service uses port 50054.
+	// Party service uses port 50055.
 	Port int
 
 	// Timeout is the default timeout for RPC calls.
@@ -86,7 +86,7 @@ type PartyClientConfig struct {
 //	config := &PartyClientConfig{
 //	    ServiceName: "party-service",
 //	    Namespace:   "default",
-//	    Port:        50054,
+//	    Port:        50055,
 //	    Timeout:     30 * time.Second,
 //	}
 //
