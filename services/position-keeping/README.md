@@ -285,9 +285,10 @@ erDiagram
 
 ### Idempotency
 
-- Redis-backed distributed locking
-- Idempotency keys for exactly-once semantics
-- 5-minute TTL for pending operations
+- Redis-backed distributed locking (when enabled)
+- Idempotency keys for effectively-once processing (retries produce same result)
+- 5-minute TTL for pending operation locks
+- Fallback to in-memory cache when Redis unavailable
 
 ### Optimistic Locking
 

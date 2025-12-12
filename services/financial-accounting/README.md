@@ -153,9 +153,9 @@ Consumes deposit events and creates balanced debit/credit postings automatically
 | `event_id` | `idempotency_key` | Dedupe on consumer restart/redelivery |
 | `correlation_id` | `correlation_id` | Distributed tracing |
 
-- Duplicate events (same `event_id`) are silently dropped
-- Partial failures: If booking log created but posting fails, retry creates posting only
-- Consumer commits offset only after successful DB transaction
+- Duplicate events (same `event_id`) are skipped with logged warning
+- Partial failures: If booking log exists but posting missing, retry completes the posting
+- Consumer commits offset after successful DB transaction (at-least-once delivery)
 
 **Supported Currencies**: GBP, USD, EUR, JPY, CHF, CAD, AUD
 
