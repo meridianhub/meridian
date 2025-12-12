@@ -155,10 +155,28 @@ jobs:
             echo "  ✓ Found $REVISION_SCHEMAS service revision tracking schemas"
           done
 
-          # Verify service schemas have tables
+          # Verify org schemas have tables from services with unqualified migrations
+          # Services like party use unqualified table names (search_path routing)
           echo ""
-          echo "Verifying service schemas have tables..."
-          for SCHEMA in financial_accounting party payment_order position_keeping; do
+          echo "Verifying organization schemas have tables..."
+          for ORG in acme_bank test_org; do
+            ORG_SCHEMA="org_${ORG}"
+            TABLE_COUNT=$(psql "$DATABASE_URL" -t -c "
+              SELECT COUNT(*) FROM information_schema.tables
+              WHERE table_schema = '$ORG_SCHEMA';
+            " | xargs)
+            if [ "$TABLE_COUNT" -lt 1 ]; then
+              echo "❌ Organization schema $ORG_SCHEMA has no tables!"
+              exit 1
+            fi
+            echo "  ✓ $ORG_SCHEMA has $TABLE_COUNT tables"
+          done
+
+          # Verify services with schema-qualified migrations still have their schemas
+          # These services haven't migrated to unqualified names yet
+          echo ""
+          echo "Verifying service schemas (schema-qualified migrations)..."
+          for SCHEMA in financial_accounting payment_order position_keeping; do
             TABLE_COUNT=$(psql "$DATABASE_URL" -t -c "
               SELECT COUNT(*) FROM information_schema.tables
               WHERE table_schema = '$SCHEMA';
