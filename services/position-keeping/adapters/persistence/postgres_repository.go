@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
 )
@@ -57,7 +58,7 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 	}()
 
 	// Insert main financial_position_log
-	// TODO: Consider extracting user ID from context for proper audit trails instead of hardcoding "system"
+	userID := audit.GetUserFromContext(ctx)
 	logQuery := `
 		INSERT INTO position_keeping.financial_position_logs (
 			id, created_at, created_by, updated_at, updated_by,
@@ -73,7 +74,7 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 
 	var dbID uuid.UUID
 	err = tx.QueryRow(ctx, logQuery,
-		log.CreatedAt, "system", log.UpdatedAt, "system",
+		log.CreatedAt, userID, log.UpdatedAt, userID,
 		log.LogID, log.AccountID, log.Version,
 		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
 		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
@@ -128,6 +129,7 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 	}()
 
 	// Use COPY for bulk insert of financial_position_logs
+	userID := audit.GetUserFromContext(ctx)
 	copyCount, err := tx.CopyFrom(
 		ctx,
 		pgx.Identifier{"position_keeping", "financial_position_logs"},
@@ -141,7 +143,7 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 			log := logs[i]
 			return []any{
 				uuid.New(), // Generate new DB ID
-				log.CreatedAt, "system", log.UpdatedAt, "system",
+				log.CreatedAt, userID, log.UpdatedAt, userID,
 				log.LogID, log.AccountID, log.Version,
 				log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
 				log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
@@ -304,6 +306,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	// Note: The domain layer increments the version, so we check against the previous version
 	// (log.Version - 1) and set to the current version (log.Version)
 	previousVersion := log.Version - 1
+	userID := audit.GetUserFromContext(ctx)
 
 	updateQuery := `
 		UPDATE position_keeping.financial_position_logs
@@ -313,7 +316,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 		WHERE id = $10 AND version = $11 AND deleted_at IS NULL`
 
 	result, err := tx.Exec(ctx, updateQuery,
-		log.UpdatedAt, "system", log.Version,
+		log.UpdatedAt, userID, log.Version,
 		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
 		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
 		nullStringValue(log.StatusTracking.FailureReason),
@@ -484,13 +487,14 @@ func (r *PostgresRepository) insertTransactionLogEntries(ctx context.Context, tx
 		)`
 
 	batch := &pgx.Batch{}
+	userID := audit.GetUserFromContext(ctx)
 
 	for _, entry := range entries {
 		// Convert decimal amount to cents (int64)
 		amountCents := decimalToCents(entry.Amount.Amount())
 
 		batch.Queue(query,
-			entry.CreatedAt, "system", entry.CreatedAt, "system",
+			entry.CreatedAt, userID, entry.CreatedAt, userID,
 			entry.EntryID, financialPosLogID, entry.TransactionID, entry.AccountID,
 			amountCents, entry.Amount.Currency().String(), entry.Direction.String(),
 			entry.Timestamp, nullStringValue(entry.Description), nullStringValue(entry.Reference), entry.Source.String(),
@@ -523,6 +527,7 @@ func (r *PostgresRepository) insertTransactionLineage(ctx context.Context, tx pg
 		return fmt.Errorf("failed to marshal related transaction IDs: %w", err)
 	}
 
+	userID := audit.GetUserFromContext(ctx)
 	query := `
 		INSERT INTO position_keeping.transaction_lineages (
 			id, created_at, created_by, updated_at, updated_by,
@@ -535,7 +540,7 @@ func (r *PostgresRepository) insertTransactionLineage(ctx context.Context, tx pg
 		)`
 
 	_, err = tx.Exec(ctx, query,
-		"system", "system",
+		userID, userID,
 		financialPosLogID, lineage.TransactionID(), lineage.ParentTransactionID(),
 		childIDs, relatedIDs, lineage.TransactionType(),
 	)
@@ -563,6 +568,7 @@ func (r *PostgresRepository) insertAuditTrailEntries(ctx context.Context, tx pgx
 		)`
 
 	batch := &pgx.Batch{}
+	userID := audit.GetUserFromContext(ctx)
 
 	for _, entry := range entries {
 		sysContext, err := json.Marshal(entry.SystemContext)
@@ -571,7 +577,7 @@ func (r *PostgresRepository) insertAuditTrailEntries(ctx context.Context, tx pgx
 		}
 
 		batch.Queue(query,
-			"system", "system",
+			userID, userID,
 			entry.AuditID, financialPosLogID, entry.Timestamp, entry.UserID,
 			entry.Action, nullStringValue(entry.Details), nullStringValue(entry.IPAddress), sysContext,
 		)
