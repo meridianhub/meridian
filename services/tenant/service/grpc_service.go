@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"time"
 
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/organization"
 	"google.golang.org/grpc/codes"
@@ -23,19 +25,25 @@ var ErrUnknownStatus = errors.New("unspecified or unknown tenant status")
 // Service implements the TenantService gRPC server.
 type Service struct {
 	pb.UnimplementedTenantServiceServer
-	repo   *persistence.Repository
-	logger *slog.Logger
+	repo        *persistence.Repository
+	partyClient clients.PartyClient
+	logger      *slog.Logger
 }
 
 // NewService creates a new TenantService.
-func NewService(repo *persistence.Repository, logger *slog.Logger) *Service {
+// The partyClient parameter is optional; if nil, party registration is skipped during tenant creation.
+func NewService(repo *persistence.Repository, partyClient clients.PartyClient, logger *slog.Logger) *Service {
 	return &Service{
-		repo:   repo,
-		logger: logger,
+		repo:        repo,
+		partyClient: partyClient,
+		logger:      logger,
 	}
 }
 
 // InitiateTenant creates a new tenant in the platform registry (BIAN: Initiate).
+// If a Party client is configured, this also registers a corresponding Party in the
+// BIAN Party Reference Data Directory, establishing the link between platform
+// infrastructure (Tenant) and BIAN domain entities (Party.Organization).
 func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequest) (*pb.InitiateTenantResponse, error) {
 	// Validate and create tenant ID
 	tenantID, err := organization.NewOrganizationID(req.TenantId)
@@ -61,6 +69,28 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		Version:         1,
 	}
 
+	// Register corresponding Party in BIAN Party Reference Data Directory (if client configured)
+	if s.partyClient != nil {
+		party, err := s.partyClient.RegisterParty(ctx, &partyv1.RegisterPartyRequest{
+			PartyType:   partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
+			LegalName:   req.DisplayName,
+			DisplayName: req.DisplayName,
+		})
+		if err != nil {
+			s.logger.Error("failed to register party for tenant",
+				"tenant_id", req.TenantId,
+				"error", err)
+			return nil, status.Errorf(codes.Internal, "failed to register party for tenant: %v", err)
+		}
+		tenant.PartyID = party.PartyId
+		s.logger.Info("registered party for tenant",
+			"tenant_id", req.TenantId,
+			"party_id", tenant.PartyID)
+	} else {
+		s.logger.Warn("party client not configured - skipping party registration",
+			"tenant_id", req.TenantId)
+	}
+
 	// Persist tenant
 	if err := s.repo.Create(ctx, tenant); err != nil {
 		if errors.Is(err, persistence.ErrTenantExists) {
@@ -78,7 +108,8 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 	s.logger.Info("tenant created",
 		"tenant_id", tenant.ID.String(),
 		"display_name", tenant.DisplayName,
-		"settlement_asset", tenant.SettlementAsset)
+		"settlement_asset", tenant.SettlementAsset,
+		"party_id", tenant.PartyID)
 
 	return &pb.InitiateTenantResponse{
 		Tenant: s.toProto(tenant),
@@ -211,6 +242,7 @@ func (s *Service) toProto(tenant *domain.Tenant) *pb.Tenant {
 		Status:          s.toProtoStatus(tenant.Status),
 		CreatedAt:       timestamppb.New(tenant.CreatedAt),
 		Version:         int32(tenant.Version),
+		PartyId:         tenant.PartyID,
 	}
 
 	if tenant.DeprovisionedAt != nil {

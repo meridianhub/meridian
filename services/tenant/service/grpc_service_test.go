@@ -23,7 +23,8 @@ func setupTest(t *testing.T) (*Service, *gorm.DB, func()) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	svc := NewService(repo, logger)
+	// Pass nil for partyClient - party registration is skipped in tests without Party service
+	svc := NewService(repo, nil, logger)
 	return svc, db, cleanup
 }
 

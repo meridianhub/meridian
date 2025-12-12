@@ -23,6 +23,7 @@ type TenantEntity struct {
 	DeprovisionedAt *time.Time `gorm:"column:deprovisioned_at"`
 	Metadata        JSONMap    `gorm:"column:metadata;type:jsonb;default:'{}'"`
 	Version         int        `gorm:"column:version;not null;default:1"`
+	PartyID         *string    `gorm:"column:party_id;index:idx_tenants_party_id"`
 }
 
 // TableName returns the table name for GORM.
