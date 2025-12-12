@@ -9,6 +9,7 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
+	"github.com/meridianhub/meridian/shared/platform/organization"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ type publishedMessage struct {
 	msg   proto.Message
 }
 
-func (m *mockProtoPublisher) Publish(_ context.Context, topic, key string, msg proto.Message) error {
+func (m *mockProtoPublisher) PublishWithOrganization(_ context.Context, topic, key string, msg proto.Message) error {
 	m.publishedMessages = append(m.publishedMessages, publishedMessage{
 		topic: topic,
 		key:   key,
@@ -44,6 +45,12 @@ func (m *mockProtoPublisher) Flush(_ int) int {
 
 func (m *mockProtoPublisher) Close() {
 	m.closed = true
+}
+
+// testOrgContext creates a context with organization for testing
+func testOrgContext() context.Context {
+	orgID := organization.MustNewOrganizationID("test_org")
+	return organization.WithOrganization(context.Background(), orgID)
 }
 
 func TestDefaultTopicConfig(t *testing.T) {
@@ -326,8 +333,8 @@ func TestKafkaEventPublisher_TopicMapping(t *testing.T) {
 			publisher, err := messaging.NewKafkaEventPublisher(mock, topicConfig)
 			require.NoError(t, err)
 
-			// Publish event
-			ctx := context.Background()
+			// Publish event with organization context
+			ctx := testOrgContext()
 			err = publisher.Publish(ctx, tt.event)
 			require.NoError(t, err)
 
@@ -355,7 +362,7 @@ func TestKafkaEventPublisher_UnknownEventType(t *testing.T) {
 	publisher, err := messaging.NewKafkaEventPublisher(mock, topicConfig)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testOrgContext()
 	err = publisher.Publish(ctx, unknownEvent)
 
 	assert.Error(t, err)
@@ -369,7 +376,7 @@ func TestKafkaEventPublisher_NilEvent(t *testing.T) {
 	publisher, err := messaging.NewKafkaEventPublisher(mock, topicConfig)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testOrgContext()
 	err = publisher.Publish(ctx, nil)
 
 	assert.Error(t, err)
@@ -412,7 +419,7 @@ func TestKafkaEventPublisher_PublishBatch(t *testing.T) {
 	publisher, err := messaging.NewKafkaEventPublisher(mock, topicConfig)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	ctx := testOrgContext()
 	err = publisher.PublishBatch(ctx, events)
 	require.NoError(t, err)
 

@@ -14,8 +14,9 @@ import (
 // This interface allows the KafkaEventPublisher to be unit-tested without
 // requiring a real Kafka connection.
 type protoPublisher interface {
-	// Publish publishes a protobuf message to a topic with a partition key
-	Publish(ctx context.Context, topic, key string, msg proto.Message) error
+	// PublishWithOrganization publishes a protobuf message with organization context
+	// extracted from ctx and injected as a Kafka header (x-org-id).
+	PublishWithOrganization(ctx context.Context, topic, key string, msg proto.Message) error
 	// Flush waits for outstanding messages to be delivered
 	Flush(timeoutMs int) int
 	// Close closes the producer
@@ -127,8 +128,8 @@ func (p *KafkaEventPublisher) Publish(ctx context.Context, event domain.DomainEv
 	// Use aggregate ID as partition key for ordering
 	partitionKey := event.AggregateID()
 
-	// Publish to Kafka
-	if err := p.producer.Publish(ctx, topic, partitionKey, protoMsg); err != nil {
+	// Publish with organization headers (extracted from context)
+	if err := p.producer.PublishWithOrganization(ctx, topic, partitionKey, protoMsg); err != nil {
 		return fmt.Errorf("failed to publish event %s to topic %s: %w", event.EventType(), topic, err)
 	}
 
