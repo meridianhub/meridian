@@ -22,8 +22,6 @@ env "local" {
   // Schema-specific migration directory
   migration {
     dir = "file://services/party/migrations"
-    // Use schema-specific revisions table to avoid conflicts with other services
-    revisions_schema = "party_revisions"
   }
 
   // Dev database with search_path set to party schema
@@ -54,7 +52,8 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/party/migrations"
-    revisions_schema = "party_revisions"
+    // No revisions_schema specified - revisions table created in target schema
+    // This enables per-organization migration tracking via search_path
   }
 
   // CI uses search_path to route to party schema
@@ -85,7 +84,7 @@ env "production" {
 
   migration {
     dir = "file://services/party/migrations"
-    // Revisions table is created in the target schema (set via search_path)
-    revisions_schema = "party_revisions"
+    // No revisions_schema - revisions created in target schema via search_path
+    // Each org has independent migration tracking
   }
 }
