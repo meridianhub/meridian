@@ -539,7 +539,7 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 
 // getEnvAsBool returns the environment variable value as bool or default
 func getEnvAsBool(key string, defaultValue bool) bool {
-	valueStr := os.Getenv(key)
+	valueStr := strings.TrimSpace(os.Getenv(key))
 	if valueStr == "" {
 		return defaultValue
 	}
