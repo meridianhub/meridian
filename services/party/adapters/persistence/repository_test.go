@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/shared/platform/auth"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -449,7 +449,7 @@ func stringPtr(s string) *string {
 
 func TestSave_WithOrganizationContext_SetsSearchPath(t *testing.T) {
 	// This test verifies that when organization context is present,
-	// the repository correctly uses WithGormOrganizationScope.
+	// the repository correctly uses WithGormTenantScope.
 	// In single-tenant mode (no org context), it should work without transaction wrapping.
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -495,15 +495,15 @@ func TestFindByID_WithOrganizationContext_IsolatesData(t *testing.T) {
 	// Since the parties table only exists in public, this should still work
 	// (public is included in search_path), but the isolation is enforced at the
 	// schema level when org schemas are properly set up.
-	orgID := organization.OrganizationID("acme_bank")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.TenantID("acme_bank")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	// This may return the party (from public schema) or error depending on
 	// whether the SET LOCAL succeeds. The key behavior is that the code path
 	// attempts to set the search_path when org context is present.
 	_, err = repo.FindByID(orgCtx, party.ID())
 	// Note: In a test environment without org schemas, this may or may not error
-	// The important thing is that the hasOrganizationContext check works
+	// The important thing is that the hasTenantContext check works
 	// Full isolation testing requires proper org schema setup
 	t.Logf("FindByID with org context result: %v", err)
 }
@@ -529,8 +529,8 @@ func TestExistsByID_WithOrganizationContext_UsesOrgScope(t *testing.T) {
 
 	// With organization context, the search_path is changed.
 	// Since we include public schema in search_path, the party is still found.
-	orgID := organization.OrganizationID("acme_bank")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.TenantID("acme_bank")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	// The query will use the org-scoped transaction
 	exists, err = repo.ExistsByID(orgCtx, party.ID())
@@ -561,8 +561,8 @@ func TestFindByExternalReference_WithOrganizationContext_UsesOrgScope(t *testing
 	assert.Equal(t, party.ID(), found.ID())
 
 	// With organization context, uses org-scoped search_path
-	orgID := organization.OrganizationID("acme_bank")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.TenantID("acme_bank")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	found, err = repo.FindByExternalReference(orgCtx, "12345678", string(domain.ExternalReferenceTypeCompaniesHouse))
 	// May find via public schema fallback
@@ -584,8 +584,8 @@ func TestDelete_WithOrganizationContext_UsesOrgScope(t *testing.T) {
 	require.NoError(t, err)
 
 	// Delete with organization context - uses org-scoped search_path
-	orgID := organization.OrganizationID("acme_bank")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.TenantID("acme_bank")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	err = repo.Delete(orgCtx, party.ID())
 	// Delete may succeed via public schema fallback
@@ -617,8 +617,8 @@ func TestFindByIDForUpdate_WithOrganizationContext_UsesOrgScope(t *testing.T) {
 	assert.Equal(t, party.ID(), found.ID())
 
 	// With organization context, uses org-scoped transaction
-	orgID := organization.OrganizationID("acme_bank")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.TenantID("acme_bank")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	found, err = repo.FindByIDForUpdate(orgCtx, party.ID())
 	// May find via public schema fallback
@@ -638,8 +638,8 @@ func TestPing_WorksWithoutOrganizationContext(t *testing.T) {
 	assert.NoError(t, err, "Ping should work without organization context")
 
 	// Ping should also work when org context is present (it ignores it)
-	orgID := organization.OrganizationID("acme_bank")
-	orgCtx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.TenantID("acme_bank")
+	orgCtx := tenant.WithTenant(context.Background(), orgID)
 
 	err = repo.Ping(orgCtx)
 	assert.NoError(t, err, "Ping should work even with organization context (ignores it)")
@@ -653,12 +653,12 @@ func TestRepository_HasOrganizationContext(t *testing.T) {
 
 	t.Run("returns false when no organization context", func(t *testing.T) {
 		ctx := context.Background()
-		assert.False(t, repo.hasOrganizationContext(ctx))
+		assert.False(t, repo.hasTenantContext(ctx))
 	})
 
 	t.Run("returns true when organization context present", func(t *testing.T) {
-		orgID := organization.OrganizationID("acme_bank")
-		ctx := organization.WithOrganization(context.Background(), orgID)
-		assert.True(t, repo.hasOrganizationContext(ctx))
+		orgID := tenant.TenantID("acme_bank")
+		ctx := tenant.WithTenant(context.Background(), orgID)
+		assert.True(t, repo.hasTenantContext(ctx))
 	})
 }

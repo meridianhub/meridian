@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // MockProvisioner is an in-memory implementation of SchemaProvisioner for testing.
@@ -34,13 +34,13 @@ type MockProvisioner struct {
 	FailPurgeFor map[string]error
 
 	// ProvisioningCalls tracks calls to ProvisionSchemas for verification
-	ProvisioningCalls []organization.OrganizationID
+	ProvisioningCalls []tenant.TenantID
 
 	// DeprovisioningCalls tracks calls to DeprovisionSchemas for verification
-	DeprovisioningCalls []organization.OrganizationID
+	DeprovisioningCalls []tenant.TenantID
 
 	// PurgeCalls tracks calls to PurgeSchemas for verification
-	PurgeCalls []organization.OrganizationID
+	PurgeCalls []tenant.TenantID
 
 	// DataRetentionPeriod for testing retention enforcement
 	DataRetentionPeriod time.Duration
@@ -54,15 +54,15 @@ func NewMockProvisioner(services []ServiceConfig) *MockProvisioner {
 		FailProvisioningFor:   make(map[string]error),
 		FailDeprovisioningFor: make(map[string]error),
 		FailPurgeFor:          make(map[string]error),
-		ProvisioningCalls:     make([]organization.OrganizationID, 0),
-		DeprovisioningCalls:   make([]organization.OrganizationID, 0),
-		PurgeCalls:            make([]organization.OrganizationID, 0),
+		ProvisioningCalls:     make([]tenant.TenantID, 0),
+		DeprovisioningCalls:   make([]tenant.TenantID, 0),
+		PurgeCalls:            make([]tenant.TenantID, 0),
 		DataRetentionPeriod:   0, // No retention period by default for testing
 	}
 }
 
 // ProvisionSchemas simulates schema provisioning for the tenant.
-func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID organization.OrganizationID) error {
+func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -119,7 +119,7 @@ func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID organiz
 }
 
 // DeprovisionSchemas simulates schema deprovisioning (soft delete) for the tenant.
-func (m *MockProvisioner) DeprovisionSchemas(_ context.Context, tenantID organization.OrganizationID) error {
+func (m *MockProvisioner) DeprovisionSchemas(_ context.Context, tenantID tenant.TenantID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -152,7 +152,7 @@ func (m *MockProvisioner) DeprovisionSchemas(_ context.Context, tenantID organiz
 }
 
 // PurgeSchemas simulates permanent schema deletion after retention period.
-func (m *MockProvisioner) PurgeSchemas(_ context.Context, tenantID organization.OrganizationID) error {
+func (m *MockProvisioner) PurgeSchemas(_ context.Context, tenantID tenant.TenantID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -191,7 +191,7 @@ func (m *MockProvisioner) PurgeSchemas(_ context.Context, tenantID organization.
 }
 
 // GetProvisioningStatus retrieves the current provisioning state for a tenant.
-func (m *MockProvisioner) GetProvisioningStatus(_ context.Context, tenantID organization.OrganizationID) (*ProvisioningStatus, error) {
+func (m *MockProvisioner) GetProvisioningStatus(_ context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -209,7 +209,7 @@ func (m *MockProvisioner) GetProvisioningStatus(_ context.Context, tenantID orga
 }
 
 // createServiceStatuses creates service status entries for all configured services.
-func (m *MockProvisioner) createServiceStatuses(tenantID organization.OrganizationID, state ServiceProvisioningState) []ServiceSchemaStatus {
+func (m *MockProvisioner) createServiceStatuses(tenantID tenant.TenantID, state ServiceProvisioningState) []ServiceSchemaStatus {
 	statuses := make([]ServiceSchemaStatus, len(m.services))
 	schemaName := tenantID.SchemaName()
 
@@ -231,9 +231,9 @@ func (m *MockProvisioner) Reset() {
 	defer m.mu.Unlock()
 
 	m.statuses = make(map[string]*ProvisioningStatus)
-	m.ProvisioningCalls = make([]organization.OrganizationID, 0)
-	m.DeprovisioningCalls = make([]organization.OrganizationID, 0)
-	m.PurgeCalls = make([]organization.OrganizationID, 0)
+	m.ProvisioningCalls = make([]tenant.TenantID, 0)
+	m.DeprovisioningCalls = make([]tenant.TenantID, 0)
+	m.PurgeCalls = make([]tenant.TenantID, 0)
 	m.FailProvisioningFor = make(map[string]error)
 	m.FailDeprovisioningFor = make(map[string]error)
 	m.FailPurgeFor = make(map[string]error)

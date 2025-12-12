@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -146,7 +146,7 @@ func TestProtoProducer_Close(t *testing.T) {
 	producer.Close()
 }
 
-func TestProtoProducer_PublishWithOrganization(t *testing.T) {
+func TestProtoProducer_PublishWithTenant(t *testing.T) {
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
 		ClientID:         "test-producer",
@@ -157,31 +157,31 @@ func TestProtoProducer_PublishWithOrganization(t *testing.T) {
 	defer producer.Close()
 
 	t.Run("empty topic returns error", func(t *testing.T) {
-		orgID := organization.MustNewOrganizationID("acme_bank")
-		ctx := organization.WithOrganization(context.Background(), orgID)
+		orgID := tenant.MustNewTenantID("acme_bank")
+		ctx := tenant.WithTenant(context.Background(), orgID)
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		err := producer.PublishWithOrganization(ctx, "", "test-key", timestamppb.Now())
+		err := producer.PublishWithTenant(ctx, "", "test-key", timestamppb.Now())
 		if !errors.Is(err, ErrEmptyTopic) {
-			t.Errorf("PublishWithOrganization() error = %v, want ErrEmptyTopic", err)
+			t.Errorf("PublishWithTenant() error = %v, want ErrEmptyTopic", err)
 		}
 	})
 
 	t.Run("nil message returns error", func(t *testing.T) {
-		orgID := organization.MustNewOrganizationID("acme_bank")
-		ctx := organization.WithOrganization(context.Background(), orgID)
+		orgID := tenant.MustNewTenantID("acme_bank")
+		ctx := tenant.WithTenant(context.Background(), orgID)
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		err := producer.PublishWithOrganization(ctx, "test-topic", "test-key", nil)
+		err := producer.PublishWithTenant(ctx, "test-topic", "test-key", nil)
 		if !errors.Is(err, ErrNilMessage) {
-			t.Errorf("PublishWithOrganization() error = %v, want ErrNilMessage", err)
+			t.Errorf("PublishWithTenant() error = %v, want ErrNilMessage", err)
 		}
 	})
 }
 
-func TestProtoProducer_PublishWithOrganization_MissingContext(t *testing.T) {
+func TestProtoProducer_PublishWithTenant_MissingContext(t *testing.T) {
 	producer, err := NewProtoProducer(ProducerConfig{
 		BootstrapServers: "localhost:9092",
 		ClientID:         "test-producer",
@@ -191,16 +191,16 @@ func TestProtoProducer_PublishWithOrganization_MissingContext(t *testing.T) {
 	}
 	defer producer.Close()
 
-	// Test that missing organization context causes panic (fail-fast)
+	// Test that missing tenant context causes panic (fail-fast)
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("PublishWithOrganization did not panic for context without organization")
+			t.Error("PublishWithTenant did not panic for context without tenant")
 		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// This should panic because organization context is missing
-	_ = producer.PublishWithOrganization(ctx, "test-topic", "test-key", timestamppb.Now())
+	// This should panic because tenant context is missing
+	_ = producer.PublishWithTenant(ctx, "test-topic", "test-key", timestamppb.Now())
 }

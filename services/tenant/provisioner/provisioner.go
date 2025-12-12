@@ -56,7 +56,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // SchemaProvisioner manages the lifecycle of tenant database schemas.
@@ -74,7 +74,7 @@ type SchemaProvisioner interface {
 	//
 	// Returns an error if any service migration fails. Partial progress is
 	// recorded in the provisioning status for debugging and retry.
-	ProvisionSchemas(ctx context.Context, tenantID organization.OrganizationID) error
+	ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error
 
 	// DeprovisionSchemas marks tenant schemas as deprovisioned (soft delete).
 	//
@@ -92,7 +92,7 @@ type SchemaProvisioner interface {
 	//
 	// Idempotency: Safe to call multiple times; already-deprovisioned tenants
 	// are unchanged.
-	DeprovisionSchemas(ctx context.Context, tenantID organization.OrganizationID) error
+	DeprovisionSchemas(ctx context.Context, tenantID tenant.TenantID) error
 
 	// PurgeSchemas permanently drops org_{tenant_id} schemas and all data.
 	//
@@ -111,13 +111,13 @@ type SchemaProvisioner interface {
 	//
 	// Returns ErrRetentionPeriodNotElapsed if called before retention period.
 	// Returns ErrNotDeprovisioned if tenant is still active.
-	PurgeSchemas(ctx context.Context, tenantID organization.OrganizationID) error
+	PurgeSchemas(ctx context.Context, tenantID tenant.TenantID) error
 
 	// GetProvisioningStatus retrieves the current provisioning state for a tenant.
 	//
 	// Returns ErrProvisioningStatusNotFound if no provisioning record exists.
 	// Note: Deprovisioned tenants still have a status record (for audit trail).
-	GetProvisioningStatus(ctx context.Context, tenantID organization.OrganizationID) (*ProvisioningStatus, error)
+	GetProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error)
 }
 
 // ProvisioningState represents the lifecycle state of schema provisioning.
@@ -168,7 +168,7 @@ func (s ProvisioningState) IsTerminal() bool {
 // ProvisioningStatus tracks the state of schema provisioning for a tenant.
 type ProvisioningStatus struct {
 	// TenantID is the organization identifier for this provisioning record.
-	TenantID organization.OrganizationID
+	TenantID tenant.TenantID
 
 	// State is the current provisioning lifecycle state.
 	State ProvisioningState

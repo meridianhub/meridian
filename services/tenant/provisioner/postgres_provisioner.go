@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
 
@@ -62,7 +62,7 @@ func NewPostgresProvisioner(db *gorm.DB, config *Config) (*PostgresProvisioner, 
 //
 // Idempotency: Safe to call multiple times. Already-created schemas are skipped,
 // and migrations are checked against the version recorded in the status.
-func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID organization.OrganizationID) error {
+func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -126,7 +126,7 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID org
 
 // prepareProvisioningStatus validates existing status and prepares for provisioning.
 // Returns nil status if already active (no-op), or error if provisioning cannot proceed.
-func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, tenantID organization.OrganizationID) (*ProvisioningStatus, error) {
+func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error) {
 	status, err := p.getProvisioningStatusLocked(ctx, tenantID)
 	if err != nil && !errors.Is(err, ErrProvisioningStatusNotFound) {
 		return nil, fmt.Errorf("get provisioning status: %w", err)
@@ -235,7 +235,7 @@ func (p *PostgresProvisioner) markProvisioningFailed(_ context.Context, status *
 
 // DeprovisionSchemas marks the tenant schemas as deprovisioned (soft delete).
 // The actual schema data remains in the database until explicitly purged.
-func (p *PostgresProvisioner) DeprovisionSchemas(ctx context.Context, tenantID organization.OrganizationID) error {
+func (p *PostgresProvisioner) DeprovisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -275,7 +275,7 @@ func (p *PostgresProvisioner) DeprovisionSchemas(ctx context.Context, tenantID o
 // Prerequisites:
 //   - Tenant must be in 'deprovisioned' state
 //   - Data retention period must have elapsed
-func (p *PostgresProvisioner) PurgeSchemas(ctx context.Context, tenantID organization.OrganizationID) error {
+func (p *PostgresProvisioner) PurgeSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -324,7 +324,7 @@ func (p *PostgresProvisioner) PurgeSchemas(ctx context.Context, tenantID organiz
 }
 
 // GetProvisioningStatus retrieves the current provisioning state for a tenant.
-func (p *PostgresProvisioner) GetProvisioningStatus(ctx context.Context, tenantID organization.OrganizationID) (*ProvisioningStatus, error) {
+func (p *PostgresProvisioner) GetProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.getProvisioningStatusLocked(ctx, tenantID)
@@ -450,7 +450,7 @@ func (p *PostgresProvisioner) readMigrationFiles(migrationPath string) ([]migrat
 // processMigrationSQL processes migration SQL to work with dynamic schema names.
 // It handles both unqualified table names and hardcoded schema references.
 //
-// Security: The schemaName parameter is derived from OrganizationID.SchemaName(),
+// Security: The schemaName parameter is derived from TenantID.SchemaName(),
 // which is validated at construction to contain only alphanumeric characters and
 // underscores (regex: ^[a-zA-Z0-9_]{1,50}$). The "org_" prefix is added and the
 // string is lowercased, making SQL injection impossible through this path.
@@ -490,7 +490,7 @@ func (p *PostgresProvisioner) processMigrationSQL(sql, schemaName string) string
 }
 
 // createInitialServiceStatuses creates the initial service status list.
-func (p *PostgresProvisioner) createInitialServiceStatuses(tenantID organization.OrganizationID) []ServiceSchemaStatus {
+func (p *PostgresProvisioner) createInitialServiceStatuses(tenantID tenant.TenantID) []ServiceSchemaStatus {
 	statuses := make([]ServiceSchemaStatus, len(p.config.Services))
 	schemaName := tenantID.SchemaName()
 
@@ -523,7 +523,7 @@ func (provisioningEntity) TableName() string {
 
 // getProvisioningStatusLocked retrieves the status without acquiring the mutex.
 // Caller must hold the mutex.
-func (p *PostgresProvisioner) getProvisioningStatusLocked(ctx context.Context, tenantID organization.OrganizationID) (*ProvisioningStatus, error) {
+func (p *PostgresProvisioner) getProvisioningStatusLocked(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error) {
 	var entity provisioningEntity
 	result := p.db.WithContext(ctx).Where("tenant_id = ?", tenantID.String()).First(&entity)
 
@@ -573,14 +573,14 @@ func (p *PostgresProvisioner) saveProvisioningStatus(ctx context.Context, status
 }
 
 // deleteProvisioningStatus removes the provisioning status record.
-func (p *PostgresProvisioner) deleteProvisioningStatus(ctx context.Context, tenantID organization.OrganizationID) error {
+func (p *PostgresProvisioner) deleteProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) error {
 	return p.db.WithContext(ctx).
 		Where("tenant_id = ?", tenantID.String()).
 		Delete(&provisioningEntity{}).Error
 }
 
 // entityToStatus converts database entity to domain model.
-func (p *PostgresProvisioner) entityToStatus(tenantID organization.OrganizationID, entity *provisioningEntity) (*ProvisioningStatus, error) {
+func (p *PostgresProvisioner) entityToStatus(tenantID tenant.TenantID, entity *provisioningEntity) (*ProvisioningStatus, error) {
 	var services []ServiceSchemaStatus
 	if entity.ServiceSchemas != "" && entity.ServiceSchemas != "[]" {
 		if err := json.Unmarshal([]byte(entity.ServiceSchemas), &services); err != nil {

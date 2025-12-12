@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -617,8 +617,8 @@ func TestMultiOrgMode(t *testing.T) {
 	validator, err := NewJWTValidator(publicKey)
 	require.NoError(t, err)
 
-	t.Run("multi-org mode enabled injects organization into context", func(t *testing.T) {
-		t.Setenv(MultiOrgModeEnvVar, "true")
+	t.Run("multi-tenant mode enabled injects organization into context", func(t *testing.T) {
+		t.Setenv(MultiTenantModeEnvVar, "true")
 
 		cfg := &InterceptorConfig{
 			Validator: validator,
@@ -627,11 +627,11 @@ func TestMultiOrgMode(t *testing.T) {
 		interceptor, err := NewAuthInterceptor(cfg)
 		require.NoError(t, err)
 
-		// Create token with organization claim
+		// Create token with tenant claim
 		claims := &Claims{
-			UserID:         "user-123",
-			OrganizationID: "acme_bank",
-			Roles:          []string{"admin"},
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			},
@@ -651,13 +651,13 @@ func TestMultiOrgMode(t *testing.T) {
 
 		// Verify organization was injected into context
 		resultCtx := resp.(context.Context)
-		orgID, ok := organization.FromContext(resultCtx)
+		orgID, ok := tenant.FromContext(resultCtx)
 		assert.True(t, ok)
-		assert.Equal(t, organization.OrganizationID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), orgID)
 	})
 
-	t.Run("multi-org mode enabled rejects token without organization claim", func(t *testing.T) {
-		t.Setenv(MultiOrgModeEnvVar, "true")
+	t.Run("multi-tenant mode enabled rejects token without tenant claim", func(t *testing.T) {
+		t.Setenv(MultiTenantModeEnvVar, "true")
 
 		cfg := &InterceptorConfig{
 			Validator: validator,
@@ -666,7 +666,7 @@ func TestMultiOrgMode(t *testing.T) {
 		interceptor, err := NewAuthInterceptor(cfg)
 		require.NoError(t, err)
 
-		// Create token without organization claim
+		// Create token without tenant claim
 		claims := &Claims{
 			UserID: "user-123",
 			Roles:  []string{"admin"},
@@ -689,11 +689,11 @@ func TestMultiOrgMode(t *testing.T) {
 		st, ok := status.FromError(err)
 		assert.True(t, ok)
 		assert.Equal(t, codes.Unauthenticated, st.Code())
-		assert.Contains(t, st.Message(), "organization_id claim required")
+		assert.Contains(t, st.Message(), "tenant_id claim required")
 	})
 
-	t.Run("multi-org mode enabled rejects token with invalid organization format", func(t *testing.T) {
-		t.Setenv(MultiOrgModeEnvVar, "true")
+	t.Run("multi-tenant mode enabled rejects token with invalid organization format", func(t *testing.T) {
+		t.Setenv(MultiTenantModeEnvVar, "true")
 
 		cfg := &InterceptorConfig{
 			Validator: validator,
@@ -704,9 +704,9 @@ func TestMultiOrgMode(t *testing.T) {
 
 		// Create token with invalid organization format (spaces not allowed)
 		claims := &Claims{
-			UserID:         "user-123",
-			OrganizationID: "invalid org!",
-			Roles:          []string{"admin"},
+			UserID:   "user-123",
+			TenantID: "invalid org!",
+			Roles:    []string{"admin"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			},
@@ -726,12 +726,12 @@ func TestMultiOrgMode(t *testing.T) {
 		st, ok := status.FromError(err)
 		assert.True(t, ok)
 		assert.Equal(t, codes.InvalidArgument, st.Code())
-		assert.Contains(t, st.Message(), "invalid organization_id format")
+		assert.Contains(t, st.Message(), "invalid tenant_id format")
 	})
 
-	t.Run("single-org mode (default) allows token without organization claim", func(t *testing.T) {
-		// Ensure MULTI_ORG_MODE is not set
-		t.Setenv(MultiOrgModeEnvVar, "false")
+	t.Run("single-org mode (default) allows token without tenant claim", func(t *testing.T) {
+		// Ensure MULTI_TENANT_MODE is not set
+		t.Setenv(MultiTenantModeEnvVar, "false")
 
 		cfg := &InterceptorConfig{
 			Validator: validator,
@@ -740,7 +740,7 @@ func TestMultiOrgMode(t *testing.T) {
 		interceptor, err := NewAuthInterceptor(cfg)
 		require.NoError(t, err)
 
-		// Create token without organization claim
+		// Create token without tenant claim
 		claims := &Claims{
 			UserID: "user-123",
 			Roles:  []string{"admin"},
@@ -761,15 +761,15 @@ func TestMultiOrgMode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Organization should not be in context
+		// Tenant should not be in context
 		resultCtx := resp.(context.Context)
-		_, ok := organization.FromContext(resultCtx)
+		_, ok := tenant.FromContext(resultCtx)
 		assert.False(t, ok)
 	})
 
-	t.Run("single-org mode does not inject organization even if present in token", func(t *testing.T) {
-		// Ensure MULTI_ORG_MODE is not set
-		t.Setenv(MultiOrgModeEnvVar, "")
+	t.Run("single-tenant mode does not inject tenant even if present in token", func(t *testing.T) {
+		// Ensure MULTI_TENANT_MODE is not set
+		t.Setenv(MultiTenantModeEnvVar, "")
 
 		cfg := &InterceptorConfig{
 			Validator: validator,
@@ -778,11 +778,11 @@ func TestMultiOrgMode(t *testing.T) {
 		interceptor, err := NewAuthInterceptor(cfg)
 		require.NoError(t, err)
 
-		// Create token with organization claim
+		// Create token with tenant claim
 		claims := &Claims{
-			UserID:         "user-123",
-			OrganizationID: "acme_bank",
-			Roles:          []string{"admin"},
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			},
@@ -800,32 +800,32 @@ func TestMultiOrgMode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Organization should not be in context in single-org mode
+		// Tenant should not be in context in single-tenant mode
 		resultCtx := resp.(context.Context)
-		_, ok := organization.FromContext(resultCtx)
+		_, ok := tenant.FromContext(resultCtx)
 		assert.False(t, ok)
 	})
 }
 
-func TestIsMultiOrgModeEnabled(t *testing.T) {
-	t.Run("returns true when MULTI_ORG_MODE is true", func(t *testing.T) {
-		t.Setenv(MultiOrgModeEnvVar, "true")
-		assert.True(t, IsMultiOrgModeEnabled())
+func TestIsMultiTenantModeEnabled(t *testing.T) {
+	t.Run("returns true when MULTI_TENANT_MODE is true", func(t *testing.T) {
+		t.Setenv(MultiTenantModeEnvVar, "true")
+		assert.True(t, IsMultiTenantModeEnabled())
 	})
 
-	t.Run("returns false when MULTI_ORG_MODE is false", func(t *testing.T) {
-		t.Setenv(MultiOrgModeEnvVar, "false")
-		assert.False(t, IsMultiOrgModeEnabled())
+	t.Run("returns false when MULTI_TENANT_MODE is false", func(t *testing.T) {
+		t.Setenv(MultiTenantModeEnvVar, "false")
+		assert.False(t, IsMultiTenantModeEnabled())
 	})
 
-	t.Run("returns false when MULTI_ORG_MODE is empty", func(t *testing.T) {
-		t.Setenv(MultiOrgModeEnvVar, "")
-		assert.False(t, IsMultiOrgModeEnabled())
+	t.Run("returns false when MULTI_TENANT_MODE is empty", func(t *testing.T) {
+		t.Setenv(MultiTenantModeEnvVar, "")
+		assert.False(t, IsMultiTenantModeEnabled())
 	})
 
-	t.Run("returns false when MULTI_ORG_MODE is not set", func(t *testing.T) {
+	t.Run("returns false when MULTI_TENANT_MODE is not set", func(t *testing.T) {
 		// Unset the env var by setting to empty (t.Setenv doesn't support unsetting)
-		t.Setenv(MultiOrgModeEnvVar, "")
-		assert.False(t, IsMultiOrgModeEnabled())
+		t.Setenv(MultiTenantModeEnvVar, "")
+		assert.False(t, IsMultiTenantModeEnabled())
 	})
 }

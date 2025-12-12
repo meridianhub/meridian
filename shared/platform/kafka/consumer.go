@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -92,8 +92,8 @@ var (
 	ErrNilHandler = errors.New("message handler cannot be nil")
 	// ErrEmptyTopics is returned when topics list is empty.
 	ErrEmptyTopics = errors.New("topics cannot be empty")
-	// ErrMissingOrganizationHeader is returned when the x-org-id header is missing from a Kafka message.
-	ErrMissingOrganizationHeader = errors.New("missing x-org-id header")
+	// ErrMissingTenantHeader is returned when the x-tenant-id header is missing from a Kafka message.
+	ErrMissingTenantHeader = errors.New("missing x-tenant-id header")
 )
 
 // NewProtoConsumer creates a new Kafka consumer for protobuf messages.
@@ -242,41 +242,41 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 	}
 }
 
-// ExtractOrganizationHeader extracts and validates the organization ID from a Kafka message header.
-// It looks for the x-org-id header and validates the organization ID format.
+// ExtractTenantHeader extracts and validates the tenant ID from a Kafka message header.
+// It looks for the x-tenant-id header and validates the tenant ID format.
 //
 // Returns:
-// - The organization ID if the header is present and valid
-// - ErrMissingOrganizationHeader if the message is nil or the header is not present
-// - organization.ErrInvalidOrganizationID if the header value is invalid
-func ExtractOrganizationHeader(msg *kafka.Message) (organization.OrganizationID, error) {
+// - The tenant ID if the header is present and valid
+// - ErrMissingTenantHeader if the message is nil or the header is not present
+// - tenant.ErrInvalidTenantID if the header value is invalid
+func ExtractTenantHeader(msg *kafka.Message) (tenant.TenantID, error) {
 	if msg == nil {
-		return "", ErrMissingOrganizationHeader
+		return "", ErrMissingTenantHeader
 	}
 	for _, h := range msg.Headers {
-		if h.Key == organization.OrgIDKey {
-			return organization.NewOrganizationID(string(h.Value))
+		if h.Key == tenant.TenantIDKey {
+			return tenant.NewTenantID(string(h.Value))
 		}
 	}
-	return "", ErrMissingOrganizationHeader
+	return "", ErrMissingTenantHeader
 }
 
 // processMessage deserializes and handles a Kafka message.
 // This is an internal method that:
-// 1. Extracts organization ID from Kafka header
+// 1. Extracts tenant ID from Kafka header
 // 2. Creates a new protobuf message instance using the factory
 // 3. Deserializes the Kafka message value into the proto message
-// 4. Calls the handler with organization context and configured timeout
+// 4. Calls the handler with tenant context and configured timeout
 //
 // Returns an error if header extraction, deserialization, or handler execution fails.
 // Note: Errors returned here bubble up through processMessageWithRetry, which handles
-// DLQ routing after exhausting retries. Messages with missing/invalid organization
+// DLQ routing after exhausting retries. Messages with missing/invalid tenant
 // headers will eventually be sent to DLQ if configured.
 func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
-	// Extract organization header
-	orgID, err := ExtractOrganizationHeader(kafkaMsg)
+	// Extract tenant header
+	orgID, err := ExtractTenantHeader(kafkaMsg)
 	if err != nil {
-		return fmt.Errorf("failed to extract organization header: %w", err)
+		return fmt.Errorf("failed to extract tenant header: %w", err)
 	}
 
 	// Create new proto message instance
@@ -287,12 +287,12 @@ func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 		return fmt.Errorf("failed to unmarshal protobuf message: %w", err)
 	}
 
-	// Call handler with organization context and configured timeout
+	// Call handler with tenant context and configured timeout
 	ctx, cancel := context.WithTimeout(c.ctx, c.handlerTimeout)
 	defer cancel()
 
-	// Inject organization context
-	ctx = organization.WithOrganization(ctx, orgID)
+	// Inject tenant context
+	ctx = tenant.WithTenant(ctx, orgID)
 
 	if err := c.handler(ctx, kafkaMsg.Key, protoMsg); err != nil {
 		return fmt.Errorf("handler error: %w", err)

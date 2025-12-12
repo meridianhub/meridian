@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -153,7 +153,7 @@ func TestPostgresProvisioner_ProvisionSchemas(t *testing.T) {
 	defer tc.cleanup(t)
 
 	// Create test tenant
-	tenantID := organization.MustNewOrganizationID("acme_corp")
+	tenantID := tenant.MustNewTenantID("acme_corp")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	// Create test migrations
@@ -209,7 +209,7 @@ func TestPostgresProvisioner_ProvisionSchemas_Idempotent(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("beta_inc")
+	tenantID := tenant.MustNewTenantID("beta_inc")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "simple-service")
@@ -243,7 +243,7 @@ func TestPostgresProvisioner_ProvisionSchemas_MultipleServices(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("gamma_ltd")
+	tenantID := tenant.MustNewTenantID("gamma_ltd")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	// Create migrations for two services
@@ -300,7 +300,7 @@ func TestPostgresProvisioner_ProvisionSchemas_MigrationFailure(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("failing_tenant")
+	tenantID := tenant.MustNewTenantID("failing_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "bad-service")
@@ -333,7 +333,7 @@ func TestPostgresProvisioner_ProvisionSchemas_ConcurrentBlocked(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("concurrent_tenant")
+	tenantID := tenant.MustNewTenantID("concurrent_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	// Pre-create an in_progress status to simulate concurrent provisioning
@@ -358,7 +358,7 @@ func TestPostgresProvisioner_DeprovisionSchemas(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("deprov_tenant")
+	tenantID := tenant.MustNewTenantID("deprov_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "deprov-service")
@@ -399,7 +399,7 @@ func TestPostgresProvisioner_DeprovisionSchemas_Idempotent(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("idem_deprov")
+	tenantID := tenant.MustNewTenantID("idem_deprov")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "idem-service")
@@ -433,7 +433,7 @@ func TestPostgresProvisioner_ProvisionSchemas_AfterDeprovisioned(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("reprov_tenant")
+	tenantID := tenant.MustNewTenantID("reprov_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "reprov-service")
@@ -468,7 +468,7 @@ func TestPostgresProvisioner_PurgeSchemas(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("purge_tenant")
+	tenantID := tenant.MustNewTenantID("purge_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "purge-service")
@@ -512,7 +512,7 @@ func TestPostgresProvisioner_PurgeSchemas_NotDeprovisioned(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("active_tenant")
+	tenantID := tenant.MustNewTenantID("active_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "active-service")
@@ -539,7 +539,7 @@ func TestPostgresProvisioner_PurgeSchemas_RetentionNotElapsed(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("retained_tenant")
+	tenantID := tenant.MustNewTenantID("retained_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "retained-service")
@@ -581,7 +581,7 @@ func TestPostgresProvisioner_GetProvisioningStatus_NotFound(t *testing.T) {
 	provisioner, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
 
-	tenantID := organization.MustNewOrganizationID("unknown_tenant")
+	tenantID := tenant.MustNewTenantID("unknown_tenant")
 	_, err = provisioner.GetProvisioningStatus(context.Background(), tenantID)
 	assert.ErrorIs(t, err, ErrProvisioningStatusNotFound)
 }
@@ -590,7 +590,7 @@ func TestPostgresProvisioner_ProvisionSchemas_Timeout(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("timeout_tenant")
+	tenantID := tenant.MustNewTenantID("timeout_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	// Create a slow migration using pg_sleep
@@ -620,7 +620,7 @@ func TestPostgresProvisioner_ProvisionSchemas_NoMigrationDirectory(t *testing.T)
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("no_mig_tenant")
+	tenantID := tenant.MustNewTenantID("no_mig_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	config := &Config{
@@ -645,7 +645,7 @@ func TestPostgresProvisioner_ProvisionSchemas_MultipleMigrationFiles(t *testing.
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("multi_mig_tenant")
+	tenantID := tenant.MustNewTenantID("multi_mig_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "multi-service")
@@ -698,8 +698,8 @@ func TestPostgresProvisioner_ProvisionSchemas_SchemaIsolation(t *testing.T) {
 	defer tc.cleanup(t)
 
 	// Create two tenants
-	tenant1 := organization.MustNewOrganizationID("tenant_1")
-	tenant2 := organization.MustNewOrganizationID("tenant_2")
+	tenant1 := tenant.MustNewTenantID("tenant_1")
+	tenant2 := tenant.MustNewTenantID("tenant_2")
 	createTestTenant(t, tc.db, tenant1.String())
 	createTestTenant(t, tc.db, tenant2.String())
 
@@ -746,7 +746,7 @@ func TestPostgresProvisioner_RetryAfterFailure(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
-	tenantID := organization.MustNewOrganizationID("retry_tenant")
+	tenantID := tenant.MustNewTenantID("retry_tenant")
 	createTestTenant(t, tc.db, tenantID.String())
 
 	svcDir := filepath.Join(tc.migDir, "retry-service")

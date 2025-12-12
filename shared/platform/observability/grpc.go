@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -20,12 +20,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Organization span attribute keys for multi-tenant tracing
+// Tenant span attribute keys for multi-tenant tracing
 const (
-	// OrganizationIDKey is the attribute key for the organization ID in traces
-	OrganizationIDKey = "organization.id"
-	// OrganizationSchemaKey is the attribute key for the database schema name
-	OrganizationSchemaKey = "organization.schema"
+	// TenantIDAttrKey is the attribute key for the tenant ID in traces
+	TenantIDAttrKey = "tenant.id"
+	// TenantSchemaKey is the attribute key for the database schema name
+	TenantSchemaKey = "tenant.schema"
 )
 
 // parseGRPCMethod parses a gRPC method string (e.g., "/package.Service/Method")
@@ -96,8 +96,8 @@ func (t *Tracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		// Call the handler
 		resp, err := handler(ctx, req)
 
-		// Add organization attributes after handler (organization context set by auth middleware)
-		addOrganizationSpanAttributes(ctx, span)
+		// Add tenant attributes after handler (tenant context set by auth middleware)
+		addTenantSpanAttributes(ctx, span)
 
 		// Record error if present
 		if err != nil {
@@ -126,7 +126,7 @@ func (t *Tracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 //   - Creates spans for streaming RPC calls
 //   - Extracts trace context from incoming metadata
 //   - Records stream events (send, receive, close)
-//   - Adds organization attributes for multi-tenant tracing
+//   - Adds tenant attributes for multi-tenant tracing
 //
 // Example usage:
 //
@@ -172,8 +172,8 @@ func (t *Tracer) StreamServerInterceptor() grpc.StreamServerInterceptor {
 		// Call the handler
 		err := handler(srv, wrappedStream)
 
-		// Add organization attributes after handler (organization context set by auth middleware)
-		addOrganizationSpanAttributes(wrappedStream.ctx, span)
+		// Add tenant attributes after handler (tenant context set by auth middleware)
+		addTenantSpanAttributes(wrappedStream.ctx, span)
 
 		// Record error if present
 		if err != nil {
@@ -479,24 +479,24 @@ func (mc metadataCarrier) Keys() []string {
 	return lo.Keys(mc)
 }
 
-// addOrganizationSpanAttributes adds organization context attributes to a span.
-// This enables filtering and grouping traces by organization in Tempo/Jaeger.
+// addTenantSpanAttributes adds tenant context attributes to a span.
+// This enables filtering and grouping traces by tenant in Tempo/Jaeger.
 //
 // Attributes added:
-//   - organization.id: The organization identifier (e.g., "acme_bank")
-//   - organization.schema: The database schema name (e.g., "org_acme_bank")
-func addOrganizationSpanAttributes(ctx context.Context, span trace.Span) {
+//   - tenant.id: The tenant identifier (e.g., "acme_bank")
+//   - tenant.schema: The database schema name (e.g., "org_acme_bank")
+func addTenantSpanAttributes(ctx context.Context, span trace.Span) {
 	if ctx == nil || !span.IsRecording() {
 		return
 	}
 
-	orgID, ok := organization.FromContext(ctx)
+	orgID, ok := tenant.FromContext(ctx)
 	if !ok || orgID.IsEmpty() {
 		return
 	}
 
 	span.SetAttributes(
-		attribute.String(OrganizationIDKey, orgID.String()),
-		attribute.String(OrganizationSchemaKey, orgID.SchemaName()),
+		attribute.String(TenantIDAttrKey, orgID.String()),
+		attribute.String(TenantSchemaKey, orgID.SchemaName()),
 	)
 }

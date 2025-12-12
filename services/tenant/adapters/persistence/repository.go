@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/tenant/domain"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
 
@@ -62,7 +62,7 @@ func (r *Repository) Create(ctx context.Context, tenant *domain.Tenant) error {
 }
 
 // GetByID retrieves a tenant by ID (BIAN: Retrieve).
-func (r *Repository) GetByID(ctx context.Context, id organization.OrganizationID) (*domain.Tenant, error) {
+func (r *Repository) GetByID(ctx context.Context, id tenant.TenantID) (*domain.Tenant, error) {
 	var entity TenantEntity
 	result := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&entity)
 
@@ -79,7 +79,7 @@ func (r *Repository) GetByID(ctx context.Context, id organization.OrganizationID
 
 // IsActive checks if a tenant exists and is active.
 // This is optimized for validation middleware - returns only what's needed.
-func (r *Repository) IsActive(ctx context.Context, id organization.OrganizationID) (bool, error) {
+func (r *Repository) IsActive(ctx context.Context, id tenant.TenantID) (bool, error) {
 	var status string
 	result := r.db.WithContext(ctx).
 		Model(&TenantEntity{}).
@@ -99,7 +99,7 @@ func (r *Repository) IsActive(ctx context.Context, id organization.OrganizationI
 }
 
 // UpdateStatus changes the tenant status (BIAN: Update).
-func (r *Repository) UpdateStatus(ctx context.Context, id organization.OrganizationID, status domain.Status, currentVersion int) (*domain.Tenant, error) {
+func (r *Repository) UpdateStatus(ctx context.Context, id tenant.TenantID, status domain.Status, currentVersion int) (*domain.Tenant, error) {
 	updates := map[string]interface{}{
 		"status":  status,
 		"version": currentVersion + 1,
@@ -145,7 +145,7 @@ func (r *Repository) UpdateStatus(ctx context.Context, id organization.Organizat
 
 // UpdateStatusWithError changes the tenant status and sets an error message.
 // Used for recording provisioning failures.
-func (r *Repository) UpdateStatusWithError(ctx context.Context, id organization.OrganizationID, status domain.Status, errorMessage string, currentVersion int) (*domain.Tenant, error) {
+func (r *Repository) UpdateStatusWithError(ctx context.Context, id tenant.TenantID, status domain.Status, errorMessage string, currentVersion int) (*domain.Tenant, error) {
 	updates := map[string]interface{}{
 		"status":        status,
 		"error_message": errorMessage,
@@ -285,7 +285,7 @@ func toEntity(tenant *domain.Tenant) *TenantEntity {
 
 // toDomain converts database entity to domain model.
 func toDomain(entity *TenantEntity) (*domain.Tenant, error) {
-	tenantID, err := organization.NewOrganizationID(entity.ID)
+	tenantID, err := tenant.NewTenantID(entity.ID)
 	if err != nil {
 		return nil, err
 	}

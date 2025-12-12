@@ -13,7 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -51,7 +51,7 @@ func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner
 // infrastructure (Tenant) and BIAN domain entities (Party.Organization).
 func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequest) (*pb.InitiateTenantResponse, error) {
 	// Validate and create tenant ID
-	tenantID, err := organization.NewOrganizationID(req.TenantId)
+	tenantID, err := tenant.NewTenantID(req.TenantId)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid tenant ID: %v", err)
 	}
@@ -179,7 +179,7 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 // RetrieveTenant gets tenant details by ID (BIAN: Retrieve).
 func (s *Service) RetrieveTenant(ctx context.Context, req *pb.RetrieveTenantRequest) (*pb.RetrieveTenantResponse, error) {
 	// Validate tenant ID
-	tenantID, err := organization.NewOrganizationID(req.TenantId)
+	tenantID, err := tenant.NewTenantID(req.TenantId)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid tenant ID: %v", err)
 	}
@@ -204,7 +204,7 @@ func (s *Service) RetrieveTenant(ctx context.Context, req *pb.RetrieveTenantRequ
 // UpdateTenantStatus changes the lifecycle status of a tenant (BIAN: Update).
 func (s *Service) UpdateTenantStatus(ctx context.Context, req *pb.UpdateTenantStatusRequest) (*pb.UpdateTenantStatusResponse, error) {
 	// Validate tenant ID
-	tenantID, err := organization.NewOrganizationID(req.TenantId)
+	tenantID, err := tenant.NewTenantID(req.TenantId)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid tenant ID: %v", err)
 	}

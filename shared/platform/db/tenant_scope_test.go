@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // errMockExecFailed is a sentinel error for testing exec failures
@@ -46,20 +46,20 @@ func (m *mockDB) Close() error {
 	return nil
 }
 
-func TestWithOrganizationScope_Success(t *testing.T) {
+func TestWithTenantScope_Success(t *testing.T) {
 	mock := &mockDB{}
-	orgID := organization.MustNewOrganizationID("acme_bank")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.MustNewTenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
-	result, err := db.WithOrganizationScope(ctx, mock)
+	result, err := db.WithTenantScope(ctx, mock)
 	if err != nil {
-		t.Fatalf("WithOrganizationScope returned unexpected error: %v", err)
+		t.Fatalf("WithTenantScope returned unexpected error: %v", err)
 	}
 	if result != mock {
-		t.Error("WithOrganizationScope should return the same DB instance")
+		t.Error("WithTenantScope should return the same DB instance")
 	}
 	if !mock.execCalled {
-		t.Error("WithOrganizationScope should execute SET LOCAL query")
+		t.Error("WithTenantScope should execute SET LOCAL query")
 	}
 	// Schema name should be quoted and include public
 	expected := `SET LOCAL search_path TO "org_acme_bank", public`
@@ -68,45 +68,45 @@ func TestWithOrganizationScope_Success(t *testing.T) {
 	}
 }
 
-func TestWithOrganizationScope_MissingOrganizationContext(t *testing.T) {
+func TestWithTenantScope_MissingTenantContext(t *testing.T) {
 	mock := &mockDB{}
-	ctx := context.Background() // No organization in context
+	ctx := context.Background() // No tenant in context
 
-	result, err := db.WithOrganizationScope(ctx, mock)
+	result, err := db.WithTenantScope(ctx, mock)
 
 	if err == nil {
-		t.Fatal("WithOrganizationScope should return error for missing organization context")
+		t.Fatal("WithTenantScope should return error for missing tenant context")
 	}
-	if !errors.Is(err, organization.ErrMissingOrganizationContext) {
-		t.Errorf("error = %v, want ErrMissingOrganizationContext", err)
+	if !errors.Is(err, tenant.ErrMissingTenantContext) {
+		t.Errorf("error = %v, want ErrMissingTenantContext", err)
 	}
 	if result != nil {
-		t.Error("WithOrganizationScope should return nil DB on error")
+		t.Error("WithTenantScope should return nil DB on error")
 	}
 	if mock.execCalled {
-		t.Error("WithOrganizationScope should not execute query when organization missing")
+		t.Error("WithTenantScope should not execute query when tenant missing")
 	}
 }
 
-func TestWithOrganizationScope_ExecError(t *testing.T) {
+func TestWithTenantScope_ExecError(t *testing.T) {
 	mock := &mockDB{execErr: errMockExecFailed}
-	orgID := organization.MustNewOrganizationID("test_org")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.MustNewTenantID("test_org")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
-	result, err := db.WithOrganizationScope(ctx, mock)
+	result, err := db.WithTenantScope(ctx, mock)
 
 	if err == nil {
-		t.Fatal("WithOrganizationScope should return error when exec fails")
+		t.Fatal("WithTenantScope should return error when exec fails")
 	}
 	if !errors.Is(err, errMockExecFailed) {
 		t.Errorf("error should wrap exec error, got: %v", err)
 	}
 	if result != nil {
-		t.Error("WithOrganizationScope should return nil DB on error")
+		t.Error("WithTenantScope should return nil DB on error")
 	}
 }
 
-func TestWithOrganizationScope_SchemaNameQuoting(t *testing.T) {
+func TestWithTenantScope_SchemaNameQuoting(t *testing.T) {
 	tests := []struct {
 		name           string
 		orgID          string
@@ -137,12 +137,12 @@ func TestWithOrganizationScope_SchemaNameQuoting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockDB{}
-			orgID := organization.MustNewOrganizationID(tt.orgID)
-			ctx := organization.WithOrganization(context.Background(), orgID)
+			orgID := tenant.MustNewTenantID(tt.orgID)
+			ctx := tenant.WithTenant(context.Background(), orgID)
 
-			_, err := db.WithOrganizationScope(ctx, mock)
+			_, err := db.WithTenantScope(ctx, mock)
 			if err != nil {
-				t.Fatalf("WithOrganizationScope returned unexpected error: %v", err)
+				t.Fatalf("WithTenantScope returned unexpected error: %v", err)
 			}
 			expected := "SET LOCAL search_path TO " + tt.expectedSchema + ", public"
 			if mock.execQuery != expected {
@@ -152,28 +152,28 @@ func TestWithOrganizationScope_SchemaNameQuoting(t *testing.T) {
 	}
 }
 
-func TestMustWithOrganizationScope_Success(t *testing.T) {
+func TestMustWithTenantScope_Success(t *testing.T) {
 	mock := &mockDB{}
-	orgID := organization.MustNewOrganizationID("test_org")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.MustNewTenantID("test_org")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
 	// Should not panic
-	result := db.MustWithOrganizationScope(ctx, mock)
+	result := db.MustWithTenantScope(ctx, mock)
 
 	if result != mock {
-		t.Error("MustWithOrganizationScope should return the same DB instance")
+		t.Error("MustWithTenantScope should return the same DB instance")
 	}
 }
 
-func TestMustWithOrganizationScope_Panics(t *testing.T) {
+func TestMustWithTenantScope_Panics(t *testing.T) {
 	mock := &mockDB{}
-	ctx := context.Background() // No organization
+	ctx := context.Background() // No tenant
 
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("MustWithOrganizationScope should panic when organization missing")
+			t.Error("MustWithTenantScope should panic when tenant missing")
 		}
 	}()
 
-	db.MustWithOrganizationScope(ctx, mock)
+	db.MustWithTenantScope(ctx, mock)
 }

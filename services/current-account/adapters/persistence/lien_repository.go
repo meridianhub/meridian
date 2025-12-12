@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -38,9 +38,9 @@ func (r *LienRepository) WithTx(tx *gorm.DB) *LienRepository {
 	return &LienRepository{db: tx}
 }
 
-// hasOrganizationContext checks if organization context is present (multi-org mode).
-func (r *LienRepository) hasOrganizationContext(ctx context.Context) bool {
-	_, ok := organization.FromContext(ctx)
+// hasTenantContext checks if tenant context is present (multi-tenant mode).
+func (r *LienRepository) hasTenantContext(ctx context.Context) bool {
+	_, ok := tenant.FromContext(ctx)
 	return ok
 }
 
@@ -49,12 +49,12 @@ func (r *LienRepository) hasOrganizationContext(ctx context.Context) bool {
 // In multi-org mode, it wraps the function in a transaction and sets the search_path.
 // This helper reduces code duplication across repository methods.
 func (r *LienRepository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	if !r.hasOrganizationContext(ctx) {
+	if !r.hasTenantContext(ctx) {
 		// Single-tenant mode: run directly without transaction overhead
 		return fn(r.db.WithContext(ctx))
 	}
 	// Multi-org mode: use the shared helper that handles transaction + org scope
-	return db.WithGormOrganizationTransaction(ctx, r.db, fn)
+	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
 // Create inserts a new lien

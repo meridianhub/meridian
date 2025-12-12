@@ -38,11 +38,11 @@ var (
 
 // Key represents an idempotency key with namespace and operation context
 type Key struct {
-	// OrganizationID is the organization identifier for multi-organization isolation.
-	// When set, keys are prefixed with the organization ID to ensure isolation.
-	// When empty, keys are generated without an organization prefix (single-org mode).
+	// TenantID is the tenant identifier for multi-tenant isolation.
+	// When set, keys are prefixed with the tenant ID to ensure isolation.
+	// When empty, keys are generated without a tenant prefix (single-tenant mode).
 	// Must not contain colons (':') to avoid key parsing ambiguity.
-	OrganizationID string
+	TenantID string
 
 	// Namespace groups related operations (e.g., "current-account")
 	Namespace string
@@ -58,13 +58,13 @@ type Key struct {
 }
 
 // String returns the Redis key format.
-// With OrganizationID: {org_id}:idempotency:{namespace}:{operation}:{entity}:{request}
-// Without OrganizationID: idempotency:{namespace}:{operation}:{entity}:{request}
+// With TenantID: {tenant_id}:idempotency:{namespace}:{operation}:{entity}:{request}
+// Without TenantID: idempotency:{namespace}:{operation}:{entity}:{request}
 // Note: Field values must not contain colons to avoid ambiguous key representations
 func (k Key) String() string {
 	var prefix string
-	if k.OrganizationID != "" {
-		prefix = k.OrganizationID + ":"
+	if k.TenantID != "" {
+		prefix = k.TenantID + ":"
 	}
 
 	if k.RequestID != "" {
@@ -80,7 +80,7 @@ func (k Key) Validate() error {
 	}
 
 	// Prevent colon characters in fields to avoid key collisions
-	if containsColon(k.OrganizationID) || containsColon(k.Namespace) ||
+	if containsColon(k.TenantID) || containsColon(k.Namespace) ||
 		containsColon(k.Operation) || containsColon(k.EntityID) ||
 		containsColon(k.RequestID) {
 		return ErrInvalidKey

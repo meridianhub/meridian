@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -93,7 +93,7 @@ func setupOrgScopeTestContainer(ctx context.Context, t *testing.T) (*PostgresPoo
 	return pool, cleanup
 }
 
-func TestWithOrganizationScope_Integration_QueryRouting(t *testing.T) {
+func TestWithTenantScope_Integration_QueryRouting(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
@@ -103,14 +103,14 @@ func TestWithOrganizationScope_Integration_QueryRouting(t *testing.T) {
 	defer cleanup()
 
 	t.Run("org_a retrieves org_a data", func(t *testing.T) {
-		orgID := organization.MustNewOrganizationID("test_a")
-		orgCtx := organization.WithOrganization(ctx, orgID)
+		orgID := tenant.MustNewTenantID("test_a")
+		orgCtx := tenant.WithTenant(ctx, orgID)
 
 		var name string
 		var balance float64
 
 		err := WithTransaction(orgCtx, pool, func(tx DB) error {
-			if _, err := WithOrganizationScope(orgCtx, tx); err != nil {
+			if _, err := WithTenantScope(orgCtx, tx); err != nil {
 				return err
 			}
 
@@ -125,14 +125,14 @@ func TestWithOrganizationScope_Integration_QueryRouting(t *testing.T) {
 	})
 
 	t.Run("org_b retrieves org_b data", func(t *testing.T) {
-		orgID := organization.MustNewOrganizationID("test_b")
-		orgCtx := organization.WithOrganization(ctx, orgID)
+		orgID := tenant.MustNewTenantID("test_b")
+		orgCtx := tenant.WithTenant(ctx, orgID)
 
 		var name string
 		var balance float64
 
 		err := WithTransaction(orgCtx, pool, func(tx DB) error {
-			if _, err := WithOrganizationScope(orgCtx, tx); err != nil {
+			if _, err := WithTenantScope(orgCtx, tx); err != nil {
 				return err
 			}
 
@@ -147,7 +147,7 @@ func TestWithOrganizationScope_Integration_QueryRouting(t *testing.T) {
 	})
 }
 
-func TestWithOrganizationScope_Integration_Isolation(t *testing.T) {
+func TestWithTenantScope_Integration_Isolation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
@@ -157,8 +157,8 @@ func TestWithOrganizationScope_Integration_Isolation(t *testing.T) {
 	defer cleanup()
 
 	// Org A should not see Org B's unique data
-	orgID := organization.MustNewOrganizationID("test_a")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.MustNewTenantID("test_a")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	// Insert unique data in org_b
 	_, err := pool.ExecContext(ctx,
@@ -169,7 +169,7 @@ func TestWithOrganizationScope_Integration_Isolation(t *testing.T) {
 	// Try to query it from org_a context - should return no rows
 	var count int
 	err = WithTransaction(orgCtx, pool, func(tx DB) error {
-		if _, err := WithOrganizationScope(orgCtx, tx); err != nil {
+		if _, err := WithTenantScope(orgCtx, tx); err != nil {
 			return err
 		}
 
@@ -182,7 +182,7 @@ func TestWithOrganizationScope_Integration_Isolation(t *testing.T) {
 	assert.Equal(t, 0, count, "org_a should not see org_b's unique data")
 }
 
-func TestWithOrganizationScope_Integration_SearchPathAutoRevert(t *testing.T) {
+func TestWithTenantScope_Integration_SearchPathAutoRevert(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
@@ -197,11 +197,11 @@ func TestWithOrganizationScope_Integration_SearchPathAutoRevert(t *testing.T) {
 	require.NoError(t, err)
 
 	// Run a transaction with organization scope
-	orgID := organization.MustNewOrganizationID("test_a")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.MustNewTenantID("test_a")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	err = WithTransaction(orgCtx, pool, func(tx DB) error {
-		if _, err := WithOrganizationScope(orgCtx, tx); err != nil {
+		if _, err := WithTenantScope(orgCtx, tx); err != nil {
 			return err
 		}
 
@@ -223,7 +223,7 @@ func TestWithOrganizationScope_Integration_SearchPathAutoRevert(t *testing.T) {
 	assert.Equal(t, originalSearchPath, afterSearchPath, "search_path should revert after transaction")
 }
 
-func TestWithOrganizationScope_Integration_PublicSchemaAccess(t *testing.T) {
+func TestWithTenantScope_Integration_PublicSchemaAccess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
@@ -237,12 +237,12 @@ func TestWithOrganizationScope_Integration_PublicSchemaAccess(t *testing.T) {
 
 	for _, org := range orgs {
 		t.Run("org_"+org+"_can_read_public", func(t *testing.T) {
-			orgID := organization.MustNewOrganizationID(org)
-			orgCtx := organization.WithOrganization(ctx, orgID)
+			orgID := tenant.MustNewTenantID(org)
+			orgCtx := tenant.WithTenant(ctx, orgID)
 
 			var currencyName string
 			err := WithTransaction(orgCtx, pool, func(tx DB) error {
-				if _, err := WithOrganizationScope(orgCtx, tx); err != nil {
+				if _, err := WithTenantScope(orgCtx, tx); err != nil {
 					return err
 				}
 
@@ -258,7 +258,7 @@ func TestWithOrganizationScope_Integration_PublicSchemaAccess(t *testing.T) {
 	}
 }
 
-func TestWithOrganizationScope_Integration_MissingOrganizationContext(t *testing.T) {
+func TestWithTenantScope_Integration_MissingOrganizationContext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
@@ -269,15 +269,15 @@ func TestWithOrganizationScope_Integration_MissingOrganizationContext(t *testing
 
 	// Context without organization
 	err := WithTransaction(ctx, pool, func(tx DB) error {
-		_, err := WithOrganizationScope(ctx, tx) // Missing organization in context
+		_, err := WithTenantScope(ctx, tx) // Missing organization in context
 		return err
 	})
 
 	require.Error(t, err)
-	assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+	assert.ErrorIs(t, err, tenant.ErrMissingTenantContext)
 }
 
-func TestWithOrganizationScope_Integration_NonExistentSchema(t *testing.T) {
+func TestWithTenantScope_Integration_NonExistentSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
@@ -287,13 +287,13 @@ func TestWithOrganizationScope_Integration_NonExistentSchema(t *testing.T) {
 	defer cleanup()
 
 	// Create context with organization that has no schema
-	orgID := organization.MustNewOrganizationID("nonexistent")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.MustNewTenantID("nonexistent")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	// SET LOCAL should succeed (PostgreSQL allows setting search_path to non-existent schemas)
 	// But querying tables should fail
 	err := WithTransaction(orgCtx, pool, func(tx DB) error {
-		if _, err := WithOrganizationScope(orgCtx, tx); err != nil {
+		if _, err := WithTenantScope(orgCtx, tx); err != nil {
 			return err
 		}
 
@@ -306,7 +306,7 @@ func TestWithOrganizationScope_Integration_NonExistentSchema(t *testing.T) {
 	assert.Contains(t, err.Error(), "accounts") // Table not found in search_path
 }
 
-func TestWithOrganizationScope_Integration_SQLInjectionPrevention(t *testing.T) {
+func TestWithTenantScope_Integration_SQLInjectionPrevention(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
@@ -315,19 +315,19 @@ func TestWithOrganizationScope_Integration_SQLInjectionPrevention(t *testing.T) 
 	pool, cleanup := setupOrgScopeTestContainer(ctx, t)
 	defer cleanup()
 
-	// Attempt SQL injection through organization ID
-	// Note: This test relies on organization.NewOrganizationID rejecting invalid characters
-	// The SQL injection attempt should be blocked at the OrganizationID validation level
+	// Attempt SQL injection through tenant ID
+	// Note: This test relies on tenant.NewTenantID rejecting invalid characters
+	// The SQL injection attempt should be blocked at the TenantID validation level
 
-	// Valid organization IDs cannot contain SQL injection characters due to validation
+	// Valid tenant IDs cannot contain SQL injection characters due to validation
 	// So we test that the schema name is properly quoted even for edge cases
 
 	t.Run("schema_name_is_quoted", func(t *testing.T) {
-		orgID := organization.MustNewOrganizationID("test_a")
-		orgCtx := organization.WithOrganization(ctx, orgID)
+		orgID := tenant.MustNewTenantID("test_a")
+		orgCtx := tenant.WithTenant(ctx, orgID)
 
 		err := WithTransaction(orgCtx, pool, func(tx DB) error {
-			if _, err := WithOrganizationScope(orgCtx, tx); err != nil {
+			if _, err := WithTenantScope(orgCtx, tx); err != nil {
 				return err
 			}
 
@@ -346,7 +346,7 @@ func TestWithOrganizationScope_Integration_SQLInjectionPrevention(t *testing.T) 
 	})
 }
 
-func TestWithOrganizationScope_Integration_WriteIsolation(t *testing.T) {
+func TestWithTenantScope_Integration_WriteIsolation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
@@ -356,11 +356,11 @@ func TestWithOrganizationScope_Integration_WriteIsolation(t *testing.T) {
 	defer cleanup()
 
 	// Write from org_a context
-	orgIDa := organization.MustNewOrganizationID("test_a")
-	orgCtxA := organization.WithOrganization(ctx, orgIDa)
+	orgIDa := tenant.MustNewTenantID("test_a")
+	orgCtxA := tenant.WithTenant(ctx, orgIDa)
 
 	err := WithTransaction(orgCtxA, pool, func(tx DB) error {
-		if _, err := WithOrganizationScope(orgCtxA, tx); err != nil {
+		if _, err := WithTenantScope(orgCtxA, tx); err != nil {
 			return err
 		}
 
@@ -375,7 +375,7 @@ func TestWithOrganizationScope_Integration_WriteIsolation(t *testing.T) {
 	t.Run("write_visible_in_org_a", func(t *testing.T) {
 		var balance float64
 		err := WithTransaction(orgCtxA, pool, func(tx DB) error {
-			if _, err := WithOrganizationScope(orgCtxA, tx); err != nil {
+			if _, err := WithTenantScope(orgCtxA, tx); err != nil {
 				return err
 			}
 
@@ -389,12 +389,12 @@ func TestWithOrganizationScope_Integration_WriteIsolation(t *testing.T) {
 	})
 
 	t.Run("write_not_visible_in_org_b", func(t *testing.T) {
-		orgIDb := organization.MustNewOrganizationID("test_b")
-		orgCtxB := organization.WithOrganization(ctx, orgIDb)
+		orgIDb := tenant.MustNewTenantID("test_b")
+		orgCtxB := tenant.WithTenant(ctx, orgIDb)
 
 		var count int
 		err := WithTransaction(orgCtxB, pool, func(tx DB) error {
-			if _, err := WithOrganizationScope(orgCtxB, tx); err != nil {
+			if _, err := WithTenantScope(orgCtxB, tx); err != nil {
 				return err
 			}
 

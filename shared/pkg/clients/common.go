@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -72,7 +72,7 @@ func PropagateOrganization(ctx context.Context) context.Context {
 		return nil
 	}
 
-	orgID, ok := organization.FromContext(ctx)
+	orgID, ok := tenant.FromContext(ctx)
 	if !ok || orgID.IsEmpty() {
 		// No org in context or empty org - return unchanged (single-tenant or bootstrap call)
 		return ctx
@@ -86,6 +86,6 @@ func PropagateOrganization(ctx context.Context) context.Context {
 	}
 
 	// Add org to outgoing metadata using standard header name
-	md.Set(organization.OrgIDKey, orgID.String())
+	md.Set(tenant.TenantIDKey, orgID.String())
 	return metadata.NewOutgoingContext(ctx, md)
 }

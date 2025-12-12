@@ -9,7 +9,7 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,7 +29,7 @@ type publishedMessage struct {
 	msg   proto.Message
 }
 
-func (m *mockProtoPublisher) PublishWithOrganization(_ context.Context, topic, key string, msg proto.Message) error {
+func (m *mockProtoPublisher) PublishWithTenant(_ context.Context, topic, key string, msg proto.Message) error {
 	m.publishedMessages = append(m.publishedMessages, publishedMessage{
 		topic: topic,
 		key:   key,
@@ -49,8 +49,8 @@ func (m *mockProtoPublisher) Close() {
 
 // testOrgContext creates a context with organization for testing
 func testOrgContext() context.Context {
-	orgID := organization.MustNewOrganizationID("test_org")
-	return organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.MustNewTenantID("test_org")
+	return tenant.WithTenant(context.Background(), orgID)
 }
 
 func TestDefaultTopicConfig(t *testing.T) {
@@ -333,7 +333,7 @@ func TestKafkaEventPublisher_TopicMapping(t *testing.T) {
 			publisher, err := messaging.NewKafkaEventPublisher(mock, topicConfig)
 			require.NoError(t, err)
 
-			// Publish event with organization context
+			// Publish event with tenant context
 			ctx := testOrgContext()
 			err = publisher.Publish(ctx, tt.event)
 			require.NoError(t, err)

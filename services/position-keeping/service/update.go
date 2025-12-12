@@ -322,7 +322,7 @@ func extractIPAddress(ctx context.Context) string {
 }
 
 // extractSystemContext extracts service metadata from gRPC context.
-// Includes service name, correlation ID, and organization ID for multi-tenant tracking.
+// Includes service name, correlation ID, and tenant ID for multi-tenant tracking.
 func extractSystemContext(ctx context.Context) map[string]string {
 	systemCtx := map[string]string{
 		"service": "position-keeping",
@@ -346,9 +346,9 @@ func extractSystemContext(ctx context.Context) map[string]string {
 				}
 			}
 		}
-		// Add organization ID if present (multi-tenant context)
-		if vals := md.Get("x-org-id"); len(vals) > 0 && vals[0] != "" {
-			systemCtx["organization_id"] = vals[0]
+		// Add tenant ID if present (multi-tenant context)
+		if vals := md.Get("x-tenant-id"); len(vals) > 0 && vals[0] != "" {
+			systemCtx["tenant_id"] = vals[0]
 		}
 		// Add user agent if present
 		if vals := md.Get("user-agent"); len(vals) > 0 && vals[0] != "" {

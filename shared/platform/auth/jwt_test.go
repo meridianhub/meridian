@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -176,99 +176,99 @@ func TestClaims_GetUserID(t *testing.T) {
 	})
 }
 
-func TestClaims_GetOrganizationID(t *testing.T) {
-	t.Run("returns organization ID when valid", func(t *testing.T) {
-		claims := &Claims{OrganizationID: "acme_bank"}
-		orgID, err := claims.GetOrganizationID()
+func TestClaims_GetTenantID(t *testing.T) {
+	t.Run("returns tenant ID when valid", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme_bank"}
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, organization.OrganizationID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 	})
 
-	t.Run("returns error when organization claim missing", func(t *testing.T) {
+	t.Run("returns error when tenant claim missing", func(t *testing.T) {
 		claims := &Claims{UserID: "user-123"}
-		orgID, err := claims.GetOrganizationID()
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrOrganizationClaimMissing)
-		assert.Equal(t, organization.OrganizationID(""), orgID)
+		assert.ErrorIs(t, err, ErrTenantClaimMissing)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 
-	t.Run("returns error when organization claim empty", func(t *testing.T) {
-		claims := &Claims{OrganizationID: ""}
-		orgID, err := claims.GetOrganizationID()
+	t.Run("returns error when tenant claim empty", func(t *testing.T) {
+		claims := &Claims{TenantID: ""}
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrOrganizationClaimMissing)
-		assert.Equal(t, organization.OrganizationID(""), orgID)
+		assert.ErrorIs(t, err, ErrTenantClaimMissing)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 
 	t.Run("returns error for invalid format with spaces", func(t *testing.T) {
-		claims := &Claims{OrganizationID: "acme bank"}
-		orgID, err := claims.GetOrganizationID()
+		claims := &Claims{TenantID: "acme bank"}
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, organization.ErrInvalidOrganizationID)
-		assert.Equal(t, organization.OrganizationID(""), orgID)
+		assert.ErrorIs(t, err, tenant.ErrInvalidTenantID)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 
 	t.Run("returns error for invalid format with special chars", func(t *testing.T) {
-		claims := &Claims{OrganizationID: "acme-bank!"}
-		orgID, err := claims.GetOrganizationID()
+		claims := &Claims{TenantID: "acme-bank!"}
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, organization.ErrInvalidOrganizationID)
-		assert.Equal(t, organization.OrganizationID(""), orgID)
+		assert.ErrorIs(t, err, tenant.ErrInvalidTenantID)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 
-	t.Run("accepts valid organization IDs with underscores", func(t *testing.T) {
-		claims := &Claims{OrganizationID: "acme_bank_corp"}
-		orgID, err := claims.GetOrganizationID()
+	t.Run("accepts valid tenant IDs with underscores", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme_bank_corp"}
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, organization.OrganizationID("acme_bank_corp"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank_corp"), tenantID)
 	})
 
-	t.Run("accepts valid organization IDs with numbers", func(t *testing.T) {
-		claims := &Claims{OrganizationID: "bank123"}
-		orgID, err := claims.GetOrganizationID()
+	t.Run("accepts valid tenant IDs with numbers", func(t *testing.T) {
+		claims := &Claims{TenantID: "bank123"}
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, organization.OrganizationID("bank123"), orgID)
+		assert.Equal(t, tenant.TenantID("bank123"), tenantID)
 	})
 
-	t.Run("accepts single character organization ID (min length)", func(t *testing.T) {
-		claims := &Claims{OrganizationID: "a"}
-		orgID, err := claims.GetOrganizationID()
+	t.Run("accepts single character tenant ID (min length)", func(t *testing.T) {
+		claims := &Claims{TenantID: "a"}
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, organization.OrganizationID("a"), orgID)
+		assert.Equal(t, tenant.TenantID("a"), tenantID)
 	})
 
-	t.Run("accepts 50 character organization ID (max length)", func(t *testing.T) {
+	t.Run("accepts 50 character tenant ID (max length)", func(t *testing.T) {
 		maxLengthID := "a1234567890123456789012345678901234567890123456789"
-		claims := &Claims{OrganizationID: maxLengthID}
-		orgID, err := claims.GetOrganizationID()
+		claims := &Claims{TenantID: maxLengthID}
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, organization.OrganizationID(maxLengthID), orgID)
+		assert.Equal(t, tenant.TenantID(maxLengthID), tenantID)
 	})
 
-	t.Run("rejects 51 character organization ID (exceeds max length)", func(t *testing.T) {
+	t.Run("rejects 51 character tenant ID (exceeds max length)", func(t *testing.T) {
 		tooLongID := "a12345678901234567890123456789012345678901234567890"
-		claims := &Claims{OrganizationID: tooLongID}
-		orgID, err := claims.GetOrganizationID()
+		claims := &Claims{TenantID: tooLongID}
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, organization.ErrInvalidOrganizationID)
-		assert.Equal(t, organization.OrganizationID(""), orgID)
+		assert.ErrorIs(t, err, tenant.ErrInvalidTenantID)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 }
 
-func TestClaims_HasOrganizationID(t *testing.T) {
-	t.Run("returns true when organization ID is present", func(t *testing.T) {
-		claims := &Claims{OrganizationID: "acme_bank"}
-		assert.True(t, claims.HasOrganizationID())
+func TestClaims_HasTenantID(t *testing.T) {
+	t.Run("returns true when tenant ID is present", func(t *testing.T) {
+		claims := &Claims{TenantID: "acme_bank"}
+		assert.True(t, claims.HasTenantID())
 	})
 
-	t.Run("returns false when organization ID is empty", func(t *testing.T) {
-		claims := &Claims{OrganizationID: ""}
-		assert.False(t, claims.HasOrganizationID())
+	t.Run("returns false when tenant ID is empty", func(t *testing.T) {
+		claims := &Claims{TenantID: ""}
+		assert.False(t, claims.HasTenantID())
 	})
 
-	t.Run("returns false when organization ID is not set", func(t *testing.T) {
+	t.Run("returns false when tenant ID is not set", func(t *testing.T) {
 		claims := &Claims{UserID: "user-123"}
-		assert.False(t, claims.HasOrganizationID())
+		assert.False(t, claims.HasTenantID())
 	})
 }
 
@@ -414,10 +414,10 @@ func TestClaims_EdgeCases(t *testing.T) {
 
 	t.Run("claims with all fields populated", func(t *testing.T) {
 		claims := &Claims{
-			UserID:         "user-123",
-			OrganizationID: "acme_bank",
-			Roles:          []string{"admin"},
-			Scopes:         []string{"read"},
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			Scopes:   []string{"read"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 				IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -428,9 +428,9 @@ func TestClaims_EdgeCases(t *testing.T) {
 			},
 		}
 		assert.Equal(t, "user-123", claims.GetUserID())
-		orgID, err := claims.GetOrganizationID()
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, organization.OrganizationID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 		assert.Equal(t, []string{"admin"}, claims.GetRoles())
 		assert.Equal(t, []string{"read"}, claims.GetScopes())
 		assert.False(t, claims.IsExpired())
@@ -446,12 +446,12 @@ func TestValidateToken_WithOrganizationClaim(t *testing.T) {
 	validator, err := NewJWTValidator(publicKey)
 	require.NoError(t, err)
 
-	t.Run("extracts organization claim from valid JWT", func(t *testing.T) {
+	t.Run("extracts tenant claim from valid JWT", func(t *testing.T) {
 		claims := &Claims{
-			UserID:         "user-123",
-			OrganizationID: "acme_bank",
-			Roles:          []string{"admin"},
-			Scopes:         []string{"read", "write"},
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			Scopes:   []string{"read", "write"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 				IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -466,14 +466,14 @@ func TestValidateToken_WithOrganizationClaim(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, extractedClaims)
 		assert.Equal(t, "user-123", extractedClaims.UserID)
-		assert.Equal(t, "acme_bank", extractedClaims.OrganizationID)
+		assert.Equal(t, "acme_bank", extractedClaims.TenantID)
 
-		orgID, err := extractedClaims.GetOrganizationID()
+		tenantID, err := extractedClaims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, organization.OrganizationID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 	})
 
-	t.Run("backward compatibility - tokens without organization claim still validate", func(t *testing.T) {
+	t.Run("backward compatibility - tokens without tenant claim still validate", func(t *testing.T) {
 		claims := &Claims{
 			UserID: "user-123",
 			Roles:  []string{"admin"},
@@ -491,10 +491,10 @@ func TestValidateToken_WithOrganizationClaim(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, extractedClaims)
 		assert.Equal(t, "user-123", extractedClaims.UserID)
-		assert.Equal(t, "", extractedClaims.OrganizationID)
+		assert.Equal(t, "", extractedClaims.TenantID)
 
-		_, err = extractedClaims.GetOrganizationID()
+		_, err = extractedClaims.GetTenantID()
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrOrganizationClaimMissing)
+		assert.ErrorIs(t, err, ErrTenantClaimMissing)
 	})
 }
