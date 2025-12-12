@@ -68,7 +68,7 @@ func TestWithTenantScope_Success(t *testing.T) {
 	}
 }
 
-func TestWithTenantScope_MissingOrganizationContext(t *testing.T) {
+func TestWithTenantScope_MissingTenantContext(t *testing.T) {
 	mock := &mockDB{}
 	ctx := context.Background() // No tenant in context
 
@@ -78,7 +78,7 @@ func TestWithTenantScope_MissingOrganizationContext(t *testing.T) {
 		t.Fatal("WithTenantScope should return error for missing tenant context")
 	}
 	if !errors.Is(err, tenant.ErrMissingTenantContext) {
-		t.Errorf("error = %v, want ErrMissingOrganizationContext", err)
+		t.Errorf("error = %v, want ErrMissingTenantContext", err)
 	}
 	if result != nil {
 		t.Error("WithTenantScope should return nil DB on error")

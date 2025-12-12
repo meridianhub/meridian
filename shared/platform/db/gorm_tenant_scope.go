@@ -12,10 +12,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// hashOrgID creates a short, privacy-preserving hash of the org ID for logging.
-// This allows correlation in logs without exposing the actual org ID.
-func hashOrgID(orgID tenant.TenantID) string {
-	h := sha256.Sum256([]byte(orgID))
+// hashTenantID creates a short, privacy-preserving hash of the tenant ID for logging.
+// This allows correlation in logs without exposing the actual tenant ID.
+func hashTenantID(tenantID tenant.TenantID) string {
+	h := sha256.Sum256([]byte(tenantID))
 	return hex.EncodeToString(h[:8]) // First 8 bytes = 16 hex chars
 }
 
@@ -25,7 +25,7 @@ func hashOrgID(orgID tenant.TenantID) string {
 // The function:
 //  1. Extracts the tenant ID from context using tenant.FromContext
 //  2. Returns ErrMissingTenantContext if tenant is missing (fail-fast)
-//  3. Generates schema name via orgID.SchemaName() (returns "org_{id}")
+//  3. Generates schema name via tenantID.SchemaName() (returns "org_{id}")
 //  4. Executes SET LOCAL search_path TO <schema>, public
 //  5. Returns the same DB for chaining
 //
@@ -46,7 +46,7 @@ func hashOrgID(orgID tenant.TenantID) string {
 //	    return tx.Create(&entity).Error
 //	})
 func WithGormTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
-	orgID, ok := tenant.FromContext(ctx)
+	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
 		slog.DebugContext(ctx, "tenant scope: missing tenant context, returning error")
 		return nil, tenant.ErrMissingTenantContext
@@ -54,7 +54,7 @@ func WithGormTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
 
 	// Quote the schema name to prevent SQL injection
 	// pq.QuoteIdentifier handles special characters safely
-	schemaName := pq.QuoteIdentifier(orgID.SchemaName())
+	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
 
 	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback.
 	// fmt.Sprintf is safe here because schemaName is already quoted by pq.QuoteIdentifier above,
@@ -62,13 +62,13 @@ func WithGormTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
 	if err := tx.Exec(query).Error; err != nil {
 		slog.ErrorContext(ctx, "tenant scope: failed to set search_path",
-			"org_hash", hashOrgID(orgID),
+			"tenant_hash", hashTenantID(tenantID),
 			"error", err)
 		return nil, fmt.Errorf("failed to set tenant schema scope: %w", err)
 	}
 
 	slog.DebugContext(ctx, "tenant scope: search_path set successfully",
-		"org_hash", hashOrgID(orgID))
+		"tenant_hash", hashTenantID(tenantID))
 	return tx, nil
 }
 
@@ -83,17 +83,17 @@ func MustWithGormTenantScope(ctx context.Context, tx *gorm.DB) *gorm.DB {
 	return result
 }
 
-// WithGormOrganizationTransaction provides a helper for running GORM operations
+// WithGormTenantTransaction provides a helper for running GORM operations
 // within a transaction with tenant scope automatically set.
 //
 // This is the recommended way to perform multi-tenant database operations with GORM.
 //
 // Example:
 //
-//	err := db.WithGormOrganizationTransaction(ctx, gormDB, func(tx *gorm.DB) error {
+//	err := db.WithGormTenantTransaction(ctx, gormDB, func(tx *gorm.DB) error {
 //	    return tx.Create(&entity).Error
 //	})
-func WithGormOrganizationTransaction(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error) error {
+func WithGormTenantTransaction(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tx, err := WithGormTenantScope(ctx, tx)
 		if err != nil {

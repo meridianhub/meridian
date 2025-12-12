@@ -64,19 +64,19 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
 
-// hasOrganizationContext checks if organization context is present (multi-org mode).
-func (r *Repository) hasOrganizationContext(ctx context.Context) bool {
+// hasTenantContext checks if tenant context is present (multi-tenant mode).
+func (r *Repository) hasTenantContext(ctx context.Context) bool {
 	_, ok := tenant.FromContext(ctx)
 	return ok
 }
 
 // withTenantScope returns a GORM DB instance scoped to the organization from context.
-// If organization context is present (multi-org mode), it sets the PostgreSQL search_path.
-// If organization context is missing (single-tenant mode), it returns the DB unchanged.
+// If tenant context is present (multi-tenant mode), it sets the PostgreSQL search_path.
+// If tenant context is missing (single-tenant mode), it returns the DB unchanged.
 //
 // This must be called within a transaction for the search_path setting to work correctly.
 func (r *Repository) withTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
-	if r.hasOrganizationContext(ctx) {
+	if r.hasTenantContext(ctx) {
 		return db.WithGormTenantScope(ctx, tx)
 	}
 	// Single-tenant mode: no organization scope needed
@@ -88,12 +88,12 @@ func (r *Repository) withTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB
 // In multi-org mode, it wraps the function in a transaction and sets the search_path.
 // This helper reduces code duplication across repository methods.
 func (r *Repository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	if !r.hasOrganizationContext(ctx) {
+	if !r.hasTenantContext(ctx) {
 		// Single-tenant mode: run directly without transaction overhead
 		return fn(r.db.WithContext(ctx))
 	}
 	// Multi-org mode: use the shared helper that handles transaction + org scope
-	return db.WithGormOrganizationTransaction(ctx, r.db, fn)
+	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
 // isInTransaction checks if the repository's db connection is already within a transaction.
@@ -128,8 +128,8 @@ func (r *Repository) withForUpdateScope(ctx context.Context, fn func(tx *gorm.DB
 	}
 
 	// Not in a transaction - use the shared helper that handles transaction + org scope
-	if r.hasOrganizationContext(ctx) {
-		return db.WithGormOrganizationTransaction(ctx, r.db, fn)
+	if r.hasTenantContext(ctx) {
+		return db.WithGormTenantTransaction(ctx, r.db, fn)
 	}
 
 	// Single-tenant mode: still need a transaction for FOR UPDATE, but no org scope

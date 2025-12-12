@@ -503,7 +503,7 @@ func TestFindByID_WithOrganizationContext_IsolatesData(t *testing.T) {
 	// attempts to set the search_path when org context is present.
 	_, err = repo.FindByID(orgCtx, party.ID())
 	// Note: In a test environment without org schemas, this may or may not error
-	// The important thing is that the hasOrganizationContext check works
+	// The important thing is that the hasTenantContext check works
 	// Full isolation testing requires proper org schema setup
 	t.Logf("FindByID with org context result: %v", err)
 }
@@ -653,12 +653,12 @@ func TestRepository_HasOrganizationContext(t *testing.T) {
 
 	t.Run("returns false when no organization context", func(t *testing.T) {
 		ctx := context.Background()
-		assert.False(t, repo.hasOrganizationContext(ctx))
+		assert.False(t, repo.hasTenantContext(ctx))
 	})
 
 	t.Run("returns true when organization context present", func(t *testing.T) {
 		orgID := tenant.TenantID("acme_bank")
 		ctx := tenant.WithTenant(context.Background(), orgID)
-		assert.True(t, repo.hasOrganizationContext(ctx))
+		assert.True(t, repo.hasTenantContext(ctx))
 	})
 }

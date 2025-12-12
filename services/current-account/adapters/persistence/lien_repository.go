@@ -38,7 +38,7 @@ func (r *LienRepository) WithTx(tx *gorm.DB) *LienRepository {
 	return &LienRepository{db: tx}
 }
 
-// hasTenantContext checks if organization context is present (multi-org mode).
+// hasTenantContext checks if tenant context is present (multi-tenant mode).
 func (r *LienRepository) hasTenantContext(ctx context.Context) bool {
 	_, ok := tenant.FromContext(ctx)
 	return ok
@@ -54,7 +54,7 @@ func (r *LienRepository) withOptionalOrgScope(ctx context.Context, fn func(tx *g
 		return fn(r.db.WithContext(ctx))
 	}
 	// Multi-org mode: use the shared helper that handles transaction + org scope
-	return db.WithGormOrganizationTransaction(ctx, r.db, fn)
+	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
 // Create inserts a new lien

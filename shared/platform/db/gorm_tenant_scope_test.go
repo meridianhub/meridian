@@ -93,7 +93,7 @@ func TestMustWithGormTenantScope_MissingContext_Panics(t *testing.T) {
 	})
 }
 
-func TestWithGormOrganizationTransaction_SetsSearchPathAndExecutes(t *testing.T) {
+func TestWithGormTenantTransaction_SetsSearchPathAndExecutes(t *testing.T) {
 	// Create mock database
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestWithGormOrganizationTransaction_SetsSearchPathAndExecutes(t *testing.T)
 
 	// Execute
 	executed := false
-	err = WithGormOrganizationTransaction(ctx, gormDB, func(_ *gorm.DB) error {
+	err = WithGormTenantTransaction(ctx, gormDB, func(_ *gorm.DB) error {
 		executed = true
 		return nil
 	})
@@ -128,7 +128,7 @@ func TestWithGormOrganizationTransaction_SetsSearchPathAndExecutes(t *testing.T)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestWithGormOrganizationTransaction_MissingContext_ReturnsError(t *testing.T) {
+func TestWithGormTenantTransaction_MissingContext_ReturnsError(t *testing.T) {
 	// Create mock database
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestWithGormOrganizationTransaction_MissingContext_ReturnsError(t *testing.
 
 	// Execute
 	executed := false
-	err = WithGormOrganizationTransaction(ctx, gormDB, func(_ *gorm.DB) error {
+	err = WithGormTenantTransaction(ctx, gormDB, func(_ *gorm.DB) error {
 		executed = true
 		return nil
 	})
@@ -247,8 +247,8 @@ func TestWithGormTenantScope_DatabaseError_ReturnsError(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestWithGormOrganizationTransaction_DatabaseError_ReturnsError(t *testing.T) {
-	// This tests the error propagation through WithGormOrganizationTransaction
+func TestWithGormTenantTransaction_DatabaseError_ReturnsError(t *testing.T) {
+	// This tests the error propagation through WithGormTenantTransaction
 	// when SET LOCAL search_path fails
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -271,7 +271,7 @@ func TestWithGormOrganizationTransaction_DatabaseError_ReturnsError(t *testing.T
 
 	// Execute
 	executed := false
-	err = WithGormOrganizationTransaction(ctx, gormDB, func(_ *gorm.DB) error {
+	err = WithGormTenantTransaction(ctx, gormDB, func(_ *gorm.DB) error {
 		executed = true
 		return nil
 	})
