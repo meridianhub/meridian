@@ -135,6 +135,10 @@ func parseStatus(s string) (tenantv1.TenantStatus, error) {
 // formatStatus converts protobuf TenantStatus to a display string.
 func formatStatus(s tenantv1.TenantStatus) string {
 	switch s {
+	case tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING:
+		return "provisioning"
+	case tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED:
+		return "provisioning_failed"
 	case tenantv1.TenantStatus_TENANT_STATUS_ACTIVE:
 		return "active"
 	case tenantv1.TenantStatus_TENANT_STATUS_SUSPENDED:
