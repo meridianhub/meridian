@@ -8,14 +8,18 @@
 --  - One row per tenant, created when provisioning starts
 --  - service_schemas JSONB stores per-service status for debugging
 --  - Idempotent: safe to query and update during retry scenarios
---  - Deleted when tenant is fully deprovisioned
+--  - Soft delete via 'deprovisioned' state - records are NEVER hard deleted for audit trail
+--  - Schema data retention: deprovisioned schemas are NOT dropped automatically;
+--    a separate purge process handles schema deletion after retention period
 
 CREATE TABLE platform.tenant_provisioning (
     -- Foreign key to tenants table (same ID format)
-    tenant_id VARCHAR(50) PRIMARY KEY REFERENCES platform.tenants(id) ON DELETE CASCADE,
+    -- ON DELETE RESTRICT: Cannot delete tenant while provisioning record exists (audit trail)
+    tenant_id VARCHAR(50) PRIMARY KEY REFERENCES platform.tenants(id) ON DELETE RESTRICT,
 
     -- Provisioning lifecycle state
-    -- Values: 'pending', 'in_progress', 'active', 'failed'
+    -- Values: 'pending', 'in_progress', 'active', 'failed', 'deprovisioned'
+    -- Note: 'deprovisioned' is a terminal state - schema marked for eventual cleanup
     state VARCHAR(20) NOT NULL DEFAULT 'pending',
 
     -- Per-service provisioning status
@@ -28,9 +32,14 @@ CREATE TABLE platform.tenant_provisioning (
     -- Timestamps
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deprovisioned_at TIMESTAMPTZ,
 
     -- Constraints
-    CONSTRAINT valid_provisioning_state CHECK (state IN ('pending', 'in_progress', 'active', 'failed'))
+    CONSTRAINT valid_provisioning_state CHECK (state IN ('pending', 'in_progress', 'active', 'failed', 'deprovisioned')),
+    CONSTRAINT deprovisioned_at_required CHECK (
+        (state = 'deprovisioned' AND deprovisioned_at IS NOT NULL) OR
+        (state != 'deprovisioned' AND deprovisioned_at IS NULL)
+    )
 );
 
 -- Index for finding tenants by provisioning state (e.g., "find all failed provisioning")

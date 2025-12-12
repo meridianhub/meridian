@@ -30,11 +30,20 @@ type MockProvisioner struct {
 	// FailDeprovisioningFor lists tenant IDs that should fail during deprovisioning
 	FailDeprovisioningFor map[string]error
 
+	// FailPurgeFor lists tenant IDs that should fail during purging
+	FailPurgeFor map[string]error
+
 	// ProvisioningCalls tracks calls to ProvisionSchemas for verification
 	ProvisioningCalls []organization.OrganizationID
 
 	// DeprovisioningCalls tracks calls to DeprovisionSchemas for verification
 	DeprovisioningCalls []organization.OrganizationID
+
+	// PurgeCalls tracks calls to PurgeSchemas for verification
+	PurgeCalls []organization.OrganizationID
+
+	// DataRetentionPeriod for testing retention enforcement
+	DataRetentionPeriod time.Duration
 }
 
 // NewMockProvisioner creates a new mock provisioner with the given service configuration.
@@ -44,8 +53,11 @@ func NewMockProvisioner(services []ServiceConfig) *MockProvisioner {
 		services:              services,
 		FailProvisioningFor:   make(map[string]error),
 		FailDeprovisioningFor: make(map[string]error),
+		FailPurgeFor:          make(map[string]error),
 		ProvisioningCalls:     make([]organization.OrganizationID, 0),
 		DeprovisioningCalls:   make([]organization.OrganizationID, 0),
+		PurgeCalls:            make([]organization.OrganizationID, 0),
+		DataRetentionPeriod:   0, // No retention period by default for testing
 	}
 }
 
@@ -98,7 +110,7 @@ func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID organiz
 	return nil
 }
 
-// DeprovisionSchemas simulates schema deprovisioning for the tenant.
+// DeprovisionSchemas simulates schema deprovisioning (soft delete) for the tenant.
 func (m *MockProvisioner) DeprovisionSchemas(_ context.Context, tenantID organization.OrganizationID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -111,8 +123,61 @@ func (m *MockProvisioner) DeprovisionSchemas(_ context.Context, tenantID organiz
 		return err
 	}
 
-	// Remove the status (idempotent: no error if not found)
-	delete(m.statuses, tenantID.String())
+	// Get existing status
+	status, exists := m.statuses[tenantID.String()]
+	if !exists {
+		return ErrProvisioningStatusNotFound
+	}
+
+	// Idempotent: already deprovisioned
+	if status.State == StateDeprovisioned {
+		return nil
+	}
+
+	// Soft delete: mark as deprovisioned
+	now := time.Now()
+	status.State = StateDeprovisioned
+	status.DeprovisionedAt = &now
+	status.UpdatedAt = now
+
+	return nil
+}
+
+// PurgeSchemas simulates permanent schema deletion after retention period.
+func (m *MockProvisioner) PurgeSchemas(_ context.Context, tenantID organization.OrganizationID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Record the call
+	m.PurgeCalls = append(m.PurgeCalls, tenantID)
+
+	// Check for simulated failure
+	if err, shouldFail := m.FailPurgeFor[tenantID.String()]; shouldFail {
+		return err
+	}
+
+	// Get existing status
+	status, exists := m.statuses[tenantID.String()]
+	if !exists {
+		return ErrProvisioningStatusNotFound
+	}
+
+	// Must be deprovisioned first
+	if status.State != StateDeprovisioned {
+		return ErrNotDeprovisioned
+	}
+
+	// Check retention period
+	if status.DeprovisionedAt != nil && m.DataRetentionPeriod > 0 {
+		retentionEnd := status.DeprovisionedAt.Add(m.DataRetentionPeriod)
+		if time.Now().Before(retentionEnd) {
+			return ErrRetentionPeriodNotElapsed
+		}
+	}
+
+	// In real implementation, this would DROP SCHEMA CASCADE
+	// For mock, we just leave the status as is (marking purge complete)
+	// A real implementation might add a "purged" state or timestamp
 
 	return nil
 }
@@ -160,9 +225,12 @@ func (m *MockProvisioner) Reset() {
 	m.statuses = make(map[string]*ProvisioningStatus)
 	m.ProvisioningCalls = make([]organization.OrganizationID, 0)
 	m.DeprovisioningCalls = make([]organization.OrganizationID, 0)
+	m.PurgeCalls = make([]organization.OrganizationID, 0)
 	m.FailProvisioningFor = make(map[string]error)
 	m.FailDeprovisioningFor = make(map[string]error)
+	m.FailPurgeFor = make(map[string]error)
 	m.ProvisioningDelay = 0
+	m.DataRetentionPeriod = 0
 }
 
 // SetStatus allows tests to manually set the provisioning status for a tenant.

@@ -37,4 +37,16 @@ var (
 
 	// ErrProvisioningTimeout indicates the provisioning operation exceeded the configured timeout.
 	ErrProvisioningTimeout = errors.New("provisioning operation timed out")
+
+	// ErrNotDeprovisioned indicates an operation requires the tenant to be deprovisioned first.
+	// For example, PurgeSchemas requires the tenant to be in 'deprovisioned' state.
+	ErrNotDeprovisioned = errors.New("tenant must be deprovisioned before this operation")
+
+	// ErrRetentionPeriodNotElapsed indicates the data retention period has not yet passed.
+	// Schema data cannot be purged until the retention period (e.g., 7 years) has elapsed.
+	ErrRetentionPeriodNotElapsed = errors.New("data retention period has not elapsed")
+
+	// ErrAlreadyDeprovisioned indicates the tenant has already been deprovisioned.
+	// This is informational - deprovisioning is idempotent.
+	ErrAlreadyDeprovisioned = errors.New("tenant is already deprovisioned")
 )

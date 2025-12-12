@@ -42,6 +42,13 @@
 //
 //   - Rollback strategy: On failure, tenant is marked as provisioning_failed;
 //     manual cleanup via DeprovisionSchemas or retry via ProvisionSchemas
+//
+//   - Audit trail: Provisioning records are NEVER hard deleted. Deprovisioning
+//     marks the record as 'deprovisioned' with a timestamp for audit purposes.
+//
+//   - Data retention: Deprovisioned schemas are NOT automatically dropped.
+//     A separate PurgeSchemas operation handles schema deletion after the
+//     configured retention period (for regulatory compliance).
 package provisioner
 
 import (
@@ -68,25 +75,47 @@ type SchemaProvisioner interface {
 	// recorded in the provisioning status for debugging and retry.
 	ProvisionSchemas(ctx context.Context, tenantID organization.OrganizationID) error
 
-	// DeprovisionSchemas drops all org_{tenant_id} schemas and data.
+	// DeprovisionSchemas marks tenant schemas as deprovisioned (soft delete).
 	//
-	// WARNING: This permanently deletes all tenant data. Use with caution.
-	// Typically called only during:
-	//  - Tenant deletion (after data export/archival)
-	//  - Cleanup after failed provisioning
-	//  - Development/testing
+	// This is a SOFT DELETE operation for audit trail compliance:
+	//  - Sets provisioning state to 'deprovisioned'
+	//  - Records deprovisioned_at timestamp
+	//  - Does NOT drop the actual database schema or data
+	//
+	// The org_{tenant_id} schema remains in the database until explicitly purged
+	// via PurgeSchemas after the data retention period.
+	//
+	// Typically called during:
+	//  - Tenant deactivation/offboarding
+	//  - Account closure workflows
+	//
+	// Idempotency: Safe to call multiple times; already-deprovisioned tenants
+	// are unchanged.
+	DeprovisionSchemas(ctx context.Context, tenantID organization.OrganizationID) error
+
+	// PurgeSchemas permanently drops org_{tenant_id} schemas and all data.
+	//
+	// WARNING: This is a DESTRUCTIVE operation that permanently deletes all
+	// tenant data. This action cannot be undone.
+	//
+	// Prerequisites:
+	//  - Tenant must be in 'deprovisioned' state
+	//  - Data retention period must have elapsed (checked by implementation)
+	//  - Data export/archival should be completed before calling
 	//
 	// The function performs:
-	//  1. DROP SCHEMA org_{tenant_id} CASCADE (removes all objects)
-	//  2. Removes provisioning status record
+	//  1. Validates tenant is deprovisioned and retention period elapsed
+	//  2. DROP SCHEMA org_{tenant_id} CASCADE (removes all objects)
+	//  3. Updates provisioning status to record purge timestamp
 	//
-	// Idempotency: Safe to call on non-existent schemas.
-	DeprovisionSchemas(ctx context.Context, tenantID organization.OrganizationID) error
+	// Returns ErrRetentionPeriodNotElapsed if called before retention period.
+	// Returns ErrNotDeprovisioned if tenant is still active.
+	PurgeSchemas(ctx context.Context, tenantID organization.OrganizationID) error
 
 	// GetProvisioningStatus retrieves the current provisioning state for a tenant.
 	//
 	// Returns ErrProvisioningStatusNotFound if no provisioning record exists.
-	// This can indicate the tenant was never provisioned or was fully deprovisioned.
+	// Note: Deprovisioned tenants still have a status record (for audit trail).
 	GetProvisioningStatus(ctx context.Context, tenantID organization.OrganizationID) (*ProvisioningStatus, error)
 }
 
@@ -106,21 +135,26 @@ const (
 	// StateFailed indicates provisioning failed. Check ErrorMessage for details.
 	// Failed provisioning can be retried via ProvisionSchemas.
 	StateFailed ProvisioningState = "failed"
+
+	// StateDeprovisioned indicates the tenant has been deprovisioned (soft deleted).
+	// The schema data still exists but is marked for eventual cleanup.
+	// This is a terminal state - provisioning cannot be retried.
+	StateDeprovisioned ProvisioningState = "deprovisioned"
 )
 
 // IsValid returns true if the state is a recognized provisioning state.
 func (s ProvisioningState) IsValid() bool {
 	switch s {
-	case StatePending, StateInProgress, StateActive, StateFailed:
+	case StatePending, StateInProgress, StateActive, StateFailed, StateDeprovisioned:
 		return true
 	default:
 		return false
 	}
 }
 
-// IsTerminal returns true if the state is a final state (active or permanently failed).
+// IsTerminal returns true if the state is a final state that cannot transition further.
 func (s ProvisioningState) IsTerminal() bool {
-	return s == StateActive || s == StateFailed
+	return s == StateActive || s == StateFailed || s == StateDeprovisioned
 }
 
 // ProvisioningStatus tracks the state of schema provisioning for a tenant.
@@ -144,6 +178,10 @@ type ProvisioningStatus struct {
 
 	// UpdatedAt is when the status was last modified.
 	UpdatedAt time.Time
+
+	// DeprovisionedAt is when the tenant was marked as deprovisioned.
+	// Nil if the tenant is still active. Used for data retention policy enforcement.
+	DeprovisionedAt *time.Time
 }
 
 // ServiceSchemaStatus tracks provisioning progress for a single service's schema.
@@ -204,6 +242,12 @@ type Config struct {
 	// ProvisioningTimeout is the maximum time allowed for provisioning all schemas.
 	// Default: 30 seconds.
 	ProvisioningTimeout time.Duration
+
+	// DataRetentionPeriod is the minimum time that must elapse after deprovisioning
+	// before schema data can be purged. This ensures compliance with data retention
+	// regulations (e.g., financial record keeping requirements).
+	// Default: 7 years (2555 days) for financial services compliance.
+	DataRetentionPeriod time.Duration
 }
 
 // DefaultConfig returns a configuration with standard BIAN services.
@@ -217,5 +261,6 @@ func DefaultConfig() *Config {
 			{Name: "payment-order", MigrationPath: "services/payment-order/migrations"},
 		},
 		ProvisioningTimeout: 30 * time.Second,
+		DataRetentionPeriod: 7 * 365 * 24 * time.Hour, // 7 years
 	}
 }

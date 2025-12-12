@@ -89,7 +89,7 @@ func TestSchemaProvisioner_ProvisionSchemas_Failure(t *testing.T) {
 	assert.Contains(t, status.ErrorMessage, "database connection failed")
 }
 
-func TestSchemaProvisioner_DeprovisionSchemas(t *testing.T) {
+func TestSchemaProvisioner_DeprovisionSchemas_SoftDelete(t *testing.T) {
 	services := []ServiceConfig{
 		{Name: "party", MigrationPath: "services/party/migrations"},
 	}
@@ -101,16 +101,18 @@ func TestSchemaProvisioner_DeprovisionSchemas(t *testing.T) {
 	err := provisioner.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
-	// Then deprovision
+	// Then deprovision (soft delete)
 	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Verify deprovisioning was recorded
 	assert.Len(t, provisioner.DeprovisioningCalls, 1)
 
-	// Verify status is gone
-	_, err = provisioner.GetProvisioningStatus(context.Background(), tenantID)
-	assert.ErrorIs(t, err, ErrProvisioningStatusNotFound)
+	// Verify status still exists but is marked as deprovisioned (soft delete)
+	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateDeprovisioned, status.State)
+	assert.NotNil(t, status.DeprovisionedAt)
 }
 
 func TestSchemaProvisioner_DeprovisionSchemas_Idempotent(t *testing.T) {
@@ -119,11 +121,90 @@ func TestSchemaProvisioner_DeprovisionSchemas_Idempotent(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
+	tenantID := organization.MustNewOrganizationID("idempotent_deprov")
+
+	// First provision
+	err := provisioner.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Deprovision twice
+	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Both calls should be recorded
+	assert.Len(t, provisioner.DeprovisioningCalls, 2)
+
+	// Status should still be deprovisioned
+	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateDeprovisioned, status.State)
+}
+
+func TestSchemaProvisioner_DeprovisionSchemas_NotFound(t *testing.T) {
+	provisioner := NewMockProvisioner(nil)
+
 	tenantID := organization.MustNewOrganizationID("never_existed")
 
-	// Deprovision non-existent tenant (should succeed - idempotent)
+	// Deprovision non-existent tenant should fail
 	err := provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	assert.ErrorIs(t, err, ErrProvisioningStatusNotFound)
+}
+
+func TestSchemaProvisioner_PurgeSchemas(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "services/party/migrations"},
+	}
+	provisioner := NewMockProvisioner(services)
+
+	tenantID := organization.MustNewOrganizationID("purge_tenant")
+
+	// Provision then deprovision
+	_ = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	_ = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+
+	// Purge should succeed (no retention period configured)
+	err := provisioner.PurgeSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
+
+	// Verify purge was recorded
+	assert.Len(t, provisioner.PurgeCalls, 1)
+}
+
+func TestSchemaProvisioner_PurgeSchemas_NotDeprovisioned(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "services/party/migrations"},
+	}
+	provisioner := NewMockProvisioner(services)
+
+	tenantID := organization.MustNewOrganizationID("active_tenant")
+
+	// Provision but don't deprovision
+	_ = provisioner.ProvisionSchemas(context.Background(), tenantID)
+
+	// Purge should fail - tenant is still active
+	err := provisioner.PurgeSchemas(context.Background(), tenantID)
+	assert.ErrorIs(t, err, ErrNotDeprovisioned)
+}
+
+func TestSchemaProvisioner_PurgeSchemas_RetentionPeriodNotElapsed(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "services/party/migrations"},
+	}
+	provisioner := NewMockProvisioner(services)
+	provisioner.DataRetentionPeriod = 7 * 24 * time.Hour // 7 days
+
+	tenantID := organization.MustNewOrganizationID("retention_tenant")
+
+	// Provision then deprovision
+	_ = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	_ = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+
+	// Purge should fail - retention period not elapsed
+	err := provisioner.PurgeSchemas(context.Background(), tenantID)
+	assert.ErrorIs(t, err, ErrRetentionPeriodNotElapsed)
 }
 
 func TestSchemaProvisioner_GetProvisioningStatus_NotFound(t *testing.T) {
@@ -163,6 +244,7 @@ func TestProvisioningState_IsValid(t *testing.T) {
 		{StateInProgress, true},
 		{StateActive, true},
 		{StateFailed, true},
+		{StateDeprovisioned, true},
 		{ProvisioningState("unknown"), false},
 		{ProvisioningState(""), false},
 	}
@@ -183,6 +265,7 @@ func TestProvisioningState_IsTerminal(t *testing.T) {
 		{StateInProgress, false},
 		{StateActive, true},
 		{StateFailed, true},
+		{StateDeprovisioned, true},
 	}
 
 	for _, tt := range tests {
@@ -197,6 +280,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	assert.Len(t, config.Services, 5)
 	assert.Equal(t, 30*time.Second, config.ProvisioningTimeout)
+	assert.Equal(t, 7*365*24*time.Hour, config.DataRetentionPeriod) // 7 years
 
 	// Verify expected services
 	serviceNames := make([]string, len(config.Services))
