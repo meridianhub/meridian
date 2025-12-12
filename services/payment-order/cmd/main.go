@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/service"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
@@ -134,17 +137,35 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create payment order service: %w", err)
 	}
 
+	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
+	authInterceptor, err := initAuth(ctx, logger)
+	if err != nil {
+		return fmt.Errorf("failed to initialize auth: %w", err)
+	}
+
 	// Create gRPC server with interceptor chain
-	// Order: tracing → recovery (recovery last to catch all panics)
+	// Order: tracing → auth → recovery (recovery last to catch all panics)
+	var unaryInterceptors []grpc.UnaryServerInterceptor
+	var streamInterceptors []grpc.StreamServerInterceptor
+
+	// 1. Tracing (always first for full request coverage)
+	unaryInterceptors = append(unaryInterceptors, tracer.UnaryServerInterceptor())
+	streamInterceptors = append(streamInterceptors, tracer.StreamServerInterceptor())
+
+	// 2. Auth (JWT validation with JWKS - optional)
+	if authInterceptor != nil {
+		unaryInterceptors = append(unaryInterceptors, authInterceptor.UnaryInterceptor())
+		streamInterceptors = append(streamInterceptors, authInterceptor.StreamInterceptor())
+		logger.Info("auth interceptor enabled in chain")
+	}
+
+	// 3. Recovery (last in chain to catch all panics)
+	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
+	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(logger))
+
 	grpcServer := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(
-			tracer.UnaryServerInterceptor(),
-			interceptors.RecoveryUnaryInterceptor(logger),
-		),
-		grpc.ChainStreamInterceptor(
-			tracer.StreamServerInterceptor(),
-			interceptors.RecoveryStreamInterceptor(logger),
-		),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
 	)
 
 	// Register gRPC services
@@ -514,4 +535,96 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return value
+}
+
+// getEnvAsBool returns the environment variable value as bool or default
+func getEnvAsBool(key string, defaultValue bool) bool {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	switch strings.ToLower(valueStr) {
+	case "true", "1", "yes":
+		return true
+	case "false", "0", "no":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+// initAuth initializes the JWT authentication interceptor if enabled.
+// Returns nil if AUTH_ENABLED is false (default), allowing unauthenticated requests.
+//
+// Environment variables:
+//   - AUTH_ENABLED: Set to "true" to enable JWT authentication (default: false)
+//   - JWKS_URL: JWKS endpoint URL for JWT validation (required when enabled)
+//   - JWKS_CACHE_TTL: How long to cache JWKS keys (default: 1h)
+//   - JWKS_REFRESH_TTL: Background refresh interval for JWKS (default: 30m)
+//   - JWKS_HTTP_TIMEOUT: HTTP client timeout for JWKS fetch (default: 10s)
+//   - MULTI_ORG_MODE: Set to "true" to require organization_id claim in JWT
+//     (read directly by interceptor via auth.MultiOrgModeEnvVar at request time)
+func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, error) {
+	enabled := getEnvAsBool("AUTH_ENABLED", false)
+	if !enabled {
+		logger.Info("auth disabled (set AUTH_ENABLED=true to enable)")
+		return nil, nil //nolint:nilnil // Disabled mode intentionally returns no interceptor and no error
+	}
+
+	// Load JWKS configuration
+	jwksURL := getEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
+	cacheTTL := getEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour)
+	refreshTTL := getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
+
+	// Create JWKS provider with HTTP client
+	httpTimeout := getEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
+	httpClient := &http.Client{
+		Timeout: httpTimeout,
+	}
+	jwksConfig := &auth.JWKSProviderConfig{
+		URL:        jwksURL,
+		Client:     httpClient,
+		CacheTTL:   cacheTTL,
+		RefreshTTL: refreshTTL,
+	}
+
+	provider, err := auth.NewJWKSProvider(ctx, jwksConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWKS provider: %w", err)
+	}
+
+	// Create JWT validator
+	validator, err := auth.NewJWTValidatorWithJWKS(provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWT validator: %w", err)
+	}
+
+	// Create interceptor with bypass methods for health checks and reflection
+	interceptorConfig := &auth.InterceptorConfig{
+		JWKSValidator: validator,
+		BypassMethods: []string{
+			"/grpc.health.v1.Health/Check",
+			"/grpc.health.v1.Health/Watch",
+			"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
+		},
+	}
+
+	interceptor, err := auth.NewAuthInterceptor(interceptorConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create auth interceptor: %w", err)
+	}
+
+	// Log multi-org mode status for visibility.
+	multiOrgMode := getEnvAsBool("MULTI_ORG_MODE", false)
+	logger.Debug("auth interceptor initialized",
+		"jwks_url", jwksURL,
+		"cache_ttl", cacheTTL,
+		"refresh_ttl", refreshTTL,
+		"http_timeout", httpTimeout,
+		"multi_org_mode", multiOrgMode,
+		"bypass_methods", len(interceptorConfig.BypassMethods))
+
+	return interceptor, nil
 }
