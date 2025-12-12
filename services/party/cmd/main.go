@@ -390,6 +390,7 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 			"/grpc.health.v1.Health/Check",
 			"/grpc.health.v1.Health/Watch",
 			"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
 		},
 	}
 

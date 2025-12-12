@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -147,14 +149,17 @@ func TestInitAuth_DisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestInitAuth_EnabledWithInvalidJWKSURL(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+func TestInitAuth_EnabledWithInvalidJWKSResponse(t *testing.T) {
+	// Use httptest server to return invalid JWKS response (deterministic, no network flakiness)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal server error"))
+	}))
+	defer ts.Close()
 
-	// Enable auth but with an invalid JWKS URL
+	// Enable auth with httptest server URL
 	t.Setenv("AUTH_ENABLED", "true")
-	t.Setenv("JWKS_URL", "http://invalid-host-that-does-not-exist:9999/jwks")
+	t.Setenv("JWKS_URL", ts.URL)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelError,
@@ -165,9 +170,9 @@ func TestInitAuth_EnabledWithInvalidJWKSURL(t *testing.T) {
 
 	interceptor, err := initAuth(ctx, logger)
 
-	// Should fail because JWKS URL is unreachable
+	// Should fail because JWKS response is invalid
 	if err == nil {
-		t.Errorf("initAuth() error = nil, want error for invalid JWKS URL")
+		t.Errorf("initAuth() error = nil, want error for invalid JWKS response")
 	}
 
 	if interceptor != nil {
@@ -176,13 +181,8 @@ func TestInitAuth_EnabledWithInvalidJWKSURL(t *testing.T) {
 }
 
 func TestInitAuth_UsesConfiguredValues(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test in short mode")
-	}
-
 	// This test verifies that configured values are read from environment
-	// We can't fully test without a real JWKS server, but we can verify
-	// that the environment variables are being read
+	// It only exercises cheap environment-parsing helpers, no network calls
 
 	t.Setenv("AUTH_ENABLED", "true")
 	t.Setenv("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
