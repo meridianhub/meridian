@@ -55,8 +55,10 @@ flowchart TB
     PO -->|"SQL"| DB
     Tenant -->|"SQL"| DB
 
-    %% Redis (optional)
-    PK -.->|"Idempotency (Redis, optional)"| Redis
+    %% Redis (optional idempotency)
+    PK -.->|"Idempotency (optional)"| Redis
+    FA -.->|"Idempotency (optional)"| Redis
+    PO -.->|"Idempotency (optional)"| Redis
 
     classDef service fill:#4a90d9,stroke:#2d5a87,color:#fff
     classDef infra fill:#50c878,stroke:#2d7a4a,color:#fff
@@ -153,12 +155,14 @@ Apache Kafka provides event streaming for asynchronous workflows:
 - **Topics:** Auto-created with `position-keeping.*` pattern
 - **Retention:** Configurable per topic
 
-### Redis (Optional Caching)
+### Redis (Optional Idempotency)
 
-Redis provides optional caching and idempotency:
+Redis provides optional distributed idempotency for exactly-once semantics:
 
 - **Use case:** Idempotency key storage for duplicate request detection
+- **Services:** PositionKeeping, FinancialAccounting, PaymentOrder
 - **Configuration:** Disabled by default (`REDIS_ENABLED=false`)
+- **Fallback:** Services degrade gracefully when Redis unavailable
 
 ## Service Ports
 
