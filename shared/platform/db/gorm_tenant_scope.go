@@ -8,23 +8,23 @@ import (
 	"log/slog"
 
 	"github.com/lib/pq"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
 
 // hashOrgID creates a short, privacy-preserving hash of the org ID for logging.
 // This allows correlation in logs without exposing the actual org ID.
-func hashOrgID(orgID organization.OrganizationID) string {
+func hashOrgID(orgID tenant.TenantID) string {
 	h := sha256.Sum256([]byte(orgID))
 	return hex.EncodeToString(h[:8]) // First 8 bytes = 16 hex chars
 }
 
-// WithGormOrganizationScope sets the PostgreSQL search_path for multi-tenant isolation using GORM.
+// WithGormTenantScope sets the PostgreSQL search_path for multi-tenant isolation using GORM.
 // This must be called at the start of a transaction to ensure the search_path is transaction-scoped.
 //
 // The function:
-//  1. Extracts the organization ID from context using organization.FromContext
-//  2. Returns ErrMissingOrganizationContext if organization is missing (fail-fast)
+//  1. Extracts the tenant ID from context using tenant.FromContext
+//  2. Returns ErrMissingTenantContext if tenant is missing (fail-fast)
 //  3. Generates schema name via orgID.SchemaName() (returns "org_{id}")
 //  4. Executes SET LOCAL search_path TO <schema>, public
 //  5. Returns the same DB for chaining
@@ -38,18 +38,18 @@ func hashOrgID(orgID organization.OrganizationID) string {
 // Example usage with GORM transactions:
 //
 //	err := db.Transaction(func(tx *gorm.DB) error {
-//	    tx, err := db.WithGormOrganizationScope(ctx, tx)
+//	    tx, err := db.WithGormTenantScope(ctx, tx)
 //	    if err != nil {
 //	        return err
 //	    }
-//	    // All queries now target the organization's schema
+//	    // All queries now target the tenant.s schema
 //	    return tx.Create(&entity).Error
 //	})
-func WithGormOrganizationScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
-	orgID, ok := organization.FromContext(ctx)
+func WithGormTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
+	orgID, ok := tenant.FromContext(ctx)
 	if !ok {
-		slog.DebugContext(ctx, "organization scope: missing org context, returning error")
-		return nil, organization.ErrMissingOrganizationContext
+		slog.DebugContext(ctx, "tenant scope: missing tenant context, returning error")
+		return nil, tenant.ErrMissingTenantContext
 	}
 
 	// Quote the schema name to prevent SQL injection
@@ -61,30 +61,30 @@ func WithGormOrganizationScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, erro
 	// which properly escapes any special characters including quotes and null bytes.
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
 	if err := tx.Exec(query).Error; err != nil {
-		slog.ErrorContext(ctx, "organization scope: failed to set search_path",
+		slog.ErrorContext(ctx, "tenant scope: failed to set search_path",
 			"org_hash", hashOrgID(orgID),
 			"error", err)
-		return nil, fmt.Errorf("failed to set organization schema scope: %w", err)
+		return nil, fmt.Errorf("failed to set tenant schema scope: %w", err)
 	}
 
-	slog.DebugContext(ctx, "organization scope: search_path set successfully",
+	slog.DebugContext(ctx, "tenant scope: search_path set successfully",
 		"org_hash", hashOrgID(orgID))
 	return tx, nil
 }
 
-// MustWithGormOrganizationScope is like WithGormOrganizationScope but panics on error.
-// Use only when organization context is guaranteed to be present (e.g., after
+// MustWithGormTenantScope is like WithGormTenantScope but panics on error.
+// Use only when tenant context is guaranteed to be present (e.g., after
 // middleware validation).
-func MustWithGormOrganizationScope(ctx context.Context, tx *gorm.DB) *gorm.DB {
-	result, err := WithGormOrganizationScope(ctx, tx)
+func MustWithGormTenantScope(ctx context.Context, tx *gorm.DB) *gorm.DB {
+	result, err := WithGormTenantScope(ctx, tx)
 	if err != nil {
-		panic(fmt.Sprintf("gorm organization scope failed: %v", err))
+		panic(fmt.Sprintf("gorm tenant scope failed: %v", err))
 	}
 	return result
 }
 
 // WithGormOrganizationTransaction provides a helper for running GORM operations
-// within a transaction with organization scope automatically set.
+// within a transaction with tenant scope automatically set.
 //
 // This is the recommended way to perform multi-tenant database operations with GORM.
 //
@@ -95,7 +95,7 @@ func MustWithGormOrganizationScope(ctx context.Context, tx *gorm.DB) *gorm.DB {
 //	})
 func WithGormOrganizationTransaction(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		tx, err := WithGormOrganizationScope(ctx, tx)
+		tx, err := WithGormTenantScope(ctx, tx)
 		if err != nil {
 			return err
 		}

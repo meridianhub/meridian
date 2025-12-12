@@ -16,7 +16,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,7 +72,7 @@ func setupPostgresWithOrgSchemas(ctx context.Context, t *testing.T, orgs ...stri
 
 	// Create organization schemas with identical table structure
 	for _, orgID := range orgs {
-		org := organization.MustNewOrganizationID(orgID)
+		org := tenant.MustNewTenantID(orgID)
 		schemaName := org.SchemaName()
 		quotedSchema := pq.QuoteIdentifier(schemaName)
 
@@ -146,14 +146,14 @@ func TestOrganizationDatabaseIsolation(t *testing.T) {
 	ctx := context.Background()
 	tc := setupPostgresWithOrgSchemas(ctx, t, "acme_bank", "motive_corp")
 
-	orgA := organization.MustNewOrganizationID("acme_bank")
-	orgB := organization.MustNewOrganizationID("motive_corp")
+	orgA := tenant.MustNewTenantID("acme_bank")
+	orgB := tenant.MustNewTenantID("motive_corp")
 
 	t.Run("organization_A_cannot_see_organization_B_data", func(t *testing.T) {
 		// Insert account in org A
-		ctxA := organization.WithOrganization(ctx, orgA)
+		ctxA := tenant.WithTenant(ctx, orgA)
 		err := db.WithTransaction(ctxA, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxA, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxA, tx); err != nil {
 				return err
 			}
 			_, err := tx.ExecContext(ctxA,
@@ -164,10 +164,10 @@ func TestOrganizationDatabaseIsolation(t *testing.T) {
 		require.NoError(t, err, "failed to insert account in org A")
 
 		// Query with org B context → expect NOT_FOUND
-		ctxB := organization.WithOrganization(ctx, orgB)
+		ctxB := tenant.WithTenant(ctx, orgB)
 		var count int
 		err = db.WithTransaction(ctxB, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxB, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxB, tx); err != nil {
 				return err
 			}
 			return tx.QueryRowContext(ctxB,
@@ -180,9 +180,9 @@ func TestOrganizationDatabaseIsolation(t *testing.T) {
 
 	t.Run("same_account_id_in_different_organizations_no_conflict", func(t *testing.T) {
 		// Insert same account ID in both organizations
-		ctxA := organization.WithOrganization(ctx, orgA)
+		ctxA := tenant.WithTenant(ctx, orgA)
 		err := db.WithTransaction(ctxA, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxA, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxA, tx); err != nil {
 				return err
 			}
 			_, err := tx.ExecContext(ctxA,
@@ -192,9 +192,9 @@ func TestOrganizationDatabaseIsolation(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		ctxB := organization.WithOrganization(ctx, orgB)
+		ctxB := tenant.WithTenant(ctx, orgB)
 		err = db.WithTransaction(ctxB, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxB, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxB, tx); err != nil {
 				return err
 			}
 			_, err := tx.ExecContext(ctxB,
@@ -209,7 +209,7 @@ func TestOrganizationDatabaseIsolation(t *testing.T) {
 		var balanceA, balanceB float64
 
 		err = db.WithTransaction(ctxA, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxA, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxA, tx); err != nil {
 				return err
 			}
 			return tx.QueryRowContext(ctxA,
@@ -221,7 +221,7 @@ func TestOrganizationDatabaseIsolation(t *testing.T) {
 		assert.Equal(t, 500.00, balanceA)
 
 		err = db.WithTransaction(ctxB, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxB, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxB, tx); err != nil {
 				return err
 			}
 			return tx.QueryRowContext(ctxB,
@@ -248,11 +248,11 @@ func TestSearchPathRevertsAfterTransaction(t *testing.T) {
 	require.NoError(t, err)
 
 	// Run a transaction with organization scope
-	orgID := organization.MustNewOrganizationID("test_org")
-	orgCtx := organization.WithOrganization(ctx, orgID)
+	orgID := tenant.MustNewTenantID("test_org")
+	orgCtx := tenant.WithTenant(ctx, orgID)
 
 	err = db.WithTransaction(orgCtx, tc.pool, func(tx db.DB) error {
-		if _, err := db.WithOrganizationScope(orgCtx, tx); err != nil {
+		if _, err := db.WithTenantScope(orgCtx, tx); err != nil {
 			return err
 		}
 
@@ -273,8 +273,8 @@ func TestSearchPathRevertsAfterTransaction(t *testing.T) {
 	assert.Equal(t, originalSearchPath, afterSearchPath, "search_path should revert after transaction - ensures no connection pool leakage")
 }
 
-func TestSQLInjectionPreventionViaOrganizationID(t *testing.T) {
-	// Test that OrganizationID validation prevents SQL injection attempts
+func TestSQLInjectionPreventionViaTenantID(t *testing.T) {
+	// Test that TenantID validation prevents SQL injection attempts
 	testCases := []struct {
 		name          string
 		maliciousID   string
@@ -324,7 +324,7 @@ func TestSQLInjectionPreventionViaOrganizationID(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := organization.NewOrganizationID(tc.maliciousID)
+			_, err := tenant.NewTenantID(tc.maliciousID)
 			if tc.expectError {
 				assert.Error(t, err, "expected error for malicious organization ID: %s", tc.maliciousID)
 			} else {
@@ -350,7 +350,7 @@ func TestOrganizationSchemaNameQuoting(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.orgID, func(t *testing.T) {
-			orgID := organization.MustNewOrganizationID(tc.orgID)
+			orgID := tenant.MustNewTenantID(tc.orgID)
 			schemaName := orgID.SchemaName()
 			assert.Equal(t, tc.expectedSchemaName, schemaName)
 
@@ -366,9 +366,9 @@ func TestOrganizationSchemaNameQuoting(t *testing.T) {
 	// PostgreSQL identifiers are case-insensitive by default, so ACME and acme
 	// must resolve to the same schema to prevent accidental cross-org access
 	t.Run("case_insensitive_schema_names_handled", func(t *testing.T) {
-		orgUpper := organization.MustNewOrganizationID("ACME")
-		orgLower := organization.MustNewOrganizationID("acme")
-		orgMixed := organization.MustNewOrganizationID("Acme")
+		orgUpper := tenant.MustNewTenantID("ACME")
+		orgLower := tenant.MustNewTenantID("acme")
+		orgMixed := tenant.MustNewTenantID("Acme")
 
 		// All case variants should produce identical schema names
 		assert.Equal(t, orgUpper.SchemaName(), orgLower.SchemaName(),
@@ -390,30 +390,30 @@ func TestKafkaEventOrganizationHeader(t *testing.T) {
 
 	t.Run("organization_header_key_constant", func(t *testing.T) {
 		// Verify the header key constant is defined correctly
-		assert.Equal(t, "x-org-id", organization.OrgIDKey,
-			"organization header key should be 'x-org-id'")
+		assert.Equal(t, "x-tenant-id", tenant.TenantIDKey,
+			"tenant header key should be 'x-tenant-id'")
 	})
 
 	t.Run("organization_context_extraction", func(t *testing.T) {
 		ctx := context.Background()
-		orgID := organization.MustNewOrganizationID("acme_bank")
-		ctxWithOrg := organization.WithOrganization(ctx, orgID)
+		orgID := tenant.MustNewTenantID("acme_bank")
+		ctxWithOrg := tenant.WithTenant(ctx, orgID)
 
-		extractedOrg, ok := organization.FromContext(ctxWithOrg)
+		extractedOrg, ok := tenant.FromContext(ctxWithOrg)
 		assert.True(t, ok, "should extract organization from context")
 		assert.Equal(t, "acme_bank", extractedOrg.String())
 	})
 
 	t.Run("missing_organization_context_detected", func(t *testing.T) {
 		ctx := context.Background()
-		_, ok := organization.FromContext(ctx)
+		_, ok := tenant.FromContext(ctx)
 		assert.False(t, ok, "should detect missing organization in context")
 	})
 
 	t.Run("require_organization_context_returns_error", func(t *testing.T) {
 		ctx := context.Background()
-		_, err := organization.RequireFromContext(ctx)
-		assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+		_, err := tenant.RequireFromContext(ctx)
+		assert.ErrorIs(t, err, tenant.ErrMissingTenantContext)
 	})
 }
 
@@ -426,7 +426,7 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 	t.Run("key_includes_organization_prefix", func(t *testing.T) {
 		keyOrgA := idempotency.Key{
-			OrganizationID: "acme_bank",
+			TenantID: "acme_bank",
 			Namespace:      "current-account",
 			Operation:      "deposit",
 			EntityID:       "ACC-123",
@@ -434,7 +434,7 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 		}
 
 		keyOrgB := idempotency.Key{
-			OrganizationID: "motive_corp",
+			TenantID: "motive_corp",
 			Namespace:      "current-account",
 			Operation:      "deposit",
 			EntityID:       "ACC-123",
@@ -454,7 +454,7 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 	t.Run("key_format_with_organization", func(t *testing.T) {
 		key := idempotency.Key{
-			OrganizationID: "acme_bank",
+			TenantID: "acme_bank",
 			Namespace:      "current-account",
 			Operation:      "create",
 			EntityID:       "ACC-123",
@@ -467,7 +467,7 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 	t.Run("key_format_without_organization_single_org_mode", func(t *testing.T) {
 		key := idempotency.Key{
-			OrganizationID: "", // Single-org mode
+			TenantID: "", // Single-tenant mode
 			Namespace:      "current-account",
 			Operation:      "create",
 			EntityID:       "ACC-123",
@@ -480,7 +480,7 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 	t.Run("key_validation_rejects_colon_in_org_id", func(t *testing.T) {
 		key := idempotency.Key{
-			OrganizationID: "org:with:colons",
+			TenantID: "org:with:colons",
 			Namespace:      "test",
 			Operation:      "test",
 			EntityID:       "123",
@@ -488,7 +488,7 @@ func TestIdempotencyKeyOrganizationIsolation(t *testing.T) {
 
 		err := key.Validate()
 		assert.ErrorIs(t, err, idempotency.ErrInvalidKey,
-			"key with colon in OrganizationID should be rejected")
+			"key with colon in TenantID should be rejected")
 	})
 }
 
@@ -505,7 +505,7 @@ func TestIdempotencyKeyOrganizationIsolation_Integration(t *testing.T) {
 
 	// Same request ID but different organizations
 	keyOrgA := idempotency.Key{
-		OrganizationID: "acme_bank",
+		TenantID: "acme_bank",
 		Namespace:      "test",
 		Operation:      "create",
 		EntityID:       "entity-1",
@@ -513,7 +513,7 @@ func TestIdempotencyKeyOrganizationIsolation_Integration(t *testing.T) {
 	}
 
 	keyOrgB := idempotency.Key{
-		OrganizationID: "motive_corp",
+		TenantID: "motive_corp",
 		Namespace:      "test",
 		Operation:      "create",
 		EntityID:       "entity-1",
@@ -547,7 +547,7 @@ func TestIdempotencyKeyOrganizationIsolation_Integration(t *testing.T) {
 // 4. Security Tests (JWT/Auth)
 // =============================================================================
 
-func TestOrganizationIDFormatValidation(t *testing.T) {
+func TestTenantIDFormatValidation(t *testing.T) {
 	// Comprehensive validation of organization ID format rules
 
 	validCases := []string{
@@ -564,7 +564,7 @@ func TestOrganizationIDFormatValidation(t *testing.T) {
 
 	for _, id := range validCases {
 		t.Run("valid_"+id, func(t *testing.T) {
-			orgID, err := organization.NewOrganizationID(id)
+			orgID, err := tenant.NewTenantID(id)
 			require.NoError(t, err, "expected %q to be valid", id)
 			assert.Equal(t, id, orgID.String())
 		})
@@ -589,8 +589,8 @@ func TestOrganizationIDFormatValidation(t *testing.T) {
 
 	for _, tc := range invalidCases {
 		t.Run("invalid_"+tc.name, func(t *testing.T) {
-			_, err := organization.NewOrganizationID(tc.id)
-			assert.ErrorIs(t, err, organization.ErrInvalidOrganizationID,
+			_, err := tenant.NewTenantID(tc.id)
+			assert.ErrorIs(t, err, tenant.ErrInvalidTenantID,
 				"expected %q to be invalid", tc.id)
 		})
 	}
@@ -601,20 +601,20 @@ func TestMissingOrganizationContext(t *testing.T) {
 
 	t.Run("from_context_returns_false", func(t *testing.T) {
 		ctx := context.Background()
-		_, ok := organization.FromContext(ctx)
+		_, ok := tenant.FromContext(ctx)
 		assert.False(t, ok)
 	})
 
 	t.Run("require_from_context_returns_error", func(t *testing.T) {
 		ctx := context.Background()
-		_, err := organization.RequireFromContext(ctx)
-		assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+		_, err := tenant.RequireFromContext(ctx)
+		assert.ErrorIs(t, err, tenant.ErrMissingTenantContext)
 	})
 
 	t.Run("must_from_context_panics", func(t *testing.T) {
 		ctx := context.Background()
 		assert.Panics(t, func() {
-			_ = organization.MustFromContext(ctx)
+			_ = tenant.MustFromContext(ctx)
 		}, "MustFromContext should panic when organization is missing")
 	})
 }
@@ -625,14 +625,14 @@ func TestOrganizationContextIsolation(t *testing.T) {
 	t.Run("separate_contexts_have_separate_organizations", func(t *testing.T) {
 		ctx := context.Background()
 
-		orgA := organization.MustNewOrganizationID("org_a")
-		orgB := organization.MustNewOrganizationID("org_b")
+		orgA := tenant.MustNewTenantID("org_a")
+		orgB := tenant.MustNewTenantID("org_b")
 
-		ctxA := organization.WithOrganization(ctx, orgA)
-		ctxB := organization.WithOrganization(ctx, orgB)
+		ctxA := tenant.WithTenant(ctx, orgA)
+		ctxB := tenant.WithTenant(ctx, orgB)
 
-		extractedA, _ := organization.FromContext(ctxA)
-		extractedB, _ := organization.FromContext(ctxB)
+		extractedA, _ := tenant.FromContext(ctxA)
+		extractedB, _ := tenant.FromContext(ctxB)
 
 		assert.Equal(t, "org_a", extractedA.String())
 		assert.Equal(t, "org_b", extractedB.String())
@@ -641,32 +641,32 @@ func TestOrganizationContextIsolation(t *testing.T) {
 
 	t.Run("child_context_inherits_organization", func(t *testing.T) {
 		ctx := context.Background()
-		orgID := organization.MustNewOrganizationID("parent_org")
-		ctxWithOrg := organization.WithOrganization(ctx, orgID)
+		orgID := tenant.MustNewTenantID("parent_org")
+		ctxWithOrg := tenant.WithTenant(ctx, orgID)
 
 		// Create child context (e.g., with timeout)
 		childCtx, cancel := context.WithTimeout(ctxWithOrg, 5*time.Second)
 		defer cancel()
 
-		extracted, ok := organization.FromContext(childCtx)
+		extracted, ok := tenant.FromContext(childCtx)
 		assert.True(t, ok, "child context should inherit organization")
 		assert.Equal(t, "parent_org", extracted.String())
 	})
 
 	t.Run("overriding_organization_in_child_context", func(t *testing.T) {
 		ctx := context.Background()
-		parentOrg := organization.MustNewOrganizationID("parent_org")
-		childOrg := organization.MustNewOrganizationID("child_org")
+		parentOrg := tenant.MustNewTenantID("parent_org")
+		childOrg := tenant.MustNewTenantID("child_org")
 
-		ctxParent := organization.WithOrganization(ctx, parentOrg)
-		ctxChild := organization.WithOrganization(ctxParent, childOrg)
+		ctxParent := tenant.WithTenant(ctx, parentOrg)
+		ctxChild := tenant.WithTenant(ctxParent, childOrg)
 
 		// Parent context unchanged
-		extractedParent, _ := organization.FromContext(ctxParent)
+		extractedParent, _ := tenant.FromContext(ctxParent)
 		assert.Equal(t, "parent_org", extractedParent.String())
 
 		// Child context has new org
-		extractedChild, _ := organization.FromContext(ctxChild)
+		extractedChild, _ := tenant.FromContext(ctxChild)
 		assert.Equal(t, "child_org", extractedChild.String())
 	})
 }
@@ -683,13 +683,13 @@ func TestCrossOrganizationDataAccessBlocked(t *testing.T) {
 	ctx := context.Background()
 	tc := setupPostgresWithOrgSchemas(ctx, t, "org_united_nations", "org_motive")
 
-	orgUN := organization.MustNewOrganizationID("org_united_nations")
-	orgMotive := organization.MustNewOrganizationID("org_motive")
+	orgUN := tenant.MustNewTenantID("org_united_nations")
+	orgMotive := tenant.MustNewTenantID("org_motive")
 
 	// Insert data in UN organization
-	ctxUN := organization.WithOrganization(ctx, orgUN)
+	ctxUN := tenant.WithTenant(ctx, orgUN)
 	err := db.WithTransaction(ctxUN, tc.pool, func(tx db.DB) error {
-		if _, err := db.WithOrganizationScope(ctxUN, tx); err != nil {
+		if _, err := db.WithTenantScope(ctxUN, tx); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctxUN,
@@ -700,9 +700,9 @@ func TestCrossOrganizationDataAccessBlocked(t *testing.T) {
 	require.NoError(t, err)
 
 	// Insert data in Motive organization
-	ctxMotive := organization.WithOrganization(ctx, orgMotive)
+	ctxMotive := tenant.WithTenant(ctx, orgMotive)
 	err = db.WithTransaction(ctxMotive, tc.pool, func(tx db.DB) error {
-		if _, err := db.WithOrganizationScope(ctxMotive, tx); err != nil {
+		if _, err := db.WithTenantScope(ctxMotive, tx); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctxMotive,
@@ -715,7 +715,7 @@ func TestCrossOrganizationDataAccessBlocked(t *testing.T) {
 	t.Run("motive_cannot_see_un_accounts", func(t *testing.T) {
 		var count int
 		err := db.WithTransaction(ctxMotive, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxMotive, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxMotive, tx); err != nil {
 				return err
 			}
 			return tx.QueryRowContext(ctxMotive,
@@ -729,7 +729,7 @@ func TestCrossOrganizationDataAccessBlocked(t *testing.T) {
 	t.Run("un_cannot_see_motive_accounts", func(t *testing.T) {
 		var count int
 		err := db.WithTransaction(ctxUN, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxUN, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxUN, tx); err != nil {
 				return err
 			}
 			return tx.QueryRowContext(ctxUN,
@@ -745,7 +745,7 @@ func TestCrossOrganizationDataAccessBlocked(t *testing.T) {
 		// when using organization-scoped context
 
 		err := db.WithTransaction(ctxMotive, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxMotive, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxMotive, tx); err != nil {
 				return err
 			}
 
@@ -772,24 +772,24 @@ func TestOrganizationInContext(t *testing.T) {
 
 	t.Run("organization_stored_in_context", func(t *testing.T) {
 		ctx := context.Background()
-		orgID := organization.MustNewOrganizationID("observable_org")
-		ctxWithOrg := organization.WithOrganization(ctx, orgID)
+		orgID := tenant.MustNewTenantID("observable_org")
+		ctxWithOrg := tenant.WithTenant(ctx, orgID)
 
-		extracted, ok := organization.FromContext(ctxWithOrg)
+		extracted, ok := tenant.FromContext(ctxWithOrg)
 		require.True(t, ok)
 		assert.Equal(t, "observable_org", extracted.String())
 	})
 
 	t.Run("organization_id_string_format", func(t *testing.T) {
 		// Verify the string format is suitable for logging/tracing
-		orgID := organization.MustNewOrganizationID("log_test_org")
+		orgID := tenant.MustNewTenantID("log_test_org")
 		assert.Equal(t, "log_test_org", orgID.String(),
 			"organization ID should be directly usable in logs")
 	})
 
 	t.Run("schema_name_format_for_metrics", func(t *testing.T) {
 		// Schema names could be used for metrics labeling
-		orgID := organization.MustNewOrganizationID("Metrics_Org")
+		orgID := tenant.MustNewTenantID("Metrics_Org")
 		schemaName := orgID.SchemaName()
 		assert.Equal(t, "org_metrics_org", schemaName,
 			"schema name should be lowercase for consistent metrics")
@@ -800,13 +800,13 @@ func TestOrganizationInContext(t *testing.T) {
 // 7. Additional Edge Case Tests
 // =============================================================================
 
-func TestOrganizationIDEdgeCases(t *testing.T) {
+func TestTenantIDEdgeCases(t *testing.T) {
 	t.Run("maximum_length_50_chars", func(t *testing.T) {
 		// 50 characters should be valid
 		maxLengthID := "a1234567890123456789012345678901234567890123456789"
 		assert.Len(t, maxLengthID, 50)
 
-		orgID, err := organization.NewOrganizationID(maxLengthID)
+		orgID, err := tenant.NewTenantID(maxLengthID)
 		require.NoError(t, err)
 		assert.Equal(t, maxLengthID, orgID.String())
 	})
@@ -815,27 +815,27 @@ func TestOrganizationIDEdgeCases(t *testing.T) {
 		tooLongID := "a12345678901234567890123456789012345678901234567890"
 		assert.Len(t, tooLongID, 51)
 
-		_, err := organization.NewOrganizationID(tooLongID)
+		_, err := tenant.NewTenantID(tooLongID)
 		assert.Error(t, err)
 	})
 
 	t.Run("single_char_minimum", func(t *testing.T) {
-		orgID, err := organization.NewOrganizationID("a")
+		orgID, err := tenant.NewTenantID("a")
 		require.NoError(t, err)
 		assert.Equal(t, "a", orgID.String())
 	})
 
 	t.Run("is_empty_check", func(t *testing.T) {
-		var emptyOrg organization.OrganizationID
+		var emptyOrg tenant.TenantID
 		assert.True(t, emptyOrg.IsEmpty())
 
-		nonEmptyOrg := organization.MustNewOrganizationID("not_empty")
+		nonEmptyOrg := tenant.MustNewTenantID("not_empty")
 		assert.False(t, nonEmptyOrg.IsEmpty())
 	})
 
 	t.Run("must_panics_on_invalid", func(t *testing.T) {
 		assert.Panics(t, func() {
-			organization.MustNewOrganizationID("invalid-hyphen")
+			tenant.MustNewTenantID("invalid-hyphen")
 		})
 	})
 }
@@ -851,21 +851,21 @@ func TestOrganizationDatabaseScopeErrors(t *testing.T) {
 	t.Run("missing_organization_context_returns_error", func(t *testing.T) {
 		// Context without organization
 		err := db.WithTransaction(ctx, tc.pool, func(tx db.DB) error {
-			_, err := db.WithOrganizationScope(ctx, tx) // Missing organization in context
+			_, err := db.WithTenantScope(ctx, tx) // Missing organization in context
 			return err
 		})
 
 		require.Error(t, err)
-		assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+		assert.ErrorIs(t, err, tenant.ErrMissingTenantContext)
 	})
 
 	t.Run("non_existent_schema_query_fails_gracefully", func(t *testing.T) {
 		// Create context with organization that has no schema
-		orgID := organization.MustNewOrganizationID("nonexistent_org")
-		orgCtx := organization.WithOrganization(ctx, orgID)
+		orgID := tenant.MustNewTenantID("nonexistent_org")
+		orgCtx := tenant.WithTenant(ctx, orgID)
 
 		err := db.WithTransaction(orgCtx, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(orgCtx, tx); err != nil {
+			if _, err := db.WithTenantScope(orgCtx, tx); err != nil {
 				return err
 			}
 
@@ -892,8 +892,8 @@ func TestConcurrentOrganizationAccess(t *testing.T) {
 	ctx := context.Background()
 	tc := setupPostgresWithOrgSchemas(ctx, t, "concurrent_a", "concurrent_b")
 
-	orgA := organization.MustNewOrganizationID("concurrent_a")
-	orgB := organization.MustNewOrganizationID("concurrent_b")
+	orgA := tenant.MustNewTenantID("concurrent_a")
+	orgB := tenant.MustNewTenantID("concurrent_b")
 
 	t.Run("parallel_transactions_maintain_isolation", func(t *testing.T) {
 		// Run multiple goroutines accessing different orgs concurrently
@@ -903,9 +903,9 @@ func TestConcurrentOrganizationAccess(t *testing.T) {
 		for i := 0; i < iterations; i++ {
 			// Org A transaction
 			go func(iter int) {
-				ctxA := organization.WithOrganization(ctx, orgA)
+				ctxA := tenant.WithTenant(ctx, orgA)
 				err := db.WithTransaction(ctxA, tc.pool, func(tx db.DB) error {
-					if _, err := db.WithOrganizationScope(ctxA, tx); err != nil {
+					if _, err := db.WithTenantScope(ctxA, tx); err != nil {
 						return err
 					}
 
@@ -934,9 +934,9 @@ func TestConcurrentOrganizationAccess(t *testing.T) {
 
 			// Org B transaction
 			go func(iter int) {
-				ctxB := organization.WithOrganization(ctx, orgB)
+				ctxB := tenant.WithTenant(ctx, orgB)
 				err := db.WithTransaction(ctxB, tc.pool, func(tx db.DB) error {
-					if _, err := db.WithOrganizationScope(ctxB, tx); err != nil {
+					if _, err := db.WithTenantScope(ctxB, tx); err != nil {
 						return err
 					}
 
@@ -971,11 +971,11 @@ func TestConcurrentOrganizationAccess(t *testing.T) {
 		}
 
 		// Verify isolation - org A should not see org B data and vice versa
-		ctxA := organization.WithOrganization(ctx, orgA)
+		ctxA := tenant.WithTenant(ctx, orgA)
 		var countA, countB int
 
 		err := db.WithTransaction(ctxA, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxA, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxA, tx); err != nil {
 				return err
 			}
 			return tx.QueryRowContext(ctxA,
@@ -984,7 +984,7 @@ func TestConcurrentOrganizationAccess(t *testing.T) {
 		require.NoError(t, err)
 
 		err = db.WithTransaction(ctxA, tc.pool, func(tx db.DB) error {
-			if _, err := db.WithOrganizationScope(ctxA, tx); err != nil {
+			if _, err := db.WithTenantScope(ctxA, tx); err != nil {
 				return err
 			}
 			return tx.QueryRowContext(ctxA,

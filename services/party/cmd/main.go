@@ -354,7 +354,7 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 //   - JWKS_CACHE_TTL: How long to cache JWKS keys (default: 1h)
 //   - JWKS_REFRESH_TTL: Background refresh interval for JWKS (default: 30m)
 //   - JWKS_HTTP_TIMEOUT: HTTP client timeout for JWKS fetch (default: 10s)
-//   - MULTI_ORG_MODE: Set to "true" to require organization_id claim in JWT
+//   - MULTI_TENANT_MODE: Set to "true" to require tenant_id claim in JWT
 //     (read directly by interceptor via auth.MultiOrgModeEnvVar at request time)
 //
 // Note: The JWKS provider starts a background refresh goroutine. This follows the
@@ -412,15 +412,15 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 	}
 
 	// Log multi-org mode status for visibility.
-	// Note: The auth interceptor reads MULTI_ORG_MODE directly from the environment
+	// Note: The auth interceptor reads MULTI_TENANT_MODE directly from the environment
 	// via os.Getenv(auth.MultiOrgModeEnvVar) at request time, not from config passed here.
-	multiOrgMode := getEnvAsBool("MULTI_ORG_MODE", false)
+	multiTenantMode := getEnvAsBool("MULTI_TENANT_MODE", false)
 	logger.Debug("auth interceptor initialized",
 		"jwks_url", jwksURL,
 		"cache_ttl", cacheTTL,
 		"refresh_ttl", refreshTTL,
 		"http_timeout", httpTimeout,
-		"multi_org_mode", multiOrgMode,
+		"multi_org_mode", multiTenantMode,
 		"bypass_methods", len(interceptorConfig.BypassMethods))
 
 	return interceptor, nil

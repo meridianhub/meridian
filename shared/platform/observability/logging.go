@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -32,14 +32,14 @@ const (
 
 // LogEntry represents a structured log entry
 type LogEntry struct {
-	Timestamp      string                 `json:"timestamp"`
-	Level          LogLevel               `json:"level"`
-	Message        string                 `json:"message"`
-	OrganizationID string                 `json:"organization_id,omitempty"`
-	CorrelationID  string                 `json:"correlation_id,omitempty"`
-	TraceID        string                 `json:"trace_id,omitempty"`
-	SpanID         string                 `json:"span_id,omitempty"`
-	Fields         map[string]interface{} `json:"fields,omitempty"`
+	Timestamp     string                 `json:"timestamp"`
+	Level         LogLevel               `json:"level"`
+	Message       string                 `json:"message"`
+	TenantID      string                 `json:"tenant_id,omitempty"`
+	CorrelationID string                 `json:"correlation_id,omitempty"`
+	TraceID       string                 `json:"trace_id,omitempty"`
+	SpanID        string                 `json:"span_id,omitempty"`
+	Fields        map[string]interface{} `json:"fields,omitempty"`
 }
 
 // NewLogger creates a new JSON logger
@@ -108,9 +108,9 @@ func (l *Logger) log(ctx context.Context, level LogLevel, msg string, fields ...
 
 	// Extract context values
 	if ctx != nil {
-		// Extract organization ID from context
-		if orgID, ok := organization.FromContext(ctx); ok && !orgID.IsEmpty() {
-			entry.OrganizationID = orgID.String()
+		// Extract tenant ID from context
+		if orgID, ok := tenant.FromContext(ctx); ok && !orgID.IsEmpty() {
+			entry.TenantID = orgID.String()
 		}
 
 		// Extract correlation ID from context

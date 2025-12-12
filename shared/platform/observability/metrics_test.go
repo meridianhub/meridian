@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -43,7 +43,7 @@ func TestRecordHTTPRequest(t *testing.T) {
 	mc := NewMetricsCollector()
 
 	// Create context with organization
-	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 
 	// Record a request
 	mc.RecordHTTPRequest(ctx, "GET", "/api/test", 200, 100*time.Millisecond)
@@ -66,7 +66,7 @@ func TestRecordHTTPRequest(t *testing.T) {
 func TestRecordHTTPRequest_WithoutOrganization(t *testing.T) {
 	mc := NewMetricsCollector()
 
-	// Record a request without organization context
+	// Record a request without tenant context
 	mc.RecordHTTPRequest(context.Background(), "GET", "/api/test", 200, 100*time.Millisecond)
 
 	// Verify counter was incremented with "unknown" organization
@@ -80,8 +80,8 @@ func TestRecordHTTPRequest_MultipleOrganizations(t *testing.T) {
 	mc := NewMetricsCollector()
 
 	// Create contexts for different organizations
-	ctxAcme := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
-	ctxMotive := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("motive"))
+	ctxAcme := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
+	ctxMotive := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("motive"))
 
 	// Record requests from different organizations
 	mc.RecordHTTPRequest(ctxAcme, "GET", "/api/accounts", 200, 100*time.Millisecond)
@@ -103,7 +103,7 @@ func TestRecordHTTPRequest_MultipleOrganizations(t *testing.T) {
 func TestRecordGRPCRequest(t *testing.T) {
 	mc := NewMetricsCollector()
 
-	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 	mc.RecordGRPCRequest(ctx, "PositionKeeping", "GetPosition", "OK")
 
 	count := testutil.ToFloat64(mc.GRPCServerHandledTotal.WithLabelValues("PositionKeeping", "GetPosition", "OK", "acme_bank"))
@@ -126,7 +126,7 @@ func TestRecordGRPCRequest_WithoutOrganization(t *testing.T) {
 func TestRecordDBQuery(t *testing.T) {
 	mc := NewMetricsCollector()
 
-	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 
 	// Record a query - we're just testing that it doesn't panic
 	mc.RecordDBQuery(ctx, "SELECT", "positions", 25*time.Millisecond)
@@ -145,7 +145,7 @@ func TestRecordDBQuery(t *testing.T) {
 func TestRecordKafkaPublish(t *testing.T) {
 	mc := NewMetricsCollector()
 
-	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 	mc.RecordKafkaPublish(ctx, "position.events", "success")
 
 	count := testutil.ToFloat64(mc.KafkaMessagesPublishedTotal.WithLabelValues("position.events", "success", "acme_bank"))
@@ -177,7 +177,7 @@ func TestMetricsHandler(t *testing.T) {
 	mc := NewMetricsCollector()
 
 	// Record some metrics
-	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 	mc.RecordHTTPRequest(ctx, "GET", "/test", 200, 100*time.Millisecond)
 
 	// Create a request to the metrics endpoint
@@ -246,7 +246,7 @@ func TestHTTPMiddleware_WithOrganization(t *testing.T) {
 
 	// Make a request with organization in context
 	req := httptest.NewRequest("GET", "/test", nil)
-	ctx := organization.WithOrganization(req.Context(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(req.Context(), tenant.MustNewTenantID("acme_bank"))
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -360,7 +360,7 @@ func findString(haystack, needle string) bool {
 // Benchmark tests
 func BenchmarkRecordHTTPRequest(b *testing.B) {
 	mc := NewMetricsCollector()
-	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -380,7 +380,7 @@ func BenchmarkRecordHTTPRequest_WithoutOrganization(b *testing.B) {
 
 func BenchmarkRecordDBQuery(b *testing.B) {
 	mc := NewMetricsCollector()
-	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -407,7 +407,7 @@ func TestGetOrganizationLabel(t *testing.T) {
 		},
 		{
 			name:     "with organization",
-			ctx:      organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank")),
+			ctx:      tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank")),
 			expected: "acme_bank",
 		},
 	}

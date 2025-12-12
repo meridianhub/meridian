@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/shared/pkg/clients"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 )
@@ -303,15 +303,15 @@ func TestWithTimeout_NegativeTimeout(t *testing.T) {
 func TestPropagateOrganization_Success(t *testing.T) {
 	t.Parallel()
 
-	orgID := organization.MustNewOrganizationID("acme_bank")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.MustNewTenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
 	result := clients.PropagateOrganization(ctx)
 
 	// Verify organization ID was added to outgoing metadata
 	md, ok := metadata.FromOutgoingContext(result)
 	assert.True(t, ok, "should have outgoing metadata")
-	assert.Equal(t, []string{"acme_bank"}, md.Get(organization.OrgIDKey))
+	assert.Equal(t, []string{"acme_bank"}, md.Get(tenant.TenantIDKey))
 }
 
 // TestPropagateOrganization_NoOrganization verifies context is unchanged when no organization exists
@@ -343,21 +343,21 @@ func TestPropagateOrganization_NilContext(t *testing.T) {
 	})
 }
 
-// TestPropagateOrganization_EmptyOrganizationID verifies empty org ID returns unchanged context
-func TestPropagateOrganization_EmptyOrganizationID(t *testing.T) {
+// TestPropagateTenant_EmptyTenantID verifies empty tenant ID returns unchanged context
+func TestPropagateTenant_EmptyTenantID(t *testing.T) {
 	t.Parallel()
 
 	// Create context with empty organization ID
-	ctx := organization.WithOrganization(context.Background(), organization.OrganizationID(""))
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantID(""))
 
 	result := clients.PropagateOrganization(ctx)
 
-	// Context should be returned unchanged (empty org ID treated as missing)
+	// Context should be returned unchanged (empty tenant ID treated as missing)
 	assert.Equal(t, ctx, result)
 
 	// Should not have outgoing metadata with org ID
 	_, ok := metadata.FromOutgoingContext(result)
-	assert.False(t, ok, "should not have outgoing metadata for empty org ID")
+	assert.False(t, ok, "should not have outgoing metadata for empty tenant ID")
 }
 
 // TestPropagateOrganization_ExistingMetadata verifies existing metadata is preserved
@@ -369,8 +369,8 @@ func TestPropagateOrganization_ExistingMetadata(t *testing.T) {
 		"existing-key": "existing-value",
 	})
 	ctx := metadata.NewOutgoingContext(context.Background(), existingMD)
-	orgID := organization.MustNewOrganizationID("test_org")
-	ctx = organization.WithOrganization(ctx, orgID)
+	orgID := tenant.MustNewTenantID("test_org")
+	ctx = tenant.WithTenant(ctx, orgID)
 
 	result := clients.PropagateOrganization(ctx)
 
@@ -378,7 +378,7 @@ func TestPropagateOrganization_ExistingMetadata(t *testing.T) {
 	md, ok := metadata.FromOutgoingContext(result)
 	assert.True(t, ok, "should have outgoing metadata")
 	assert.Equal(t, []string{"existing-value"}, md.Get("existing-key"), "should preserve existing metadata")
-	assert.Equal(t, []string{"test_org"}, md.Get(organization.OrgIDKey), "should add organization ID")
+	assert.Equal(t, []string{"test_org"}, md.Get(tenant.TenantIDKey), "should add organization ID")
 }
 
 // TestPropagateOrganization_OverwritesExistingOrgID verifies organization ID is updated if it already exists
@@ -387,18 +387,18 @@ func TestPropagateOrganization_OverwritesExistingOrgID(t *testing.T) {
 
 	// Create context with existing org ID in outgoing metadata
 	existingMD := metadata.New(map[string]string{
-		organization.OrgIDKey: "old_org",
+		tenant.TenantIDKey: "old_org",
 	})
 	ctx := metadata.NewOutgoingContext(context.Background(), existingMD)
-	orgID := organization.MustNewOrganizationID("new_org")
-	ctx = organization.WithOrganization(ctx, orgID)
+	orgID := tenant.MustNewTenantID("new_org")
+	ctx = tenant.WithTenant(ctx, orgID)
 
 	result := clients.PropagateOrganization(ctx)
 
 	// Verify organization ID was updated
 	md, ok := metadata.FromOutgoingContext(result)
 	assert.True(t, ok, "should have outgoing metadata")
-	assert.Equal(t, []string{"new_org"}, md.Get(organization.OrgIDKey), "should update organization ID")
+	assert.Equal(t, []string{"new_org"}, md.Get(tenant.TenantIDKey), "should update organization ID")
 }
 
 // TestPropagateOrganization_ChainWithCorrelationID verifies both propagation functions work together
@@ -408,8 +408,8 @@ func TestPropagateOrganization_ChainWithCorrelationID(t *testing.T) {
 	// Create context with both correlation ID and organization
 	//nolint:revive,staticcheck // Using string key as expected by ExtractCorrelationID implementation
 	ctx := context.WithValue(context.Background(), "x-correlation-id", "corr-123")
-	orgID := organization.MustNewOrganizationID("chain_test")
-	ctx = organization.WithOrganization(ctx, orgID)
+	orgID := tenant.MustNewTenantID("chain_test")
+	ctx = tenant.WithTenant(ctx, orgID)
 
 	// Apply both propagation functions
 	ctx = clients.PropagateCorrelationID(ctx)
@@ -419,5 +419,5 @@ func TestPropagateOrganization_ChainWithCorrelationID(t *testing.T) {
 	md, ok := metadata.FromOutgoingContext(ctx)
 	assert.True(t, ok, "should have outgoing metadata")
 	assert.Equal(t, []string{"corr-123"}, md.Get("x-correlation-id"), "should have correlation ID")
-	assert.Equal(t, []string{"chain_test"}, md.Get(organization.OrgIDKey), "should have organization ID")
+	assert.Equal(t, []string{"chain_test"}, md.Get(tenant.TenantIDKey), "should have organization ID")
 }

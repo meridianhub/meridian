@@ -44,32 +44,32 @@ func TestKey_String(t *testing.T) {
 		{
 			name: "with organization ID and request ID",
 			key: Key{
-				OrganizationID: "acme_bank",
-				Namespace:      "payment-order",
-				Operation:      "create",
-				EntityID:       "payment-123",
-				RequestID:      "req-456",
+				TenantID:  "acme_bank",
+				Namespace: "payment-order",
+				Operation: "create",
+				EntityID:  "payment-123",
+				RequestID: "req-456",
 			},
 			want: "acme_bank:idempotency:payment-order:create:payment-123:req-456",
 		},
 		{
 			name: "with organization ID without request ID",
 			key: Key{
-				OrganizationID: "acme_bank",
-				Namespace:      "current-account",
-				Operation:      "deposit",
-				EntityID:       "ACC-12345",
+				TenantID:  "acme_bank",
+				Namespace: "current-account",
+				Operation: "deposit",
+				EntityID:  "ACC-12345",
 			},
 			want: "acme_bank:idempotency:current-account:deposit:ACC-12345",
 		},
 		{
 			name: "different organizations same operation",
 			key: Key{
-				OrganizationID: "other_bank",
-				Namespace:      "payment-order",
-				Operation:      "create",
-				EntityID:       "payment-123",
-				RequestID:      "req-456",
+				TenantID:  "other_bank",
+				Namespace: "payment-order",
+				Operation: "create",
+				EntityID:  "payment-123",
+				RequestID: "req-456",
 			},
 			want: "other_bank:idempotency:payment-order:create:payment-123:req-456",
 		},
@@ -88,19 +88,19 @@ func TestKey_String(t *testing.T) {
 func TestKey_String_OrganizationIsolation(t *testing.T) {
 	// Same operation across different organizations should produce different keys
 	keyOrg1 := Key{
-		OrganizationID: "org_alpha",
-		Namespace:      "payment",
-		Operation:      "transfer",
-		EntityID:       "TXN-001",
-		RequestID:      "same-request-id",
+		TenantID:  "org_alpha",
+		Namespace: "payment",
+		Operation: "transfer",
+		EntityID:  "TXN-001",
+		RequestID: "same-request-id",
 	}
 
 	keyOrg2 := Key{
-		OrganizationID: "org_beta",
-		Namespace:      "payment",
-		Operation:      "transfer",
-		EntityID:       "TXN-001",
-		RequestID:      "same-request-id",
+		TenantID:  "org_beta",
+		Namespace: "payment",
+		Operation: "transfer",
+		EntityID:  "TXN-001",
+		RequestID: "same-request-id",
 	}
 
 	if keyOrg1.String() == keyOrg2.String() {
@@ -286,10 +286,10 @@ func TestKey_Validate_RejectsColons(t *testing.T) {
 		{
 			name: "colon in organization ID",
 			key: Key{
-				OrganizationID: "org:id",
-				Namespace:      "current-account",
-				Operation:      "deposit",
-				EntityID:       "ACC-123",
+				TenantID:  "org:id",
+				Namespace: "current-account",
+				Operation: "deposit",
+				EntityID:  "ACC-123",
 			},
 		},
 		{
@@ -340,7 +340,7 @@ func TestKey_Validate_RejectsColons(t *testing.T) {
 	}
 }
 
-func TestKey_Validate_WithOrganizationID(t *testing.T) {
+func TestKey_Validate_WithTenantID(t *testing.T) {
 	tests := []struct {
 		name    string
 		key     Key
@@ -349,31 +349,31 @@ func TestKey_Validate_WithOrganizationID(t *testing.T) {
 		{
 			name: "valid key with organization ID",
 			key: Key{
-				OrganizationID: "acme_bank",
-				Namespace:      "current-account",
-				Operation:      "deposit",
-				EntityID:       "ACC-12345",
-				RequestID:      "req-abc",
+				TenantID:  "acme_bank",
+				Namespace: "current-account",
+				Operation: "deposit",
+				EntityID:  "ACC-12345",
+				RequestID: "req-abc",
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid key with organization ID, no request ID",
 			key: Key{
-				OrganizationID: "acme_bank",
-				Namespace:      "current-account",
-				Operation:      "deposit",
-				EntityID:       "ACC-12345",
+				TenantID:  "acme_bank",
+				Namespace: "current-account",
+				Operation: "deposit",
+				EntityID:  "ACC-12345",
 			},
 			wantErr: false,
 		},
 		{
 			name: "organization ID is optional (empty is valid)",
 			key: Key{
-				OrganizationID: "",
-				Namespace:      "current-account",
-				Operation:      "deposit",
-				EntityID:       "ACC-12345",
+				TenantID:  "",
+				Namespace: "current-account",
+				Operation: "deposit",
+				EntityID:  "ACC-12345",
 			},
 			wantErr: false,
 		},

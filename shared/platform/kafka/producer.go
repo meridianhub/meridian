@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -170,21 +170,21 @@ func (p *ProtoProducer) Close() {
 	p.producer.Close()
 }
 
-// PublishWithOrganization sends a protobuf message with organization context to the specified Kafka topic.
-// The organization ID is extracted from the context and injected as a Kafka header (x-org-id).
-// This ensures organization isolation for multi-tenant event processing.
+// PublishWithTenant sends a protobuf message with tenant context to the specified Kafka topic.
+// The tenant ID is extracted from the context and injected as a Kafka header (x-tenant-id).
+// This ensures tenant isolation for multi-tenant event processing.
 //
 // The key is used for partitioning - messages with the same key go to the same partition.
 // This method blocks until the message is confirmed by the Kafka broker or the context is cancelled.
 //
 // Parameters:
-// - ctx: Context containing organization ID (via organization.WithOrganization) for cancellation and timeout
+// - ctx: Context containing tenant ID (via tenant.WithTenant) for cancellation and timeout
 // - topic: Target Kafka topic name (must not be empty)
 // - key: Partition key as string (empty key will be null in Kafka)
 // - msg: Protocol Buffer message to serialize and send (must not be nil)
 //
-// Panics if the organization context is missing - this is a fail-fast strategy to prevent
-// events without organization attribution from being published.
+// Panics if the tenant context is missing - this is a fail-fast strategy to prevent
+// events without tenant attribution from being published.
 //
 // Returns an error if:
 // - topic is empty
@@ -193,9 +193,9 @@ func (p *ProtoProducer) Close() {
 // - message production fails
 // - delivery confirmation indicates failure
 // - context is cancelled before delivery confirmation
-func (p *ProtoProducer) PublishWithOrganization(ctx context.Context, topic string, key string, msg proto.Message) error {
-	// Extract organization from context - panic if missing (fail-fast)
-	orgID := organization.MustFromContext(ctx)
+func (p *ProtoProducer) PublishWithTenant(ctx context.Context, topic string, key string, msg proto.Message) error {
+	// Extract tenant from context - panic if missing (fail-fast)
+	orgID := tenant.MustFromContext(ctx)
 
 	if topic == "" {
 		return ErrEmptyTopic
@@ -210,13 +210,13 @@ func (p *ProtoProducer) PublishWithOrganization(ctx context.Context, topic strin
 		return fmt.Errorf("failed to marshal protobuf message: %w", err)
 	}
 
-	// Create Kafka message with organization header
+	// Create Kafka message with tenant header
 	kafkaMsg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
 		Key:            []byte(key),
 		Value:          data,
 		Headers: []kafka.Header{
-			{Key: organization.OrgIDKey, Value: []byte(orgID.String())},
+			{Key: tenant.TenantIDKey, Value: []byte(orgID.String())},
 		},
 		Timestamp: time.Now(),
 	}

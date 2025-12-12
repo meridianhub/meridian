@@ -4,7 +4,7 @@ package domain
 import (
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // Status represents the lifecycle state of a tenant.
@@ -35,7 +35,7 @@ func (s Status) IsValid() bool {
 type Tenant struct {
 	// ID is the unique identifier (alphanumeric + underscore, 1-50 chars).
 	// Used for schema routing (org_{id} schema) and API subdomain.
-	ID organization.OrganizationID
+	ID tenant.TenantID
 
 	// DisplayName is the human-readable name of the tenant.
 	DisplayName string

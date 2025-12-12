@@ -8,7 +8,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // CachedRegistry provides an in-memory cache for tenant validation.
@@ -21,7 +21,7 @@ type CachedRegistry struct {
 	logger          *slog.Logger
 
 	mu          sync.RWMutex
-	cache       map[organization.OrganizationID]*domain.Tenant
+	cache       map[tenant.TenantID]*domain.Tenant
 	lastRefresh time.Time
 	refreshErr  error
 }
@@ -56,7 +56,7 @@ func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig
 
 	return &CachedRegistry{
 		repo:            repo,
-		cache:           make(map[organization.OrganizationID]*domain.Tenant),
+		cache:           make(map[tenant.TenantID]*domain.Tenant),
 		refreshInterval: config.RefreshInterval,
 		refreshTimeout:  config.RefreshTimeout,
 		logger:          config.Logger,
@@ -91,7 +91,7 @@ func (r *CachedRegistry) Start(ctx context.Context) {
 
 // IsActive checks if a tenant exists and is active.
 // Uses the cache for fast lookups, falls back to database if cache miss.
-func (r *CachedRegistry) IsActive(ctx context.Context, id organization.OrganizationID) (bool, error) {
+func (r *CachedRegistry) IsActive(ctx context.Context, id tenant.TenantID) (bool, error) {
 	// Try cache first
 	r.mu.RLock()
 	tenant, ok := r.cache[id]
@@ -113,7 +113,7 @@ func (r *CachedRegistry) IsActive(ctx context.Context, id organization.Organizat
 
 // GetTenant retrieves a tenant from the cache.
 // Returns nil if not found in cache (caller should query database if needed).
-func (r *CachedRegistry) GetTenant(id organization.OrganizationID) *domain.Tenant {
+func (r *CachedRegistry) GetTenant(id tenant.TenantID) *domain.Tenant {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.cache[id]
@@ -135,7 +135,7 @@ func (r *CachedRegistry) refresh(ctx context.Context) error {
 	}
 
 	// Build new cache map atomically
-	newCache := make(map[organization.OrganizationID]*domain.Tenant, len(tenants))
+	newCache := make(map[tenant.TenantID]*domain.Tenant, len(tenants))
 	for _, tenant := range tenants {
 		newCache[tenant.ID] = tenant
 	}

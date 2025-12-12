@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/current-account/clients"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 )
@@ -303,15 +303,15 @@ func TestWithTimeout_NegativeTimeout(t *testing.T) {
 func TestPropagateOrganization_Success(t *testing.T) {
 	t.Parallel()
 
-	orgID := organization.MustNewOrganizationID("acme_bank")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.MustNewTenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
 	result := clients.PropagateOrganization(ctx)
 
 	// Verify organization ID was added to outgoing metadata
 	md, ok := metadata.FromOutgoingContext(result)
 	assert.True(t, ok, "should have outgoing metadata")
-	assert.Equal(t, []string{"acme_bank"}, md.Get(organization.OrgIDKey))
+	assert.Equal(t, []string{"acme_bank"}, md.Get(tenant.TenantIDKey))
 }
 
 // TestPropagateOrganization_NoOrganization verifies context is unchanged when no organization exists
@@ -337,8 +337,8 @@ func TestPropagateOrganization_ChainWithCorrelationID(t *testing.T) {
 	// Create context with both correlation ID and organization
 	//nolint:revive,staticcheck // Using string key as expected by ExtractCorrelationID implementation
 	ctx := context.WithValue(context.Background(), "x-correlation-id", "corr-123")
-	orgID := organization.MustNewOrganizationID("chain_test")
-	ctx = organization.WithOrganization(ctx, orgID)
+	orgID := tenant.MustNewTenantID("chain_test")
+	ctx = tenant.WithTenant(ctx, orgID)
 
 	// Apply both propagation functions
 	ctx = clients.PropagateCorrelationID(ctx)
@@ -348,5 +348,5 @@ func TestPropagateOrganization_ChainWithCorrelationID(t *testing.T) {
 	md, ok := metadata.FromOutgoingContext(ctx)
 	assert.True(t, ok, "should have outgoing metadata")
 	assert.Equal(t, []string{"corr-123"}, md.Get("x-correlation-id"), "should have correlation ID")
-	assert.Equal(t, []string{"chain_test"}, md.Get(organization.OrgIDKey), "should have organization ID")
+	assert.Equal(t, []string{"chain_test"}, md.Get(tenant.TenantIDKey), "should have organization ID")
 }

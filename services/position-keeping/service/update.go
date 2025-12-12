@@ -347,7 +347,7 @@ func extractSystemContext(ctx context.Context) map[string]string {
 			}
 		}
 		// Add organization ID if present (multi-tenant context)
-		if vals := md.Get("x-org-id"); len(vals) > 0 && vals[0] != "" {
+		if vals := md.Get("x-tenant-id"); len(vals) > 0 && vals[0] != "" {
 			systemCtx["organization_id"] = vals[0]
 		}
 		// Add user agent if present

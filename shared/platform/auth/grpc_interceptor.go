@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -38,9 +38,9 @@ const (
 	// ClaimsContextKey is the context key for full claims
 	ClaimsContextKey contextKey = "claims"
 
-	// MultiOrgModeEnvVar is the environment variable that enables multi-organization mode.
-	// When set to "true", organization claims are required in JWT tokens.
-	MultiOrgModeEnvVar = "MULTI_ORG_MODE"
+	// MultiTenantModeEnvVar is the environment variable that enables multi-tenant mode.
+	// When set to "true", tenant claims are required in JWT tokens.
+	MultiTenantModeEnvVar = "MULTI_TENANT_MODE"
 )
 
 // Interceptor provides gRPC interceptors for JWT authentication
@@ -161,21 +161,21 @@ func (a *Interceptor) authenticate(ctx context.Context) (context.Context, error)
 	ctx = context.WithValue(ctx, ScopesContextKey, claims.Scopes)
 	ctx = context.WithValue(ctx, ClaimsContextKey, claims)
 
-	// Organization context injection
-	multiOrgMode := os.Getenv(MultiOrgModeEnvVar) == "true"
-	if multiOrgMode {
-		orgID, err := claims.GetOrganizationID()
+	// Tenant context injection
+	multiTenantMode := os.Getenv(MultiTenantModeEnvVar) == "true"
+	if multiTenantMode {
+		tenantID, err := claims.GetTenantID()
 		if err != nil {
-			if errors.Is(err, ErrOrganizationClaimMissing) {
-				return nil, status.Error(codes.Unauthenticated, "organization_id claim required")
+			if errors.Is(err, ErrTenantClaimMissing) {
+				return nil, status.Error(codes.Unauthenticated, "tenant_id claim required")
 			}
-			return nil, status.Error(codes.InvalidArgument, "invalid organization_id format")
+			return nil, status.Error(codes.InvalidArgument, "invalid tenant_id format")
 		}
-		ctx = organization.WithOrganization(ctx, orgID)
+		ctx = tenant.WithTenant(ctx, tenantID)
 
-		// Add organization to OpenTelemetry span attributes
+		// Add tenant to OpenTelemetry span attributes
 		span := trace.SpanFromContext(ctx)
-		span.SetAttributes(attribute.String("organization.id", orgID.String()))
+		span.SetAttributes(attribute.String("tenant.id", tenantID.String()))
 	}
 
 	return ctx, nil
@@ -241,10 +241,10 @@ func GetClaimsFromContext(ctx context.Context) (*Claims, bool) {
 	return claims, ok
 }
 
-// IsMultiOrgModeEnabled returns true if multi-organization mode is enabled.
-// Multi-org mode requires organization claims in JWT tokens.
-func IsMultiOrgModeEnabled() bool {
-	return os.Getenv(MultiOrgModeEnvVar) == "true"
+// IsMultiTenantModeEnabled returns true if multi-tenant mode is enabled.
+// Multi-tenant mode requires tenant claims in JWT tokens.
+func IsMultiTenantModeEnabled() bool {
+	return os.Getenv(MultiTenantModeEnvVar) == "true"
 }
 
 // RequireRole creates an interceptor that requires specific roles

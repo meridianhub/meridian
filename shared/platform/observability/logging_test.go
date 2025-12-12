@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"go.opentelemetry.io/otel"
 )
 
@@ -106,11 +106,11 @@ func TestLogger_InfoContext_CorrelationID(t *testing.T) {
 	}
 }
 
-func TestLogger_InfoContext_OrganizationID(t *testing.T) {
+func TestLogger_InfoContext_TenantID(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := NewLogger(buf, LogLevelInfo)
 
-	ctx := organization.WithOrganization(context.Background(), organization.MustNewOrganizationID("acme_bank"))
+	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 	logger.InfoContext(ctx, "test message with organization")
 
 	var entry LogEntry
@@ -118,8 +118,8 @@ func TestLogger_InfoContext_OrganizationID(t *testing.T) {
 		t.Fatalf("Failed to parse log entry: %v", err)
 	}
 
-	if entry.OrganizationID != "acme_bank" {
-		t.Errorf("Expected organization ID acme_bank, got %s", entry.OrganizationID)
+	if entry.TenantID != "acme_bank" {
+		t.Errorf("Expected tenant ID acme_bank, got %s", entry.TenantID)
 	}
 }
 
@@ -134,8 +134,8 @@ func TestLogger_InfoContext_WithoutOrganization(t *testing.T) {
 		t.Fatalf("Failed to parse log entry: %v", err)
 	}
 
-	if entry.OrganizationID != "" {
-		t.Errorf("Expected empty organization ID, got %s", entry.OrganizationID)
+	if entry.TenantID != "" {
+		t.Errorf("Expected empty tenant ID, got %s", entry.TenantID)
 	}
 }
 
@@ -145,7 +145,7 @@ func TestLogger_InfoContext_AllContextValues(t *testing.T) {
 
 	// Create context with both organization and correlation ID
 	ctx := context.Background()
-	ctx = organization.WithOrganization(ctx, organization.MustNewOrganizationID("motive"))
+	ctx = tenant.WithTenant(ctx, tenant.MustNewTenantID("motive"))
 	ctx = WithCorrelationID(ctx, "request-456")
 
 	logger.InfoContext(ctx, "test message with all context")
@@ -155,8 +155,8 @@ func TestLogger_InfoContext_AllContextValues(t *testing.T) {
 		t.Fatalf("Failed to parse log entry: %v", err)
 	}
 
-	if entry.OrganizationID != "motive" {
-		t.Errorf("Expected organization ID motive, got %s", entry.OrganizationID)
+	if entry.TenantID != "motive" {
+		t.Errorf("Expected tenant ID motive, got %s", entry.TenantID)
 	}
 	if entry.CorrelationID != "request-456" {
 		t.Errorf("Expected correlation ID request-456, got %s", entry.CorrelationID)

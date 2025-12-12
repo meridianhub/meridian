@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -171,74 +171,74 @@ func TestProtoConsumer_StopAndClose(t *testing.T) {
 	}
 }
 
-func TestExtractOrganizationHeader(t *testing.T) {
+func TestExtractTenantHeader(t *testing.T) {
 	topic := "test-topic"
 
-	t.Run("valid organization header", func(t *testing.T) {
+	t.Run("valid tenant header", func(t *testing.T) {
 		msg := &kafka.Message{
 			TopicPartition: kafka.TopicPartition{Topic: &topic},
 			Headers: []kafka.Header{
-				{Key: organization.OrgIDKey, Value: []byte("acme_bank")},
+				{Key: tenant.TenantIDKey, Value: []byte("acme_bank")},
 			},
 		}
 
-		orgID, err := ExtractOrganizationHeader(msg)
+		orgID, err := ExtractTenantHeader(msg)
 		if err != nil {
-			t.Errorf("ExtractOrganizationHeader() unexpected error: %v", err)
+			t.Errorf("ExtractTenantHeader() unexpected error: %v", err)
 		}
 		if orgID.String() != "acme_bank" {
-			t.Errorf("ExtractOrganizationHeader() = %q, want %q", orgID.String(), "acme_bank")
+			t.Errorf("ExtractTenantHeader() = %q, want %q", orgID.String(), "acme_bank")
 		}
 	})
 
-	t.Run("missing organization header", func(t *testing.T) {
+	t.Run("missing tenant header", func(t *testing.T) {
 		msg := &kafka.Message{
 			TopicPartition: kafka.TopicPartition{Topic: &topic},
 			Headers:        []kafka.Header{},
 		}
 
-		orgID, err := ExtractOrganizationHeader(msg)
-		if !errors.Is(err, ErrMissingOrganizationHeader) {
-			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrMissingOrganizationHeader", err)
+		orgID, err := ExtractTenantHeader(msg)
+		if !errors.Is(err, ErrMissingTenantHeader) {
+			t.Errorf("ExtractTenantHeader() error = %v, want ErrMissingTenantHeader", err)
 		}
 		if orgID != "" {
-			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+			t.Errorf("ExtractTenantHeader() orgID = %q, want empty", orgID)
 		}
 	})
 
-	t.Run("invalid organization header format", func(t *testing.T) {
+	t.Run("invalid tenant header format", func(t *testing.T) {
 		msg := &kafka.Message{
 			TopicPartition: kafka.TopicPartition{Topic: &topic},
 			Headers: []kafka.Header{
-				{Key: organization.OrgIDKey, Value: []byte("invalid-org-id!")},
+				{Key: tenant.TenantIDKey, Value: []byte("invalid-org-id!")},
 			},
 		}
 
-		orgID, err := ExtractOrganizationHeader(msg)
-		if !errors.Is(err, organization.ErrInvalidOrganizationID) {
-			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrInvalidOrganizationID", err)
+		orgID, err := ExtractTenantHeader(msg)
+		if !errors.Is(err, tenant.ErrInvalidTenantID) {
+			t.Errorf("ExtractTenantHeader() error = %v, want ErrInvalidTenantID", err)
 		}
 		if orgID != "" {
-			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+			t.Errorf("ExtractTenantHeader() orgID = %q, want empty", orgID)
 		}
 	})
 
-	t.Run("organization header with other headers", func(t *testing.T) {
+	t.Run("tenant header with other headers", func(t *testing.T) {
 		msg := &kafka.Message{
 			TopicPartition: kafka.TopicPartition{Topic: &topic},
 			Headers: []kafka.Header{
 				{Key: "correlation-id", Value: []byte("12345")},
-				{Key: organization.OrgIDKey, Value: []byte("motive_financial")},
+				{Key: tenant.TenantIDKey, Value: []byte("motive_financial")},
 				{Key: "trace-id", Value: []byte("abcdef")},
 			},
 		}
 
-		orgID, err := ExtractOrganizationHeader(msg)
+		orgID, err := ExtractTenantHeader(msg)
 		if err != nil {
-			t.Errorf("ExtractOrganizationHeader() unexpected error: %v", err)
+			t.Errorf("ExtractTenantHeader() unexpected error: %v", err)
 		}
 		if orgID.String() != "motive_financial" {
-			t.Errorf("ExtractOrganizationHeader() = %q, want %q", orgID.String(), "motive_financial")
+			t.Errorf("ExtractTenantHeader() = %q, want %q", orgID.String(), "motive_financial")
 		}
 	})
 
@@ -248,39 +248,39 @@ func TestExtractOrganizationHeader(t *testing.T) {
 			Headers:        nil,
 		}
 
-		orgID, err := ExtractOrganizationHeader(msg)
-		if !errors.Is(err, ErrMissingOrganizationHeader) {
-			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrMissingOrganizationHeader", err)
+		orgID, err := ExtractTenantHeader(msg)
+		if !errors.Is(err, ErrMissingTenantHeader) {
+			t.Errorf("ExtractTenantHeader() error = %v, want ErrMissingTenantHeader", err)
 		}
 		if orgID != "" {
-			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+			t.Errorf("ExtractTenantHeader() orgID = %q, want empty", orgID)
 		}
 	})
 
-	t.Run("empty organization header value", func(t *testing.T) {
+	t.Run("empty tenant header value", func(t *testing.T) {
 		msg := &kafka.Message{
 			TopicPartition: kafka.TopicPartition{Topic: &topic},
 			Headers: []kafka.Header{
-				{Key: organization.OrgIDKey, Value: []byte("")},
+				{Key: tenant.TenantIDKey, Value: []byte("")},
 			},
 		}
 
-		orgID, err := ExtractOrganizationHeader(msg)
-		if !errors.Is(err, organization.ErrInvalidOrganizationID) {
-			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrInvalidOrganizationID", err)
+		orgID, err := ExtractTenantHeader(msg)
+		if !errors.Is(err, tenant.ErrInvalidTenantID) {
+			t.Errorf("ExtractTenantHeader() error = %v, want ErrInvalidTenantID", err)
 		}
 		if orgID != "" {
-			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+			t.Errorf("ExtractTenantHeader() orgID = %q, want empty", orgID)
 		}
 	})
 
 	t.Run("nil message", func(t *testing.T) {
-		orgID, err := ExtractOrganizationHeader(nil)
-		if !errors.Is(err, ErrMissingOrganizationHeader) {
-			t.Errorf("ExtractOrganizationHeader() error = %v, want ErrMissingOrganizationHeader", err)
+		orgID, err := ExtractTenantHeader(nil)
+		if !errors.Is(err, ErrMissingTenantHeader) {
+			t.Errorf("ExtractTenantHeader() error = %v, want ErrMissingTenantHeader", err)
 		}
 		if orgID != "" {
-			t.Errorf("ExtractOrganizationHeader() orgID = %q, want empty", orgID)
+			t.Errorf("ExtractTenantHeader() orgID = %q, want empty", orgID)
 		}
 	})
 }

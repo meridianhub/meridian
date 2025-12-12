@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/domain"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +20,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 }
 
 func newTestTenant(id string) *domain.Tenant {
-	tenantID, _ := organization.NewOrganizationID(id)
+	tenantID, _ := tenant.NewTenantID(id)
 	return &domain.Tenant{
 		ID:              tenantID,
 		DisplayName:     "Test Tenant " + id,
@@ -116,7 +116,7 @@ func TestRepository_GetByID_NotFound(t *testing.T) {
 	repo := NewRepository(db)
 	ctx := context.Background()
 
-	tenantID, _ := organization.NewOrganizationID("nonexistent_tenant")
+	tenantID, _ := tenant.NewTenantID("nonexistent_tenant")
 	_, err := repo.GetByID(ctx, tenantID)
 	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound, got %v", err)
 }
@@ -167,7 +167,7 @@ func TestRepository_IsActive_NotFound(t *testing.T) {
 	repo := NewRepository(db)
 	ctx := context.Background()
 
-	tenantID, _ := organization.NewOrganizationID("nonexistent_tenant")
+	tenantID, _ := tenant.NewTenantID("nonexistent_tenant")
 	_, err := repo.IsActive(ctx, tenantID)
 	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound, got %v", err)
 }
@@ -234,7 +234,7 @@ func TestRepository_UpdateStatus_NotFound(t *testing.T) {
 	repo := NewRepository(db)
 	ctx := context.Background()
 
-	tenantID, _ := organization.NewOrganizationID("nonexistent_tenant")
+	tenantID, _ := tenant.NewTenantID("nonexistent_tenant")
 	_, err := repo.UpdateStatus(ctx, tenantID, domain.StatusSuspended, 1)
 	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound, got %v", err)
 }

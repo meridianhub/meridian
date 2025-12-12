@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -40,7 +40,7 @@ func (r *LienRepository) WithTx(tx *gorm.DB) *LienRepository {
 
 // hasOrganizationContext checks if organization context is present (multi-org mode).
 func (r *LienRepository) hasOrganizationContext(ctx context.Context) bool {
-	_, ok := organization.FromContext(ctx)
+	_, ok := tenant.FromContext(ctx)
 	return ok
 }
 

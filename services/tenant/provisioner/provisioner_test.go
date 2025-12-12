@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +19,7 @@ func TestSchemaProvisioner_ProvisionSchemas(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("acme_bank")
+	tenantID := tenant.MustNewTenantID("acme_bank")
 
 	// Provision schemas for tenant
 	err := provisioner.ProvisionSchemas(context.Background(), tenantID)
@@ -48,7 +48,7 @@ func TestSchemaProvisioner_ProvisionSchemas_Idempotent(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("beta_corp")
+	tenantID := tenant.MustNewTenantID("beta_corp")
 
 	// Provision twice
 	err := provisioner.ProvisionSchemas(context.Background(), tenantID)
@@ -72,7 +72,7 @@ func TestSchemaProvisioner_ProvisionSchemas_Failure(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("failing_tenant")
+	tenantID := tenant.MustNewTenantID("failing_tenant")
 
 	// Configure failure using sentinel error
 	provisioner.FailProvisioningFor[tenantID.String()] = ErrTestDatabaseConnectionFailed
@@ -95,7 +95,7 @@ func TestSchemaProvisioner_ProvisionSchemas_RetryAfterFailure(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("retry_tenant")
+	tenantID := tenant.MustNewTenantID("retry_tenant")
 
 	// Configure initial failure
 	provisioner.FailProvisioningFor[tenantID.String()] = ErrTestDatabaseConnectionFailed
@@ -127,7 +127,7 @@ func TestSchemaProvisioner_ProvisionSchemas_ConcurrentAttemptBlocked(t *testing.
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("concurrent_tenant")
+	tenantID := tenant.MustNewTenantID("concurrent_tenant")
 
 	// Manually set status to in_progress to simulate concurrent attempt
 	provisioner.SetStatus(&ProvisioningStatus{
@@ -148,7 +148,7 @@ func TestSchemaProvisioner_DeprovisionSchemas_SoftDelete(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("deprovisioned_tenant")
+	tenantID := tenant.MustNewTenantID("deprovisioned_tenant")
 
 	// First provision
 	err := provisioner.ProvisionSchemas(context.Background(), tenantID)
@@ -174,7 +174,7 @@ func TestSchemaProvisioner_DeprovisionSchemas_Idempotent(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("idempotent_deprov")
+	tenantID := tenant.MustNewTenantID("idempotent_deprov")
 
 	// First provision
 	err := provisioner.ProvisionSchemas(context.Background(), tenantID)
@@ -199,7 +199,7 @@ func TestSchemaProvisioner_DeprovisionSchemas_Idempotent(t *testing.T) {
 func TestSchemaProvisioner_DeprovisionSchemas_NotFound(t *testing.T) {
 	provisioner := NewMockProvisioner(nil)
 
-	tenantID := organization.MustNewOrganizationID("never_existed")
+	tenantID := tenant.MustNewTenantID("never_existed")
 
 	// Deprovision non-existent tenant should fail
 	err := provisioner.DeprovisionSchemas(context.Background(), tenantID)
@@ -212,7 +212,7 @@ func TestSchemaProvisioner_PurgeSchemas(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("purge_tenant")
+	tenantID := tenant.MustNewTenantID("purge_tenant")
 
 	// Provision then deprovision
 	_ = provisioner.ProvisionSchemas(context.Background(), tenantID)
@@ -236,7 +236,7 @@ func TestSchemaProvisioner_PurgeSchemas_NotDeprovisioned(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("active_tenant")
+	tenantID := tenant.MustNewTenantID("active_tenant")
 
 	// Provision but don't deprovision
 	_ = provisioner.ProvisionSchemas(context.Background(), tenantID)
@@ -253,7 +253,7 @@ func TestSchemaProvisioner_PurgeSchemas_RetentionPeriodNotElapsed(t *testing.T) 
 	provisioner := NewMockProvisioner(services)
 	provisioner.DataRetentionPeriod = 7 * 24 * time.Hour // 7 days
 
-	tenantID := organization.MustNewOrganizationID("retention_tenant")
+	tenantID := tenant.MustNewTenantID("retention_tenant")
 
 	// Provision then deprovision
 	_ = provisioner.ProvisionSchemas(context.Background(), tenantID)
@@ -268,7 +268,7 @@ func TestSchemaProvisioner_GetProvisioningStatus_NotFound(t *testing.T) {
 	services := []ServiceConfig{}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("unknown")
+	tenantID := tenant.MustNewTenantID("unknown")
 
 	_, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
 	assert.ErrorIs(t, err, ErrProvisioningStatusNotFound)
@@ -286,7 +286,7 @@ func TestSchemaProvisioner_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	tenantID := organization.MustNewOrganizationID("slow_tenant")
+	tenantID := tenant.MustNewTenantID("slow_tenant")
 
 	err := provisioner.ProvisionSchemas(ctx, tenantID)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
@@ -410,7 +410,7 @@ func TestMockProvisioner_Reset(t *testing.T) {
 	}
 	provisioner := NewMockProvisioner(services)
 
-	tenantID := organization.MustNewOrganizationID("reset_test")
+	tenantID := tenant.MustNewTenantID("reset_test")
 
 	// Set up some state
 	_ = provisioner.ProvisionSchemas(context.Background(), tenantID)
@@ -434,7 +434,7 @@ func TestMockProvisioner_Reset(t *testing.T) {
 func TestMockProvisioner_SetStatus(t *testing.T) {
 	provisioner := NewMockProvisioner(nil)
 
-	tenantID := organization.MustNewOrganizationID("manual_status")
+	tenantID := tenant.MustNewTenantID("manual_status")
 
 	// Manually set a custom status
 	customStatus := &ProvisioningStatus{

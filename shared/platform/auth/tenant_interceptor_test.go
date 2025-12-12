@@ -4,18 +4,18 @@ import (
 	"context"
 	"testing"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
-func TestOrganizationExtractionInterceptor(t *testing.T) {
-	t.Run("extracts org from metadata when not in context", func(t *testing.T) {
-		md := metadata.Pairs(organization.OrgIDKey, "acme_bank")
+func TestTenantExtractionInterceptor(t *testing.T) {
+	t.Run("extracts tenant from metadata when not in context", func(t *testing.T) {
+		md := metadata.Pairs(tenant.TenantIDKey, "acme_bank")
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
-		interceptor := OrganizationExtractionInterceptor()
+		interceptor := TenantExtractionInterceptor()
 		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
 		resp, err := interceptor(ctx, nil, info, mockUnaryHandler)
@@ -23,22 +23,22 @@ func TestOrganizationExtractionInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Verify organization was extracted into context
+		// Verify tenant was extracted into context
 		resultCtx := resp.(context.Context)
-		orgID, ok := organization.FromContext(resultCtx)
+		tenantID, ok := tenant.FromContext(resultCtx)
 		assert.True(t, ok)
-		assert.Equal(t, organization.OrganizationID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 	})
 
-	t.Run("is no-op when org already in context", func(t *testing.T) {
-		// Set org in context directly (simulating JWT auth having set it)
-		ctx := organization.WithOrganization(context.Background(), "jwt_org")
+	t.Run("is no-op when tenant already in context", func(t *testing.T) {
+		// Set tenant in context directly (simulating JWT auth having set it)
+		ctx := tenant.WithTenant(context.Background(), "jwt_tenant")
 
-		// Also set a different org in metadata
-		md := metadata.Pairs(organization.OrgIDKey, "metadata_org")
+		// Also set a different tenant in metadata
+		md := metadata.Pairs(tenant.TenantIDKey, "metadata_tenant")
 		ctx = metadata.NewIncomingContext(ctx, md)
 
-		interceptor := OrganizationExtractionInterceptor()
+		interceptor := TenantExtractionInterceptor()
 		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
 		resp, err := interceptor(ctx, nil, info, mockUnaryHandler)
@@ -46,19 +46,19 @@ func TestOrganizationExtractionInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Verify original org from context is preserved (JWT takes precedence)
+		// Verify original tenant from context is preserved (JWT takes precedence)
 		resultCtx := resp.(context.Context)
-		orgID, ok := organization.FromContext(resultCtx)
+		tenantID, ok := tenant.FromContext(resultCtx)
 		assert.True(t, ok)
-		assert.Equal(t, organization.OrganizationID("jwt_org"), orgID)
+		assert.Equal(t, tenant.TenantID("jwt_tenant"), tenantID)
 	})
 
-	t.Run("context unchanged when no org in metadata", func(t *testing.T) {
-		// No org in context and no org in metadata
+	t.Run("context unchanged when no tenant in metadata", func(t *testing.T) {
+		// No tenant in context and no tenant in metadata
 		md := metadata.Pairs("other-header", "value")
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
-		interceptor := OrganizationExtractionInterceptor()
+		interceptor := TenantExtractionInterceptor()
 		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
 		resp, err := interceptor(ctx, nil, info, mockUnaryHandler)
@@ -66,9 +66,9 @@ func TestOrganizationExtractionInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Verify no org in context
+		// Verify no tenant in context
 		resultCtx := resp.(context.Context)
-		_, ok := organization.FromContext(resultCtx)
+		_, ok := tenant.FromContext(resultCtx)
 		assert.False(t, ok)
 	})
 
@@ -76,7 +76,7 @@ func TestOrganizationExtractionInterceptor(t *testing.T) {
 		// No metadata at all
 		ctx := context.Background()
 
-		interceptor := OrganizationExtractionInterceptor()
+		interceptor := TenantExtractionInterceptor()
 		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
 		resp, err := interceptor(ctx, nil, info, mockUnaryHandler)
@@ -84,21 +84,21 @@ func TestOrganizationExtractionInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Verify no org in context
+		// Verify no tenant in context
 		resultCtx := resp.(context.Context)
-		_, ok := organization.FromContext(resultCtx)
+		_, ok := tenant.FromContext(resultCtx)
 		assert.False(t, ok)
 	})
 
-	t.Run("extracts first org value when multiple present", func(t *testing.T) {
-		// Multiple org values in metadata (edge case)
+	t.Run("extracts first tenant value when multiple present", func(t *testing.T) {
+		// Multiple tenant values in metadata (edge case)
 		md := metadata.Pairs(
-			organization.OrgIDKey, "first_org",
-			organization.OrgIDKey, "second_org",
+			tenant.TenantIDKey, "first_tenant",
+			tenant.TenantIDKey, "second_tenant",
 		)
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
-		interceptor := OrganizationExtractionInterceptor()
+		interceptor := TenantExtractionInterceptor()
 		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
 		resp, err := interceptor(ctx, nil, info, mockUnaryHandler)
@@ -108,17 +108,17 @@ func TestOrganizationExtractionInterceptor(t *testing.T) {
 
 		// Should use the first value
 		resultCtx := resp.(context.Context)
-		orgID, ok := organization.FromContext(resultCtx)
+		tenantID, ok := tenant.FromContext(resultCtx)
 		assert.True(t, ok)
-		assert.Equal(t, organization.OrganizationID("first_org"), orgID)
+		assert.Equal(t, tenant.TenantID("first_tenant"), tenantID)
 	})
 
-	t.Run("ignores invalid org ID format in metadata", func(t *testing.T) {
-		// Invalid org ID with special characters (validation fails)
-		md := metadata.Pairs(organization.OrgIDKey, "invalid org!")
+	t.Run("ignores invalid tenant ID format in metadata", func(t *testing.T) {
+		// Invalid tenant ID with special characters (validation fails)
+		md := metadata.Pairs(tenant.TenantIDKey, "invalid tenant!")
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
-		interceptor := OrganizationExtractionInterceptor()
+		interceptor := TenantExtractionInterceptor()
 		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 
 		resp, err := interceptor(ctx, nil, info, mockUnaryHandler)
@@ -126,16 +126,16 @@ func TestOrganizationExtractionInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Org should NOT be in context due to validation failure
+		// Tenant should NOT be in context due to validation failure
 		resultCtx := resp.(context.Context)
-		_, ok := organization.FromContext(resultCtx)
+		_, ok := tenant.FromContext(resultCtx)
 		assert.False(t, ok)
 	})
 }
 
-func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
-	t.Run("extracts org from metadata when not in context", func(t *testing.T) {
-		md := metadata.Pairs(organization.OrgIDKey, "acme_bank")
+func TestTenantExtractionStreamInterceptor(t *testing.T) {
+	t.Run("extracts tenant from metadata when not in context", func(t *testing.T) {
+		md := metadata.Pairs(tenant.TenantIDKey, "acme_bank")
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
 		stream := &mockServerStream{ctx: ctx}
@@ -147,23 +147,23 @@ func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
 			return nil
 		}
 
-		interceptor := OrganizationExtractionStreamInterceptor()
+		interceptor := TenantExtractionStreamInterceptor()
 		err := interceptor(nil, stream, info, handler)
 
 		assert.NoError(t, err)
 
-		// Verify organization was extracted into context
-		orgID, ok := organization.FromContext(capturedCtx)
+		// Verify tenant was extracted into context
+		tenantID, ok := tenant.FromContext(capturedCtx)
 		assert.True(t, ok)
-		assert.Equal(t, organization.OrganizationID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 	})
 
-	t.Run("is no-op when org already in context", func(t *testing.T) {
-		// Set org in context directly (simulating JWT auth having set it)
-		ctx := organization.WithOrganization(context.Background(), "jwt_org")
+	t.Run("is no-op when tenant already in context", func(t *testing.T) {
+		// Set tenant in context directly (simulating JWT auth having set it)
+		ctx := tenant.WithTenant(context.Background(), "jwt_tenant")
 
-		// Also set a different org in metadata
-		md := metadata.Pairs(organization.OrgIDKey, "metadata_org")
+		// Also set a different tenant in metadata
+		md := metadata.Pairs(tenant.TenantIDKey, "metadata_tenant")
 		ctx = metadata.NewIncomingContext(ctx, md)
 
 		stream := &mockServerStream{ctx: ctx}
@@ -175,19 +175,19 @@ func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
 			return nil
 		}
 
-		interceptor := OrganizationExtractionStreamInterceptor()
+		interceptor := TenantExtractionStreamInterceptor()
 		err := interceptor(nil, stream, info, handler)
 
 		assert.NoError(t, err)
 
-		// Verify original org from context is preserved (JWT takes precedence)
-		orgID, ok := organization.FromContext(capturedCtx)
+		// Verify original tenant from context is preserved (JWT takes precedence)
+		tenantID, ok := tenant.FromContext(capturedCtx)
 		assert.True(t, ok)
-		assert.Equal(t, organization.OrganizationID("jwt_org"), orgID)
+		assert.Equal(t, tenant.TenantID("jwt_tenant"), tenantID)
 	})
 
-	t.Run("context unchanged when no org in metadata", func(t *testing.T) {
-		// No org in context and no org in metadata
+	t.Run("context unchanged when no tenant in metadata", func(t *testing.T) {
+		// No tenant in context and no tenant in metadata
 		md := metadata.Pairs("other-header", "value")
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
@@ -200,13 +200,13 @@ func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
 			return nil
 		}
 
-		interceptor := OrganizationExtractionStreamInterceptor()
+		interceptor := TenantExtractionStreamInterceptor()
 		err := interceptor(nil, stream, info, handler)
 
 		assert.NoError(t, err)
 
-		// Verify no org in context
-		_, ok := organization.FromContext(capturedCtx)
+		// Verify no tenant in context
+		_, ok := tenant.FromContext(capturedCtx)
 		assert.False(t, ok)
 	})
 
@@ -223,21 +223,21 @@ func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
 			return nil
 		}
 
-		interceptor := OrganizationExtractionStreamInterceptor()
+		interceptor := TenantExtractionStreamInterceptor()
 		err := interceptor(nil, stream, info, handler)
 
 		assert.NoError(t, err)
 
-		// Verify no org in context
-		_, ok := organization.FromContext(capturedCtx)
+		// Verify no tenant in context
+		_, ok := tenant.FromContext(capturedCtx)
 		assert.False(t, ok)
 	})
 
-	t.Run("extracts first org value when multiple present", func(t *testing.T) {
-		// Multiple org values in metadata (edge case)
+	t.Run("extracts first tenant value when multiple present", func(t *testing.T) {
+		// Multiple tenant values in metadata (edge case)
 		md := metadata.Pairs(
-			organization.OrgIDKey, "first_org",
-			organization.OrgIDKey, "second_org",
+			tenant.TenantIDKey, "first_tenant",
+			tenant.TenantIDKey, "second_tenant",
 		)
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
@@ -250,20 +250,20 @@ func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
 			return nil
 		}
 
-		interceptor := OrganizationExtractionStreamInterceptor()
+		interceptor := TenantExtractionStreamInterceptor()
 		err := interceptor(nil, stream, info, handler)
 
 		assert.NoError(t, err)
 
 		// Should use the first value
-		orgID, ok := organization.FromContext(capturedCtx)
+		tenantID, ok := tenant.FromContext(capturedCtx)
 		assert.True(t, ok)
-		assert.Equal(t, organization.OrganizationID("first_org"), orgID)
+		assert.Equal(t, tenant.TenantID("first_tenant"), tenantID)
 	})
 
-	t.Run("ignores invalid org ID format in metadata", func(t *testing.T) {
-		// Invalid org ID with special characters (validation fails)
-		md := metadata.Pairs(organization.OrgIDKey, "invalid org!")
+	t.Run("ignores invalid tenant ID format in metadata", func(t *testing.T) {
+		// Invalid tenant ID with special characters (validation fails)
+		md := metadata.Pairs(tenant.TenantIDKey, "invalid tenant!")
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
 		stream := &mockServerStream{ctx: ctx}
@@ -275,13 +275,13 @@ func TestOrganizationExtractionStreamInterceptor(t *testing.T) {
 			return nil
 		}
 
-		interceptor := OrganizationExtractionStreamInterceptor()
+		interceptor := TenantExtractionStreamInterceptor()
 		err := interceptor(nil, stream, info, handler)
 
 		assert.NoError(t, err)
 
-		// Org should NOT be in context due to validation failure
-		_, ok := organization.FromContext(capturedCtx)
+		// Tenant should NOT be in context due to validation failure
+		_, ok := tenant.FromContext(capturedCtx)
 		assert.False(t, ok)
 	})
 }

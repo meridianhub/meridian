@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// organizationUnknown is the label value used when organization context is missing.
+// organizationUnknown is the label value used when tenant context is missing.
 const organizationUnknown = "unknown"
 
 // MetricsCollector holds all Prometheus metrics collectors
@@ -35,7 +35,7 @@ type MetricsCollector struct {
 
 // NewMetricsCollector creates a new metrics collector with all standard metrics
 //
-// All metrics include an "organization" label for multi-tenant observability.
+// All metrics include an "tenant" label for multi-tenant observability.
 // This allows filtering and grouping metrics by organization in Grafana dashboards.
 func NewMetricsCollector() *MetricsCollector {
 	registry := prometheus.NewRegistry()
@@ -46,7 +46,7 @@ func NewMetricsCollector() *MetricsCollector {
 				Name: "http_requests_total",
 				Help: "Total number of HTTP requests",
 			},
-			[]string{"method", "path", "status", "organization"},
+			[]string{"method", "path", "status", "tenant"},
 		),
 		HTTPRequestDurationSeconds: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -54,14 +54,14 @@ func NewMetricsCollector() *MetricsCollector {
 				Help:    "HTTP request duration in seconds",
 				Buckets: prometheus.DefBuckets,
 			},
-			[]string{"method", "path", "organization"},
+			[]string{"method", "path", "tenant"},
 		),
 		GRPCServerHandledTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "grpc_server_handled_total",
 				Help: "Total number of gRPC requests handled by the server",
 			},
-			[]string{"grpc_service", "grpc_method", "grpc_code", "organization"},
+			[]string{"grpc_service", "grpc_method", "grpc_code", "tenant"},
 		),
 		DBQueryDurationSeconds: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -69,14 +69,14 @@ func NewMetricsCollector() *MetricsCollector {
 				Help:    "Database query duration in seconds",
 				Buckets: prometheus.DefBuckets,
 			},
-			[]string{"operation", "table", "organization"},
+			[]string{"operation", "table", "tenant"},
 		),
 		KafkaMessagesPublishedTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "kafka_messages_published_total",
 				Help: "Total number of Kafka messages published",
 			},
-			[]string{"topic", "status", "organization"},
+			[]string{"topic", "status", "tenant"},
 		),
 		registry: registry,
 	}
@@ -98,7 +98,7 @@ func (mc *MetricsCollector) Handler() http.Handler {
 	return promhttp.HandlerFor(mc.registry, promhttp.HandlerOpts{})
 }
 
-// RecordHTTPRequest records an HTTP request metric with organization context
+// RecordHTTPRequest records an HTTP request metric with tenant context
 //
 // IMPORTANT: The 'path' parameter should be a route pattern (e.g., "/accounts/{id}")
 // rather than the actual request path (e.g., "/accounts/123") to prevent cardinality
@@ -112,7 +112,7 @@ func (mc *MetricsCollector) RecordHTTPRequest(ctx context.Context, method, path 
 	mc.HTTPRequestDurationSeconds.WithLabelValues(method, path, org).Observe(duration.Seconds())
 }
 
-// RecordGRPCRequest records a gRPC request metric with organization context
+// RecordGRPCRequest records a gRPC request metric with tenant context
 //
 // The organization is extracted from the context; if not present, "unknown" is used.
 func (mc *MetricsCollector) RecordGRPCRequest(ctx context.Context, service, method, code string) {
@@ -120,7 +120,7 @@ func (mc *MetricsCollector) RecordGRPCRequest(ctx context.Context, service, meth
 	mc.GRPCServerHandledTotal.WithLabelValues(service, method, code, org).Inc()
 }
 
-// RecordDBQuery records a database query metric with organization context
+// RecordDBQuery records a database query metric with tenant context
 //
 // The organization is extracted from the context; if not present, "unknown" is used.
 func (mc *MetricsCollector) RecordDBQuery(ctx context.Context, operation, table string, duration time.Duration) {
@@ -128,7 +128,7 @@ func (mc *MetricsCollector) RecordDBQuery(ctx context.Context, operation, table 
 	mc.DBQueryDurationSeconds.WithLabelValues(operation, table, org).Observe(duration.Seconds())
 }
 
-// RecordKafkaPublish records a Kafka message publish metric with organization context
+// RecordKafkaPublish records a Kafka message publish metric with tenant context
 //
 // The organization is extracted from the context; if not present, "unknown" is used.
 func (mc *MetricsCollector) RecordKafkaPublish(ctx context.Context, topic, status string) {
@@ -136,13 +136,13 @@ func (mc *MetricsCollector) RecordKafkaPublish(ctx context.Context, topic, statu
 	mc.KafkaMessagesPublishedTotal.WithLabelValues(topic, status, org).Inc()
 }
 
-// getOrganizationLabel extracts the organization ID from context for use as a metric label.
-// Returns "unknown" if organization context is missing.
+// getOrganizationLabel extracts the tenant ID from context for use as a metric label.
+// Returns "unknown" if tenant context is missing.
 func getOrganizationLabel(ctx context.Context) string {
 	if ctx == nil {
 		return organizationUnknown
 	}
-	orgID, ok := organization.FromContext(ctx)
+	orgID, ok := tenant.FromContext(ctx)
 	if !ok || orgID.IsEmpty() {
 		return organizationUnknown
 	}

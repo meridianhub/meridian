@@ -10,7 +10,7 @@ import (
 	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -44,14 +44,14 @@ func (r *Repository) DB() *gorm.DB {
 // IMPORTANT: In multi-org mode, the repository methods (Save, FindByID, etc.)
 // will automatically set the organization scope on the transaction. However,
 // for optimal performance and correct behavior, consider setting the org scope
-// once at the start of your transaction using db.WithGormOrganizationScope()
+// once at the start of your transaction using db.WithGormTenantScope()
 // rather than relying on per-operation scoping.
 //
 // Example:
 //
 //	err := repo.DB().Transaction(func(tx *gorm.DB) error {
 //	    // Set org scope once for the entire transaction
-//	    tx, err := db.WithGormOrganizationScope(ctx, tx)
+//	    tx, err := db.WithGormTenantScope(ctx, tx)
 //	    if err != nil {
 //	        return err
 //	    }
@@ -66,18 +66,18 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 
 // hasOrganizationContext checks if organization context is present (multi-org mode).
 func (r *Repository) hasOrganizationContext(ctx context.Context) bool {
-	_, ok := organization.FromContext(ctx)
+	_, ok := tenant.FromContext(ctx)
 	return ok
 }
 
-// withOrganizationScope returns a GORM DB instance scoped to the organization from context.
+// withTenantScope returns a GORM DB instance scoped to the organization from context.
 // If organization context is present (multi-org mode), it sets the PostgreSQL search_path.
 // If organization context is missing (single-tenant mode), it returns the DB unchanged.
 //
 // This must be called within a transaction for the search_path setting to work correctly.
-func (r *Repository) withOrganizationScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
+func (r *Repository) withTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
 	if r.hasOrganizationContext(ctx) {
-		return db.WithGormOrganizationScope(ctx, tx)
+		return db.WithGormTenantScope(ctx, tx)
 	}
 	// Single-tenant mode: no organization scope needed
 	return tx, nil
@@ -120,7 +120,7 @@ func (r *Repository) withForUpdateScope(ctx context.Context, fn func(tx *gorm.DB
 		// Already in a transaction (via WithTx) - use it directly with org scope
 		// The caller is responsible for the outer transaction,
 		// but we still need to set the org scope for this operation.
-		tx, err := r.withOrganizationScope(ctx, r.db.WithContext(ctx))
+		tx, err := r.withTenantScope(ctx, r.db.WithContext(ctx))
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,7 @@ func (r *Repository) Save(ctx context.Context, party *domain.Party) error {
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Set organization scope if in multi-org mode
-		tx, err := r.withOrganizationScope(ctx, tx)
+		tx, err := r.withTenantScope(ctx, tx)
 		if err != nil {
 			return err
 		}

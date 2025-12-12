@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/meridianhub/meridian/shared/platform/organization"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
@@ -19,7 +19,7 @@ var (
 	errSchemaDoesNotExist     = errors.New("schema does not exist")
 )
 
-func TestWithGormOrganizationScope_SetsSearchPath(t *testing.T) {
+func TestWithGormTenantScope_SetsSearchPath(t *testing.T) {
 	// Create mock database
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -32,15 +32,15 @@ func TestWithGormOrganizationScope_SetsSearchPath(t *testing.T) {
 	require.NoError(t, err)
 
 	// Setup context with organization
-	orgID := organization.OrganizationID("acme_bank")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
 	// Expect the SET LOCAL query
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	// Execute
-	result, err := WithGormOrganizationScope(ctx, gormDB)
+	result, err := WithGormTenantScope(ctx, gormDB)
 
 	// Assert
 	require.NoError(t, err)
@@ -48,7 +48,7 @@ func TestWithGormOrganizationScope_SetsSearchPath(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestWithGormOrganizationScope_MissingContext_ReturnsError(t *testing.T) {
+func TestWithGormTenantScope_MissingContext_ReturnsError(t *testing.T) {
 	// Create mock database
 	mockDB, _, err := sqlmock.New()
 	require.NoError(t, err)
@@ -64,15 +64,15 @@ func TestWithGormOrganizationScope_MissingContext_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 
 	// Execute
-	result, err := WithGormOrganizationScope(ctx, gormDB)
+	result, err := WithGormTenantScope(ctx, gormDB)
 
 	// Assert
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+	assert.ErrorIs(t, err, tenant.ErrMissingTenantContext)
 }
 
-func TestMustWithGormOrganizationScope_MissingContext_Panics(t *testing.T) {
+func TestMustWithGormTenantScope_MissingContext_Panics(t *testing.T) {
 	// Create mock database
 	mockDB, _, err := sqlmock.New()
 	require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestMustWithGormOrganizationScope_MissingContext_Panics(t *testing.T) {
 
 	// Assert panic
 	assert.Panics(t, func() {
-		MustWithGormOrganizationScope(ctx, gormDB)
+		MustWithGormTenantScope(ctx, gormDB)
 	})
 }
 
@@ -106,8 +106,8 @@ func TestWithGormOrganizationTransaction_SetsSearchPathAndExecutes(t *testing.T)
 	require.NoError(t, err)
 
 	// Setup context with organization
-	orgID := organization.OrganizationID("acme_bank")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
 	// Expect transaction begin, SET LOCAL, and commit
 	mock.ExpectBegin()
@@ -157,11 +157,11 @@ func TestWithGormOrganizationTransaction_MissingContext_ReturnsError(t *testing.
 	// Assert
 	require.Error(t, err)
 	assert.False(t, executed, "transaction function should not have been executed")
-	assert.ErrorIs(t, err, organization.ErrMissingOrganizationContext)
+	assert.ErrorIs(t, err, tenant.ErrMissingTenantContext)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestWithGormOrganizationScope_SpecialCharacters_QuotedProperly(t *testing.T) {
+func TestWithGormTenantScope_SpecialCharacters_QuotedProperly(t *testing.T) {
 	testCases := []struct {
 		name           string
 		orgID          string
@@ -198,8 +198,8 @@ func TestWithGormOrganizationScope_SpecialCharacters_QuotedProperly(t *testing.T
 			require.NoError(t, err)
 
 			// Setup context
-			orgID := organization.OrganizationID(tc.orgID)
-			ctx := organization.WithOrganization(context.Background(), orgID)
+			orgID := tenant.TenantID(tc.orgID)
+			ctx := tenant.WithTenant(context.Background(), orgID)
 
 			// Expect the SET LOCAL query with properly quoted schema
 			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
@@ -207,7 +207,7 @@ func TestWithGormOrganizationScope_SpecialCharacters_QuotedProperly(t *testing.T
 				WillReturnResult(sqlmock.NewResult(0, 0))
 
 			// Execute
-			result, err := WithGormOrganizationScope(ctx, gormDB)
+			result, err := WithGormTenantScope(ctx, gormDB)
 
 			// Assert
 			require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestWithGormOrganizationScope_SpecialCharacters_QuotedProperly(t *testing.T
 	}
 }
 
-func TestWithGormOrganizationScope_DatabaseError_ReturnsError(t *testing.T) {
+func TestWithGormTenantScope_DatabaseError_ReturnsError(t *testing.T) {
 	// This tests the error path when SET LOCAL search_path fails (e.g., database connection issue)
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -229,20 +229,20 @@ func TestWithGormOrganizationScope_DatabaseError_ReturnsError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Setup context with organization
-	orgID := organization.OrganizationID("acme_bank")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
 	// Simulate database error on SET LOCAL query
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnError(errDatabaseConnectionLost)
 
 	// Execute
-	result, err := WithGormOrganizationScope(ctx, gormDB)
+	result, err := WithGormTenantScope(ctx, gormDB)
 
 	// Assert - should return error when SET LOCAL fails
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "failed to set organization schema scope")
+	assert.Contains(t, err.Error(), "failed to set tenant schema scope")
 	assert.ErrorIs(t, err, errDatabaseConnectionLost)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -260,8 +260,8 @@ func TestWithGormOrganizationTransaction_DatabaseError_ReturnsError(t *testing.T
 	require.NoError(t, err)
 
 	// Setup context with organization
-	orgID := organization.OrganizationID("acme_bank")
-	ctx := organization.WithOrganization(context.Background(), orgID)
+	orgID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), orgID)
 
 	// Expect transaction begin, SET LOCAL failure, and rollback
 	mock.ExpectBegin()
@@ -279,14 +279,14 @@ func TestWithGormOrganizationTransaction_DatabaseError_ReturnsError(t *testing.T
 	// Assert - function should not have been executed, error should propagate
 	require.Error(t, err)
 	assert.False(t, executed, "transaction function should not have been executed")
-	assert.Contains(t, err.Error(), "failed to set organization schema scope")
+	assert.Contains(t, err.Error(), "failed to set tenant schema scope")
 	assert.ErrorIs(t, err, errSchemaDoesNotExist)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestWithGormOrganizationScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) {
+func TestWithGormTenantScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) {
 	// These test cases verify that pq.QuoteIdentifier properly escapes
-	// potentially malicious organization IDs to prevent SQL injection.
+	// potentially malicious tenant IDs to prevent SQL injection.
 	// Note: pq.QuoteIdentifier truncates at null bytes and uses lowercase.
 	testCases := []struct {
 		name           string
@@ -341,8 +341,8 @@ func TestWithGormOrganizationScope_MaliciousSchemaNames_ProperlyEscaped(t *testi
 			require.NoError(t, err)
 
 			// Setup context with potentially malicious org ID
-			orgID := organization.OrganizationID(tc.orgID)
-			ctx := organization.WithOrganization(context.Background(), orgID)
+			orgID := tenant.TenantID(tc.orgID)
+			ctx := tenant.WithTenant(context.Background(), orgID)
 
 			// Expect the SET LOCAL query with properly escaped schema
 			// The schema should be safely quoted by pq.QuoteIdentifier
@@ -351,7 +351,7 @@ func TestWithGormOrganizationScope_MaliciousSchemaNames_ProperlyEscaped(t *testi
 				WillReturnResult(sqlmock.NewResult(0, 0))
 
 			// Execute
-			result, err := WithGormOrganizationScope(ctx, gormDB)
+			result, err := WithGormTenantScope(ctx, gormDB)
 
 			// Assert - even with malicious input, the function should work
 			// because pq.QuoteIdentifier properly escapes the schema name
