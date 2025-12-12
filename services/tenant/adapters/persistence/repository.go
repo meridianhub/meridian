@@ -231,6 +231,10 @@ func toEntity(tenant *domain.Tenant) *TenantEntity {
 		entity.Subdomain = &tenant.Subdomain
 	}
 
+	if tenant.PartyID != "" {
+		entity.PartyID = &tenant.PartyID
+	}
+
 	return entity
 }
 
@@ -254,6 +258,10 @@ func toDomain(entity *TenantEntity) (*domain.Tenant, error) {
 
 	if entity.Subdomain != nil {
 		tenant.Subdomain = *entity.Subdomain
+	}
+
+	if entity.PartyID != nil {
+		tenant.PartyID = *entity.PartyID
 	}
 
 	return tenant, nil

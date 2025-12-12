@@ -61,6 +61,11 @@ type Tenant struct {
 
 	// Version is for optimistic locking.
 	Version int
+
+	// PartyID is the reference to the corresponding Party in the BIAN Party Reference Data Directory.
+	// Automatically populated when the tenant is created via PartyService.RegisterParty.
+	// This links platform infrastructure (Tenant) to BIAN domain entities (Party.Organization).
+	PartyID string
 }
 
 // IsActive returns true if the tenant is in active status.

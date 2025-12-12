@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -95,8 +96,32 @@ func run(logger *slog.Logger) error {
 	// Create repository
 	repo := persistence.NewRepository(db)
 
+	// Initialize Party client (optional - skipped if PARTY_SERVICE_TARGET not set)
+	var partyClient clients.PartyClient
+	partyTarget := getEnvOrDefault("PARTY_SERVICE_TARGET", "")
+	if partyTarget != "" {
+		pc, err := clients.NewPartyClient(&clients.PartyClientConfig{
+			Target:  partyTarget,
+			Timeout: 30 * time.Second,
+			Tracer:  tracer,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create party client: %w", err)
+		}
+		partyClient = pc
+		defer func() {
+			if err := pc.Close(); err != nil {
+				logger.Error("failed to close party client", "error", err)
+			}
+		}()
+		logger.Info("party client initialized", "target", partyTarget)
+	} else {
+		logger.Warn("party client not configured - tenant creation will not register parties",
+			"hint", "set PARTY_SERVICE_TARGET to enable party registration")
+	}
+
 	// Create gRPC service
-	tenantService := service.NewService(repo, logger)
+	tenantService := service.NewService(repo, partyClient, logger)
 
 	// Create cached registry for validation middleware
 	cachedRegistry := service.NewCachedRegistry(repo, service.CachedRegistryConfig{
