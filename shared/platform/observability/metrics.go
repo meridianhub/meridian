@@ -35,7 +35,7 @@ type MetricsCollector struct {
 
 // NewMetricsCollector creates a new metrics collector with all standard metrics
 //
-// All metrics include an "tenant" label for multi-tenant observability.
+// All metrics include a "tenant" label for multi-tenant observability.
 // This allows filtering and grouping metrics by tenant in Grafana dashboards.
 func NewMetricsCollector() *MetricsCollector {
 	registry := prometheus.NewRegistry()

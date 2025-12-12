@@ -761,13 +761,13 @@ func TestMultiOrgMode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Organization should not be in context
+		// Tenant should not be in context
 		resultCtx := resp.(context.Context)
 		_, ok := tenant.FromContext(resultCtx)
 		assert.False(t, ok)
 	})
 
-	t.Run("single-org mode does not inject organization even if present in token", func(t *testing.T) {
+	t.Run("single-tenant mode does not inject tenant even if present in token", func(t *testing.T) {
 		// Ensure MULTI_TENANT_MODE is not set
 		t.Setenv(MultiTenantModeEnvVar, "")
 
@@ -800,7 +800,7 @@ func TestMultiOrgMode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Organization should not be in context in single-org mode
+		// Tenant should not be in context in single-tenant mode
 		resultCtx := resp.(context.Context)
 		_, ok := tenant.FromContext(resultCtx)
 		assert.False(t, ok)

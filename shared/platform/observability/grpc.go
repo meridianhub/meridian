@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Organization span attribute keys for multi-tenant tracing
+// Tenant span attribute keys for multi-tenant tracing
 const (
 	// TenantIDAttrKey is the attribute key for the tenant ID in traces
 	TenantIDAttrKey = "tenant.id"
@@ -97,7 +97,7 @@ func (t *Tracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		resp, err := handler(ctx, req)
 
 		// Add tenant attributes after handler (tenant context set by auth middleware)
-		addOrganizationSpanAttributes(ctx, span)
+		addTenantSpanAttributes(ctx, span)
 
 		// Record error if present
 		if err != nil {
@@ -173,7 +173,7 @@ func (t *Tracer) StreamServerInterceptor() grpc.StreamServerInterceptor {
 		err := handler(srv, wrappedStream)
 
 		// Add tenant attributes after handler (tenant context set by auth middleware)
-		addOrganizationSpanAttributes(wrappedStream.ctx, span)
+		addTenantSpanAttributes(wrappedStream.ctx, span)
 
 		// Record error if present
 		if err != nil {
@@ -479,13 +479,13 @@ func (mc metadataCarrier) Keys() []string {
 	return lo.Keys(mc)
 }
 
-// addOrganizationSpanAttributes adds tenant context attributes to a span.
+// addTenantSpanAttributes adds tenant context attributes to a span.
 // This enables filtering and grouping traces by tenant in Tempo/Jaeger.
 //
 // Attributes added:
 //   - tenant.id: The tenant identifier (e.g., "acme_bank")
 //   - tenant.schema: The database schema name (e.g., "org_acme_bank")
-func addOrganizationSpanAttributes(ctx context.Context, span trace.Span) {
+func addTenantSpanAttributes(ctx context.Context, span trace.Span) {
 	if ctx == nil || !span.IsRecording() {
 		return
 	}
