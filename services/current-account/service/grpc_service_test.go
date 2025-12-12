@@ -525,13 +525,3 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 		t.Errorf("Error should mention overflow or positivity, got: %s", st.Message())
 	}
 }
-
-// NOTE: Party validation tests are in grpc_service_party_integration_test.go
-// That file contains comprehensive tests for party validation scenarios including:
-// - TestInitiateCurrentAccount_WithPartyValidation_Success
-// - TestInitiateCurrentAccount_PartyNotFound
-// - TestInitiateCurrentAccount_PartyNotActive
-// - TestInitiateCurrentAccount_PartyServiceUnavailable
-// - TestInitiateCurrentAccount_PartyServiceTimeout
-// - TestInitiateCurrentAccount_NilPartyClient_BackwardCompatibility
-// - etc.
