@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,6 +30,7 @@ var errAlreadyProvisioned = errors.New("already provisioned")
 type PostgresProvisioner struct {
 	db     *gorm.DB
 	config *Config
+	logger *slog.Logger
 
 	// mu protects concurrent access to provisioning operations for the same tenant.
 	// This prevents race conditions when multiple goroutines attempt to provision
@@ -37,12 +39,17 @@ type PostgresProvisioner struct {
 }
 
 // NewPostgresProvisioner creates a new PostgreSQL schema provisioner.
-// The config must be validated before calling this function.
-func NewPostgresProvisioner(db *gorm.DB, config *Config) *PostgresProvisioner {
+// Returns an error if the config is invalid.
+func NewPostgresProvisioner(db *gorm.DB, config *Config) (*PostgresProvisioner, error) {
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
 	return &PostgresProvisioner{
 		db:     db,
 		config: config,
-	}
+		logger: slog.Default().With("component", "provisioner"),
+	}, nil
 }
 
 // ProvisionSchemas creates the org_{tenant_id} schema and applies all service migrations.
@@ -59,12 +66,18 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID org
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	startTime := time.Now()
+	logger := p.logger.With("tenant_id", tenantID.String(), "schema", tenantID.SchemaName())
+	logger.Info("starting schema provisioning")
+
 	// Validate and prepare provisioning status
 	status, err := p.prepareProvisioningStatus(ctx, tenantID)
 	if errors.Is(err, errAlreadyProvisioned) {
+		logger.Info("schema already provisioned, skipping")
 		return nil // Idempotent: already provisioned
 	}
 	if err != nil {
+		logger.Error("failed to prepare provisioning status", "error", err)
 		return err
 	}
 
@@ -78,12 +91,15 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID org
 	// Create the schema
 	schemaName := tenantID.SchemaName()
 	if err := p.createSchema(ctx, schemaName); err != nil {
+		logger.Error("failed to create schema", "error", err)
 		p.markProvisioningFailed(ctx, status, fmt.Sprintf("create schema: %v", err))
 		return fmt.Errorf("%w: %w", ErrSchemaCreationFailed, err)
 	}
+	logger.Debug("schema created successfully")
 
 	// Apply migrations for each service
 	if err := p.provisionAllServices(ctx, status, schemaName); err != nil {
+		logger.Error("failed to provision services", "error", err)
 		return err
 	}
 
@@ -91,9 +107,13 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID org
 	status.State = StateActive
 	status.UpdatedAt = time.Now()
 	if err := p.saveProvisioningStatus(ctx, status); err != nil {
+		logger.Error("failed to save final status", "error", err)
 		return fmt.Errorf("save final status: %w", err)
 	}
 
+	logger.Info("schema provisioning completed",
+		"duration_ms", time.Since(startTime).Milliseconds(),
+		"services_count", len(p.config.Services))
 	return nil
 }
 
@@ -144,11 +164,16 @@ func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, ten
 
 // provisionAllServices applies migrations for each configured service.
 func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *ProvisioningStatus, schemaName string) error {
+	logger := p.logger.With("tenant_id", status.TenantID.String(), "schema", schemaName)
+
 	for i, svc := range p.config.Services {
 		if ctx.Err() != nil {
+			logger.Warn("provisioning timeout", "service", svc.Name)
 			p.markProvisioningFailed(ctx, status, fmt.Sprintf("timeout during %s migrations", svc.Name))
 			return ErrProvisioningTimeout
 		}
+
+		logger.Debug("provisioning service", "service", svc.Name, "migration_path", svc.MigrationPath)
 
 		// Update service status to created
 		status.Services[i].State = ServiceStateCreated
@@ -158,12 +183,14 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 		// Apply migrations
 		version, err := p.applyServiceMigrations(ctx, schemaName, svc)
 		if err != nil {
+			logger.Error("service migration failed", "service", svc.Name, "error", err)
 			status.Services[i].State = ServiceStateFailed
 			status.Services[i].ErrorMessage = err.Error()
 			p.markProvisioningFailed(ctx, status, fmt.Sprintf("%s migrations failed: %v", svc.Name, err))
 			return fmt.Errorf("%w: %s: %w", ErrMigrationFailed, svc.Name, err)
 		}
 
+		logger.Debug("service migration completed", "service", svc.Name, "version", version)
 		status.Services[i].State = ServiceStateMigrated
 		status.Services[i].MigrationVersion = version
 		status.UpdatedAt = time.Now()
@@ -186,13 +213,18 @@ func (p *PostgresProvisioner) DeprovisionSchemas(ctx context.Context, tenantID o
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	logger := p.logger.With("tenant_id", tenantID.String(), "schema", tenantID.SchemaName())
+	logger.Info("starting schema deprovisioning")
+
 	status, err := p.getProvisioningStatusLocked(ctx, tenantID)
 	if err != nil {
+		logger.Error("failed to get provisioning status", "error", err)
 		return err
 	}
 
 	// Idempotent: already deprovisioned
 	if status.State == StateDeprovisioned {
+		logger.Info("schema already deprovisioned, skipping")
 		return nil
 	}
 
@@ -203,9 +235,11 @@ func (p *PostgresProvisioner) DeprovisionSchemas(ctx context.Context, tenantID o
 	status.UpdatedAt = now
 
 	if err := p.saveProvisioningStatus(ctx, status); err != nil {
+		logger.Error("failed to save deprovisioned status", "error", err)
 		return fmt.Errorf("%w: %w", ErrDeprovisioningFailed, err)
 	}
 
+	logger.Info("schema deprovisioning completed")
 	return nil
 }
 
@@ -219,13 +253,18 @@ func (p *PostgresProvisioner) PurgeSchemas(ctx context.Context, tenantID organiz
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	logger := p.logger.With("tenant_id", tenantID.String(), "schema", tenantID.SchemaName())
+	logger.Info("starting schema purge")
+
 	status, err := p.getProvisioningStatusLocked(ctx, tenantID)
 	if err != nil {
+		logger.Error("failed to get provisioning status", "error", err)
 		return err
 	}
 
 	// Must be deprovisioned first
 	if status.State != StateDeprovisioned {
+		logger.Warn("cannot purge: tenant not deprovisioned", "current_state", status.State)
 		return ErrNotDeprovisioned
 	}
 
@@ -233,6 +272,9 @@ func (p *PostgresProvisioner) PurgeSchemas(ctx context.Context, tenantID organiz
 	if status.DeprovisionedAt != nil && p.config.DataRetentionPeriod > 0 {
 		retentionEnd := status.DeprovisionedAt.Add(p.config.DataRetentionPeriod)
 		if time.Now().Before(retentionEnd) {
+			logger.Warn("cannot purge: retention period not elapsed",
+				"deprovisioned_at", status.DeprovisionedAt,
+				"retention_ends", retentionEnd)
 			return ErrRetentionPeriodNotElapsed
 		}
 	}
@@ -240,14 +282,18 @@ func (p *PostgresProvisioner) PurgeSchemas(ctx context.Context, tenantID organiz
 	// Drop the schema
 	schemaName := tenantID.SchemaName()
 	if err := p.dropSchema(ctx, schemaName); err != nil {
+		logger.Error("failed to drop schema", "error", err)
 		return fmt.Errorf("%w: %w", ErrDeprovisioningFailed, err)
 	}
+	logger.Debug("schema dropped successfully")
 
 	// Remove the provisioning record
 	if err := p.deleteProvisioningStatus(ctx, tenantID); err != nil {
+		logger.Error("failed to delete provisioning status", "error", err)
 		return fmt.Errorf("delete provisioning status: %w", err)
 	}
 
+	logger.Info("schema purge completed")
 	return nil
 }
 
