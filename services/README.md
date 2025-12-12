@@ -237,7 +237,7 @@ Aggregated health endpoints check:
 The transactional outbox pattern provides guaranteed audit logging with eventual delivery.
 See [ADR-0009](../docs/adr/0009-application-level-audit-logging.md) for architecture rationale.
 
-**Implementation Status:** (tracked in [#288](https://github.com/meridianhub/meridian/issues/288))
+**Implementation Status:**
 
 | Service | Audit Schema | Outbox Table | GORM Hooks | Worker |
 |---------|:------------:|:------------:|:----------:|:------:|
