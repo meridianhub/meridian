@@ -162,6 +162,7 @@ func (c *FinancialAccountingGRPCClient) InitiateFinancialBookingLog(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.InitiateFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -180,6 +181,7 @@ func (c *FinancialAccountingGRPCClient) UpdateFinancialBookingLog(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.UpdateFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -198,6 +200,7 @@ func (c *FinancialAccountingGRPCClient) RetrieveFinancialBookingLog(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.RetrieveFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -216,6 +219,7 @@ func (c *FinancialAccountingGRPCClient) ListFinancialBookingLogs(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.ListFinancialBookingLogs(ctx, req)
 	if err != nil {
@@ -234,6 +238,7 @@ func (c *FinancialAccountingGRPCClient) CaptureLedgerPosting(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.CaptureLedgerPosting(ctx, req)
 	if err != nil {
@@ -252,6 +257,7 @@ func (c *FinancialAccountingGRPCClient) RetrieveLedgerPosting(
 	defer cancel()
 
 	ctx = PropagateCorrelationID(ctx)
+	ctx = PropagateOrganization(ctx)
 
 	resp, err := c.client.RetrieveLedgerPosting(ctx, req)
 	if err != nil {
