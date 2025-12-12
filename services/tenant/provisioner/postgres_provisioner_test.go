@@ -429,6 +429,41 @@ func TestPostgresProvisioner_DeprovisionSchemas_Idempotent(t *testing.T) {
 	assert.Equal(t, StateDeprovisioned, status.State)
 }
 
+func TestPostgresProvisioner_ProvisionSchemas_AfterDeprovisioned(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := organization.MustNewOrganizationID("reprov_tenant")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	svcDir := filepath.Join(tc.migDir, "reprov-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+
+	config := &Config{
+		Services:            []ServiceConfig{{Name: "reprov-service", MigrationPath: svcDir}},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+
+	// Provision and then deprovision
+	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Attempting to re-provision a deprovisioned tenant should fail
+	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	assert.ErrorIs(t, err, ErrAlreadyDeprovisioned)
+
+	// Status should remain deprovisioned
+	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateDeprovisioned, status.State)
+}
+
 func TestPostgresProvisioner_PurgeSchemas(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)

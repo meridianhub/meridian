@@ -211,11 +211,22 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 }
 
 // markProvisioningFailed updates status to failed state with error message.
-func (p *PostgresProvisioner) markProvisioningFailed(ctx context.Context, status *ProvisioningStatus, errorMsg string) {
+// Uses a fresh context for the save operation since the original context may be
+// cancelled (e.g., due to timeout), and we still want to record the failure.
+func (p *PostgresProvisioner) markProvisioningFailed(_ context.Context, status *ProvisioningStatus, errorMsg string) {
 	status.State = StateFailed
 	status.ErrorMessage = errorMsg
 	status.UpdatedAt = time.Now()
-	if err := p.saveProvisioningStatus(ctx, status); err != nil {
+
+	// Use a fresh context with timeout for cleanup, since the original may be cancelled.
+	// This is intentional - we want to save the failed status even if the parent context
+	// was cancelled due to timeout, so we use context.Background() as the base.
+	//nolint:contextcheck // Intentionally using Background() for cleanup after timeout
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	//nolint:contextcheck // cleanupCtx intentionally derived from Background() for cleanup after timeout
+	if err := p.saveProvisioningStatus(cleanupCtx, status); err != nil {
 		p.logger.Warn("failed to save failed status",
 			"tenant_id", status.TenantID.String(),
 			"error", err)
@@ -438,6 +449,13 @@ func (p *PostgresProvisioner) readMigrationFiles(migrationPath string) ([]migrat
 
 // processMigrationSQL processes migration SQL to work with dynamic schema names.
 // It handles both unqualified table names and hardcoded schema references.
+//
+// Security: The schemaName parameter is derived from OrganizationID.SchemaName(),
+// which is validated at construction to contain only alphanumeric characters and
+// underscores (regex: ^[a-zA-Z0-9_]{1,50}$). The "org_" prefix is added and the
+// string is lowercased, making SQL injection impossible through this path.
+// The string replacement is safe because the schema name cannot contain quotes,
+// semicolons, or other SQL control characters.
 func (p *PostgresProvisioner) processMigrationSQL(sql, schemaName string) string {
 	// Remove CREATE SCHEMA statements - we already created the schema
 	lines := strings.Split(sql, "\n")
