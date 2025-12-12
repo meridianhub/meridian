@@ -121,6 +121,27 @@ func TestSchemaProvisioner_ProvisionSchemas_RetryAfterFailure(t *testing.T) {
 	assert.Equal(t, StateActive, status.State)
 }
 
+func TestSchemaProvisioner_ProvisionSchemas_ConcurrentAttemptBlocked(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "services/party/migrations"},
+	}
+	provisioner := NewMockProvisioner(services)
+
+	tenantID := organization.MustNewOrganizationID("concurrent_tenant")
+
+	// Manually set status to in_progress to simulate concurrent attempt
+	provisioner.SetStatus(&ProvisioningStatus{
+		TenantID:  tenantID,
+		State:     StateInProgress,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	// Attempt to provision while already in progress
+	err := provisioner.ProvisionSchemas(context.Background(), tenantID)
+	assert.ErrorIs(t, err, ErrProvisioningInProgress)
+}
+
 func TestSchemaProvisioner_DeprovisionSchemas_SoftDelete(t *testing.T) {
 	services := []ServiceConfig{
 		{Name: "party", MigrationPath: "services/party/migrations"},
@@ -203,6 +224,10 @@ func TestSchemaProvisioner_PurgeSchemas(t *testing.T) {
 
 	// Verify purge was recorded
 	assert.Len(t, provisioner.PurgeCalls, 1)
+
+	// Verify status record is removed after purge
+	_, err = provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	assert.ErrorIs(t, err, ErrProvisioningStatusNotFound)
 }
 
 func TestSchemaProvisioner_PurgeSchemas_NotDeprovisioned(t *testing.T) {

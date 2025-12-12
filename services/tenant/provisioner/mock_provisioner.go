@@ -183,9 +183,9 @@ func (m *MockProvisioner) PurgeSchemas(_ context.Context, tenantID organization.
 		}
 	}
 
-	// In real implementation, this would DROP SCHEMA CASCADE
-	// For mock, we just leave the status as is (marking purge complete)
-	// A real implementation might add a "purged" state or timestamp
+	// Remove the status record - matches interface contract:
+	// "Removes the provisioning status record (purge completes the lifecycle)"
+	delete(m.statuses, tenantID.String())
 
 	return nil
 }
