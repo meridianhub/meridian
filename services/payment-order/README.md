@@ -127,7 +127,7 @@ INITIATED
 | Header | `X-Webhook-Signature` |
 | Timestamp | Max 5 minutes age |
 | Rate Limiting | 100 req/sec per IP |
-| Idempotency | Deterministic key from (gateway_ref + status + timestamp) |
+| Idempotency | Deterministic key from (gateway_ref + status + gateway_event_ts) |
 
 ## Service Dependencies
 

@@ -121,6 +121,8 @@ The tenant registry itself is stored in the shared `platform` schema.
 - `valid_org_id`: id matches `^[a-zA-Z0-9_]{1,50}$`
 - Subdomain unique when not null
 
+**Note**: API enum uses uppercase (ACTIVE), DB stores lowercase (active).
+
 ## Cached Registry
 
 In-memory tenant cache for validation middleware:
@@ -130,6 +132,13 @@ In-memory tenant cache for validation middleware:
 | Refresh interval | 60 seconds |
 | Per-refresh timeout | 30 seconds |
 | Strategy | Fail-open (uses stale cache if refresh fails) |
+
+**Fail-open guardrails:**
+
+- Only allows previously-seen tenants (cached entries)
+- Never accepts unknown tenant IDs during refresh failures
+- Emits metrics/alerts when operating in stale-cache mode
+- Cache populated on startup before accepting traffic
 
 ## Configuration
 

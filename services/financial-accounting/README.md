@@ -17,9 +17,9 @@ instructions: |
   - LedgerPosting: Individual debit/credit line item
   - PostingDirection: DEBIT (asset/expense increase) or CREDIT (liability/income increase)
 
-  Core operation (ProcessDeposit):
-    Debit Entry:  Customer Account [asset increase]
-    Credit Entry: Bank Cash Account [liability increase]
+  Core operation (ProcessDeposit) - from bank's general ledger perspective:
+    Debit Entry:  Customer Account (bank's receivable/asset ↑)
+    Credit Entry: Bank Cash Account (bank's cash liability ↑)
     Balance Check: Debits = Credits
 
   Port: 50052 (gRPC), 8082 (metrics)
@@ -96,12 +96,15 @@ LedgerPosting {
 Every financial transaction creates balanced postings:
 
 ```text
-Deposit £500.00:
-  DEBIT   Customer Account (asset increase)    = £500.00
-  CREDIT  Bank Cash Account (liability increase) = £500.00
-  ─────────────────────────────────────────────────────────
+Deposit £500.00 (from bank's general ledger perspective):
+  DEBIT   Customer Account (bank's receivable ↑)  = £500.00
+  CREDIT  Bank Cash Account (bank's cash ↑)       = £500.00
+  ──────────────────────────────────────────────────────────
   Balance Check: Debits (£500.00) = Credits (£500.00) ✓
 ```
+
+**Note**: This follows traditional bank GL accounting where customer deposits
+are recorded as assets (receivables) on the bank's books.
 
 **Validation Rules:**
 
