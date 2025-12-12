@@ -50,6 +50,7 @@ type PartyGRPCClient struct {
 // PartyClientConfig holds configuration for the Party client.
 type PartyClientConfig struct {
 	// Target is the gRPC server address (e.g., "localhost:50054" or "party-service:50054").
+	//
 	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
 	Target string
 
