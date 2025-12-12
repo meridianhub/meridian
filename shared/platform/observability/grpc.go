@@ -126,7 +126,7 @@ func (t *Tracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 //   - Creates spans for streaming RPC calls
 //   - Extracts trace context from incoming metadata
 //   - Records stream events (send, receive, close)
-//   - Adds organization attributes for multi-tenant tracing
+//   - Adds tenant attributes for multi-tenant tracing
 //
 // Example usage:
 //
@@ -480,10 +480,10 @@ func (mc metadataCarrier) Keys() []string {
 }
 
 // addOrganizationSpanAttributes adds tenant context attributes to a span.
-// This enables filtering and grouping traces by organization in Tempo/Jaeger.
+// This enables filtering and grouping traces by tenant in Tempo/Jaeger.
 //
 // Attributes added:
-//   - tenant.id: The organization identifier (e.g., "acme_bank")
+//   - tenant.id: The tenant identifier (e.g., "acme_bank")
 //   - tenant.schema: The database schema name (e.g., "org_acme_bank")
 func addOrganizationSpanAttributes(ctx context.Context, span trace.Span) {
 	if ctx == nil || !span.IsRecording() {

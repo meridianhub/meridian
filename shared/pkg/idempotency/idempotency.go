@@ -40,7 +40,7 @@ var (
 type Key struct {
 	// TenantID is the tenant identifier for multi-tenant isolation.
 	// When set, keys are prefixed with the tenant ID to ensure isolation.
-	// When empty, keys are generated without an organization prefix (single-tenant mode).
+	// When empty, keys are generated without a tenant prefix (single-tenant mode).
 	// Must not contain colons (':') to avoid key parsing ambiguity.
 	TenantID string
 

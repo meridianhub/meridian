@@ -70,7 +70,7 @@ func TestWithTenantScope_Success(t *testing.T) {
 
 func TestWithTenantScope_MissingOrganizationContext(t *testing.T) {
 	mock := &mockDB{}
-	ctx := context.Background() // No organization in context
+	ctx := context.Background() // No tenant in context
 
 	result, err := db.WithTenantScope(ctx, mock)
 
@@ -84,7 +84,7 @@ func TestWithTenantScope_MissingOrganizationContext(t *testing.T) {
 		t.Error("WithTenantScope should return nil DB on error")
 	}
 	if mock.execCalled {
-		t.Error("WithTenantScope should not execute query when organization missing")
+		t.Error("WithTenantScope should not execute query when tenant missing")
 	}
 }
 
@@ -167,11 +167,11 @@ func TestMustWithTenantScope_Success(t *testing.T) {
 
 func TestMustWithTenantScope_Panics(t *testing.T) {
 	mock := &mockDB{}
-	ctx := context.Background() // No organization
+	ctx := context.Background() // No tenant
 
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("MustWithTenantScope should panic when organization missing")
+			t.Error("MustWithTenantScope should panic when tenant missing")
 		}
 	}()
 

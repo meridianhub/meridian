@@ -36,7 +36,7 @@ type MetricsCollector struct {
 // NewMetricsCollector creates a new metrics collector with all standard metrics
 //
 // All metrics include an "tenant" label for multi-tenant observability.
-// This allows filtering and grouping metrics by organization in Grafana dashboards.
+// This allows filtering and grouping metrics by tenant in Grafana dashboards.
 func NewMetricsCollector() *MetricsCollector {
 	registry := prometheus.NewRegistry()
 
@@ -105,7 +105,7 @@ func (mc *MetricsCollector) Handler() http.Handler {
 // explosion. High cardinality labels can cause excessive memory usage in Prometheus.
 //
 // When using with a router, pass the matched route pattern instead of r.URL.Path.
-// The organization is extracted from the context; if not present, "unknown" is used.
+// The tenant is extracted from the context; if not present, "unknown" is used.
 func (mc *MetricsCollector) RecordHTTPRequest(ctx context.Context, method, path string, status int, duration time.Duration) {
 	org := getOrganizationLabel(ctx)
 	mc.HTTPRequestsTotal.WithLabelValues(method, path, fmt.Sprintf("%d", status), org).Inc()
@@ -114,7 +114,7 @@ func (mc *MetricsCollector) RecordHTTPRequest(ctx context.Context, method, path 
 
 // RecordGRPCRequest records a gRPC request metric with tenant context
 //
-// The organization is extracted from the context; if not present, "unknown" is used.
+// The tenant is extracted from the context; if not present, "unknown" is used.
 func (mc *MetricsCollector) RecordGRPCRequest(ctx context.Context, service, method, code string) {
 	org := getOrganizationLabel(ctx)
 	mc.GRPCServerHandledTotal.WithLabelValues(service, method, code, org).Inc()
@@ -122,7 +122,7 @@ func (mc *MetricsCollector) RecordGRPCRequest(ctx context.Context, service, meth
 
 // RecordDBQuery records a database query metric with tenant context
 //
-// The organization is extracted from the context; if not present, "unknown" is used.
+// The tenant is extracted from the context; if not present, "unknown" is used.
 func (mc *MetricsCollector) RecordDBQuery(ctx context.Context, operation, table string, duration time.Duration) {
 	org := getOrganizationLabel(ctx)
 	mc.DBQueryDurationSeconds.WithLabelValues(operation, table, org).Observe(duration.Seconds())
@@ -130,7 +130,7 @@ func (mc *MetricsCollector) RecordDBQuery(ctx context.Context, operation, table 
 
 // RecordKafkaPublish records a Kafka message publish metric with tenant context
 //
-// The organization is extracted from the context; if not present, "unknown" is used.
+// The tenant is extracted from the context; if not present, "unknown" is used.
 func (mc *MetricsCollector) RecordKafkaPublish(ctx context.Context, topic, status string) {
 	org := getOrganizationLabel(ctx)
 	mc.KafkaMessagesPublishedTotal.WithLabelValues(topic, status, org).Inc()
@@ -156,7 +156,7 @@ func getOrganizationLabel(ctx context.Context) string {
 // For production use, consider extracting the route pattern from your router and
 // passing it to RecordHTTPRequest instead of using this generic middleware.
 //
-// The organization is extracted from the request context for metric labeling.
+// The tenant is extracted from the request context for metric labeling.
 //
 // Example with chi router:
 //

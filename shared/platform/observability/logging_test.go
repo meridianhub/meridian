@@ -111,7 +111,7 @@ func TestLogger_InfoContext_TenantID(t *testing.T) {
 	logger := NewLogger(buf, LogLevelInfo)
 
 	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
-	logger.InfoContext(ctx, "test message with organization")
+	logger.InfoContext(ctx, "test message with tenant")
 
 	var entry LogEntry
 	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
@@ -127,7 +127,7 @@ func TestLogger_InfoContext_WithoutOrganization(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := NewLogger(buf, LogLevelInfo)
 
-	logger.InfoContext(context.Background(), "test message without organization")
+	logger.InfoContext(context.Background(), "test message without tenant")
 
 	var entry LogEntry
 	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
@@ -143,7 +143,7 @@ func TestLogger_InfoContext_AllContextValues(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := NewLogger(buf, LogLevelInfo)
 
-	// Create context with both organization and correlation ID
+	// Create context with both tenant and correlation ID
 	ctx := context.Background()
 	ctx = tenant.WithTenant(ctx, tenant.MustNewTenantID("motive"))
 	ctx = WithCorrelationID(ctx, "request-456")

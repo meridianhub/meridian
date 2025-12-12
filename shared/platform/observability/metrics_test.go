@@ -42,13 +42,13 @@ func TestNewMetricsCollector(t *testing.T) {
 func TestRecordHTTPRequest(t *testing.T) {
 	mc := NewMetricsCollector()
 
-	// Create context with organization
+	// Create context with tenant
 	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 
 	// Record a request
 	mc.RecordHTTPRequest(ctx, "GET", "/api/test", 200, 100*time.Millisecond)
 
-	// Verify counter was incremented with organization label
+	// Verify counter was incremented with tenant label
 	count := testutil.ToFloat64(mc.HTTPRequestsTotal.WithLabelValues("GET", "/api/test", "200", "acme_bank"))
 	if count != 1 {
 		t.Errorf("Expected count 1, got %f", count)
@@ -69,7 +69,7 @@ func TestRecordHTTPRequest_WithoutOrganization(t *testing.T) {
 	// Record a request without tenant context
 	mc.RecordHTTPRequest(context.Background(), "GET", "/api/test", 200, 100*time.Millisecond)
 
-	// Verify counter was incremented with "unknown" organization
+	// Verify counter was incremented with "unknown" tenant
 	count := testutil.ToFloat64(mc.HTTPRequestsTotal.WithLabelValues("GET", "/api/test", "200", "unknown"))
 	if count != 1 {
 		t.Errorf("Expected count 1 for unknown org, got %f", count)
@@ -79,16 +79,16 @@ func TestRecordHTTPRequest_WithoutOrganization(t *testing.T) {
 func TestRecordHTTPRequest_MultipleOrganizations(t *testing.T) {
 	mc := NewMetricsCollector()
 
-	// Create contexts for different organizations
+	// Create contexts for different tenants
 	ctxAcme := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank"))
 	ctxMotive := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("motive"))
 
-	// Record requests from different organizations
+	// Record requests from different tenants
 	mc.RecordHTTPRequest(ctxAcme, "GET", "/api/accounts", 200, 100*time.Millisecond)
 	mc.RecordHTTPRequest(ctxAcme, "GET", "/api/accounts", 200, 100*time.Millisecond)
 	mc.RecordHTTPRequest(ctxMotive, "GET", "/api/accounts", 200, 100*time.Millisecond)
 
-	// Verify separate counts per organization
+	// Verify separate counts per tenant
 	countAcme := testutil.ToFloat64(mc.HTTPRequestsTotal.WithLabelValues("GET", "/api/accounts", "200", "acme_bank"))
 	if countAcme != 2 {
 		t.Errorf("Expected count 2 for acme_bank, got %f", countAcme)
@@ -132,7 +132,7 @@ func TestRecordDBQuery(t *testing.T) {
 	mc.RecordDBQuery(ctx, "SELECT", "positions", 25*time.Millisecond)
 	mc.RecordDBQuery(ctx, "INSERT", "accounts", 10*time.Millisecond)
 
-	// Also test without organization
+	// Also test without tenant
 	mc.RecordDBQuery(context.Background(), "SELECT", "positions", 25*time.Millisecond)
 
 	// Verify histogram was observed (basic sanity check)
@@ -244,7 +244,7 @@ func TestHTTPMiddleware_WithOrganization(t *testing.T) {
 	// Wrap with middleware
 	wrappedHandler := mc.HTTPMiddleware(testHandler)
 
-	// Make a request with organization in context
+	// Make a request with tenant in context
 	req := httptest.NewRequest("GET", "/test", nil)
 	ctx := tenant.WithTenant(req.Context(), tenant.MustNewTenantID("acme_bank"))
 	req = req.WithContext(ctx)
@@ -252,7 +252,7 @@ func TestHTTPMiddleware_WithOrganization(t *testing.T) {
 
 	wrappedHandler.ServeHTTP(w, req)
 
-	// Verify metrics were recorded with organization
+	// Verify metrics were recorded with tenant
 	count := testutil.ToFloat64(mc.HTTPRequestsTotal.WithLabelValues("GET", "/test", "200", "acme_bank"))
 	if count != 1 {
 		t.Errorf("Expected count 1, got %f", count)
@@ -406,7 +406,7 @@ func TestGetOrganizationLabel(t *testing.T) {
 			expected: "unknown",
 		},
 		{
-			name:     "with organization",
+			name:     "with tenant",
 			ctx:      tenant.WithTenant(context.Background(), tenant.MustNewTenantID("acme_bank")),
 			expected: "acme_bank",
 		},
