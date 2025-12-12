@@ -26,8 +26,8 @@ flowchart LR
 
         subgraph Infrastructure["Infrastructure"]
             DB[("CockroachDB<br/>:26257")]
-            Kafka[("Kafka<br/>:9092")]
-            Redis[("Redis<br/>:6379")]
+            Kafka@{ shape: das, label: "Kafka :9092" }
+            Redis@{ shape: das, label: "Redis :6379" }
         end
     end
 
@@ -74,7 +74,8 @@ flowchart LR
 - Solid arrows (`-->`) = Required runtime dependency
 - Dashed arrows (`-.->`) = Optional runtime dependency
 - Blue boxes = Microservices
-- Cylinders `[(" ")]` = Storage/infrastructure (database, message queue, cache)
+- Vertical cylinder `[(" ")]` = Database (CockroachDB)
+- Horizontal cylinder `@{ shape: das }` = Direct access storage (Kafka, Redis)
 - Orange boxes = External systems
 
 ## Communication Protocols
