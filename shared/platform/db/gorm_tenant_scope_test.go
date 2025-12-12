@@ -31,9 +31,9 @@ func TestWithGormTenantScope_SetsSearchPath(t *testing.T) {
 	}), &gorm.Config{})
 	require.NoError(t, err)
 
-	// Setup context with organization
-	orgID := tenant.TenantID("acme_bank")
-	ctx := tenant.WithTenant(context.Background(), orgID)
+	// Setup context with tenant
+	tenantID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
 
 	// Expect the SET LOCAL query
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
@@ -105,9 +105,9 @@ func TestWithGormOrganizationTransaction_SetsSearchPathAndExecutes(t *testing.T)
 	}), &gorm.Config{})
 	require.NoError(t, err)
 
-	// Setup context with organization
-	orgID := tenant.TenantID("acme_bank")
-	ctx := tenant.WithTenant(context.Background(), orgID)
+	// Setup context with tenant
+	tenantID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
 
 	// Expect transaction begin, SET LOCAL, and commit
 	mock.ExpectBegin()
@@ -164,22 +164,22 @@ func TestWithGormOrganizationTransaction_MissingContext_ReturnsError(t *testing.
 func TestWithGormTenantScope_SpecialCharacters_QuotedProperly(t *testing.T) {
 	testCases := []struct {
 		name           string
-		orgID          string
+		tenantID       string
 		expectedSchema string
 	}{
 		{
 			name:           "simple org id",
-			orgID:          "acme",
+			tenantID:       "acme",
 			expectedSchema: `"org_acme"`,
 		},
 		{
 			name:           "org id with underscore",
-			orgID:          "acme_bank",
+			tenantID:       "acme_bank",
 			expectedSchema: `"org_acme_bank"`,
 		},
 		{
 			name:           "org id with numbers",
-			orgID:          "bank123",
+			tenantID:       "bank123",
 			expectedSchema: `"org_bank123"`,
 		},
 	}
@@ -198,8 +198,8 @@ func TestWithGormTenantScope_SpecialCharacters_QuotedProperly(t *testing.T) {
 			require.NoError(t, err)
 
 			// Setup context
-			orgID := tenant.TenantID(tc.orgID)
-			ctx := tenant.WithTenant(context.Background(), orgID)
+			tenantID := tenant.TenantID(tc.tenantID)
+			ctx := tenant.WithTenant(context.Background(), tenantID)
 
 			// Expect the SET LOCAL query with properly quoted schema
 			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
@@ -228,9 +228,9 @@ func TestWithGormTenantScope_DatabaseError_ReturnsError(t *testing.T) {
 	}), &gorm.Config{})
 	require.NoError(t, err)
 
-	// Setup context with organization
-	orgID := tenant.TenantID("acme_bank")
-	ctx := tenant.WithTenant(context.Background(), orgID)
+	// Setup context with tenant
+	tenantID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
 
 	// Simulate database error on SET LOCAL query
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
@@ -259,9 +259,9 @@ func TestWithGormOrganizationTransaction_DatabaseError_ReturnsError(t *testing.T
 	}), &gorm.Config{})
 	require.NoError(t, err)
 
-	// Setup context with organization
-	orgID := tenant.TenantID("acme_bank")
-	ctx := tenant.WithTenant(context.Background(), orgID)
+	// Setup context with tenant
+	tenantID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
 
 	// Expect transaction begin, SET LOCAL failure, and rollback
 	mock.ExpectBegin()
@@ -290,39 +290,39 @@ func TestWithGormTenantScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) 
 	// Note: pq.QuoteIdentifier truncates at null bytes and uses lowercase.
 	testCases := []struct {
 		name           string
-		orgID          string
+		tenantID       string
 		expectedSchema string // pq.QuoteIdentifier output
 	}{
 		{
-			name:  "SQL injection attempt with quote",
-			orgID: `evil"; drop table users; --`,
+			name:     "SQL injection attempt with quote",
+			tenantID: `evil"; drop table users; --`,
 			// pq.QuoteIdentifier escapes double quotes by doubling them
 			expectedSchema: `"org_evil""; drop table users; --"`,
 		},
 		{
 			name:           "SQL injection attempt with semicolon",
-			orgID:          "evil; drop table users",
+			tenantID:       "evil; drop table users",
 			expectedSchema: `"org_evil; drop table users"`,
 		},
 		{
-			name:  "null byte injection",
-			orgID: "evil\x00attack",
+			name:     "null byte injection",
+			tenantID: "evil\x00attack",
 			// pq.QuoteIdentifier truncates at the null byte
 			expectedSchema: `"org_evil"`,
 		},
 		{
 			name:           "unicode escape sequence for double quote",
-			orgID:          "evil\u0022injection",
+			tenantID:       "evil\u0022injection",
 			expectedSchema: `"org_evil""injection"`, // \u0022 is a double quote, escaped by doubling
 		},
 		{
 			name:           "schema traversal attempt with dot",
-			orgID:          "public.accounts",
+			tenantID:       "public.accounts",
 			expectedSchema: `"org_public.accounts"`,
 		},
 		{
 			name:           "backslash injection",
-			orgID:          `evil\ninjection`,
+			tenantID:       `evil\ninjection`,
 			expectedSchema: `"org_evil\ninjection"`,
 		},
 	}
@@ -341,8 +341,8 @@ func TestWithGormTenantScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) 
 			require.NoError(t, err)
 
 			// Setup context with potentially malicious org ID
-			orgID := tenant.TenantID(tc.orgID)
-			ctx := tenant.WithTenant(context.Background(), orgID)
+			tenantID := tenant.TenantID(tc.tenantID)
+			ctx := tenant.WithTenant(context.Background(), tenantID)
 
 			// Expect the SET LOCAL query with properly escaped schema
 			// The schema should be safely quoted by pq.QuoteIdentifier

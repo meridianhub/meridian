@@ -96,7 +96,7 @@ func (t *Tracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		// Call the handler
 		resp, err := handler(ctx, req)
 
-		// Add organization attributes after handler (tenant context set by auth middleware)
+		// Add tenant attributes after handler (tenant context set by auth middleware)
 		addOrganizationSpanAttributes(ctx, span)
 
 		// Record error if present
@@ -172,7 +172,7 @@ func (t *Tracer) StreamServerInterceptor() grpc.StreamServerInterceptor {
 		// Call the handler
 		err := handler(srv, wrappedStream)
 
-		// Add organization attributes after handler (tenant context set by auth middleware)
+		// Add tenant attributes after handler (tenant context set by auth middleware)
 		addOrganizationSpanAttributes(wrappedStream.ctx, span)
 
 		// Record error if present

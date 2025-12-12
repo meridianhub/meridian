@@ -179,79 +179,79 @@ func TestClaims_GetUserID(t *testing.T) {
 func TestClaims_GetTenantID(t *testing.T) {
 	t.Run("returns tenant ID when valid", func(t *testing.T) {
 		claims := &Claims{TenantID: "acme_bank"}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, tenant.TenantID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 	})
 
 	t.Run("returns error when tenant claim missing", func(t *testing.T) {
 		claims := &Claims{UserID: "user-123"}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrTenantClaimMissing)
-		assert.Equal(t, tenant.TenantID(""), orgID)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 
 	t.Run("returns error when tenant claim empty", func(t *testing.T) {
 		claims := &Claims{TenantID: ""}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrTenantClaimMissing)
-		assert.Equal(t, tenant.TenantID(""), orgID)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 
 	t.Run("returns error for invalid format with spaces", func(t *testing.T) {
 		claims := &Claims{TenantID: "acme bank"}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, tenant.ErrInvalidTenantID)
-		assert.Equal(t, tenant.TenantID(""), orgID)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 
 	t.Run("returns error for invalid format with special chars", func(t *testing.T) {
 		claims := &Claims{TenantID: "acme-bank!"}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, tenant.ErrInvalidTenantID)
-		assert.Equal(t, tenant.TenantID(""), orgID)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 
 	t.Run("accepts valid tenant IDs with underscores", func(t *testing.T) {
 		claims := &Claims{TenantID: "acme_bank_corp"}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, tenant.TenantID("acme_bank_corp"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank_corp"), tenantID)
 	})
 
 	t.Run("accepts valid tenant IDs with numbers", func(t *testing.T) {
 		claims := &Claims{TenantID: "bank123"}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, tenant.TenantID("bank123"), orgID)
+		assert.Equal(t, tenant.TenantID("bank123"), tenantID)
 	})
 
 	t.Run("accepts single character tenant ID (min length)", func(t *testing.T) {
 		claims := &Claims{TenantID: "a"}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, tenant.TenantID("a"), orgID)
+		assert.Equal(t, tenant.TenantID("a"), tenantID)
 	})
 
 	t.Run("accepts 50 character tenant ID (max length)", func(t *testing.T) {
 		maxLengthID := "a1234567890123456789012345678901234567890123456789"
 		claims := &Claims{TenantID: maxLengthID}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, tenant.TenantID(maxLengthID), orgID)
+		assert.Equal(t, tenant.TenantID(maxLengthID), tenantID)
 	})
 
 	t.Run("rejects 51 character tenant ID (exceeds max length)", func(t *testing.T) {
 		tooLongID := "a12345678901234567890123456789012345678901234567890"
 		claims := &Claims{TenantID: tooLongID}
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, tenant.ErrInvalidTenantID)
-		assert.Equal(t, tenant.TenantID(""), orgID)
+		assert.Equal(t, tenant.TenantID(""), tenantID)
 	})
 }
 
@@ -428,9 +428,9 @@ func TestClaims_EdgeCases(t *testing.T) {
 			},
 		}
 		assert.Equal(t, "user-123", claims.GetUserID())
-		orgID, err := claims.GetTenantID()
+		tenantID, err := claims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, tenant.TenantID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 		assert.Equal(t, []string{"admin"}, claims.GetRoles())
 		assert.Equal(t, []string{"read"}, claims.GetScopes())
 		assert.False(t, claims.IsExpired())
@@ -468,9 +468,9 @@ func TestValidateToken_WithOrganizationClaim(t *testing.T) {
 		assert.Equal(t, "user-123", extractedClaims.UserID)
 		assert.Equal(t, "acme_bank", extractedClaims.TenantID)
 
-		orgID, err := extractedClaims.GetTenantID()
+		tenantID, err := extractedClaims.GetTenantID()
 		assert.NoError(t, err)
-		assert.Equal(t, tenant.TenantID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 	})
 
 	t.Run("backward compatibility - tokens without tenant claim still validate", func(t *testing.T) {

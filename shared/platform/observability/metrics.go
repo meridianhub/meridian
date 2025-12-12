@@ -12,8 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// organizationUnknown is the label value used when tenant context is missing.
-const organizationUnknown = "unknown"
+// tenantUnknown is the label value used when tenant context is missing.
+const tenantUnknown = "unknown"
 
 // MetricsCollector holds all Prometheus metrics collectors
 type MetricsCollector struct {
@@ -140,11 +140,11 @@ func (mc *MetricsCollector) RecordKafkaPublish(ctx context.Context, topic, statu
 // Returns "unknown" if tenant context is missing.
 func getOrganizationLabel(ctx context.Context) string {
 	if ctx == nil {
-		return organizationUnknown
+		return tenantUnknown
 	}
 	orgID, ok := tenant.FromContext(ctx)
 	if !ok || orgID.IsEmpty() {
-		return organizationUnknown
+		return tenantUnknown
 	}
 	return orgID.String()
 }

@@ -128,7 +128,7 @@ func (p *KafkaEventPublisher) Publish(ctx context.Context, event domain.DomainEv
 	// Use aggregate ID as partition key for ordering
 	partitionKey := event.AggregateID()
 
-	// Publish with organization headers (extracted from context)
+	// Publish with tenant headers (extracted from context)
 	if err := p.producer.PublishWithTenant(ctx, topic, partitionKey, protoMsg); err != nil {
 		return fmt.Errorf("failed to publish event %s to topic %s: %w", event.EventType(), topic, err)
 	}

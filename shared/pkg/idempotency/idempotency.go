@@ -39,8 +39,8 @@ var (
 // Key represents an idempotency key with namespace and operation context
 type Key struct {
 	// TenantID is the tenant identifier for multi-tenant isolation.
-	// When set, keys are prefixed with the organization ID to ensure isolation.
-	// When empty, keys are generated without an organization prefix (single-org mode).
+	// When set, keys are prefixed with the tenant ID to ensure isolation.
+	// When empty, keys are generated without an organization prefix (single-tenant mode).
 	// Must not contain colons (':') to avoid key parsing ambiguity.
 	TenantID string
 
@@ -58,7 +58,7 @@ type Key struct {
 }
 
 // String returns the Redis key format.
-// With TenantID: {org_id}:idempotency:{namespace}:{operation}:{entity}:{request}
+// With TenantID: {tenant_id}:idempotency:{namespace}:{operation}:{entity}:{request}
 // Without TenantID: idempotency:{namespace}:{operation}:{entity}:{request}
 // Note: Field values must not contain colons to avoid ambiguous key representations
 func (k Key) String() string {
