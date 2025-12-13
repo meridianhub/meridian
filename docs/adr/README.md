@@ -55,6 +55,8 @@ Architectural Decision Records) format.
 | [ADR-0012](0012-lien-based-fund-reservation.md) | Lien-Based Fund Reservation for Payment Order Saga | Accepted | 2025-11-25 |
 | [ADR-0013](0013-generic-asset-quantity-types.md) | Universal Quantity Type System | Proposed | 2025-12-03 |
 | [ADR-0014](0014-dynamic-asset-registry.md) | Dynamic Asset Registry & Lifecycle | Proposed | 2025-12-04 |
+| [ADR-0015](0015-standard-service-directory-structure.md) | Standard Service Directory Structure | Accepted | 2025-12-06 |
+| [ADR-0016](0016-tenant-id-naming-strategy.md) | Tenant ID Naming Strategy | Accepted | 2025-12-13 |
 
 ## Categories
 
@@ -62,6 +64,7 @@ Architectural Decision Records) format.
 
 - [ADR-0001](0001-record-architecture-decisions.md) - Record Architecture Decisions
 - [ADR-0002](0002-microservices-per-bian-domain.md) - Microservices Architecture
+- [ADR-0015](0015-standard-service-directory-structure.md) - Standard Service Directory Structure
 
 ### Data Management & Architecture Patterns
 
@@ -83,6 +86,10 @@ Architectural Decision Records) format.
 ### Quality & Testing
 
 - [ADR-0008](0008-defensive-testing-standards.md) - Defensive Testing Standards
+
+### Multi-Tenancy
+
+- [ADR-0016](0016-tenant-id-naming-strategy.md) - Tenant ID Naming Strategy
 
 ## Key Architectural Changes
 
