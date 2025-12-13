@@ -84,8 +84,8 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 	)
 	require.NoError(t, err, "Failed to start PostgreSQL container")
 
-	// Get connection string
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	// Get connection string with search_path configured
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping,public")
 	require.NoError(t, err, "Failed to get connection string")
 
 	// Create connection pool
