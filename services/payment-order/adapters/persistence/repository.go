@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
 
@@ -101,93 +103,153 @@ type PaymentOrderRepository struct {
 var _ Repository = (*PaymentOrderRepository)(nil)
 
 // NewPaymentOrderRepository creates a new payment order repository
-func NewPaymentOrderRepository(db *gorm.DB) *PaymentOrderRepository {
-	return &PaymentOrderRepository{db: db}
+func NewPaymentOrderRepository(gormDB *gorm.DB) *PaymentOrderRepository {
+	return &PaymentOrderRepository{db: gormDB}
+}
+
+// hasTenantContext checks if tenant context is present (multi-tenant mode).
+func (r *PaymentOrderRepository) hasTenantContext(ctx context.Context) bool {
+	_, ok := tenant.FromContext(ctx)
+	return ok
+}
+
+// withOptionalOrgScope executes the given function with optional tenant scoping.
+// In single-tenant mode (no tenant context), it runs the function directly without a transaction.
+// In multi-tenant mode, it wraps the function in a transaction and sets the search_path.
+// This helper reduces code duplication across repository methods.
+func (r *PaymentOrderRepository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if !r.hasTenantContext(ctx) {
+		// Single-tenant mode: run directly without transaction overhead
+		return fn(r.db.WithContext(ctx))
+	}
+	// Multi-tenant mode: use the shared helper that handles transaction + tenant scope
+	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
 // Create inserts a new payment order.
 // Returns ErrIdempotencyKeyConflict if a payment order with the same idempotency key exists.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PaymentOrderRepository) Create(ctx context.Context, po *domain.PaymentOrder) error {
 	entity := toEntity(po)
-	err := r.db.WithContext(ctx).Create(entity).Error
-	if err != nil && strings.Contains(err.Error(), errUniqueConstraintIdempotencyKey) {
-		return ErrIdempotencyKeyConflict
-	}
-	return err
-}
-
-// FindByID retrieves a payment order by its UUID
-func (r *PaymentOrderRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.PaymentOrder, error) {
-	var entity PaymentOrderEntity
-	result := r.db.WithContext(ctx).Where("id = ?", id).First(&entity)
-
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrPaymentOrderNotFound
-	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return toDomain(&entity)
-}
-
-// FindByIdempotencyKey retrieves a payment order by its idempotency key
-func (r *PaymentOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*domain.PaymentOrder, error) {
-	var entity PaymentOrderEntity
-	result := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&entity)
-
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrPaymentOrderNotFound
-	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return toDomain(&entity)
-}
-
-// FindByGatewayReferenceID retrieves a payment order by its gateway reference ID
-func (r *PaymentOrderRepository) FindByGatewayReferenceID(ctx context.Context, gatewayRefID string) (*domain.PaymentOrder, error) {
-	var entity PaymentOrderEntity
-	result := r.db.WithContext(ctx).Where("gateway_reference_id = ?", gatewayRefID).First(&entity)
-
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrPaymentOrderNotFound
-	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return toDomain(&entity)
-}
-
-// FindByDebtorAccountID retrieves all payment orders for a debtor account
-func (r *PaymentOrderRepository) FindByDebtorAccountID(ctx context.Context, accountID string) ([]*domain.PaymentOrder, error) {
-	var entities []PaymentOrderEntity
-	result := r.db.WithContext(ctx).Where("debtor_account_id = ?", accountID).Find(&entities)
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	paymentOrders := make([]*domain.PaymentOrder, 0, len(entities))
-	for i := range entities {
-		po, err := toDomain(&entities[i])
-		if err != nil {
-			return nil, err
+	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		err := tx.Create(entity).Error
+		if err != nil && strings.Contains(err.Error(), errUniqueConstraintIdempotencyKey) {
+			return ErrIdempotencyKeyConflict
 		}
-		paymentOrders = append(paymentOrders, po)
-	}
+		return err
+	})
+}
 
+// FindByID retrieves a payment order by its UUID.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+func (r *PaymentOrderRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.PaymentOrder, error) {
+	var paymentOrder *domain.PaymentOrder
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		var entity PaymentOrderEntity
+		result := tx.Where("id = ?", id).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrPaymentOrderNotFound
+		}
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		var domainErr error
+		paymentOrder, domainErr = toDomain(&entity)
+		return domainErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return paymentOrder, nil
+}
+
+// FindByIdempotencyKey retrieves a payment order by its idempotency key.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+func (r *PaymentOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*domain.PaymentOrder, error) {
+	var paymentOrder *domain.PaymentOrder
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		var entity PaymentOrderEntity
+		result := tx.Where("idempotency_key = ?", key).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrPaymentOrderNotFound
+		}
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		var domainErr error
+		paymentOrder, domainErr = toDomain(&entity)
+		return domainErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return paymentOrder, nil
+}
+
+// FindByGatewayReferenceID retrieves a payment order by its gateway reference ID.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+func (r *PaymentOrderRepository) FindByGatewayReferenceID(ctx context.Context, gatewayRefID string) (*domain.PaymentOrder, error) {
+	var paymentOrder *domain.PaymentOrder
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		var entity PaymentOrderEntity
+		result := tx.Where("gateway_reference_id = ?", gatewayRefID).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrPaymentOrderNotFound
+		}
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		var domainErr error
+		paymentOrder, domainErr = toDomain(&entity)
+		return domainErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return paymentOrder, nil
+}
+
+// FindByDebtorAccountID retrieves all payment orders for a debtor account.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+func (r *PaymentOrderRepository) FindByDebtorAccountID(ctx context.Context, accountID string) ([]*domain.PaymentOrder, error) {
+	var paymentOrders []*domain.PaymentOrder
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		var entities []PaymentOrderEntity
+		result := tx.Where("debtor_account_id = ?", accountID).Find(&entities)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		paymentOrders = make([]*domain.PaymentOrder, 0, len(entities))
+		for i := range entities {
+			po, err := toDomain(&entities[i])
+			if err != nil {
+				return err
+			}
+			paymentOrders = append(paymentOrders, po)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return paymentOrders, nil
 }
 
 // FindByDebtorAccountIDWithCursor retrieves payment orders for a debtor account with cursor-based pagination.
 // This provides consistent results even when items are inserted/deleted during pagination.
 // Results are ordered by created_at DESC, id DESC (newest first) for deterministic ordering.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 //
 // The cursor uses (created_at, id) as a composite key to handle ties when multiple records
 // have the same created_at timestamp. The query uses:
@@ -196,117 +258,134 @@ func (r *PaymentOrderRepository) FindByDebtorAccountID(ctx context.Context, acco
 //
 // This ensures stable pagination even with concurrent inserts.
 func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Context, accountID string, limit int, cursor Cursor) (*PaginatedResult, error) {
-	// Get total count (for UI purposes - this is still useful for showing "X of Y" in pagination)
-	var totalCount int64
-	countResult := r.db.WithContext(ctx).Model(&PaymentOrderEntity{}).
-		Where("debtor_account_id = ?", accountID).
-		Count(&totalCount)
+	var paginatedResult *PaginatedResult
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		// Get total count (for UI purposes - this is still useful for showing "X of Y" in pagination)
+		var totalCount int64
+		countResult := tx.Model(&PaymentOrderEntity{}).
+			Where("debtor_account_id = ?", accountID).
+			Count(&totalCount)
 
-	if countResult.Error != nil {
-		return nil, countResult.Error
-	}
-
-	// Return early if no results
-	if totalCount == 0 {
-		return &PaginatedResult{
-			PaymentOrders: []*domain.PaymentOrder{},
-			TotalCount:    0,
-			HasMore:       false,
-			NextCursor:    "",
-		}, nil
-	}
-
-	// Build query with cursor-based pagination
-	// Request one extra to determine if there are more results
-	query := r.db.WithContext(ctx).Where("debtor_account_id = ?", accountID)
-
-	// Apply cursor condition if provided (not first page)
-	if !cursor.CreatedAt.IsZero() {
-		// Use composite cursor: (created_at < cursor_time) OR (created_at = cursor_time AND id < cursor_id)
-		// This handles ties when multiple records have the same created_at
-		query = query.Where(
-			"(created_at < ?) OR (created_at = ? AND id < ?)",
-			cursor.CreatedAt, cursor.CreatedAt, cursor.ID,
-		)
-	}
-
-	var entities []PaymentOrderEntity
-	result := query.
-		Order("created_at DESC, id DESC").
-		Limit(limit + 1). // Fetch one extra to check for more
-		Find(&entities)
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	// Determine if there are more results
-	hasMore := len(entities) > limit
-	if hasMore {
-		entities = entities[:limit] // Trim to requested limit
-	}
-
-	paymentOrders := make([]*domain.PaymentOrder, 0, len(entities))
-	for i := range entities {
-		po, err := toDomain(&entities[i])
-		if err != nil {
-			return nil, err
+		if countResult.Error != nil {
+			return countResult.Error
 		}
-		paymentOrders = append(paymentOrders, po)
-	}
 
-	// Build next cursor from the last item if there are more results
-	var nextCursor string
-	if hasMore && len(paymentOrders) > 0 {
-		lastPO := paymentOrders[len(paymentOrders)-1]
-		nextCursor = EncodeCursor(Cursor{
-			CreatedAt: lastPO.CreatedAt,
-			ID:        lastPO.ID,
-		})
-	}
+		// Return early if no results
+		if totalCount == 0 {
+			paginatedResult = &PaginatedResult{
+				PaymentOrders: []*domain.PaymentOrder{},
+				TotalCount:    0,
+				HasMore:       false,
+				NextCursor:    "",
+			}
+			return nil
+		}
 
-	return &PaginatedResult{
-		PaymentOrders: paymentOrders,
-		TotalCount:    totalCount,
-		HasMore:       hasMore,
-		NextCursor:    nextCursor,
-	}, nil
+		// Build query with cursor-based pagination
+		// Request one extra to determine if there are more results
+		query := tx.Where("debtor_account_id = ?", accountID)
+
+		// Apply cursor condition if provided (not first page)
+		if !cursor.CreatedAt.IsZero() {
+			// Use composite cursor: (created_at < cursor_time) OR (created_at = cursor_time AND id < cursor_id)
+			// This handles ties when multiple records have the same created_at
+			query = query.Where(
+				"(created_at < ?) OR (created_at = ? AND id < ?)",
+				cursor.CreatedAt, cursor.CreatedAt, cursor.ID,
+			)
+		}
+
+		var entities []PaymentOrderEntity
+		result := query.
+			Order("created_at DESC, id DESC").
+			Limit(limit + 1). // Fetch one extra to check for more
+			Find(&entities)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		// Determine if there are more results
+		hasMore := len(entities) > limit
+		if hasMore {
+			entities = entities[:limit] // Trim to requested limit
+		}
+
+		paymentOrders := make([]*domain.PaymentOrder, 0, len(entities))
+		for i := range entities {
+			po, domainErr := toDomain(&entities[i])
+			if domainErr != nil {
+				return domainErr
+			}
+			paymentOrders = append(paymentOrders, po)
+		}
+
+		// Build next cursor from the last item if there are more results
+		var nextCursor string
+		if hasMore && len(paymentOrders) > 0 {
+			lastPO := paymentOrders[len(paymentOrders)-1]
+			nextCursor = EncodeCursor(Cursor{
+				CreatedAt: lastPO.CreatedAt,
+				ID:        lastPO.ID,
+			})
+		}
+
+		paginatedResult = &PaginatedResult{
+			PaymentOrders: paymentOrders,
+			TotalCount:    totalCount,
+			HasMore:       hasMore,
+			NextCursor:    nextCursor,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return paginatedResult, nil
 }
 
-// Update updates an existing payment order with optimistic locking
+// Update updates an existing payment order with optimistic locking.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentOrder) error {
 	entity := toEntity(po)
 
-	// Optimistic locking: use WHERE clause with version check
-	result := r.db.WithContext(ctx).Model(&PaymentOrderEntity{}).
-		Where("id = ? AND version = ?", entity.ID, po.Version).
-		Updates(map[string]interface{}{
-			"status":                  entity.Status,
-			"lien_id":                 entity.LienID,
-			"gateway_reference_id":    entity.GatewayReferenceID,
-			"ledger_booking_id":       entity.LedgerBookingID,
-			"causation_id":            entity.CausationID,
-			"failure_reason":          entity.FailureReason,
-			"error_code":              entity.ErrorCode,
-			"lien_execution_status":   entity.LienExecutionStatus,
-			"lien_execution_attempts": entity.LienExecutionAttempts,
-			"lien_execution_error":    entity.LienExecutionError,
-			"updated_at":              entity.UpdatedAt,
-			"reserved_at":             entity.ReservedAt,
-			"executing_at":            entity.ExecutingAt,
-			"completed_at":            entity.CompletedAt,
-			"failed_at":               entity.FailedAt,
-			"cancelled_at":            entity.CancelledAt,
-			"reversed_at":             entity.ReversedAt,
-			"version":                 po.Version + 1,
-		})
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		// Optimistic locking: use WHERE clause with version check
+		result := tx.Model(&PaymentOrderEntity{}).
+			Where("id = ? AND version = ?", entity.ID, po.Version).
+			Updates(map[string]interface{}{
+				"status":                  entity.Status,
+				"lien_id":                 entity.LienID,
+				"gateway_reference_id":    entity.GatewayReferenceID,
+				"ledger_booking_id":       entity.LedgerBookingID,
+				"causation_id":            entity.CausationID,
+				"failure_reason":          entity.FailureReason,
+				"error_code":              entity.ErrorCode,
+				"lien_execution_status":   entity.LienExecutionStatus,
+				"lien_execution_attempts": entity.LienExecutionAttempts,
+				"lien_execution_error":    entity.LienExecutionError,
+				"updated_at":              entity.UpdatedAt,
+				"reserved_at":             entity.ReservedAt,
+				"executing_at":            entity.ExecutingAt,
+				"completed_at":            entity.CompletedAt,
+				"failed_at":               entity.FailedAt,
+				"cancelled_at":            entity.CancelledAt,
+				"reversed_at":             entity.ReversedAt,
+				"version":                 po.Version + 1,
+			})
 
-	if result.Error != nil {
-		return result.Error
-	}
+		if result.Error != nil {
+			return result.Error
+		}
 
-	if result.RowsAffected == 0 {
-		return ErrPaymentOrderVersionConflict
+		if result.RowsAffected == 0 {
+			return ErrPaymentOrderVersionConflict
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	// Update domain model version
