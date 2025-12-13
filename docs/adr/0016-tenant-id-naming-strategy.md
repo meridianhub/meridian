@@ -273,7 +273,6 @@ Alert if `consumed_ids` exceeds 1,000 or `consumed_ids / active_tenants` exceeds
 
 ## Links
 
-* [ADR-0016: Infrastructure Multi-Tenancy via Schema Isolation](0016-infrastructure-multi-tenancy-via-schema-isolation.md) - Related multi-tenancy architecture (pending)
 * [Stripe Object IDs Design](https://dev.to/4thzoa/designing-apis-for-humans-object-ids-3o5a) - Prefixed ID best practices
 * [Auth0 Multi-Tenant Best Practices](https://auth0.com/docs/get-started/auth0-overview/create-tenants/multi-tenant-apps-best-practices)
 * [AWS Multi-Tenant Authorization](https://docs.aws.amazon.com/prescriptive-guidance/latest/saas-multitenant-api-access-authorization/introduction.html)
