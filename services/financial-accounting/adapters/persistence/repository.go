@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
@@ -45,28 +47,72 @@ type LedgerRepository struct {
 }
 
 // NewLedgerRepository creates a new repository instance
-func NewLedgerRepository(db *gorm.DB) *LedgerRepository {
-	return &LedgerRepository{db: db}
+func NewLedgerRepository(gormDB *gorm.DB) *LedgerRepository {
+	return &LedgerRepository{db: gormDB}
 }
 
-// SavePosting persists a ledger posting
+// hasTenantContext checks if tenant context is present (multi-tenant mode).
+func (r *LedgerRepository) hasTenantContext(ctx context.Context) bool {
+	_, ok := tenant.FromContext(ctx)
+	return ok
+}
+
+// withTenantScope returns a GORM DB instance scoped to the tenant from context.
+// If tenant context is present (multi-tenant mode), it sets the PostgreSQL search_path.
+// If tenant context is missing (single-tenant mode), it returns the DB unchanged.
+//
+// This must be called within a transaction for the search_path setting to work correctly.
+func (r *LedgerRepository) withTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
+	if r.hasTenantContext(ctx) {
+		return db.WithGormTenantScope(ctx, tx)
+	}
+	// Single-tenant mode: no tenant scope needed
+	return tx, nil
+}
+
+// withOptionalOrgScope executes the given function with optional tenant scoping.
+// In single-tenant mode (no tenant context), it runs the function directly without a transaction.
+// In multi-tenant mode, it wraps the function in a transaction and sets the search_path.
+// This helper reduces code duplication across repository methods.
+func (r *LedgerRepository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if !r.hasTenantContext(ctx) {
+		// Single-tenant mode: run directly without transaction overhead
+		return fn(r.db.WithContext(ctx))
+	}
+	// Multi-tenant mode: use the shared helper that handles transaction + tenant scope
+	return db.WithGormTenantTransaction(ctx, r.db, fn)
+}
+
+// SavePosting persists a ledger posting.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) SavePosting(ctx context.Context, posting *domain.LedgerPosting) error {
 	entity, err := toPostingEntity(posting)
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Create(&entity).Error
+	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		return tx.Create(&entity).Error
+	})
 }
 
-// SavePostingsInTransaction persists multiple postings atomically within a transaction
+// SavePostingsInTransaction persists multiple postings atomically within a transaction.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) SavePostingsInTransaction(ctx context.Context, postings []*domain.LedgerPosting) error {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Set tenant scope if in multi-tenant mode
+		var scopedTx *gorm.DB
+		var scopeErr error
+		scopedTx, scopeErr = r.withTenantScope(ctx, tx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+
 		for _, posting := range postings {
 			entity, err := toPostingEntity(posting)
 			if err != nil {
 				return err
 			}
-			if err := tx.Create(&entity).Error; err != nil {
+			if err := scopedTx.Create(&entity).Error; err != nil {
 				return err
 			}
 		}
@@ -78,63 +124,79 @@ func (r *LedgerRepository) SavePostingsInTransaction(ctx context.Context, postin
 	return nil
 }
 
-// GetPosting retrieves a posting by ID
+// GetPosting retrieves a posting by ID.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) GetPosting(ctx context.Context, id uuid.UUID) (*domain.LedgerPosting, error) {
-	var entity LedgerPostingEntity
-	err := r.db.WithContext(ctx).First(&entity, "id = ?", id).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrPostingNotFound
-	}
+	var posting *domain.LedgerPosting
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		var entity LedgerPostingEntity
+		result := tx.First(&entity, "id = ?", id)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrPostingNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		posting = toPostingDomain(&entity)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	return toPostingDomain(&entity), nil
+	return posting, nil
 }
 
-// GetPostingsByBookingLogID retrieves all postings for a booking log
+// GetPostingsByBookingLogID retrieves all postings for a booking log.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) GetPostingsByBookingLogID(ctx context.Context, bookingLogID uuid.UUID) ([]*domain.LedgerPosting, error) {
-	var entities []LedgerPostingEntity
-	err := r.db.WithContext(ctx).
-		Where("financial_booking_log_id = ?", bookingLogID).
-		Order("created_at ASC").
-		Find(&entities).Error
+	var postings []*domain.LedgerPosting
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		var entities []LedgerPostingEntity
+		result := tx.Where("financial_booking_log_id = ?", bookingLogID).
+			Order("created_at ASC").
+			Find(&entities)
+		if result.Error != nil {
+			return result.Error
+		}
+
+		postings = make([]*domain.LedgerPosting, len(entities))
+		for i, entity := range entities {
+			postings[i] = toPostingDomain(&entity)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	postings := make([]*domain.LedgerPosting, len(entities))
-	for i, entity := range entities {
-		postings[i] = toPostingDomain(&entity)
-	}
-
 	return postings, nil
 }
 
-// UpdatePosting updates an existing ledger posting
+// UpdatePosting updates an existing ledger posting.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) UpdatePosting(ctx context.Context, posting *domain.LedgerPosting) error {
 	entity, err := toPostingEntity(posting)
 	if err != nil {
 		return err
 	}
 
-	result := r.db.WithContext(ctx).
-		Model(&LedgerPostingEntity{}).
-		Where("id = ?", entity.ID).
-		Updates(map[string]interface{}{
-			"status":         entity.Status,
-			"posting_result": entity.PostingResult,
-		})
+	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		result := tx.Model(&LedgerPostingEntity{}).
+			Where("id = ?", entity.ID).
+			Updates(map[string]interface{}{
+				"status":         entity.Status,
+				"posting_result": entity.PostingResult,
+			})
 
-	if result.Error != nil {
-		return result.Error
-	}
+		if result.Error != nil {
+			return result.Error
+		}
 
-	if result.RowsAffected == 0 {
-		return ErrPostingNotFound
-	}
+		if result.RowsAffected == 0 {
+			return ErrPostingNotFound
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // toPostingEntity converts domain model to database entity
@@ -184,59 +246,72 @@ func toPostingDomain(entity *LedgerPostingEntity) *domain.LedgerPosting {
 	}
 }
 
-// GetBookingLog retrieves a booking log by ID
+// GetBookingLog retrieves a booking log by ID.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) GetBookingLog(ctx context.Context, id uuid.UUID) (*domain.FinancialBookingLog, error) {
-	var entity FinancialBookingLogEntity
-	err := r.db.WithContext(ctx).First(&entity, "id = ?", id).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrBookingLogNotFound
-	}
+	var bookingLog *domain.FinancialBookingLog
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		var entity FinancialBookingLogEntity
+		result := tx.First(&entity, "id = ?", id)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrBookingLogNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		bookingLog = toBookingLogDomain(&entity)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	return toBookingLogDomain(&entity), nil
+	return bookingLog, nil
 }
 
 // SaveBookingLog persists a new financial booking log.
 // Returns ErrDuplicateIdempotencyKey if a booking log with the same idempotency key already exists.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) SaveBookingLog(ctx context.Context, log *domain.FinancialBookingLog, idempotencyKey string) error {
 	entity := toBookingLogEntity(log, idempotencyKey)
-	err := r.db.WithContext(ctx).Create(&entity).Error
-	if err != nil {
-		// Check for unique constraint violation using PostgreSQL error code
-		// 23505 is the SQLSTATE for unique_violation
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			if strings.Contains(pgErr.ConstraintName, "idempotency_key") {
-				return ErrDuplicateIdempotencyKey
+	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		err := tx.Create(&entity).Error
+		if err != nil {
+			// Check for unique constraint violation using PostgreSQL error code
+			// 23505 is the SQLSTATE for unique_violation
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				if strings.Contains(pgErr.ConstraintName, "idempotency_key") {
+					return ErrDuplicateIdempotencyKey
+				}
 			}
+			return err
 		}
-		return err
-	}
-	return nil
+		return nil
+	})
 }
 
-// UpdateBookingLog updates an existing financial booking log
+// UpdateBookingLog updates an existing financial booking log.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) UpdateBookingLog(ctx context.Context, log *domain.FinancialBookingLog) error {
-	result := r.db.WithContext(ctx).
-		Model(&FinancialBookingLogEntity{}).
-		Where("id = ?", log.ID).
-		Updates(map[string]interface{}{
-			"status":                  string(log.Status),
-			"chart_of_accounts_rules": log.ChartOfAccountsRules,
-			"updated_at":              log.UpdatedAt,
-		})
+	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		result := tx.Model(&FinancialBookingLogEntity{}).
+			Where("id = ?", log.ID).
+			Updates(map[string]interface{}{
+				"status":                  string(log.Status),
+				"chart_of_accounts_rules": log.ChartOfAccountsRules,
+				"updated_at":              log.UpdatedAt,
+			})
 
-	if result.Error != nil {
-		return result.Error
-	}
+		if result.Error != nil {
+			return result.Error
+		}
 
-	if result.RowsAffected == 0 {
-		return ErrBookingLogNotFound
-	}
+		if result.RowsAffected == 0 {
+			return ErrBookingLogNotFound
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // toBookingLogEntity converts domain model to database entity
@@ -279,6 +354,7 @@ type ListBookingLogsResult struct {
 }
 
 // ListBookingLogs lists booking logs with optional filtering and pagination.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 //
 // LIMITATION: Page token parsing is not yet implemented. Pagination currently
 // uses OFFSET-based queries which may show inconsistent results if data changes
@@ -295,65 +371,73 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 		pageSize = MaxPageSize
 	}
 
-	// Build base query
-	query := r.db.WithContext(ctx).Model(&FinancialBookingLogEntity{})
+	var result *ListBookingLogsResult
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		// Build base query
+		query := tx.Model(&FinancialBookingLogEntity{})
 
-	// Apply status filter if provided
-	if params.StatusFilter != "" {
-		query = query.Where("status = ?", params.StatusFilter)
-	}
+		// Apply status filter if provided
+		if params.StatusFilter != "" {
+			query = query.Where("status = ?", params.StatusFilter)
+		}
 
-	// Apply business unit filter if provided
-	if params.BusinessUnitFilter != "" {
-		query = query.Where("business_unit_reference = ?", params.BusinessUnitFilter)
-	}
+		// Apply business unit filter if provided
+		if params.BusinessUnitFilter != "" {
+			query = query.Where("business_unit_reference = ?", params.BusinessUnitFilter)
+		}
 
-	// Get total count
-	var totalCount int64
-	if err := query.Count(&totalCount).Error; err != nil {
-		return nil, err
-	}
+		// Get total count
+		var totalCount int64
+		if err := query.Count(&totalCount).Error; err != nil {
+			return err
+		}
 
-	// Apply cursor-based pagination using created_at + id
-	// Page token format: <timestamp>_<uuid>
-	// TODO: Implement proper cursor-based pagination
-	_ = params.PageToken // Unused for now, will be implemented in future iteration
+		// Apply cursor-based pagination using created_at + id
+		// Page token format: <timestamp>_<uuid>
+		// TODO: Implement proper cursor-based pagination
+		_ = params.PageToken // Unused for now, will be implemented in future iteration
 
-	// Fetch results with limit
-	var entities []FinancialBookingLogEntity
-	err := query.
-		Order("created_at DESC, id DESC").
-		Limit(pageSize + 1). // Fetch one extra to determine if there's a next page
-		Find(&entities).Error
+		// Fetch results with limit
+		var entities []FinancialBookingLogEntity
+		err := query.
+			Order("created_at DESC, id DESC").
+			Limit(pageSize + 1). // Fetch one extra to determine if there's a next page
+			Find(&entities).Error
+		if err != nil {
+			return err
+		}
+
+		// Determine if there's a next page
+		hasMore := len(entities) > pageSize
+		if hasMore {
+			entities = entities[:pageSize]
+		}
+
+		// Convert to domain models
+		bookingLogs := make([]*domain.FinancialBookingLog, len(entities))
+		for i, entity := range entities {
+			bookingLogs[i] = toBookingLogDomain(&entity)
+		}
+
+		// Generate next page token if there are more results
+		var nextPageToken string
+		if hasMore && len(entities) > 0 {
+			lastEntity := entities[len(entities)-1]
+			// Simple token format: timestamp_id
+			nextPageToken = fmt.Sprintf("%d_%s", lastEntity.CreatedAt.Unix(), lastEntity.ID)
+		}
+
+		result = &ListBookingLogsResult{
+			BookingLogs:   bookingLogs,
+			NextPageToken: nextPageToken,
+			TotalCount:    totalCount,
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	// Determine if there's a next page
-	hasMore := len(entities) > pageSize
-	if hasMore {
-		entities = entities[:pageSize]
-	}
-
-	// Convert to domain models
-	bookingLogs := make([]*domain.FinancialBookingLog, len(entities))
-	for i, entity := range entities {
-		bookingLogs[i] = toBookingLogDomain(&entity)
-	}
-
-	// Generate next page token if there are more results
-	var nextPageToken string
-	if hasMore && len(entities) > 0 {
-		lastEntity := entities[len(entities)-1]
-		// Simple token format: timestamp_id
-		nextPageToken = fmt.Sprintf("%d_%s", lastEntity.CreatedAt.Unix(), lastEntity.ID)
-	}
-
-	return &ListBookingLogsResult{
-		BookingLogs:   bookingLogs,
-		NextPageToken: nextPageToken,
-		TotalCount:    totalCount,
-	}, nil
+	return result, nil
 }
 
 // toBookingLogDomain converts database entity to domain model.
@@ -415,6 +499,7 @@ type ListPostingsResult struct {
 }
 
 // ListPostings lists ledger postings with optional filtering and pagination.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 //
 // LIMITATION: Page token parsing is not yet implemented. Pagination currently
 // uses OFFSET-based queries which may show inconsistent results if data changes
@@ -431,86 +516,94 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 		pageSize = MaxPageSize
 	}
 
-	// Build base query
-	query := r.db.WithContext(ctx).Model(&LedgerPostingEntity{})
+	var result *ListPostingsResult
+	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+		// Build base query
+		query := tx.Model(&LedgerPostingEntity{})
 
-	// Apply booking log filter if provided
-	if params.BookingLogID != nil {
-		query = query.Where("financial_booking_log_id = ?", *params.BookingLogID)
-	}
+		// Apply booking log filter if provided
+		if params.BookingLogID != nil {
+			query = query.Where("financial_booking_log_id = ?", *params.BookingLogID)
+		}
 
-	// Apply account ID filter if provided
-	if params.AccountID != "" {
-		query = query.Where("account_id = ?", params.AccountID)
-	}
+		// Apply account ID filter if provided
+		if params.AccountID != "" {
+			query = query.Where("account_id = ?", params.AccountID)
+		}
 
-	// Apply posting direction filter if provided
-	if params.PostingDirection != "" {
-		query = query.Where("posting_direction = ?", params.PostingDirection)
-	}
+		// Apply posting direction filter if provided
+		if params.PostingDirection != "" {
+			query = query.Where("posting_direction = ?", params.PostingDirection)
+		}
 
-	// Apply value date range filters if provided
-	if params.ValueDateFrom != nil {
-		query = query.Where("value_date >= ?", *params.ValueDateFrom)
-	}
-	if params.ValueDateTo != nil {
-		query = query.Where("value_date <= ?", *params.ValueDateTo)
-	}
+		// Apply value date range filters if provided
+		if params.ValueDateFrom != nil {
+			query = query.Where("value_date >= ?", *params.ValueDateFrom)
+		}
+		if params.ValueDateTo != nil {
+			query = query.Where("value_date <= ?", *params.ValueDateTo)
+		}
 
-	// Apply currency filter if provided
-	if params.Currency != "" {
-		query = query.Where("currency = ?", params.Currency)
-	}
+		// Apply currency filter if provided
+		if params.Currency != "" {
+			query = query.Where("currency = ?", params.Currency)
+		}
 
-	// Apply status filter if provided
-	if params.Status != "" {
-		query = query.Where("status = ?", params.Status)
-	}
+		// Apply status filter if provided
+		if params.Status != "" {
+			query = query.Where("status = ?", params.Status)
+		}
 
-	// Get total count
-	var totalCount int64
-	if err := query.Count(&totalCount).Error; err != nil {
-		return nil, err
-	}
+		// Get total count
+		var totalCount int64
+		if err := query.Count(&totalCount).Error; err != nil {
+			return err
+		}
 
-	// Apply cursor-based pagination using created_at + id
-	// Page token format: <timestamp>_<uuid>
-	// TODO: Implement proper cursor-based pagination
-	_ = params.PageToken // Unused for now, will be implemented in future iteration
+		// Apply cursor-based pagination using created_at + id
+		// Page token format: <timestamp>_<uuid>
+		// TODO: Implement proper cursor-based pagination
+		_ = params.PageToken // Unused for now, will be implemented in future iteration
 
-	// Fetch results with limit
-	var entities []LedgerPostingEntity
-	err := query.
-		Order("created_at DESC, id DESC").
-		Limit(pageSize + 1). // Fetch one extra to determine if there's a next page
-		Find(&entities).Error
+		// Fetch results with limit
+		var entities []LedgerPostingEntity
+		err := query.
+			Order("created_at DESC, id DESC").
+			Limit(pageSize + 1). // Fetch one extra to determine if there's a next page
+			Find(&entities).Error
+		if err != nil {
+			return err
+		}
+
+		// Determine if there's a next page
+		hasMore := len(entities) > pageSize
+		if hasMore {
+			entities = entities[:pageSize]
+		}
+
+		// Convert to domain models
+		postings := make([]*domain.LedgerPosting, len(entities))
+		for i, entity := range entities {
+			postings[i] = toPostingDomain(&entity)
+		}
+
+		// Generate next page token if there are more results
+		var nextPageToken string
+		if hasMore && len(entities) > 0 {
+			lastEntity := entities[len(entities)-1]
+			// Simple token format: timestamp_id
+			nextPageToken = fmt.Sprintf("%d_%s", lastEntity.CreatedAt.Unix(), lastEntity.ID)
+		}
+
+		result = &ListPostingsResult{
+			Postings:      postings,
+			NextPageToken: nextPageToken,
+			TotalCount:    totalCount,
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	// Determine if there's a next page
-	hasMore := len(entities) > pageSize
-	if hasMore {
-		entities = entities[:pageSize]
-	}
-
-	// Convert to domain models
-	postings := make([]*domain.LedgerPosting, len(entities))
-	for i, entity := range entities {
-		postings[i] = toPostingDomain(&entity)
-	}
-
-	// Generate next page token if there are more results
-	var nextPageToken string
-	if hasMore && len(entities) > 0 {
-		lastEntity := entities[len(entities)-1]
-		// Simple token format: timestamp_id
-		nextPageToken = fmt.Sprintf("%d_%s", lastEntity.CreatedAt.Unix(), lastEntity.ID)
-	}
-
-	return &ListPostingsResult{
-		Postings:      postings,
-		NextPageToken: nextPageToken,
-		TotalCount:    totalCount,
-	}, nil
+	return result, nil
 }

@@ -13,8 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
 )
@@ -42,8 +44,65 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
+// setSearchPath sets the PostgreSQL search_path for the transaction.
+// In multi-tenant mode, it sets the search_path to the tenant's schema.
+// In single-tenant mode (no tenant context), it does nothing.
+//
+// This must be called immediately after tx.Begin() to ensure all queries
+// in the transaction are scoped to the correct tenant schema.
+func (r *PostgresRepository) setSearchPath(ctx context.Context, tx pgx.Tx) error {
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		// Single-tenant mode: no scoping needed
+		return nil
+	}
+
+	// Quote the schema name to prevent SQL injection
+	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
+
+	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback
+	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
+	_, err := tx.Exec(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to set tenant schema scope: %w", err)
+	}
+
+	return nil
+}
+
+// withReadTransaction executes a read-only function within a transaction with tenant scoping.
+// In multi-tenant mode, it wraps the function in a transaction with search_path set.
+// In single-tenant mode, it still uses a transaction for consistency but without search_path.
+// This is necessary because PostgreSQL's SET LOCAL requires a transaction context.
+func (r *PostgresRepository) withReadTransaction(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	// Set tenant scope if in multi-tenant mode
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	// Commit the read-only transaction
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit read transaction: %w", err)
+	}
+
+	return nil
+}
+
 // Create persists a new FinancialPositionLog aggregate to the database.
 // Returns domain.ErrConflict if a log with the same LogID already exists.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPositionLog) error {
 	if log == nil {
 		return ErrNilLog
@@ -57,10 +116,15 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 		_ = tx.Rollback(ctx)
 	}()
 
+	// Set tenant scope if in multi-tenant mode
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
 	// Insert main financial_position_log
 	userID := audit.GetUserFromContext(ctx)
 	logQuery := `
-		INSERT INTO position_keeping.financial_position_logs (
+		INSERT INTO financial_position_logs (
 			id, created_at, created_by, updated_at, updated_by,
 			log_id, account_id, version,
 			current_status, previous_status, status_updated_at, status_reason, failure_reason,
@@ -115,6 +179,7 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 
 // CreateBatch persists multiple FinancialPositionLog aggregates atomically using efficient bulk operations.
 // If any log fails to persist, the entire batch is rolled back.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.FinancialPositionLog) error {
 	if len(logs) == 0 {
 		return nil
@@ -128,11 +193,16 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 		_ = tx.Rollback(ctx)
 	}()
 
+	// Set tenant scope if in multi-tenant mode
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
 	// Use COPY for bulk insert of financial_position_logs
 	userID := audit.GetUserFromContext(ctx)
 	copyCount, err := tx.CopyFrom(
 		ctx,
-		pgx.Identifier{"position_keeping", "financial_position_logs"},
+		pgx.Identifier{"financial_position_logs"},
 		[]string{
 			"id", "created_at", "created_by", "updated_at", "updated_by",
 			"log_id", "account_id", "version",
@@ -202,83 +272,106 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 
 // FindByID retrieves a FinancialPositionLog by its LogID.
 // Returns domain.ErrNotFound if the log doesn't exist.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*domain.FinancialPositionLog, error) {
-	query := `
-		SELECT id, created_at, updated_at, log_id, account_id, version,
-			current_status, previous_status, status_updated_at, status_reason, failure_reason,
-			reconciliation_status
-		FROM position_keeping.financial_position_logs
-		WHERE log_id = $1 AND deleted_at IS NULL`
+	var result *domain.FinancialPositionLog
 
-	var dbID uuid.UUID
-	var log domain.FinancialPositionLog
-	var statusTracking domain.StatusTracking
-	var currentStatus, reconciliationStatus string
-	var previousStatus sql.NullString
-	var failureReason sql.NullString
+	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		query := `
+			SELECT id, created_at, updated_at, log_id, account_id, version,
+				current_status, previous_status, status_updated_at, status_reason, failure_reason,
+				reconciliation_status
+			FROM financial_position_logs
+			WHERE log_id = $1 AND deleted_at IS NULL`
 
-	err := r.pool.QueryRow(ctx, query, logID).Scan(
-		&dbID, &log.CreatedAt, &log.UpdatedAt, &log.LogID, &log.AccountID, &log.Version,
-		&currentStatus, &previousStatus, &statusTracking.StatusUpdatedAt,
-		&statusTracking.StatusReason, &failureReason,
-		&reconciliationStatus,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrNotFound
+		var dbID uuid.UUID
+		var log domain.FinancialPositionLog
+		var statusTracking domain.StatusTracking
+		var currentStatus, reconciliationStatus string
+		var previousStatus sql.NullString
+		var failureReason sql.NullString
+
+		err := tx.QueryRow(ctx, query, logID).Scan(
+			&dbID, &log.CreatedAt, &log.UpdatedAt, &log.LogID, &log.AccountID, &log.Version,
+			&currentStatus, &previousStatus, &statusTracking.StatusUpdatedAt,
+			&statusTracking.StatusReason, &failureReason,
+			&reconciliationStatus,
+		)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return domain.ErrNotFound
+			}
+			return fmt.Errorf("failed to query financial position log: %w", err)
 		}
-		return nil, fmt.Errorf("failed to query financial position log: %w", err)
-	}
 
-	// Parse status values
-	statusTracking.CurrentStatus = domain.ParseTransactionStatus(currentStatus)
-	if previousStatus.Valid {
-		prevStatus := domain.ParseTransactionStatus(previousStatus.String)
-		statusTracking.PreviousStatus = &prevStatus
-	}
-	if failureReason.Valid {
-		statusTracking.FailureReason = failureReason.String
-	}
-	statusTracking.ReconciliationStatus = domain.ParseReconciliationStatus(reconciliationStatus)
+		// Parse status values
+		statusTracking.CurrentStatus = domain.ParseTransactionStatus(currentStatus)
+		if previousStatus.Valid {
+			prevStatus := domain.ParseTransactionStatus(previousStatus.String)
+			statusTracking.PreviousStatus = &prevStatus
+		}
+		if failureReason.Valid {
+			statusTracking.FailureReason = failureReason.String
+		}
+		statusTracking.ReconciliationStatus = domain.ParseReconciliationStatus(reconciliationStatus)
 
-	log.StatusTracking = &statusTracking
+		log.StatusTracking = &statusTracking
 
-	// Load related entities
-	if err := r.loadTransactionLogEntries(ctx, dbID, &log); err != nil {
+		// Load related entities using the transaction
+		if err := r.loadTransactionLogEntriesTx(ctx, tx, dbID, &log); err != nil {
+			return err
+		}
+
+		if err := r.loadTransactionLineageTx(ctx, tx, dbID, &log); err != nil {
+			return err
+		}
+
+		if err := r.loadAuditTrailEntriesTx(ctx, tx, dbID, &log); err != nil {
+			return err
+		}
+
+		result = &log
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	if err := r.loadTransactionLineage(ctx, dbID, &log); err != nil {
-		return nil, err
-	}
-
-	if err := r.loadAuditTrailEntries(ctx, dbID, &log); err != nil {
-		return nil, err
-	}
-
-	return &log, nil
+	return result, nil
 }
 
 // FindByAccountID retrieves all FinancialPositionLogs for a specific account.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) FindByAccountID(ctx context.Context, accountID string) ([]*domain.FinancialPositionLog, error) {
-	query := `
-		SELECT id, created_at, updated_at, log_id, account_id, version,
-			current_status, previous_status, status_updated_at, status_reason, failure_reason,
-			reconciliation_status
-		FROM position_keeping.financial_position_logs
-		WHERE account_id = $1 AND deleted_at IS NULL
-		ORDER BY created_at DESC`
+	var result []*domain.FinancialPositionLog
 
-	rows, err := r.pool.Query(ctx, query, accountID)
+	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		query := `
+			SELECT id, created_at, updated_at, log_id, account_id, version,
+				current_status, previous_status, status_updated_at, status_reason, failure_reason,
+				reconciliation_status
+			FROM financial_position_logs
+			WHERE account_id = $1 AND deleted_at IS NULL
+			ORDER BY created_at DESC`
+
+		rows, err := tx.Query(ctx, query, accountID)
+		if err != nil {
+			return fmt.Errorf("failed to query financial position logs: %w", err)
+		}
+		defer rows.Close()
+
+		result, err = r.scanLogsTx(ctx, tx, rows)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query financial position logs: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
 
-	return r.scanLogs(ctx, rows)
+	return result, nil
 }
 
 // Update updates an existing FinancialPositionLog using optimistic locking.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPositionLog) error {
 	if log == nil {
 		return ErrNilLog
@@ -292,9 +385,14 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 		_ = tx.Rollback(ctx)
 	}()
 
+	// Set tenant scope if in multi-tenant mode
+	if err := r.setSearchPath(ctx, tx); err != nil {
+		return err
+	}
+
 	// Get current database ID
 	var dbID uuid.UUID
-	err = tx.QueryRow(ctx, "SELECT id FROM position_keeping.financial_position_logs WHERE log_id = $1 AND deleted_at IS NULL", log.LogID).Scan(&dbID)
+	err = tx.QueryRow(ctx, "SELECT id FROM financial_position_logs WHERE log_id = $1 AND deleted_at IS NULL", log.LogID).Scan(&dbID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
@@ -309,7 +407,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	userID := audit.GetUserFromContext(ctx)
 
 	updateQuery := `
-		UPDATE position_keeping.financial_position_logs
+		UPDATE financial_position_logs
 		SET updated_at = $1, updated_by = $2, version = $3,
 			current_status = $4, previous_status = $5, status_updated_at = $6,
 			status_reason = $7, failure_reason = $8, reconciliation_status = $9
@@ -332,7 +430,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	}
 
 	// Delete and re-insert transaction log entries (simplest approach for aggregate updates)
-	_, err = tx.Exec(ctx, "DELETE FROM position_keeping.transaction_log_entries WHERE financial_position_log_id = $1", dbID)
+	_, err = tx.Exec(ctx, "DELETE FROM transaction_log_entries WHERE financial_position_log_id = $1", dbID)
 	if err != nil {
 		return fmt.Errorf("failed to delete old transaction log entries: %w", err)
 	}
@@ -342,7 +440,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	}
 
 	// Delete and re-insert transaction lineage
-	_, err = tx.Exec(ctx, "DELETE FROM position_keeping.transaction_lineages WHERE financial_position_log_id = $1", dbID)
+	_, err = tx.Exec(ctx, "DELETE FROM transaction_lineages WHERE financial_position_log_id = $1", dbID)
 	if err != nil {
 		return fmt.Errorf("failed to delete old transaction lineage: %w", err)
 	}
@@ -381,91 +479,113 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 }
 
 // List retrieves FinancialPositionLogs matching the given filter with pagination.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) List(ctx context.Context, filter domain.PositionLogFilter) ([]*domain.FinancialPositionLog, error) {
 	if filter.Limit <= 0 {
 		return nil, ErrInvalidLimit
 	}
 
-	query := `
-		SELECT id, created_at, updated_at, log_id, account_id, version,
-			current_status, previous_status, status_updated_at, status_reason, failure_reason,
-			reconciliation_status
-		FROM position_keeping.financial_position_logs
-		WHERE deleted_at IS NULL`
+	var result []*domain.FinancialPositionLog
 
-	args := []any{}
-	argPos := 1
+	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		query := `
+			SELECT id, created_at, updated_at, log_id, account_id, version,
+				current_status, previous_status, status_updated_at, status_reason, failure_reason,
+				reconciliation_status
+			FROM financial_position_logs
+			WHERE deleted_at IS NULL`
 
-	// Build WHERE clauses dynamically
-	if filter.AccountID != nil {
-		query += fmt.Sprintf(" AND account_id = $%d", argPos)
-		args = append(args, *filter.AccountID)
-		argPos++
-	}
+		args := []any{}
+		argPos := 1
 
-	if filter.Status != nil {
-		query += fmt.Sprintf(" AND current_status = $%d", argPos)
-		args = append(args, filter.Status.String())
-		argPos++
-	}
+		// Build WHERE clauses dynamically
+		if filter.AccountID != nil {
+			query += fmt.Sprintf(" AND account_id = $%d", argPos)
+			args = append(args, *filter.AccountID)
+			argPos++
+		}
 
-	if filter.ReconciliationStatus != nil {
-		query += fmt.Sprintf(" AND reconciliation_status = $%d", argPos)
-		args = append(args, filter.ReconciliationStatus.String())
-		argPos++
-	}
+		if filter.Status != nil {
+			query += fmt.Sprintf(" AND current_status = $%d", argPos)
+			args = append(args, filter.Status.String())
+			argPos++
+		}
 
-	if filter.FromDate != nil {
-		query += fmt.Sprintf(" AND updated_at >= $%d", argPos)
-		args = append(args, *filter.FromDate)
-		argPos++
-	}
+		if filter.ReconciliationStatus != nil {
+			query += fmt.Sprintf(" AND reconciliation_status = $%d", argPos)
+			args = append(args, filter.ReconciliationStatus.String())
+			argPos++
+		}
 
-	if filter.ToDate != nil {
-		query += fmt.Sprintf(" AND updated_at <= $%d", argPos)
-		args = append(args, *filter.ToDate)
-		argPos++
-	}
+		if filter.FromDate != nil {
+			query += fmt.Sprintf(" AND updated_at >= $%d", argPos)
+			args = append(args, *filter.FromDate)
+			argPos++
+		}
 
-	// Add pagination
-	query += " ORDER BY created_at DESC"
-	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
-	args = append(args, filter.Limit, filter.Offset)
+		if filter.ToDate != nil {
+			query += fmt.Sprintf(" AND updated_at <= $%d", argPos)
+			args = append(args, *filter.ToDate)
+			argPos++
+		}
 
-	rows, err := r.pool.Query(ctx, query, args...)
+		// Add pagination
+		query += " ORDER BY created_at DESC"
+		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argPos, argPos+1)
+		args = append(args, filter.Limit, filter.Offset)
+
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("failed to query financial position logs: %w", err)
+		}
+		defer rows.Close()
+
+		result, err = r.scanLogsTx(ctx, tx, rows)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query financial position logs: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
 
-	return r.scanLogs(ctx, rows)
+	return result, nil
 }
 
 // FindPendingForReconciliation retrieves logs that are pending reconciliation.
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) FindPendingForReconciliation(ctx context.Context, limit int) ([]*domain.FinancialPositionLog, error) {
-	query := `
-		SELECT id, created_at, updated_at, log_id, account_id, version,
-			current_status, previous_status, status_updated_at, status_reason, failure_reason,
-			reconciliation_status
-		FROM position_keeping.financial_position_logs
-		WHERE deleted_at IS NULL
-			AND current_status = 'PENDING'
-			AND reconciliation_status = 'UNRECONCILED'
-		ORDER BY created_at ASC`
+	var result []*domain.FinancialPositionLog
 
-	args := []any{}
-	if limit > 0 {
-		query += " LIMIT $1"
-		args = append(args, limit)
-	}
+	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		query := `
+			SELECT id, created_at, updated_at, log_id, account_id, version,
+				current_status, previous_status, status_updated_at, status_reason, failure_reason,
+				reconciliation_status
+			FROM financial_position_logs
+			WHERE deleted_at IS NULL
+				AND current_status = 'PENDING'
+				AND reconciliation_status = 'UNRECONCILED'
+			ORDER BY created_at ASC`
 
-	rows, err := r.pool.Query(ctx, query, args...)
+		args := []any{}
+		if limit > 0 {
+			query += " LIMIT $1"
+			args = append(args, limit)
+		}
+
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("failed to query pending logs: %w", err)
+		}
+		defer rows.Close()
+
+		result, err = r.scanLogsTx(ctx, tx, rows)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query pending logs: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
 
-	return r.scanLogs(ctx, rows)
+	return result, nil
 }
 
 // Helper methods
@@ -476,7 +596,7 @@ func (r *PostgresRepository) insertTransactionLogEntries(ctx context.Context, tx
 	}
 
 	query := `
-		INSERT INTO position_keeping.transaction_log_entries (
+		INSERT INTO transaction_log_entries (
 			id, created_at, created_by, updated_at, updated_by,
 			entry_id, financial_position_log_id, transaction_id, account_id,
 			amount_cents, currency, direction, timestamp, description, reference, source
@@ -529,7 +649,7 @@ func (r *PostgresRepository) insertTransactionLineage(ctx context.Context, tx pg
 
 	userID := audit.GetUserFromContext(ctx)
 	query := `
-		INSERT INTO position_keeping.transaction_lineages (
+		INSERT INTO transaction_lineages (
 			id, created_at, created_by, updated_at, updated_by,
 			financial_position_log_id, transaction_id, parent_transaction_id,
 			child_transaction_ids, related_transaction_ids, transaction_type
@@ -557,7 +677,7 @@ func (r *PostgresRepository) insertAuditTrailEntries(ctx context.Context, tx pgx
 	}
 
 	query := `
-		INSERT INTO position_keeping.audit_trail_entries (
+		INSERT INTO audit_trail_entries (
 			id, created_at, created_by, updated_at, updated_by,
 			audit_id, financial_position_log_id, timestamp, user_id,
 			action, details, ip_address, system_context
@@ -598,15 +718,16 @@ func (r *PostgresRepository) insertAuditTrailEntries(ctx context.Context, tx pgx
 	return nil
 }
 
-func (r *PostgresRepository) loadTransactionLogEntries(ctx context.Context, financialPosLogID uuid.UUID, log *domain.FinancialPositionLog) error {
+// loadTransactionLogEntriesTx is a transaction-aware version of loadTransactionLogEntries.
+func (r *PostgresRepository) loadTransactionLogEntriesTx(ctx context.Context, tx pgx.Tx, financialPosLogID uuid.UUID, log *domain.FinancialPositionLog) error {
 	query := `
 		SELECT entry_id, transaction_id, account_id, amount_cents, currency,
 			direction, timestamp, description, reference, source
-		FROM position_keeping.transaction_log_entries
+		FROM transaction_log_entries
 		WHERE financial_position_log_id = $1 AND deleted_at IS NULL
 		ORDER BY timestamp ASC`
 
-	rows, err := r.pool.Query(ctx, query, financialPosLogID)
+	rows, err := tx.Query(ctx, query, financialPosLogID)
 	if err != nil {
 		return fmt.Errorf("failed to load transaction log entries: %w", err)
 	}
@@ -652,11 +773,12 @@ func (r *PostgresRepository) loadTransactionLogEntries(ctx context.Context, fina
 	return nil
 }
 
-func (r *PostgresRepository) loadTransactionLineage(ctx context.Context, financialPosLogID uuid.UUID, log *domain.FinancialPositionLog) error {
+// loadTransactionLineageTx is a transaction-aware version of loadTransactionLineage.
+func (r *PostgresRepository) loadTransactionLineageTx(ctx context.Context, tx pgx.Tx, financialPosLogID uuid.UUID, log *domain.FinancialPositionLog) error {
 	query := `
 		SELECT transaction_id, parent_transaction_id, child_transaction_ids,
 			related_transaction_ids, transaction_type
-		FROM position_keeping.transaction_lineages
+		FROM transaction_lineages
 		WHERE financial_position_log_id = $1 AND deleted_at IS NULL`
 
 	var transactionID uuid.UUID
@@ -664,7 +786,7 @@ func (r *PostgresRepository) loadTransactionLineage(ctx context.Context, financi
 	var parentID sql.NullString
 	var childIDsJSON, relatedIDsJSON []byte
 
-	err := r.pool.QueryRow(ctx, query, financialPosLogID).Scan(
+	err := tx.QueryRow(ctx, query, financialPosLogID).Scan(
 		&transactionID, &parentID,
 		&childIDsJSON, &relatedIDsJSON, &transactionType,
 	)
@@ -708,7 +830,7 @@ func (r *PostgresRepository) loadTransactionLineage(ctx context.Context, financi
 func (r *PostgresRepository) getExistingAuditIDs(ctx context.Context, tx pgx.Tx, financialPosLogID uuid.UUID) (map[uuid.UUID]struct{}, error) {
 	query := `
 		SELECT audit_id
-		FROM position_keeping.audit_trail_entries
+		FROM audit_trail_entries
 		WHERE financial_position_log_id = $1 AND deleted_at IS NULL`
 
 	rows, err := tx.Query(ctx, query, financialPosLogID)
@@ -729,14 +851,15 @@ func (r *PostgresRepository) getExistingAuditIDs(ctx context.Context, tx pgx.Tx,
 	return existingIDs, nil
 }
 
-func (r *PostgresRepository) loadAuditTrailEntries(ctx context.Context, financialPosLogID uuid.UUID, log *domain.FinancialPositionLog) error {
+// loadAuditTrailEntriesTx is a transaction-aware version of loadAuditTrailEntries.
+func (r *PostgresRepository) loadAuditTrailEntriesTx(ctx context.Context, tx pgx.Tx, financialPosLogID uuid.UUID, log *domain.FinancialPositionLog) error {
 	query := `
 		SELECT audit_id, timestamp, user_id, action, details, ip_address, system_context
-		FROM position_keeping.audit_trail_entries
+		FROM audit_trail_entries
 		WHERE financial_position_log_id = $1 AND deleted_at IS NULL
 		ORDER BY timestamp ASC`
 
-	rows, err := r.pool.Query(ctx, query, financialPosLogID)
+	rows, err := tx.Query(ctx, query, financialPosLogID)
 	if err != nil {
 		return fmt.Errorf("failed to load audit trail entries: %w", err)
 	}
@@ -776,9 +899,9 @@ func (r *PostgresRepository) loadAuditTrailEntries(ctx context.Context, financia
 	return nil
 }
 
-// loadTransactionLogEntriesBatch loads transaction log entries for multiple logs in a single query.
+// loadTransactionLogEntriesBatchTx loads transaction log entries for multiple logs in a single query.
 // This avoids N+1 query issues when loading many logs.
-func (r *PostgresRepository) loadTransactionLogEntriesBatch(ctx context.Context, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
+func (r *PostgresRepository) loadTransactionLogEntriesBatchTx(ctx context.Context, tx pgx.Tx, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
 	if len(dbIDs) == 0 {
 		return nil
 	}
@@ -794,11 +917,11 @@ func (r *PostgresRepository) loadTransactionLogEntriesBatch(ctx context.Context,
 	query := fmt.Sprintf(`
 		SELECT financial_position_log_id, entry_id, transaction_id, account_id, amount_cents, currency,
 			direction, timestamp, description, reference, source
-		FROM position_keeping.transaction_log_entries
+		FROM transaction_log_entries
 		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL
 		ORDER BY financial_position_log_id, timestamp ASC`, strings.Join(placeholders, ","))
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to load transaction log entries batch: %w", err)
 	}
@@ -847,9 +970,9 @@ func (r *PostgresRepository) loadTransactionLogEntriesBatch(ctx context.Context,
 	return nil
 }
 
-// loadTransactionLineageBatch loads transaction lineages for multiple logs in a single query.
+// loadTransactionLineageBatchTx loads transaction lineages for multiple logs in a single query.
 // This avoids N+1 query issues when loading many logs.
-func (r *PostgresRepository) loadTransactionLineageBatch(ctx context.Context, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
+func (r *PostgresRepository) loadTransactionLineageBatchTx(ctx context.Context, tx pgx.Tx, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
 	if len(dbIDs) == 0 {
 		return nil
 	}
@@ -865,10 +988,10 @@ func (r *PostgresRepository) loadTransactionLineageBatch(ctx context.Context, db
 	query := fmt.Sprintf(`
 		SELECT financial_position_log_id, transaction_id, parent_transaction_id, child_transaction_ids,
 			related_transaction_ids, transaction_type
-		FROM position_keeping.transaction_lineages
+		FROM transaction_lineages
 		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL`, strings.Join(placeholders, ","))
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to load transaction lineage batch: %w", err)
 	}
@@ -924,9 +1047,9 @@ func (r *PostgresRepository) loadTransactionLineageBatch(ctx context.Context, db
 	return nil
 }
 
-// loadAuditTrailEntriesBatch loads audit trail entries for multiple logs in a single query.
+// loadAuditTrailEntriesBatchTx loads audit trail entries for multiple logs in a single query.
 // This avoids N+1 query issues when loading many logs.
-func (r *PostgresRepository) loadAuditTrailEntriesBatch(ctx context.Context, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
+func (r *PostgresRepository) loadAuditTrailEntriesBatchTx(ctx context.Context, tx pgx.Tx, dbIDs []uuid.UUID, dbIDToLog map[uuid.UUID]*domain.FinancialPositionLog) error {
 	if len(dbIDs) == 0 {
 		return nil
 	}
@@ -941,11 +1064,11 @@ func (r *PostgresRepository) loadAuditTrailEntriesBatch(ctx context.Context, dbI
 
 	query := fmt.Sprintf(`
 		SELECT financial_position_log_id, audit_id, timestamp, user_id, action, details, ip_address, system_context
-		FROM position_keeping.audit_trail_entries
+		FROM audit_trail_entries
 		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL
 		ORDER BY financial_position_log_id, timestamp ASC`, strings.Join(placeholders, ","))
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to load audit trail entries batch: %w", err)
 	}
@@ -986,7 +1109,9 @@ func (r *PostgresRepository) loadAuditTrailEntriesBatch(ctx context.Context, dbI
 	return nil
 }
 
-func (r *PostgresRepository) scanLogs(ctx context.Context, rows pgx.Rows) ([]*domain.FinancialPositionLog, error) {
+// scanLogsTx scans log rows and loads related entities using a transaction.
+// Uses batch loading to avoid N+1 queries.
+func (r *PostgresRepository) scanLogsTx(ctx context.Context, tx pgx.Tx, rows pgx.Rows) ([]*domain.FinancialPositionLog, error) {
 	logs := []*domain.FinancialPositionLog{}
 	dbIDToLog := make(map[uuid.UUID]*domain.FinancialPositionLog)
 	dbIDs := []uuid.UUID{}
@@ -1033,15 +1158,15 @@ func (r *PostgresRepository) scanLogs(ctx context.Context, rows pgx.Rows) ([]*do
 	}
 
 	// Batch load all related entities for all logs to avoid N+1 queries
-	if err := r.loadTransactionLogEntriesBatch(ctx, dbIDs, dbIDToLog); err != nil {
+	if err := r.loadTransactionLogEntriesBatchTx(ctx, tx, dbIDs, dbIDToLog); err != nil {
 		return nil, err
 	}
 
-	if err := r.loadTransactionLineageBatch(ctx, dbIDs, dbIDToLog); err != nil {
+	if err := r.loadTransactionLineageBatchTx(ctx, tx, dbIDs, dbIDToLog); err != nil {
 		return nil, err
 	}
 
-	if err := r.loadAuditTrailEntriesBatch(ctx, dbIDs, dbIDToLog); err != nil {
+	if err := r.loadAuditTrailEntriesBatchTx(ctx, tx, dbIDs, dbIDToLog); err != nil {
 		return nil, err
 	}
 
@@ -1064,7 +1189,7 @@ func (r *PostgresRepository) getLogIDMap(ctx context.Context, tx pgx.Tx, logs []
 
 	query := fmt.Sprintf(`
 		SELECT id, log_id
-		FROM position_keeping.financial_position_logs
+		FROM financial_position_logs
 		WHERE log_id IN (%s)`, strings.Join(placeholders, ","))
 
 	rows, err := tx.Query(ctx, query, args...)
