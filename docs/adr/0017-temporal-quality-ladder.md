@@ -193,6 +193,17 @@ func (p Period) Validate() error {
 }
 ```
 
+**Why different interval semantics?**
+
+| Method | Semantics | Rationale |
+|--------|-----------|-----------|
+| `Overlaps()` | Half-open `[Start, End)` | Adjacent periods don't overlap: `[12:00, 12:30)` and `[12:30, 13:00)` are non-overlapping |
+| `Contains()` | Closed `[Start, End]` | Boundary instants belong to their period: `12:30` is "in" `[12:00, 12:30]` |
+| Instants | Point `[t, t]` | An instant at `12:30` overlaps `[12:00, 13:00)` but not `[13:00, 14:00)` |
+
+This matches PostgreSQL's `TSTZRANGE` default behavior and ensures settlement periods
+partition time without gaps or overlaps.
+
 **Database representation using PostgreSQL range types:**
 
 ```sql
@@ -235,6 +246,27 @@ CREATE INDEX idx_measurements_lookup
     ON measurements(account_id, asset_code, period)
     WHERE superseded_by IS NULL;
 ```
+
+**TSTZRANGE Handling for Instant Events:**
+
+PostgreSQL's `TSTZRANGE` with default bounds `[)` represents `[t, t)` as an empty range.
+To correctly handle instants where `Start == End`:
+
+```sql
+-- Application creates instants with closed-closed bounds
+INSERT INTO measurements (period, ...) VALUES (
+    tstzrange('2025-01-15 12:00:00+00', '2025-01-15 12:00:00+00', '[]'),  -- Instant
+    ...
+);
+
+-- GiST index handles both range and instant queries efficiently
+-- Range containment: period @> tstzrange('2025-01-15 12:00', '2025-01-15 12:30', '[)')
+-- Instant lookup: period @> '2025-01-15 12:15:00+00'::timestamptz
+```
+
+The application's `Instant(t)` function creates closed-closed ranges `[t, t]` which
+PostgreSQL normalizes to a point. The GiST index supports both range overlap queries
+and point containment queries efficiently.
 
 ### 2. Source Authority Registry
 
@@ -722,6 +754,11 @@ CREATE INDEX idx_measurements_period
 -- Reconciliation queries
 CREATE INDEX idx_settlement_snapshots_run
     ON settlement_snapshots(settlement_run_id);
+
+-- Settlement finality queries (FinalizeRun)
+CREATE INDEX idx_measurements_settlement_run
+    ON measurements(settlement_run)
+    WHERE locked_at IS NULL;
 ```
 
 ### Overlap Prevention
@@ -1037,9 +1074,12 @@ const (
 )
 
 // PositionEntry represents a single change to an account's position.
+// Note: Attributes are NOT stored on entries - they are always derived from the
+// linked Measurement via MeasurementID. This avoids duplication and ensures
+// attribute changes propagate correctly through the supersession chain.
 type PositionEntry struct {
     ID            uuid.UUID
-    MeasurementID uuid.UUID       // Source measurement
+    MeasurementID uuid.UUID       // Source measurement (attributes derivable from here)
     AccountID     uuid.UUID
     AssetCode     string
     Period        Period
@@ -1047,6 +1087,41 @@ type PositionEntry struct {
     EntryType     EntryType
     CorrectionRef *uuid.UUID      // Links wash/reload pairs
     CreatedAt     time.Time
+}
+
+// GetAttributes returns attributes from the source measurement.
+func (e PositionEntry) GetAttributes(ctx context.Context, repo MeasurementRepository) (map[string]string, error) {
+    m, err := repo.FindByID(ctx, e.MeasurementID)
+    if err != nil {
+        return nil, err
+    }
+    return m.Attributes, nil
+}
+```
+
+## Placeholder Interfaces
+
+Interfaces referenced but defined in future ADRs:
+
+```go
+// ValuationEngine converts quantities to settlement values.
+// Full specification in ADR-0019 (Valuation Engine).
+type ValuationEngine interface {
+    Valuate(ctx context.Context, req ValuationRequest) (*ValuationResult, error)
+}
+
+type ValuationRequest struct {
+    AssetCode  string
+    Quantity   decimal.Decimal
+    Period     Period
+    Attributes map[string]string
+}
+
+type ValuationResult struct {
+    SettlementAmount decimal.Decimal
+    Currency         string
+    RateApplied      decimal.Decimal
+    RateEffectiveAt  time.Time
 }
 ```
 
@@ -1183,12 +1258,22 @@ func (s *MeasurementIngestionService) Ingest(ctx context.Context, m *Measurement
             ErrInvalidSettlementRun, m.SettlementRun, m.AssetCode)
     }
 
-    // Continue with normal ingestion...
+    // Validate measurement period is within backfill window
+    backfillCutoff := time.Now().AddDate(0, 0, -rules.BackfillWindowDays)
+    if m.Period.End.Before(backfillCutoff) {
+        return fmt.Errorf("%w: period ends %s, backfill cutoff is %s for asset %s",
+            ErrOutsideBackfillWindow, m.Period.End.Format(time.RFC3339),
+            backfillCutoff.Format(time.RFC3339), m.AssetCode)
+    }
+
+    // Continue with normal ingestion (Delta Engine evaluation, etc.)
 }
 ```
 
-This ensures settlement runs are consistent with asset configuration and prevents
-free-form strings that would break reconciliation queries.
+This ensures:
+1. Settlement runs are consistent with asset configuration
+2. Measurements outside the backfill window are rejected early
+3. Free-form strings that would break reconciliation queries are prevented
 
 ### Valuation Integration
 
@@ -1242,6 +1327,42 @@ This denormalization is justified because:
 
 4. **Acceptable cost**: 560 GB/year is modest for a financial system handling 1M meters.
    Storage is cheap; cross-service latency at scale is not.
+
+### Design Decisions FAQ
+
+**Q: Should attribute matching support "key subset" matching (e.g., match only on `tariff_zone`)?**
+
+A: No. Exact equality is required for position key hashing. Rationale:
+- Positions with different attributes ARE different positions
+- Subset matching would require application-level logic that's harder to make consistent
+- If you need "match on tariff_zone only", model tariff_zone as the asset code or use separate accounts
+
+For flexible attribute querying (reporting, analytics), use the GIN index on attributes:
+```sql
+CREATE INDEX idx_measurements_attributes ON measurements USING GIN (attributes);
+-- Then query: SELECT * FROM measurements WHERE attributes @> '{"tariff_zone": "peak"}'
+```
+
+**Q: Should `MaxDayOffset` and `MaxMonthOffset` be configurable per-tenant or per-asset?**
+
+A: Currently hardcoded for simplicity. To make configurable:
+```go
+// In asset_settlement_rules table:
+ALTER TABLE asset_settlement_rules ADD COLUMN max_day_offset INTEGER DEFAULT 30;
+ALTER TABLE asset_settlement_rules ADD COLUMN max_month_offset INTEGER DEFAULT 24;
+
+// Validation then becomes:
+if offset > rules.MaxDayOffset { ... }
+```
+
+This adds complexity and is deferred until a tenant actually needs non-standard ranges.
+The defaults (D+30, M+24) cover all known settlement conventions.
+
+**Q: Where is `ErrOutsideBackfillWindow` enforced?**
+
+A: In `MeasurementIngestionService.Ingest()` (see Settlement Run Validation section).
+The check compares `m.Period.End` against `now - backfill_window_days` from the asset's
+settlement rules.
 
 ### Reconsidering This Decision
 
