@@ -194,23 +194,12 @@ func (p Period) Duration() time.Duration {
 }
 
 // Overlaps returns true if this period shares any time with another.
-// Uses half-open interval semantics [Start, End) for ranged periods.
-// For instant events (Start == End), overlap requires containment by the other period,
-// or both being the same instant.
+// Uses closed interval semantics [Start, End] matching the ADR's position model.
+// Two periods overlap if neither starts after the other ends.
 func (p Period) Overlaps(other Period) bool {
-    // Two instants overlap if and only if they're at the same moment
-    if p.IsInstant() && other.IsInstant() {
-        return p.Start.Equal(other.Start)
-    }
-    // Instant overlaps range if contained: a <= t < b
-    if p.IsInstant() {
-        return !p.Start.Before(other.Start) && p.Start.Before(other.End)
-    }
-    if other.IsInstant() {
-        return !other.Start.Before(p.Start) && other.Start.Before(p.End)
-    }
-    // Standard half-open interval overlap
-    return p.Start.Before(other.End) && other.Start.Before(p.End)
+    // Closed-interval overlap: neither period starts after the other's end
+    // This handles all cases uniformly including instants
+    return !p.Start.After(other.End) && !other.Start.After(p.End)
 }
 
 // Contains returns true if the given instant falls within this period.
@@ -234,16 +223,18 @@ func (p Period) Validate() error {
 }
 ```
 
-**Why different interval semantics?**
+**Interval Semantics (Closed `[Start, End]`):**
 
 | Method | Semantics | Rationale |
 |--------|-----------|-----------|
-| `Overlaps()` | Half-open `[Start, End)` | Adjacent periods don't overlap: `[12:00, 12:30)` and `[12:30, 13:00)` are non-overlapping |
+| `Overlaps()` | Closed `[Start, End]` | Inclusive boundaries: `[12:00, 12:30]` overlaps `[12:30, 13:00]` at the shared instant `12:30` |
 | `Contains()` | Closed `[Start, End]` | Boundary instants belong to their period: `12:30` is "in" `[12:00, 12:30]` |
-| Instants | Point `[t, t]` | An instant at `12:30` overlaps `[12:00, 13:00)` but not `[13:00, 14:00)` |
+| Instants | Point `[t, t]` | An instant `[12:30, 12:30]` overlaps itself and any period containing `12:30` |
 
-This matches PostgreSQL's `TSTZRANGE` default behavior and ensures settlement periods
-partition time without gaps or overlaps.
+**Note on PostgreSQL TSTZRANGE:** PostgreSQL's default `[)` bounds differ from this ADR's closed
+intervals. When storing periods, use explicit bounds: `tstzrange(start, end, '[]')` for closed
+semantics. The GiST index handles both efficiently. Alternatively, translate at the repository
+layer if half-open storage is preferred for partitioning.
 
 **Database representation using PostgreSQL range types:**
 

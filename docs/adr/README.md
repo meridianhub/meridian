@@ -77,6 +77,7 @@ Architectural Decision Records) format.
 - [ADR-0012](0012-lien-based-fund-reservation.md) - Lien-Based Fund Reservation for Payment Order Saga
 - [ADR-0013](0013-generic-asset-quantity-types.md) - Universal Quantity Type System
 - [ADR-0014](0014-dynamic-asset-registry.md) - Dynamic Asset Registry & Lifecycle
+- [ADR-0017](0017-temporal-quality-ladder.md) - Time-Bound Quality Ladder for Temporal Asset Reconciliation
 
 ### Development Environment & Infrastructure
 
