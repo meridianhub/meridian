@@ -57,6 +57,7 @@ Architectural Decision Records) format.
 | [ADR-0014](0014-dynamic-asset-registry.md) | Dynamic Asset Registry & Lifecycle | Proposed | 2025-12-04 |
 | [ADR-0015](0015-standard-service-directory-structure.md) | Standard Service Directory Structure | Accepted | 2025-12-06 |
 | [ADR-0016](0016-tenant-id-naming-strategy.md) | Tenant ID Naming Strategy | Accepted | 2025-12-13 |
+| [ADR-0017](0017-temporal-quality-ladder.md) | Temporal Quality Ledger (Data Physics) | Proposed | 2025-12-14 |
 
 ## Categories
 
@@ -75,6 +76,7 @@ Architectural Decision Records) format.
 - [ADR-0012](0012-lien-based-fund-reservation.md) - Lien-Based Fund Reservation for Payment Order Saga
 - [ADR-0013](0013-generic-asset-quantity-types.md) - Universal Quantity Type System
 - [ADR-0014](0014-dynamic-asset-registry.md) - Dynamic Asset Registry & Lifecycle
+- [ADR-0017](0017-temporal-quality-ladder.md) - Temporal Quality Ledger (Data Physics)
 
 ### Development Environment & Infrastructure
 
