@@ -145,8 +145,8 @@ func (p Period) Validate() error {
 ```sql
 CREATE TABLE measurements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    account_id VARCHAR(50) NOT NULL,
-    asset_code VARCHAR(32) NOT NULL,
+    account_id UUID NOT NULL,        -- References current_accounts.id
+    asset_code VARCHAR(32) NOT NULL, -- References asset_definitions.code
     quantity DECIMAL(38, 18) NOT NULL,
 
     -- Time as range (point-in-time has start = end)
@@ -166,10 +166,17 @@ CREATE TABLE measurements (
     locked_at TIMESTAMPTZ,
 
     -- Prevent overlapping current positions for same account/asset/attributes
+    -- See "Overlap Prevention" section below for enforcement details
     CONSTRAINT no_overlapping_current CHECK (
-        superseded_by IS NOT NULL OR TRUE  -- Enforced via application logic
+        superseded_by IS NOT NULL OR TRUE  -- Placeholder; enforced via application logic
     )
 );
+
+-- Overlap prevention is enforced at the application layer using SERIALIZABLE
+-- isolation or explicit row locking. PostgreSQL exclusion constraints cannot
+-- handle the multi-column key (account_id, asset_code, attributes) with JSONB.
+--
+-- See the Overlap Prevention section in Implementation Notes for details.
 
 CREATE INDEX idx_measurements_lookup
     ON measurements(account_id, asset_code, period)
@@ -238,8 +245,8 @@ received, regardless of quality. Nothing is deleted or updated (except supersess
 // Immutable after creation except for SupersededBy pointer.
 type Measurement struct {
     ID            uuid.UUID
-    AccountID     string
-    AssetCode     string
+    AccountID     uuid.UUID   // References Current Account
+    AssetCode     string      // References Asset Directory
     Quantity      decimal.Decimal
 
     // Temporal
@@ -476,8 +483,8 @@ reconciliation when better data arrives later.
 type BillBinding struct {
     ID              uuid.UUID
     BillID          uuid.UUID
-    AccountID       string
-    AssetCode       string
+    AccountID       uuid.UUID       // References Current Account
+    AssetCode       string          // References Asset Directory
     Period          Period
     MeasurementID   uuid.UUID       // The measurement used
     QuantityBilled  decimal.Decimal // Snapshot of quantity at billing time
@@ -558,6 +565,40 @@ Bill #12345 Reconciliation:
 Action: Create adjustment invoice for £0.22
 ```
 
+**Performance considerations for high-volume bills:**
+
+For bills with many periods (e.g., 48 half-hours × 365 days = 17,520 bindings/year):
+
+```go
+// FindByBillPaginated returns bindings in batches for large bills.
+func (r *BillBindingRepository) FindByBillPaginated(
+    ctx context.Context,
+    billID uuid.UUID,
+    limit, offset int,
+) ([]BillBinding, error) {
+    var bindings []BillBinding
+    return bindings, r.db.Where("bill_id = ?", billID).
+        Order("period_start ASC").
+        Limit(limit).
+        Offset(offset).
+        Find(&bindings).Error
+}
+
+// BatchFindCurrent reduces round trips when checking many positions.
+func (r *MeasurementRepository) BatchFindCurrent(
+    ctx context.Context,
+    keys []PositionKey,
+) (map[PositionKey]*Measurement, error) {
+    // Build a single query for all position keys
+    // Returns map keyed by position for efficient lookup
+}
+```
+
+For most use cases (monthly residential energy bills with ~1,440 half-hours),
+the simple iteration approach is sufficient. Consider pagination when:
+- Annual bills exceed 10,000 bindings
+- Reconciliation jobs process bills in parallel
+
 ## Service Responsibilities
 
 | Component | Service | Notes |
@@ -567,9 +608,14 @@ Action: Create adjustment invoice for £0.22
 | Delta Engine | Position Keeping | Supersession evaluation |
 | Correction Saga | Position Keeping | Wash & Reload execution |
 | Position Entries | Position Keeping | Net position calculation |
-| Bill Binding | Financial Accounting | Snapshot at billing time |
-| Reconciliation | Valuation Service | Variance → adjustment value |
+| Bill Binding (creation) | Financial Accounting | Captures measurement snapshots when generating bills |
+| Bill Binding (storage) | Position Keeping | Bindings stored alongside measurements for query efficiency |
+| Reconciliation | Cross-cutting | Financial Accounting triggers, Position Keeping queries, Valuation prices |
 | Adjustment Invoice | Payment Order | Financial settlement of variance |
+
+**Note on Bill Binding:** While Financial Accounting owns the billing lifecycle and triggers
+binding creation, the bindings are stored in Position Keeping's database for query efficiency
+(joining bindings with measurements). This follows the "data near the queries" principle.
 
 ## Consequences
 
@@ -607,6 +653,47 @@ CREATE INDEX idx_bill_bindings_bill
     ON bill_bindings(bill_id);
 ```
 
+### Overlap Prevention
+
+Preventing overlapping current positions requires coordination at the application layer
+since PostgreSQL exclusion constraints don't support JSONB in the key:
+
+```go
+// BookMeasurement atomically checks for overlaps and inserts a new measurement.
+// Uses SERIALIZABLE isolation to prevent phantom reads.
+func (r *MeasurementRepository) BookMeasurement(ctx context.Context, m *Measurement) error {
+    return r.db.Transaction(func(tx *gorm.DB) error {
+        // Check for existing overlapping current measurement
+        var existing Measurement
+        err := tx.Raw(`
+            SELECT * FROM measurements
+            WHERE account_id = ?
+              AND asset_code = ?
+              AND attributes @> ?::jsonb
+              AND period && tstzrange(?, ?)
+              AND superseded_by IS NULL
+            FOR UPDATE
+        `, m.AccountID, m.AssetCode, m.Attributes, m.Period.Start, m.Period.End).
+            Scan(&existing).Error
+
+        if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+            return err
+        }
+        if existing.ID != uuid.Nil {
+            return ErrOverlappingPosition
+        }
+
+        return tx.Create(m).Error
+    }, &sql.TxOptions{Isolation: sql.LevelSerializable})
+}
+```
+
+**Attribute Matching:**
+
+When checking for overlaps, attributes are compared using PostgreSQL JSONB containment (`@>`).
+This means the existing record's attributes must contain all key-value pairs from the incoming
+measurement. For exact-match semantics, normalize attributes on ingestion.
+
 ### Settlement Finality
 
 After final settlement (e.g., M+14 for UK energy), positions are locked:
@@ -639,6 +726,166 @@ func (r *MeasurementRepository) Supersede(ctx context.Context, oldID, newID uuid
 }
 ```
 
+**Simultaneous arrival of same-quality measurements:**
+
+When two measurements with identical quality scores arrive at the same millisecond for
+the same position, `ReceivedAt` comparison becomes non-deterministic. Handle this with:
+
+```go
+// Measurement includes optional source-specific sequence for tiebreaking.
+type Measurement struct {
+    // ... existing fields ...
+
+    // SourceSequence provides deterministic ordering when ReceivedAt is identical.
+    // For smart meters: cumulative read count. For APIs: request sequence number.
+    // Null if source doesn't provide sequencing.
+    SourceSequence *int64
+}
+
+// compareSameQuality determines winner when quality scores are equal.
+func compareSameQuality(a, b *Measurement) *Measurement {
+    // Primary: ReceivedAt
+    if !a.ReceivedAt.Equal(b.ReceivedAt) {
+        if a.ReceivedAt.After(b.ReceivedAt) {
+            return a
+        }
+        return b
+    }
+
+    // Secondary: SourceSequence (if both have it)
+    if a.SourceSequence != nil && b.SourceSequence != nil {
+        if *a.SourceSequence > *b.SourceSequence {
+            return a
+        }
+        return b
+    }
+
+    // Tertiary: Lexicographic ID comparison (deterministic fallback)
+    if a.ID.String() > b.ID.String() {
+        return a
+    }
+    return b
+}
+```
+
+## Error Taxonomy
+
+Domain-specific errors for the temporal quality ladder:
+
+```go
+var (
+    // ErrNotFound indicates no measurement exists for the given position key.
+    ErrNotFound = errors.New("measurement not found")
+
+    // ErrAlreadySuperseded indicates the measurement was superseded by another
+    // process between read and write (optimistic lock failure).
+    ErrAlreadySuperseded = errors.New("measurement already superseded")
+
+    // ErrPositionLocked indicates the position is in final settlement and cannot
+    // be modified. New data should route to dispute workflow.
+    ErrPositionLocked = errors.New("position is locked for final settlement")
+
+    // ErrInvalidPeriod indicates the period end is before start.
+    ErrInvalidPeriod = errors.New("invalid period: end before start")
+
+    // ErrUnknownSource indicates the source code is not registered in the
+    // Source Authority Registry.
+    ErrUnknownSource = errors.New("unknown source authority")
+
+    // ErrOverlappingPosition indicates an attempt to book a measurement that
+    // overlaps with an existing non-superseded measurement (same account/asset/attributes).
+    ErrOverlappingPosition = errors.New("overlapping position exists")
+
+    // ErrOutsideBackfillWindow indicates the measurement period is older than
+    // the configured backfill window for this asset.
+    ErrOutsideBackfillWindow = errors.New("measurement outside backfill window")
+)
+```
+
+## Scope and Boundaries
+
+### In Scope
+
+- Quality-based supersession logic (Delta Engine)
+- Measurement lifecycle (append, supersede, lock)
+- Correction pattern (Wash & Reload)
+- Bill binding for reconciliation
+- Settlement finality windows
+
+### Out of Scope (Future ADRs)
+
+| Topic | Notes |
+|-------|-------|
+| **Dispute Resolution Workflow** | When `ActionCreateDispute` is returned, the dispute workflow handles investigation, resolution, and potential manual adjustments. This includes dispute SLAs, escalation paths, and operator UI. Target: ADR-0018. |
+| **Valuation Engine** | The `ValuationEngine.Valuate()` call in reconciliation is a placeholder. A dedicated ADR will define temporal tariff lookup, attribute-based pricing tiers, and rate schedule management. ADR-0013's `Rate` type provides the foundation. Target: ADR-0019. |
+| **Attribute Schema Validation** | Measurement attributes (`map[string]string`) are opaque in this ADR. Integration with ADR-0014's Schema-on-Write validation for attribute keys/values is implementation detail. |
+| **Event Streaming** | This ADR assumes batch-oriented settlement runs. Real-time streaming ingestion with micro-batching may be addressed in a performance optimization ADR. |
+
+### Attribute Handling Clarification
+
+When checking for existing measurements in `FindCurrent`, attributes are compared using
+**JSONB containment** (`@>` operator). This means:
+
+```go
+// Scenario 1: Exact match required
+// Existing: {"tariff": "peak", "region": "north"}
+// Incoming: {"tariff": "peak", "region": "north"}
+// Result: MATCH ✓
+
+// Scenario 2: Subset - incoming is contained by existing
+// Existing: {"tariff": "peak", "region": "north"}
+// Incoming: {"tariff": "peak"}
+// Result: MATCH ✓ (incoming subset of existing)
+
+// Scenario 3: Superset - incoming has more keys
+// Existing: {"tariff": "peak"}
+// Incoming: {"tariff": "peak", "region": "north"}
+// Result: NO MATCH (different position key)
+```
+
+For strict exact-match semantics, normalize attributes on ingestion and use equality comparison.
+
+## Entry Types
+
+Position entries track all movements including corrections:
+
+```go
+type EntryType string
+
+const (
+    // EntryTypeBooking is the initial booking of a measurement.
+    EntryTypeBooking EntryType = "BOOKING"
+
+    // EntryTypeCorrectionReversal is the "wash" - negates a previous booking.
+    EntryTypeCorrectionReversal EntryType = "CORRECTION_REVERSAL"
+
+    // EntryTypeCorrectionBooking is the "reload" - books the replacement value.
+    EntryTypeCorrectionBooking EntryType = "CORRECTION_BOOKING"
+
+    // EntryTypeTransfer moves quantity between accounts (same asset).
+    EntryTypeTransfer EntryType = "TRANSFER"
+
+    // EntryTypeAdjustment is a manual correction by an operator.
+    EntryTypeAdjustment EntryType = "ADJUSTMENT"
+
+    // EntryTypeDispute is a correction resulting from dispute resolution.
+    EntryTypeDispute EntryType = "DISPUTE"
+)
+
+// PositionEntry represents a single change to an account's position.
+type PositionEntry struct {
+    ID            uuid.UUID
+    MeasurementID uuid.UUID       // Source measurement
+    AccountID     uuid.UUID
+    AssetCode     string
+    Period        Period
+    Quantity      decimal.Decimal // Positive or negative
+    EntryType     EntryType
+    CorrectionRef *uuid.UUID      // Links wash/reload pairs
+    CreatedAt     time.Time
+}
+```
+
 ## Links
 
 * [ADR-0013: Universal Quantity Type System](0013-generic-asset-quantity-types.md)
@@ -659,7 +906,40 @@ Different industries have different backfill windows:
 | Banking | T+1 to T+3 | Same day to 3 days |
 | Carbon | Years | Registry-dependent |
 
-Configure per-asset in the Asset Directory.
+**Configuration schema (extends ADR-0014 asset definitions):**
+
+```sql
+-- Settlement rules table linked to asset definitions
+CREATE TABLE asset_settlement_rules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_code VARCHAR(32) NOT NULL REFERENCES asset_definitions(code),
+
+    -- Backfill limits
+    backfill_window_days INTEGER NOT NULL DEFAULT 365,
+
+    -- Settlement run schedule (cron-like or explicit)
+    settlement_schedule JSONB NOT NULL DEFAULT '["D+1", "D+5", "M+3", "M+14"]',
+
+    -- Finality: after which run positions lock
+    final_settlement_run VARCHAR(20) NOT NULL DEFAULT 'M+14',
+
+    -- Grace period after final before disputes auto-close
+    dispute_window_days INTEGER NOT NULL DEFAULT 30,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE(asset_code)
+);
+
+-- Example: UK half-hourly electricity
+INSERT INTO asset_settlement_rules (asset_code, backfill_window_days, final_settlement_run)
+VALUES ('ELEC_HH_KWH', 425, 'M+14');  -- 14 months = ~425 days
+
+-- Example: Real-time gross settlement (banking)
+INSERT INTO asset_settlement_rules (asset_code, backfill_window_days, final_settlement_run)
+VALUES ('GBP', 0, 'D+0');  -- Same-day finality
+```
 
 ### Valuation Integration
 
