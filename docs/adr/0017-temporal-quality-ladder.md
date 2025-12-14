@@ -374,26 +374,38 @@ for read-heavy queries, not the source of truth.
 // SourceAuthority defines the quality ranking for a data source.
 // Stored in the Asset Directory service.
 type SourceAuthority struct {
-    Code         string    // "SMETS2_METER", "PROFILE_ESTIMATE"
-    AssetCode    string    // Source rankings can be asset-specific
-    QualityScore int       // Higher = more authoritative (0-100)
-    Description  string
-    ValidFrom    time.Time
-    ValidTo      *time.Time // Null = currently valid
+    Code            string    // "SMETS2_METER", "FORECAST_ML"
+    AssetCode       string    // Source rankings can be asset-specific
+    QualityScore    int       // Higher = more authoritative (0-100)
+    TemporalContext string    // "PAST", "FUTURE", or "ANY" - when this source is authoritative
+    Description     string
+    ValidFrom       time.Time
+    ValidTo         *time.Time // Null = currently valid
 }
 ```
 
-**Default energy hierarchy:**
+**Source Authority with Temporal Context:**
 
-| Source Code | Quality Score | Description |
-|-------------|---------------|-------------|
-| `DEFAULT_PROFILE` | 10 | Regulatory default when no data |
-| `ESTIMATED_HISTORIC` | 20 | Same period last year |
-| `ESTIMATED_PROFILE` | 30 | Profile coefficient calculation |
-| `CUSTOMER_READ` | 50 | Customer-submitted reading |
-| `ACTUAL_UNVALIDATED` | 70 | Meter reading, not yet validated |
-| `ACTUAL_VALIDATED` | 90 | Meter reading, passed validation |
-| `ACTUAL_FINAL` | 100 | Final settlement reading |
+Authority is relative to time. A **Forecast** is the highest quality source for *Tomorrow* (T+1),
+but worthless for *Yesterday* (T-1). This enables **Provisional Settlement** for forward-looking
+use cases like budgeting, hedging, and resource reservation.
+
+| Source Code | Quality Score | Temporal Context | Description |
+|-------------|---------------|------------------|-------------|
+| `FORECAST_ML` | 50 | **Future** | ML prediction. Authoritative for T+1 onwards |
+| `FORECAST_BUDGET` | 40 | **Future** | Budget allocation. Authoritative until actual spend |
+| `DEFAULT_PROFILE` | 10 | Past | Regulatory default when no data |
+| `ESTIMATED_HISTORIC` | 20 | Past | Same period last year |
+| `ESTIMATED_PROFILE` | 30 | Past | Profile coefficient calculation |
+| `CUSTOMER_READ` | 50 | Past | Customer-submitted reading |
+| `ACTUAL_UNVALIDATED` | 70 | Past | Meter reading, not yet validated |
+| `ACTUAL_VALIDATED` | 90 | Past | Meter reading, passed validation |
+| `ACTUAL_FINAL` | 100 | Past | Final settlement reading |
+
+**Temporal Authority Rules:**
+- For **Past periods** (T ≤ Now): Only `TemporalContext: Past` sources compete. Actuals always win.
+- For **Future periods** (T > Now): Only `TemporalContext: Future` sources are valid. Forecasts win by default.
+- When time advances and Actuals arrive, they supersede Forecasts automatically.
 
 **Lookup at measurement ingestion:**
 
@@ -679,7 +691,116 @@ Position Entries for Account METER-001, Period 12:00-12:30:
 └──────────────┴──────────┴───────────────────────┴─────────────────┘
 ```
 
-### 6. Settlement Snapshots and Reconciliation
+### 6. Temporal Authority & Provisional Settlement
+
+Most ledgers treat the database as "The State of Now." Meridian manages the **Entire Timeline
+of Value** - past (audit, integrity, settlement) AND future (forecasts, commitments, hedging).
+
+**The Key Insight:** A Forecast is the **Golden Source** for tomorrow, but **Garbage** for
+yesterday. Without modeling this "Temporal Weighting," you get the classic billing disaster:
+
+1. Bill customer based on Forecast (because Actuals weren't in yet)
+2. Actuals arrive
+3. System overwrites Forecast
+4. **Bug:** You've lost the record of *why* you billed that amount. The variance is inexplicable.
+
+**The "Freezing" Mechanism:**
+
+When a financial action is taken based on non-final data (Forecast, Estimate), we **Freeze**
+the basis of that decision into the `SettlementSnapshot`. This enables accurate reconciliation:
+
+```go
+// ProvisionalSettlement creates a settlement based on forecast data
+func (s *SettlementService) CreateProvisionalSettlement(
+    ctx context.Context,
+    forecast *Measurement,
+) (*SettlementSnapshot, error) {
+    if forecast.Source != "FORECAST_ML" && forecast.Source != "FORECAST_BUDGET" {
+        return nil, errors.New("provisional settlement requires forecast source")
+    }
+
+    snapshot := &SettlementSnapshot{
+        ID:              uuid.New(),
+        MeasurementID:   forecast.ID,
+        QuantitySettled: forecast.Quantity,
+        QualityAtSettle: forecast.QualityScore,
+        SourceAtSettle:  forecast.Source,        // "FORECAST_ML"
+        SettlementType:  SettlementProvisional,  // Subject to reconciliation
+        CreatedAt:       time.Now(),
+    }
+
+    return snapshot, s.snapshotRepo.Create(ctx, snapshot)
+}
+```
+
+**Reconciliation with Provenance:**
+
+When Actuals arrive, reconciliation compares against the frozen provisional snapshot:
+
+```go
+// ReconcileProvisional generates adjustments when actuals supersede forecasts
+func (s *ReconciliationService) ReconcileProvisional(
+    ctx context.Context,
+    snapshot *SettlementSnapshot,
+    actual *Measurement,
+) (*Variance, error) {
+    // The snapshot preserves WHY we settled that amount
+    variance := &Variance{
+        SnapshotID:         snapshot.ID,
+        OriginalSource:     snapshot.SourceAtSettle,    // "FORECAST_ML"
+        OriginalQuality:    snapshot.QualityAtSettle,   // 50
+        OriginalQuantity:   snapshot.QuantitySettled,
+
+        ActualSource:       actual.Source,              // "ACTUAL_VALIDATED"
+        ActualQuality:      actual.QualityScore,        // 90
+        ActualQuantity:     actual.Quantity,
+
+        QuantityDelta:      actual.Quantity.Sub(snapshot.QuantitySettled),
+        VarianceReason:     "FORECAST_DEVIATION",       // Audit trail!
+    }
+
+    return variance, nil
+}
+```
+
+**Cross-Domain Applications:**
+
+This "Provisional Settlement" pattern enables high-value capabilities across all target sectors:
+
+| Domain | Forecast Source | Provisional Action | Reconciliation Trigger |
+|--------|-----------------|-------------------|----------------------|
+| **Energy** | ML demand forecast | Book hedge position | Smart meter actual |
+| **NGO/Gov** | Refugee estimate | Allocate budget | Biometric headcount |
+| **Compute** | Reservation request | Reserve GPU hours | Actual job runtime |
+| **Treasury** | FX rate forecast | Book forward contract | Market settlement rate |
+
+**Example: NGO Budget Allocation**
+
+```
+T-30 (Forecast):
+  Source: FORECAST_BUDGET (Quality 40)
+  Quantity: 1,000 refugees expected
+  Action: Provisional Settlement - Transfer $10,000 to Field Wallet
+  Snapshot: { source: "FORECAST_BUDGET", quantity: 1000, type: "PROVISIONAL" }
+
+T+1 (Actual):
+  Source: BIOMETRIC_COUNT (Quality 95)
+  Quantity: 800 refugees arrived
+  Action: Reconciliation
+    - Current (800) vs Snapshot (1,000)
+    - Variance: -200 refugees = -$2,000
+    - Reason: "FORECAST_DEVIATION"
+  Output: Payment Order - Return $2,000 to HQ
+```
+
+**The Strategic Value:**
+
+This transforms Meridian from "A Ledger that fixes errors" to "A Ledger that manages Time":
+
+- **10x side (Backward-looking):** Audit, Integrity, Settlement, Corrections
+- **Murex side (Forward-looking):** Risk, Commitments, Hedging, Budgeting
+
+### 7. Settlement Snapshots and Reconciliation
 
 When a settlement run executes, it captures which measurements were used. This enables
 reconciliation when better data arrives in subsequent runs.
@@ -707,7 +828,23 @@ type SettlementSnapshot struct {
     QuantitySettled  decimal.Decimal   // Snapshot of quantity at settlement time
     QualityAtSettle  int               // Quality score at settlement time
     CreatedAt        time.Time
+
+    // Provenance (The "Freeze") - enables variance analysis for provisional settlements
+    SourceAtSettle   string            // e.g., "FORECAST_ML", "ACTUAL_VALIDATED"
+    SettlementType   SettlementType    // PROVISIONAL or FINAL
 }
+
+type SettlementType string
+
+const (
+    // SettlementProvisional indicates settlement based on non-final data (forecasts, estimates).
+    // Subject to reconciliation when actuals arrive.
+    SettlementProvisional SettlementType = "PROVISIONAL"
+
+    // SettlementFinal indicates settlement based on final, audited data.
+    // No further reconciliation expected.
+    SettlementFinal SettlementType = "FINAL"
+)
 
 // ReconciliationService compares settled positions to current positions.
 type ReconciliationService struct {
@@ -1478,6 +1615,9 @@ type ValuationResult struct {
 | Term | Definition |
 |------|------------|
 | **Quality Ladder** | Hierarchy of data sources ranked by authority (e.g., estimate < customer read < meter actual) |
+| **Temporal Authority** | Principle that source quality depends on time context: Forecasts are authoritative for future periods, Actuals for past |
+| **Provisional Settlement** | Financial action based on non-final data (forecast/estimate), subject to reconciliation when actuals arrive |
+| **Freezing** | Capturing provenance (source, quality) in a snapshot when taking provisional action, enabling variance analysis |
 | **Wash & Reload** | Correction pattern: reverse old position entry, book new entry, preserving audit trail |
 | **Settlement Run** | Batch process that finalizes positions for a time period (e.g., D+1, M+14) |
 | **Supersession** | Replacement of one measurement by another of higher quality for the same position |
@@ -1485,6 +1625,7 @@ type ValuationResult struct {
 | **Backfill Window** | Maximum age of measurements accepted before rejection |
 | **Final Settlement** | Point after which positions are locked and changes become disputes |
 | **Delta Engine** | Decision component that evaluates incoming measurements against current state |
+| **ATP (Available to Promise)** | Current balance minus future commitments; the amount safe to allocate |
 
 ## Links
 
