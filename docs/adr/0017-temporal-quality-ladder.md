@@ -147,13 +147,42 @@ This unifies point-in-time events (transactions) with period-based measurements 
 
 ```go
 // Period represents a time range. For point-in-time events, Start equals End.
+// All timestamps MUST be in UTC to ensure consistent comparisons and storage.
 type Period struct {
     Start time.Time
     End   time.Time
 }
 
-func Instant(t time.Time) Period {
-    return Period{Start: t, End: t}
+// NewPeriod creates a validated Period. Returns error if timestamps are not UTC
+// or if End is before Start.
+func NewPeriod(start, end time.Time) (Period, error) {
+    if start.Location() != time.UTC {
+        return Period{}, errors.New("period start must be in UTC")
+    }
+    if end.Location() != time.UTC {
+        return Period{}, errors.New("period end must be in UTC")
+    }
+    if end.Before(start) {
+        return Period{}, errors.New("period end cannot be before start")
+    }
+    return Period{Start: start, End: end}, nil
+}
+
+// MustPeriod creates a Period, panicking on validation failure.
+// Use only in tests or initialization where failure is fatal.
+func MustPeriod(start, end time.Time) Period {
+    p, err := NewPeriod(start, end)
+    if err != nil {
+        panic(err)
+    }
+    return p
+}
+
+func Instant(t time.Time) (Period, error) {
+    if t.Location() != time.UTC {
+        return Period{}, errors.New("instant must be in UTC")
+    }
+    return Period{Start: t, End: t}, nil
 }
 
 func (p Period) IsInstant() bool {
@@ -190,7 +219,14 @@ func (p Period) Contains(t time.Time) bool {
     return !t.Before(p.Start) && !t.After(p.End)
 }
 
+// Validate checks period invariants. Prefer NewPeriod() for construction.
 func (p Period) Validate() error {
+    if p.Start.Location() != time.UTC {
+        return errors.New("period start must be in UTC")
+    }
+    if p.End.Location() != time.UTC {
+        return errors.New("period end must be in UTC")
+    }
     if p.End.Before(p.Start) {
         return errors.New("period end cannot be before start")
     }
@@ -214,11 +250,13 @@ partition time without gaps or overlaps.
 ```sql
 CREATE TABLE measurements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    account_id UUID NOT NULL,        -- References current_accounts.id
-    asset_code VARCHAR(32) NOT NULL, -- References asset_definitions.code
+    tenant_id UUID NOT NULL,          -- Tenant isolation (see ADR-0016)
+    account_id UUID NOT NULL,         -- References current_accounts.id
+    asset_code VARCHAR(32) NOT NULL,  -- References asset_definitions.code
     quantity DECIMAL(38, 18) NOT NULL,
 
     -- Time as range (point-in-time has start = end)
+    -- All timestamps MUST be in UTC (enforced at application layer)
     period TSTZRANGE NOT NULL,
 
     -- Attributes for fungibility
@@ -234,21 +272,24 @@ CREATE TABLE measurements (
     settlement_run VARCHAR(20),
     locked_at TIMESTAMPTZ,
 
-    -- Prevent overlapping current positions for same account/asset/attributes
+    -- Prevent overlapping current positions for same tenant/account/asset/attributes
     -- See "Overlap Prevention" section below for enforcement details
     CONSTRAINT no_overlapping_current CHECK (
         superseded_by IS NOT NULL OR TRUE  -- Placeholder; enforced via application logic
     )
 );
 
--- Overlap prevention is enforced at the application layer using SERIALIZABLE
--- isolation or explicit row locking. PostgreSQL exclusion constraints cannot
--- handle the multi-column key (account_id, asset_code, attributes) with JSONB.
+-- Tenant isolation index (critical for performance and security)
+CREATE INDEX idx_measurements_tenant ON measurements(tenant_id);
+
+-- Overlap prevention is enforced at the application layer using optimistic
+-- concurrency via position_key_hash. PostgreSQL exclusion constraints cannot
+-- handle the multi-column key (tenant_id, account_id, asset_code, attributes) with JSONB.
 --
 -- See the Overlap Prevention section in Implementation Notes for details.
 
 CREATE INDEX idx_measurements_lookup
-    ON measurements(account_id, asset_code, period)
+    ON measurements(tenant_id, account_id, asset_code, period)
     WHERE superseded_by IS NULL;
 ```
 
@@ -272,6 +313,60 @@ INSERT INTO measurements (period, ...) VALUES (
 The application's `Instant(t)` function creates closed-closed ranges `[t, t]` which
 PostgreSQL normalizes to a point. The GiST index supports both range overlap queries
 and point containment queries efficiently.
+
+**TSTZRANGE Integration Tests (Required):**
+
+Before production deployment, verify PostgreSQL's TSTZRANGE behavior with integration tests:
+
+```go
+func TestTSTZRANGE_InstantHandling(t *testing.T) {
+    db := setupTestDB(t)
+
+    tests := []struct {
+        name     string
+        setup    string
+        query    string
+        expected bool
+    }{
+        {
+            name:     "point-in-range query works",
+            setup:    "INSERT INTO measurements (period) VALUES (tstzrange('2025-01-15 12:00+00', '2025-01-15 13:00+00', '[)'))",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period @> '2025-01-15 12:30+00'::timestamptz)",
+            expected: true,
+        },
+        {
+            name:     "instant-to-instant overlap detected",
+            setup:    "INSERT INTO measurements (period) VALUES (tstzrange('2025-01-15 12:00+00', '2025-01-15 12:00+00', '[]'))",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period && tstzrange('2025-01-15 12:00+00', '2025-01-15 12:00+00', '[]'))",
+            expected: true,
+        },
+        {
+            name:     "instant at range boundary (exclusive end)",
+            setup:    "INSERT INTO measurements (period) VALUES (tstzrange('2025-01-15 12:00+00', '2025-01-15 13:00+00', '[)'))",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period @> '2025-01-15 13:00+00'::timestamptz)",
+            expected: false, // 13:00 is exclusive end
+        },
+        {
+            name:     "GiST index used for range query",
+            setup:    "INSERT INTO measurements (period) VALUES (tstzrange('2025-01-15 12:00+00', '2025-01-15 13:00+00', '[)'))",
+            query:    "EXPLAIN SELECT * FROM measurements WHERE period && tstzrange('2025-01-15 12:00+00', '2025-01-15 12:30+00', '[)')",
+            expected: true, // Should show "Index Scan using idx_measurements_period"
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // ... test implementation ...
+        })
+    }
+}
+```
+
+These tests validate:
+1. Point-in-range containment queries work correctly
+2. Instant-to-instant overlap detection (critical for duplicate prevention)
+3. Half-open interval boundary behavior (`[)` excludes end)
+4. GiST index is actually used for range queries (query plan verification)
 
 ### 2. Source Authority Registry
 
@@ -385,7 +480,8 @@ The Delta Engine evaluates incoming measurements and determines the appropriate 
 type Action int
 
 const (
-    ActionBookNew Action = iota      // No existing data, book this measurement
+    ActionError Action = iota - 1    // Sentinel for error state (never returned on success)
+    ActionBookNew                    // No existing data, book this measurement
     ActionArchiveOnly                // Lower quality, keep for audit only
     ActionWashAndReload              // Higher quality, trigger correction
     ActionIgnoreDuplicate            // Same source, same value, idempotent skip
@@ -398,6 +494,7 @@ type DeltaEngine struct {
 }
 
 // Evaluate determines what action to take for an incoming measurement.
+// Returns ActionError on failure - callers must check error before using Action.
 func (e *DeltaEngine) Evaluate(ctx context.Context, incoming Measurement) (Action, *Measurement, error) {
     // Find existing current measurement for this position key
     existing, err := e.repo.FindCurrent(ctx,
@@ -407,7 +504,7 @@ func (e *DeltaEngine) Evaluate(ctx context.Context, incoming Measurement) (Actio
         incoming.Attributes,
     )
     if err != nil && !errors.Is(err, ErrNotFound) {
-        return 0, nil, err
+        return ActionError, nil, err
     }
 
     // Case D: No existing measurement - book as new
@@ -420,9 +517,13 @@ func (e *DeltaEngine) Evaluate(ctx context.Context, incoming Measurement) (Actio
         return ActionCreateDispute, existing, nil
     }
 
-    // Case E: Duplicate detection (same source, same value)
+    // Case E: Duplicate detection - must match source, value, period, AND attributes
+    // to be considered a true duplicate (idempotent retry)
     if incoming.Source == existing.Source &&
-       incoming.Quantity.Equal(existing.Quantity) {
+       incoming.Quantity.Equal(existing.Quantity) &&
+       incoming.Period.Start.Equal(existing.Period.Start) &&
+       incoming.Period.End.Equal(existing.Period.End) &&
+       mapsEqual(incoming.Attributes, existing.Attributes) {
         return ActionIgnoreDuplicate, existing, nil
     }
 
@@ -445,6 +546,19 @@ func (e *DeltaEngine) Evaluate(ctx context.Context, incoming Measurement) (Actio
 
     // Stale same-quality data
     return ActionArchiveOnly, existing, nil
+}
+
+// mapsEqual checks if two string maps have identical keys and values.
+func mapsEqual(a, b map[string]string) bool {
+    if len(a) != len(b) {
+        return false
+    }
+    for k, v := range a {
+        if bv, ok := b[k]; !ok || bv != v {
+            return false
+        }
+    }
+    return true
 }
 ```
 
@@ -509,12 +623,13 @@ type CorrectionSaga struct {
 }
 
 // Execute performs an atomic wash (reversal) and reload (booking).
+// Respects context timeout/cancellation for long-running transactions.
 func (s *CorrectionSaga) Execute(
     ctx context.Context,
     old *Measurement,
     new *Measurement,
 ) error {
-    return s.db.Transaction(func(tx *gorm.DB) error {
+    return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
         // 1. Mark old measurement as superseded
         if err := tx.Model(old).Update("superseded_by", new.ID).Error; err != nil {
             return fmt.Errorf("failed to mark supersession: %w", err)
@@ -1191,6 +1306,156 @@ func (e PositionEntry) GetAttributes(ctx context.Context, repo MeasurementReposi
 }
 ```
 
+## Event Contracts
+
+Per ADR-0004 (Event-Driven Architecture), the following domain events are published during
+measurement lifecycle operations. All events include standard envelope fields (event_id,
+timestamp, tenant_id, correlation_id).
+
+### Measurement Events
+
+| Event | Trigger | Payload | Consumers |
+|-------|---------|---------|-----------|
+| `MeasurementReceived` | Any measurement ingested | measurement_id, account_id, asset_code, period, source, quality_score | Audit, Analytics |
+| `MeasurementSuperseded` | Higher-quality data replaces existing | superseded_id, superseding_id, quality_delta | Position Keeping, Audit |
+| `MeasurementLocked` | Settlement finalized | measurement_id, settlement_run, locked_at | Financial Accounting |
+
+### Settlement Events
+
+| Event | Trigger | Payload | Consumers |
+|-------|---------|---------|-----------|
+| `SettlementRunStarted` | Settlement batch begins | run_id, run_type, period_start, period_end | Monitoring, Audit |
+| `SettlementSnapshotCreated` | Position captured for settlement | snapshot_id, run_id, measurement_id | Financial Accounting |
+| `SettlementRunCompleted` | Settlement batch finishes | run_id, positions_settled, total_value | Monitoring, Payment Order |
+
+### Correction Events
+
+| Event | Trigger | Payload | Consumers |
+|-------|---------|---------|-----------|
+| `CorrectionInitiated` | Wash & Reload saga starts | correction_id, old_measurement_id, new_measurement_id | Audit |
+| `CorrectionCompleted` | Wash & Reload saga succeeds | correction_id, wash_entry_id, reload_entry_id, delta | Financial Accounting, Audit |
+| `DisputeCreated` | Locked position receives new data | dispute_id, incoming_measurement_id, existing_measurement_id | Dispute Resolution, Alerting |
+
+### Event Publishing Pattern
+
+Events are published using the transactional outbox pattern (see Dispute Fail-Safe section)
+to ensure exactly-once delivery semantics:
+
+```go
+// Example: Publishing MeasurementSuperseded event
+func (s *CorrectionSaga) Execute(ctx context.Context, old, new *Measurement) error {
+    return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+        // ... correction logic ...
+
+        // Write event to outbox (same transaction)
+        event := OutboxEvent{
+            ID:        uuid.New(),
+            EventType: "MeasurementSuperseded",
+            Payload: mustMarshal(MeasurementSupersededEvent{
+                SupersededID:  old.ID,
+                SupersedingID: new.ID,
+                QualityDelta:  new.QualityScore - old.QualityScore,
+            }),
+            CreatedAt: time.Now(),
+        }
+        return tx.Create(&event).Error
+    })
+}
+```
+
+## Security Considerations
+
+### Settlement Locking Authorization
+
+The `LockedAt` field controls position finality. Only authorized services may lock positions:
+
+| Actor | Can Lock? | Mechanism |
+|-------|-----------|-----------|
+| Settlement Service | Yes | Automatic after final run (M+14) |
+| Tenant Admin | No | Must request via support ticket |
+| Operator | No | Read-only access to locked positions |
+| System Admin | Emergency only | Requires audit log entry + approval |
+
+```go
+// SettlementService is the only authorized caller
+func (s *SettlementService) FinalizeRun(ctx context.Context, run string) error {
+    // Verify caller identity via context (service account)
+    if !auth.IsSettlementService(ctx) {
+        return ErrUnauthorized
+    }
+    // ... locking logic ...
+}
+```
+
+### Dispute Workflow Security
+
+Dispute creation is rate-limited and audited:
+
+```go
+// Rate limiting per tenant to prevent abuse
+const MaxDisputesPerHour = 100
+
+func (s *MeasurementIngestionService) handleDispute(ctx context.Context, ...) error {
+    tenantID := auth.TenantIDFromContext(ctx)
+
+    // Check rate limit
+    if s.rateLimiter.DisputesThisHour(tenantID) >= MaxDisputesPerHour {
+        return ErrDisputeRateLimitExceeded
+    }
+
+    // ... dispute creation with audit logging ...
+    s.auditLog.Record(ctx, AuditEntry{
+        Action:    "DISPUTE_CREATED",
+        TenantID:  tenantID,
+        ActorID:   auth.ActorIDFromContext(ctx),
+        Details:   map[string]any{"dispute_id": dispute.ID},
+    })
+}
+```
+
+## Observability
+
+### Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `measurements_received_total` | Counter | tenant_id, asset_code, source | Total measurements ingested |
+| `measurements_superseded_total` | Counter | tenant_id, asset_code | Measurements replaced by higher quality |
+| `correction_saga_duration_seconds` | Histogram | tenant_id, outcome | Wash & Reload execution time |
+| `settlement_run_duration_seconds` | Histogram | run_type | Settlement batch processing time |
+| `reconciliation_variance_total` | Gauge | tenant_id, asset_code | Current variance amount |
+| `disputes_pending_total` | Gauge | tenant_id | Disputes awaiting resolution |
+
+### Tracing
+
+Each measurement lifecycle operation should propagate trace context:
+
+```go
+func (e *DeltaEngine) Evaluate(ctx context.Context, incoming Measurement) (Action, *Measurement, error) {
+    ctx, span := tracer.Start(ctx, "DeltaEngine.Evaluate",
+        trace.WithAttributes(
+            attribute.String("measurement.id", incoming.ID.String()),
+            attribute.String("measurement.source", incoming.Source),
+            attribute.Int("measurement.quality_score", incoming.QualityScore),
+        ),
+    )
+    defer span.End()
+
+    // ... evaluation logic ...
+    span.SetAttributes(attribute.String("action", action.String()))
+    return action, existing, nil
+}
+```
+
+### Alerting Thresholds
+
+| Alert | Condition | Severity | Action |
+|-------|-----------|----------|--------|
+| High Dispute Rate | >10 disputes/hour/tenant | Warning | Investigate data source |
+| Settlement Overdue | Run not completed T+2 hours | Critical | Page on-call |
+| Variance Threshold | Single period variance >$10k | Warning | Review for fraud |
+| Quality Degradation | >50% measurements at lowest quality | Warning | Check meter connectivity |
+
 ## Placeholder Interfaces
 
 Interfaces referenced but defined in future ADRs:
@@ -1217,10 +1482,30 @@ type ValuationResult struct {
 }
 ```
 
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Quality Ladder** | Hierarchy of data sources ranked by authority (e.g., estimate < customer read < meter actual) |
+| **Wash & Reload** | Correction pattern: reverse old position entry, book new entry, preserving audit trail |
+| **Settlement Run** | Batch process that finalizes positions for a time period (e.g., D+1, M+14) |
+| **Supersession** | Replacement of one measurement by another of higher quality for the same position |
+| **Position Key** | Composite identifier: (tenant_id, account_id, asset_code, period, attributes) |
+| **Backfill Window** | Maximum age of measurements accepted before rejection |
+| **Final Settlement** | Point after which positions are locked and changes become disputes |
+| **Delta Engine** | Decision component that evaluates incoming measurements against current state |
+
 ## Links
 
-* [ADR-0013: Universal Quantity Type System](0013-generic-asset-quantity-types.md)
-* [ADR-0014: Dynamic Asset Registry & Lifecycle](0014-dynamic-asset-registry.md)
+### Internal ADRs
+
+* [ADR-0004: Event-Driven Architecture](0004-event-driven-architecture.md) - Event contracts and publishing patterns
+* [ADR-0013: Universal Quantity Type System](0013-generic-asset-quantity-types.md) - Quantity and rate types
+* [ADR-0014: Dynamic Asset Registry & Lifecycle](0014-dynamic-asset-registry.md) - Asset definitions and attributes
+* [ADR-0016: Tenant Isolation](0016-tenant-isolation.md) - Multi-tenancy and schema separation
+
+### External References
+
 * [UK Balancing and Settlement Code (BSC)](https://www.elexon.co.uk/bsc-and-codes/)
 * [ELEXON Settlement Timetable](https://www.elexon.co.uk/operations-settlement/settlement-timetable/)
 
