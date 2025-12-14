@@ -275,8 +275,14 @@ and point containment queries efficiently.
 
 ### 2. Source Authority Registry
 
-Quality scores are derived from a Source Authority Registry, not stored on each measurement.
-This ensures consistency and allows ranking changes without touching historical data.
+The **Source Authority Registry** is the canonical source for quality rankings. Measurements
+MAY carry a denormalized snapshot of the quality score at ingestion for query performance,
+but this cached value can diverge if the registry is updated post-ingestion.
+
+**Important:** All reconciliation or authoritative decisions (supersession, dispute routing,
+settlement finality) must consult the registry rather than relying solely on denormalized
+measurement values. The denormalized `QualityScore` field on measurements is an optimization
+for read-heavy queries, not the source of truth.
 
 ```go
 // SourceAuthority defines the quality ranking for a data source.
@@ -346,8 +352,10 @@ type Measurement struct {
     Attributes    map[string]string
 
     // Quality ladder
-    Source        string    // Lookup key for quality score
-    QualityScore  int       // Denormalized at ingestion for query performance
+    Source        string    // Lookup key into Source Authority Registry
+    QualityScore  int       // Denormalized snapshot at ingestion (see Source Authority Registry
+                            // section). May diverge from registry if rankings change post-ingestion.
+                            // Authoritative decisions must consult registry, not this cached value.
 
     // Lifecycle
     ReceivedAt    time.Time
@@ -571,16 +579,27 @@ When a settlement run executes, it captures which measurements were used. This e
 reconciliation when better data arrives in subsequent runs.
 
 ```go
+// PositionKey uniquely identifies a position for lookup purposes.
+// Includes Attributes per ADR-0014 fungibility requirements.
+type PositionKey struct {
+    AccountID  uuid.UUID
+    AssetCode  string
+    Period     Period
+    Attributes map[string]string // Required: positions with different attributes are distinct
+}
+
 // SettlementSnapshot records which measurement was used for each period in a settlement run.
+// Captures full position context including attributes for reconciliation.
 type SettlementSnapshot struct {
     ID               uuid.UUID
-    SettlementRunID  uuid.UUID       // References the settlement run
-    AccountID        uuid.UUID       // References Current Account
-    AssetCode        string          // References Asset Directory
+    SettlementRunID  uuid.UUID         // References the settlement run
+    AccountID        uuid.UUID         // References Current Account
+    AssetCode        string            // References Asset Directory
     Period           Period
-    MeasurementID    uuid.UUID       // The measurement used
-    QuantitySettled  decimal.Decimal // Snapshot of quantity at settlement time
-    QualityAtSettle  int             // Quality score at settlement time
+    Attributes       map[string]string // Fungibility context at settlement (from ADR-0014)
+    MeasurementID    uuid.UUID         // The measurement used
+    QuantitySettled  decimal.Decimal   // Snapshot of quantity at settlement time
+    QualityAtSettle  int               // Quality score at settlement time
     CreatedAt        time.Time
 }
 
@@ -599,13 +618,14 @@ func (s *ReconciliationService) Reconcile(ctx context.Context, runID uuid.UUID) 
         return nil, err
     }
 
-    // Extract position keys and batch fetch current measurements
+    // Extract position keys (including attributes) and batch fetch current measurements
     keys := make([]PositionKey, len(snapshots))
     for i, snap := range snapshots {
         keys[i] = PositionKey{
-            AccountID: snap.AccountID,
-            AssetCode: snap.AssetCode,
-            Period:    snap.Period,
+            AccountID:  snap.AccountID,
+            AssetCode:  snap.AssetCode,
+            Period:     snap.Period,
+            Attributes: snap.Attributes, // Required for fungibility-aware lookup
         }
     }
 
@@ -618,9 +638,10 @@ func (s *ReconciliationService) Reconcile(ctx context.Context, runID uuid.UUID) 
     var variances []Variance
     for _, snapshot := range snapshots {
         key := PositionKey{
-            AccountID: snapshot.AccountID,
-            AssetCode: snapshot.AssetCode,
-            Period:    snapshot.Period,
+            AccountID:  snapshot.AccountID,
+            AssetCode:  snapshot.AssetCode,
+            Period:     snapshot.Period,
+            Attributes: snapshot.Attributes,
         }
         current, ok := currentByKey[key]
         if !ok {
@@ -711,11 +732,13 @@ func (r *SettlementSnapshotRepository) FindByRunPaginated(
 }
 
 // BatchFindCurrent reduces round trips when checking many positions.
+// Matches on all PositionKey fields including Attributes for fungibility.
 func (r *MeasurementRepository) BatchFindCurrent(
     ctx context.Context,
     keys []PositionKey,
 ) (map[PositionKey]*Measurement, error) {
-    // Build a single query for all position keys
+    // Build a single query for all position keys (account, asset, period, attributes)
+    // Uses position_key_hash for efficient matching
     // Returns map keyed by position for efficient lookup
 }
 ```
