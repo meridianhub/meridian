@@ -166,9 +166,14 @@ func (p Period) Duration() time.Duration {
 
 // Overlaps returns true if this period shares any time with another.
 // Uses half-open interval semantics [Start, End) for ranged periods.
-// For instant events (Start == End), overlap requires containment by the other period.
+// For instant events (Start == End), overlap requires containment by the other period,
+// or both being the same instant.
 func (p Period) Overlaps(other Period) bool {
-    // Handle instant events: [t, t] overlaps [a, b) if a <= t < b
+    // Two instants overlap if and only if they're at the same moment
+    if p.IsInstant() && other.IsInstant() {
+        return p.Start.Equal(other.Start)
+    }
+    // Instant overlaps range if contained: a <= t < b
     if p.IsInstant() {
         return !p.Start.Before(other.Start) && p.Start.Before(other.End)
     }
@@ -587,22 +592,40 @@ type ReconciliationService struct {
 }
 
 // Reconcile identifies variances between settled and current positions.
+// Uses batch fetching to avoid N+1 query problem on large settlement runs.
 func (s *ReconciliationService) Reconcile(ctx context.Context, runID uuid.UUID) ([]Variance, error) {
     snapshots, err := s.snapshotRepo.FindByRun(ctx, runID)
     if err != nil {
         return nil, err
     }
 
+    // Extract position keys and batch fetch current measurements
+    keys := make([]PositionKey, len(snapshots))
+    for i, snap := range snapshots {
+        keys[i] = PositionKey{
+            AccountID: snap.AccountID,
+            AssetCode: snap.AssetCode,
+            Period:    snap.Period,
+        }
+    }
+
+    currentByKey, err := s.measurementRepo.BatchFindCurrent(ctx, keys)
+    if err != nil {
+        return nil, err
+    }
+
+    // Compare and collect variances
     var variances []Variance
     for _, snapshot := range snapshots {
-        current, err := s.measurementRepo.FindCurrent(ctx,
-            snapshot.AccountID,
-            snapshot.AssetCode,
-            snapshot.Period,
-            nil, // All attributes
-        )
-        if err != nil {
-            return nil, err
+        key := PositionKey{
+            AccountID: snapshot.AccountID,
+            AssetCode: snapshot.AssetCode,
+            Period:    snapshot.Period,
+        }
+        current, ok := currentByKey[key]
+        if !ok {
+            // No current measurement - position may have been fully reversed
+            continue
         }
 
         if !current.Quantity.Equal(snapshot.QuantitySettled) {
@@ -759,6 +782,10 @@ CREATE INDEX idx_settlement_snapshots_run
 CREATE INDEX idx_measurements_settlement_run
     ON measurements(settlement_run)
     WHERE locked_at IS NULL;
+
+-- Attribute-based reporting and analytics queries
+CREATE INDEX idx_measurements_attributes
+    ON measurements USING GIN (attributes);
 ```
 
 ### Overlap Prevention
@@ -808,29 +835,42 @@ CREATE UNIQUE INDEX idx_measurements_position_unique
     WHERE superseded_by IS NULL;
 ```
 
-**Note on Hash Collisions:** SHA-256 collision probability is astronomically low (~1 in 2^128
-for a random collision). If a collision ever occurred, it would manifest as `ErrOverlappingPosition`
-for a non-overlapping position. The operational impact is a rejected measurement that should
-succeed. Mitigation: the application can detect this via exact match on the composite key
-and escalate for manual review. This is acceptable for 100k TPS—probability of ever seeing
-a collision is effectively zero over the system's lifetime.
+### Hash Collision Risk Assessment
+
+> **TL;DR:** SHA-256 collision probability is ~1 in 2^128. You will never see one.
+
+| Factor | Value |
+|--------|-------|
+| Hash algorithm | SHA-256 (256-bit output) |
+| Collision probability (birthday) | ~1 in 2^128 for 2^64 hashes |
+| At 100k TPS | Would take ~5.8 billion years to reach 2^64 measurements |
+| Operational impact if it occurred | `ErrOverlappingPosition` for non-overlapping position |
+| Mitigation | Exact key comparison on collision, escalate to manual review |
 
 ```go
 // BookMeasurement uses optimistic concurrency via unique constraint violation.
-// No locks, no SERIALIZABLE - relies on database enforcing uniqueness.
+// On collision, verifies it's a true overlap vs hash collision before rejecting.
 func (r *MeasurementRepository) BookMeasurement(ctx context.Context, m *Measurement) error {
     err := r.db.Create(m).Error
     if err != nil {
-        // Check for unique constraint violation
         if isUniqueViolation(err, "idx_measurements_position_unique") {
+            // Verify true overlap vs hash collision (astronomically unlikely)
+            existing, _ := r.findByExactKey(ctx, m.AccountID, m.AssetCode, m.Period, m.Attributes)
+            if existing == nil {
+                // Hash collision! Log for investigation, this should never happen
+                log.Error("SHA-256 hash collision detected", "measurement", m.ID)
+                return fmt.Errorf("%w: possible hash collision, escalate to support", ErrOverlappingPosition)
+            }
             return ErrOverlappingPosition
         }
         return err
     }
     return nil
 }
+```
 
-// For supersession, use optimistic lock on the existing row
+```go
+// Supersede uses optimistic lock on the existing row
 func (r *MeasurementRepository) Supersede(ctx context.Context, oldID, newID uuid.UUID) error {
     result := r.db.Model(&Measurement{}).
         Where("id = ? AND superseded_by IS NULL", oldID).
@@ -1016,35 +1056,64 @@ func (s *MeasurementIngestionService) handleDispute(
     incoming *Measurement,
     existing *Measurement,
 ) error {
-    // 1. Archive the incoming measurement (preserve for audit)
-    incoming.SupersededBy = nil  // Not superseded, just disputed
-    if err := s.repo.Create(ctx, incoming); err != nil {
-        return err
-    }
+    return s.db.Transaction(func(tx *gorm.DB) error {
+        // 1. Archive the incoming measurement (preserve for audit)
+        incoming.SupersededBy = nil  // Not superseded, just disputed
+        if err := tx.Create(incoming).Error; err != nil {
+            return err
+        }
 
-    // 2. Create dispute record for manual review
-    dispute := Dispute{
-        ID:                    uuid.New(),
-        IncomingMeasurementID: incoming.ID,
-        ExistingMeasurementID: existing.ID,
-        Reason:                "Position locked after final settlement",
-        Status:                DisputeStatusPendingReview,
-        CreatedAt:             time.Now(),
-    }
-    if err := s.disputeRepo.Create(ctx, &dispute); err != nil {
-        return err
-    }
+        // 2. Create dispute record for manual review
+        dispute := Dispute{
+            ID:                    uuid.New(),
+            IncomingMeasurementID: incoming.ID,
+            ExistingMeasurementID: existing.ID,
+            Reason:                "Position locked after final settlement",
+            Status:                DisputeStatusPendingReview,
+            CreatedAt:             time.Now(),
+        }
+        if err := tx.Create(&dispute).Error; err != nil {
+            return err
+        }
 
-    // 3. Emit event for alerting/monitoring
-    s.events.Publish(ctx, DisputeCreatedEvent{DisputeID: dispute.ID})
+        // 3. Write event to outbox table (same transaction)
+        // Event will be published asynchronously by outbox processor
+        outboxEvent := OutboxEvent{
+            ID:          uuid.New(),
+            EventType:   "DisputeCreated",
+            Payload:     mustMarshal(DisputeCreatedEvent{DisputeID: dispute.ID}),
+            CreatedAt:   time.Now(),
+            ProcessedAt: nil,
+        }
+        if err := tx.Create(&outboxEvent).Error; err != nil {
+            return err
+        }
 
-    return nil  // Success - measurement preserved, dispute logged
+        return nil
+    })
 }
 ```
 
 **Key principle:** Never silently drop data. If a measurement arrives for a locked position,
 archive it and create a dispute record. The business can then decide to extend the settlement
 window, adjust via dispute resolution, or acknowledge the variance.
+
+**Transaction Boundary and Outbox Pattern:**
+
+The `handleDispute()` function wraps all three operations (measurement, dispute, event) in a
+single database transaction. This ensures atomicity—either all succeed or all roll back.
+
+Events use the **transactional outbox pattern** rather than direct publishing because:
+
+| Approach | Problem |
+|----------|---------|
+| Direct publish after commit | If publish fails, dispute exists but no alert fires |
+| Direct publish before commit | If transaction rolls back, event was already sent (phantom event) |
+| **Outbox table (chosen)** | Event written in same transaction; async processor publishes with at-least-once semantics |
+
+The outbox processor (implementation out of scope) polls the `outbox_events` table and publishes
+to the event bus. On successful publish, it sets `processed_at`. Failed publishes are retried
+with exponential backoff. This guarantees eventual delivery without distributed transaction complexity.
 
 ## Entry Types
 
@@ -1363,6 +1432,92 @@ The defaults (D+30, M+24) cover all known settlement conventions.
 A: In `MeasurementIngestionService.Ingest()` (see Settlement Run Validation section).
 The check compares `m.Period.End` against `now - backfill_window_days` from the asset's
 settlement rules.
+
+**Q: If a measurement's attributes need correction (not the quantity), does this trigger Wash & Reload?**
+
+A: Yes. Attributes are part of the **position key hash**—changing attributes means the
+measurement belongs to a different position entirely. The correction path is:
+
+1. Ingest new measurement with corrected attributes (books to the correct position)
+2. Delta Engine evaluates the original position (old attributes) and sees no change
+3. Original measurement remains current for its (incorrect) position
+4. Manual intervention marks original as superseded with reason "ATTRIBUTE_CORRECTION"
+
+If the incorrect-attribute position should have zero balance, explicitly book a reversal.
+There's no "lighter-weight" path because attribute changes are semantically significant—
+a measurement for `{"tariff_zone": "peak"}` vs `{"tariff_zone": "offpeak"}` affects
+settlement values. The audit trail must show the correction explicitly.
+
+**Q: When reconciliation finds variances across many periods, are adjustments created individually or batched?**
+
+A: The `Reconcile()` function returns a slice of `Variance` objects—one per period with a
+difference. The caller decides how to process them:
+
+```go
+// Option 1: Individual adjustments (simple, traceable)
+for _, v := range variances {
+    s.adjustmentService.CreateAdjustment(ctx, v)
+}
+
+// Option 2: Batched adjustment (efficient, single entry)
+if len(variances) > 0 {
+    totalDelta := sumVariances(variances)
+    s.adjustmentService.CreateBatchAdjustment(ctx, BatchAdjustment{
+        SettlementRunID: runID,
+        Variances:       variances,
+        TotalDelta:      totalDelta,
+        // Individual variances stored as line items for audit
+    })
+}
+```
+
+**Recommendation:** Use batched adjustments per settlement run. This creates a single
+financial entry referencing all period-level variances, reducing transaction volume while
+preserving full audit detail in the line items.
+
+**Q: How are retroactive Source Authority quality score changes handled?**
+
+A: Quality scores are **denormalized at ingestion time** (`quality_score` column on
+measurements). This is intentional:
+
+| Scenario | Behavior |
+|----------|----------|
+| New source added | New measurements get the new source's score; existing unaffected |
+| Existing source score increased | Existing measurements keep original score; new ones get higher |
+| Existing source score decreased | Existing measurements keep original score (grandfathered) |
+
+**Why not re-evaluate?** Retroactive score changes could cascade into mass Wash & Reload
+operations, destabilizing settled positions and creating reconciliation nightmares.
+
+If a regulatory change genuinely requires retroactive re-ranking:
+
+```go
+// Manual re-evaluation job (use with extreme caution)
+func (s *MaintenanceService) ReEvaluateSourceQuality(
+    ctx context.Context,
+    sourceCode string,
+    newScore int,
+    periodStart, periodEnd time.Time,
+) error {
+    // 1. Find affected non-superseded measurements
+    affected, _ := s.repo.FindBySourceAndPeriod(ctx, sourceCode, periodStart, periodEnd)
+
+    for _, m := range affected {
+        if m.QualityScore == newScore {
+            continue // Already correct
+        }
+        // 2. Update denormalized score (rare exception to immutability)
+        s.repo.UpdateQualityScore(ctx, m.ID, newScore)
+        // 3. Re-run Delta Engine to check if supersession changes
+        s.deltaEngine.ReEvaluate(ctx, m)
+    }
+    return nil
+}
+```
+
+This is a maintenance operation requiring approval, not automatic behavior. The
+`ValidFrom`/`ValidTo` on `SourceAuthority` is for **prospective** changes—"starting next
+month, SMETS2 meters are quality 95 instead of 90."
 
 ### Reconsidering This Decision
 
