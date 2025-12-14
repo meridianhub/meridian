@@ -58,7 +58,8 @@ Architectural Decision Records) format.
 | [ADR-0015](0015-standard-service-directory-structure.md) | Standard Service Directory Structure | Accepted | 2025-12-06 |
 | [ADR-0016](0016-tenant-id-naming-strategy.md) | Tenant ID Naming Strategy | Accepted | 2025-12-13 |
 <!-- markdownlint-disable-next-line MD013 -->
-| [ADR-0017](0017-temporal-quality-ladder.md) | Time-Bound Quality Ladder for Temporal Asset Reconciliation | Proposed | 2025-12-14 |
+| [ADR-0017](0017-temporal-quality-ladder.md) | Temporal Quality Ledger (Data Physics) | Proposed | 2025-12-14 |
+| [ADR-0018](0018-settlement-reconciliation.md) | Settlement & Reconciliation (Lifecycle) | Proposed | 2025-12-14 |
 
 ## Categories
 
@@ -77,7 +78,8 @@ Architectural Decision Records) format.
 - [ADR-0012](0012-lien-based-fund-reservation.md) - Lien-Based Fund Reservation for Payment Order Saga
 - [ADR-0013](0013-generic-asset-quantity-types.md) - Universal Quantity Type System
 - [ADR-0014](0014-dynamic-asset-registry.md) - Dynamic Asset Registry & Lifecycle
-- [ADR-0017](0017-temporal-quality-ladder.md) - Time-Bound Quality Ladder for Temporal Asset Reconciliation
+- [ADR-0017](0017-temporal-quality-ladder.md) - Temporal Quality Ledger (Data Physics)
+- [ADR-0018](0018-settlement-reconciliation.md) - Settlement & Reconciliation (Lifecycle)
 
 ### Development Environment & Infrastructure
 

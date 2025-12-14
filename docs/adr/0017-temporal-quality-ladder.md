@@ -1,20 +1,20 @@
 ---
 name: adr-017-temporal-quality-ladder
-description: Time-bound quality ladder pattern for temporal asset reconciliation with supersession and wash/reload corrections
+description: Time-bound quality ladder pattern for temporal asset data with supersession and wash/reload corrections
 triggers:
   - Implementing metered asset tracking (energy, compute, bandwidth)
   - Handling out-of-order data arrival with quality-based precedence
-  - Building reconciliation between settled and actual values
-  - Designing settlement systems with multiple data quality tiers
+  - Storing measurements with audit trail and supersession
+  - Designing correction patterns for financial adjustments
 instructions: |
   Use the Time-Bound Quality Ladder pattern when tracking assets where the "true" value for a time
   period is not known immediately and may be revised as higher-quality data arrives. Model all
   positions as [Start, End] ranges where Start may equal End for point-in-time events. Implement
-  supersession via the Delta Engine, corrections via Wash & Reload saga, and reconciliation via
-  Settlement Snapshot comparison.
+  supersession via the Delta Engine, corrections via Wash & Reload saga. For settlement snapshots
+  and reconciliation, see ADR-0018.
 ---
 
-# 17. Time-Bound Quality Ladder for Temporal Asset Reconciliation
+# 17. Temporal Quality Ledger (Data Physics)
 
 Date: 2025-12-14
 
@@ -46,40 +46,27 @@ For any specific **Time Window** (e.g., 12:00–12:30), there may be multiple co
 **The Rule:** The Ledger must store *all* of them (for audit), but the **Financial Position**
 must only reflect the *highest quality* available at the current moment.
 
-### Real-World Settlement Patterns
-
-Energy industry settlement runs demonstrate this pattern:
-
-| Run | Timing | Data Quality | Finality |
-|-----|--------|--------------|----------|
-| D+1 | Day after | Estimates, some actuals | Provisional |
-| D+5 | 5 days after | Most actuals | Provisional |
-| M+3 | 3 months after | Validated actuals | Near-final |
-| M+14 | 14 months after | Fully reconciled | **Final** |
-
-After final settlement, corrections become disputes rather than automatic adjustments.
-
-### Relationship to ADR-0013 and ADR-0014
+### Relationship to Other ADRs
 
 This ADR builds on:
 
 - **ADR-0013 (Universal Quantity Type System):** Provides `Quantity[D]` with dimensional safety
 - **ADR-0014 (Dynamic Asset Registry):** Provides tenant-defined assets with attribute schemas
+- **ADR-0016 (Tenant Isolation):** Provides schema-per-tenant isolation
 
-This ADR adds:
+This ADR defines:
 
 - **Quality-based precedence** for competing measurements
 - **Temporal modeling** with [Start, End] periods
 - **Supersession tracking** for audit trails
 - **Wash & Reload** correction pattern
-- **Settlement snapshots** for reconciliation
+
+For settlement snapshots and reconciliation workflows, see **ADR-0018 (Settlement & Reconciliation)**.
 
 ## Decision Drivers
 
 * **Immutable audit trail**: All data received must be preserved, corrections via append not update
-* **Financial accuracy**: Settlements and positions must reflect best available data
-* **Regulatory compliance**: Settlement run deadlines and finality rules
-* **Reconciliation capability**: Variance detection between settled and actual
+* **Financial accuracy**: Positions must reflect best available data
 * **Universal applicability**: Same pattern for energy, advertising, aid, carbon
 * **100k TPS throughput**: Must support high-frequency metering without lock contention
 * **No cross-schema queries**: Services cannot join across tenant schemas
@@ -365,10 +352,10 @@ The **Source Authority Registry** is the canonical source for quality rankings. 
 MAY carry a denormalized snapshot of the quality score at ingestion for query performance,
 but this cached value can diverge if the registry is updated post-ingestion.
 
-**Important:** All reconciliation or authoritative decisions (supersession, dispute routing,
-settlement finality) must consult the registry rather than relying solely on denormalized
-measurement values. The denormalized `QualityScore` field on measurements is an optimization
-for read-heavy queries, not the source of truth.
+**Important:** All authoritative decisions (supersession, dispute routing) must consult
+the registry rather than relying solely on denormalized measurement values. The denormalized
+`QualityScore` field on measurements is an optimization for read-heavy queries, not the
+source of truth.
 
 ```go
 // SourceAuthority defines the quality ranking for a data source.
@@ -377,35 +364,23 @@ type SourceAuthority struct {
     Code            string    // "SMETS2_METER", "FORECAST_ML"
     AssetCode       string    // Source rankings can be asset-specific
     QualityScore    int       // Higher = more authoritative (0-100)
-    TemporalContext string    // "PAST", "FUTURE", or "ANY" - when this source is authoritative
     Description     string
     ValidFrom       time.Time
     ValidTo         *time.Time // Null = currently valid
 }
 ```
 
-**Source Authority with Temporal Context:**
+**Example Source Quality Rankings:**
 
-Authority is relative to time. A **Forecast** is the highest quality source for *Tomorrow* (T+1),
-but worthless for *Yesterday* (T-1). This enables **Provisional Settlement** for forward-looking
-use cases like budgeting, hedging, and resource reservation.
-
-| Source Code | Quality Score | Temporal Context | Description |
-|-------------|---------------|------------------|-------------|
-| `FORECAST_ML` | 50 | **Future** | ML prediction. Authoritative for T+1 onwards |
-| `FORECAST_BUDGET` | 40 | **Future** | Budget allocation. Authoritative until actual spend |
-| `DEFAULT_PROFILE` | 10 | Past | Regulatory default when no data |
-| `ESTIMATED_HISTORIC` | 20 | Past | Same period last year |
-| `ESTIMATED_PROFILE` | 30 | Past | Profile coefficient calculation |
-| `CUSTOMER_READ` | 50 | Past | Customer-submitted reading |
-| `ACTUAL_UNVALIDATED` | 70 | Past | Meter reading, not yet validated |
-| `ACTUAL_VALIDATED` | 90 | Past | Meter reading, passed validation |
-| `ACTUAL_FINAL` | 100 | Past | Final settlement reading |
-
-**Temporal Authority Rules:**
-- For **Past periods** (T ≤ Now): Only `TemporalContext: Past` sources compete. Actuals always win.
-- For **Future periods** (T > Now): Only `TemporalContext: Future` sources are valid. Forecasts win by default.
-- When time advances and Actuals arrive, they supersede Forecasts automatically.
+| Source Code | Quality Score | Description |
+|-------------|---------------|-------------|
+| `DEFAULT_PROFILE` | 10 | Regulatory default when no data |
+| `ESTIMATED_HISTORIC` | 20 | Same period last year |
+| `ESTIMATED_PROFILE` | 30 | Profile coefficient calculation |
+| `CUSTOMER_READ` | 50 | Customer-submitted reading |
+| `ACTUAL_UNVALIDATED` | 70 | Meter reading, not yet validated |
+| `ACTUAL_VALIDATED` | 90 | Meter reading, passed validation |
+| `ACTUAL_FINAL` | 100 | Final settlement reading |
 
 **Lookup at measurement ingestion:**
 
@@ -428,6 +403,8 @@ func (r *SourceAuthorityRegistry) GetQualityScore(
     return authority.QualityScore, nil
 }
 ```
+
+**Note:** For temporal authority (forecasts vs actuals based on time context), see ADR-0018.
 
 ### 3. Measurement Log
 
@@ -774,306 +751,6 @@ func TestCorrectionSaga_Execute_DefensiveTests(t *testing.T) {
 }
 ```
 
-### 6. Temporal Authority & Provisional Settlement
-
-Most ledgers treat the database as "The State of Now." Meridian manages the **Entire Timeline
-of Value** - past (audit, integrity, settlement) AND future (forecasts, commitments, hedging).
-
-**The Key Insight:** A Forecast is the **Golden Source** for tomorrow, but **Garbage** for
-yesterday. Without modeling this "Temporal Weighting," you get the classic billing disaster:
-
-1. Bill customer based on Forecast (because Actuals weren't in yet)
-2. Actuals arrive
-3. System overwrites Forecast
-4. **Bug:** You've lost the record of *why* you billed that amount. The variance is inexplicable.
-
-**The "Freezing" Mechanism:**
-
-When a financial action is taken based on non-final data (Forecast, Estimate), we **Freeze**
-the basis of that decision into the `SettlementSnapshot`. This enables accurate reconciliation:
-
-```go
-// ProvisionalSettlement creates a settlement based on forecast data
-func (s *SettlementService) CreateProvisionalSettlement(
-    ctx context.Context,
-    forecast *Measurement,
-) (*SettlementSnapshot, error) {
-    if forecast.Source != "FORECAST_ML" && forecast.Source != "FORECAST_BUDGET" {
-        return nil, errors.New("provisional settlement requires forecast source")
-    }
-
-    snapshot := &SettlementSnapshot{
-        ID:              uuid.New(),
-        MeasurementID:   forecast.ID,
-        QuantitySettled: forecast.Quantity,
-        QualityAtSettle: forecast.QualityScore,
-        SourceAtSettle:  forecast.Source,        // "FORECAST_ML"
-        SettlementType:  SettlementProvisional,  // Subject to reconciliation
-        CreatedAt:       time.Now(),
-    }
-
-    return snapshot, s.snapshotRepo.Create(ctx, snapshot)
-}
-```
-
-**Reconciliation with Provenance:**
-
-When Actuals arrive, reconciliation compares against the frozen provisional snapshot:
-
-```go
-// ReconcileProvisional generates adjustments when actuals supersede forecasts
-func (s *ReconciliationService) ReconcileProvisional(
-    ctx context.Context,
-    snapshot *SettlementSnapshot,
-    actual *Measurement,
-) (*Variance, error) {
-    // The snapshot preserves WHY we settled that amount
-    variance := &Variance{
-        SnapshotID:         snapshot.ID,
-        OriginalSource:     snapshot.SourceAtSettle,    // "FORECAST_ML"
-        OriginalQuality:    snapshot.QualityAtSettle,   // 50
-        OriginalQuantity:   snapshot.QuantitySettled,
-
-        ActualSource:       actual.Source,              // "ACTUAL_VALIDATED"
-        ActualQuality:      actual.QualityScore,        // 90
-        ActualQuantity:     actual.Quantity,
-
-        QuantityDelta:      actual.Quantity.Sub(snapshot.QuantitySettled),
-        VarianceReason:     "FORECAST_DEVIATION",       // Audit trail!
-    }
-
-    return variance, nil
-}
-```
-
-**Cross-Domain Applications:**
-
-This "Provisional Settlement" pattern enables high-value capabilities across all target sectors:
-
-| Domain | Forecast Source | Provisional Action | Reconciliation Trigger |
-|--------|-----------------|-------------------|----------------------|
-| **Energy** | ML demand forecast | Book hedge position | Smart meter actual |
-| **NGO/Gov** | Refugee estimate | Allocate budget | Biometric headcount |
-| **Compute** | Reservation request | Reserve GPU hours | Actual job runtime |
-| **Treasury** | FX rate forecast | Book forward contract | Market settlement rate |
-
-**Example: NGO Budget Allocation**
-
-```
-T-30 (Forecast):
-  Source: FORECAST_BUDGET (Quality 40)
-  Quantity: 1,000 refugees expected
-  Action: Provisional Settlement - Transfer $10,000 to Field Wallet
-  Snapshot: { source: "FORECAST_BUDGET", quantity: 1000, type: "PROVISIONAL" }
-
-T+1 (Actual):
-  Source: BIOMETRIC_COUNT (Quality 95)
-  Quantity: 800 refugees arrived
-  Action: Reconciliation
-    - Current (800) vs Snapshot (1,000)
-    - Variance: -200 refugees = -$2,000
-    - Reason: "FORECAST_DEVIATION"
-  Output: Payment Order - Return $2,000 to HQ
-```
-
-**The Strategic Value:**
-
-This transforms Meridian from "A Ledger that fixes errors" to "A Ledger that manages Time":
-
-- **10x side (Backward-looking):** Audit, Integrity, Settlement, Corrections
-- **Murex side (Forward-looking):** Risk, Commitments, Hedging, Budgeting
-
-### 7. Settlement Snapshots and Reconciliation
-
-When a settlement run executes, it captures which measurements were used. This enables
-reconciliation when better data arrives in subsequent runs.
-
-```go
-// PositionKey uniquely identifies a position for lookup purposes.
-// Includes Attributes per ADR-0014 fungibility requirements.
-type PositionKey struct {
-    AccountID  uuid.UUID
-    AssetCode  string
-    Period     Period
-    Attributes map[string]string // Required: positions with different attributes are distinct
-}
-
-// SettlementSnapshot records which measurement was used for each period in a settlement run.
-// Captures full position context including attributes for reconciliation.
-type SettlementSnapshot struct {
-    ID               uuid.UUID
-    SettlementRunID  uuid.UUID         // References the settlement run
-    AccountID        uuid.UUID         // References Current Account
-    AssetCode        string            // References Asset Directory
-    Period           Period
-    Attributes       map[string]string // Fungibility context at settlement (from ADR-0014)
-    MeasurementID    uuid.UUID         // The measurement used
-    QuantitySettled  decimal.Decimal   // Snapshot of quantity at settlement time
-    QualityAtSettle  int               // Quality score at settlement time
-    CreatedAt        time.Time
-
-    // Provenance (The "Freeze") - enables variance analysis for provisional settlements
-    SourceAtSettle   string            // e.g., "FORECAST_ML", "ACTUAL_VALIDATED"
-    SettlementType   SettlementType    // PROVISIONAL or FINAL
-}
-
-type SettlementType string
-
-const (
-    // SettlementProvisional indicates settlement based on non-final data (forecasts, estimates).
-    // Subject to reconciliation when actuals arrive.
-    SettlementProvisional SettlementType = "PROVISIONAL"
-
-    // SettlementFinal indicates settlement based on final, audited data.
-    // No further reconciliation expected.
-    SettlementFinal SettlementType = "FINAL"
-)
-
-// ReconciliationService compares settled positions to current positions.
-type ReconciliationService struct {
-    snapshotRepo    SettlementSnapshotRepository
-    measurementRepo MeasurementRepository
-    valuationEngine ValuationEngine
-}
-
-// Reconcile identifies variances between settled and current positions.
-// Uses batch fetching to avoid N+1 query problem on large settlement runs.
-func (s *ReconciliationService) Reconcile(ctx context.Context, runID uuid.UUID) ([]Variance, error) {
-    snapshots, err := s.snapshotRepo.FindByRun(ctx, runID)
-    if err != nil {
-        return nil, err
-    }
-
-    // Extract position keys (including attributes) and batch fetch current measurements
-    keys := make([]PositionKey, len(snapshots))
-    for i, snap := range snapshots {
-        keys[i] = PositionKey{
-            AccountID:  snap.AccountID,
-            AssetCode:  snap.AssetCode,
-            Period:     snap.Period,
-            Attributes: snap.Attributes, // Required for fungibility-aware lookup
-        }
-    }
-
-    currentByKey, err := s.measurementRepo.BatchFindCurrent(ctx, keys)
-    if err != nil {
-        return nil, err
-    }
-
-    // Compare and collect variances
-    var variances []Variance
-    for _, snapshot := range snapshots {
-        key := PositionKey{
-            AccountID:  snapshot.AccountID,
-            AssetCode:  snapshot.AssetCode,
-            Period:     snapshot.Period,
-            Attributes: snapshot.Attributes,
-        }
-        current, ok := currentByKey[key]
-        if !ok {
-            // No current measurement - position may have been fully reversed
-            continue
-        }
-
-        if !current.Quantity.Equal(snapshot.QuantitySettled) {
-            delta := current.Quantity.Sub(snapshot.QuantitySettled)
-
-            // Value the variance using the tariff at the original period
-            value, err := s.valuationEngine.Valuate(ctx, ValuationRequest{
-                AssetCode:  snapshot.AssetCode,
-                Quantity:   delta,
-                Period:     snapshot.Period,
-                Attributes: current.Attributes,
-            })
-            if err != nil {
-                return nil, err
-            }
-
-            variances = append(variances, Variance{
-                SettlementRunID:  runID,
-                Period:           snapshot.Period,
-                QuantitySettled:  snapshot.QuantitySettled,
-                QuantityCurrent:  current.Quantity,
-                QuantityDelta:    delta,
-                ValueDelta:       value.SettlementAmount,
-            })
-        }
-    }
-
-    return variances, nil
-}
-```
-
-**Reconciliation Error Handling:**
-
-The `Reconcile()` function uses fail-fast semantics (immediate return on error).
-This is intentional for settlement reconciliation where partial results could lead
-to incorrect financial adjustments. Alternative strategies considered:
-
-| Strategy | Pros | Cons | Verdict |
-|----------|------|------|---------|
-| Fail-fast | Simple, atomic | No partial results | **Chosen** |
-| Accumulate errors | Partial progress visible | Risk of partial adjustments | Rejected |
-| Skip + log | Maximizes results | Silent failures | Rejected |
-
-For large reconciliation runs, errors are typically transient (API timeouts to Position
-Keeping). The caller should implement retry with exponential backoff at the run level,
-not the individual snapshot level.
-
-**Reconciliation creates adjustments, not mutations:**
-
-```
-Settlement Run D+5 Reconciliation:
-
-┌─────────────────┬─────────────┬─────────────┬───────────┬────────────┐
-│ Period          │ Settled Qty │ Current Qty │ Delta Qty │ Delta Val  │
-├─────────────────┼─────────────┼─────────────┼───────────┼────────────┤
-│ 12:00-12:30     │ 10.00       │ 12.00       │ +2.00     │ +$0.30     │
-│ 12:30-13:00     │ 11.00       │ 10.50       │ -0.50     │ -$0.08     │
-│ 13:00-13:30     │ 9.00        │ 9.00        │ 0.00      │ $0.00      │
-├─────────────────┼─────────────┼─────────────┼───────────┼────────────┤
-│ Total           │ 30.00       │ 31.50       │ +1.50     │ +$0.22     │
-└─────────────────┴─────────────┴─────────────┴───────────┴────────────┘
-
-Action: Create adjustment entry for $0.22
-```
-
-**Performance considerations for high-volume settlement runs:**
-
-For runs with many periods (e.g., 48 half-hours × 365 days = 17,520 snapshots/year):
-
-```go
-// FindByRunPaginated returns snapshots in batches for large settlement runs.
-func (r *SettlementSnapshotRepository) FindByRunPaginated(
-    ctx context.Context,
-    runID uuid.UUID,
-    limit, offset int,
-) ([]SettlementSnapshot, error) {
-    var snapshots []SettlementSnapshot
-    return snapshots, r.db.Where("settlement_run_id = ?", runID).
-        Order("period_start ASC").
-        Limit(limit).
-        Offset(offset).
-        Find(&snapshots).Error
-}
-
-// BatchFindCurrent reduces round trips when checking many positions.
-// Matches on all PositionKey fields including Attributes for fungibility.
-func (r *MeasurementRepository) BatchFindCurrent(
-    ctx context.Context,
-    keys []PositionKey,
-) (map[PositionKey]*Measurement, error) {
-    // Build a single query for all position keys (account, asset, period, attributes)
-    // Uses position_key_hash for efficient matching
-    // Returns map keyed by position for efficient lookup
-}
-```
-
-For most use cases (monthly energy settlements with ~1,440 half-hours),
-the simple iteration approach is sufficient. Consider pagination when:
-- Annual settlement runs exceed 10,000 snapshots
-- Reconciliation jobs process runs in parallel
-
 ## Service Responsibilities
 
 | Component | Service | Notes |
@@ -1083,14 +760,8 @@ the simple iteration approach is sufficient. Consider pagination when:
 | Delta Engine | Position Keeping | Supersession evaluation |
 | Correction Saga | Position Keeping | Wash & Reload execution |
 | Position Entries | Position Keeping | Net position calculation |
-| Settlement Snapshots | Financial Accounting | Owns settlement lifecycle and snapshots |
-| Reconciliation | Financial Accounting | Queries own snapshots, calls Position Keeping API for current measurements |
-| Adjustment Entry | Payment Order | Financial settlement of variance |
 
-**Note on Cross-Service Queries:** Per project rules (no cross-schema queries), Financial
-Accounting owns Settlement Snapshots in its own schema. Reconciliation fetches current
-measurements via Position Keeping's API, not direct database joins. This maintains service
-isolation at the cost of additional API calls during reconciliation.
+For settlement snapshots and reconciliation service responsibilities, see ADR-0018.
 
 ## Consequences
 
@@ -1099,16 +770,13 @@ isolation at the cost of additional API calls during reconciliation.
 * **Complete audit trail**: Every measurement preserved, corrections are explicit entries
 * **Clear lineage**: Supersession chain shows estimate → read → actual progression
 * **Financial accuracy**: Positions reflect best available data at any point in time
-* **Regulatory compliance**: Settlement runs and finality are first-class concepts
 * **Universal pattern**: Same model for energy, advertising, aid, carbon, compute
-* **Unified Treasury & Accounting**: By treating Forecasts as authoritative for future periods and Actuals as authoritative for past periods, the ledger enables real-time **Cashflow/Inventory Forecasting** (Treasury) and **Historical Audit** (Accounting) in a single view, with automatic variance tracking as time progresses
 
 ### Negative
 
 * **Storage growth**: All measurements kept forever (required for audit)
 * **Query complexity**: "Current" position requires filtering superseded records
 * **Materialized views**: May need for performance at scale
-* **Ongoing reconciliation**: Positions are never truly "final" until settlement locked
 
 ## Implementation Notes
 
@@ -1123,15 +791,6 @@ CREATE INDEX idx_measurements_current
 -- Period overlap queries
 CREATE INDEX idx_measurements_period
     ON measurements USING GIST (period);
-
--- Reconciliation queries
-CREATE INDEX idx_settlement_snapshots_run
-    ON settlement_snapshots(settlement_run_id);
-
--- Settlement finality queries (FinalizeRun)
-CREATE INDEX idx_measurements_settlement_run
-    ON measurements(settlement_run)
-    WHERE locked_at IS NULL;
 
 -- Attribute-based reporting and analytics queries
 CREATE INDEX idx_measurements_attributes
@@ -1243,21 +902,6 @@ func (r *MeasurementRepository) Supersede(ctx context.Context, oldID, newID uuid
 Attributes are included in the position key hash, meaning **exact equality** is required
 for collision detection. This is the correct default—positions with different attributes
 are different positions (e.g., peak vs off-peak tariff periods).
-
-### Settlement Finality
-
-After final settlement (e.g., M+14 for UK energy), positions are locked:
-
-```go
-func (s *SettlementService) FinalizeRun(ctx context.Context, run string, cutoff time.Time) error {
-    return s.db.Model(&Measurement{}).
-        Where("settlement_run = ? AND locked_at IS NULL", run).
-        Where("period && tstzrange(?, ?)", cutoff.AddDate(0, -14, 0), cutoff).
-        Update("locked_at", time.Now()).Error
-}
-```
-
-Once locked, the Delta Engine returns `ActionCreateDispute` instead of `ActionWashAndReload`.
 
 ### Concurrency Handling
 
@@ -1412,105 +1056,8 @@ var (
     // ErrOverlappingPosition indicates an attempt to book a measurement that
     // overlaps with an existing non-superseded measurement (same account/asset/attributes).
     ErrOverlappingPosition = errors.New("overlapping position exists")
-
-    // ErrOutsideBackfillWindow indicates the measurement period is older than
-    // the configured backfill window for this asset.
-    ErrOutsideBackfillWindow = errors.New("measurement outside backfill window")
-
-    // ErrInvalidSettlementRun indicates the settlement run identifier is malformed
-    // or not in the asset's configured schedule.
-    ErrInvalidSettlementRun = errors.New("invalid settlement run identifier")
 )
 ```
-
-## Scope and Boundaries
-
-### In Scope
-
-- Quality-based supersession logic (Delta Engine)
-- Measurement lifecycle (append, supersede, lock)
-- Correction pattern (Wash & Reload)
-- Settlement snapshots for reconciliation
-- Settlement finality windows
-
-### Out of Scope (Future ADRs)
-
-| Topic | Notes |
-|-------|-------|
-| **Dispute Resolution Workflow** | When `ActionCreateDispute` is returned, the dispute workflow handles investigation, resolution, and potential manual adjustments. This includes dispute SLAs, escalation paths, and operator UI. Target: ADR-0018. |
-| **Valuation Engine** | The `ValuationEngine.Valuate()` call in reconciliation is a placeholder. A dedicated ADR will define temporal tariff lookup, attribute-based pricing tiers, and rate schedule management. ADR-0013's `Rate` type provides the foundation. Target: ADR-0019. |
-| **Attribute Schema Validation** | Measurement attributes (`map[string]string`) are opaque in this ADR. Integration with ADR-0014's Schema-on-Write validation for attribute keys/values is implementation detail. |
-| **Event Streaming** | This ADR assumes batch-oriented settlement runs. Real-time streaming ingestion with micro-batching may be addressed in a performance optimization ADR. |
-
-### Dispute Fail-Safe Behavior
-
-Until ADR-0018 (Dispute Resolution Workflow) is implemented, handle `ActionCreateDispute` with
-a fail-safe that preserves the incoming measurement for manual review:
-
-```go
-func (s *MeasurementIngestionService) handleDispute(
-    ctx context.Context,
-    incoming *Measurement,
-    existing *Measurement,
-) error {
-    return s.db.Transaction(func(tx *gorm.DB) error {
-        // 1. Archive the incoming measurement (preserve for audit)
-        incoming.SupersededBy = nil  // Not superseded, just disputed
-        if err := tx.Create(incoming).Error; err != nil {
-            return err
-        }
-
-        // 2. Create dispute record for manual review
-        dispute := Dispute{
-            ID:                    uuid.New(),
-            IncomingMeasurementID: incoming.ID,
-            ExistingMeasurementID: existing.ID,
-            Reason:                "Position locked after final settlement",
-            Status:                DisputeStatusPendingReview,
-            CreatedAt:             time.Now(),
-        }
-        if err := tx.Create(&dispute).Error; err != nil {
-            return err
-        }
-
-        // 3. Write event to outbox table (same transaction)
-        // Event will be published asynchronously by outbox processor
-        outboxEvent := OutboxEvent{
-            ID:          uuid.New(),
-            EventType:   "DisputeCreated",
-            Payload:     mustMarshal(DisputeCreatedEvent{DisputeID: dispute.ID}),
-            CreatedAt:   time.Now(),
-            ProcessedAt: nil,
-        }
-        if err := tx.Create(&outboxEvent).Error; err != nil {
-            return err
-        }
-
-        return nil
-    })
-}
-```
-
-**Key principle:** Never silently drop data. If a measurement arrives for a locked position,
-archive it and create a dispute record. The business can then decide to extend the settlement
-window, adjust via dispute resolution, or acknowledge the variance.
-
-**Transaction Boundary and Outbox Pattern:**
-
-The `handleDispute()` function wraps all three operations (measurement, dispute, event) in a
-single database transaction. This ensures atomicity—either all succeed or all roll back.
-
-Events use the **transactional outbox pattern** rather than direct publishing because:
-
-| Approach | Problem |
-|----------|---------|
-| Direct publish after commit | If publish fails, dispute exists but no alert fires |
-| Direct publish before commit | If transaction rolls back, event was already sent (phantom event) |
-| **Outbox table (chosen)** | Event written in same transaction; async processor publishes with at-least-once semantics |
-
-The outbox processor (implementation out of scope) polls the `outbox_events` table and publishes
-to the event bus. On successful publish, it sets `processed_at`. Failed publishes are retried
-with exponential backoff. This guarantees eventual delivery without distributed transaction complexity.
 
 ## Entry Types
 
@@ -1565,535 +1112,27 @@ func (e PositionEntry) GetAttributes(ctx context.Context, repo MeasurementReposi
 }
 ```
 
-## Event Contracts
-
-Per ADR-0004 (Event-Driven Architecture), the following domain events are published during
-measurement lifecycle operations. All events include standard envelope fields (event_id,
-timestamp, tenant_id, correlation_id).
-
-### Measurement Events
-
-| Event | Trigger | Payload | Consumers |
-|-------|---------|---------|-----------|
-| `MeasurementReceived` | Any measurement ingested | measurement_id, account_id, asset_code, period, source, quality_score | Audit, Analytics |
-| `MeasurementSuperseded` | Higher-quality data replaces existing | superseded_id, superseding_id, quality_delta | Position Keeping, Audit |
-| `MeasurementLocked` | Settlement finalized | measurement_id, settlement_run, locked_at | Financial Accounting |
-
-### Settlement Events
-
-| Event | Trigger | Payload | Consumers |
-|-------|---------|---------|-----------|
-| `SettlementRunStarted` | Settlement batch begins | run_id, run_type, period_start, period_end | Monitoring, Audit |
-| `SettlementSnapshotCreated` | Position captured for settlement | snapshot_id, run_id, measurement_id | Financial Accounting |
-| `SettlementRunCompleted` | Settlement batch finishes | run_id, positions_settled, total_value | Monitoring, Payment Order |
-
-### Correction Events
-
-| Event | Trigger | Payload | Consumers |
-|-------|---------|---------|-----------|
-| `CorrectionInitiated` | Wash & Reload saga starts | correction_id, old_measurement_id, new_measurement_id | Audit |
-| `CorrectionCompleted` | Wash & Reload saga succeeds | correction_id, wash_entry_id, reload_entry_id, delta | Financial Accounting, Audit |
-| `DisputeCreated` | Locked position receives new data | dispute_id, incoming_measurement_id, existing_measurement_id | Dispute Resolution, Alerting |
-
-### Event Publishing Pattern
-
-Events are published using the transactional outbox pattern (see Dispute Fail-Safe section)
-to ensure exactly-once delivery semantics:
-
-```go
-// Example: Publishing MeasurementSuperseded event
-func (s *CorrectionSaga) Execute(ctx context.Context, old, new *Measurement) error {
-    return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-        // ... correction logic ...
-
-        // Write event to outbox (same transaction)
-        event := OutboxEvent{
-            ID:        uuid.New(),
-            EventType: "MeasurementSuperseded",
-            Payload: mustMarshal(MeasurementSupersededEvent{
-                SupersededID:  old.ID,
-                SupersedingID: new.ID,
-                QualityDelta:  new.QualityScore - old.QualityScore,
-            }),
-            CreatedAt: time.Now(),
-        }
-        return tx.Create(&event).Error
-    })
-}
-```
-
-## Security Considerations
-
-### Settlement Locking Authorization
-
-The `LockedAt` field controls position finality. Only authorized services may lock positions:
-
-| Actor | Can Lock? | Mechanism |
-|-------|-----------|-----------|
-| Settlement Service | Yes | Automatic after final run (M+14) |
-| Tenant Admin | No | Must request via support ticket |
-| Operator | No | Read-only access to locked positions |
-| System Admin | Emergency only | Requires audit log entry + approval |
-
-```go
-// SettlementService is the only authorized caller
-func (s *SettlementService) FinalizeRun(ctx context.Context, run string) error {
-    // Verify caller identity via context (service account)
-    if !auth.IsSettlementService(ctx) {
-        return ErrUnauthorized
-    }
-    // ... locking logic ...
-}
-```
-
-### Dispute Workflow Security
-
-Dispute creation is rate-limited and audited:
-
-```go
-// Rate limiting per tenant to prevent abuse
-const MaxDisputesPerHour = 100
-
-func (s *MeasurementIngestionService) handleDispute(ctx context.Context, ...) error {
-    tenantID := auth.TenantIDFromContext(ctx)
-
-    // Check rate limit
-    if s.rateLimiter.DisputesThisHour(tenantID) >= MaxDisputesPerHour {
-        return ErrDisputeRateLimitExceeded
-    }
-
-    // ... dispute creation with audit logging ...
-    s.auditLog.Record(ctx, AuditEntry{
-        Action:    "DISPUTE_CREATED",
-        TenantID:  tenantID,
-        ActorID:   auth.ActorIDFromContext(ctx),
-        Details:   map[string]any{"dispute_id": dispute.ID},
-    })
-}
-```
-
-## Observability
-
-### Metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `measurements_received_total` | Counter | tenant_id, asset_code, source | Total measurements ingested |
-| `measurements_superseded_total` | Counter | tenant_id, asset_code | Measurements replaced by higher quality |
-| `correction_saga_duration_seconds` | Histogram | tenant_id, outcome | Wash & Reload execution time |
-| `settlement_run_duration_seconds` | Histogram | run_type | Settlement batch processing time |
-| `reconciliation_variance_total` | Gauge | tenant_id, asset_code | Current variance amount |
-| `disputes_pending_total` | Gauge | tenant_id | Disputes awaiting resolution |
-
-### Tracing
-
-Each measurement lifecycle operation should propagate trace context:
-
-```go
-func (e *DeltaEngine) Evaluate(ctx context.Context, incoming Measurement) (Action, *Measurement, error) {
-    ctx, span := tracer.Start(ctx, "DeltaEngine.Evaluate",
-        trace.WithAttributes(
-            attribute.String("measurement.id", incoming.ID.String()),
-            attribute.String("measurement.source", incoming.Source),
-            attribute.Int("measurement.quality_score", incoming.QualityScore),
-        ),
-    )
-    defer span.End()
-
-    // ... evaluation logic ...
-    span.SetAttributes(attribute.String("action", action.String()))
-    return action, existing, nil
-}
-```
-
-### Alerting Thresholds
-
-| Alert | Condition | Severity | Action |
-|-------|-----------|----------|--------|
-| High Dispute Rate | >10 disputes/hour/tenant | Warning | Investigate data source |
-| Settlement Overdue | Run not completed T+2 hours | Critical | Page on-call |
-| Variance Threshold | Single period variance >$10k | Warning | Review for fraud |
-| Quality Degradation | >50% measurements at lowest quality | Warning | Check meter connectivity |
-
-## Placeholder Interfaces
-
-Interfaces referenced but defined in future ADRs:
-
-```go
-// ValuationEngine converts quantities to settlement values.
-// Full specification in ADR-0019 (Valuation Engine).
-type ValuationEngine interface {
-    Valuate(ctx context.Context, req ValuationRequest) (*ValuationResult, error)
-}
-
-type ValuationRequest struct {
-    AssetCode  string
-    Quantity   decimal.Decimal
-    Period     Period
-    Attributes map[string]string
-}
-
-type ValuationResult struct {
-    SettlementAmount decimal.Decimal
-    Currency         string
-    RateApplied      decimal.Decimal
-    RateEffectiveAt  time.Time
-}
-```
-
 ## Glossary
 
 | Term | Definition |
 |------|------------|
 | **Quality Ladder** | Hierarchy of data sources ranked by authority (e.g., estimate < customer read < meter actual) |
-| **Temporal Authority** | Principle that source quality depends on time context: Forecasts are authoritative for future periods, Actuals for past |
-| **Provisional Settlement** | Financial action based on non-final data (forecast/estimate), subject to reconciliation when actuals arrive |
-| **Freezing** | Capturing provenance (source, quality) in a snapshot when taking provisional action, enabling variance analysis |
 | **Wash & Reload** | Correction pattern: reverse old position entry, book new entry, preserving audit trail |
-| **Settlement Run** | Batch process that finalizes positions for a time period (e.g., D+1, M+14) |
 | **Supersession** | Replacement of one measurement by another of higher quality for the same position |
 | **Position Key** | Composite identifier: (tenant_id, account_id, asset_code, period, attributes) |
-| **Backfill Window** | Maximum age of measurements accepted before rejection |
-| **Final Settlement** | Point after which positions are locked and changes become disputes |
 | **Delta Engine** | Decision component that evaluates incoming measurements against current state |
-| **ATP (Available to Promise)** | Current balance minus future commitments; the amount safe to allocate |
+
+For settlement and reconciliation terms, see ADR-0018.
 
 ## Links
 
 ### Internal ADRs
 
-* [ADR-0004: Event-Driven Architecture](0004-event-driven-architecture.md) - Event contracts and publishing patterns
 * [ADR-0013: Universal Quantity Type System](0013-generic-asset-quantity-types.md) - Quantity and rate types
 * [ADR-0014: Dynamic Asset Registry & Lifecycle](0014-dynamic-asset-registry.md) - Asset definitions and attributes
-* [ADR-0016: Tenant Isolation](0016-tenant-isolation.md) - Multi-tenancy and schema separation
+* [ADR-0016: Tenant Isolation](0016-tenant-id-naming-strategy.md) - Multi-tenancy and schema separation
+* [ADR-0018: Settlement & Reconciliation](0018-settlement-reconciliation.md) - Settlement snapshots, temporal authority, reconciliation workflows
 
 ### External References
 
 * [UK Balancing and Settlement Code (BSC)](https://www.elexon.co.uk/bsc-and-codes/)
-* [ELEXON Settlement Timetable](https://www.elexon.co.uk/operations-settlement/settlement-timetable/)
-
-## Notes
-
-### Backfill Window
-
-Different industries have different backfill windows:
-
-| Industry | Backfill Window | Final Settlement |
-|----------|-----------------|------------------|
-| UK Energy | 14 months | R3 (M+14) |
-| Advertising | 30-90 days | Varies by network |
-| Banking | T+1 to T+3 | Same day to 3 days |
-| Carbon | Years | Registry-dependent |
-
-**Configuration schema (extends ADR-0014 asset definitions):**
-
-```sql
--- Settlement rules table linked to asset definitions
-CREATE TABLE asset_settlement_rules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    asset_code VARCHAR(32) NOT NULL REFERENCES asset_definitions(code),
-
-    -- Backfill limits
-    backfill_window_days INTEGER NOT NULL DEFAULT 365,
-
-    -- Settlement run schedule (cron-like or explicit)
-    settlement_schedule JSONB NOT NULL DEFAULT '["D+1", "D+5", "M+3", "M+14"]',
-
-    -- Finality: after which run positions lock
-    final_settlement_run VARCHAR(20) NOT NULL DEFAULT 'M+14',
-
-    -- Grace period after final before disputes auto-close
-    dispute_window_days INTEGER NOT NULL DEFAULT 30,
-
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    UNIQUE(asset_code)
-);
-
--- Example: UK half-hourly electricity
-INSERT INTO asset_settlement_rules (asset_code, backfill_window_days, final_settlement_run)
-VALUES ('ELEC_HH_KWH', 425, 'M+14');  -- 14 months = ~425 days
-
--- Example: Real-time gross settlement (banking)
-INSERT INTO asset_settlement_rules (asset_code, backfill_window_days, final_settlement_run)
-VALUES ('GBP', 0, 'D+0');  -- Same-day finality
-
--- Example: Compute time (hourly periods)
-INSERT INTO asset_settlement_rules (asset_code, backfill_window_days, final_settlement_run)
-VALUES ('COMPUTE_HOURS', 30, 'M+1');  -- Monthly finality
-```
-
-### Settlement Run Validation
-
-The `settlement_run` field on measurements uses structured identifiers validated at ingestion:
-
-```go
-// SettlementRunID represents a validated settlement run identifier.
-type SettlementRunID string
-
-const (
-    MaxDayOffset   = 30  // D+0 through D+30
-    MaxMonthOffset = 24  // M+1 through M+24 (2 years)
-)
-
-// ParseSettlementRun validates and parses a settlement run string.
-// Valid formats: "D+N" (days, 0-30), "M+N" (months, 1-24), "FINAL"
-func ParseSettlementRun(s string) (SettlementRunID, error) {
-    if s == "FINAL" {
-        return SettlementRunID(s), nil
-    }
-
-    re := regexp.MustCompile(`^(D|M)\+(\d+)$`)
-    matches := re.FindStringSubmatch(s)
-    if matches == nil {
-        return "", fmt.Errorf("invalid settlement run format: %s", s)
-    }
-
-    unit := matches[1]
-    offset, _ := strconv.Atoi(matches[2])
-
-    switch unit {
-    case "D":
-        if offset > MaxDayOffset {
-            return "", fmt.Errorf("day offset %d exceeds maximum %d", offset, MaxDayOffset)
-        }
-    case "M":
-        if offset < 1 || offset > MaxMonthOffset {
-            return "", fmt.Errorf("month offset %d outside valid range 1-%d", offset, MaxMonthOffset)
-        }
-    }
-
-    return SettlementRunID(s), nil
-}
-
-// IsScheduled checks if this run is in the asset's settlement schedule.
-func (r SettlementRunID) IsScheduled(schedule []string) bool {
-    for _, s := range schedule {
-        if s == string(r) {
-            return true
-        }
-    }
-    return false
-}
-```
-
-**Validation at measurement ingestion:**
-
-```go
-func (s *MeasurementIngestionService) Ingest(ctx context.Context, m *Measurement) error {
-    // Validate settlement_run against asset's configured schedule
-    rules, err := s.rulesRepo.FindByAsset(ctx, m.AssetCode)
-    if err != nil {
-        return err
-    }
-
-    runID, err := ParseSettlementRun(m.SettlementRun)
-    if err != nil {
-        return fmt.Errorf("%w: %v", ErrInvalidSettlementRun, err)
-    }
-
-    if !runID.IsScheduled(rules.SettlementSchedule) {
-        return fmt.Errorf("%w: %s not in schedule for %s",
-            ErrInvalidSettlementRun, m.SettlementRun, m.AssetCode)
-    }
-
-    // Validate measurement period is within backfill window
-    backfillCutoff := time.Now().AddDate(0, 0, -rules.BackfillWindowDays)
-    if m.Period.End.Before(backfillCutoff) {
-        return fmt.Errorf("%w: period ends %s, backfill cutoff is %s for asset %s",
-            ErrOutsideBackfillWindow, m.Period.End.Format(time.RFC3339),
-            backfillCutoff.Format(time.RFC3339), m.AssetCode)
-    }
-
-    // Continue with normal ingestion (Delta Engine evaluation, etc.)
-}
-```
-
-This ensures:
-1. Settlement runs are consistent with asset configuration
-2. Measurements outside the backfill window are rejected early
-3. Free-form strings that would break reconciliation queries are prevented
-
-### Valuation Integration
-
-The Valuation Engine (future ADR) must support:
-- Temporal rate lookup (rate at settlement period, not current)
-- Attribute-based pricing (peak/off-peak, vintage, grade)
-- Multi-period aggregation with different rates per sub-period
-- **Cross-asset conversion**: Direct value translation between non-monetary asset classes
-  (e.g., compute hours → carbon credits, commodity A → commodity B at market rate)
-
-### Data Retention and Archival
-
-At 100k TPS of measurement ingestion, storage will grow rapidly. Retention strategy:
-
-| Data Type | Hot Storage | Warm Storage | Cold/Archive |
-|-----------|-------------|--------------|--------------|
-| Current measurements | Indefinite | N/A | N/A |
-| Superseded measurements | 90 days | 2 years | 7+ years |
-| Settlement snapshots | Until final + 1 year | 7 years | 10+ years |
-| Position entries | 2 years | 7 years | 10+ years |
-
-**Implementation (out of scope for this ADR):**
-
-```sql
--- Example: Move superseded measurements older than 90 days to archive schema
-INSERT INTO archive.measurements SELECT * FROM measurements
-WHERE superseded_by IS NOT NULL AND received_at < NOW() - INTERVAL '90 days';
-
-DELETE FROM measurements
-WHERE superseded_by IS NOT NULL AND received_at < NOW() - INTERVAL '90 days';
-```
-
-Archival preserves audit trail while keeping hot path performant. Consider partitioning
-by `received_at` month for efficient bulk archival operations.
-
-### Settlement Snapshot Denormalization Justification
-
-Settlement snapshots duplicate `quantity` from measurements. For a UK energy supplier
-with 1M meters, annual snapshots: 1M × 17,520 periods × 32 bytes ≈ **560 GB/year**.
-
-This denormalization is justified because:
-
-1. **Query locality**: Reconciliation needs snapshot + current measurement. Without
-   denormalization, every reconciliation requires joining to measurements table.
-
-2. **Immutability**: Snapshots are write-once. The measurement's quantity at snapshot
-   time is preserved even if the measurement is later superseded.
-
-3. **Cross-service isolation**: Financial Accounting owns snapshots in its schema.
-   Without denormalization, it would need to query Position Keeping for every reconciliation.
-
-4. **Acceptable cost**: 560 GB/year is modest for a financial system handling 1M meters.
-   Storage is cheap; cross-service latency at scale is not.
-
-### Design Decisions FAQ
-
-**Q: Should attribute matching support "key subset" matching (e.g., match only on `tariff_zone`)?**
-
-A: No. Exact equality is required for position key hashing. Rationale:
-- Positions with different attributes ARE different positions
-- Subset matching would require application-level logic that's harder to make consistent
-- If you need "match on tariff_zone only", model tariff_zone as the asset code or use separate accounts
-
-For flexible attribute querying (reporting, analytics), use the GIN index on attributes:
-```sql
-CREATE INDEX idx_measurements_attributes ON measurements USING GIN (attributes);
--- Then query: SELECT * FROM measurements WHERE attributes @> '{"tariff_zone": "peak"}'
-```
-
-**Q: Should `MaxDayOffset` and `MaxMonthOffset` be configurable per-tenant or per-asset?**
-
-A: Currently hardcoded for simplicity. To make configurable:
-```go
-// In asset_settlement_rules table:
-ALTER TABLE asset_settlement_rules ADD COLUMN max_day_offset INTEGER DEFAULT 30;
-ALTER TABLE asset_settlement_rules ADD COLUMN max_month_offset INTEGER DEFAULT 24;
-
-// Validation then becomes:
-if offset > rules.MaxDayOffset { ... }
-```
-
-This adds complexity and is deferred until a tenant actually needs non-standard ranges.
-The defaults (D+30, M+24) cover all known settlement conventions.
-
-**Q: Where is `ErrOutsideBackfillWindow` enforced?**
-
-A: In `MeasurementIngestionService.Ingest()` (see Settlement Run Validation section).
-The check compares `m.Period.End` against `now - backfill_window_days` from the asset's
-settlement rules.
-
-**Q: If a measurement's attributes need correction (not the quantity), does this trigger Wash & Reload?**
-
-A: Yes. Attributes are part of the **position key hash**—changing attributes means the
-measurement belongs to a different position entirely. The correction path is:
-
-1. Ingest new measurement with corrected attributes (books to the correct position)
-2. Delta Engine evaluates the original position (old attributes) and sees no change
-3. Original measurement remains current for its (incorrect) position
-4. Manual intervention marks original as superseded with reason "ATTRIBUTE_CORRECTION"
-
-If the incorrect-attribute position should have zero balance, explicitly book a reversal.
-There's no "lighter-weight" path because attribute changes are semantically significant—
-a measurement for `{"tariff_zone": "peak"}` vs `{"tariff_zone": "offpeak"}` affects
-settlement values. The audit trail must show the correction explicitly.
-
-**Q: When reconciliation finds variances across many periods, are adjustments created individually or batched?**
-
-A: The `Reconcile()` function returns a slice of `Variance` objects—one per period with a
-difference. The caller decides how to process them:
-
-```go
-// Option 1: Individual adjustments (simple, traceable)
-for _, v := range variances {
-    s.adjustmentService.CreateAdjustment(ctx, v)
-}
-
-// Option 2: Batched adjustment (efficient, single entry)
-if len(variances) > 0 {
-    totalDelta := sumVariances(variances)
-    s.adjustmentService.CreateBatchAdjustment(ctx, BatchAdjustment{
-        SettlementRunID: runID,
-        Variances:       variances,
-        TotalDelta:      totalDelta,
-        // Individual variances stored as line items for audit
-    })
-}
-```
-
-**Recommendation:** Use batched adjustments per settlement run. This creates a single
-financial entry referencing all period-level variances, reducing transaction volume while
-preserving full audit detail in the line items.
-
-**Q: How are retroactive Source Authority quality score changes handled?**
-
-A: Quality scores are **denormalized at ingestion time** (`quality_score` column on
-measurements). This is intentional:
-
-| Scenario | Behavior |
-|----------|----------|
-| New source added | New measurements get the new source's score; existing unaffected |
-| Existing source score increased | Existing measurements keep original score; new ones get higher |
-| Existing source score decreased | Existing measurements keep original score (grandfathered) |
-
-**Why not re-evaluate?** Retroactive score changes could cascade into mass Wash & Reload
-operations, destabilizing settled positions and creating reconciliation nightmares.
-
-If a regulatory change genuinely requires retroactive re-ranking:
-
-```go
-// Manual re-evaluation job (use with extreme caution)
-func (s *MaintenanceService) ReEvaluateSourceQuality(
-    ctx context.Context,
-    sourceCode string,
-    newScore int,
-    periodStart, periodEnd time.Time,
-) error {
-    // 1. Find affected non-superseded measurements
-    affected, _ := s.repo.FindBySourceAndPeriod(ctx, sourceCode, periodStart, periodEnd)
-
-    for _, m := range affected {
-        if m.QualityScore == newScore {
-            continue // Already correct
-        }
-        // 2. Update denormalized score (rare exception to immutability)
-        s.repo.UpdateQualityScore(ctx, m.ID, newScore)
-        // 3. Re-run Delta Engine to check if supersession changes
-        s.deltaEngine.ReEvaluate(ctx, m)
-    }
-    return nil
-}
-```
-
-This is a maintenance operation requiring approval, not automatic behavior. The
-`ValidFrom`/`ValidTo` on `SourceAuthority` is for **prospective** changes—"starting next
-month, SMETS2 meters are quality 95 instead of 90."
-
-### Reconsidering This Decision
-
-Revisit if:
-- Query performance degrades with measurement volume (consider event sourcing)
-- Settlement rules require retroactive position mutation (regulatory change)
-- Real-time streaming replaces batch settlement (architecture shift)
-- Storage costs become prohibitive (consider snapshot compression)
