@@ -57,6 +57,8 @@ Architectural Decision Records) format.
 | [ADR-0014](0014-dynamic-asset-registry.md) | Dynamic Asset Registry & Lifecycle | Proposed | 2025-12-04 |
 | [ADR-0015](0015-standard-service-directory-structure.md) | Standard Service Directory Structure | Accepted | 2025-12-06 |
 | [ADR-0016](0016-tenant-id-naming-strategy.md) | Tenant ID Naming Strategy | Accepted | 2025-12-13 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0017](0017-temporal-quality-ladder.md) | Time-Bound Quality Ladder for Temporal Asset Reconciliation | Proposed | 2025-12-14 |
 
 ## Categories
 
