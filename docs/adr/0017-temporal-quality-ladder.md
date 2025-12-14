@@ -164,10 +164,23 @@ func (p Period) Duration() time.Duration {
     return p.End.Sub(p.Start)
 }
 
+// Overlaps returns true if this period shares any time with another.
+// Uses half-open interval semantics [Start, End) for ranged periods.
+// For instant events (Start == End), overlap requires containment by the other period.
 func (p Period) Overlaps(other Period) bool {
+    // Handle instant events: [t, t] overlaps [a, b) if a <= t < b
+    if p.IsInstant() {
+        return !p.Start.Before(other.Start) && p.Start.Before(other.End)
+    }
+    if other.IsInstant() {
+        return !other.Start.Before(p.Start) && other.Start.Before(p.End)
+    }
+    // Standard half-open interval overlap
     return p.Start.Before(other.End) && other.Start.Before(p.End)
 }
 
+// Contains returns true if the given instant falls within this period.
+// Uses closed interval semantics [Start, End] for point containment.
 func (p Period) Contains(t time.Time) bool {
     return !t.Before(p.Start) && !t.After(p.End)
 }
@@ -589,6 +602,22 @@ func (s *ReconciliationService) Reconcile(ctx context.Context, runID uuid.UUID) 
 }
 ```
 
+**Reconciliation Error Handling:**
+
+The `Reconcile()` function uses fail-fast semantics (immediate return on error).
+This is intentional for settlement reconciliation where partial results could lead
+to incorrect financial adjustments. Alternative strategies considered:
+
+| Strategy | Pros | Cons | Verdict |
+|----------|------|------|---------|
+| Fail-fast | Simple, atomic | No partial results | **Chosen** |
+| Accumulate errors | Partial progress visible | Risk of partial adjustments | Rejected |
+| Skip + log | Maximizes results | Silent failures | Rejected |
+
+For large reconciliation runs, errors are typically transient (API timeouts to Position
+Keeping). The caller should implement retry with exponential backoff at the run level,
+not the individual snapshot level.
+
 **Reconciliation creates adjustments, not mutations:**
 
 ```
@@ -704,13 +733,34 @@ isolation would cause unacceptable contention.
 **Strategy: Position Key Hash with Unique Constraint**
 
 ```sql
+-- Helper function for deterministic JSONB hashing (sorted keys)
+CREATE OR REPLACE FUNCTION canonicalize_jsonb(j JSONB) RETURNS TEXT AS $$
+DECLARE
+    result TEXT := '{';
+    key TEXT;
+    val JSONB;
+    first BOOLEAN := TRUE;
+BEGIN
+    FOR key, val IN SELECT * FROM jsonb_each(j) ORDER BY 1
+    LOOP
+        IF NOT first THEN
+            result := result || ',';
+        END IF;
+        result := result || '"' || key || '":' || val::text;
+        first := FALSE;
+    END LOOP;
+    RETURN result || '}';
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
 -- Add position key hash for optimistic concurrency
+-- Uses canonicalize_jsonb() for deterministic attribute ordering
 ALTER TABLE measurements ADD COLUMN position_key_hash BYTEA GENERATED ALWAYS AS (
     sha256(
-        account_id::text ||
-        asset_code ||
-        COALESCE(attributes::text, '{}') ||
-        lower(period)::text ||
+        account_id::text || '|' ||
+        asset_code || '|' ||
+        canonicalize_jsonb(COALESCE(attributes, '{}'::jsonb)) || '|' ||
+        lower(period)::text || '|' ||
         upper(period)::text
     )
 ) STORED;
@@ -720,6 +770,13 @@ CREATE UNIQUE INDEX idx_measurements_position_unique
     ON measurements(position_key_hash)
     WHERE superseded_by IS NULL;
 ```
+
+**Note on Hash Collisions:** SHA-256 collision probability is astronomically low (~1 in 2^128
+for a random collision). If a collision ever occurred, it would manifest as `ErrOverlappingPosition`
+for a non-overlapping position. The operational impact is a rejected measurement that should
+succeed. Mitigation: the application can detect this via exact match on the composite key
+and escalate for manual review. This is acceptable for 100k TPS—probability of ever seeing
+a collision is effectively zero over the system's lifetime.
 
 ```go
 // BookMeasurement uses optimistic concurrency via unique constraint violation.
@@ -777,20 +834,40 @@ Once locked, the Delta Engine returns `ActionCreateDispute` instead of `ActionWa
 
 ### Concurrency Handling
 
-Use optimistic locking on supersession to prevent race conditions:
+Supersession uses optimistic locking via the `WHERE superseded_by IS NULL` clause
+(see `Supersede()` in Overlap Prevention section above).
+
+**Retry Strategy for `ErrAlreadySuperseded`:**
+
+When concurrent processes attempt to supersede the same measurement, one wins and
+the other receives `ErrAlreadySuperseded`. The losing caller should:
 
 ```go
-func (r *MeasurementRepository) Supersede(ctx context.Context, oldID, newID uuid.UUID) error {
-    result := r.db.Model(&Measurement{}).
-        Where("id = ? AND superseded_by IS NULL", oldID).  // Only if not already superseded
-        Update("superseded_by", newID)
+func (s *MeasurementIngestionService) IngestWithRetry(ctx context.Context, m *Measurement) error {
+    const maxRetries = 3
+    for attempt := 0; attempt < maxRetries; attempt++ {
+        action, existing, err := s.deltaEngine.Evaluate(ctx, m)
+        if err != nil {
+            return err
+        }
 
-    if result.RowsAffected == 0 {
-        return ErrAlreadySuperseded
+        switch action {
+        case ActionWashAndReload:
+            err = s.correctionSaga.Execute(ctx, existing, m)
+            if errors.Is(err, ErrAlreadySuperseded) {
+                // Another process superseded first - re-evaluate
+                continue
+            }
+            return err
+        // ... other cases ...
+        }
     }
-    return result.Error
+    return fmt.Errorf("failed to ingest after %d retries", maxRetries)
 }
 ```
+
+This is safe because re-evaluation will see the new current measurement and make
+the correct decision (likely `ActionArchiveOnly` if the winner had higher quality).
 
 **Simultaneous arrival of same-quality measurements:**
 
@@ -1040,8 +1117,13 @@ The `settlement_run` field on measurements uses structured identifiers validated
 // SettlementRunID represents a validated settlement run identifier.
 type SettlementRunID string
 
+const (
+    MaxDayOffset   = 30  // D+0 through D+30
+    MaxMonthOffset = 24  // M+1 through M+24 (2 years)
+)
+
 // ParseSettlementRun validates and parses a settlement run string.
-// Valid formats: "D+N" (days), "M+N" (months), "FINAL"
+// Valid formats: "D+N" (days, 0-30), "M+N" (months, 1-24), "FINAL"
 func ParseSettlementRun(s string) (SettlementRunID, error) {
     if s == "FINAL" {
         return SettlementRunID(s), nil
@@ -1051,6 +1133,20 @@ func ParseSettlementRun(s string) (SettlementRunID, error) {
     matches := re.FindStringSubmatch(s)
     if matches == nil {
         return "", fmt.Errorf("invalid settlement run format: %s", s)
+    }
+
+    unit := matches[1]
+    offset, _ := strconv.Atoi(matches[2])
+
+    switch unit {
+    case "D":
+        if offset > MaxDayOffset {
+            return "", fmt.Errorf("day offset %d exceeds maximum %d", offset, MaxDayOffset)
+        }
+    case "M":
+        if offset < 1 || offset > MaxMonthOffset {
+            return "", fmt.Errorf("month offset %d outside valid range 1-%d", offset, MaxMonthOffset)
+        }
     }
 
     return SettlementRunID(s), nil
@@ -1103,9 +1199,54 @@ The Valuation Engine (future ADR) must support:
 - **Cross-asset conversion**: Direct value translation between non-monetary asset classes
   (e.g., compute hours → carbon credits, commodity A → commodity B at market rate)
 
+### Data Retention and Archival
+
+At 100k TPS of measurement ingestion, storage will grow rapidly. Retention strategy:
+
+| Data Type | Hot Storage | Warm Storage | Cold/Archive |
+|-----------|-------------|--------------|--------------|
+| Current measurements | Indefinite | N/A | N/A |
+| Superseded measurements | 90 days | 2 years | 7+ years |
+| Settlement snapshots | Until final + 1 year | 7 years | 10+ years |
+| Position entries | 2 years | 7 years | 10+ years |
+
+**Implementation (out of scope for this ADR):**
+
+```sql
+-- Example: Move superseded measurements older than 90 days to archive schema
+INSERT INTO archive.measurements SELECT * FROM measurements
+WHERE superseded_by IS NOT NULL AND received_at < NOW() - INTERVAL '90 days';
+
+DELETE FROM measurements
+WHERE superseded_by IS NOT NULL AND received_at < NOW() - INTERVAL '90 days';
+```
+
+Archival preserves audit trail while keeping hot path performant. Consider partitioning
+by `received_at` month for efficient bulk archival operations.
+
+### Settlement Snapshot Denormalization Justification
+
+Settlement snapshots duplicate `quantity` from measurements. For a UK energy supplier
+with 1M meters, annual snapshots: 1M × 17,520 periods × 32 bytes ≈ **560 GB/year**.
+
+This denormalization is justified because:
+
+1. **Query locality**: Reconciliation needs snapshot + current measurement. Without
+   denormalization, every reconciliation requires joining to measurements table.
+
+2. **Immutability**: Snapshots are write-once. The measurement's quantity at snapshot
+   time is preserved even if the measurement is later superseded.
+
+3. **Cross-service isolation**: Financial Accounting owns snapshots in its schema.
+   Without denormalization, it would need to query Position Keeping for every reconciliation.
+
+4. **Acceptable cost**: 560 GB/year is modest for a financial system handling 1M meters.
+   Storage is cheap; cross-service latency at scale is not.
+
 ### Reconsidering This Decision
 
 Revisit if:
 - Query performance degrades with measurement volume (consider event sourcing)
 - Settlement rules require retroactive position mutation (regulatory change)
 - Real-time streaming replaces batch settlement (architecture shift)
+- Storage costs become prohibitive (consider snapshot compression)
