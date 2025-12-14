@@ -691,6 +691,89 @@ Position Entries for Account METER-001, Period 12:00-12:30:
 └──────────────┴──────────┴───────────────────────┴─────────────────┘
 ```
 
+**Defensive Tests (Per ADR-0008):**
+
+The CorrectionSaga requires comprehensive unhappy-path testing:
+
+```go
+func TestCorrectionSaga_Execute_DefensiveTests(t *testing.T) {
+    tests := []struct {
+        name        string
+        scenario    string
+        setup       func(*testing.T, *testDB) (*Measurement, *Measurement)
+        wantErr     error
+        wantRollback bool
+    }{
+        {
+            name:     "old measurement already superseded",
+            scenario: "Prevent double-supersession when concurrent process wins",
+            setup: func(t *testing.T, db *testDB) (*Measurement, *Measurement) {
+                old := createMeasurement(t, db, withSupersededBy(uuid.New()))
+                new := createMeasurement(t, db)
+                return old, new
+            },
+            wantErr:     ErrAlreadySuperseded,
+            wantRollback: true,
+        },
+        {
+            name:     "old and new have different account IDs",
+            scenario: "Cross-account corruption check",
+            setup: func(t *testing.T, db *testDB) (*Measurement, *Measurement) {
+                old := createMeasurement(t, db, withAccountID(uuid.New()))
+                new := createMeasurement(t, db, withAccountID(uuid.New())) // Different!
+                return old, new
+            },
+            wantErr:     ErrCrossAccountCorrection,
+            wantRollback: true,
+        },
+        {
+            name:     "transaction timeout during wash entry creation",
+            scenario: "Ensure full rollback on timeout mid-transaction",
+            setup: func(t *testing.T, db *testDB) (*Measurement, *Measurement) {
+                old := createMeasurement(t, db)
+                new := createMeasurement(t, db)
+                db.setLatency(10 * time.Second) // Trigger timeout
+                return old, new
+            },
+            wantErr:     context.DeadlineExceeded,
+            wantRollback: true,
+        },
+        {
+            name:     "old measurement is locked (final settlement)",
+            scenario: "Cannot correct locked positions",
+            setup: func(t *testing.T, db *testDB) (*Measurement, *Measurement) {
+                old := createMeasurement(t, db, withLockedAt(time.Now()))
+                new := createMeasurement(t, db)
+                return old, new
+            },
+            wantErr:     ErrPositionLocked,
+            wantRollback: true,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+            defer cancel()
+
+            db := newTestDB(t)
+            old, new := tt.setup(t, db)
+
+            saga := NewCorrectionSaga(db)
+            err := saga.Execute(ctx, old, new)
+
+            require.ErrorIs(t, err, tt.wantErr, "scenario: %s", tt.scenario)
+
+            if tt.wantRollback {
+                // Verify no partial state: old not superseded, no entries created
+                assertNotSuperseded(t, db, old.ID)
+                assertNoEntriesFor(t, db, new.ID)
+            }
+        })
+    }
+}
+```
+
 ### 6. Temporal Authority & Provisional Settlement
 
 Most ledgers treat the database as "The State of Now." Meridian manages the **Entire Timeline
@@ -1018,6 +1101,7 @@ isolation at the cost of additional API calls during reconciliation.
 * **Financial accuracy**: Positions reflect best available data at any point in time
 * **Regulatory compliance**: Settlement runs and finality are first-class concepts
 * **Universal pattern**: Same model for energy, advertising, aid, carbon, compute
+* **Unified Treasury & Accounting**: By treating Forecasts as authoritative for future periods and Actuals as authoritative for past periods, the ledger enables real-time **Cashflow/Inventory Forecasting** (Treasury) and **Historical Audit** (Accounting) in a single view, with automatic variance tracking as time progresses
 
 ### Negative
 
@@ -1211,6 +1295,53 @@ func (s *MeasurementIngestionService) IngestWithRetry(ctx context.Context, m *Me
 
 This is safe because re-evaluation will see the new current measurement and make
 the correct decision (likely `ActionArchiveOnly` if the winner had higher quality).
+
+**High-Contention Position Locking (Optional):**
+
+For positions with extremely high write frequency (e.g., real-time meter aggregations),
+the optimistic retry loop may cause excessive contention. In these cases, use distributed
+locking before Delta Engine evaluation:
+
+```go
+func (s *MeasurementIngestionService) IngestWithLock(ctx context.Context, m *Measurement) error {
+    // 1. Compute position key hash (same as position_key_hash column)
+    keyHash := computePositionKeyHash(m.AccountID, m.AssetCode, m.Period, m.Attributes)
+
+    // 2. Acquire distributed lock with short TTL
+    lockKey := fmt.Sprintf("position-lock:%x", keyHash)
+    acquired, err := s.distributedLock.TryAcquire(ctx, lockKey, 5*time.Second)
+    if err != nil {
+        return fmt.Errorf("lock acquisition failed: %w", err)
+    }
+    if !acquired {
+        return ErrConcurrentIngestion // Caller should retry with backoff
+    }
+    defer s.distributedLock.Release(ctx, lockKey)
+
+    // 3. Now safe to evaluate - we have exclusive access to this position
+    action, existing, err := s.deltaEngine.Evaluate(ctx, m)
+    if err != nil {
+        return err
+    }
+
+    // 4. Execute action under lock
+    switch action {
+    case ActionWashAndReload:
+        return s.correctionSaga.Execute(ctx, existing, m)
+    // ... other cases ...
+    }
+    return nil
+}
+```
+
+**When to use distributed locking vs optimistic retry:**
+
+| Scenario | Recommended Approach |
+|----------|---------------------|
+| Normal ingestion (<100 writes/sec/position) | Optimistic retry |
+| High-frequency aggregation (>100 writes/sec/position) | Distributed lock |
+| Batch imports | Distributed lock per position key |
+| Settlement run locking | Distributed lock (prevents concurrent finalization) |
 
 **Simultaneous arrival of same-quality measurements:**
 
