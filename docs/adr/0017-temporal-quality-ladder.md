@@ -4,14 +4,14 @@ description: Time-bound quality ladder pattern for temporal asset reconciliation
 triggers:
   - Implementing metered asset tracking (energy, compute, bandwidth)
   - Handling out-of-order data arrival with quality-based precedence
-  - Building reconciliation between billed and actual values
+  - Building reconciliation between settled and actual values
   - Designing settlement systems with multiple data quality tiers
 instructions: |
   Use the Time-Bound Quality Ladder pattern when tracking assets where the "true" value for a time
   period is not known immediately and may be revised as higher-quality data arrives. Model all
   positions as [Start, End] ranges where Start may equal End for point-in-time events. Implement
   supersession via the Delta Engine, corrections via Wash & Reload saga, and reconciliation via
-  Bill Binding comparison.
+  Settlement Snapshot comparison.
 ---
 
 # 17. Time-Bound Quality Ladder for Temporal Asset Reconciliation
@@ -72,15 +72,55 @@ This ADR adds:
 - **Temporal modeling** with [Start, End] periods
 - **Supersession tracking** for audit trails
 - **Wash & Reload** correction pattern
-- **Bill binding** for reconciliation
+- **Settlement snapshots** for reconciliation
 
 ## Decision Drivers
 
 * **Immutable audit trail**: All data received must be preserved, corrections via append not update
-* **Financial accuracy**: Bills and positions must reflect best available data
+* **Financial accuracy**: Settlements and positions must reflect best available data
 * **Regulatory compliance**: Settlement run deadlines and finality rules
-* **Reconciliation capability**: Variance detection between billed and actual
+* **Reconciliation capability**: Variance detection between settled and actual
 * **Universal applicability**: Same pattern for energy, advertising, aid, carbon
+* **100k TPS throughput**: Must support high-frequency metering without lock contention
+* **No cross-schema queries**: Services cannot join across tenant schemas
+
+## Considered Options
+
+### Option 1: Event Sourcing with Projection
+
+Store measurements as events, project current positions into read models.
+
+**Rejected because:**
+- Adds complexity (event store + projector + read model)
+- Snapshot management for long histories (14 months of half-hourly = 24k events/meter)
+- Project rules prefer simpler append-only tables over event sourcing infrastructure
+
+### Option 2: Bi-Temporal Tables (Valid Time + Transaction Time)
+
+Track both when data was true (valid time) and when we learned it (transaction time).
+
+**Rejected because:**
+- Over-engineering for this use case—we only need supersession, not time-travel queries
+- PostgreSQL temporal tables (SQL:2011) have limited tooling
+- `superseded_by` pointer achieves the audit goal more simply
+
+### Option 3: Separate Measurement vs Position Tables
+
+Measurements in one table, aggregated positions in another (materialized).
+
+**Partially adopted:**
+- Measurements table is the source of truth (adopted)
+- Position Entries table tracks movements for financial reporting (adopted)
+- Avoided: separate "current position" table (adds sync complexity)
+
+### Option 4: Mutable Positions with Audit Log
+
+Allow position updates, log changes separately.
+
+**Rejected because:**
+- Violates immutability rule
+- Audit log can drift from actual state
+- Harder to reason about during disputes
 
 ## Decision Outcome
 
@@ -339,6 +379,8 @@ func (e *DeltaEngine) Evaluate(ctx context.Context, incoming Measurement) (Actio
     }
 
     // Case C: Same quality, different value - latest wins
+    // Note: For sub-millisecond collision handling, see compareSameQuality()
+    // in the Concurrency Handling section.
     if incoming.ReceivedAt.After(existing.ReceivedAt) {
         return ActionWashAndReload, existing, nil
     }
@@ -396,9 +438,9 @@ When higher-quality data arrives, the Correction Saga creates financial adjustme
 without mutating historical records.
 
 **Scenario:**
-- Current position: 10 kWh (estimate, billed)
-- New measurement: 12 kWh (actual)
-- Action: Reverse old, book new, net effect +2 kWh
+- Current position: 10 units (estimate, settled)
+- New measurement: 12 units (actual)
+- Action: Reverse old, book new, net effect +2 units
 
 ```go
 // CorrectionSaga handles the atomic wash and reload of positions.
@@ -473,59 +515,59 @@ Position Entries for Account METER-001, Period 12:00-12:30:
 └──────────────┴──────────┴───────────────────────┴─────────────────┘
 ```
 
-### 6. Bill Binding and Reconciliation
+### 6. Settlement Snapshots and Reconciliation
 
-When a bill is generated, it captures which measurements were used. This enables
-reconciliation when better data arrives later.
+When a settlement run executes, it captures which measurements were used. This enables
+reconciliation when better data arrives in subsequent runs.
 
 ```go
-// BillBinding records which measurement was used for each period in a bill.
-type BillBinding struct {
-    ID              uuid.UUID
-    BillID          uuid.UUID
-    AccountID       uuid.UUID       // References Current Account
-    AssetCode       string          // References Asset Directory
-    Period          Period
-    MeasurementID   uuid.UUID       // The measurement used
-    QuantityBilled  decimal.Decimal // Snapshot of quantity at billing time
-    QualityAtBill   int             // Quality score at billing time
-    CreatedAt       time.Time
+// SettlementSnapshot records which measurement was used for each period in a settlement run.
+type SettlementSnapshot struct {
+    ID               uuid.UUID
+    SettlementRunID  uuid.UUID       // References the settlement run
+    AccountID        uuid.UUID       // References Current Account
+    AssetCode        string          // References Asset Directory
+    Period           Period
+    MeasurementID    uuid.UUID       // The measurement used
+    QuantitySettled  decimal.Decimal // Snapshot of quantity at settlement time
+    QualityAtSettle  int             // Quality score at settlement time
+    CreatedAt        time.Time
 }
 
-// ReconciliationService compares billed positions to current positions.
+// ReconciliationService compares settled positions to current positions.
 type ReconciliationService struct {
-    billBindingRepo BillBindingRepository
+    snapshotRepo    SettlementSnapshotRepository
     measurementRepo MeasurementRepository
     valuationEngine ValuationEngine
 }
 
-// Reconcile identifies variances between billed and current positions.
-func (s *ReconciliationService) Reconcile(ctx context.Context, billID uuid.UUID) ([]Variance, error) {
-    bindings, err := s.billBindingRepo.FindByBill(ctx, billID)
+// Reconcile identifies variances between settled and current positions.
+func (s *ReconciliationService) Reconcile(ctx context.Context, runID uuid.UUID) ([]Variance, error) {
+    snapshots, err := s.snapshotRepo.FindByRun(ctx, runID)
     if err != nil {
         return nil, err
     }
 
     var variances []Variance
-    for _, binding := range bindings {
+    for _, snapshot := range snapshots {
         current, err := s.measurementRepo.FindCurrent(ctx,
-            binding.AccountID,
-            binding.AssetCode,
-            binding.Period,
+            snapshot.AccountID,
+            snapshot.AssetCode,
+            snapshot.Period,
             nil, // All attributes
         )
         if err != nil {
             return nil, err
         }
 
-        if !current.Quantity.Equal(binding.QuantityBilled) {
-            delta := current.Quantity.Sub(binding.QuantityBilled)
+        if !current.Quantity.Equal(snapshot.QuantitySettled) {
+            delta := current.Quantity.Sub(snapshot.QuantitySettled)
 
             // Value the variance using the tariff at the original period
             value, err := s.valuationEngine.Valuate(ctx, ValuationRequest{
-                AssetCode:  binding.AssetCode,
+                AssetCode:  snapshot.AssetCode,
                 Quantity:   delta,
-                Period:     binding.Period,
+                Period:     snapshot.Period,
                 Attributes: current.Attributes,
             })
             if err != nil {
@@ -533,12 +575,12 @@ func (s *ReconciliationService) Reconcile(ctx context.Context, billID uuid.UUID)
             }
 
             variances = append(variances, Variance{
-                BillID:          billID,
-                Period:          binding.Period,
-                QuantityBilled:  binding.QuantityBilled,
-                QuantityCurrent: current.Quantity,
-                QuantityDelta:   delta,
-                ValueDelta:      value.SettlementAmount,
+                SettlementRunID:  runID,
+                Period:           snapshot.Period,
+                QuantitySettled:  snapshot.QuantitySettled,
+                QuantityCurrent:  current.Quantity,
+                QuantityDelta:    delta,
+                ValueDelta:       value.SettlementAmount,
             })
         }
     }
@@ -550,38 +592,38 @@ func (s *ReconciliationService) Reconcile(ctx context.Context, billID uuid.UUID)
 **Reconciliation creates adjustments, not mutations:**
 
 ```
-Bill #12345 Reconciliation:
+Settlement Run D+5 Reconciliation:
 
-┌─────────────────┬────────────┬─────────────┬───────────┬────────────┐
-│ Period          │ Billed kWh │ Current kWh │ Delta kWh │ Delta £    │
-├─────────────────┼────────────┼─────────────┼───────────┼────────────┤
-│ 12:00-12:30     │ 10.00      │ 12.00       │ +2.00     │ +£0.30     │
-│ 12:30-13:00     │ 11.00      │ 10.50       │ -0.50     │ -£0.08     │
-│ 13:00-13:30     │ 9.00       │ 9.00        │ 0.00      │ £0.00      │
-├─────────────────┼────────────┼─────────────┼───────────┼────────────┤
-│ Total           │ 30.00      │ 31.50       │ +1.50     │ +£0.22     │
-└─────────────────┴────────────┴─────────────┴───────────┴────────────┘
+┌─────────────────┬─────────────┬─────────────┬───────────┬────────────┐
+│ Period          │ Settled Qty │ Current Qty │ Delta Qty │ Delta Val  │
+├─────────────────┼─────────────┼─────────────┼───────────┼────────────┤
+│ 12:00-12:30     │ 10.00       │ 12.00       │ +2.00     │ +$0.30     │
+│ 12:30-13:00     │ 11.00       │ 10.50       │ -0.50     │ -$0.08     │
+│ 13:00-13:30     │ 9.00        │ 9.00        │ 0.00      │ $0.00      │
+├─────────────────┼─────────────┼─────────────┼───────────┼────────────┤
+│ Total           │ 30.00       │ 31.50       │ +1.50     │ +$0.22     │
+└─────────────────┴─────────────┴─────────────┴───────────┴────────────┘
 
-Action: Create adjustment invoice for £0.22
+Action: Create adjustment entry for $0.22
 ```
 
-**Performance considerations for high-volume bills:**
+**Performance considerations for high-volume settlement runs:**
 
-For bills with many periods (e.g., 48 half-hours × 365 days = 17,520 bindings/year):
+For runs with many periods (e.g., 48 half-hours × 365 days = 17,520 snapshots/year):
 
 ```go
-// FindByBillPaginated returns bindings in batches for large bills.
-func (r *BillBindingRepository) FindByBillPaginated(
+// FindByRunPaginated returns snapshots in batches for large settlement runs.
+func (r *SettlementSnapshotRepository) FindByRunPaginated(
     ctx context.Context,
-    billID uuid.UUID,
+    runID uuid.UUID,
     limit, offset int,
-) ([]BillBinding, error) {
-    var bindings []BillBinding
-    return bindings, r.db.Where("bill_id = ?", billID).
+) ([]SettlementSnapshot, error) {
+    var snapshots []SettlementSnapshot
+    return snapshots, r.db.Where("settlement_run_id = ?", runID).
         Order("period_start ASC").
         Limit(limit).
         Offset(offset).
-        Find(&bindings).Error
+        Find(&snapshots).Error
 }
 
 // BatchFindCurrent reduces round trips when checking many positions.
@@ -594,10 +636,10 @@ func (r *MeasurementRepository) BatchFindCurrent(
 }
 ```
 
-For most use cases (monthly residential energy bills with ~1,440 half-hours),
+For most use cases (monthly energy settlements with ~1,440 half-hours),
 the simple iteration approach is sufficient. Consider pagination when:
-- Annual bills exceed 10,000 bindings
-- Reconciliation jobs process bills in parallel
+- Annual settlement runs exceed 10,000 snapshots
+- Reconciliation jobs process runs in parallel
 
 ## Service Responsibilities
 
@@ -608,14 +650,14 @@ the simple iteration approach is sufficient. Consider pagination when:
 | Delta Engine | Position Keeping | Supersession evaluation |
 | Correction Saga | Position Keeping | Wash & Reload execution |
 | Position Entries | Position Keeping | Net position calculation |
-| Bill Binding (creation) | Financial Accounting | Captures measurement snapshots when generating bills |
-| Bill Binding (storage) | Position Keeping | Bindings stored alongside measurements for query efficiency |
-| Reconciliation | Cross-cutting | Financial Accounting triggers, Position Keeping queries, Valuation prices |
-| Adjustment Invoice | Payment Order | Financial settlement of variance |
+| Settlement Snapshots | Financial Accounting | Owns settlement lifecycle and snapshots |
+| Reconciliation | Financial Accounting | Queries own snapshots, calls Position Keeping API for current measurements |
+| Adjustment Entry | Payment Order | Financial settlement of variance |
 
-**Note on Bill Binding:** While Financial Accounting owns the billing lifecycle and triggers
-binding creation, the bindings are stored in Position Keeping's database for query efficiency
-(joining bindings with measurements). This follows the "data near the queries" principle.
+**Note on Cross-Service Queries:** Per project rules (no cross-schema queries), Financial
+Accounting owns Settlement Snapshots in its own schema. Reconciliation fetches current
+measurements via Position Keeping's API, not direct database joins. This maintains service
+isolation at the cost of additional API calls during reconciliation.
 
 ## Consequences
 
@@ -632,7 +674,7 @@ binding creation, the bindings are stored in Position Keeping's database for que
 * **Storage growth**: All measurements kept forever (required for audit)
 * **Query complexity**: "Current" position requires filtering superseded records
 * **Materialized views**: May need for performance at scale
-* **Ongoing reconciliation**: Bills are never truly "final" until settlement locked
+* **Ongoing reconciliation**: Positions are never truly "final" until settlement locked
 
 ## Implementation Notes
 
@@ -649,50 +691,74 @@ CREATE INDEX idx_measurements_period
     ON measurements USING GIST (period);
 
 -- Reconciliation queries
-CREATE INDEX idx_bill_bindings_bill
-    ON bill_bindings(bill_id);
+CREATE INDEX idx_settlement_snapshots_run
+    ON settlement_snapshots(settlement_run_id);
 ```
 
 ### Overlap Prevention
 
-Preventing overlapping current positions requires coordination at the application layer
-since PostgreSQL exclusion constraints don't support JSONB in the key:
+Preventing overlapping current positions uses **optimistic concurrency** rather than
+pessimistic locking. This is critical for the 100k TPS throughput requirement—SERIALIZABLE
+isolation would cause unacceptable contention.
+
+**Strategy: Position Key Hash with Unique Constraint**
+
+```sql
+-- Add position key hash for optimistic concurrency
+ALTER TABLE measurements ADD COLUMN position_key_hash BYTEA GENERATED ALWAYS AS (
+    sha256(
+        account_id::text ||
+        asset_code ||
+        COALESCE(attributes::text, '{}') ||
+        lower(period)::text ||
+        upper(period)::text
+    )
+) STORED;
+
+-- Partial unique index on non-superseded measurements
+CREATE UNIQUE INDEX idx_measurements_position_unique
+    ON measurements(position_key_hash)
+    WHERE superseded_by IS NULL;
+```
 
 ```go
-// BookMeasurement atomically checks for overlaps and inserts a new measurement.
-// Uses SERIALIZABLE isolation to prevent phantom reads.
+// BookMeasurement uses optimistic concurrency via unique constraint violation.
+// No locks, no SERIALIZABLE - relies on database enforcing uniqueness.
 func (r *MeasurementRepository) BookMeasurement(ctx context.Context, m *Measurement) error {
-    return r.db.Transaction(func(tx *gorm.DB) error {
-        // Check for existing overlapping current measurement
-        var existing Measurement
-        err := tx.Raw(`
-            SELECT * FROM measurements
-            WHERE account_id = ?
-              AND asset_code = ?
-              AND attributes @> ?::jsonb
-              AND period && tstzrange(?, ?)
-              AND superseded_by IS NULL
-            FOR UPDATE
-        `, m.AccountID, m.AssetCode, m.Attributes, m.Period.Start, m.Period.End).
-            Scan(&existing).Error
-
-        if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-            return err
-        }
-        if existing.ID != uuid.Nil {
+    err := r.db.Create(m).Error
+    if err != nil {
+        // Check for unique constraint violation
+        if isUniqueViolation(err, "idx_measurements_position_unique") {
             return ErrOverlappingPosition
         }
+        return err
+    }
+    return nil
+}
 
-        return tx.Create(m).Error
-    }, &sql.TxOptions{Isolation: sql.LevelSerializable})
+// For supersession, use optimistic lock on the existing row
+func (r *MeasurementRepository) Supersede(ctx context.Context, oldID, newID uuid.UUID) error {
+    result := r.db.Model(&Measurement{}).
+        Where("id = ? AND superseded_by IS NULL", oldID).
+        Update("superseded_by", newID)
+
+    if result.RowsAffected == 0 {
+        return ErrAlreadySuperseded  // Lost race - caller should retry or archive
+    }
+    return result.Error
 }
 ```
 
+**Why not SERIALIZABLE?**
+- At 100k TPS, serialization failures would cause cascading retries
+- Position Key Hash gives O(1) conflict detection via B-tree index
+- Retry logic only needed for actual conflicts, not phantom reads
+
 **Attribute Matching:**
 
-When checking for overlaps, attributes are compared using PostgreSQL JSONB containment (`@>`).
-This means the existing record's attributes must contain all key-value pairs from the incoming
-measurement. For exact-match semantics, normalize attributes on ingestion.
+Attributes are included in the position key hash, meaning **exact equality** is required
+for collision detection. This is the correct default—positions with different attributes
+are different positions (e.g., peak vs off-peak tariff periods).
 
 ### Settlement Finality
 
@@ -799,6 +865,10 @@ var (
     // ErrOutsideBackfillWindow indicates the measurement period is older than
     // the configured backfill window for this asset.
     ErrOutsideBackfillWindow = errors.New("measurement outside backfill window")
+
+    // ErrInvalidSettlementRun indicates the settlement run identifier is malformed
+    // or not in the asset's configured schedule.
+    ErrInvalidSettlementRun = errors.New("invalid settlement run identifier")
 )
 ```
 
@@ -809,7 +879,7 @@ var (
 - Quality-based supersession logic (Delta Engine)
 - Measurement lifecycle (append, supersede, lock)
 - Correction pattern (Wash & Reload)
-- Bill binding for reconciliation
+- Settlement snapshots for reconciliation
 - Settlement finality windows
 
 ### Out of Scope (Future ADRs)
@@ -821,29 +891,46 @@ var (
 | **Attribute Schema Validation** | Measurement attributes (`map[string]string`) are opaque in this ADR. Integration with ADR-0014's Schema-on-Write validation for attribute keys/values is implementation detail. |
 | **Event Streaming** | This ADR assumes batch-oriented settlement runs. Real-time streaming ingestion with micro-batching may be addressed in a performance optimization ADR. |
 
-### Attribute Handling Clarification
+### Dispute Fail-Safe Behavior
 
-When checking for existing measurements in `FindCurrent`, attributes are compared using
-**JSONB containment** (`@>` operator). This means:
+Until ADR-0018 (Dispute Resolution Workflow) is implemented, handle `ActionCreateDispute` with
+a fail-safe that preserves the incoming measurement for manual review:
 
 ```go
-// Scenario 1: Exact match required
-// Existing: {"tariff": "peak", "region": "north"}
-// Incoming: {"tariff": "peak", "region": "north"}
-// Result: MATCH ✓
+func (s *MeasurementIngestionService) handleDispute(
+    ctx context.Context,
+    incoming *Measurement,
+    existing *Measurement,
+) error {
+    // 1. Archive the incoming measurement (preserve for audit)
+    incoming.SupersededBy = nil  // Not superseded, just disputed
+    if err := s.repo.Create(ctx, incoming); err != nil {
+        return err
+    }
 
-// Scenario 2: Subset - incoming is contained by existing
-// Existing: {"tariff": "peak", "region": "north"}
-// Incoming: {"tariff": "peak"}
-// Result: MATCH ✓ (incoming subset of existing)
+    // 2. Create dispute record for manual review
+    dispute := Dispute{
+        ID:                    uuid.New(),
+        IncomingMeasurementID: incoming.ID,
+        ExistingMeasurementID: existing.ID,
+        Reason:                "Position locked after final settlement",
+        Status:                DisputeStatusPendingReview,
+        CreatedAt:             time.Now(),
+    }
+    if err := s.disputeRepo.Create(ctx, &dispute); err != nil {
+        return err
+    }
 
-// Scenario 3: Superset - incoming has more keys
-// Existing: {"tariff": "peak"}
-// Incoming: {"tariff": "peak", "region": "north"}
-// Result: NO MATCH (different position key)
+    // 3. Emit event for alerting/monitoring
+    s.events.Publish(ctx, DisputeCreatedEvent{DisputeID: dispute.ID})
+
+    return nil  // Success - measurement preserved, dispute logged
+}
 ```
 
-For strict exact-match semantics, normalize attributes on ingestion and use equality comparison.
+**Key principle:** Never silently drop data. If a measurement arrives for a locked position,
+archive it and create a dispute record. The business can then decide to extend the settlement
+window, adjust via dispute resolution, or acknowledge the variance.
 
 ## Entry Types
 
@@ -939,14 +1026,82 @@ VALUES ('ELEC_HH_KWH', 425, 'M+14');  -- 14 months = ~425 days
 -- Example: Real-time gross settlement (banking)
 INSERT INTO asset_settlement_rules (asset_code, backfill_window_days, final_settlement_run)
 VALUES ('GBP', 0, 'D+0');  -- Same-day finality
+
+-- Example: Compute time (hourly periods)
+INSERT INTO asset_settlement_rules (asset_code, backfill_window_days, final_settlement_run)
+VALUES ('COMPUTE_HOURS', 30, 'M+1');  -- Monthly finality
 ```
+
+### Settlement Run Validation
+
+The `settlement_run` field on measurements uses structured identifiers validated at ingestion:
+
+```go
+// SettlementRunID represents a validated settlement run identifier.
+type SettlementRunID string
+
+// ParseSettlementRun validates and parses a settlement run string.
+// Valid formats: "D+N" (days), "M+N" (months), "FINAL"
+func ParseSettlementRun(s string) (SettlementRunID, error) {
+    if s == "FINAL" {
+        return SettlementRunID(s), nil
+    }
+
+    re := regexp.MustCompile(`^(D|M)\+(\d+)$`)
+    matches := re.FindStringSubmatch(s)
+    if matches == nil {
+        return "", fmt.Errorf("invalid settlement run format: %s", s)
+    }
+
+    return SettlementRunID(s), nil
+}
+
+// IsScheduled checks if this run is in the asset's settlement schedule.
+func (r SettlementRunID) IsScheduled(schedule []string) bool {
+    for _, s := range schedule {
+        if s == string(r) {
+            return true
+        }
+    }
+    return false
+}
+```
+
+**Validation at measurement ingestion:**
+
+```go
+func (s *MeasurementIngestionService) Ingest(ctx context.Context, m *Measurement) error {
+    // Validate settlement_run against asset's configured schedule
+    rules, err := s.rulesRepo.FindByAsset(ctx, m.AssetCode)
+    if err != nil {
+        return err
+    }
+
+    runID, err := ParseSettlementRun(m.SettlementRun)
+    if err != nil {
+        return fmt.Errorf("%w: %v", ErrInvalidSettlementRun, err)
+    }
+
+    if !runID.IsScheduled(rules.SettlementSchedule) {
+        return fmt.Errorf("%w: %s not in schedule for %s",
+            ErrInvalidSettlementRun, m.SettlementRun, m.AssetCode)
+    }
+
+    // Continue with normal ingestion...
+}
+```
+
+This ensures settlement runs are consistent with asset configuration and prevents
+free-form strings that would break reconciliation queries.
 
 ### Valuation Integration
 
 The Valuation Engine (future ADR) must support:
-- Temporal tariff lookup (rate at settlement period, not current)
+- Temporal rate lookup (rate at settlement period, not current)
 - Attribute-based pricing (peak/off-peak, vintage, grade)
 - Multi-period aggregation with different rates per sub-period
+- **Cross-asset conversion**: Direct value translation between non-monetary asset classes
+  (e.g., compute hours → carbon credits, commodity A → commodity B at market rate)
 
 ### Reconsidering This Decision
 
