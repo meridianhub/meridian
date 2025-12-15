@@ -361,8 +361,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		return nil, status.Errorf(codes.InvalidArgument, "deposit failed: %v", err)
 	}
 
-	// Generate transaction ID
-	transactionID := fmt.Sprintf("TXN-%s", uuid.New().String()[:8])
+	// Generate transaction ID (full UUID required by position-keeping service)
+	transactionID := uuid.New().String()
 
 	// If clients are not configured, fall back to simple save (backward compatibility)
 	if s.posKeepingClient == nil || s.finAcctClient == nil {
