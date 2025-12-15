@@ -103,7 +103,7 @@ Architectural Decision Records) format.
   - Independent versioning of database, events, and APIs
   - Follows industry best practices (Google, LinkedIn, Netflix, AWS)
 
-See [ADR-0004](0004-separated-schema-management.md) and [ADR-0005](0005-adapter-pattern-layer-translation.md) for
+See [ADR-0004](0004-event-schema-evolution.md) and [ADR-0005](0005-adapter-pattern-layer-translation.md) for
 details.
 
 ## Future ADRs to Consider
