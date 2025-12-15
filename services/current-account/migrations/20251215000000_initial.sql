@@ -57,7 +57,7 @@ COMMENT ON COLUMN "current_account"."accounts"."party_id" IS
 
 -- Create "liens" table for tracking holds on account balances
 CREATE TABLE "current_account"."liens" (
-  "id" uuid NOT NULL,
+  "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "account_id" uuid NOT NULL,
   "amount_cents" bigint NOT NULL,
   "currency" character varying(3) NOT NULL,
@@ -65,8 +65,8 @@ CREATE TABLE "current_account"."liens" (
   "payment_order_reference" character varying(255) NOT NULL,
   "termination_reason" character varying(1000) NULL,
   "expires_at" timestamptz NULL,
-  "created_at" timestamptz NOT NULL,
-  "updated_at" timestamptz NOT NULL,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
   "version" integer NOT NULL DEFAULT 1,
   PRIMARY KEY ("id"),
   CONSTRAINT "chk_liens_amount_cents" CHECK (amount_cents > 0),
