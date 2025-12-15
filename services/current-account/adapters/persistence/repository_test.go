@@ -4,25 +4,62 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-func setupTestDB(t *testing.T) (*gorm.DB, func()) {
+// testTenantID is the tenant ID used in tests.
+const repoTestTenantID = "test_tenant"
+
+func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{&CurrentAccountEntity{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&CurrentAccountEntity{}})
+
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(repoTestTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the current_accounts table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.current_accounts (
+		id UUID PRIMARY KEY,
+		account_number VARCHAR(255) NOT NULL UNIQUE,
+		party_id VARCHAR(255) NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		balance_cents BIGINT NOT NULL DEFAULT 0,
+		overdraft_limit_cents BIGINT NOT NULL DEFAULT 0,
+		version BIGINT NOT NULL DEFAULT 1,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255)
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema so Create/Update work in the tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
 func TestSaveNewAccount(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -33,7 +70,7 @@ func TestSaveNewAccount(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 	err = repo.Save(ctx, account)
 	if err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -52,7 +89,7 @@ func TestSaveNewAccount(t *testing.T) {
 }
 
 func TestSaveNewAccount_InitialVersion(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -62,7 +99,7 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 	err = repo.Save(ctx, account)
 	require.NoError(t, err)
 
@@ -74,7 +111,7 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 }
 
 func TestSaveUpdateExisting(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -84,7 +121,7 @@ func TestSaveUpdateExisting(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 
 	// Save initial
 	if err := repo.Save(ctx, account); err != nil {
@@ -119,11 +156,11 @@ func TestSaveUpdateExisting(t *testing.T) {
 }
 
 func TestFindByIDNotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 
 	_, err := repo.FindByID(ctx, "ACC-NONEXISTENT")
 	if !errors.Is(err, ErrAccountNotFound) {
@@ -132,7 +169,7 @@ func TestFindByIDNotFound(t *testing.T) {
 }
 
 func TestFindByIBAN(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -142,7 +179,7 @@ func TestFindByIBAN(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
@@ -159,7 +196,7 @@ func TestFindByIBAN(t *testing.T) {
 }
 
 func TestFindByPartyID(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -174,7 +211,7 @@ func TestFindByPartyID(t *testing.T) {
 	account2, err := domain.NewCurrentAccount(iban2, iban2, partyID, "EUR")
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 	if err := repo.Save(ctx, account1); err != nil {
 		t.Fatalf("Save account1 failed: %v", err)
 	}
@@ -193,7 +230,7 @@ func TestFindByPartyID(t *testing.T) {
 }
 
 func TestDeleteAccount(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -203,7 +240,7 @@ func TestDeleteAccount(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
@@ -221,14 +258,14 @@ func TestDeleteAccount(t *testing.T) {
 }
 
 func TestOptimisticLocking(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
 	iban := "GB82WEST12345698765432"
 
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 
 	// Create initial account
 	account1, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
@@ -324,11 +361,11 @@ func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
 	// Skip this test as the database now properly enforces constraints.
 	t.Skip("Skipping: database constraints now prevent corrupted currency data")
 
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 
 	// Manually insert corrupted data (empty currency) into database
 	entity := &CurrentAccountEntity{
@@ -363,11 +400,11 @@ func TestFindByPartyID_PartialCorruption_ReturnsError(t *testing.T) {
 	// the kind of corruption we were testing for.
 	t.Skip("Skipping: database constraints now prevent corrupted currency data")
 
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 
 	// Create a shared party ID for both accounts
 	partyID := uuid.New()
@@ -418,7 +455,7 @@ func TestFindByPartyID_PartialCorruption_ReturnsError(t *testing.T) {
 // Audit context tests
 
 func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -428,9 +465,9 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
-	// Create context with authenticated user
+	// Create context with authenticated user AND tenant (tenant required for multi-tenant operations)
 	testUserID := "user-123"
-	ctx := context.WithValue(context.Background(), auth.UserIDContextKey, testUserID)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, testUserID)
 
 	// Save new account
 	err = repo.Save(ctx, account)
@@ -446,7 +483,7 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 }
 
 func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -457,7 +494,7 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use empty context (no user)
-	ctx := context.Background()
+	// ctx already provided by setupTestDB
 
 	// Save new account
 	err = repo.Save(ctx, account)
@@ -473,7 +510,7 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 }
 
 func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -483,15 +520,15 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
 	require.NoError(t, err)
 
-	// Create with user1
+	// Create with user1 (ctx already has tenant from setupTestDB)
 	user1 := "user-creator"
-	ctx1 := context.WithValue(context.Background(), auth.UserIDContextKey, user1)
+	ctx1 := context.WithValue(ctx, auth.UserIDContextKey, user1)
 	err = repo.Save(ctx1, account)
 	require.NoError(t, err)
 
-	// Update with user2
+	// Update with user2 (ctx already has tenant from setupTestDB)
 	user2 := "user-updater"
-	ctx2 := context.WithValue(context.Background(), auth.UserIDContextKey, user2)
+	ctx2 := context.WithValue(ctx, auth.UserIDContextKey, user2)
 	depositMoney, _ := domain.NewMoney("GBP", 5000)
 	err = account.Deposit(depositMoney)
 	require.NoError(t, err)
