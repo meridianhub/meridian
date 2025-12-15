@@ -273,22 +273,16 @@ func TestExternalReferenceUniqueness(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create second party with same external reference - should fail
-	// Test at the database level by creating directly with entity
-	entity := &PartyEntity{
-		ID:                    uuid.New(),
-		PartyType:             string(domain.PartyTypeOrganization),
-		LegalName:             "Company B",
-		Status:                string(domain.PartyStatusActive),
-		ExternalReference:     stringPtr("12345678"),
-		ExternalReferenceType: stringPtr(string(domain.ExternalReferenceTypeCompaniesHouse)),
-		Version:               1,
-		CreatedBy:             "system",
-		UpdatedBy:             "system",
-	}
+	// Use repository to ensure proper tenant scoping
+	party2, err := domain.NewParty(domain.PartyTypeOrganization, "Company B")
+	require.NoError(t, err)
 
-	err = db.Create(entity).Error
+	err = party2.SetExternalReference("12345678", domain.ExternalReferenceTypeCompaniesHouse)
+	require.NoError(t, err)
+
+	err = repo.Save(ctx, party2)
 	assert.Error(t, err, "Should fail with duplicate external reference")
-	assert.True(t, isDuplicateKeyError(err), "Should be a duplicate key error")
+	assert.True(t, errors.Is(err, ErrPartyExists), "Should be ErrPartyExists due to duplicate external reference")
 }
 
 func TestSoftDeleteVerification(t *testing.T) {

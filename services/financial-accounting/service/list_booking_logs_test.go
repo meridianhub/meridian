@@ -170,8 +170,7 @@ func TestListFinancialBookingLogs_DefensiveTests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			ctx := context.Background()
-			db, cleanup := setupTestDB(t)
+			db, ctx, cleanup := setupTestDB(t)
 			defer cleanup()
 			tt.setupRepo(db)
 
@@ -269,8 +268,7 @@ func TestListFinancialBookingLogs_PaginationBehavior(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			ctx := context.Background()
-			db, cleanup := setupTestDB(t)
+			db, ctx, cleanup := setupTestDB(t)
 			defer cleanup()
 			tt.setup(db)
 
