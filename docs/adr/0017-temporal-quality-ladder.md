@@ -1124,6 +1124,51 @@ func (e PositionEntry) GetAttributes(ctx context.Context, repo MeasurementReposi
 
 For settlement and reconciliation terms, see ADR-0018.
 
+## BIAN v13 Alignment
+
+This ADR's concepts map to BIAN (Banking Industry Architecture Network) v13 service domains:
+
+| Meridian Concept | BIAN Service Domain | BIAN Entity | Notes |
+|-----------------|---------------------|-------------|-------|
+| `MeasurementLog` | Position Keeping | `FinancialPositionLog` (CR) | "Maintain a log of transactions" |
+| `Measurement` | Position Keeping | `FinancialTransactionCapture` (BQ) | Transaction capture behavior |
+| `Period [Start, End]` | Position Keeping | `datetimeperiod` | `FromDateTime` / `ToDateTime` |
+| `TransactionStatus` | Position Keeping | `transactionstatustypevalues` | Initiated, Booked, Confirmed, etc. |
+| `PositionEntry` | Financial Accounting | `LedgerPosting` (BQ) | Ledger posting behavior |
+| Correction booking | Financial Accounting | `UpdateLedgerPosting` | Explicitly for "repair" |
+| `EntryType.ADJUSTMENT` | Position Keeping | `InterestAdjustmentTransaction` | Adjustment transaction type |
+
+**BIAN Types Referenced (from `PositionKeeping.yaml`):**
+
+```yaml
+# Transaction lifecycle status
+transactionstatustypevalues:
+  - Initiated, Executed, Cancelled, Confirmed
+  - Suspended, Pending, Completed, Notified, Booked, Rejected
+
+# Amount quality indicators (partial quality ladder)
+amounttypevalues:
+  - Estimated    # Low quality
+  - Actual       # High quality
+  - Principal, Maximum, Default, Replacement, Reserved, Available
+
+# Adjustment transaction types
+interesttransactiontypevalues:
+  - InterestAllocationTransaction
+  - InterestPaymentTransaction
+  - InterestAdjustmentTransaction  # Correction pattern
+```
+
+**Extensions Beyond BIAN Standard:**
+
+The following Meridian concepts have no direct BIAN equivalent:
+
+- **Quality Ladder / Source Authority Registry**: BIAN's `amounttypevalues` has `Estimated` vs
+  `Actual`, but lacks the full quality ranking hierarchy
+- **Supersession chain** (`superseded_by`): BIAN transactions have status but not supersession
+- **Quality-based precedence rules**: The Delta Engine's decision logic is Meridian-specific
+- **Wash & Reload saga**: BIAN has adjustment transactions but not the atomic correction pattern
+
 ## Links
 
 ### Internal ADRs

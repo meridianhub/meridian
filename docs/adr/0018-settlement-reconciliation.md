@@ -939,6 +939,50 @@ var (
 | **Variance** | Difference between settled quantity and current quantity for a position |
 | **Dispute** | Record created when new data arrives for a locked (finalized) position |
 
+## BIAN v13 Alignment
+
+This ADR's concepts map to BIAN (Banking Industry Architecture Network) v13 service domains:
+
+| Meridian Concept | BIAN Service Domain | BIAN Entity | Notes |
+|-----------------|---------------------|-------------|-------|
+| `SettlementSnapshot` | Trade Settlement | `TradeSettlementProcedure` (CR) | "Final movement of cash and securities" |
+| `ReconciliationService` | Account Reconciliation | `AccountReconciliationProcedure` (CR) | "Handles account reconciliation tasks" |
+| Settlement lifecycle | Card Financial Settlement | `CardFinancialSettlement` | "Reconciliation of settlement against cleared charges" |
+| `Variance` detection | Account Reconciliation | Reconciliation operations | Control, Exchange, Execute |
+| Position locking | Position Keeping | `Control` operation | "Control the processing of the log" |
+
+**BIAN Service Domain Descriptions:**
+
+- **Trade Settlement**: "Handles the final movement of cash and securities between depositories
+  as previously confirmed in the clearing process, in order to settle a market trade"
+- **Account Reconciliation**: "Handles account reconciliation tasks" with operations for
+  Control, Exchange, Execute, Initiate, Notify, Request
+- **Card Financial Settlement**: "Orchestrates the settlement of transactions... used by
+  Issuing and Acquiring banks to perform reconciliation of settlement instructions against
+  cleared charges"
+
+**Service Responsibility Alignment:**
+
+| Meridian Service | BIAN Service Domain | Responsibility |
+|-----------------|---------------------|----------------|
+| Financial Accounting | Financial Accounting | `FinancialBookingLog`, `LedgerPosting` |
+| Financial Accounting | Trade Settlement | Settlement snapshots and lifecycle |
+| Financial Accounting | Account Reconciliation | Variance detection and reconciliation |
+| Position Keeping | Position Keeping | `FinancialPositionLog`, position locking |
+| Payment Order | (various) | Financial settlement of variances |
+
+**Extensions Beyond BIAN Standard:**
+
+The following Meridian concepts extend or have no direct BIAN equivalent:
+
+- **Temporal Authority**: BIAN doesn't model time-relative source authority (Forecasts for
+  future, Actuals for past)
+- **Provisional Settlement**: BIAN settlement is typically final; Meridian supports provisional
+  settlement with later reconciliation
+- **Settlement Run scheduling** (D+1, M+14): Industry-specific patterns not in BIAN standard
+- **Dispute workflow for locked positions**: BIAN has case management but not the specific
+  pattern of archiving incoming data and creating disputes for finalized positions
+
 ## Links
 
 ### Internal ADRs
