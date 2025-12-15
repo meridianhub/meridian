@@ -286,7 +286,7 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	return db, ctx, cleanup
 }
 
-func createTestAccount(t *testing.T, repo *persistence.Repository, ctx context.Context, accountID string) *domain.CurrentAccount {
+func createTestAccount(t *testing.T, ctx context.Context, repo *persistence.Repository, accountID string) *domain.CurrentAccount {
 	t.Helper()
 	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
@@ -327,7 +327,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, repo, ctx, "ACC-001")
+	_ = createTestAccount(t, ctx, repo, "ACC-001")
 
 	// Create mock clients
 	mockPosKeeping := &mockPositionKeepingClient{}
@@ -387,7 +387,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	account := createTestAccount(t, repo, ctx, "ACC-002")
+	account := createTestAccount(t, ctx, repo, "ACC-002")
 	originalBalance := account.Balance.AmountCents()
 
 	// Create mock clients - PositionKeeping configured to fail on initiate
@@ -456,7 +456,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	account := createTestAccount(t, repo, ctx, "ACC-003")
+	account := createTestAccount(t, ctx, repo, "ACC-003")
 	originalBalance := account.Balance.AmountCents()
 
 	// Create mock clients - FinancialAccounting configured to fail
@@ -670,7 +670,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	account := createTestAccount(t, repo, ctx, "ACC-004")
+	account := createTestAccount(t, ctx, repo, "ACC-004")
 	originalBalance := account.Balance.AmountCents()
 
 	// Create mock that tracks compensation
@@ -718,7 +718,7 @@ func TestExecuteDeposit_WithOrchestration_ContextPropagation(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, repo, ctx, "ACC-005")
+	_ = createTestAccount(t, ctx, repo, "ACC-005")
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 	mockFinAcct := &mockFinancialAccountingClient{}
@@ -757,7 +757,7 @@ func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, repo, ctx, "ACC-006")
+	_ = createTestAccount(t, ctx, repo, "ACC-006")
 
 	// Create service WITHOUT clients (backward compatibility mode)
 	svc := NewService(repo, nil)

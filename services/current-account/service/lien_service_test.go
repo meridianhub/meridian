@@ -76,7 +76,7 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	return db, ctx, cleanup
 }
 
-func createTestAccountWithBalance(t *testing.T, repo *persistence.Repository, ctx context.Context, accountID string, balanceCents int64) *domain.CurrentAccount {
+func createTestAccountWithBalance(t *testing.T, ctx context.Context, repo *persistence.Repository, accountID string, balanceCents int64) *domain.CurrentAccount {
 	t.Helper()
 	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
@@ -102,7 +102,7 @@ func TestInitiateLien_Success(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account with £1000 balance
-	createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-001", 100000) // 100000 cents = £1000
+	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-001", 100000) // 100000 cents = £1000
 
 	req := &pb.InitiateLienRequest{
 		AccountId: "ACC-LIEN-001",
@@ -136,7 +136,7 @@ func TestInitiateLien_InsufficientFunds(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account with £100 balance
-	createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-002", 10000) // £100
+	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-002", 10000) // £100
 
 	req := &pb.InitiateLienRequest{
 		AccountId: "ACC-LIEN-002",
@@ -194,7 +194,7 @@ func TestInitiateLien_CurrencyMismatch(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create GBP account
-	createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-003", 100000)
+	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-003", 100000)
 
 	req := &pb.InitiateLienRequest{
 		AccountId: "ACC-LIEN-003",
@@ -225,7 +225,7 @@ func TestInitiateLien_Idempotent(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account with £1000 balance
-	createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-IDEMP", 100000)
+	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP", 100000)
 
 	req := &pb.InitiateLienRequest{
 		AccountId: "ACC-LIEN-IDEMP",
@@ -262,7 +262,7 @@ func TestExecuteLien_Success(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account with £1000 balance
-	account := createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-004", 100000)
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-004", 100000)
 
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
@@ -294,7 +294,7 @@ func TestExecuteLien_Idempotent(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account with £1000 balance
-	account := createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-005", 100000)
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-005", 100000)
 
 	// Create and execute a lien
 	lienAmount, err := domain.NewMoney("GBP", 50000)
@@ -345,7 +345,7 @@ func TestTerminateLien_Success(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account with £1000 balance
-	account := createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-006", 100000)
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-006", 100000)
 
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
@@ -377,7 +377,7 @@ func TestTerminateLien_Idempotent(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account with £1000 balance
-	account := createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-007", 100000)
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-007", 100000)
 
 	// Create lien
 	lienAmount, err := domain.NewMoney("GBP", 50000)
@@ -411,7 +411,7 @@ func TestRetrieveLien_Success(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account
-	account := createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-008", 100000)
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-008", 100000)
 
 	// Create lien
 	lienAmount, err := domain.NewMoney("GBP", 25000)
@@ -510,7 +510,7 @@ func TestMultipleLiens_AvailableBalanceCalculation(t *testing.T) {
 	svc := NewService(repo, lienRepo)
 
 	// Create account with £1000 balance
-	createTestAccountWithBalance(t, repo, ctx, "ACC-LIEN-MULTI", 100000)
+	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-MULTI", 100000)
 
 	// Create first lien for £300
 	req1 := &pb.InitiateLienRequest{
