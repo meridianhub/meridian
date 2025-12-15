@@ -3,9 +3,9 @@
 -- by the Party Service (accessed via gRPC). The customer_id column is kept for now
 -- and will be renamed to party_id in a subsequent migration along with Go code updates.
 
--- Drop FK constraint from accounts table
+-- Drop FK constraint from accounts table (IF EXISTS for idempotency with CockroachDB)
 ALTER TABLE "current_account"."accounts"
-    DROP CONSTRAINT "fk_current_account_customers_accounts";
+    DROP CONSTRAINT IF EXISTS "fk_current_account_customers_accounts";
 
 -- Add comment documenting that customer_id now references Party Service via gRPC (not FK)
 COMMENT ON COLUMN "current_account"."accounts"."customer_id" IS
