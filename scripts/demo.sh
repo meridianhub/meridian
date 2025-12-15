@@ -96,12 +96,20 @@ else
 fi
 echo ""
 
-# Verify services are running
-echo -e "${YELLOW}Verifying services...${NC}"
-kubectl get pods | grep -E "(current-account|position-keeping|financial-accounting|party)" || {
-    echo "Services not healthy. Check: tilt status";
-    exit 1;
+# Verify services are running (with retry)
+verify_services() {
+    kubectl get pods 2>/dev/null | grep -E "(current-account|position-keeping|financial-accounting|party|tenant)" | grep -q "Running"
 }
+
+echo -e "${YELLOW}Verifying services...${NC}"
+while ! verify_services; do
+    echo -e "${YELLOW}⚠ Services not yet running. Press any key to retry, or Ctrl+C to exit.${NC}"
+    kubectl get pods 2>/dev/null | grep -E "(current-account|position-keeping|financial-accounting|party|tenant)" || true
+    read -n 1 -s -r
+    echo ""
+    echo -e "${CYAN}► Retrying...${NC}"
+done
+kubectl get pods | grep -E "(current-account|position-keeping|financial-accounting|party|tenant)"
 echo -e "${GREEN}✓ All services running${NC}\n"
 
 # ════════════════════════════════════════════════════════════════
@@ -172,18 +180,27 @@ check_health() {
     echo ""
 }
 
-check_health "current-account" 50051
-check_health "position-keeping" 50053
-check_health "financial-accounting" 50052
-check_health "payment-order" 50054
-check_health "party" 50055
+run_health_checks() {
+    ALL_HEALTHY=true
+    check_health "current-account" 50051
+    check_health "position-keeping" 50053
+    check_health "financial-accounting" 50052
+    check_health "payment-order" 50054
+    check_health "party" 50055
+}
 
-if [ "$ALL_HEALTHY" = true ]; then
-    echo -e "${GREEN}✓ All services healthy and ready${NC}\n"
-else
+run_health_checks
+
+while [ "$ALL_HEALTHY" != true ]; do
     echo -e "${YELLOW}⚠ Some services are not fully healthy. Demo may have issues.${NC}"
-    echo -e "${YELLOW}  Consider waiting for services to start or check logs.${NC}\n"
-fi
+    echo -e "${YELLOW}  Press any key to retry health checks, or Ctrl+C to exit.${NC}\n"
+    read -n 1 -s -r
+    echo ""
+    echo -e "${CYAN}► Retrying health checks...${NC}\n"
+    run_health_checks
+done
+
+echo -e "${GREEN}✓ All services healthy and ready${NC}\n"
 pause
 
 # ════════════════════════════════════════════════════════════════

@@ -24,8 +24,11 @@ CREATE TABLE platform.tenants (
     -- Links platform infrastructure to BIAN domain entities (Party.Organization)
     party_id VARCHAR(100),
 
-    -- Lifecycle status: active, suspended, deprovisioned
-    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    -- Lifecycle status: provisioning, active, suspended, provisioning_failed, deprovisioned
+    status VARCHAR(20) NOT NULL DEFAULT 'provisioning',
+
+    -- Error details if status = 'provisioning_failed'
+    error_message TEXT,
 
     -- Timestamps
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -38,8 +41,8 @@ CREATE TABLE platform.tenants (
     version INTEGER NOT NULL DEFAULT 1,
 
     -- Constraints
-    CONSTRAINT valid_status CHECK (status IN ('active', 'suspended', 'deprovisioned')),
-    CONSTRAINT valid_tenant_id CHECK (id ~ '^[a-zA-Z0-9_]{1,50}$')
+    -- Note: tenant_id format validation (alphanumeric + underscore) done at application layer
+    CONSTRAINT valid_status CHECK (status IN ('provisioning', 'active', 'suspended', 'provisioning_failed', 'deprovisioned'))
 );
 
 -- Indexes for tenants
@@ -57,6 +60,7 @@ COMMENT ON COLUMN platform.tenants.subdomain IS 'API subdomain for tenant-specif
 COMMENT ON COLUMN platform.tenants.party_id IS 'Reference to corresponding Party in BIAN Party Reference Data Directory (auto-populated on tenant creation)';
 COMMENT ON COLUMN platform.tenants.metadata IS 'Flexible JSON storage for features, quotas, and tenant-specific config';
 COMMENT ON COLUMN platform.tenants.version IS 'Optimistic locking version for concurrent updates';
+COMMENT ON COLUMN platform.tenants.error_message IS 'Error details when status is provisioning_failed';
 
 -- Tenant provisioning status table
 CREATE TABLE platform.tenant_provisioning (

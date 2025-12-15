@@ -20,7 +20,7 @@ CREATE TABLE "current_account"."accounts" (
 
   -- Account details
   "account_type" character varying(50) NOT NULL,
-  "currency" character(3) NOT NULL DEFAULT 'GBP',
+  "currency" character varying(3) NOT NULL DEFAULT 'GBP',
   "status" character varying(20) NOT NULL DEFAULT 'active',
 
   -- Party reference (external - Party Service via gRPC)
@@ -67,7 +67,7 @@ CREATE TABLE "current_account"."liens" (
   "expires_at" timestamptz NULL,
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "updated_at" timestamptz NOT NULL DEFAULT now(),
-  "version" integer NOT NULL DEFAULT 1,
+  "version" bigint NOT NULL DEFAULT 1,
   PRIMARY KEY ("id"),
   CONSTRAINT "chk_liens_amount_cents" CHECK (amount_cents > 0),
   CONSTRAINT "chk_liens_status" CHECK (status IN ('ACTIVE', 'EXECUTED', 'TERMINATED')),

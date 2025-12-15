@@ -6,10 +6,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// contractTestTenantID is a consistent tenant ID used across contract tests.
+// Named differently to avoid collision with testTenantID in lien_repository_test.go.
+var contractTestTenantID = tenant.MustNewTenantID("contract_test")
 
 // Contract tests validate that repository operations work correctly with
 // different values for account_id vs account_identification.
@@ -27,7 +32,7 @@ func TestFindByID_UsesAccountID(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
+	ctx := tenant.WithTenant(context.Background(), contractTestTenantID)
 
 	// Create account with DISTINCT values for account_id and account_identification
 	partyID := uuid.New().String()
@@ -58,7 +63,7 @@ func TestFindByIDForUpdate_UsesAccountID(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
+	ctx := tenant.WithTenant(context.Background(), contractTestTenantID)
 
 	partyID := uuid.New().String()
 	accountID := "ACC-" + uuid.New().String()[:8]
@@ -82,7 +87,7 @@ func TestDelete_UsesAccountID(t *testing.T) {
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
+	ctx := tenant.WithTenant(context.Background(), contractTestTenantID)
 
 	partyID := uuid.New().String()
 	accountID := "ACC-" + uuid.New().String()[:8]
