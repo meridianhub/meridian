@@ -894,7 +894,6 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-
 	testCases := []struct {
 		name          string
 		units         int64
@@ -982,7 +981,6 @@ func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 		Logger:               logger,
 	})
 	require.NoError(t, err)
-
 
 	testCases := []struct {
 		name         string

@@ -459,11 +459,6 @@ func TestPing(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// Helper function for creating string pointers
-func stringPtr(s string) *string {
-	return &s
-}
-
 // Multi-Organization Tests
 
 func TestSave_WithOrganizationContext_SetsSearchPath(t *testing.T) {

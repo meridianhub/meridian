@@ -88,7 +88,6 @@ func BenchmarkRepository_Create(b *testing.B) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -117,7 +116,6 @@ func BenchmarkRepository_FindByID(b *testing.B) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	
 
 	// Create a payment order to retrieve
 	amount, err := cadomain.NewMoney("GBP", 10000)
@@ -150,7 +148,6 @@ func BenchmarkRepository_FindByIdempotencyKey(b *testing.B) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	
 
 	// Create a payment order to retrieve
 	amount, err := cadomain.NewMoney("GBP", 10000)
@@ -183,7 +180,6 @@ func BenchmarkRepository_FindByGatewayReferenceID(b *testing.B) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	
 
 	// Create a payment order with gateway reference
 	amount, err := cadomain.NewMoney("GBP", 10000)
@@ -231,7 +227,6 @@ func BenchmarkRepository_Update(b *testing.B) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	
 
 	// Pre-create a pool of payment orders for update testing.
 	// Using a fixed pool size avoids OOM when b.N grows to millions during calibration.
@@ -314,7 +309,6 @@ func BenchmarkRepository_FindByDebtorAccountIDWithCursor(b *testing.B) {
 			defer cleanup()
 
 			repo := NewPaymentOrderRepository(db)
-			
 
 			// Pre-populate payment orders
 			for i := 0; i < bm.numOrders; i++ {
@@ -357,7 +351,6 @@ func BenchmarkRepository_StateTransitionSequence(b *testing.B) {
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	
 
 	b.ResetTimer()
 	b.ReportAllocs()
