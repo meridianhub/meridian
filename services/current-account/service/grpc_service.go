@@ -66,7 +66,7 @@ type Config struct {
 	LienRepository            *persistence.LienRepository
 	PositionKeepingTarget     string // e.g., "positionkeeping-service:50051"
 	FinancialAccountingTarget string // e.g., "financialaccounting-service:50052"
-	PartyServiceTarget        string // e.g., "party-service:50054"
+	PartyServiceTarget        string // e.g., "party-service:50055"
 	Logger                    *slog.Logger
 	Tracer                    *observability.Tracer
 }

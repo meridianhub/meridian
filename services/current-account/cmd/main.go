@@ -389,7 +389,7 @@ func createServiceWithClients(
 	partyGRPCClient, err := clients.NewPartyClient(&clients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   namespace,
-		Port:        50054,
+		Port:        50055, // Party service port (see services/party/k8s/service.yaml)
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
 	})
