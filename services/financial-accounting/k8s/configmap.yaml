@@ -20,6 +20,10 @@ data:
   GRPC_PORT: "50052"
   GRPC_MAX_CONCURRENT_STREAMS: "100"
 
+  # Redis configuration for idempotency
+  REDIS_ENABLED: "true"
+  REDIS_ADDRESS: "redis:6379"
+
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "financial-accounting-service"
   OTEL_SAMPLING_RATE: "0.1"
