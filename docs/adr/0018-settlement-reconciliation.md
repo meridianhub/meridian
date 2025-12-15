@@ -121,6 +121,22 @@ type SourceAuthority struct {
 - For **Future periods** (T > Now): Only `TemporalContext: Future` sources are valid. Forecasts win by default.
 - When time advances and Actuals arrive, they supersede Forecasts automatically.
 
+**Temporal Authority Evaluation:**
+
+Authority is evaluated **at query time**, not proactively:
+
+- When a measurement is ingested, `DeltaEngine` compares `Period.End` against `time.Now()`
+  to determine temporal context (past vs future)
+- When a settlement run executes, it evaluates authority for each period based on the
+  run's effective date
+- There is no scheduled process to "flip" authority when time advances
+
+**Rationale:** Settlement runs are the natural business boundary where authority matters.
+Proactive re-evaluation would require scheduling infrastructure and produce events that
+may have no consumer. Components querying for "current authoritative value" must evaluate
+temporal context at query time. The `SourceAuthority` registry provides the rules; the
+consumer applies them.
+
 ### 2. Provisional Settlement
 
 When a financial action is taken based on non-final data (Forecast, Estimate), we **Freeze**
@@ -460,6 +476,13 @@ Events use the **transactional outbox pattern** rather than direct publishing be
 Accounting owns Settlement Snapshots in its own schema. Reconciliation fetches current
 measurements via Position Keeping's API, not direct database joins. This maintains service
 isolation at the cost of additional API calls during reconciliation.
+
+**Cross-Tenant Reconciliation:** By design, there is no special backdoor for cross-tenant
+reconciliation. When two organizations need to reconcile positions (e.g., inter-company
+settlements, counterparty reconciliation), they are treated as two external systems
+communicating via standard APIs. Each tenant's data remains isolated per ADR-0016; any
+cross-tenant data exchange happens through explicit integration contracts, not internal
+shortcuts. This ensures tenant isolation guarantees are never compromised for convenience.
 
 ## Consequences
 

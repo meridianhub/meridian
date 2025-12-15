@@ -264,6 +264,13 @@ CREATE INDEX idx_measurements_tenant ON measurements(tenant_id);
 -- concurrency via position_key_hash. PostgreSQL exclusion constraints cannot
 -- handle the multi-column key (tenant_id, account_id, asset_code, attributes) with JSONB.
 --
+-- APPLICATION-LEVEL ENFORCEMENT IS THE LONG-TERM STRATEGY:
+-- PostgreSQL exclusion constraints with GiST indexes work well for simple TSTZRANGE
+-- overlap detection, but our composite key includes JSONB attributes which cannot
+-- participate in exclusion constraints. Custom operators would add complexity without
+-- proportional benefit. The application layer (DeltaEngine) already evaluates overlap
+-- as part of its supersession logic, making database-level enforcement redundant.
+--
 -- See the Overlap Prevention section in Implementation Notes for details.
 
 CREATE INDEX idx_measurements_lookup
