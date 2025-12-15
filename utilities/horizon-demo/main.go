@@ -156,6 +156,8 @@ var (
 type Config struct {
 	// Target is the gRPC target address for services
 	Target string
+	// TenantID is the tenant context for multi-tenant operations
+	TenantID string
 	// Timeout is the client-side timeout for the sabotage attempt
 	Timeout time.Duration
 	// Amount is the payment amount in pence
@@ -172,6 +174,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Target:    "localhost:50051",
+		TenantID:  "demo", // Default tenant matching demo.sh
 		Timeout:   30 * time.Millisecond,
 		Amount:    10000, // GBP 100.00 in pence
 		Output:    "./integrity_report.json",
@@ -230,6 +233,8 @@ The demo:
 	flags := rootCmd.Flags()
 	flags.StringVar(&cfg.Target, "target", cfg.Target,
 		"gRPC target address for CurrentAccount and PaymentOrder services")
+	flags.StringVar(&cfg.TenantID, "tenant", cfg.TenantID,
+		"tenant ID for multi-tenant context (default: demo)")
 	flags.DurationVar(&cfg.Timeout, "timeout", cfg.Timeout,
 		"client-side timeout for sabotage attempt (simulated network failure)")
 	flags.Int64Var(&cfg.Amount, "amount", cfg.Amount,
@@ -261,6 +266,7 @@ func runDemo(cfg *Config) (*DemoResult, error) {
 	logger.Info("starting Horizon Integrity Proof",
 		"version", Version,
 		"target", cfg.Target,
+		"tenant", cfg.TenantID,
 		"timeout", cfg.Timeout,
 		"amount_pence", cfg.Amount,
 		"output", cfg.Output,

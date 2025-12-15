@@ -217,6 +217,24 @@ func ContextWithCorrelationID(ctx context.Context, correlationID string) context
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
+// ContextWithTenantID creates a new context with the tenant ID set in gRPC metadata.
+// All service calls require tenant context for multi-tenant isolation.
+func ContextWithTenantID(ctx context.Context, tenantID string) context.Context {
+	if tenantID == "" {
+		return ctx
+	}
+
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		md = metadata.New(nil)
+	} else {
+		md = md.Copy()
+	}
+
+	md.Set("x-tenant-id", tenantID)
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
 // ExtractCorrelationID attempts to extract a correlation ID from the context.
 // It checks multiple common keys used for correlation/request tracking.
 func ExtractCorrelationID(ctx context.Context) string {
