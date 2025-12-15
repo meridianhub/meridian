@@ -197,13 +197,13 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 	})
 }
 
-// FindByID retrieves an account by its account identification (IBAN).
+// FindByID retrieves an account by its internal account ID (e.g., "ACC-xxx").
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
-		result := tx.Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
+		result := tx.Where("account_id = ? AND deleted_at IS NULL", accountID).First(&entity)
 
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return ErrAccountNotFound
@@ -222,7 +222,7 @@ func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.Cu
 	return account, nil
 }
 
-// FindByIDForUpdate retrieves an account by its account identification with a pessimistic lock.
+// FindByIDForUpdate retrieves an account by its internal account ID with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 //
@@ -237,7 +237,7 @@ func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*
 	err := r.withForUpdateScope(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("account_identification = ? AND deleted_at IS NULL", accountID).
+			Where("account_id = ? AND deleted_at IS NULL", accountID).
 			First(&entity)
 
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -372,12 +372,12 @@ func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]*doma
 	return accounts, nil
 }
 
-// Delete soft deletes an account.
+// Delete soft deletes an account by its internal account ID.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) Delete(ctx context.Context, accountID string) error {
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Model(&CurrentAccountEntity{}).
-			Where("account_identification = ?", accountID).
+			Where("account_id = ?", accountID).
 			Update("deleted_at", time.Now()).Error
 	})
 }

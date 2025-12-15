@@ -227,13 +227,13 @@ CREATE_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"base_currency\": \"CURRENCY_GBP\"
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount)
 
-ACCOUNT_ID=$(echo "$CREATE_RESPONSE" | jq -r '.account_id')
+ACCOUNT_ID=$(echo "$CREATE_RESPONSE" | jq -r '.accountId')
 echo -e "${GREEN}✓ Account Created:${NC} $ACCOUNT_ID"
 echo "$CREATE_RESPONSE" | jq '{
-  account_id: .account_id,
-  status: .facility.account_status,
-  currency: .facility.base_currency,
-  balance: .facility.current_balance.current_balance.amount
+  account_id: .accountId,
+  status: .facility.accountStatus,
+  currency: .facility.baseCurrency,
+  balance: .facility.currentBalance.currentBalance.amount
 }'
 echo ""
 
