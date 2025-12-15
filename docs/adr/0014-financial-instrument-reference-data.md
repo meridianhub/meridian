@@ -140,7 +140,7 @@ func (t InstrumentType) Dimension() string {
     if t == InstrumentTypeCommodity {
         return "Commodity"
     }
-    return "Monetary"
+    return "Monetary"  // Safe default: CHECK constraint enforces valid types
 }
 ```
 

@@ -152,6 +152,11 @@ const (
 
 // Dimension returns the compile-time dimension for this instrument type.
 // Used for type safety and partition routing.
+//
+// Note: Defaults to Monetary for unknown types. This is safe because:
+// 1. Database CHECK constraint enforces valid instrument_type values
+// 2. Schema-on-Write validation rejects unknown types at ingestion
+// 3. Monetary is the conservative default (regulated assets)
 func (t InstrumentType) Dimension() string {
     if t == InstrumentTypeCommodity {
         return "Commodity"
