@@ -2,6 +2,9 @@
 -- Uses unqualified table names for multi-tenant schema routing.
 -- Tables are created in whichever schema is set via search_path (e.g., org_acme_bank).
 
+-- Create schema for party service
+CREATE SCHEMA IF NOT EXISTS "party";
+
 -- Create "parties" table
 CREATE TABLE "parties" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
