@@ -31,20 +31,28 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the current_accounts table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.current_accounts (
-		id UUID PRIMARY KEY,
-		account_number VARCHAR(255) NOT NULL UNIQUE,
-		party_id VARCHAR(255) NOT NULL,
-		currency VARCHAR(3) NOT NULL,
-		status VARCHAR(20) NOT NULL,
-		balance_cents BIGINT NOT NULL DEFAULT 0,
-		overdraft_limit_cents BIGINT NOT NULL DEFAULT 0,
+	// Create the accounts table in the tenant schema (matching CurrentAccountEntity.TableName())
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.accounts (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		account_id VARCHAR(100) NOT NULL UNIQUE,
+		account_identification VARCHAR(34) NOT NULL UNIQUE,
+		account_type VARCHAR(50) NOT NULL DEFAULT 'current',
+		currency CHAR(3) NOT NULL DEFAULT 'GBP',
+		status VARCHAR(20) NOT NULL DEFAULT 'active',
+		party_id UUID NOT NULL,
+		balance BIGINT NOT NULL DEFAULT 0,
+		available_balance BIGINT NOT NULL DEFAULT 0,
+		overdraft_limit BIGINT NOT NULL DEFAULT 0,
+		overdraft_rate NUMERIC(5,4) NOT NULL DEFAULT 0,
+		balance_updated_at TIMESTAMP WITH TIME ZONE,
+		opened_at TIMESTAMP WITH TIME ZONE,
+		closed_at TIMESTAMP WITH TIME ZONE,
 		version BIGINT NOT NULL DEFAULT 1,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		created_by VARCHAR(255),
-		updated_by VARCHAR(255)
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		created_by VARCHAR(100) NOT NULL DEFAULT 'test',
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		updated_by VARCHAR(100) NOT NULL DEFAULT 'test',
+		deleted_at TIMESTAMP WITH TIME ZONE
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
