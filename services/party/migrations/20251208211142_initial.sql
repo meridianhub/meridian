@@ -1,7 +1,10 @@
 -- Party Service initial migration
 -- Uses UNQUALIFIED table names to support multi-organization routing via search_path.
--- The schema is created by organization provisioning, not by this migration.
--- Runtime search_path (e.g., org_acme_bank) routes queries to the correct org schema.
+-- For local dev: creates 'party' schema, search_path=party routes here
+-- For multi-org: org schemas created by provisioning, search_path routes to org schema
+
+-- Create schema for local development (idempotent - harmless in multi-org mode)
+CREATE SCHEMA IF NOT EXISTS "party";
 
 -- Create "parties" table (unqualified - uses search_path for schema routing)
 CREATE TABLE "parties" (
