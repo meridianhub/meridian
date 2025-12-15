@@ -2,25 +2,77 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-func setupTestDB(t *testing.T) (*gorm.DB, func()) {
+const testTenantID = "test_tenant"
+
+func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{}})
-	return db, cleanup
+
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(testTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create tables in tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_logs (
+		id UUID PRIMARY KEY,
+		financial_account_type VARCHAR(50) NOT NULL,
+		product_service_reference VARCHAR(255) NOT NULL,
+		business_unit_reference VARCHAR(255) NOT NULL,
+		chart_of_accounts_rules TEXT NOT NULL,
+		base_currency VARCHAR(3) NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		version BIGINT NOT NULL DEFAULT 1,
+		deleted_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_postings (
+		id UUID PRIMARY KEY,
+		financial_booking_log_id UUID NOT NULL,
+		posting_direction VARCHAR(20) NOT NULL,
+		amount_cents BIGINT NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		account_id VARCHAR(255) NOT NULL,
+		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
+		posting_result TEXT NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		correlation_id VARCHAR(255) NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		deleted_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
 func TestProcessDeposit(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
@@ -32,8 +84,6 @@ func TestProcessDeposit(t *testing.T) {
 		CorrelationID: "deposit-001",
 		ValueDate:     time.Now(),
 	}
-
-	ctx := context.Background()
 	err := service.ProcessDeposit(ctx, event)
 	if err != nil {
 		t.Fatalf("ProcessDeposit failed: %v", err)
@@ -79,11 +129,10 @@ func TestProcessDeposit(t *testing.T) {
 }
 
 func TestValidateDoubleEntry(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
-	ctx := context.Background()
 
 	// Process a deposit (creates balanced entries)
 	event := DepositEvent{
@@ -115,7 +164,7 @@ func TestValidateDoubleEntry(t *testing.T) {
 }
 
 func TestProcessDeposit_InvalidAmount(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
@@ -127,8 +176,6 @@ func TestProcessDeposit_InvalidAmount(t *testing.T) {
 		CorrelationID: "deposit-003",
 		ValueDate:     time.Now(),
 	}
-
-	ctx := context.Background()
 	err := service.ProcessDeposit(ctx, event)
 	if err == nil {
 		t.Error("Expected error for zero amount, got nil")
@@ -136,11 +183,10 @@ func TestProcessDeposit_InvalidAmount(t *testing.T) {
 }
 
 func TestGetPostingsByBookingLog(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
-	ctx := context.Background()
 
 	// Create some postings
 	event := DepositEvent{
@@ -187,11 +233,10 @@ func TestGetPostingsByBookingLog(t *testing.T) {
 }
 
 func TestValidateDoubleEntry_Unbalanced(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 	repo := persistence.NewLedgerRepository(db)
 	service := NewPostingService(repo, "BANK-CASH-001")
-	ctx := context.Background()
 
 	bookingLogID := uuid.New()
 

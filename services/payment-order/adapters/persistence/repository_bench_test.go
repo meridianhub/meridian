@@ -2,13 +2,16 @@ package persistence
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -23,7 +26,7 @@ var benchTime = time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 // We pass a minimal testing.T - if container setup fails, the detached T will call Fatalf
 // which triggers runtime.Goexit(). The benchmark framework catches this appropriately.
 // This is a pragmatic workaround until testdb.SetupPostgres accepts testing.TB.
-func setupBenchDB(b *testing.B) (*gorm.DB, func()) {
+func setupBenchDB(b *testing.B) (*gorm.DB, context.Context, func()) {
 	b.Helper()
 	// Use testing.T with Fatalf that properly fails the benchmark
 	t := &testing.T{}
@@ -31,17 +34,61 @@ func setupBenchDB(b *testing.B) (*gorm.DB, func()) {
 	if t.Failed() {
 		b.Fatalf("setupBenchDB: testcontainer setup failed")
 	}
-	return db, cleanup
+
+	// Create tenant schema
+	tid := tenant.TenantID(testTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create payment_orders table in tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.payment_orders (
+		id UUID PRIMARY KEY,
+		debtor_account_id VARCHAR(255) NOT NULL,
+		creditor_reference VARCHAR(255) NOT NULL,
+		amount_cents BIGINT NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+		correlation_id VARCHAR(255),
+		causation_id VARCHAR(255),
+		lien_id VARCHAR(255),
+		gateway_reference_id VARCHAR(255),
+		ledger_booking_id VARCHAR(255),
+		failure_reason TEXT,
+		error_code VARCHAR(50),
+		version INTEGER NOT NULL DEFAULT 1,
+		lien_execution_status VARCHAR(20),
+		lien_execution_attempts INTEGER DEFAULT 0,
+		lien_execution_error TEXT,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		reserved_at TIMESTAMP WITH TIME ZONE,
+		executing_at TIMESTAMP WITH TIME ZONE,
+		completed_at TIMESTAMP WITH TIME ZONE,
+		failed_at TIMESTAMP WITH TIME ZONE,
+		cancelled_at TIMESTAMP WITH TIME ZONE,
+		reversed_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set search_path to tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
 // BenchmarkRepository_Create benchmarks the Create operation.
 // This measures the hot path for persisting new payment orders.
 func BenchmarkRepository_Create(b *testing.B) {
-	db, cleanup := setupBenchDB(b)
+	db, ctx, cleanup := setupBenchDB(b)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
+	
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -66,11 +113,11 @@ func BenchmarkRepository_Create(b *testing.B) {
 // BenchmarkRepository_FindByID benchmarks the FindByID operation.
 // This is a primary key lookup - the most efficient read path.
 func BenchmarkRepository_FindByID(b *testing.B) {
-	db, cleanup := setupBenchDB(b)
+	db, ctx, cleanup := setupBenchDB(b)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
+	
 
 	// Create a payment order to retrieve
 	amount, err := cadomain.NewMoney("GBP", 10000)
@@ -99,11 +146,11 @@ func BenchmarkRepository_FindByID(b *testing.B) {
 // BenchmarkRepository_FindByIdempotencyKey benchmarks the idempotency key lookup.
 // This is used for idempotent request handling and must be fast.
 func BenchmarkRepository_FindByIdempotencyKey(b *testing.B) {
-	db, cleanup := setupBenchDB(b)
+	db, ctx, cleanup := setupBenchDB(b)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
+	
 
 	// Create a payment order to retrieve
 	amount, err := cadomain.NewMoney("GBP", 10000)
@@ -132,11 +179,11 @@ func BenchmarkRepository_FindByIdempotencyKey(b *testing.B) {
 // BenchmarkRepository_FindByGatewayReferenceID benchmarks gateway reference lookup.
 // This is used for webhook callback handling.
 func BenchmarkRepository_FindByGatewayReferenceID(b *testing.B) {
-	db, cleanup := setupBenchDB(b)
+	db, ctx, cleanup := setupBenchDB(b)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
+	
 
 	// Create a payment order with gateway reference
 	amount, err := cadomain.NewMoney("GBP", 10000)
@@ -180,11 +227,11 @@ func BenchmarkRepository_FindByGatewayReferenceID(b *testing.B) {
 // Note: Each iteration creates a fresh domain object but updates an existing database row.
 // This isolates database UPDATE performance from state machine transition logic.
 func BenchmarkRepository_Update(b *testing.B) {
-	db, cleanup := setupBenchDB(b)
+	db, ctx, cleanup := setupBenchDB(b)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
+	
 
 	// Pre-create a pool of payment orders for update testing.
 	// Using a fixed pool size avoids OOM when b.N grows to millions during calibration.
@@ -263,11 +310,11 @@ func BenchmarkRepository_FindByDebtorAccountIDWithCursor(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			db, cleanup := setupBenchDB(b)
+			db, ctx, cleanup := setupBenchDB(b)
 			defer cleanup()
 
 			repo := NewPaymentOrderRepository(db)
-			ctx := context.Background()
+			
 
 			// Pre-populate payment orders
 			for i := 0; i < bm.numOrders; i++ {
@@ -306,11 +353,11 @@ func BenchmarkRepository_FindByDebtorAccountIDWithCursor(b *testing.B) {
 // BenchmarkRepository_StateTransitionSequence benchmarks a complete state transition sequence.
 // This simulates the full lifecycle: INITIATED -> RESERVED -> EXECUTING -> COMPLETED.
 func BenchmarkRepository_StateTransitionSequence(b *testing.B) {
-	db, cleanup := setupBenchDB(b)
+	db, ctx, cleanup := setupBenchDB(b)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
+	
 
 	b.ResetTimer()
 	b.ReportAllocs()

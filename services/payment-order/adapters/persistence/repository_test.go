@@ -4,24 +4,73 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-func setupTestDB(t *testing.T) (*gorm.DB, func()) {
+const testTenantID = "test_tenant"
+
+func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}})
+
+	// Create tenant schema
+	tid := tenant.TenantID(testTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create payment_orders table in tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.payment_orders (
+		id UUID PRIMARY KEY,
+		debtor_account_id VARCHAR(255) NOT NULL,
+		creditor_reference VARCHAR(255) NOT NULL,
+		amount_cents BIGINT NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+		correlation_id VARCHAR(255),
+		causation_id VARCHAR(255),
+		lien_id VARCHAR(255),
+		gateway_reference_id VARCHAR(255),
+		ledger_booking_id VARCHAR(255),
+		failure_reason TEXT,
+		error_code VARCHAR(50),
+		version INTEGER NOT NULL DEFAULT 1,
+		lien_execution_status VARCHAR(20),
+		lien_execution_attempts INTEGER DEFAULT 0,
+		lien_execution_error TEXT,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		reserved_at TIMESTAMP WITH TIME ZONE,
+		executing_at TIMESTAMP WITH TIME ZONE,
+		completed_at TIMESTAMP WITH TIME ZONE,
+		failed_at TIMESTAMP WITH TIME ZONE,
+		cancelled_at TIMESTAMP WITH TIME ZONE,
+		reversed_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set search_path to tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
 func TestPaymentOrderRepository_Create(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
@@ -37,7 +86,6 @@ func TestPaymentOrderRepository_Create(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Create(ctx, po)
 	require.NoError(t, err)
 
@@ -56,18 +104,17 @@ func TestPaymentOrderRepository_Create(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_FindByID_NotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 
 	_, err := repo.FindByID(ctx, uuid.New())
 	assert.ErrorIs(t, err, ErrPaymentOrderNotFound)
 }
 
 func TestPaymentOrderRepository_FindByIdempotencyKey(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
@@ -82,7 +129,6 @@ func TestPaymentOrderRepository_FindByIdempotencyKey(t *testing.T) {
 		"corr-001",
 	)
 	require.NoError(t, err)
-	ctx := context.Background()
 	require.NoError(t, repo.Create(ctx, po))
 
 	retrieved, err := repo.FindByIdempotencyKey(ctx, "unique-idem-key")
@@ -92,18 +138,17 @@ func TestPaymentOrderRepository_FindByIdempotencyKey(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_FindByIdempotencyKey_NotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 
 	_, err := repo.FindByIdempotencyKey(ctx, "nonexistent-key")
 	assert.ErrorIs(t, err, ErrPaymentOrderNotFound)
 }
 
 func TestPaymentOrderRepository_FindByGatewayReferenceID(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
@@ -118,7 +163,6 @@ func TestPaymentOrderRepository_FindByGatewayReferenceID(t *testing.T) {
 		"corr-001",
 	)
 	require.NoError(t, err)
-	ctx := context.Background()
 	require.NoError(t, repo.Create(ctx, po))
 
 	// Reserve and execute to set gateway reference
@@ -136,22 +180,20 @@ func TestPaymentOrderRepository_FindByGatewayReferenceID(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_FindByGatewayReferenceID_NotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 
 	_, err := repo.FindByGatewayReferenceID(ctx, "nonexistent-gateway-ref")
 	assert.ErrorIs(t, err, ErrPaymentOrderNotFound)
 }
 
 func TestPaymentOrderRepository_Update_Reserve(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -180,11 +222,10 @@ func TestPaymentOrderRepository_Update_Reserve(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_Update_Execute(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -216,11 +257,10 @@ func TestPaymentOrderRepository_Update_Execute(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_Update_Complete(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -255,11 +295,10 @@ func TestPaymentOrderRepository_Update_Complete(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_Update_Fail(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -289,11 +328,10 @@ func TestPaymentOrderRepository_Update_Fail(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_Update_Cancel(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -322,11 +360,10 @@ func TestPaymentOrderRepository_Update_Cancel(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_Update_Reverse(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -365,11 +402,10 @@ func TestPaymentOrderRepository_Update_Reverse(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_OptimisticLocking(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -409,11 +445,10 @@ func TestPaymentOrderRepository_OptimisticLocking(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_IdempotencyKeyUniqueness(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -443,11 +478,10 @@ func TestPaymentOrderRepository_IdempotencyKeyUniqueness(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_Update_NonExistent_ReturnsError(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 
 	// Create a payment order in memory but don't save it
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -482,11 +516,10 @@ func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_FindByID_CorruptedData_ReturnsError(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 
 	// Manually insert corrupted data (empty currency)
 	corruptedEntity := &PaymentOrderEntity{
@@ -509,11 +542,10 @@ func TestPaymentOrderRepository_FindByID_CorruptedData_ReturnsError(t *testing.T
 }
 
 func TestPaymentOrderRepository_CausationID(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -539,11 +571,10 @@ func TestPaymentOrderRepository_CausationID(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_FindByDebtorAccountID(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
@@ -587,11 +618,10 @@ func TestPaymentOrderRepository_FindByDebtorAccountID(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_FindByDebtorAccountID_Empty(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 
 	// Find for non-existent account
 	paymentOrders, err := repo.FindByDebtorAccountID(ctx, "nonexistent-acc")
@@ -601,11 +631,10 @@ func TestPaymentOrderRepository_FindByDebtorAccountID_Empty(t *testing.T) {
 }
 
 func TestPaymentOrderRepository_FindByDebtorAccountID_CorruptedData_ReturnsError(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewPaymentOrderRepository(db)
-	ctx := context.Background()
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 

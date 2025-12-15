@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,14 +19,48 @@ import (
 	"gorm.io/gorm"
 )
 
+const testTenantID = "test_tenant"
+
 // setupIntegrationTest creates a PostgreSQL testcontainer with the party schema
 // and returns a configured Service for integration testing.
-func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, func()) {
+func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, func()) {
 	t.Helper()
 
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.PartyEntity{},
 	})
+
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(testTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the parties table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.parties (
+		id UUID PRIMARY KEY,
+		party_type VARCHAR(20) NOT NULL,
+		legal_name VARCHAR(255) NOT NULL,
+		display_name VARCHAR(255),
+		status VARCHAR(20) NOT NULL,
+		external_reference VARCHAR(255),
+		external_reference_type VARCHAR(50),
+		version BIGINT NOT NULL DEFAULT 1,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		deleted_at TIMESTAMP WITH TIME ZONE,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255),
+		UNIQUE(external_reference, external_reference_type)
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema so Create/Update work in the tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
 
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -32,7 +68,7 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, func()) {
 	svc, err := NewService(repo, logger)
 	require.NoError(t, err, "Failed to create service")
 
-	return svc, db, cleanup
+	return svc, db, ctx, cleanup
 }
 
 // TestRegisterParty_Person verifies successful registration of a person party
@@ -43,10 +79,8 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, func()) {
 // 2. Verify response contains party_id and correct fields
 // 3. Retrieve by ID and verify fields match
 func TestRegisterParty_Person(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	// Register a person party
 	registerReq := &pb.RegisterPartyRequest{
@@ -101,10 +135,8 @@ func TestRegisterParty_Person(t *testing.T) {
 // 2. Verify status is ACTIVE by default
 // 3. Retrieve by ID
 func TestRegisterParty_Organization(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	// Register an organization party with LEI
 	registerReq := &pb.RegisterPartyRequest{
@@ -141,10 +173,8 @@ func TestRegisterParty_Organization(t *testing.T) {
 // 2. Attempt duplicate registration with same reference
 // 3. Verify AlreadyExists error (gRPC code 6)
 func TestRegisterParty_DuplicateExternalReference(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	// First registration
 	firstReq := &pb.RegisterPartyRequest{
@@ -181,10 +211,8 @@ func TestRegisterParty_DuplicateExternalReference(t *testing.T) {
 // TestRegisterParty_NoExternalReference verifies that parties can be registered
 // without an external reference (external reference is optional).
 func TestRegisterParty_NoExternalReference(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	// Register party without external reference
 	registerReq := &pb.RegisterPartyRequest{
@@ -207,10 +235,8 @@ func TestRegisterParty_NoExternalReference(t *testing.T) {
 // TestRetrieveParty_NotFound verifies that retrieving a non-existent party
 // returns NotFound error (gRPC code 5).
 func TestRetrieveParty_NotFound(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	// Generate a random UUID that doesn't exist
 	nonExistentID := uuid.New().String()
@@ -234,10 +260,8 @@ func TestRetrieveParty_NotFound(t *testing.T) {
 // TestRetrieveParty_InvalidUUID verifies that retrieving a party with a malformed
 // party_id returns InvalidArgument error (gRPC code 3).
 func TestRetrieveParty_InvalidUUID(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	testCases := []struct {
 		name    string
@@ -271,10 +295,8 @@ func TestRetrieveParty_InvalidUUID(t *testing.T) {
 // TestRegisterParty_ValidationErrors verifies that invalid requests are rejected
 // with InvalidArgument errors.
 func TestRegisterParty_ValidationErrors(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	testCases := []struct {
 		name        string
@@ -347,10 +369,8 @@ func TestRegisterParty_ValidationErrors(t *testing.T) {
 // TestRegisterParty_DifferentExternalRefTypes verifies that parties can have
 // the same external reference value if the types are different.
 func TestRegisterParty_DifferentExternalRefTypes(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	// Register party with Companies House reference
 	firstReq := &pb.RegisterPartyRequest{
@@ -384,10 +404,8 @@ func TestRegisterParty_DifferentExternalRefTypes(t *testing.T) {
 // TestRegisterAndRetrieve_EndToEnd performs a complete end-to-end flow:
 // Register → Retrieve → Verify all fields
 func TestRegisterAndRetrieve_EndToEnd(t *testing.T) {
-	svc, _, cleanup := setupIntegrationTest(t)
+	svc, _, ctx, cleanup := setupIntegrationTest(t)
 	defer cleanup()
-
-	ctx := context.Background()
 
 	// Register a comprehensive party (LEI must be 20 uppercase alphanumeric chars)
 	registerReq := &pb.RegisterPartyRequest{
