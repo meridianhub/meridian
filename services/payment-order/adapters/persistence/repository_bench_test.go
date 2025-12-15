@@ -11,7 +11,6 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
-	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -39,7 +38,9 @@ func setupBenchDB(b *testing.B) (*gorm.DB, context.Context, func()) {
 	tid := tenant.TenantID(testTenantID)
 	schemaName := tid.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
-	require.NoError(t, err)
+	if err != nil {
+		b.Fatalf("setupBenchDB: failed to create tenant schema: %v", err)
+	}
 
 	// Create payment_orders table in tenant schema
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.payment_orders (
@@ -69,11 +70,15 @@ func setupBenchDB(b *testing.B) (*gorm.DB, context.Context, func()) {
 		cancelled_at TIMESTAMP WITH TIME ZONE,
 		reversed_at TIMESTAMP WITH TIME ZONE
 	)`, schemaName)).Error
-	require.NoError(t, err)
+	if err != nil {
+		b.Fatalf("setupBenchDB: failed to create payment_orders table: %v", err)
+	}
 
 	// Set search_path to tenant schema
 	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
-	require.NoError(t, err)
+	if err != nil {
+		b.Fatalf("setupBenchDB: failed to set search_path: %v", err)
+	}
 
 	// Create context with tenant
 	ctx := tenant.WithTenant(context.Background(), tid)
