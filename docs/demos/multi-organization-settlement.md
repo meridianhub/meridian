@@ -175,12 +175,12 @@ Automated validation of the demo environment:
 ./orgctl list
 
 # Try to access Post Office account from Motive context (should fail)
-grpcurl -plaintext -H "x-organization-id:motive" \
+grpcurl -plaintext -H "x-tenant-id:motive" \
   -d '{"account_id": "po-customer-1"}' \
   localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
 
 # Access account from correct organization context (should succeed)
-grpcurl -plaintext -H "x-organization-id:post_office" \
+grpcurl -plaintext -H "x-tenant-id:post_office" \
   -d '{"account_id": "po-customer-1"}' \
   localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
 ```
@@ -276,7 +276,7 @@ kubectl logs -l app=current-account --tail=100
 
 ```bash
 # Verify correct organization context
-grpcurl -plaintext -H "x-organization-id:<correct_org>" \
+grpcurl -plaintext -H "x-tenant-id:<correct_org>" \
   -d '{"account_id": "<account_id>"}' \
   localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount
 

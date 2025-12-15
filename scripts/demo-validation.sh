@@ -164,11 +164,11 @@ validate_organizations() {
 validate_isolation() {
     section_header "4. Organization Isolation (Schema Separation)"
 
-    # Test that each org can only see their own data
+    # Test that each tenant can only see their own data
     for org in "${ORGS[@]}"; do
-        # Try to access an account that should exist in this org
+        # Try to access an account that should exist in this tenant
         local result
-        result=$(grpcurl -plaintext -H "x-organization-id:${org}" \
+        result=$(grpcurl -plaintext -H "x-tenant-id:${org}" \
             -d '{"account_id": "test-nonexistent"}' \
             "${CURRENT_ACCOUNT_URL}" \
             meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount 2>&1) || true
@@ -181,13 +181,13 @@ validate_isolation() {
         fi
     done
 
-    # Cross-organization access test
+    # Cross-tenant access test
     echo ""
-    echo -e "  ${YELLOW}Cross-organization access test:${NC}"
+    echo -e "  ${YELLOW}Cross-tenant access test:${NC}"
 
-    # Try to access post_office data with motive context
+    # Try to access post_office data with motive tenant context
     local cross_result
-    cross_result=$(grpcurl -plaintext -H "x-organization-id:motive" \
+    cross_result=$(grpcurl -plaintext -H "x-tenant-id:motive" \
         -d '{"account_id": "po-customer-1"}' \
         "${CURRENT_ACCOUNT_URL}" \
         meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount 2>&1) || true
@@ -340,7 +340,7 @@ validate_demo_data() {
 
     # Check Post Office accounts
     local po_result
-    po_result=$(grpcurl -plaintext -H "x-organization-id:post_office" \
+    po_result=$(grpcurl -plaintext -H "x-tenant-id:post_office" \
         -d '{"account_id": "po-customer-1"}' \
         "${CURRENT_ACCOUNT_URL}" \
         meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount 2>&1) || true
@@ -353,7 +353,7 @@ validate_demo_data() {
 
     # Check Meridian treasury
     local meridian_result
-    meridian_result=$(grpcurl -plaintext -H "x-organization-id:meridian" \
+    meridian_result=$(grpcurl -plaintext -H "x-tenant-id:meridian" \
         -d '{"account_id": "meridian-treasury"}' \
         "${CURRENT_ACCOUNT_URL}" \
         meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount 2>&1) || true

@@ -108,10 +108,10 @@ create_account_with_deposit() {
 
     echo -e "${CYAN}  Creating account: ${account_id}${NC}"
 
-    # Build metadata headers for organization context
+    # Build metadata headers for tenant context
     local metadata_args=""
     if [ -n "$org_id" ]; then
-        metadata_args="-H x-organization-id:${org_id}"
+        metadata_args="-H x-tenant-id:${org_id}"
     fi
 
     # Try to create account (will fail if exists - that's OK, idempotent)
@@ -306,9 +306,9 @@ display_summary() {
     echo -e "  ${CYAN}meridian${NC}     - 1 treasury account = \$1,000,000"
     echo ""
     echo -e "${YELLOW}Data Isolation:${NC}"
-    echo -e "  • Each organization's accounts are isolated in separate schemas"
-    echo -e "  • X-Organization-ID header determines which schema is accessed"
-    echo -e "  • Cross-organization queries are blocked by design"
+    echo -e "  • Each tenant's accounts are isolated in separate schemas"
+    echo -e "  • x-tenant-id header (or JWT claim) determines which schema is accessed"
+    echo -e "  • Cross-tenant queries are blocked by design"
     echo ""
     echo -e "${YELLOW}Next steps:${NC}"
     echo -e "  1. Run ./scripts/demo-cross-org-settlement.sh for cross-org demo"
@@ -316,7 +316,7 @@ display_summary() {
     echo -e "  3. Check Grafana at http://localhost:3000 for org-scoped metrics"
     echo ""
     echo -e "${YELLOW}Verify accounts via grpcurl:${NC}"
-    echo -e "  grpcurl -plaintext -H 'x-organization-id:post_office' \\"
+    echo -e "  grpcurl -plaintext -H 'x-tenant-id:post_office' \\"
     echo -e "    -d '{\"account_id\":\"...\"}' \\"
     echo -e "    localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount"
     echo ""

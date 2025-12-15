@@ -79,7 +79,7 @@ get_balance() {
     local account_id=$2
 
     local result
-    result=$(grpcurl -plaintext -H "x-organization-id:${org_id}" \
+    result=$(grpcurl -plaintext -H "x-tenant-id:${org_id}" \
         -d "{\"account_id\": \"${account_id}\"}" \
         "${CURRENT_ACCOUNT_URL}" \
         meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount 2>&1) || true
@@ -104,7 +104,7 @@ execute_withdrawal() {
     # Note: In actual implementation, you'd use a withdrawal/debit endpoint
     # For demo, we simulate by showing the intent
     local result
-    result=$(grpcurl -plaintext -H "x-organization-id:${org_id}" \
+    result=$(grpcurl -plaintext -H "x-tenant-id:${org_id}" \
         -d "{
             \"account_id\": \"${account_id}\",
             \"amount\": {
@@ -136,7 +136,7 @@ execute_deposit() {
     echo -e "${CYAN}    Executing deposit to ${org_id}/${account_id}: ${amount}${NC}"
 
     local result
-    result=$(grpcurl -plaintext -H "x-organization-id:${org_id}" \
+    result=$(grpcurl -plaintext -H "x-tenant-id:${org_id}" \
         -d "{
             \"account_id\": \"${account_id}\",
             \"amount\": {
@@ -312,7 +312,7 @@ demonstrate_isolation() {
     echo ""
 
     local result
-    result=$(grpcurl -plaintext -H "x-organization-id:un_wfp" \
+    result=$(grpcurl -plaintext -H "x-tenant-id:un_wfp" \
         -d "{\"account_id\": \"${MOTIVE_ACCOUNT}\"}" \
         "${CURRENT_ACCOUNT_URL}" \
         meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount 2>&1) || true
@@ -328,7 +328,7 @@ demonstrate_isolation() {
     echo -e "${YELLOW}Attempting to access UN WFP account from Motive context...${NC}"
     echo ""
 
-    result=$(grpcurl -plaintext -H "x-organization-id:motive" \
+    result=$(grpcurl -plaintext -H "x-tenant-id:motive" \
         -d "{\"account_id\": \"${UN_WFP_ACCOUNT}\"}" \
         "${CURRENT_ACCOUNT_URL}" \
         meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount 2>&1) || true

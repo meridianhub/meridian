@@ -22,6 +22,11 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
+# Tenant configuration - all demo operations run within this tenant context
+# The system is always multi-tenant; every request must include tenant ID
+DEMO_TENANT="${DEMO_TENANT:-demo}"
+TENANT_HEADER="-H x-tenant-id:${DEMO_TENANT}"
+
 # Helper function for pausing between sections
 pause() {
     echo -e "\n${YELLOW}Press any key to continue to next section...${NC}"
@@ -100,6 +105,43 @@ kubectl get pods | grep -E "(current-account|position-keeping|financial-accounti
 echo -e "${GREEN}✓ All services running${NC}\n"
 
 # ════════════════════════════════════════════════════════════════
+# PART 0: Tenant Provisioning (Always Multi-Tenant)
+# ════════════════════════════════════════════════════════════════
+echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${MAGENTA}║  Setup: Tenant Provisioning                                    ║${NC}"
+echo -e "${MAGENTA}║  System is always multi-tenant - provisioning demo tenant     ║${NC}"
+echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+echo -e "${CYAN}► Checking/provisioning demo tenant: ${DEMO_TENANT}${NC}"
+
+# Check if tenant service is available
+TENANT_SERVICE_PORT=50056
+if grpcurl -plaintext localhost:${TENANT_SERVICE_PORT} grpc.health.v1.Health/Check >/dev/null 2>&1; then
+    # Try to create the tenant (idempotent - will fail gracefully if exists)
+    TENANT_RESULT=$(grpcurl -plaintext -d "{
+      \"tenant_id\": \"${DEMO_TENANT}\",
+      \"display_name\": \"Demo Tenant\",
+      \"settlement_asset\": \"GBP\"
+    }" localhost:${TENANT_SERVICE_PORT} meridian.tenant.v1.TenantService/InitiateTenant 2>&1) || true
+
+    if echo "$TENANT_RESULT" | grep -q "tenant_id"; then
+        echo -e "${GREEN}✓ Tenant '${DEMO_TENANT}' provisioned successfully${NC}"
+        echo "$TENANT_RESULT" | jq '{tenant_id: .tenant.tenant_id, status: .tenant.status, display_name: .tenant.display_name}' 2>/dev/null || true
+    elif echo "$TENANT_RESULT" | grep -qi "already exists\|AlreadyExists"; then
+        echo -e "${GREEN}✓ Tenant '${DEMO_TENANT}' already exists (idempotent)${NC}"
+    else
+        echo -e "${YELLOW}⚠ Tenant provisioning result: ${TENANT_RESULT}${NC}"
+        echo -e "${YELLOW}  Continuing with demo - tenant may need manual setup${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ Tenant Service not available at localhost:${TENANT_SERVICE_PORT}${NC}"
+    echo -e "${YELLOW}  Ensure tenant '${DEMO_TENANT}' is manually provisioned${NC}"
+    echo -e "${YELLOW}  Continuing with demo...${NC}"
+fi
+echo ""
+
+# ════════════════════════════════════════════════════════════════
 # PART 1: Health Checks & Service Discovery
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
@@ -155,7 +197,7 @@ echo ""
 echo -e "${CYAN}► Step 1: Register Party (Customer)${NC}"
 echo -e "${YELLOW}  Party Service provides customer reference data for multi-tenancy${NC}"
 TIMESTAMP=$(date +%s)
-PARTY_RESPONSE=$(grpcurl -plaintext -d '{
+PARTY_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d '{
   "party_type": "PARTY_TYPE_PERSON",
   "legal_name": "Demo User",
   "display_name": "Demo Customer"
@@ -179,7 +221,7 @@ echo ""
 
 echo -e "${CYAN}► Step 2: Initiate Current Account${NC}"
 echo -e "${YELLOW}  Account linked to Party for ownership and validation${NC}"
-CREATE_RESPONSE=$(grpcurl -plaintext -d "{
+CREATE_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"account_identification\": \"GB29NWBK$TIMESTAMP\",
   \"party_id\": \"$PARTY_ID\",
   \"base_currency\": \"CURRENCY_GBP\"
@@ -203,7 +245,7 @@ echo -e "${YELLOW}    3. Update CurrentAccount balance       (local)${NC}"
 echo -e "${YELLOW}  * Automatic compensation if any step fails${NC}"
 echo ""
 
-DEPOSIT_RESPONSE=$(grpcurl -plaintext -d "{
+DEPOSIT_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
     \"amount\": {
@@ -286,7 +328,7 @@ echo -e "${CYAN}► Testing load distribution across ${NEW_POS_PODS} pods:${NC}"
 echo -e "${YELLOW}  Executing 6 rapid-fire deposits to demonstrate round_robin...${NC}"
 SUCCESS_COUNT=0
 for _ in {1..6}; do
-    if grpcurl -plaintext -d "{
+    if grpcurl -plaintext ${TENANT_HEADER} -d "{
       \"account_id\": \"$ACCOUNT_ID\",
       \"amount\": {
         \"amount\": {
@@ -329,7 +371,7 @@ echo -e "  ${YELLOW}Retry Behavior:${NC}   Duplicate requests return cached resp
 echo ""
 
 echo -e "${CYAN}► Example deposit transaction:${NC}"
-DEPOSIT1=$(grpcurl -plaintext -d "{
+DEPOSIT1=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
     \"amount\": {
@@ -391,7 +433,7 @@ echo -e "${MAGENTA}╚═══════════════════�
 echo ""
 
 echo -e "${CYAN}► Retrieving position log for account:${NC}"
-POSITION_LOG=$(grpcurl -plaintext -d "{
+POSITION_LOG=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"log_id\": \"$ACCOUNT_ID\"
 }" localhost:50053 meridian.position_keeping.v1.PositionKeepingService/RetrieveFinancialPositionLog)
 
@@ -420,7 +462,7 @@ echo -e "${MAGENTA}╚═══════════════════�
 echo ""
 
 echo -e "${CYAN}► Retrieving booking log:${NC}"
-BOOKING_LOG=$(grpcurl -plaintext -d "{
+BOOKING_LOG=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"financial_booking_log_id\": \"$ACCOUNT_ID\"
 }" localhost:50052 meridian.financial_accounting.v1.FinancialAccountingService/RetrieveFinancialBookingLog)
 
@@ -447,7 +489,7 @@ echo -e "${MAGENTA}║  Part 8: Final Account State & Summary                   
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-FINAL_ACCOUNT=$(grpcurl -plaintext -d "{
+FINAL_ACCOUNT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"account_id\": \"$ACCOUNT_ID\"
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount)
 
@@ -478,6 +520,7 @@ echo -e "  Balance:      £$FINAL_BALANCE"
 echo -e "  Available:    £$AVAILABLE"
 echo ""
 echo -e "${CYAN}Architecture Features Demonstrated:${NC}"
+echo -e "  ${GREEN}✓${NC} Always multi-tenant (tenant: ${DEMO_TENANT})"
 echo -e "  ${GREEN}✓${NC} BIAN-compliant microservices (4 domains including Party)"
 echo -e "  ${GREEN}✓${NC} Party validation for account ownership"
 echo -e "  ${GREEN}✓${NC} Saga pattern with automatic compensation"
