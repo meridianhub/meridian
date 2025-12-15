@@ -54,9 +54,12 @@ Architectural Decision Records) format.
 | [ADR-0011](0011-iso-20022-compliance-via-adapter-layer.md) | ISO 20022 Compliance via Adapter Layer | Accepted | 2025-11-14 |
 | [ADR-0012](0012-lien-based-fund-reservation.md) | Lien-Based Fund Reservation for Payment Order Saga | Accepted | 2025-11-25 |
 | [ADR-0013](0013-generic-asset-quantity-types.md) | Universal Quantity Type System | Proposed | 2025-12-03 |
-| [ADR-0014](0014-dynamic-asset-registry.md) | Dynamic Asset Registry & Lifecycle | Proposed | 2025-12-04 |
+| [ADR-0014](0014-financial-instrument-reference-data.md) | Financial Instrument Reference Data | Proposed | 2025-12-04 |
 | [ADR-0015](0015-standard-service-directory-structure.md) | Standard Service Directory Structure | Accepted | 2025-12-06 |
 | [ADR-0016](0016-tenant-id-naming-strategy.md) | Tenant ID Naming Strategy | Accepted | 2025-12-13 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0017](0017-temporal-quality-ladder.md) | Temporal Quality Ledger (Data Physics) | Proposed | 2025-12-14 |
+| [ADR-0018](0018-settlement-reconciliation.md) | Settlement & Reconciliation (Lifecycle) | Proposed | 2025-12-14 |
 
 ## Categories
 
@@ -74,7 +77,9 @@ Architectural Decision Records) format.
 - [ADR-0009](0009-application-level-audit-logging.md) - Application-Level Audit Logging
 - [ADR-0012](0012-lien-based-fund-reservation.md) - Lien-Based Fund Reservation for Payment Order Saga
 - [ADR-0013](0013-generic-asset-quantity-types.md) - Universal Quantity Type System
-- [ADR-0014](0014-dynamic-asset-registry.md) - Dynamic Asset Registry & Lifecycle
+- [ADR-0014](0014-financial-instrument-reference-data.md) - Financial Instrument Reference Data (BIAN)
+- [ADR-0017](0017-temporal-quality-ladder.md) - Temporal Quality Ledger (Data Physics)
+- [ADR-0018](0018-settlement-reconciliation.md) - Settlement & Reconciliation (Lifecycle)
 
 ### Development Environment & Infrastructure
 
@@ -103,7 +108,7 @@ Architectural Decision Records) format.
   - Independent versioning of database, events, and APIs
   - Follows industry best practices (Google, LinkedIn, Netflix, AWS)
 
-See [ADR-0004](0004-separated-schema-management.md) and [ADR-0005](0005-adapter-pattern-layer-translation.md) for
+See [ADR-0004](0004-event-schema-evolution.md) and [ADR-0005](0005-adapter-pattern-layer-translation.md) for
 details.
 
 ## Future ADRs to Consider
