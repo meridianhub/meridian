@@ -152,16 +152,16 @@ const (
 
 // Dimension returns the compile-time dimension for this instrument type.
 // Used for type safety and partition routing.
-//
-// Note: Defaults to Monetary for unknown types. This is safe because:
-// 1. Database CHECK constraint enforces valid instrument_type values
-// 2. Schema-on-Write validation rejects unknown types at ingestion
-// 3. Monetary is the conservative default (regulated assets)
 func (t InstrumentType) Dimension() string {
-    if t == InstrumentTypeCommodity {
+    switch t {
+    case InstrumentTypeCommodity:
         return "Commodity"
+    case InstrumentTypeCurrency, InstrumentTypeDebt, InstrumentTypeEquity, InstrumentTypeDerivative:
+        return "Monetary"
+    default:
+        // Should never reach here: CHECK constraint enforces valid types at DB level
+        return "Monetary"
     }
-    return "Monetary"
 }
 
 // Equality check enforces version - Rice(v1) ≠ Rice(v2)
@@ -198,6 +198,21 @@ type PositionKey struct {
     Version        uint32            // From FinancialInstrument.Version
     Attributes     map[string]string // Validated by Schema (expiry, vintage, tou)
 }
+
+// =============================================================================
+// ERROR TYPES
+// =============================================================================
+
+var (
+    // ErrInstrumentMismatch is returned when adding quantities of different instruments
+    ErrInstrumentMismatch = errors.New("instrument mismatch: cannot combine different instruments")
+
+    // ErrVersionMismatch is returned when adding quantities of different versions
+    ErrVersionMismatch = errors.New("version mismatch: cannot combine different instrument versions")
+
+    // ErrDimensionMismatch is returned when a loaded instrument has unexpected dimension
+    ErrDimensionMismatch = errors.New("dimension mismatch: instrument type does not match expected dimension")
+)
 ```
 
 ### Compile-Time Safety
