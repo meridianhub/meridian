@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -38,22 +37,10 @@ func (r *LienRepository) WithTx(tx *gorm.DB) *LienRepository {
 	return &LienRepository{db: tx}
 }
 
-// hasTenantContext checks if tenant context is present (multi-tenant mode).
-func (r *LienRepository) hasTenantContext(ctx context.Context) bool {
-	_, ok := tenant.FromContext(ctx)
-	return ok
-}
-
-// withOptionalOrgScope executes the given function with optional organization scoping.
-// In single-tenant mode (no org context), it runs the function directly without a transaction.
-// In multi-org mode, it wraps the function in a transaction and sets the search_path.
-// This helper reduces code duplication across repository methods.
-func (r *LienRepository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	if !r.hasTenantContext(ctx) {
-		// Single-tenant mode: run directly without transaction overhead
-		return fn(r.db.WithContext(ctx))
-	}
-	// Multi-org mode: use the shared helper that handles transaction + org scope
+// withTenantTransaction executes the given function with tenant scoping in a transaction.
+// The system is always multi-tenant - tenant context is ALWAYS required.
+// This wraps the function in a transaction and sets the search_path to the tenant's schema.
+func (r *LienRepository) withTenantTransaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
@@ -69,7 +56,7 @@ func (r *LienRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Li
 	var entity LienEntity
 	var queryErr error
 
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		result := tx.Where("id = ?", id).First(&entity)
 		if result.Error != nil {
 			queryErr = result.Error
@@ -158,7 +145,7 @@ func (r *LienRepository) FindByPaymentOrderReference(ctx context.Context, refere
 	var entity LienEntity
 	var queryErr error
 
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		result := tx.Where("payment_order_reference = ?", reference).First(&entity)
 		if result.Error != nil {
 			queryErr = result.Error
@@ -214,7 +201,7 @@ func (r *LienRepository) SumActiveAmountByAccountID(ctx context.Context, account
 	var currencyCount int64
 	var totalCents int64
 
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// First, check for currency consistency (defensive check for data corruption)
 		countResult := tx.Model(&LienEntity{}).
 			Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",

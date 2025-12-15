@@ -502,9 +502,9 @@ func TestFindByID_WithOrganizationContext_IsolatesData(t *testing.T) {
 	// whether the SET LOCAL succeeds. The key behavior is that the code path
 	// attempts to set the search_path when org context is present.
 	_, err = repo.FindByID(orgCtx, party.ID())
-	// Note: In a test environment without org schemas, this may or may not error
-	// The important thing is that the hasTenantContext check works
-	// Full isolation testing requires proper org schema setup
+	// Note: In a test environment without org schemas, this may or may not error.
+	// The system is always multi-tenant - tenant context is always required.
+	// Full isolation testing requires proper org schema setup.
 	t.Logf("FindByID with org context result: %v", err)
 }
 
@@ -645,20 +645,5 @@ func TestPing_WorksWithoutOrganizationContext(t *testing.T) {
 	assert.NoError(t, err, "Ping should work even with organization context (ignores it)")
 }
 
-func TestRepository_HasOrganizationContext(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := NewRepository(db)
-
-	t.Run("returns false when no organization context", func(t *testing.T) {
-		ctx := context.Background()
-		assert.False(t, repo.hasTenantContext(ctx))
-	})
-
-	t.Run("returns true when organization context present", func(t *testing.T) {
-		orgID := tenant.TenantID("acme_bank")
-		ctx := tenant.WithTenant(context.Background(), orgID)
-		assert.True(t, repo.hasTenantContext(ctx))
-	})
-}
+// Note: hasTenantContext tests removed - the system is always multi-tenant.
+// Tenant context is always required for all business service operations.

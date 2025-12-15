@@ -12,7 +12,6 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -66,35 +65,19 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
 }
 
-// hasTenantContext checks if tenant context is present (multi-tenant mode).
-func (r *Repository) hasTenantContext(ctx context.Context) bool {
-	_, ok := tenant.FromContext(ctx)
-	return ok
-}
-
-// withTenantScope returns a GORM DB instance scoped to the organization from context.
-// If tenant context is present (multi-tenant mode), it sets the PostgreSQL search_path.
-// If tenant context is missing (single-tenant mode), it returns the DB unchanged.
+// withTenantScope returns a GORM DB instance scoped to the tenant from context.
+// The system is always multi-tenant - tenant context is ALWAYS required.
+// This sets the PostgreSQL search_path to the tenant's schema (org_<tenant_id>).
 //
 // This must be called within a transaction for the search_path setting to work correctly.
 func (r *Repository) withTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
-	if r.hasTenantContext(ctx) {
-		return db.WithGormTenantScope(ctx, tx)
-	}
-	// Single-tenant mode: no organization scope needed
-	return tx, nil
+	return db.WithGormTenantScope(ctx, tx)
 }
 
-// withOptionalOrgScope executes the given function with optional organization scoping.
-// In single-tenant mode (no org context), it runs the function directly without a transaction.
-// In multi-org mode, it wraps the function in a transaction and sets the search_path.
-// This helper reduces code duplication across repository methods.
-func (r *Repository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	if !r.hasTenantContext(ctx) {
-		// Single-tenant mode: run directly without transaction overhead
-		return fn(r.db.WithContext(ctx))
-	}
-	// Multi-org mode: use the shared helper that handles transaction + org scope
+// withTenantTransaction executes the given function with tenant scoping in a transaction.
+// The system is always multi-tenant - tenant context is ALWAYS required.
+// This wraps the function in a transaction and sets the search_path to the tenant's schema.
+func (r *Repository) withTenantTransaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
@@ -113,15 +96,15 @@ func (r *Repository) isInTransaction() bool {
 
 // withForUpdateScope executes the given function with FOR UPDATE locking support.
 // If already in a transaction (via WithTx), it uses the existing transaction directly
-// with org scope set. If not in a transaction, it creates a new one with org scope.
+// with tenant scope set. If not in a transaction, it creates a new one with tenant scope.
 //
 // This prevents the security issue where nested transactions would have search_path
 // set only on the inner transaction, while the outer transaction operates without it.
 func (r *Repository) withForUpdateScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	if r.isInTransaction() {
-		// Already in a transaction (via WithTx) - use it directly with org scope
+		// Already in a transaction (via WithTx) - use it directly with tenant scope
 		// The caller (e.g., lien_service.go) is responsible for the outer transaction,
-		// but we still need to set the org scope for this operation.
+		// but we still need to set the tenant scope for this operation.
 		// Note: withTenantScope returns already-wrapped errors, so don't re-wrap.
 		tx, err := r.withTenantScope(ctx, r.db.WithContext(ctx))
 		if err != nil {
@@ -130,15 +113,8 @@ func (r *Repository) withForUpdateScope(ctx context.Context, fn func(tx *gorm.DB
 		return fn(tx)
 	}
 
-	// Not in a transaction - use the shared helper that handles transaction + org scope
-	if r.hasTenantContext(ctx) {
-		return db.WithGormTenantTransaction(ctx, r.db, fn)
-	}
-
-	// Single-tenant mode: still need a transaction for FOR UPDATE, but no org scope
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(tx)
-	})
+	// Not in a transaction - use the shared helper that handles transaction + tenant scope
+	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
 // Save creates or updates an account with optimistic locking.
@@ -225,7 +201,7 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("account_identification = ? AND deleted_at IS NULL", accountID).First(&entity)
 
@@ -286,7 +262,7 @@ func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
 
@@ -311,7 +287,7 @@ func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.Curre
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("id = ? AND deleted_at IS NULL", id).First(&entity)
 
@@ -372,7 +348,7 @@ func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*do
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]*domain.CurrentAccount, error) {
 	var accounts []*domain.CurrentAccount
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entities []CurrentAccountEntity
 		result := tx.Where("party_id = ? AND deleted_at IS NULL", partyID).Find(&entities)
 
@@ -399,7 +375,7 @@ func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]*doma
 // Delete soft deletes an account.
 // In multi-org mode, the context must contain the organization ID for schema routing.
 func (r *Repository) Delete(ctx context.Context, accountID string) error {
-	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Model(&CurrentAccountEntity{}).
 			Where("account_identification = ?", accountID).
 			Update("deleted_at", time.Now()).Error

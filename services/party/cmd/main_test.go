@@ -189,7 +189,6 @@ func TestInitAuth_UsesConfiguredValues(t *testing.T) {
 	t.Setenv("JWKS_CACHE_TTL", "2h")
 	t.Setenv("JWKS_REFRESH_TTL", "45m")
 	t.Setenv("JWKS_HTTP_TIMEOUT", "15s")
-	t.Setenv("MULTI_TENANT_MODE", "true")
 
 	// Verify environment variables are read correctly
 	if jwksURL := getEnvOrDefault("JWKS_URL", ""); jwksURL != "http://localhost:18080/realms/meridian/protocol/openid-connect/certs" {
@@ -209,11 +208,6 @@ func TestInitAuth_UsesConfiguredValues(t *testing.T) {
 	httpTimeout := getEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
 	if httpTimeout != 15*time.Second {
 		t.Errorf("JWKS_HTTP_TIMEOUT = %v, want 15s", httpTimeout)
-	}
-
-	multiTenantMode := getEnvAsBool("MULTI_TENANT_MODE", false)
-	if !multiTenantMode {
-		t.Errorf("MULTI_TENANT_MODE = %v, want true", multiTenantMode)
 	}
 }
 

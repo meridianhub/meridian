@@ -354,10 +354,9 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 //   - JWKS_CACHE_TTL: How long to cache JWKS keys (default: 1h)
 //   - JWKS_REFRESH_TTL: Background refresh interval for JWKS (default: 30m)
 //   - JWKS_HTTP_TIMEOUT: HTTP client timeout for JWKS fetch (default: 10s)
-//   - MULTI_TENANT_MODE: Set to "true" to require x-tenant-id claim in JWT
-//     (read directly by interceptor via auth.MultiTenantModeEnvVar at request time)
 //
-// Note: The JWKS provider starts a background refresh goroutine. This follows the
+// Note: The system is always multi-tenant. JWT tokens MUST include tenant_id claim.
+// The JWKS provider starts a background refresh goroutine. This follows the
 // existing pattern in other services (e.g., position-keeping) where the provider
 // is not explicitly closed during shutdown, relying on process termination.
 func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, error) {
@@ -411,16 +410,11 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 		return nil, fmt.Errorf("failed to create auth interceptor: %w", err)
 	}
 
-	// Log multi-tenant mode status for visibility.
-	// Note: The auth interceptor reads MULTI_TENANT_MODE directly from the environment
-	// via auth.MultiTenantModeEnvVar at request time (not from config passed here).
-	multiTenantMode := getEnvAsBool("MULTI_TENANT_MODE", false)
 	logger.Debug("auth interceptor initialized",
 		"jwks_url", jwksURL,
 		"cache_ttl", cacheTTL,
 		"refresh_ttl", refreshTTL,
 		"http_timeout", httpTimeout,
-		"multi_tenant_mode", multiTenantMode,
 		"bypass_methods", len(interceptorConfig.BypassMethods))
 
 	return interceptor, nil
