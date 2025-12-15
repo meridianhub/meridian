@@ -14,7 +14,7 @@ instructions: |
   and reconciliation, see ADR-0018.
 ---
 
-# 17. Temporal Quality Ledger (Data Physics)
+# 17. Temporal Quality Ladder (Data Physics)
 
 Date: 2025-12-14
 
@@ -248,14 +248,11 @@ CREATE TABLE measurements (
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     superseded_by UUID REFERENCES measurements(id),
     settlement_run VARCHAR(20),
-    locked_at TIMESTAMPTZ,
-
-    -- Prevent overlapping current positions for same tenant/account/asset/attributes
-    -- See "Overlap Prevention" section below for enforcement details
-    CONSTRAINT no_overlapping_current CHECK (
-        superseded_by IS NOT NULL OR TRUE  -- Placeholder; enforced via application logic
-    )
+    locked_at TIMESTAMPTZ
 );
+
+-- Note: Overlap prevention is NOT enforced via database constraints.
+-- See "Overlap Prevention" section below for application-level enforcement details.
 
 -- Tenant isolation index (critical for performance and security)
 CREATE INDEX idx_measurements_tenant ON measurements(tenant_id);
@@ -483,7 +480,9 @@ type DeltaEngine struct {
 // Evaluate determines what action to take for an incoming measurement.
 // Returns ActionError on failure - callers must check error before using Action.
 func (e *DeltaEngine) Evaluate(ctx context.Context, incoming Measurement) (Action, *Measurement, error) {
-    // Find existing current measurement for this position key
+    // Find existing current measurement for this position key.
+    // Note: tenant_id is extracted from ctx per project conventions (see ADR-0016).
+    // All repository methods enforce tenant isolation via ctx.
     existing, err := e.repo.FindCurrent(ctx,
         incoming.AccountID,
         incoming.AssetCode,

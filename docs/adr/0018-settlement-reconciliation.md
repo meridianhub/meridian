@@ -257,6 +257,9 @@ type ReconciliationService struct {
 
 // Reconcile identifies variances between settled and current positions.
 // Uses batch fetching to avoid N+1 query problem on large settlement runs.
+// Reconcile compares settlement snapshots against current measurements.
+// Note: tenant_id is extracted from ctx per project conventions (see ADR-0016).
+// All repository methods and cross-service API calls enforce tenant isolation via ctx.
 func (s *ReconciliationService) Reconcile(ctx context.Context, runID uuid.UUID) ([]Variance, error) {
     snapshots, err := s.snapshotRepo.FindByRun(ctx, runID)
     if err != nil {
