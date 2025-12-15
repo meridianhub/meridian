@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/samber/lo"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -350,10 +351,13 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	// The saga may modify po while toProto reads from it
 	responseProto := toProto(po)
 
+	// Extract tenant ID from request context to propagate to saga
+	tenantID, hasTenant := tenant.FromContext(ctx)
+
 	// Start saga orchestration asynchronously
 	// The saga runs in the background after returning the response
 	// nolint:contextcheck // Intentionally using background context for async saga orchestration
-	go func(paymentOrderID uuid.UUID) {
+	go func(paymentOrderID uuid.UUID, tid tenant.TenantID, hasTenantCtx bool) {
 		// Recover from panics to prevent silent goroutine termination
 		defer func() {
 			if r := recover(); r != nil {
@@ -364,6 +368,9 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 				// Reload fresh state before failing - the original po may be stale
 				// if the saga made state transitions before panicking
 				failCtx := context.Background()
+				if hasTenantCtx {
+					failCtx = tenant.WithTenant(failCtx, tid)
+				}
 				freshPO, err := s.repo.FindByID(failCtx, paymentOrderID)
 				if err != nil {
 					s.logger.Error("failed to reload payment order after panic",
@@ -380,7 +387,11 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 			}
 		}()
 		// Create saga context with timeout to prevent indefinite hangs
-		sagaCtx, cancel := context.WithTimeout(context.Background(), s.sagaTimeout)
+		sagaCtx := context.Background()
+		if hasTenantCtx {
+			sagaCtx = tenant.WithTenant(sagaCtx, tid)
+		}
+		sagaCtx, cancel := context.WithTimeout(sagaCtx, s.sagaTimeout)
 		defer cancel()
 		if s.tracer != nil {
 			sagaCtx = observability.WithCorrelationID(sagaCtx, correlationID)
@@ -395,7 +406,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 			return
 		}
 		s.orchestratePayment(sagaCtx, freshPO)
-	}(po.ID)
+	}(po.ID, tenantID, hasTenant)
 
 	// Prevent accidental access to po after goroutine launch - the goroutine
 	// reloads fresh state from DB, so any access to po here would be stale
@@ -882,8 +893,11 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		// Start async retry goroutine - this won't block the webhook response
 		// We create a new background context since the request context will be cancelled
 		// after the webhook response is sent
-		//nolint:contextcheck // Intentionally using fresh context for async operation
-		go s.executeLienWithRetry(context.Background(), po.ID, po.LienID)
+		asyncCtx := context.Background()
+		if tenantID, hasTenant := tenant.FromContext(ctx); hasTenant {
+			asyncCtx = tenant.WithTenant(asyncCtx, tenantID)
+		}
+		go s.executeLienWithRetry(asyncCtx, po.ID, po.LienID) //nolint:contextcheck // Async operation outlives request context
 	}
 
 	// Publish PaymentOrderCompleted event
@@ -1388,7 +1402,11 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 				"lien_id", lienID)
 			// Attempt to mark as FAILED to prevent stuck PENDING state
 			// Use a fresh context since the original may be cancelled
-			panicCtx, panicCancel := context.WithTimeout(context.Background(), 10*time.Second) //nolint:contextcheck
+			panicCtx := context.Background()
+			if tenantID, hasTenant := tenant.FromContext(parentCtx); hasTenant {
+				panicCtx = tenant.WithTenant(panicCtx, tenantID)
+			}
+			panicCtx, panicCancel := context.WithTimeout(panicCtx, 10*time.Second) //nolint:contextcheck
 			defer panicCancel()
 			po, findErr := s.repo.FindByID(panicCtx, paymentOrderID) //nolint:contextcheck
 			if findErr != nil {
@@ -1455,7 +1473,7 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 	})
 
 	// Update payment order with final status
-	s.updateLienExecutionStatus(paymentOrderID, attempts, err, lastErr, logger)
+	s.updateLienExecutionStatus(ctx, paymentOrderID, attempts, err, lastErr, logger)
 }
 
 // updateLienExecutionStatus updates the payment order's lien execution status after retry completion.
@@ -1463,6 +1481,7 @@ func (s *Service) executeLienWithRetry(parentCtx context.Context, paymentOrderID
 // Uses optimistic locking with retry on version conflict to handle concurrent updates.
 // Note: Uses a fresh context to ensure the status update completes even if the parent context has timed out.
 func (s *Service) updateLienExecutionStatus(
+	parentCtx context.Context,
 	paymentOrderID uuid.UUID,
 	totalLienAttempts int,
 	retryErr error,
@@ -1473,7 +1492,11 @@ func (s *Service) updateLienExecutionStatus(
 	// This is intentional - the parent context may have timed out during retries,
 	// but we must still persist the final status for reconciliation purposes.
 	//nolint:contextcheck // Intentionally using fresh context to ensure status persistence
-	updateCtx, cancel := context.WithTimeout(context.Background(), lienStatusUpdateTimeout)
+	updateCtx := context.Background()
+	if tenantID, hasTenant := tenant.FromContext(parentCtx); hasTenant {
+		updateCtx = tenant.WithTenant(updateCtx, tenantID)
+	}
+	updateCtx, cancel := context.WithTimeout(updateCtx, lienStatusUpdateTimeout)
 	defer cancel()
 
 	for updateAttempt := 1; updateAttempt <= lienStatusUpdateMaxRetries; updateAttempt++ {
