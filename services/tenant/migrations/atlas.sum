@@ -1,5 +1,2 @@
-h1:K7d/C9+NknRHVW2Do2370nNMJw6epHnX7V+90KZ5yRI=
-20251208000000_create_organizations.sql h1:oTapjSSijrWB/62q4b9V/JZcrqgR4TarzW/Xse1a87I=
-20251211000000_rename_organizations_to_tenants.sql h1:61f3KjNjswQkQzgrdZsQi2CH0k0jpUfS16qfLZlneVs=
-20251212000000_add_party_id_to_tenants.sql h1:Zd9kapGaxORB1emGBSjKLaLk2HkWRnqWZNNSEeEuq5M=
-20251212100000_create_tenant_provisioning.sql h1:vLNj/OjQDzAX+GZWFisrWvNqJ/UoxTFyjMpvhBSAB5Q=
+h1:FLzYaNSIj4DYHrqVerzNG34PrN9vOd51AH8MHY2FpK0=
+20251215000000_initial.sql h1:bnRHaHpdwIXC4yKotWFRatuoMDYG1uOy4kxFPl2iIWw=
