@@ -7,6 +7,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,13 +47,60 @@ var (
 	errLedgerUnavailable        = errors.New("ledger service unavailable")
 )
 
+const integrationTestTenantID = "test_tenant"
+
 // setupIntegrationTestDB creates a PostgreSQL testcontainer for integration testing.
-// Returns a configured GORM database connection and a cleanup function.
-func setupIntegrationTestDB(t *testing.T) (*gorm.DB, func()) {
+// Returns a configured GORM database connection, context with tenant, and a cleanup function.
+func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.PaymentOrderEntity{},
 	})
+
+	// Create tenant schema
+	tid := tenant.TenantID(integrationTestTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create payment_orders table in tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.payment_orders (
+		id UUID PRIMARY KEY,
+		debtor_account_id VARCHAR(255) NOT NULL,
+		creditor_reference VARCHAR(255) NOT NULL,
+		amount_cents BIGINT NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+		correlation_id VARCHAR(255),
+		causation_id VARCHAR(255),
+		lien_id VARCHAR(255),
+		gateway_reference_id VARCHAR(255),
+		ledger_booking_id VARCHAR(255),
+		failure_reason TEXT,
+		error_code VARCHAR(50),
+		version INTEGER NOT NULL DEFAULT 1,
+		lien_execution_status VARCHAR(20),
+		lien_execution_attempts INTEGER DEFAULT 0,
+		lien_execution_error TEXT,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		reserved_at TIMESTAMP WITH TIME ZONE,
+		executing_at TIMESTAMP WITH TIME ZONE,
+		completed_at TIMESTAMP WITH TIME ZONE,
+		failed_at TIMESTAMP WITH TIME ZONE,
+		cancelled_at TIMESTAMP WITH TIME ZONE,
+		reversed_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set search_path to tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
 // =============================================================================
@@ -303,7 +352,7 @@ func waitForSagaCompletion(ctx context.Context, t *testing.T, repo persistence.R
 // payment order lifecycle: INITIATED -> RESERVED -> EXECUTING -> COMPLETED
 func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -321,7 +370,6 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-001", 100, 500000000) // £100.50
 
 	// Execute: Initiate payment order
@@ -374,7 +422,7 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 // idempotency key returns the same payment order without creating duplicates.
 func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -391,7 +439,6 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	idempotencyKey := uuid.New().String()
 
 	req := &pb.InitiatePaymentOrderRequest{
@@ -448,7 +495,7 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 // callbacks are handled idempotently.
 func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -465,7 +512,6 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-DUP-001", 25, 0)
 
 	// Initiate payment
@@ -516,7 +562,7 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 // fails gracefully when the debtor has insufficient funds.
 func TestIntegration_InsufficientFunds_SagaFails(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -534,7 +580,6 @@ func TestIntegration_InsufficientFunds_SagaFails(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-INSUFF-001", 1000, 0)
 
 	// Initiate payment
@@ -557,7 +602,7 @@ func TestIntegration_InsufficientFunds_SagaFails(t *testing.T) {
 // the gateway times out, the saga compensation releases the lien.
 func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -576,7 +621,6 @@ func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-TIMEOUT-001", 75, 0)
 
 	// Initiate payment
@@ -604,7 +648,7 @@ func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 // rejects a payment, the order transitions to FAILED with proper compensation.
 func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -622,7 +666,6 @@ func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-REJECT-001", 200, 0)
 
 	// Initiate payment
@@ -649,7 +692,7 @@ func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 // requests to the same account are handled correctly.
 func TestIntegration_ConcurrentPayments_SameAccount(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -666,7 +709,6 @@ func TestIntegration_ConcurrentPayments_SameAccount(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	accountID := "ACC-CONC-001"
 	numPayments := 5
 
@@ -725,7 +767,7 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 	}
 
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -744,7 +786,6 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-NETTIMEOUT-001", 50, 0)
 
 	// Initiate payment
@@ -780,7 +821,7 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 // gateway accepts but the lien execution fails post-completion.
 func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -799,7 +840,6 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-PARTIAL-001", 100, 0)
 
 	// Initiate payment
@@ -837,7 +877,7 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 // amounts are preserved correctly through all layer translations.
 func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -853,8 +893,6 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 		Logger:               logger,
 	})
 	require.NoError(t, err)
-
-	ctx := context.Background()
 
 	testCases := []struct {
 		name          string
@@ -927,7 +965,7 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 // are properly rejected with appropriate error codes.
 func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -943,8 +981,6 @@ func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 		Logger:               logger,
 	})
 	require.NoError(t, err)
-
-	ctx := context.Background()
 
 	testCases := []struct {
 		name         string
@@ -1015,7 +1051,7 @@ func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 // TestIntegration_RetrievePaymentOrder tests the RetrievePaymentOrder RPC.
 func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -1032,7 +1068,6 @@ func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-RETRIEVE-001", 100, 0)
 
 	// Create payment order
@@ -1060,7 +1095,7 @@ func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 // TestIntegration_CancelPaymentOrder tests the CancelPaymentOrder RPC.
 func TestIntegration_CancelPaymentOrder(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -1079,7 +1114,6 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-CANCEL-001", 100, 0)
 
 	// Create payment order
@@ -1131,7 +1165,7 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 // with cursor-based pagination.
 func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -1148,7 +1182,6 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	accountID := "ACC-LIST-001"
 
 	// Create multiple payment orders
@@ -1240,7 +1273,7 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 // TestIntegration_ReversePaymentOrder tests the ReversePaymentOrder RPC.
 func TestIntegration_ReversePaymentOrder(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewPaymentOrderRepository(db)
@@ -1257,7 +1290,6 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	req := createTestPaymentRequest("ACC-REVERSE-001", 100, 0)
 
 	// Create and complete payment order

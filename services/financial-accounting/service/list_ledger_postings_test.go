@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -312,8 +311,7 @@ func TestListLedgerPostings_DefensiveTests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			ctx := context.Background()
-			db, cleanup := setupTestDB(t)
+			db, ctx, cleanup := setupTestDB(t)
 			defer cleanup()
 			bookingLogID := tt.setupRepo(db)
 
@@ -352,8 +350,7 @@ func TestListLedgerPostings_DefensiveTests(t *testing.T) {
 // TestListLedgerPostings_MultipleFilters tests combining multiple filters.
 func TestListLedgerPostings_MultipleFilters(t *testing.T) {
 	// Arrange
-	ctx := context.Background()
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	bookingLogID := uuid.New()

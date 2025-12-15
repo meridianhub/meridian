@@ -135,11 +135,12 @@ func TestUnaryInterceptor(t *testing.T) {
 		interceptor, err := NewAuthInterceptor(cfg)
 		require.NoError(t, err)
 
-		// Create valid token
+		// Create valid token with tenant_id (always required)
 		claims := &Claims{
-			UserID: "user-123",
-			Roles:  []string{"admin"},
-			Scopes: []string{"read", "write"},
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			Scopes:   []string{"read", "write"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			},
@@ -172,6 +173,11 @@ func TestUnaryInterceptor(t *testing.T) {
 		scopes, ok := GetScopesFromContext(resultCtx)
 		assert.True(t, ok)
 		assert.Equal(t, []string{"read", "write"}, scopes)
+
+		// Verify tenant was injected into context
+		tenantID, ok := tenant.FromContext(resultCtx)
+		assert.True(t, ok)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 	})
 
 	t.Run("bypass authentication for whitelisted method", func(t *testing.T) {
@@ -284,10 +290,11 @@ func TestStreamInterceptor(t *testing.T) {
 		interceptor, err := NewAuthInterceptor(cfg)
 		require.NoError(t, err)
 
-		// Create valid token
+		// Create valid token with tenant_id (always required)
 		claims := &Claims{
-			UserID: "user-123",
-			Roles:  []string{"admin"},
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			},
@@ -610,16 +617,16 @@ func TestRequireScope(t *testing.T) {
 	})
 }
 
-func TestMultiOrgMode(t *testing.T) {
+// TestTenantContext tests that tenant context is always required and injected.
+// The system is always multi-tenant (platform schema + 1 to N org_X schemas).
+func TestTenantContext(t *testing.T) {
 	privateKey, publicKey, err := generateTestRSAKeys()
 	require.NoError(t, err)
 
 	validator, err := NewJWTValidator(publicKey)
 	require.NoError(t, err)
 
-	t.Run("multi-tenant mode enabled injects organization into context", func(t *testing.T) {
-		t.Setenv(MultiTenantModeEnvVar, "true")
-
+	t.Run("injects tenant into context", func(t *testing.T) {
 		cfg := &InterceptorConfig{
 			Validator: validator,
 		}
@@ -649,16 +656,14 @@ func TestMultiOrgMode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Verify organization was injected into context
+		// Verify tenant was injected into context
 		resultCtx := resp.(context.Context)
-		orgID, ok := tenant.FromContext(resultCtx)
+		tenantID, ok := tenant.FromContext(resultCtx)
 		assert.True(t, ok)
-		assert.Equal(t, tenant.TenantID("acme_bank"), orgID)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
 	})
 
-	t.Run("multi-tenant mode enabled rejects token without tenant claim", func(t *testing.T) {
-		t.Setenv(MultiTenantModeEnvVar, "true")
-
+	t.Run("rejects token without tenant claim", func(t *testing.T) {
 		cfg := &InterceptorConfig{
 			Validator: validator,
 		}
@@ -692,9 +697,7 @@ func TestMultiOrgMode(t *testing.T) {
 		assert.Contains(t, st.Message(), "tenant_id claim required")
 	})
 
-	t.Run("multi-tenant mode enabled rejects token with invalid organization format", func(t *testing.T) {
-		t.Setenv(MultiTenantModeEnvVar, "true")
-
+	t.Run("rejects token with invalid tenant format", func(t *testing.T) {
 		cfg := &InterceptorConfig{
 			Validator: validator,
 		}
@@ -729,10 +732,8 @@ func TestMultiOrgMode(t *testing.T) {
 		assert.Contains(t, st.Message(), "invalid tenant_id format")
 	})
 
-	t.Run("single-org mode (default) allows token without tenant claim", func(t *testing.T) {
-		// Ensure MULTI_TENANT_MODE is not set
-		t.Setenv(MultiTenantModeEnvVar, "false")
-
+	t.Run("always rejects token without tenant claim", func(t *testing.T) {
+		// The system is always multi-tenant - tenant claims are always required
 		cfg := &InterceptorConfig{
 			Validator: validator,
 		}
@@ -758,19 +759,17 @@ func TestMultiOrgMode(t *testing.T) {
 		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
 
-		assert.NoError(t, err)
-		assert.NotNil(t, resp)
-
-		// Tenant should not be in context
-		resultCtx := resp.(context.Context)
-		_, ok := tenant.FromContext(resultCtx)
-		assert.False(t, ok)
+		// Should fail - tenant claim is always required
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+		assert.Contains(t, st.Message(), "tenant_id claim required")
 	})
 
-	t.Run("single-tenant mode does not inject tenant even if present in token", func(t *testing.T) {
-		// Ensure MULTI_TENANT_MODE is not set
-		t.Setenv(MultiTenantModeEnvVar, "")
-
+	t.Run("always injects tenant context when present in token", func(t *testing.T) {
+		// The system is always multi-tenant - tenant context is always injected
 		cfg := &InterceptorConfig{
 			Validator: validator,
 		}
@@ -800,32 +799,10 @@ func TestMultiOrgMode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 
-		// Tenant should not be in context in single-tenant mode
+		// Tenant should always be in context
 		resultCtx := resp.(context.Context)
-		_, ok := tenant.FromContext(resultCtx)
-		assert.False(t, ok)
-	})
-}
-
-func TestIsMultiTenantModeEnabled(t *testing.T) {
-	t.Run("returns true when MULTI_TENANT_MODE is true", func(t *testing.T) {
-		t.Setenv(MultiTenantModeEnvVar, "true")
-		assert.True(t, IsMultiTenantModeEnabled())
-	})
-
-	t.Run("returns false when MULTI_TENANT_MODE is false", func(t *testing.T) {
-		t.Setenv(MultiTenantModeEnvVar, "false")
-		assert.False(t, IsMultiTenantModeEnabled())
-	})
-
-	t.Run("returns false when MULTI_TENANT_MODE is empty", func(t *testing.T) {
-		t.Setenv(MultiTenantModeEnvVar, "")
-		assert.False(t, IsMultiTenantModeEnabled())
-	})
-
-	t.Run("returns false when MULTI_TENANT_MODE is not set", func(t *testing.T) {
-		// Unset the env var by setting to empty (t.Setenv doesn't support unsetting)
-		t.Setenv(MultiTenantModeEnvVar, "")
-		assert.False(t, IsMultiTenantModeEnabled())
+		tenantID, ok := tenant.FromContext(resultCtx)
+		assert.True(t, ok, "tenant context should always be present")
+		assert.Equal(t, "acme_bank", tenantID.String())
 	})
 }

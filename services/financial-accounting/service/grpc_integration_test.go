@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
@@ -29,6 +31,8 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 )
 
@@ -44,6 +48,7 @@ type testServer struct {
 	grpcClient financialaccountingv1.FinancialAccountingServiceClient
 	healthCli  grpc_health_v1.HealthClient
 	conn       *grpc.ClientConn
+	ctx        context.Context
 }
 
 // setupIntegrationTest creates a complete test environment with:
@@ -51,7 +56,7 @@ type testServer struct {
 // - gRPC server with FinancialAccountingService
 // - Health check service
 // - gRPC client connections
-func setupIntegrationTest(t *testing.T) *testServer {
+func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 	t.Helper()
 
 	// Create PostgreSQL testcontainer with schema and migrations
@@ -60,15 +65,50 @@ func setupIntegrationTest(t *testing.T) *testServer {
 		&persistence.LedgerPostingEntity{},
 	})
 
-	// Manually create FK constraint since GORM AutoMigrate doesn't create them
-	err := db.Exec(`
-		ALTER TABLE financial_accounting.ledger_postings
-		ADD CONSTRAINT fk_ledger_postings_booking_log
-		FOREIGN KEY (financial_booking_log_id)
-		REFERENCES financial_accounting.financial_booking_logs(id)
-		ON DELETE RESTRICT
-	`).Error
-	require.NoError(t, err, "Failed to create FK constraint")
+	// Create tenant schema
+	tid := tenant.TenantID(testTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create tables in tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_logs (
+		id UUID PRIMARY KEY,
+		financial_account_type TEXT NOT NULL,
+		product_service_reference TEXT NOT NULL,
+		business_unit_reference TEXT NOT NULL,
+		chart_of_accounts_rules TEXT,
+		base_currency TEXT NOT NULL,
+		status TEXT NOT NULL,
+		idempotency_key TEXT UNIQUE NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		version INT NOT NULL DEFAULT 1
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_postings (
+		id UUID PRIMARY KEY,
+		financial_booking_log_id UUID NOT NULL REFERENCES %q.financial_booking_logs(id) ON DELETE RESTRICT,
+		posting_direction TEXT NOT NULL,
+		amount_cents BIGINT NOT NULL,
+		currency TEXT NOT NULL,
+		account_id TEXT NOT NULL,
+		value_date TIMESTAMP NOT NULL,
+		posting_result TEXT,
+		correlation_id TEXT,
+		status TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP
+	)`, schemaName, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set search_path to tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
 
 	// Create repository
 	repo := persistence.NewLedgerRepository(db)
@@ -82,8 +122,10 @@ func setupIntegrationTest(t *testing.T) *testServer {
 	// Create the financial accounting service
 	service := NewFinancialAccountingService(repo, eventPublisher, idempotencySvc)
 
-	// Create gRPC server
-	grpcServer := grpc.NewServer()
+	// Create gRPC server with tenant interceptor
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(auth.TenantExtractionInterceptor()),
+	)
 	financialaccountingv1.RegisterFinancialAccountingServiceServer(grpcServer, service)
 
 	// Create and register health service
@@ -106,10 +148,28 @@ func setupIntegrationTest(t *testing.T) *testServer {
 		_ = grpcServer.Serve(listener)
 	}()
 
+	// Create client interceptor that adds tenant ID to outgoing metadata
+	tenantInterceptor := func(
+		ctx context.Context,
+		method string,
+		req, reply interface{},
+		cc *grpc.ClientConn,
+		invoker grpc.UnaryInvoker,
+		opts ...grpc.CallOption,
+	) error {
+		// Add tenant ID to outgoing metadata
+		md := metadata.New(map[string]string{
+			tenant.TenantIDKey: testTenantID,
+		})
+		ctx = metadata.NewOutgoingContext(ctx, md)
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+
 	// Create client connection using NewClient (grpc.DialContext is deprecated)
 	// Note: NewClient creates a lazy client that doesn't connect until first RPC
 	conn, err := grpc.NewClient(address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(tenantInterceptor),
 	)
 	require.NoError(t, err, "Failed to create gRPC client")
 
@@ -127,6 +187,7 @@ func setupIntegrationTest(t *testing.T) *testServer {
 		grpcClient: grpcClient,
 		healthCli:  healthClient,
 		conn:       conn,
+		ctx:        ctx,
 	}
 
 	ts.cleanup = func() {
@@ -135,11 +196,11 @@ func setupIntegrationTest(t *testing.T) *testServer {
 		dbCleanup()
 	}
 
-	return ts
+	return ts, ctx
 }
 
 // createTestBookingLog creates a booking log in the database for testing
-func createTestBookingLog(t *testing.T, db *gorm.DB) uuid.UUID {
+func createTestBookingLog(t *testing.T, db *gorm.DB, ctx context.Context) uuid.UUID {
 	t.Helper()
 
 	bookingLogID := uuid.New()
@@ -156,7 +217,7 @@ func createTestBookingLog(t *testing.T, db *gorm.DB) uuid.UUID {
 		UpdatedAt:               time.Now(),
 		Version:                 1,
 	}
-	require.NoError(t, db.Create(bookingLog).Error)
+	require.NoError(t, db.WithContext(ctx).Create(bookingLog).Error)
 
 	return bookingLogID
 }
@@ -243,10 +304,10 @@ func (s *inMemoryIdempotencyService) IsHeld(_ context.Context, _ idempotency.Key
 // ============================================================================
 
 func TestHealthCheck_Integration_DefaultService(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 5*time.Second)
 	defer cancel()
 
 	// Test default service health check (used by K8s probes)
@@ -259,10 +320,10 @@ func TestHealthCheck_Integration_DefaultService(t *testing.T) {
 }
 
 func TestHealthCheck_Integration_NamedService(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 5*time.Second)
 	defer cancel()
 
 	// Test named service health check
@@ -275,10 +336,10 @@ func TestHealthCheck_Integration_NamedService(t *testing.T) {
 }
 
 func TestHealthCheck_Integration_UnknownService(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 5*time.Second)
 	defer cancel()
 
 	// Test unknown service health check
@@ -293,10 +354,10 @@ func TestHealthCheck_Integration_UnknownService(t *testing.T) {
 }
 
 func TestHealthCheck_Integration_StatusChange(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 5*time.Second)
 	defer cancel()
 
 	// Initially SERVING
@@ -322,14 +383,14 @@ func TestHealthCheck_Integration_StatusChange(t *testing.T) {
 // ============================================================================
 
 func TestCaptureLedgerPosting_Integration_Success(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Create a booking log first (required for FK constraint)
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 
 	// Create posting request
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
@@ -369,13 +430,13 @@ func TestCaptureLedgerPosting_Integration_Success(t *testing.T) {
 }
 
 func TestCaptureLedgerPosting_Integration_CreditDirection(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
@@ -397,13 +458,13 @@ func TestCaptureLedgerPosting_Integration_CreditDirection(t *testing.T) {
 }
 
 func TestCaptureLedgerPosting_Integration_WithIdempotencyKey(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
@@ -435,10 +496,10 @@ func TestCaptureLedgerPosting_Integration_WithIdempotencyKey(t *testing.T) {
 }
 
 func TestCaptureLedgerPosting_Integration_InvalidBookingLogID(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
@@ -462,13 +523,13 @@ func TestCaptureLedgerPosting_Integration_InvalidBookingLogID(t *testing.T) {
 }
 
 func TestCaptureLedgerPosting_Integration_ZeroAmount(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
@@ -491,13 +552,13 @@ func TestCaptureLedgerPosting_Integration_ZeroAmount(t *testing.T) {
 }
 
 func TestCaptureLedgerPosting_Integration_MissingAccountID(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
@@ -524,14 +585,14 @@ func TestCaptureLedgerPosting_Integration_MissingAccountID(t *testing.T) {
 // ============================================================================
 
 func TestRetrieveLedgerPosting_Integration_Success(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Create booking log and posting
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 	amount, _ := domain.NewMoney(decimal.NewFromFloat(100.50), domain.CurrencyGBP)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
@@ -561,10 +622,10 @@ func TestRetrieveLedgerPosting_Integration_Success(t *testing.T) {
 }
 
 func TestRetrieveLedgerPosting_Integration_NotFound(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Try to retrieve non-existent posting
@@ -579,10 +640,10 @@ func TestRetrieveLedgerPosting_Integration_NotFound(t *testing.T) {
 }
 
 func TestRetrieveLedgerPosting_Integration_InvalidUUID(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	_, err := ts.grpcClient.RetrieveLedgerPosting(ctx, &financialaccountingv1.RetrieveLedgerPostingRequest{
@@ -600,14 +661,14 @@ func TestRetrieveLedgerPosting_Integration_InvalidUUID(t *testing.T) {
 // ============================================================================
 
 func TestUpdateLedgerPosting_Integration_PendingToPosted(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Create booking log and pending posting
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
@@ -640,13 +701,13 @@ func TestUpdateLedgerPosting_Integration_PendingToPosted(t *testing.T) {
 }
 
 func TestUpdateLedgerPosting_Integration_PendingToFailed(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
@@ -672,14 +733,14 @@ func TestUpdateLedgerPosting_Integration_PendingToFailed(t *testing.T) {
 }
 
 func TestUpdateLedgerPosting_Integration_InvalidTransition(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Create already POSTED posting
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
@@ -708,10 +769,10 @@ func TestUpdateLedgerPosting_Integration_InvalidTransition(t *testing.T) {
 }
 
 func TestUpdateLedgerPosting_Integration_NotFound(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	_, err := ts.grpcClient.UpdateLedgerPosting(ctx, &financialaccountingv1.UpdateLedgerPostingRequest{
@@ -731,14 +792,14 @@ func TestUpdateLedgerPosting_Integration_NotFound(t *testing.T) {
 // ============================================================================
 
 func TestListLedgerPostings_Integration_Success(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Create booking log and multiple postings
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
 
 	for i := 0; i < 5; i++ {
@@ -769,15 +830,15 @@ func TestListLedgerPostings_Integration_Success(t *testing.T) {
 }
 
 func TestListLedgerPostings_Integration_FilterByBookingLogID(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Create two booking logs
-	bookingLogID1 := createTestBookingLog(t, ts.db)
-	bookingLogID2 := createTestBookingLog(t, ts.db)
+	bookingLogID1 := createTestBookingLog(t, ts.db, ts.ctx)
+	bookingLogID2 := createTestBookingLog(t, ts.db, ts.ctx)
 
 	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
 
@@ -830,13 +891,13 @@ func TestListLedgerPostings_Integration_FilterByBookingLogID(t *testing.T) {
 }
 
 func TestListLedgerPostings_Integration_FilterByDirection(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
 
 	// Create 2 debit and 3 credit postings
@@ -886,13 +947,13 @@ func TestListLedgerPostings_Integration_FilterByDirection(t *testing.T) {
 }
 
 func TestListLedgerPostings_Integration_Pagination(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
 
 	// Create 10 postings
@@ -946,10 +1007,10 @@ func TestListLedgerPostings_Integration_Pagination(t *testing.T) {
 }
 
 func TestListLedgerPostings_Integration_InvalidPageSize(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Page size 0 should fail
@@ -970,15 +1031,15 @@ func TestListLedgerPostings_Integration_InvalidPageSize(t *testing.T) {
 // ============================================================================
 
 func TestListFinancialBookingLogs_Integration_Success(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Create multiple booking logs
 	for i := 0; i < 3; i++ {
-		createTestBookingLog(t, ts.db)
+		createTestBookingLog(t, ts.db, ts.ctx)
 	}
 
 	resp, err := ts.grpcClient.ListFinancialBookingLogs(ctx, &financialaccountingv1.ListFinancialBookingLogsRequest{
@@ -993,10 +1054,10 @@ func TestListFinancialBookingLogs_Integration_Success(t *testing.T) {
 }
 
 func TestListFinancialBookingLogs_Integration_FilterByBusinessUnit(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
 	// Create booking logs with different business units
@@ -1013,7 +1074,7 @@ func TestListFinancialBookingLogs_Integration_FilterByBusinessUnit(t *testing.T)
 		UpdatedAt:               time.Now(),
 		Version:                 1,
 	}
-	require.NoError(t, ts.db.Create(bookingLog1).Error)
+	require.NoError(t, ts.db.WithContext(ts.ctx).Create(bookingLog1).Error)
 
 	bookingLog2 := &persistence.FinancialBookingLogEntity{
 		ID:                      uuid.New(),
@@ -1028,7 +1089,7 @@ func TestListFinancialBookingLogs_Integration_FilterByBusinessUnit(t *testing.T)
 		UpdatedAt:               time.Now(),
 		Version:                 1,
 	}
-	require.NoError(t, ts.db.Create(bookingLog2).Error)
+	require.NoError(t, ts.db.WithContext(ts.ctx).Create(bookingLog2).Error)
 
 	// Filter by business unit
 	resp, err := ts.grpcClient.ListFinancialBookingLogs(ctx, &financialaccountingv1.ListFinancialBookingLogsRequest{
@@ -1049,13 +1110,13 @@ func TestListFinancialBookingLogs_Integration_FilterByBusinessUnit(t *testing.T)
 // ============================================================================
 
 func TestEndToEnd_CreateAndRetrievePosting(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 
 	// Step 1: Create posting
 	createResp, err := ts.grpcClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
@@ -1084,13 +1145,13 @@ func TestEndToEnd_CreateAndRetrievePosting(t *testing.T) {
 }
 
 func TestEndToEnd_PostingLifecycle(t *testing.T) {
-	ts := setupIntegrationTest(t)
+	ts, _ := setupIntegrationTest(t)
 	defer ts.cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
 	defer cancel()
 
-	bookingLogID := createTestBookingLog(t, ts.db)
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
 
 	// Step 1: Create posting (PENDING)
 	createResp, err := ts.grpcClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{

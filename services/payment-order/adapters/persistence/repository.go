@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
 
@@ -107,31 +106,19 @@ func NewPaymentOrderRepository(gormDB *gorm.DB) *PaymentOrderRepository {
 	return &PaymentOrderRepository{db: gormDB}
 }
 
-// hasTenantContext checks if tenant context is present (multi-tenant mode).
-func (r *PaymentOrderRepository) hasTenantContext(ctx context.Context) bool {
-	_, ok := tenant.FromContext(ctx)
-	return ok
-}
-
-// withOptionalOrgScope executes the given function with optional tenant scoping.
-// In single-tenant mode (no tenant context), it runs the function directly without a transaction.
-// In multi-tenant mode, it wraps the function in a transaction and sets the search_path.
-// This helper reduces code duplication across repository methods.
-func (r *PaymentOrderRepository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	if !r.hasTenantContext(ctx) {
-		// Single-tenant mode: run directly without transaction overhead
-		return fn(r.db.WithContext(ctx))
-	}
-	// Multi-tenant mode: use the shared helper that handles transaction + tenant scope
+// withTenantTransaction executes the given function with tenant scoping.
+// The system is always in multi-tenant mode, so this wraps the function in a transaction
+// and sets the search_path. This helper reduces code duplication across repository methods.
+func (r *PaymentOrderRepository) withTenantTransaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
 // Create inserts a new payment order.
 // Returns ErrIdempotencyKeyConflict if a payment order with the same idempotency key exists.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *PaymentOrderRepository) Create(ctx context.Context, po *domain.PaymentOrder) error {
 	entity := toEntity(po)
-	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		err := tx.Create(entity).Error
 		if err != nil && strings.Contains(err.Error(), errUniqueConstraintIdempotencyKey) {
 			return ErrIdempotencyKeyConflict
@@ -141,10 +128,10 @@ func (r *PaymentOrderRepository) Create(ctx context.Context, po *domain.PaymentO
 }
 
 // FindByID retrieves a payment order by its UUID.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *PaymentOrderRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.PaymentOrder, error) {
 	var paymentOrder *domain.PaymentOrder
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity PaymentOrderEntity
 		result := tx.Where("id = ?", id).First(&entity)
 
@@ -167,10 +154,10 @@ func (r *PaymentOrderRepository) FindByID(ctx context.Context, id uuid.UUID) (*d
 }
 
 // FindByIdempotencyKey retrieves a payment order by its idempotency key.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *PaymentOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*domain.PaymentOrder, error) {
 	var paymentOrder *domain.PaymentOrder
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity PaymentOrderEntity
 		result := tx.Where("idempotency_key = ?", key).First(&entity)
 
@@ -193,10 +180,10 @@ func (r *PaymentOrderRepository) FindByIdempotencyKey(ctx context.Context, key s
 }
 
 // FindByGatewayReferenceID retrieves a payment order by its gateway reference ID.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *PaymentOrderRepository) FindByGatewayReferenceID(ctx context.Context, gatewayRefID string) (*domain.PaymentOrder, error) {
 	var paymentOrder *domain.PaymentOrder
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity PaymentOrderEntity
 		result := tx.Where("gateway_reference_id = ?", gatewayRefID).First(&entity)
 
@@ -219,10 +206,10 @@ func (r *PaymentOrderRepository) FindByGatewayReferenceID(ctx context.Context, g
 }
 
 // FindByDebtorAccountID retrieves all payment orders for a debtor account.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *PaymentOrderRepository) FindByDebtorAccountID(ctx context.Context, accountID string) ([]*domain.PaymentOrder, error) {
 	var paymentOrders []*domain.PaymentOrder
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entities []PaymentOrderEntity
 		result := tx.Where("debtor_account_id = ?", accountID).Find(&entities)
 
@@ -249,7 +236,7 @@ func (r *PaymentOrderRepository) FindByDebtorAccountID(ctx context.Context, acco
 // FindByDebtorAccountIDWithCursor retrieves payment orders for a debtor account with cursor-based pagination.
 // This provides consistent results even when items are inserted/deleted during pagination.
 // Results are ordered by created_at DESC, id DESC (newest first) for deterministic ordering.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 //
 // The cursor uses (created_at, id) as a composite key to handle ties when multiple records
 // have the same created_at timestamp. The query uses:
@@ -259,7 +246,7 @@ func (r *PaymentOrderRepository) FindByDebtorAccountID(ctx context.Context, acco
 // This ensures stable pagination even with concurrent inserts.
 func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Context, accountID string, limit int, cursor Cursor) (*PaginatedResult, error) {
 	var paginatedResult *PaginatedResult
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// Get total count (for UI purposes - this is still useful for showing "X of Y" in pagination)
 		var totalCount int64
 		countResult := tx.Model(&PaymentOrderEntity{}).
@@ -345,11 +332,11 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Con
 }
 
 // Update updates an existing payment order with optimistic locking.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentOrder) error {
 	entity := toEntity(po)
 
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// Optimistic locking: use WHERE clause with version check
 		result := tx.Model(&PaymentOrderEntity{}).
 			Where("id = ? AND version = ?", entity.ID, po.Version).

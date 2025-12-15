@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -27,13 +29,46 @@ func mustNewMoney(currency string, amountCents int64) domain.Money {
 	return m
 }
 
-func setupTestDB(t *testing.T) (*gorm.DB, func()) {
+const svcTestTenantID = "test_tenant"
+
+func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{&persistence.CurrentAccountEntity{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.CurrentAccountEntity{}})
+
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(svcTestTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the current_accounts table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.current_accounts (
+		id UUID PRIMARY KEY,
+		account_number VARCHAR(255) NOT NULL UNIQUE,
+		party_id UUID NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		balance_cents BIGINT NOT NULL DEFAULT 0,
+		status VARCHAR(20) NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		version INT NOT NULL DEFAULT 1,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255)
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
 func TestInitiateCurrentAccount(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -45,7 +80,7 @@ func TestInitiateCurrentAccount(t *testing.T) {
 		BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
 	}
 
-	resp, err := svc.InitiateCurrentAccount(context.Background(), req)
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
 	if err != nil {
 		t.Fatalf("InitiateCurrentAccount failed: %v", err)
 	}
@@ -68,7 +103,7 @@ func TestInitiateCurrentAccount(t *testing.T) {
 }
 
 func TestExecuteDeposit(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -77,7 +112,7 @@ func TestExecuteDeposit(t *testing.T) {
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(context.Background(), account); err != nil {
+	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
 
@@ -94,7 +129,7 @@ func TestExecuteDeposit(t *testing.T) {
 		Description: "Test deposit",
 	}
 
-	resp, err := svc.ExecuteDeposit(context.Background(), req)
+	resp, err := svc.ExecuteDeposit(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteDeposit failed: %v", err)
 	}
@@ -123,7 +158,7 @@ func TestExecuteDeposit(t *testing.T) {
 }
 
 func TestExecuteDepositAccountNotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -140,7 +175,7 @@ func TestExecuteDepositAccountNotFound(t *testing.T) {
 		},
 	}
 
-	_, err := svc.ExecuteDeposit(context.Background(), req)
+	_, err := svc.ExecuteDeposit(ctx, req)
 	if err == nil {
 		t.Fatal("Expected error for non-existent account")
 	}
@@ -156,7 +191,7 @@ func TestExecuteDepositAccountNotFound(t *testing.T) {
 }
 
 func TestExecuteDepositInvalidAmount(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -165,7 +200,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(context.Background(), account); err != nil {
+	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
 
@@ -181,7 +216,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 		},
 	}
 
-	_, err = svc.ExecuteDeposit(context.Background(), req)
+	_, err = svc.ExecuteDeposit(ctx, req)
 	if err == nil {
 		t.Fatal("Expected error for zero amount")
 	}
@@ -197,7 +232,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 }
 
 func TestRetrieveCurrentAccount(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -206,7 +241,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(context.Background(), account); err != nil {
+	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
 
@@ -215,7 +250,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 		AccountId: "ACC-001",
 	}
 
-	resp, err := svc.RetrieveCurrentAccount(context.Background(), req)
+	resp, err := svc.RetrieveCurrentAccount(ctx, req)
 	if err != nil {
 		t.Fatalf("RetrieveCurrentAccount failed: %v", err)
 	}
@@ -234,7 +269,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 }
 
 func TestRetrieveCurrentAccountNotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -244,7 +279,7 @@ func TestRetrieveCurrentAccountNotFound(t *testing.T) {
 		AccountId: "ACC-NONEXISTENT",
 	}
 
-	_, err := svc.RetrieveCurrentAccount(context.Background(), req)
+	_, err := svc.RetrieveCurrentAccount(ctx, req)
 	if err == nil {
 		t.Fatal("Expected error for non-existent account")
 	}
@@ -283,7 +318,7 @@ func TestCurrencyMapping(t *testing.T) {
 }
 
 func TestExecuteDepositCurrencyMismatch(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -292,7 +327,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	// Create GBP account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	if err := repo.Save(context.Background(), account); err != nil {
+	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
 	}
 
@@ -308,7 +343,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 		},
 	}
 
-	_, err = svc.ExecuteDeposit(context.Background(), req)
+	_, err = svc.ExecuteDeposit(ctx, req)
 	if err == nil {
 		t.Fatal("Expected error for currency mismatch")
 	}
@@ -328,7 +363,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 }
 
 func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -340,7 +375,7 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 		BaseCurrency:          commonpb.Currency_CURRENCY_JPY,
 	}
 
-	_, err := svc.InitiateCurrentAccount(context.Background(), req)
+	_, err := svc.InitiateCurrentAccount(ctx, req)
 	if err == nil {
 		t.Fatal("Expected error for unsupported currency")
 	}
@@ -422,7 +457,7 @@ func TestToMoneyAmount(t *testing.T) {
 // Defensive tests for overflow scenarios per ADR-008
 
 func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -431,7 +466,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	require.NoError(t, repo.Save(context.Background(), account))
+	require.NoError(t, repo.Save(ctx, account))
 
 	// Test: Units value that would overflow when multiplied by 100
 	tests := []struct {
@@ -467,7 +502,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 				},
 			}
 
-			_, err := svc.ExecuteDeposit(context.Background(), req)
+			_, err := svc.ExecuteDeposit(ctx, req)
 
 			if tt.wantErr {
 				require.Error(t, err, tt.rationale)
@@ -487,7 +522,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 }
 
 func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -496,7 +531,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
 	require.NoError(t, err)
-	require.NoError(t, repo.Save(context.Background(), account))
+	require.NoError(t, repo.Save(ctx, account))
 
 	// Test: Large units + nanos uses Money.Add() safely
 	req := &pb.ExecuteDepositRequest{
@@ -512,7 +547,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 
 	// This should fail safely - either with overflow error or invalid amount error
 	// (int64 overflow in ToMinorUnitsUnchecked can produce negative values caught by positivity check)
-	_, err = svc.ExecuteDeposit(context.Background(), req)
+	_, err = svc.ExecuteDeposit(ctx, req)
 	require.Error(t, err, "overflow scenario should surface an error, not succeed")
 
 	st, ok := status.FromError(err)

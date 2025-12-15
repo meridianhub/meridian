@@ -70,6 +70,12 @@ linters:
           - nilnil           # Tests may use (nil, nil) for mock implementations
           - govet            # unusedwrite and nilness checks too strict for test scaffolding
 
+      # Allow context-as-argument after *testing.T in test helper functions
+      - path: _test\.go
+        text: "context-as-argument"
+        linters:
+          - revive
+
       # Exclude linters for testdb package (test support utilities)
       - path: shared/platform/testdb/
         linters:

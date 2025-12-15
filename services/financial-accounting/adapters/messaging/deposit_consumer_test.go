@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,21 +11,71 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func setupTestServices(t *testing.T) (*service.PostingService, func()) {
+const testTenantID = "test_tenant"
+
+func setupTestServices(t *testing.T) (*service.PostingService, context.Context, func()) {
 	t.Helper()
 
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{}})
 
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(testTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create tables in tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_logs (
+		id UUID PRIMARY KEY,
+		financial_account_type VARCHAR(50) NOT NULL,
+		product_service_reference VARCHAR(255) NOT NULL,
+		business_unit_reference VARCHAR(255) NOT NULL,
+		chart_of_accounts_rules TEXT NOT NULL,
+		base_currency VARCHAR(3) NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		version BIGINT NOT NULL DEFAULT 1,
+		deleted_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_postings (
+		id UUID PRIMARY KEY,
+		financial_booking_log_id UUID NOT NULL,
+		posting_direction VARCHAR(20) NOT NULL,
+		amount_cents BIGINT NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		account_id VARCHAR(255) NOT NULL,
+		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
+		posting_result TEXT NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		correlation_id VARCHAR(255) NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		deleted_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
 	repo := persistence.NewLedgerRepository(db)
-	return service.NewPostingService(repo, "BANK-CASH-001"), cleanup
+	return service.NewPostingService(repo, "BANK-CASH-001"), ctx, cleanup
 }
 
 func TestNewDepositConsumer(t *testing.T) {
-	postingService, cleanup := setupTestServices(t)
+	postingService, _, cleanup := setupTestServices(t)
 	defer cleanup()
 
 	tests := []struct {
@@ -74,7 +125,7 @@ func TestNewDepositConsumer(t *testing.T) {
 }
 
 func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
-	postingService, cleanup := setupTestServices(t)
+	postingService, ctx, cleanup := setupTestServices(t)
 	defer cleanup()
 
 	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
@@ -145,10 +196,10 @@ func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := consumer.handleDepositEvent(ctx, tt.event)
+			err := consumer.handleDepositEvent(testCtx, tt.event)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("handleDepositEvent() error = %v, wantErr %v", err, tt.wantErr)
 			}

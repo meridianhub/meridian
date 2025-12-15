@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
@@ -51,55 +50,37 @@ func NewLedgerRepository(gormDB *gorm.DB) *LedgerRepository {
 	return &LedgerRepository{db: gormDB}
 }
 
-// hasTenantContext checks if tenant context is present (multi-tenant mode).
-func (r *LedgerRepository) hasTenantContext(ctx context.Context) bool {
-	_, ok := tenant.FromContext(ctx)
-	return ok
-}
-
 // withTenantScope returns a GORM DB instance scoped to the tenant from context.
-// If tenant context is present (multi-tenant mode), it sets the PostgreSQL search_path.
-// If tenant context is missing (single-tenant mode), it returns the DB unchanged.
-//
+// The system is always in multi-tenant mode and requires tenant context.
 // This must be called within a transaction for the search_path setting to work correctly.
 func (r *LedgerRepository) withTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
-	if r.hasTenantContext(ctx) {
-		return db.WithGormTenantScope(ctx, tx)
-	}
-	// Single-tenant mode: no tenant scope needed
-	return tx, nil
+	return db.WithGormTenantScope(ctx, tx)
 }
 
-// withOptionalOrgScope executes the given function with optional tenant scoping.
-// In single-tenant mode (no tenant context), it runs the function directly without a transaction.
-// In multi-tenant mode, it wraps the function in a transaction and sets the search_path.
-// This helper reduces code duplication across repository methods.
-func (r *LedgerRepository) withOptionalOrgScope(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	if !r.hasTenantContext(ctx) {
-		// Single-tenant mode: run directly without transaction overhead
-		return fn(r.db.WithContext(ctx))
-	}
-	// Multi-tenant mode: use the shared helper that handles transaction + tenant scope
+// withTenantTransaction executes the given function with tenant scoping.
+// The system is always in multi-tenant mode, so this wraps the function in a transaction
+// and sets the search_path. This helper reduces code duplication across repository methods.
+func (r *LedgerRepository) withTenantTransaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
 // SavePosting persists a ledger posting.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) SavePosting(ctx context.Context, posting *domain.LedgerPosting) error {
 	entity, err := toPostingEntity(posting)
 	if err != nil {
 		return err
 	}
-	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Create(&entity).Error
 	})
 }
 
 // SavePostingsInTransaction persists multiple postings atomically within a transaction.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) SavePostingsInTransaction(ctx context.Context, postings []*domain.LedgerPosting) error {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Set tenant scope if in multi-tenant mode
+		// Set tenant scope (always required in multi-tenant mode)
 		var scopedTx *gorm.DB
 		var scopeErr error
 		scopedTx, scopeErr = r.withTenantScope(ctx, tx)
@@ -125,10 +106,10 @@ func (r *LedgerRepository) SavePostingsInTransaction(ctx context.Context, postin
 }
 
 // GetPosting retrieves a posting by ID.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) GetPosting(ctx context.Context, id uuid.UUID) (*domain.LedgerPosting, error) {
 	var posting *domain.LedgerPosting
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity LedgerPostingEntity
 		result := tx.First(&entity, "id = ?", id)
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -147,10 +128,10 @@ func (r *LedgerRepository) GetPosting(ctx context.Context, id uuid.UUID) (*domai
 }
 
 // GetPostingsByBookingLogID retrieves all postings for a booking log.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) GetPostingsByBookingLogID(ctx context.Context, bookingLogID uuid.UUID) ([]*domain.LedgerPosting, error) {
 	var postings []*domain.LedgerPosting
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entities []LedgerPostingEntity
 		result := tx.Where("financial_booking_log_id = ?", bookingLogID).
 			Order("created_at ASC").
@@ -172,14 +153,14 @@ func (r *LedgerRepository) GetPostingsByBookingLogID(ctx context.Context, bookin
 }
 
 // UpdatePosting updates an existing ledger posting.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) UpdatePosting(ctx context.Context, posting *domain.LedgerPosting) error {
 	entity, err := toPostingEntity(posting)
 	if err != nil {
 		return err
 	}
 
-	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		result := tx.Model(&LedgerPostingEntity{}).
 			Where("id = ?", entity.ID).
 			Updates(map[string]interface{}{
@@ -247,10 +228,10 @@ func toPostingDomain(entity *LedgerPostingEntity) *domain.LedgerPosting {
 }
 
 // GetBookingLog retrieves a booking log by ID.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) GetBookingLog(ctx context.Context, id uuid.UUID) (*domain.FinancialBookingLog, error) {
 	var bookingLog *domain.FinancialBookingLog
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity FinancialBookingLogEntity
 		result := tx.First(&entity, "id = ?", id)
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -270,10 +251,10 @@ func (r *LedgerRepository) GetBookingLog(ctx context.Context, id uuid.UUID) (*do
 
 // SaveBookingLog persists a new financial booking log.
 // Returns ErrDuplicateIdempotencyKey if a booking log with the same idempotency key already exists.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) SaveBookingLog(ctx context.Context, log *domain.FinancialBookingLog, idempotencyKey string) error {
 	entity := toBookingLogEntity(log, idempotencyKey)
-	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		err := tx.Create(&entity).Error
 		if err != nil {
 			// Check for unique constraint violation using PostgreSQL error code
@@ -291,9 +272,9 @@ func (r *LedgerRepository) SaveBookingLog(ctx context.Context, log *domain.Finan
 }
 
 // UpdateBookingLog updates an existing financial booking log.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 func (r *LedgerRepository) UpdateBookingLog(ctx context.Context, log *domain.FinancialBookingLog) error {
-	return r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		result := tx.Model(&FinancialBookingLogEntity{}).
 			Where("id = ?", log.ID).
 			Updates(map[string]interface{}{
@@ -354,7 +335,7 @@ type ListBookingLogsResult struct {
 }
 
 // ListBookingLogs lists booking logs with optional filtering and pagination.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 //
 // LIMITATION: Page token parsing is not yet implemented. Pagination currently
 // uses OFFSET-based queries which may show inconsistent results if data changes
@@ -372,7 +353,7 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 	}
 
 	var result *ListBookingLogsResult
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// Build base query
 		query := tx.Model(&FinancialBookingLogEntity{})
 
@@ -499,7 +480,7 @@ type ListPostingsResult struct {
 }
 
 // ListPostings lists ledger postings with optional filtering and pagination.
-// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+// The context must contain the tenant ID for schema routing.
 //
 // LIMITATION: Page token parsing is not yet implemented. Pagination currently
 // uses OFFSET-based queries which may show inconsistent results if data changes
@@ -517,7 +498,7 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 	}
 
 	var result *ListPostingsResult
-	err := r.withOptionalOrgScope(ctx, func(tx *gorm.DB) error {
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// Build base query
 		query := tx.Model(&LedgerPostingEntity{})
 

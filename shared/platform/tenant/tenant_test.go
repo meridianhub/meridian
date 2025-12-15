@@ -253,3 +253,54 @@ func TestRequireFromContext_NilContext(t *testing.T) {
 		t.Errorf("RequireFromContext returned non-empty TenantID %q for nil context", tenantID)
 	}
 }
+
+func TestPropagateToBackground_WithTenant(t *testing.T) {
+	expected := tenant.MustNewTenantID("async_tenant")
+	parentCtx := tenant.WithTenant(context.Background(), expected)
+
+	// PropagateToBackground should create a new context with just the tenant
+	asyncCtx := tenant.PropagateToBackground(parentCtx)
+
+	// Verify tenant was propagated
+	got, ok := tenant.FromContext(asyncCtx)
+	if !ok {
+		t.Error("PropagateToBackground did not propagate tenant to new context")
+	}
+	if got != expected {
+		t.Errorf("PropagateToBackground propagated wrong tenant: got %q, want %q", got, expected)
+	}
+
+	// Verify it's a fresh context (no deadline from parent)
+	if deadline, hasDeadline := asyncCtx.Deadline(); hasDeadline {
+		t.Errorf("PropagateToBackground context should not have deadline, got %v", deadline)
+	}
+}
+
+func TestPropagateToBackground_WithoutTenant(t *testing.T) {
+	parentCtx := context.Background()
+
+	// PropagateToBackground should return a plain background context
+	asyncCtx := tenant.PropagateToBackground(parentCtx)
+
+	// Verify no tenant
+	_, ok := tenant.FromContext(asyncCtx)
+	if ok {
+		t.Error("PropagateToBackground should not have tenant when parent has none")
+	}
+}
+
+func TestPropagateToBackground_NilContext(t *testing.T) {
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
+	asyncCtx := tenant.PropagateToBackground(nil)
+
+	// Should return a valid background context
+	if asyncCtx == nil {
+		t.Error("PropagateToBackground(nil) returned nil context")
+	}
+
+	// Verify no tenant
+	_, ok := tenant.FromContext(asyncCtx)
+	if ok {
+		t.Error("PropagateToBackground(nil) should not have tenant")
+	}
+}

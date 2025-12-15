@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,13 +16,49 @@ import (
 	"gorm.io/gorm"
 )
 
-func setupTestDB(t *testing.T) (*gorm.DB, func()) {
+const testTenantID = "test_tenant"
+
+func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{&PartyEntity{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PartyEntity{}})
+
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(testTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the parties table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.parties (
+		id UUID PRIMARY KEY,
+		party_type VARCHAR(20) NOT NULL,
+		legal_name VARCHAR(255) NOT NULL,
+		display_name VARCHAR(255),
+		status VARCHAR(20) NOT NULL,
+		external_reference VARCHAR(255),
+		external_reference_type VARCHAR(50),
+		version BIGINT NOT NULL DEFAULT 1,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		deleted_at TIMESTAMP WITH TIME ZONE,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255),
+		UNIQUE(external_reference, external_reference_type)
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema so Create/Update work in the tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
 func TestSaveNewParty(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -29,7 +66,6 @@ func TestSaveNewParty(t *testing.T) {
 	party, err := domain.NewParty(domain.PartyTypePerson, "John Doe")
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Save(ctx, party)
 	require.NoError(t, err)
 
@@ -43,7 +79,7 @@ func TestSaveNewParty(t *testing.T) {
 }
 
 func TestSaveNewParty_InitialVersion(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -51,7 +87,6 @@ func TestSaveNewParty_InitialVersion(t *testing.T) {
 	party, err := domain.NewParty(domain.PartyTypeOrganization, "Acme Corp")
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Save(ctx, party)
 	require.NoError(t, err)
 
@@ -62,11 +97,10 @@ func TestSaveNewParty_InitialVersion(t *testing.T) {
 }
 
 func TestSaveUpdateExisting(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	party, err := domain.NewParty(domain.PartyTypePerson, "John Doe")
 	require.NoError(t, err)
@@ -92,22 +126,20 @@ func TestSaveUpdateExisting(t *testing.T) {
 }
 
 func TestFindByIDNotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	_, err := repo.FindByID(ctx, uuid.New())
 	assert.True(t, errors.Is(err, ErrPartyNotFound))
 }
 
 func TestFindByExternalReference(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	party, err := domain.NewParty(domain.PartyTypeOrganization, "Acme Corp Ltd")
 	require.NoError(t, err)
@@ -125,22 +157,20 @@ func TestFindByExternalReference(t *testing.T) {
 }
 
 func TestFindByExternalReferenceNotFound(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	_, err := repo.FindByExternalReference(ctx, "NONEXISTENT", string(domain.ExternalReferenceTypeCompaniesHouse))
 	assert.True(t, errors.Is(err, ErrPartyNotFound))
 }
 
 func TestExistsByID(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	party, err := domain.NewParty(domain.PartyTypePerson, "Jane Doe")
 	require.NoError(t, err)
@@ -160,11 +190,10 @@ func TestExistsByID(t *testing.T) {
 }
 
 func TestDeleteParty(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	party, err := domain.NewParty(domain.PartyTypePerson, "To Be Deleted")
 	require.NoError(t, err)
@@ -182,11 +211,10 @@ func TestDeleteParty(t *testing.T) {
 }
 
 func TestOptimisticLocking(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	// Create initial party
 	party1, err := domain.NewParty(domain.PartyTypePerson, "John Doe")
@@ -229,11 +257,10 @@ func TestOptimisticLocking(t *testing.T) {
 }
 
 func TestExternalReferenceUniqueness(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	// Create first party with external reference
 	party1, err := domain.NewParty(domain.PartyTypeOrganization, "Company A")
@@ -246,30 +273,23 @@ func TestExternalReferenceUniqueness(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create second party with same external reference - should fail
-	// Test at the database level by creating directly with entity
-	entity := &PartyEntity{
-		ID:                    uuid.New(),
-		PartyType:             string(domain.PartyTypeOrganization),
-		LegalName:             "Company B",
-		Status:                string(domain.PartyStatusActive),
-		ExternalReference:     stringPtr("12345678"),
-		ExternalReferenceType: stringPtr(string(domain.ExternalReferenceTypeCompaniesHouse)),
-		Version:               1,
-		CreatedBy:             "system",
-		UpdatedBy:             "system",
-	}
+	// Use repository to ensure proper tenant scoping
+	party2, err := domain.NewParty(domain.PartyTypeOrganization, "Company B")
+	require.NoError(t, err)
 
-	err = db.Create(entity).Error
+	err = party2.SetExternalReference("12345678", domain.ExternalReferenceTypeCompaniesHouse)
+	require.NoError(t, err)
+
+	err = repo.Save(ctx, party2)
 	assert.Error(t, err, "Should fail with duplicate external reference")
-	assert.True(t, isDuplicateKeyError(err), "Should be a duplicate key error")
+	assert.True(t, errors.Is(err, ErrPartyExists), "Should be ErrPartyExists due to duplicate external reference")
 }
 
 func TestSoftDeleteVerification(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	party, err := domain.NewParty(domain.PartyTypePerson, "Soft Delete Test")
 	require.NoError(t, err)
@@ -347,7 +367,7 @@ func TestToDomain_WithOptionalFields(t *testing.T) {
 // Audit context tests
 
 func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -355,9 +375,9 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 	party, err := domain.NewParty(domain.PartyTypePerson, "Audit Test")
 	require.NoError(t, err)
 
-	// Create context with authenticated user
+	// Create context with authenticated user on top of tenant context
 	testUserID := "user-123"
-	ctx := context.WithValue(context.Background(), auth.UserIDContextKey, testUserID)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, testUserID)
 
 	// Save new party
 	err = repo.Save(ctx, party)
@@ -373,7 +393,7 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 }
 
 func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -381,8 +401,7 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 	party, err := domain.NewParty(domain.PartyTypePerson, "System Test")
 	require.NoError(t, err)
 
-	// Use empty context (no user)
-	ctx := context.Background()
+	// Use context without user (but still has tenant)
 
 	// Save new party
 	err = repo.Save(ctx, party)
@@ -398,7 +417,7 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 }
 
 func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
@@ -408,13 +427,13 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 
 	// Create with user1
 	user1 := "user-creator"
-	ctx1 := context.WithValue(context.Background(), auth.UserIDContextKey, user1)
+	ctx1 := context.WithValue(ctx, auth.UserIDContextKey, user1)
 	err = repo.Save(ctx1, party)
 	require.NoError(t, err)
 
 	// Update with user2
 	user2 := "user-updater"
-	ctx2 := context.WithValue(context.Background(), auth.UserIDContextKey, user2)
+	ctx2 := context.WithValue(ctx, auth.UserIDContextKey, user2)
 	err = party.SetDisplayName("Updated Name")
 	require.NoError(t, err)
 
@@ -431,18 +450,13 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 }
 
 func TestPing(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 
-	err := repo.Ping(context.Background())
+	err := repo.Ping(ctx)
 	assert.NoError(t, err)
-}
-
-// Helper function for creating string pointers
-func stringPtr(s string) *string {
-	return &s
 }
 
 // Multi-Organization Tests
@@ -450,19 +464,17 @@ func stringPtr(s string) *string {
 func TestSave_WithOrganizationContext_SetsSearchPath(t *testing.T) {
 	// This test verifies that when organization context is present,
 	// the repository correctly uses WithGormTenantScope.
-	// In single-tenant mode (no org context), it should work without transaction wrapping.
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 
-	// Test single-tenant mode (no org context) - should work normally
+	// Test with tenant context - should work normally
 	party, err := domain.NewParty(domain.PartyTypePerson, "Single Tenant Party")
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Save(ctx, party)
-	require.NoError(t, err, "Save should work without organization context in single-tenant mode")
+	require.NoError(t, err, "Save should work with tenant context")
 
 	// Verify party was saved
 	retrieved, err := repo.FindByID(ctx, party.ID())
@@ -474,22 +486,21 @@ func TestFindByID_WithOrganizationContext_IsolatesData(t *testing.T) {
 	// In multi-org mode, when organization context is present, data is isolated by schema.
 	// When the org schema doesn't exist but the SET LOCAL search_path succeeds (PostgreSQL
 	// doesn't error on non-existent schemas), queries find nothing in the org schema.
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 
-	// Create party in single-tenant mode (public schema)
+	// Create party with tenant context
 	party, err := domain.NewParty(domain.PartyTypePerson, "Test Party")
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Save(ctx, party)
 	require.NoError(t, err)
 
-	// Verify party exists in single-tenant mode
+	// Verify party exists with tenant context
 	_, err = repo.FindByID(ctx, party.ID())
-	require.NoError(t, err, "Party should be findable without org context")
+	require.NoError(t, err, "Party should be findable with tenant context")
 
 	// With organization context, the search_path changes to org_acme_bank,public.
 	// Since the parties table only exists in public, this should still work
@@ -502,30 +513,29 @@ func TestFindByID_WithOrganizationContext_IsolatesData(t *testing.T) {
 	// whether the SET LOCAL succeeds. The key behavior is that the code path
 	// attempts to set the search_path when org context is present.
 	_, err = repo.FindByID(orgCtx, party.ID())
-	// Note: In a test environment without org schemas, this may or may not error
-	// The important thing is that the hasTenantContext check works
-	// Full isolation testing requires proper org schema setup
+	// Note: In a test environment without org schemas, this may or may not error.
+	// The system is always multi-tenant - tenant context is always required.
+	// Full isolation testing requires proper org schema setup.
 	t.Logf("FindByID with org context result: %v", err)
 }
 
 func TestExistsByID_WithOrganizationContext_UsesOrgScope(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 
-	// Create party in single-tenant mode
+	// Create party with tenant context
 	party, err := domain.NewParty(domain.PartyTypePerson, "Test Party")
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Save(ctx, party)
 	require.NoError(t, err)
 
-	// Verify exists in single-tenant mode
+	// Verify exists with tenant context
 	exists, err := repo.ExistsByID(ctx, party.ID())
 	require.NoError(t, err)
-	assert.True(t, exists, "Party should exist without org context")
+	assert.True(t, exists, "Party should exist with tenant context")
 
 	// With organization context, the search_path is changed.
 	// Since we include public schema in search_path, the party is still found.
@@ -540,22 +550,21 @@ func TestExistsByID_WithOrganizationContext_UsesOrgScope(t *testing.T) {
 }
 
 func TestFindByExternalReference_WithOrganizationContext_UsesOrgScope(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 
-	// Create party with external reference in single-tenant mode
+	// Create party with external reference with tenant context
 	party, err := domain.NewParty(domain.PartyTypeOrganization, "Acme Corp Ltd")
 	require.NoError(t, err)
 	err = party.SetExternalReference("12345678", domain.ExternalReferenceTypeCompaniesHouse)
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Save(ctx, party)
 	require.NoError(t, err)
 
-	// Verify findable in single-tenant mode
+	// Verify findable with tenant context
 	found, err := repo.FindByExternalReference(ctx, "12345678", string(domain.ExternalReferenceTypeCompaniesHouse))
 	require.NoError(t, err)
 	assert.Equal(t, party.ID(), found.ID())
@@ -570,16 +579,15 @@ func TestFindByExternalReference_WithOrganizationContext_UsesOrgScope(t *testing
 }
 
 func TestDelete_WithOrganizationContext_UsesOrgScope(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 
-	// Create party in single-tenant mode
+	// Create party with tenant context
 	party, err := domain.NewParty(domain.PartyTypePerson, "To Be Deleted")
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Save(ctx, party)
 	require.NoError(t, err)
 
@@ -598,20 +606,19 @@ func TestDelete_WithOrganizationContext_UsesOrgScope(t *testing.T) {
 }
 
 func TestFindByIDForUpdate_WithOrganizationContext_UsesOrgScope(t *testing.T) {
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 
-	// Create party in single-tenant mode
+	// Create party with tenant context
 	party, err := domain.NewParty(domain.PartyTypePerson, "Test Party")
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	err = repo.Save(ctx, party)
 	require.NoError(t, err)
 
-	// Verify findable in single-tenant mode
+	// Verify findable with tenant context
 	found, err := repo.FindByIDForUpdate(ctx, party.ID())
 	require.NoError(t, err)
 	assert.Equal(t, party.ID(), found.ID())
@@ -628,37 +635,22 @@ func TestFindByIDForUpdate_WithOrganizationContext_UsesOrgScope(t *testing.T) {
 func TestPing_WorksWithoutOrganizationContext(t *testing.T) {
 	// Ping is a health check and should work without organization context
 	// This is critical for health checks to succeed even in multi-org mode
-	db, cleanup := setupTestDB(t)
+	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	repo := NewRepository(db)
 
-	// Ping should work without any context
-	err := repo.Ping(context.Background())
-	assert.NoError(t, err, "Ping should work without organization context")
+	// Ping should work with tenant context
+	err := repo.Ping(ctx)
+	assert.NoError(t, err, "Ping should work with tenant context")
 
-	// Ping should also work when org context is present (it ignores it)
+	// Ping should also work when different org context is present (it ignores it)
 	orgID := tenant.TenantID("acme_bank")
 	orgCtx := tenant.WithTenant(context.Background(), orgID)
 
 	err = repo.Ping(orgCtx)
-	assert.NoError(t, err, "Ping should work even with organization context (ignores it)")
+	assert.NoError(t, err, "Ping should work even with different organization context (ignores it)")
 }
 
-func TestRepository_HasOrganizationContext(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := NewRepository(db)
-
-	t.Run("returns false when no organization context", func(t *testing.T) {
-		ctx := context.Background()
-		assert.False(t, repo.hasTenantContext(ctx))
-	})
-
-	t.Run("returns true when organization context present", func(t *testing.T) {
-		orgID := tenant.TenantID("acme_bank")
-		ctx := tenant.WithTenant(context.Background(), orgID)
-		assert.True(t, repo.hasTenantContext(ctx))
-	})
-}
+// Note: hasTenantContext tests removed - the system is always multi-tenant.
+// Tenant context is always required for all business service operations.

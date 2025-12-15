@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -37,10 +36,6 @@ const (
 	ScopesContextKey contextKey = "scopes"
 	// ClaimsContextKey is the context key for full claims
 	ClaimsContextKey contextKey = "claims"
-
-	// MultiTenantModeEnvVar is the environment variable that enables multi-tenant mode.
-	// When set to "true", tenant claims are required in JWT tokens.
-	MultiTenantModeEnvVar = "MULTI_TENANT_MODE"
 )
 
 // Interceptor provides gRPC interceptors for JWT authentication
@@ -161,22 +156,21 @@ func (a *Interceptor) authenticate(ctx context.Context) (context.Context, error)
 	ctx = context.WithValue(ctx, ScopesContextKey, claims.Scopes)
 	ctx = context.WithValue(ctx, ClaimsContextKey, claims)
 
-	// Tenant context injection
-	multiTenantMode := os.Getenv(MultiTenantModeEnvVar) == "true"
-	if multiTenantMode {
-		tenantID, err := claims.GetTenantID()
-		if err != nil {
-			if errors.Is(err, ErrTenantClaimMissing) {
-				return nil, status.Error(codes.Unauthenticated, "tenant_id claim required")
-			}
-			return nil, status.Error(codes.InvalidArgument, "invalid tenant_id format")
+	// Tenant context injection - ALWAYS required for tenant-layer services.
+	// The system is always multi-tenant (platform schema + 1 to N org_X schemas).
+	// Platform-layer services (like Tenant Service) should NOT use this interceptor.
+	tenantID, err := claims.GetTenantID()
+	if err != nil {
+		if errors.Is(err, ErrTenantClaimMissing) {
+			return nil, status.Error(codes.Unauthenticated, "tenant_id claim required")
 		}
-		ctx = tenant.WithTenant(ctx, tenantID)
-
-		// Add tenant to OpenTelemetry span attributes
-		span := trace.SpanFromContext(ctx)
-		span.SetAttributes(attribute.String("tenant.id", tenantID.String()))
+		return nil, status.Error(codes.InvalidArgument, "invalid tenant_id format")
 	}
+	ctx = tenant.WithTenant(ctx, tenantID)
+
+	// Add tenant to OpenTelemetry span attributes
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.String("tenant.id", tenantID.String()))
 
 	return ctx, nil
 }
@@ -239,12 +233,6 @@ func GetScopesFromContext(ctx context.Context) ([]string, bool) {
 func GetClaimsFromContext(ctx context.Context) (*Claims, bool) {
 	claims, ok := ctx.Value(ClaimsContextKey).(*Claims)
 	return claims, ok
-}
-
-// IsMultiTenantModeEnabled returns true if multi-tenant mode is enabled.
-// Multi-tenant mode requires tenant claims in JWT tokens.
-func IsMultiTenantModeEnabled() bool {
-	return os.Getenv(MultiTenantModeEnvVar) == "true"
 }
 
 // RequireRole creates an interceptor that requires specific roles

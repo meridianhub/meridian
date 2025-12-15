@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,11 +118,44 @@ func (m *mockPartyClient) Close() error {
 }
 
 // Helper function for party integration tests
-func setupPartyIntegrationTestDB(t *testing.T) (*gorm.DB, func()) {
+const partyIntegrationTestTenantID = "test_tenant"
+
+func setupPartyIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.CurrentAccountEntity{},
 	})
+
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(partyIntegrationTestTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the current_accounts table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.current_accounts (
+		id UUID PRIMARY KEY,
+		account_number VARCHAR(255) NOT NULL UNIQUE,
+		party_id UUID NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		balance_cents BIGINT NOT NULL DEFAULT 0,
+		status VARCHAR(20) NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		version INT NOT NULL DEFAULT 1,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255)
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
 func createInitiateAccountRequest(partyID, iban string) *pb.InitiateCurrentAccountRequest {
@@ -148,7 +183,7 @@ func newTestPartyID() string {
 // 4. Response contains valid account details
 func TestInitiateCurrentAccount_WithPartyValidation_Success(t *testing.T) {
 	// Setup
-	db, cleanup := setupPartyIntegrationTestDB(t)
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -169,7 +204,7 @@ func TestInitiateCurrentAccount_WithPartyValidation_Success(t *testing.T) {
 	// Execute account creation with valid UUID party ID
 	partyID := newTestPartyID()
 	req := createInitiateAccountRequest(partyID, "GB82WEST12345698765432")
-	resp, err := svc.InitiateCurrentAccount(context.Background(), req)
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
 	// Verify success
 	require.NoError(t, err, "Account creation should succeed with active party")
@@ -193,7 +228,7 @@ func TestInitiateCurrentAccount_WithPartyValidation_Success(t *testing.T) {
 // 4. No account is created in the database
 func TestInitiateCurrentAccount_PartyNotFound(t *testing.T) {
 	// Setup
-	db, cleanup := setupPartyIntegrationTestDB(t)
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -212,7 +247,7 @@ func TestInitiateCurrentAccount_PartyNotFound(t *testing.T) {
 	// Execute account creation with valid UUID party ID (even though party doesn't exist)
 	partyID := newTestPartyID()
 	req := createInitiateAccountRequest(partyID, "GB82WEST12345698765432")
-	resp, err := svc.InitiateCurrentAccount(context.Background(), req)
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
 	// Verify failure
 	require.Error(t, err, "Account creation should fail when party not found")
@@ -258,7 +293,7 @@ func TestInitiateCurrentAccount_InactiveParty(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			db, cleanup := setupPartyIntegrationTestDB(t)
+			db, ctx, cleanup := setupPartyIntegrationTestDB(t)
 			defer cleanup()
 
 			repo := persistence.NewRepository(db)
@@ -278,7 +313,7 @@ func TestInitiateCurrentAccount_InactiveParty(t *testing.T) {
 			// Execute account creation with valid UUID party ID
 			partyID := newTestPartyID()
 			req := createInitiateAccountRequest(partyID, "GB82WEST12345698765432")
-			resp, err := svc.InitiateCurrentAccount(context.Background(), req)
+			resp, err := svc.InitiateCurrentAccount(ctx, req)
 
 			// Verify failure
 			require.Error(t, err, "Account creation should fail with inactive party")
@@ -304,7 +339,7 @@ func TestInitiateCurrentAccount_InactiveParty(t *testing.T) {
 // 3. Error message indicates party validation failed
 func TestInitiateCurrentAccount_PartyServiceUnavailable(t *testing.T) {
 	// Setup
-	db, cleanup := setupPartyIntegrationTestDB(t)
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -323,7 +358,7 @@ func TestInitiateCurrentAccount_PartyServiceUnavailable(t *testing.T) {
 	// Execute account creation with valid UUID party ID
 	partyID := newTestPartyID()
 	req := createInitiateAccountRequest(partyID, "GB82WEST12345698765432")
-	resp, err := svc.InitiateCurrentAccount(context.Background(), req)
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
 	// Verify failure
 	require.Error(t, err, "Account creation should fail when party service unavailable")
@@ -347,7 +382,7 @@ func TestInitiateCurrentAccount_PartyServiceUnavailable(t *testing.T) {
 // 3. Context deadline exceeded is properly handled
 func TestInitiateCurrentAccount_PartyServiceTimeout(t *testing.T) {
 	// Setup
-	db, cleanup := setupPartyIntegrationTestDB(t)
+	db, baseCtx, cleanup := setupPartyIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -364,8 +399,8 @@ func TestInitiateCurrentAccount_PartyServiceTimeout(t *testing.T) {
 		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
-	// Create context with short timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	// Create context with short timeout, preserving tenant from baseCtx
+	ctx, cancel := context.WithTimeout(baseCtx, 50*time.Millisecond)
 	defer cancel()
 
 	// Execute account creation with valid UUID party ID
@@ -391,7 +426,7 @@ func TestInitiateCurrentAccount_PartyServiceTimeout(t *testing.T) {
 // the Party Service available yet.
 func TestInitiateCurrentAccount_WithoutPartyClient_BackwardCompatibility(t *testing.T) {
 	// Setup
-	db, cleanup := setupPartyIntegrationTestDB(t)
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -402,7 +437,7 @@ func TestInitiateCurrentAccount_WithoutPartyClient_BackwardCompatibility(t *test
 	// Execute account creation with valid UUID party ID
 	partyID := newTestPartyID()
 	req := createInitiateAccountRequest(partyID, "GB82WEST12345698765432")
-	resp, err := svc.InitiateCurrentAccount(context.Background(), req)
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
 
 	// Verify success (no party validation performed)
 	require.NoError(t, err, "Account creation should succeed without party client")
@@ -414,7 +449,7 @@ func TestInitiateCurrentAccount_WithoutPartyClient_BackwardCompatibility(t *test
 // multiple accounts can be created for the same party concurrently.
 func TestInitiateCurrentAccount_ConcurrentCreationSameParty(t *testing.T) {
 	// Setup
-	db, cleanup := setupPartyIntegrationTestDB(t)
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -443,7 +478,7 @@ func TestInitiateCurrentAccount_ConcurrentCreationSameParty(t *testing.T) {
 				PartyId:               partyID,
 				BaseCurrency:          commonpb.Currency_CURRENCY_GBP,
 			}
-			_, err := svc.InitiateCurrentAccount(context.Background(), req)
+			_, err := svc.InitiateCurrentAccount(ctx, req)
 			results <- err
 		}(i)
 	}
@@ -469,7 +504,7 @@ func TestInitiateCurrentAccount_ConcurrentCreationSameParty(t *testing.T) {
 // party validation attempts are properly recorded for observability.
 func TestInitiateCurrentAccount_PartyValidationCalledBeforeAccountCreation(t *testing.T) {
 	// Setup
-	db, cleanup := setupPartyIntegrationTestDB(t)
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -488,7 +523,7 @@ func TestInitiateCurrentAccount_PartyValidationCalledBeforeAccountCreation(t *te
 	// Execute account creation (will fail)
 	partyID := newTestPartyID()
 	req := createInitiateAccountRequest(partyID, "GB82WEST12345698765432")
-	_, err := svc.InitiateCurrentAccount(context.Background(), req)
+	_, err := svc.InitiateCurrentAccount(ctx, req)
 
 	// Verify party validation was called
 	require.Error(t, err)
@@ -496,7 +531,7 @@ func TestInitiateCurrentAccount_PartyValidationCalledBeforeAccountCreation(t *te
 
 	// Verify no account was saved (party validation failed before account creation)
 	// This confirms validation happens BEFORE any database operations
-	_, findErr := repo.FindByID(context.Background(), "GB82WEST12345698765432")
+	_, findErr := repo.FindByID(ctx, "GB82WEST12345698765432")
 	assert.Error(t, findErr, "No account should exist since party validation failed")
 }
 
@@ -553,7 +588,7 @@ func TestInitiateCurrentAccount_TableDriven(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			db, cleanup := setupPartyIntegrationTestDB(t)
+			db, ctx, cleanup := setupPartyIntegrationTestDB(t)
 			defer cleanup()
 
 			repo := persistence.NewRepository(db)
@@ -573,7 +608,7 @@ func TestInitiateCurrentAccount_TableDriven(t *testing.T) {
 			// Execute with valid UUID party ID
 			partyID := newTestPartyID()
 			req := createInitiateAccountRequest(partyID, "GB82WEST12345698765432")
-			resp, err := svc.InitiateCurrentAccount(context.Background(), req)
+			resp, err := svc.InitiateCurrentAccount(ctx, req)
 
 			// Verify
 			if tt.shouldSucceed {

@@ -232,7 +232,7 @@ func (c *Container) initializeEventPublisher() {
 		return
 	}
 
-	// Create Kafka producer with organization header support
+	// Create Kafka producer with tenant header support
 	producerConfig := kafka.ProducerConfig{
 		BootstrapServers: strings.Join(c.Config.Kafka.Brokers, ","),
 		ClientID:         "position-keeping-service",
