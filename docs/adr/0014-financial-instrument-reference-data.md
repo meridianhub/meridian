@@ -137,10 +137,14 @@ CREATE INDEX idx_instrument_directory_lookup
 
 ```go
 func (t InstrumentType) Dimension() string {
-    if t == InstrumentTypeCommodity {
+    switch t {
+    case InstrumentTypeCommodity:
         return "Commodity"
+    case InstrumentTypeCurrency, InstrumentTypeDebt, InstrumentTypeEquity, InstrumentTypeDerivative:
+        return "Monetary"
+    default:
+        return "Monetary"  // CHECK constraint enforces valid types
     }
-    return "Monetary"  // Safe default: CHECK constraint enforces valid types
 }
 ```
 
@@ -238,9 +242,10 @@ type FinancialInstrumentReferenceData interface {
     Register(ctx context.Context, entry FinancialInstrumentDirectoryEntry) error
 
     // Retrieve loads an instrument by code and version (BIAN: Retrieve)
+    // Pass version=0 to retrieve the latest non-deprecated version.
     Retrieve(ctx context.Context, tenantID uuid.UUID, code string, version uint32) (FinancialInstrumentDirectoryEntry, error)
 
-    // RetrieveLatest loads the latest non-deprecated version
+    // RetrieveLatest loads the latest non-deprecated version (convenience wrapper)
     RetrieveLatest(ctx context.Context, tenantID uuid.UUID, code string) (FinancialInstrumentDirectoryEntry, error)
 
     // Update deprecates an instrument version (BIAN: Update)

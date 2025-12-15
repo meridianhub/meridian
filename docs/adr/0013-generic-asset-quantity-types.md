@@ -203,6 +203,8 @@ type PositionKey struct {
 // ERROR TYPES
 // =============================================================================
 
+import "errors"
+
 var (
     // ErrInstrumentMismatch is returned when adding quantities of different instruments
     ErrInstrumentMismatch = errors.New("instrument mismatch: cannot combine different instruments")
@@ -367,8 +369,8 @@ type Rate struct {
     From      FinancialInstrument
     To        FinancialInstrument
     Factor    decimal.Decimal
-    ValidFrom time.Time  // nil = effective from beginning of time
-    ValidTo   time.Time  // nil = effective indefinitely
+    ValidFrom *time.Time  // nil = effective from beginning of time
+    ValidTo   *time.Time  // nil = effective indefinitely
 }
 
 // Identity rate for fiat (£1 = £1)
