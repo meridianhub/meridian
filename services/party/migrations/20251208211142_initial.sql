@@ -1,12 +1,10 @@
 -- Party Service initial migration
--- Uses fully qualified table names (party.parties) for schema isolation.
--- Runtime search_path routes application queries to the correct schema.
+-- Uses UNQUALIFIED table names to support multi-organization routing via search_path.
+-- The schema is created by organization provisioning, not by this migration.
+-- Runtime search_path (e.g., org_acme_bank) routes queries to the correct org schema.
 
--- Create schema for party service
-CREATE SCHEMA IF NOT EXISTS "party";
-
--- Create "parties" table
-CREATE TABLE "party"."parties" (
+-- Create "parties" table (unqualified - uses search_path for schema routing)
+CREATE TABLE "parties" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "party_type" character varying(20) NOT NULL,
   "legal_name" character varying(255) NOT NULL,
@@ -23,10 +21,10 @@ CREATE TABLE "party"."parties" (
   PRIMARY KEY ("id")
 );
 -- Create index "idx_parties_party_type" to table: "parties"
-CREATE INDEX "idx_parties_party_type" ON "party"."parties" ("party_type");
+CREATE INDEX "idx_parties_party_type" ON "parties" ("party_type");
 -- Create index "idx_parties_status" to table: "parties"
-CREATE INDEX "idx_parties_status" ON "party"."parties" ("status");
+CREATE INDEX "idx_parties_status" ON "parties" ("status");
 -- Create index "idx_party_external_ref" to table: "parties"
-CREATE UNIQUE INDEX "idx_party_external_ref" ON "party"."parties" ("external_reference", "external_reference_type") WHERE ((external_reference IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX "idx_party_external_ref" ON "parties" ("external_reference", "external_reference_type") WHERE ((external_reference IS NOT NULL) AND (deleted_at IS NULL));
 -- Create index "idx_party_parties_deleted_at" to table: "parties"
-CREATE INDEX "idx_party_parties_deleted_at" ON "party"."parties" ("deleted_at");
+CREATE INDEX "idx_party_parties_deleted_at" ON "parties" ("deleted_at");
