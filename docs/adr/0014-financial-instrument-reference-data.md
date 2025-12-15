@@ -418,6 +418,37 @@ Instrument definitions are tenant-scoped. The `tenant_id` column ensures:
 - Platform-wide instruments (USD, EUR) use a special system tenant ID
 - Queries always filter by tenant
 
+### Instrument Type Mapping Guidance
+
+When categorizing custom instruments, consider the economic characteristics:
+
+| If the instrument... | Map to | Examples |
+|---------------------|--------|----------|
+| Is legal tender or settles obligations | **Currency** | USD, EUR, GBP |
+| Represents ownership in an entity | **Equity** | Shares, stock units |
+| Is an obligation to pay/receive | **Debt** | Bonds, loans, receivables |
+| Derives value from an underlying | **Derivative** | Options, futures, swaps |
+| Is consumed, redeemed, or amortized | **Commodity** | Energy, compute, inventory |
+
+**Commodity is the catch-all for consumable value:**
+
+| Instrument | Why Commodity? | Key Attributes |
+|------------|---------------|----------------|
+| Energy credits (KWH) | Consumed when used | `tou_period`, `tariff_zone` |
+| Loyalty points / Airmiles | Redeemed for services, expires | `expiry_date`, `program_id` |
+| Vouchers / Gift cards | Redeemed for goods, expires | `expiry_date`, `merchant_id` |
+| Content licenses | Amortized over term | `license_start`, `license_end`, `content_id` |
+| Compute credits | Consumed when used | `region`, `instance_type` |
+| Carbon credits | Retired when used | `vintage`, `project_id`, `registry` |
+| Physical inventory | Sold or consumed | `quality_grade`, `lot_number` |
+
+**The key insight**: If the position decreases through consumption, redemption, or
+amortization (rather than sale or transfer), it's a Commodity.
+
+**Attributes handle the nuances**: Expiry dates, vintages, license terms, and quality
+grades are all position attributes validated by the instrument's schema - not separate
+instrument types.
+
 ### Built-in Instruments
 
 Platform provides standard instruments that all tenants inherit:
