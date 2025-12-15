@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -244,16 +246,48 @@ func (m *mockFinancialAccountingClient) Close() error {
 
 // Helper functions for integration tests
 
-func setupIntegrationTestDB(t *testing.T) (*gorm.DB, func()) {
+const integrationTestTenantID = "test_tenant"
+
+func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.CurrentAccountEntity{},
 	})
+
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(integrationTestTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the current_accounts table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.current_accounts (
+		id UUID PRIMARY KEY,
+		account_number VARCHAR(255) NOT NULL UNIQUE,
+		party_id UUID NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		balance_cents BIGINT NOT NULL DEFAULT 0,
+		status VARCHAR(20) NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		version INT NOT NULL DEFAULT 1,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255)
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
 }
 
-func createTestAccount(t *testing.T, repo *persistence.Repository, accountID string) *domain.CurrentAccount {
+func createTestAccount(t *testing.T, repo *persistence.Repository, ctx context.Context, accountID string) *domain.CurrentAccount {
 	t.Helper()
-	ctx := context.Background()
 	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
 	account, err := domain.NewCurrentAccount(accountID, accountID, uuid.New().String(), "GBP")
@@ -289,11 +323,11 @@ func createTestDepositRequest(accountID string, units int64, nanos int32) *pb.Ex
 // 5. Transaction completes successfully
 func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, repo, "ACC-001")
+	_ = createTestAccount(t, repo, ctx, "ACC-001")
 
 	// Create mock clients
 	mockPosKeeping := &mockPositionKeepingClient{}
@@ -309,7 +343,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 
 	// Execute deposit
 	req := createTestDepositRequest("ACC-001", 100, 500000000) // £100.50
-	resp, err := svc.ExecuteDeposit(context.Background(), req)
+	resp, err := svc.ExecuteDeposit(ctx, req)
 
 	// Verify success
 	require.NoError(t, err, "Deposit should succeed")
@@ -323,7 +357,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	assert.Equal(t, int32(500000000), resp.NewBalance.Amount.Nanos)
 
 	// Verify account persisted correctly
-	updatedAccount, err := repo.FindByID(context.Background(), "ACC-001")
+	updatedAccount, err := repo.FindByID(ctx, "ACC-001")
 	require.NoError(t, err)
 	assert.Equal(t, int64(10050), updatedAccount.Balance.AmountCents(), "Balance should be £100.50 = 10050 cents")
 
@@ -349,11 +383,11 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 // 5. Transaction fails with appropriate error
 func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	account := createTestAccount(t, repo, "ACC-002")
+	account := createTestAccount(t, repo, ctx, "ACC-002")
 	originalBalance := account.Balance.AmountCents()
 
 	// Create mock clients - PositionKeeping configured to fail on initiate
@@ -373,7 +407,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 
 	// Execute deposit
 	req := createTestDepositRequest("ACC-002", 50, 0) // £50.00
-	resp, err := svc.ExecuteDeposit(context.Background(), req)
+	resp, err := svc.ExecuteDeposit(ctx, req)
 
 	// Verify failure
 	require.Error(t, err, "Deposit should fail due to PositionKeeping failure")
@@ -389,7 +423,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	// Verify account state after failure
 	// With the fixed saga ordering, the account is never saved if external services fail,
 	// so the balance should remain unchanged
-	updatedAccount, err := repo.FindByID(context.Background(), "ACC-002")
+	updatedAccount, err := repo.FindByID(ctx, "ACC-002")
 	require.NoError(t, err)
 	// Account balance should be unchanged because save_account is the final step
 	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
@@ -418,11 +452,11 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 // 5. Transaction fails with appropriate error
 func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	account := createTestAccount(t, repo, "ACC-003")
+	account := createTestAccount(t, repo, ctx, "ACC-003")
 	originalBalance := account.Balance.AmountCents()
 
 	// Create mock clients - FinancialAccounting configured to fail
@@ -442,7 +476,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 
 	// Execute deposit
 	req := createTestDepositRequest("ACC-003", 75, 250000000) // £75.25
-	resp, err := svc.ExecuteDeposit(context.Background(), req)
+	resp, err := svc.ExecuteDeposit(ctx, req)
 
 	// Verify failure
 	require.Error(t, err, "Deposit should fail due to FinancialAccounting failure")
@@ -458,7 +492,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 	// Verify account state after failure
 	// With the fixed saga ordering, the account is never saved if external services fail,
 	// so the balance should remain unchanged
-	updatedAccount, err := repo.FindByID(context.Background(), "ACC-003")
+	updatedAccount, err := repo.FindByID(ctx, "ACC-003")
 	require.NoError(t, err)
 	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
 		"Account balance should remain unchanged when external services fail")
@@ -484,7 +518,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 // - Clients are properly initialized
 func TestNewServiceWithClients_ValidConfig(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, _, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -569,7 +603,7 @@ func TestNewServiceWithClients_ValidConfig(t *testing.T) {
 // preventing runtime failures when clients are actually used.
 func TestNewServiceWithClients_MissingTargets(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, _, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
@@ -632,11 +666,11 @@ func TestNewServiceWithClients_MissingTargets(t *testing.T) {
 // which is critical for properly unwinding distributed transactions.
 func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	account := createTestAccount(t, repo, "ACC-004")
+	account := createTestAccount(t, repo, ctx, "ACC-004")
 	originalBalance := account.Balance.AmountCents()
 
 	// Create mock that tracks compensation
@@ -656,7 +690,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 
 	// Execute deposit (will fail at step 3)
 	req := createTestDepositRequest("ACC-004", 25, 0)
-	_, err := svc.ExecuteDeposit(context.Background(), req)
+	_, err := svc.ExecuteDeposit(ctx, req)
 
 	// Verify failure occurred
 	require.Error(t, err)
@@ -667,7 +701,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 
 	// Verify account state after failure
 	// With the fixed saga ordering, the account is never saved if external services fail
-	updatedAccount, err := repo.FindByID(context.Background(), "ACC-004")
+	updatedAccount, err := repo.FindByID(ctx, "ACC-004")
 	require.NoError(t, err)
 	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
 		"Account balance should remain unchanged when external services fail")
@@ -680,11 +714,11 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 // through all saga steps.
 func TestExecuteDeposit_WithOrchestration_ContextPropagation(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, repo, "ACC-005")
+	_ = createTestAccount(t, repo, ctx, "ACC-005")
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 	mockFinAcct := &mockFinancialAccountingClient{}
@@ -696,8 +730,7 @@ func TestExecuteDeposit_WithOrchestration_ContextPropagation(t *testing.T) {
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
-	// Execute deposit with context
-	ctx := context.Background()
+	// Execute deposit with context (ctx already has tenant from setup)
 	req := createTestDepositRequest("ACC-005", 10, 0)
 	resp, err := svc.ExecuteDeposit(ctx, req)
 
@@ -720,18 +753,18 @@ func TestExecuteDeposit_WithOrchestration_ContextPropagation(t *testing.T) {
 // not have the downstream services available yet.
 func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
 	// Setup
-	db, cleanup := setupIntegrationTestDB(t)
+	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, repo, "ACC-006")
+	_ = createTestAccount(t, repo, ctx, "ACC-006")
 
 	// Create service WITHOUT clients (backward compatibility mode)
 	svc := NewService(repo, nil)
 
 	// Execute deposit
 	req := createTestDepositRequest("ACC-006", 200, 0) // £200.00
-	resp, err := svc.ExecuteDeposit(context.Background(), req)
+	resp, err := svc.ExecuteDeposit(ctx, req)
 
 	// Verify success
 	require.NoError(t, err)
@@ -744,7 +777,7 @@ func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
 	assert.Equal(t, int64(200), resp.NewBalance.Amount.Units)
 
 	// Verify account persisted
-	updatedAccount, err := repo.FindByID(context.Background(), "ACC-006")
+	updatedAccount, err := repo.FindByID(ctx, "ACC-006")
 	require.NoError(t, err)
 	assert.Equal(t, int64(20000), updatedAccount.Balance.AmountCents())
 }
