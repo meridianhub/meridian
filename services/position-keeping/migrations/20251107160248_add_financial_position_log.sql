@@ -126,10 +126,10 @@ ALTER TABLE "position_keeping"."transaction_log_entries"
   CHECK ("direction" IN ('debit', 'credit'));
 ALTER TABLE "position_keeping"."financial_position_logs"
   ADD CONSTRAINT "chk_financial_position_logs_current_status"
-  CHECK ("current_status" IN ('pending', 'completed', 'failed', 'reconciled'));
+  CHECK ("current_status" IN ('PENDING', 'RECONCILED', 'POSTED', 'CANCELLED', 'FAILED', 'REJECTED', 'AMENDED', 'REVERSED'));
 ALTER TABLE "position_keeping"."financial_position_logs"
   ADD CONSTRAINT "chk_financial_position_logs_previous_status"
-  CHECK ("previous_status" IS NULL OR "previous_status" IN ('pending', 'completed', 'failed', 'reconciled'));
+  CHECK ("previous_status" IS NULL OR "previous_status" IN ('PENDING', 'RECONCILED', 'POSTED', 'CANCELLED', 'FAILED', 'REJECTED', 'AMENDED', 'REVERSED'));
 ALTER TABLE "position_keeping"."financial_position_logs"
   ADD CONSTRAINT "chk_financial_position_logs_reconciliation_status"
-  CHECK ("reconciliation_status" IN ('pending', 'matched', 'unmatched', 'resolved'));
+  CHECK ("reconciliation_status" IN ('UNRECONCILED', 'MATCHED', 'MISMATCHED', 'RESOLVED'));
