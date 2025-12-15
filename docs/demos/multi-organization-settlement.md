@@ -49,7 +49,7 @@ diverse use cases:
 **Key Points:**
 
 - Each organization gets a dedicated PostgreSQL schema (`org_<id>`)
-- JWT tokens include `meridian_organization_id` claim
+- JWT tokens include `x-tenant-id` claim
 - `SET LOCAL search_path = org_<id>` enforces isolation at the database level
 - No cross-organization queries are possible
 
@@ -214,7 +214,7 @@ open http://localhost:3000
 open http://localhost:9090
 
 # Query by organization
-# In Prometheus: {organization_id="post_office"}
+# In Prometheus: {tenant="post_office"}
 ```
 
 ## Tenant Zero Pattern
@@ -237,8 +237,8 @@ settlements - it only provides infrastructure.
   schema
 - **Query enforcement**: `SET LOCAL search_path = org_<id>` executed at the
   start of every transaction
-- **JWT claims**: `meridian_organization_id` claim in access tokens
-- **Request validation**: Missing/invalid organization context routes to DLQ
+- **JWT claims**: `x-tenant-id` claim in access tokens
+- **Request validation**: Missing/invalid tenant context routes to DLQ
 
 ### Cross-Organization Access
 
@@ -300,7 +300,7 @@ After running the demo:
 
 1. **Review Grafana dashboards** at <http://localhost:3000> for org-scoped
    metrics
-2. **Explore Tempo traces** with `organization.id` attribute
+2. **Explore Tempo traces** with `tenant.id` attribute
 3. **Run the Horizon Integrity Proof** (`./scripts/demo.sh`) to verify
    idempotency
 4. **Scale services** to test load balancing across organizations

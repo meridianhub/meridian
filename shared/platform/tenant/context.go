@@ -45,3 +45,32 @@ func RequireFromContext(ctx context.Context) (TenantID, error) {
 	}
 	return t, nil
 }
+
+// PropagateToBackground creates a new background context with the tenant ID
+// from the parent context propagated. This is useful for async operations
+// (goroutines) that need to outlive the request context but still require
+// tenant context for database operations.
+//
+// Usage:
+//
+//	// Instead of:
+//	//   asyncCtx := context.Background()
+//	//   if tenantID, ok := tenant.FromContext(ctx); ok {
+//	//       asyncCtx = tenant.WithTenant(asyncCtx, tenantID)
+//	//   }
+//	//
+//	// Use:
+//	asyncCtx := tenant.PropagateToBackground(ctx)
+//	go func() {
+//	    // asyncCtx has tenant ID but no deadline/cancellation from parent
+//	    repo.FindByID(asyncCtx, id)
+//	}()
+//
+// If the parent context has no tenant, returns a plain background context.
+func PropagateToBackground(parent context.Context) context.Context {
+	asyncCtx := context.Background()
+	if tenantID, ok := FromContext(parent); ok {
+		asyncCtx = WithTenant(asyncCtx, tenantID)
+	}
+	return asyncCtx
+}
