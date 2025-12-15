@@ -36,7 +36,7 @@ pause() {
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║  Meridian Banking Platform - Comprehensive Demo                ║${NC}"
-echo -e "${BLUE}║  Saga • Load Balancing • Tracing • Health • Idempotency       ║${NC}"
+echo -e "${BLUE}║  Saga • Load Balancing • Tracing • Health • Idempotency        ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -109,7 +109,7 @@ echo -e "${GREEN}✓ All services running${NC}\n"
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${MAGENTA}║  Setup: Tenant Provisioning                                    ║${NC}"
-echo -e "${MAGENTA}║  System is always multi-tenant - provisioning demo tenant     ║${NC}"
+echo -e "${MAGENTA}║  System is always multi-tenant - provisioning demo tenant      ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -510,7 +510,7 @@ echo ""
 # SUMMARY
 # ════════════════════════════════════════════════════════════════
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Demo Complete! Enterprise Features Validated                 ║${NC}"
+echo -e "${BLUE}║  Demo Complete! Enterprise Features Validated                  ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${GREEN}Account Summary:${NC}"
@@ -552,7 +552,7 @@ echo ""
 if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
     echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${MAGENTA}║  Part 9: Horizon Integrity Proof                               ║${NC}"
-    echo -e "${MAGENTA}║  Demonstrating resilience against phantom transactions        ║${NC}"
+    echo -e "${MAGENTA}║  Demonstrating resilience against phantom transactions         ║${NC}"
     echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -625,12 +625,12 @@ if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
 
             if [ "$verdict" = "PASSED" ]; then
                 echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-                echo -e "${GREEN}║  INTEGRITY PROOF PASSED                                       ║${NC}"
-                echo -e "${GREEN}║  No phantom transactions. Idempotency guarantees hold.        ║${NC}"
+                echo -e "${GREEN}║  INTEGRITY PROOF PASSED                                        ║${NC}"
+                echo -e "${GREEN}║  No phantom transactions. Idempotency guarantees hold.         ║${NC}"
                 echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
             else
                 echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
-                echo -e "${YELLOW}║  INTEGRITY PROOF: $verdict                                    ║${NC}"
+                echo -e "${YELLOW}║  INTEGRITY PROOF: $verdict                                     ║${NC}"
                 echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════╝${NC}"
             fi
         fi
