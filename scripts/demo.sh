@@ -149,6 +149,45 @@ else
 fi
 echo ""
 
+# Validate database schema was provisioned
+echo -e "${CYAN}► Validating database schema provisioning...${NC}"
+SCHEMA_NAME="org_${DEMO_TENANT}"
+EXPECTED_TABLES="parties accounts liens financial_position_logs payment_orders"
+
+validate_schema() {
+    # Check if schema exists and has expected tables
+    TABLES=$(kubectl exec cockroachdb-0 -- ./cockroach sql --insecure -d meridian -e \
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = '${SCHEMA_NAME}';" 2>/dev/null | tail -n +2)
+
+    if [ -z "$TABLES" ]; then
+        return 1
+    fi
+
+    # Check for key tables
+    for table in $EXPECTED_TABLES; do
+        if ! echo "$TABLES" | grep -q "^${table}$"; then
+            echo -e "${YELLOW}  Missing table: ${table}${NC}"
+            return 1
+        fi
+    done
+    return 0
+}
+
+if validate_schema; then
+    TABLE_COUNT=$(kubectl exec cockroachdb-0 -- ./cockroach sql --insecure -d meridian -e \
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${SCHEMA_NAME}';" 2>/dev/null | tail -n 1)
+    echo -e "${GREEN}✓ Schema '${SCHEMA_NAME}' validated: ${TABLE_COUNT} tables provisioned${NC}"
+else
+    echo -e "${YELLOW}⚠ Schema '${SCHEMA_NAME}' may not be fully provisioned${NC}"
+    echo -e "${YELLOW}  Press any key to retry validation, or Ctrl+C to exit${NC}"
+    while ! validate_schema; do
+        read -n 1 -s -r
+        echo -e "${CYAN}► Retrying schema validation...${NC}"
+    done
+    echo -e "${GREEN}✓ Schema '${SCHEMA_NAME}' now validated${NC}"
+fi
+echo ""
+
 # ════════════════════════════════════════════════════════════════
 # PART 1: Health Checks & Service Discovery
 # ════════════════════════════════════════════════════════════════
