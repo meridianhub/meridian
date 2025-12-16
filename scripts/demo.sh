@@ -632,9 +632,42 @@ transaction_loop() {
 # INTERACTIVE DEMO MAIN LOOP
 # ════════════════════════════════════════════════════════════════
 
+# ─────────────────────────────────────────────────────────────────
+# Demo Mode Selection (after account selected)
+# ─────────────────────────────────────────────────────────────────
+select_demo_mode() {
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${MAGENTA}  What would you like to do?${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${GREEN}1)${NC} Interactive transactions - deposit/withdraw manually"
+    echo -e "  ${CYAN}2)${NC} Scripted demo - Saga, Load Balancing, Idempotency, Tracing"
+    echo -e "  ${YELLOW}Q)${NC} Quit demo"
+    echo ""
+    echo -e -n "${CYAN}Select mode [1, 2, Q]: ${NC}"
+    read -r MODE_CHOICE
+
+    case "$MODE_CHOICE" in
+        1)
+            DEMO_MODE="interactive"
+            ;;
+        2)
+            DEMO_MODE="scripted"
+            ;;
+        [Qq])
+            DEMO_MODE="quit"
+            ;;
+        *)
+            echo -e "${YELLOW}Invalid choice, defaulting to scripted demo${NC}"
+            DEMO_MODE="scripted"
+            ;;
+    esac
+}
+
 run_interactive_demo() {
     local JUMP_TO="tenant"
     NAVIGATION_RESULT=""
+    DEMO_MODE=""
 
     while true; do
         case "$JUMP_TO" in
@@ -648,7 +681,18 @@ run_interactive_demo() {
                 ;;
             account)
                 select_account || { JUMP_TO="party"; continue; }
-                JUMP_TO="transactions"
+                JUMP_TO="mode_select"
+                ;;
+            mode_select)
+                select_demo_mode
+                case "$DEMO_MODE" in
+                    interactive) JUMP_TO="transactions" ;;
+                    scripted) break ;;  # Exit to run scripted demo
+                    quit)
+                        echo -e "${GREEN}Demo complete. Goodbye!${NC}"
+                        exit 0
+                        ;;
+                esac
                 ;;
             transactions)
                 transaction_loop
@@ -656,32 +700,31 @@ run_interactive_demo() {
                     tenant) JUMP_TO="tenant" ;;
                     party) JUMP_TO="party" ;;
                     account) JUMP_TO="account" ;;
-                    quit) break ;;
+                    quit)
+                        echo -e "${GREEN}Demo complete. Goodbye!${NC}"
+                        exit 0
+                        ;;
                 esac
                 ;;
         esac
     done
 }
 
-# Run the interactive demo
+# Run the interactive demo (selection phase)
 run_interactive_demo
 
+# If we get here, user chose scripted demo mode
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  Interactive session complete!${NC}"
+echo -e "${GREEN}  Running Scripted Demo${NC}"
 echo -e "${GREEN}  Context: Tenant=${SELECTED_TENANT}, Party=${SELECTED_PARTY_NAME}${NC}"
+echo -e "${GREEN}  Account: ${SELECTED_ACCOUNT_ID}${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo -e "${YELLOW}Continue to advanced demo sections? (Health, Load Balancing, Tracing, etc.)${NC}"
-echo -e -n "${CYAN}[Y/n]: ${NC}"
-read -r CONTINUE_DEMO
-if [[ "$CONTINUE_DEMO" =~ ^[Nn]$ ]]; then
-    echo -e "${GREEN}Demo complete. Goodbye!${NC}"
-    exit 0
-fi
+pause
 
-# Set up for remaining demo sections using selected context
+# Set up for scripted demo sections using selected context
 DEMO_TENANT="$SELECTED_TENANT"
+TENANT_HEADER="-H x-tenant-id:${DEMO_TENANT}"
 ACCOUNT_ID="$SELECTED_ACCOUNT_ID"
 PARTY_ID="$SELECTED_PARTY_ID"
 
