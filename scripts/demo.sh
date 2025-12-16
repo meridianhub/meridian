@@ -418,7 +418,7 @@ select_account() {
     echo -e "${CYAN}► Loading existing accounts...${NC}"
     SCHEMA="org_${SELECTED_TENANT}"
 
-    ACCOUNTS_SQL="SELECT id, iban, currency, balance_units, status FROM ${SCHEMA}.accounts WHERE party_id = '${SELECTED_PARTY_ID}' ORDER BY created_at DESC LIMIT 20;"
+    ACCOUNTS_SQL="SELECT id, account_identification, currency, balance, status FROM ${SCHEMA}.accounts WHERE party_id = '${SELECTED_PARTY_ID}' ORDER BY created_at DESC LIMIT 20;"
     ACCOUNTS_RAW=$(run_sql "$ACCOUNTS_SQL" 2>/dev/null | tail -n +2 || echo "")
 
     ACCOUNT_IDS=()
@@ -537,7 +537,7 @@ transaction_loop() {
     while true; do
         # Get current balance
         SCHEMA="org_${SELECTED_TENANT}"
-        CURRENT_BAL=$(run_sql "SELECT balance_units FROM ${SCHEMA}.accounts WHERE id = '${SELECTED_ACCOUNT_ID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+        CURRENT_BAL=$(run_sql "SELECT balance FROM ${SCHEMA}.accounts WHERE id = '${SELECTED_ACCOUNT_ID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
         CURRENT_BAL=${CURRENT_BAL:-0}
 
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
