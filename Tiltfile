@@ -69,7 +69,21 @@ k8s_namespace = 'default'
 # Database configuration
 # SECURITY: Never commit credentials to version control
 # For local development with CockroachDB (insecure mode, no password required)
-database_url = os.getenv('DATABASE_URL', 'postgres://meridian@localhost:26257/meridian?sslmode=disable')
+#
+# Database-per-service architecture:
+# Each service has its own database with a dedicated user for isolation.
+# Connection URLs use service-specific databases (e.g., meridian_party, meridian_current_account)
+# with corresponding users (e.g., meridian_party_user, meridian_current_account_user).
+#
+# See init-database.sh for database/user creation and ADR-0003 for architecture details.
+db_urls = {
+  'platform': os.getenv('PLATFORM_DATABASE_URL', 'postgres://meridian_platform_user@cockroachdb:26257/meridian_platform?sslmode=disable'),
+  'current_account': os.getenv('CURRENT_ACCOUNT_DATABASE_URL', 'postgres://meridian_current_account_user@cockroachdb:26257/meridian_current_account?sslmode=disable'),
+  'financial_accounting': os.getenv('FINANCIAL_ACCOUNTING_DATABASE_URL', 'postgres://meridian_financial_accounting_user@cockroachdb:26257/meridian_financial_accounting?sslmode=disable'),
+  'position_keeping': os.getenv('POSITION_KEEPING_DATABASE_URL', 'postgres://meridian_position_keeping_user@cockroachdb:26257/meridian_position_keeping?sslmode=disable'),
+  'payment_order': os.getenv('PAYMENT_ORDER_DATABASE_URL', 'postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable'),
+  'party': os.getenv('PARTY_DATABASE_URL', 'postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable'),
+}
 
 # =============================================================================
 # Backing Services
@@ -939,14 +953,18 @@ local_resource(
 )
 
 # Run database migrations on startup - uses Atlas to apply schema changes
-# Each service has its own business schema
+# Database-per-service architecture:
+# - Each service has its own database (e.g., meridian_party, meridian_current_account)
+# - Within each database, org schemas are created for multi-tenant isolation
+# - Tables use singular, unqualified names (relies on search_path for routing)
+#
 # Migrations execute in parallel where possible:
-# - Parallel: current_account + financial_accounting (both depend only on init-database)
-# - Sequential: position_keeping waits for current_account (requires Account FK reference)
+# - Parallel: current_account + financial_accounting + party + tenant (all independent)
+# - Sequential: position_keeping and payment_order wait for current_account (Account FK reference)
 # This minimizes total migration time while respecting schema dependencies
 local_resource(
   'migrate-current-account',
-  cmd='atlas migrate apply --env local --config file://services/current-account/atlas/atlas.hcl --url "{}" --allow-dirty'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://services/current-account/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['current_account']),
   resource_deps=['init-database'],  # Database and user must exist before migrations
   labels=['database'],
   auto_init=True,
@@ -955,7 +973,7 @@ local_resource(
 
 local_resource(
   'migrate-position-keeping',
-  cmd='atlas migrate apply --env local --config file://services/position-keeping/atlas/atlas.hcl --url "{}" --allow-dirty'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://services/position-keeping/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['position_keeping']),
   resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
   labels=['database'],
   auto_init=True,
@@ -964,8 +982,8 @@ local_resource(
 
 local_resource(
   'migrate-financial-accounting',
-  cmd='atlas migrate apply --env local --config file://services/financial-accounting/atlas/atlas.hcl --url "{}" --allow-dirty'.format(database_url),
-  resource_deps=['init-database'],  # Independent schema, only needs database to exist
+  cmd='atlas migrate apply --env local --config file://services/financial-accounting/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['financial_accounting']),
+  resource_deps=['init-database'],  # Independent database, only needs init to complete
   labels=['database'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,
@@ -973,7 +991,7 @@ local_resource(
 
 local_resource(
   'migrate-payment-order',
-  cmd='atlas migrate apply --env local --config file://services/payment-order/atlas/atlas.hcl --url "{}" --allow-dirty'.format(database_url),
+  cmd='atlas migrate apply --env local --config file://services/payment-order/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['payment_order']),
   resource_deps=['migrate-current-account'],  # Depends on current_account for account FK reference
   labels=['database'],
   auto_init=True,
@@ -982,8 +1000,8 @@ local_resource(
 
 local_resource(
   'migrate-tenant',
-  cmd='atlas migrate apply --env local --config file://services/tenant/atlas/atlas.hcl --url "{}" --allow-dirty'.format(database_url),
-  resource_deps=['init-database'],  # Independent schema (platform), only needs database to exist
+  cmd='atlas migrate apply --env local --config file://services/tenant/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['platform']),
+  resource_deps=['init-database'],  # Independent database (platform), only needs init to complete
   labels=['database'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,
@@ -991,8 +1009,8 @@ local_resource(
 
 local_resource(
   'migrate-party',
-  cmd='atlas migrate apply --env local --config file://services/party/atlas/atlas.hcl --url "{}" --allow-dirty'.format(database_url),
-  resource_deps=['init-database'],  # Independent schema, only needs database to exist
+  cmd='atlas migrate apply --env local --config file://services/party/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['party']),
+  resource_deps=['init-database'],  # Independent database, only needs init to complete
   labels=['database'],
   auto_init=True,
   trigger_mode=TRIGGER_MODE_MANUAL,
@@ -1080,21 +1098,30 @@ Tilt UI                    → http://localhost:10350
 
 Hot reload: Edit Go code and see changes in ~3 seconds
 
+Database Architecture (database-per-service):
+  • Each service has its own database with dedicated user:
+    - meridian_platform       (tenant service)
+    - meridian_current_account
+    - meridian_financial_accounting
+    - meridian_position_keeping
+    - meridian_payment_order
+    - meridian_party
+  • Within each database: org schemas for multi-tenant isolation
+  • Tables use singular, unqualified names (search_path routing)
+  • See ADR-0003 for architecture details
+
 Database Migrations:
   • Migrations run automatically on startup (6 resources):
-    1. current_account (customers, accounts, current_account_audit)
-    2. financial_accounting (general_ledger, financial_accounting_audit)
-    3. position_keeping (transactions, position_keeping_audit)
-    4. payment_order (payment orders, saga state)
-    5. party (parties, party reference data)
-    6. tenant (platform.tenants - platform tenant registry)
-  • Parallel execution: current_account + financial_accounting + party + tenant run together after init-database
+    1. current_account → meridian_current_account (account, lien, audit tables)
+    2. financial_accounting → meridian_financial_accounting (ledger, booking)
+    3. position_keeping → meridian_position_keeping (positions, transactions)
+    4. payment_order → meridian_payment_order (payment orders, saga state)
+    5. party → meridian_party (party reference data)
+    6. tenant → meridian_platform (tenant registry)
+  • Parallel execution: current_account + financial_accounting + party + tenant
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
     - payment_order waits for current_account (Account FK)
-  • Each service has its own audit schema for isolation
-  • Phase 1: Empty audit tables created (current work)
-  • Phase 2: GORM hooks for audit logging (future PR, see ADR-0009)
   • Manual triggers:
     - tilt trigger migrate-current-account
     - tilt trigger migrate-financial-accounting
@@ -1102,8 +1129,6 @@ Database Migrations:
     - tilt trigger migrate-payment-order
     - tilt trigger migrate-party
     - tilt trigger migrate-tenant
-  • Check status:
-    - make migrate-status-all (requires DATABASE_URL env var)
 
 Testing Kafka Failover:
   kubectl delete pod kafka-1  # Kill broker
