@@ -256,7 +256,7 @@ show_health_status() {
             ALL_HEALTHY=false
         fi
 
-        printf "${CYAN}│${NC}  %-28s %-8s %b         ${CYAN}│${NC}\n" "$svc" "$port" "$STATUS_DISPLAY"
+        printf "${CYAN}│${NC}  %-28s %-8s %b                ${CYAN}│${NC}\n" "$svc" "$port" "$STATUS_DISPLAY"
     }
 
     check_service_health "current-account" 50051
@@ -341,7 +341,6 @@ echo "$CREATE_RESPONSE" | jq '{
 echo ""
 
 echo -e "${CYAN}► Step 3: Execute Deposit - Saga Orchestration${NC}"
-echo -e "${YELLOW}  Depositing: £500${NC}"
 echo -e "${YELLOW}  Saga Steps:${NC}"
 echo -e "${YELLOW}    1. Log position in PositionKeeping     (via gRPC)${NC}"
 echo -e "${YELLOW}    2. Post ledger in FinancialAccounting  (via gRPC)${NC}"
@@ -349,25 +348,72 @@ echo -e "${YELLOW}    3. Update CurrentAccount balance       (local)${NC}"
 echo -e "${YELLOW}  * Automatic compensation if any step fails${NC}"
 echo ""
 
-DEPOSIT_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
-  \"account_id\": \"$ACCOUNT_ID\",
-  \"amount\": {
-    \"amount\": {
-      \"currency_code\": \"GBP\",
-      \"units\": 500,
-      \"nanos\": 0
-    }
-  }
-}" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit)
+# Interactive deposit loop
+CURRENT_BALANCE=0
+while true; do
+    echo -e -n "${CYAN}Enter deposit amount (default: 500, Enter to continue): ${NC}"
+    read -r DEPOSIT_AMOUNT
 
-TRANSACTION_ID=$(echo "$DEPOSIT_RESPONSE" | jq -r '.transactionId')
-echo -e "${GREEN}✓ Deposit Completed via Saga:${NC} $TRANSACTION_ID"
-echo "$DEPOSIT_RESPONSE" | jq '{
-  transaction_id: .transactionId,
-  status: .status,
-  new_balance: .newBalance.amount,
-  available_balance: .availableBalance.amount
-}'
+    # If empty input, break and continue to next section
+    if [ -z "$DEPOSIT_AMOUNT" ]; then
+        echo -e "${GREEN}✓ Deposit demonstration complete${NC}"
+        break
+    fi
+
+    # Validate input is a number
+    if ! [[ "$DEPOSIT_AMOUNT" =~ ^[0-9]+$ ]]; then
+        echo -e "${RED}✗ Please enter a valid number${NC}"
+        continue
+    fi
+
+    echo -e "${YELLOW}  Depositing: £$DEPOSIT_AMOUNT${NC}"
+
+    DEPOSIT_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+      \"account_id\": \"$ACCOUNT_ID\",
+      \"amount\": {
+        \"amount\": {
+          \"currency_code\": \"GBP\",
+          \"units\": $DEPOSIT_AMOUNT,
+          \"nanos\": 0
+        }
+      }
+    }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit)
+
+    TRANSACTION_ID=$(echo "$DEPOSIT_RESPONSE" | jq -r '.transactionId')
+    CURRENT_BALANCE=$(echo "$DEPOSIT_RESPONSE" | jq -r '.newBalance.amount.units // 0')
+
+    echo -e "${GREEN}✓ Deposit Completed via Saga:${NC} $TRANSACTION_ID"
+    echo "$DEPOSIT_RESPONSE" | jq '{
+      transaction_id: .transactionId,
+      status: .status,
+      new_balance: .newBalance.amount,
+      available_balance: .availableBalance.amount
+    }'
+    echo ""
+done
+
+# If no deposits were made, make a default one for the rest of the demo
+if [ "$CURRENT_BALANCE" = "0" ]; then
+    echo -e "${YELLOW}  Making initial deposit of £500 for demo...${NC}"
+    DEPOSIT_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+      \"account_id\": \"$ACCOUNT_ID\",
+      \"amount\": {
+        \"amount\": {
+          \"currency_code\": \"GBP\",
+          \"units\": 500,
+          \"nanos\": 0
+        }
+      }
+    }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit)
+    TRANSACTION_ID=$(echo "$DEPOSIT_RESPONSE" | jq -r '.transactionId')
+    echo -e "${GREEN}✓ Deposit Completed via Saga:${NC} $TRANSACTION_ID"
+    echo "$DEPOSIT_RESPONSE" | jq '{
+      transaction_id: .transactionId,
+      status: .status,
+      new_balance: .newBalance.amount,
+      available_balance: .availableBalance.amount
+    }'
+fi
 echo ""
 pause
 
@@ -394,24 +440,32 @@ echo -e "${CYAN}► Scaling PositionKeeping from $INITIAL_POS_PODS to 3 replicas
 kubectl scale deployment position-keeping --replicas=3
 echo -e "${YELLOW}  Waiting for new pods to be ready...${NC}"
 
-# Wait for pods to be ready (max 60 seconds)
-SCALE_TIMEOUT=60
+# Wait for pods to be ready (max 30 seconds, then continue anyway)
+SCALE_TIMEOUT=30
 SCALE_ELAPSED=0
+SCALE_SUCCESS=false
 while [ $SCALE_ELAPSED -lt $SCALE_TIMEOUT ]; do
     READY_PODS=$(kubectl get pods -l app=position-keeping -o json | jq '[.items[] | select(.status.phase == "Running") | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))] | length')
-    if [ "$READY_PODS" -eq 3 ]; then
+    if [ "$READY_PODS" -ge 3 ]; then
         echo -e "${GREEN}✓ All 3 replicas ready${NC}"
+        SCALE_SUCCESS=true
         break
     fi
     echo -e "${YELLOW}  Pods ready: $READY_PODS/3${NC}"
-    sleep 3
-    SCALE_ELAPSED=$((SCALE_ELAPSED + 3))
+    sleep 5
+    SCALE_ELAPSED=$((SCALE_ELAPSED + 5))
 done
+
+if [ "$SCALE_SUCCESS" != true ]; then
+    echo -e "${YELLOW}⚠ Scaling timeout - continuing with available pods ($READY_PODS/3)${NC}"
+    echo -e "${YELLOW}  (Cluster may have resource constraints)${NC}"
+fi
 
 echo ""
 echo -e "${CYAN}► Service status after scaling:${NC}"
 show_service_status
-NEW_POS_PODS=$(kubectl get deployment position-keeping -o jsonpath='{.status.readyReplicas}')
+NEW_POS_PODS=$(kubectl get deployment position-keeping -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "$READY_PODS")
+NEW_POS_PODS=${NEW_POS_PODS:-$READY_PODS}
 echo -e "  ${GREEN}PositionKeeping scaled: $INITIAL_POS_PODS → $NEW_POS_PODS replicas${NC}"
 echo ""
 
