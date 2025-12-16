@@ -27,10 +27,11 @@ The audit-worker implements the worker component of the
 
 ## Metrics
 
-- `audit_outbox_depth` - Current number of entries in outbox
-- `audit_processed_total` - Total entries processed
-- `audit_failed_total` - Total entries failed
-- `audit_processing_duration_seconds` - Processing latency histogram
+- `meridian_audit_worker_outbox_depth_total` - Current number of entries in outbox (gauge)
+- `meridian_audit_worker_outbox_processed_total` - Total entries processed (counter)
+- `meridian_audit_worker_outbox_failed_total` - Total entries failed (counter)
+- `meridian_audit_worker_processing_duration_seconds` - Batch processing duration (histogram)
+- `meridian_audit_worker_entry_age_seconds` - Age of entries when processed (histogram)
 
 ## Configuration
 
