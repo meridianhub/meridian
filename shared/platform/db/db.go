@@ -7,6 +7,31 @@
 // - Automatic transaction retry logic
 // - Connection pooling with health checks
 // - Context-aware operations for timeout and cancellation
+// - Per-service database isolation via connection string configuration
+//
+// # Database-per-Service Architecture
+//
+// This package supports the database-per-service pattern where each microservice connects
+// to its own isolated database. The database name is specified as part of the connection
+// string (ConnectionString field in Config), not as a separate configuration parameter.
+//
+// Connection string format:
+//
+//	postgresql://user:password@host:port/database_name?sslmode=require
+//
+// Example connection strings for different services:
+//
+//	# Current Account service
+//	postgresql://meridian:secret@cockroachdb:26257/meridian_current_account?sslmode=require
+//
+//	# Position Keeping service
+//	postgresql://meridian:secret@cockroachdb:26257/meridian_position_keeping?sslmode=require
+//
+//	# Financial Accounting service
+//	postgresql://meridian:secret@cockroachdb:26257/meridian_financial_accounting?sslmode=require
+//
+// Services should read the connection string from the DATABASE_URL environment variable,
+// which is configured via Kubernetes secrets for each service deployment.
 //
 // The core DB interface is implemented by both PostgresPool (connection pooling) and Tx
 // (transaction wrapper), allowing the same repository methods to work with either.
@@ -54,8 +79,22 @@ type DB interface {
 }
 
 // Config holds the configuration for database connection pooling.
+//
+// The database name MUST be included in the ConnectionString field. This enables the
+// database-per-service architecture where each service connects to its own isolated database.
+// There is no separate Database field - the database name is always part of the connection URL.
+//
+// Example:
+//
+//	cfg := &Config{
+//	    ConnectionString: "postgresql://user:pass@host:26257/meridian_current_account?sslmode=require",
+//	    MaxConnections: 25,
+//	}
 type Config struct {
-	// ConnectionString is the PostgreSQL connection URL (e.g., "postgresql://user:pass@host:26257/db?sslmode=require")
+	// ConnectionString is the PostgreSQL connection URL including the database name.
+	// Format: postgresql://user:pass@host:port/database_name?sslmode=require
+	// The database name in the URL determines which database the pool connects to.
+	// This is typically read from the DATABASE_URL environment variable.
 	ConnectionString string
 
 	// MaxConnections is the maximum number of connections in the pool (default: 50)
