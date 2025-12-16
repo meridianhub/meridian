@@ -1,117 +1,194 @@
 #!/bin/bash
-# Integration test for database setup
+# Integration test for database-per-service setup
 #
 # Validates that the database initialization works correctly:
-# 1. Database exists
-# 2. User exists
-# 3. User has correct permissions
-# 4. Can connect with the configured credentials
+# 1. All service databases exist
+# 2. All service users exist
+# 3. Users have correct permissions on their own database
+# 4. Users CANNOT access other service databases (isolation)
 
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-default}"
 POD_NAME="${POD_NAME:-cockroachdb-0}"
-DATABASE_NAME="meridian"
-USER_NAME="meridian"
 TEST_TABLE="test_permissions_$$"  # Include PID for uniqueness
 
-echo "Testing database setup..."
+# Service databases and their users (must match init-database.sh)
+DATABASES=(
+  "meridian_platform:meridian_platform_user"
+  "meridian_current_account:meridian_current_account_user"
+  "meridian_financial_accounting:meridian_financial_accounting_user"
+  "meridian_position_keeping:meridian_position_keeping_user"
+  "meridian_payment_order:meridian_payment_order_user"
+  "meridian_party:meridian_party_user"
+)
+
+TESTS_PASSED=0
+TESTS_FAILED=0
+
+pass() {
+  echo "✓ $1"
+  ((TESTS_PASSED++))
+}
+
+fail() {
+  echo "✗ FAILED: $1"
+  ((TESTS_FAILED++))
+}
+
+echo "Testing database-per-service setup..."
+echo "=============================================="
 echo
 
-# Test 1: Verify database exists
-echo "Test 1: Checking if database exists..."
+# Test 1: Verify all databases exist
+echo "Test 1: Checking if all databases exist..."
 DB_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
   cockroach sql --insecure -e "SHOW DATABASES;" 2>&1) || {
-  echo "✗ FAILED: kubectl exec failed"
+  fail "kubectl exec failed for SHOW DATABASES"
   echo "Output: $DB_OUTPUT"
   exit 1
 }
 
-if echo "$DB_OUTPUT" | grep -q "$DATABASE_NAME"; then
-  echo "✓ Database '$DATABASE_NAME' exists"
-else
-  echo "✗ FAILED: Database '$DATABASE_NAME' not found"
-  echo "Available databases:"
-  echo "$DB_OUTPUT"
-  exit 1
-fi
+for ENTRY in "${DATABASES[@]}"; do
+  DB_NAME="${ENTRY%%:*}"
+  if echo "$DB_OUTPUT" | grep -q "$DB_NAME"; then
+    pass "Database '$DB_NAME' exists"
+  else
+    fail "Database '$DB_NAME' not found"
+  fi
+done
+echo
 
-# Test 2: Verify user exists
-echo "Test 2: Checking if user exists..."
+# Test 2: Verify all users exist
+echo "Test 2: Checking if all users exist..."
 USER_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
   cockroach sql --insecure -e "SHOW USERS;" 2>&1) || {
-  echo "✗ FAILED: kubectl exec failed"
+  fail "kubectl exec failed for SHOW USERS"
   echo "Output: $USER_OUTPUT"
   exit 1
 }
 
-if echo "$USER_OUTPUT" | grep -q "$USER_NAME"; then
-  echo "✓ User '$USER_NAME' exists"
-else
-  echo "✗ FAILED: User '$USER_NAME' not found"
-  echo "Available users:"
-  echo "$USER_OUTPUT"
-  exit 1
-fi
-
-# Test 3: Verify user can connect to database
-echo "Test 3: Testing user connection to database..."
-CONNECT_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
-  cockroach sql --insecure --user="$USER_NAME" --database="$DATABASE_NAME" \
-  -e "SELECT 1;" 2>&1) || {
-  echo "✗ FAILED: User cannot connect to database"
-  echo "Output: $CONNECT_OUTPUT"
-  exit 1
-}
-
-if echo "$CONNECT_OUTPUT" | grep -q "1"; then
-  echo "✓ User can connect to database"
-else
-  echo "✗ FAILED: Unexpected connection output"
-  echo "Output: $CONNECT_OUTPUT"
-  exit 1
-fi
-
-# Test 4: Verify user has CREATE privilege
-echo "Test 4: Testing user permissions (CREATE TABLE)..."
-CREATE_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
-  cockroach sql --insecure --user="$USER_NAME" --database="$DATABASE_NAME" \
-  -e "CREATE TABLE IF NOT EXISTS $TEST_TABLE (id INT); DROP TABLE IF EXISTS $TEST_TABLE;" 2>&1) || {
-  echo "✗ FAILED: User lacks CREATE privilege"
-  echo "Output: $CREATE_OUTPUT"
-  exit 1
-}
-
-if echo "$CREATE_OUTPUT" | grep -qE "CREATE TABLE|DROP TABLE"; then
-  echo "✓ User has CREATE privilege"
-else
-  echo "✗ FAILED: Unexpected CREATE/DROP output"
-  echo "Output: $CREATE_OUTPUT"
-  exit 1
-fi
-
-# Test 5: Verify connection string works (simulate app connection)
-echo "Test 5: Testing connection string format..."
-CONNECTION_STRING="postgres://$USER_NAME@$POD_NAME:26257/$DATABASE_NAME?sslmode=disable"
-CONN_STRING_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
-  cockroach sql --url="$CONNECTION_STRING" \
-  -e "SELECT current_database();" 2>&1) || {
-  echo "✗ FAILED: Connection string format invalid"
-  echo "Output: $CONN_STRING_OUTPUT"
-  exit 1
-}
-
-if echo "$CONN_STRING_OUTPUT" | grep -q "$DATABASE_NAME"; then
-  echo "✓ Connection string format is valid"
-else
-  echo "✗ FAILED: Unexpected connection string output"
-  echo "Output: $CONN_STRING_OUTPUT"
-  exit 1
-fi
-
+for ENTRY in "${DATABASES[@]}"; do
+  USER_NAME="${ENTRY##*:}"
+  if echo "$USER_OUTPUT" | grep -q "$USER_NAME"; then
+    pass "User '$USER_NAME' exists"
+  else
+    fail "User '$USER_NAME' not found"
+  fi
+done
 echo
-echo "✓ All database setup tests passed!"
-echo "  - Database: $DATABASE_NAME"
-echo "  - User: $USER_NAME"
-echo "  - Permissions: Verified"
-echo "  - Connection: Working"
+
+# Test 3: Verify each user can connect to their own database
+echo "Test 3: Testing user connections to own database..."
+for ENTRY in "${DATABASES[@]}"; do
+  DB_NAME="${ENTRY%%:*}"
+  USER_NAME="${ENTRY##*:}"
+
+  CONNECT_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
+    cockroach sql --insecure --user="$USER_NAME" --database="$DB_NAME" \
+    -e "SELECT 1;" 2>&1) || {
+    fail "User '$USER_NAME' cannot connect to '$DB_NAME'"
+    continue
+  }
+
+  if echo "$CONNECT_OUTPUT" | grep -q "1"; then
+    pass "User '$USER_NAME' can connect to '$DB_NAME'"
+  else
+    fail "Unexpected output for '$USER_NAME' on '$DB_NAME'"
+  fi
+done
+echo
+
+# Test 4: Verify each user has CREATE privilege on their database
+echo "Test 4: Testing user permissions (CREATE TABLE)..."
+for ENTRY in "${DATABASES[@]}"; do
+  DB_NAME="${ENTRY%%:*}"
+  USER_NAME="${ENTRY##*:}"
+
+  CREATE_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
+    cockroach sql --insecure --user="$USER_NAME" --database="$DB_NAME" \
+    -e "CREATE TABLE IF NOT EXISTS $TEST_TABLE (id INT); DROP TABLE IF EXISTS $TEST_TABLE;" 2>&1) || {
+    fail "User '$USER_NAME' lacks CREATE privilege on '$DB_NAME'"
+    continue
+  }
+
+  if echo "$CREATE_OUTPUT" | grep -qE "CREATE TABLE|DROP TABLE"; then
+    pass "User '$USER_NAME' has CREATE privilege on '$DB_NAME'"
+  else
+    fail "Unexpected CREATE/DROP output for '$USER_NAME' on '$DB_NAME'"
+  fi
+done
+echo
+
+# Test 5: Verify database isolation (users CANNOT access other databases)
+echo "Test 5: Testing database isolation (cross-database access denied)..."
+for ENTRY in "${DATABASES[@]}"; do
+  DB_NAME="${ENTRY%%:*}"
+  USER_NAME="${ENTRY##*:}"
+
+  # Try to access every OTHER database with this user
+  for OTHER_ENTRY in "${DATABASES[@]}"; do
+    OTHER_DB="${OTHER_ENTRY%%:*}"
+
+    # Skip own database
+    if [ "$OTHER_DB" = "$DB_NAME" ]; then
+      continue
+    fi
+
+    # Attempt to create a table in another database (should fail)
+    if ISOLATION_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
+      cockroach sql --insecure --user="$USER_NAME" --database="$OTHER_DB" \
+      -e "CREATE TABLE IF NOT EXISTS isolation_test_$$ (id INT);" 2>&1); then
+      # Command succeeded - check if it was actually a permission error in the output
+      if echo "$ISOLATION_OUTPUT" | grep -qiE "permission denied|does not have|insufficient privilege"; then
+        pass "User '$USER_NAME' correctly denied access to '$OTHER_DB'"
+      else
+        fail "User '$USER_NAME' has unauthorized access to '$OTHER_DB'"
+        echo "    Output: $ISOLATION_OUTPUT"
+      fi
+    else
+      # Command failed (good - access denied)
+      pass "User '$USER_NAME' correctly denied access to '$OTHER_DB'"
+    fi
+  done
+done
+echo
+
+# Test 6: Verify connection string format works
+echo "Test 6: Testing connection string format..."
+for ENTRY in "${DATABASES[@]}"; do
+  DB_NAME="${ENTRY%%:*}"
+  USER_NAME="${ENTRY##*:}"
+
+  CONNECTION_STRING="postgres://$USER_NAME@$POD_NAME:26257/$DB_NAME?sslmode=disable"
+  CONN_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
+    cockroach sql --url="$CONNECTION_STRING" \
+    -e "SELECT current_database();" 2>&1) || {
+    fail "Connection string invalid for '$USER_NAME' on '$DB_NAME'"
+    continue
+  }
+
+  if echo "$CONN_OUTPUT" | grep -q "$DB_NAME"; then
+    pass "Connection string format valid for '$DB_NAME'"
+  else
+    fail "Unexpected connection string output for '$DB_NAME'"
+  fi
+done
+echo
+
+# Summary
+echo "=============================================="
+echo "Test Summary:"
+echo "  Passed: $TESTS_PASSED"
+echo "  Failed: $TESTS_FAILED"
+echo
+
+if [ "$TESTS_FAILED" -gt 0 ]; then
+  echo "✗ Some tests failed!"
+  exit 1
+fi
+
+echo "✓ All database-per-service tests passed!"
+echo "  - ${#DATABASES[@]} databases with isolated users"
+echo "  - Cross-database access correctly denied"
+echo "  - All connection strings verified"
