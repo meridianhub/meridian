@@ -445,9 +445,28 @@ If migrating from golang-migrate:
 * Maintain migration history (no need to replay all migrations)
 * Continue using immutability principles
 
+### CockroachDB Compatibility Considerations
+
+While CockroachDB is PostgreSQL-compatible, some PostgreSQL features are **not supported**:
+
+| Feature | PostgreSQL | CockroachDB | Workaround |
+|---------|------------|-------------|------------|
+| Range types (`TSTZRANGE`, `DATERANGE`, etc.) | Supported | Not supported ([#27791](https://github.com/cockroachdb/cockroach/issues/27791)) | Use explicit `start`/`end` columns |
+| GiST indexes for ranges | Supported | Not supported | Use B-tree composite indexes |
+| Exclusion constraints | Supported | Not supported | Application-level enforcement |
+| PL/pgSQL functions | Supported | Limited support | Keep functions simple |
+
+**Recommendation:** Design schemas using the common subset of PostgreSQL/CockroachDB features.
+Use explicit timestamp columns (`period_start`, `period_end`) instead of range types for temporal
+data. See [ADR-0017](0017-temporal-quality-ladder.md) for the temporal data pattern.
+
+For deployments using PostgreSQL or YugabyteDB exclusively, database-specific optimizations
+(TSTZRANGE with GiST indexes, exclusion constraints) can be added as an optional enhancement.
+
 ### Future Considerations
 
 * Atlas Pro for advanced CI/CD integrations
 * Schema visualization for documentation
 * Multi-tenant schema management patterns
 * Cross-region migration strategies for distributed SQL
+* Database-specific optimization paths (PostgreSQL/YugabyteDB TSTZRANGE support)

@@ -218,12 +218,25 @@ func (p Period) Validate() error {
 | `Contains()` | Closed `[Start, End]` | Boundary instants belong to their period: `12:30` is "in" `[12:00, 12:30]` |
 | Instants | Point `[t, t]` | An instant `[12:30, 12:30]` overlaps itself and any period containing `12:30` |
 
-**Note on PostgreSQL TSTZRANGE:** PostgreSQL's default `[)` bounds differ from this ADR's closed
-intervals. When storing periods, use explicit bounds: `tstzrange(start, end, '[]')` for closed
-semantics. The GiST index handles both efficiently. Alternatively, translate at the repository
-layer if half-open storage is preferred for partitioning.
+**Database Compatibility Note:** This ADR uses explicit `period_start` and `period_end` columns
+rather than PostgreSQL's native `TSTZRANGE` type. While `TSTZRANGE` provides elegant range
+operators (`&&`, `@>`) and GiST indexing, **CockroachDB does not support range types**
+([issue #27791](https://github.com/cockroachdb/cockroach/issues/27791), open since 2018).
+To maintain compatibility across PostgreSQL, CockroachDB, and YugabyteDB, we use explicit
+timestamp columns. The query complexity difference is minimal:
 
-**Database representation using PostgreSQL range types:**
+```sql
+-- With TSTZRANGE (PostgreSQL/YugabyteDB only)
+WHERE period && tstzrange('2025-01-01', '2025-01-02')
+
+-- With explicit columns (works on all databases)
+WHERE period_start < '2025-01-02' AND period_end > '2025-01-01'
+```
+
+For deployments using PostgreSQL or YugabyteDB exclusively, a future optimization path
+could add a computed `TSTZRANGE` column with GiST index as an enterprise-tier feature.
+
+**Database representation using explicit period columns:**
 
 ```sql
 CREATE TABLE measurements (
@@ -233,9 +246,13 @@ CREATE TABLE measurements (
     asset_code VARCHAR(32) NOT NULL,  -- References asset_definitions.code
     quantity DECIMAL(38, 18) NOT NULL,
 
-    -- Time as range (point-in-time has start = end)
+    -- Time as explicit columns (point-in-time has start = end)
     -- All timestamps MUST be in UTC (enforced at application layer)
-    period TSTZRANGE NOT NULL,
+    period_start TIMESTAMPTZ NOT NULL,
+    period_end TIMESTAMPTZ NOT NULL,
+
+    -- Constraint: end must be >= start (equal for instant events)
+    CONSTRAINT valid_period CHECK (period_end >= period_start),
 
     -- Attributes for fungibility
     attributes JSONB NOT NULL DEFAULT '{}',
@@ -258,50 +275,50 @@ CREATE TABLE measurements (
 CREATE INDEX idx_measurements_tenant ON measurements(tenant_id);
 
 -- Overlap prevention is enforced at the application layer using optimistic
--- concurrency via position_key_hash. PostgreSQL exclusion constraints cannot
--- handle the multi-column key (tenant_id, account_id, asset_code, attributes) with JSONB.
---
--- APPLICATION-LEVEL ENFORCEMENT IS THE LONG-TERM STRATEGY:
--- PostgreSQL exclusion constraints with GiST indexes work well for simple TSTZRANGE
--- overlap detection, but our composite key includes JSONB attributes which cannot
--- participate in exclusion constraints. Custom operators would add complexity without
--- proportional benefit. The application layer (DeltaEngine) already evaluates overlap
--- as part of its supersession logic, making database-level enforcement redundant.
+-- concurrency via position_key_hash. Database-level exclusion constraints would
+-- require TSTZRANGE (not available on CockroachDB) and cannot handle our composite
+-- key with JSONB attributes. The application layer (DeltaEngine) already evaluates
+-- overlap as part of its supersession logic, making database-level enforcement redundant.
 --
 -- See the Overlap Prevention section in Implementation Notes for details.
 
 CREATE INDEX idx_measurements_lookup
-    ON measurements(tenant_id, account_id, asset_code, period)
+    ON measurements(tenant_id, account_id, asset_code, period_start, period_end)
     WHERE superseded_by IS NULL;
 ```
 
-**TSTZRANGE Handling for Instant Events:**
+**Instant Event Handling with Explicit Columns:**
 
-PostgreSQL's `TSTZRANGE` with default bounds `[)` represents `[t, t)` as an empty range.
-To correctly handle instants where `Start == End`:
+Instant events (where `Start == End`) are simply stored with identical `period_start` and
+`period_end` values. No special handling is required:
 
 ```sql
--- Application creates instants with closed-closed bounds
-INSERT INTO measurements (period, ...) VALUES (
-    tstzrange('2025-01-15 12:00:00+00', '2025-01-15 12:00:00+00', '[]'),  -- Instant
+-- Insert an instant event (point-in-time)
+INSERT INTO measurements (period_start, period_end, ...) VALUES (
+    '2025-01-15 12:00:00+00',
+    '2025-01-15 12:00:00+00',  -- Same as start = instant
     ...
 );
 
--- GiST index handles both range and instant queries efficiently
--- Range containment: period @> tstzrange('2025-01-15 12:00', '2025-01-15 12:30', '[)')
--- Instant lookup: period @> '2025-01-15 12:15:00+00'::timestamptz
+-- Find measurements containing a specific point in time
+-- Uses closed interval semantics [start, end]
+SELECT * FROM measurements
+WHERE period_start <= '2025-01-15 12:15:00+00'
+  AND period_end >= '2025-01-15 12:15:00+00';
+
+-- Find overlapping periods (closed interval overlap)
+-- Two periods overlap if neither starts after the other ends
+SELECT * FROM measurements
+WHERE period_start <= '2025-01-15 12:30:00+00'
+  AND period_end >= '2025-01-15 12:00:00+00';
 ```
 
-The application's `Instant(t)` function creates closed-closed ranges `[t, t]` which
-PostgreSQL normalizes to a point. The GiST index supports both range overlap queries
-and point containment queries efficiently.
+**Period Query Integration Tests (Required):**
 
-**TSTZRANGE Integration Tests (Required):**
-
-Before production deployment, verify PostgreSQL's TSTZRANGE behavior with integration tests:
+Before production deployment, verify period query behavior with integration tests:
 
 ```go
-func TestTSTZRANGE_InstantHandling(t *testing.T) {
+func TestPeriodQueries(t *testing.T) {
     db := setupTestDB(t)
 
     tests := []struct {
@@ -312,27 +329,33 @@ func TestTSTZRANGE_InstantHandling(t *testing.T) {
     }{
         {
             name:     "point-in-range query works",
-            setup:    "INSERT INTO measurements (period) VALUES (tstzrange('2025-01-15 12:00+00', '2025-01-15 13:00+00', '[)'))",
-            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period @> '2025-01-15 12:30+00'::timestamptz)",
+            setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 13:00+00')",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start <= '2025-01-15 12:30+00' AND period_end >= '2025-01-15 12:30+00')",
             expected: true,
         },
         {
             name:     "instant-to-instant overlap detected",
-            setup:    "INSERT INTO measurements (period) VALUES (tstzrange('2025-01-15 12:00+00', '2025-01-15 12:00+00', '[]'))",
-            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period && tstzrange('2025-01-15 12:00+00', '2025-01-15 12:00+00', '[]'))",
+            setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 12:00+00')",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start <= '2025-01-15 12:00+00' AND period_end >= '2025-01-15 12:00+00')",
             expected: true,
         },
         {
-            name:     "instant at range boundary (exclusive end)",
-            setup:    "INSERT INTO measurements (period) VALUES (tstzrange('2025-01-15 12:00+00', '2025-01-15 13:00+00', '[)'))",
-            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period @> '2025-01-15 13:00+00'::timestamptz)",
-            expected: false, // 13:00 is exclusive end
+            name:     "range overlap detection",
+            setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 13:00+00')",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start < '2025-01-15 12:30+00' AND period_end > '2025-01-15 12:00+00')",
+            expected: true,
         },
         {
-            name:     "GiST index used for range query",
-            setup:    "INSERT INTO measurements (period) VALUES (tstzrange('2025-01-15 12:00+00', '2025-01-15 13:00+00', '[)'))",
-            query:    "EXPLAIN SELECT * FROM measurements WHERE period && tstzrange('2025-01-15 12:00+00', '2025-01-15 12:30+00', '[)')",
-            expected: true, // Should show "Index Scan using idx_measurements_period"
+            name:     "non-overlapping ranges",
+            setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 13:00+00')",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start < '2025-01-15 11:00+00' AND period_end > '2025-01-15 10:00+00')",
+            expected: false,
+        },
+        {
+            name:     "B-tree index used for period queries",
+            setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 13:00+00')",
+            query:    "EXPLAIN SELECT * FROM measurements WHERE period_start < '2025-01-15 12:30+00' AND period_end > '2025-01-15 12:00+00'",
+            expected: true, // Should show "Index Scan using idx_measurements_lookup"
         },
     }
 
@@ -347,8 +370,8 @@ func TestTSTZRANGE_InstantHandling(t *testing.T) {
 These tests validate:
 1. Point-in-range containment queries work correctly
 2. Instant-to-instant overlap detection (critical for duplicate prevention)
-3. Half-open interval boundary behavior (`[)` excludes end)
-4. GiST index is actually used for range queries (query plan verification)
+3. Range overlap detection with explicit column comparisons
+4. B-tree composite index is used for period queries
 
 ### 2. Source Authority Registry
 
@@ -791,14 +814,17 @@ For settlement snapshots and reconciliation service responsibilities, see ADR-00
 ```sql
 -- Fast lookup of current measurement for a position
 CREATE INDEX idx_measurements_current
-    ON measurements(account_id, asset_code, period)
+    ON measurements(account_id, asset_code, period_start, period_end)
     WHERE superseded_by IS NULL;
 
--- Period overlap queries
+-- Period overlap queries (B-tree composite index)
+-- CockroachDB doesn't support GiST indexes for TSTZRANGE, so we use B-tree
+-- Query pattern: WHERE period_start < ? AND period_end > ?
 CREATE INDEX idx_measurements_period
-    ON measurements USING GIST (period);
+    ON measurements(period_start, period_end);
 
 -- Attribute-based reporting and analytics queries
+-- Note: CockroachDB supports GIN indexes for JSONB
 CREATE INDEX idx_measurements_attributes
     ON measurements USING GIN (attributes);
 ```
@@ -834,13 +860,14 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 -- Add position key hash for optimistic concurrency
 -- Uses canonicalize_jsonb() for deterministic attribute ordering
+-- Uses explicit period_start/period_end columns for CockroachDB compatibility
 ALTER TABLE measurements ADD COLUMN position_key_hash BYTEA GENERATED ALWAYS AS (
     sha256(
         account_id::text || '|' ||
         asset_code || '|' ||
         canonicalize_jsonb(COALESCE(attributes, '{}'::jsonb)) || '|' ||
-        lower(period)::text || '|' ||
-        upper(period)::text
+        period_start::text || '|' ||
+        period_end::text
     )
 ) STORED;
 
