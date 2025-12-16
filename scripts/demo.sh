@@ -306,6 +306,7 @@ echo "$CREATE_RESPONSE" | jq '{
 echo ""
 
 echo -e "${CYAN}► Step 3: Execute Deposit - Saga Orchestration${NC}"
+echo -e "${YELLOW}  Depositing: £500${NC}"
 echo -e "${YELLOW}  Saga Steps:${NC}"
 echo -e "${YELLOW}    1. Log position in PositionKeeping     (via gRPC)${NC}"
 echo -e "${YELLOW}    2. Post ledger in FinancialAccounting  (via gRPC)${NC}"
@@ -438,7 +439,7 @@ echo -e "  ${YELLOW}Duplicate Detection:${NC} Hash(request) → stored result"
 echo -e "  ${YELLOW}Retry Behavior:${NC}   Duplicate requests return cached response"
 echo ""
 
-echo -e "${CYAN}► Example deposit transaction:${NC}"
+echo -e "${CYAN}► Example deposit transaction (£250):${NC}"
 DEPOSIT1=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
@@ -500,21 +501,25 @@ echo -e "${MAGENTA}║  Part 6: Position Keeping - Transaction Audit Trail      
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-echo -e "${CYAN}► Retrieving position log for account:${NC}"
-POSITION_LOG=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
-  \"log_id\": \"$ACCOUNT_ID\"
-}" localhost:50053 meridian.position_keeping.v1.PositionKeepingService/RetrieveFinancialPositionLog)
+echo -e "${CYAN}► Listing position logs for account: ${ACCOUNT_ID}${NC}"
+POSITION_LOGS=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+  \"account_id\": \"$ACCOUNT_ID\"
+}" localhost:50053 meridian.position_keeping.v1.PositionKeepingService/ListFinancialPositionLogs)
 
-echo "$POSITION_LOG" | jq '{
-  log_id: .log.logId,
-  account_id: .log.accountId,
-  total_entries: (.log.entries | length),
-  entries: [.log.entries[] | {
-    entry_id: .entryId,
-    transaction_id: .transactionId,
-    direction: .direction,
-    amount: .amount.amount,
-    timestamp: .timestamp
+echo "$POSITION_LOGS" | jq '{
+  total_logs: (.logs | length),
+  logs: [.logs[] | {
+    log_id: .logId,
+    account_id: .accountId,
+    status: .status,
+    total_entries: (.entries | length),
+    entries: [.entries[]? | {
+      entry_id: .entryId,
+      transaction_id: .transactionId,
+      direction: .direction,
+      amount: .amount.amount,
+      timestamp: .timestamp
+    }]
   }]
 }'
 echo ""
@@ -529,20 +534,23 @@ echo -e "${MAGENTA}║  Part 7: Financial Accounting - Double-Entry Bookkeeping 
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-echo -e "${CYAN}► Retrieving booking log:${NC}"
-BOOKING_LOG=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
-  \"financial_booking_log_id\": \"$ACCOUNT_ID\"
-}" localhost:50052 meridian.financial_accounting.v1.FinancialAccountingService/RetrieveFinancialBookingLog)
+echo -e "${CYAN}► Listing booking logs for account: ${ACCOUNT_ID}${NC}"
+BOOKING_LOGS=$(grpcurl -plaintext ${TENANT_HEADER} -d "{}" localhost:50052 meridian.financial_accounting.v1.FinancialAccountingService/ListFinancialBookingLogs)
 
-echo "$BOOKING_LOG" | jq '{
-  booking_log_id: .financialBookingLog.id,
-  product_service_ref: .financialBookingLog.productServiceReference,
-  total_postings: (.financialBookingLog.ledgerPostings | length),
-  postings: [.financialBookingLog.ledgerPostings[] | {
-    id: .id,
-    direction: .postingDirection,
-    amount: .postingAmount,
-    value_date: .valueDate
+# Filter to show only logs matching our account
+echo "$BOOKING_LOGS" | jq --arg account_id "$ACCOUNT_ID" '{
+  total_logs: ([.financialBookingLogs[] | select(.productServiceReference == $account_id)] | length),
+  logs: [.financialBookingLogs[] | select(.productServiceReference == $account_id) | {
+    booking_log_id: .id,
+    product_service_ref: .productServiceReference,
+    status: .status,
+    total_postings: (.ledgerPostings | length),
+    postings: [.ledgerPostings[]? | {
+      id: .id,
+      direction: .postingDirection,
+      amount: .postingAmount,
+      value_date: .valueDate
+    }]
   }]
 }'
 echo ""
