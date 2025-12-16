@@ -12,6 +12,21 @@ permissions:
   checks: write
 
 jobs:
+  shellcheck:
+    name: Shell Script Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.'
+          ignore_paths: 'node_modules .git'
+          severity: warning  # Only fail on warnings and errors, not info
+
   golangci-lint:
     name: golangci-lint
     runs-on: ubuntu-latest

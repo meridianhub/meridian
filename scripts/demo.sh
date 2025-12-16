@@ -206,7 +206,7 @@ select_tenant() {
             NUM=$((i + 1))
             TID="${TENANT_IDS[$i]}"
             TNAME="${TENANT_NAMES[$i]:-$TID}"
-            TSTATUS="${TENANT_STATUSES[$i]}"
+            _TSTATUS="${TENANT_STATUSES[$i]}"
 
             # Get party/account counts for this tenant
             SCHEMA="org_${TID}"
@@ -320,7 +320,7 @@ select_party() {
             ACCT_COUNT=${ACCT_COUNT:-0}
 
             # Shorten type for display
-            PTYPE_SHORT=$(echo "$PTYPE" | sed 's/PARTY_TYPE_//')
+            PTYPE_SHORT="${PTYPE//PARTY_TYPE_/}"
 
             printf "${CYAN}│${NC}  %-3s %-30s %-12s %-14s ${CYAN}│${NC}\n" \
                 "$NUM)" "${PNAME:0:30}" "${PTYPE_SHORT}" "($ACCT_COUNT accounts)"
@@ -356,7 +356,7 @@ select_party() {
         LEGAL_NAME="${FIRST_NAME} ${LAST_NAME}"
         echo -e "${YELLOW}  Creating person '${LEGAL_NAME}'...${NC}"
 
-        PARTY_RESULT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+        PARTY_RESULT=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
           \"party_type\": \"PARTY_TYPE_PERSON\",
           \"legal_name\": \"${LEGAL_NAME}\",
           \"display_name\": \"${LEGAL_NAME}\"
@@ -379,7 +379,7 @@ select_party() {
 
         echo -e "${YELLOW}  Creating organization '${ORG_NAME}'...${NC}"
 
-        PARTY_RESULT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+        PARTY_RESULT=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
           \"party_type\": \"PARTY_TYPE_ORGANIZATION\",
           \"legal_name\": \"${ORG_NAME}\",
           \"display_name\": \"${ORG_NAME}\"
@@ -427,7 +427,7 @@ select_account() {
     ACCOUNT_BALANCES=()
     ACCOUNT_STATUSES=()
 
-    while IFS=$'\t' read -r aid aiban acurr abal astatus; do
+    while IFS=$'\t' read -r aid aiban _acurr abal astatus; do
         [ -z "$aid" ] && continue
         ACCOUNT_IDS+=("$aid")
         ACCOUNT_IBANS+=("$aiban")
@@ -454,7 +454,7 @@ select_account() {
             ABAL_FMT="£${ABAL_GBP}"
 
             # Shorten status
-            ASTATUS_SHORT=$(echo "$ASTATUS" | sed 's/ACCOUNT_STATUS_//')
+            ASTATUS_SHORT="${ASTATUS//ACCOUNT_STATUS_/}"
 
             # Truncate IBAN for display
             AIBAN_SHORT="${AIBAN:0:8}...${AIBAN: -4}"
@@ -485,7 +485,7 @@ select_account() {
 
         echo -e "${YELLOW}  Creating new GBP account...${NC}"
 
-        ACCOUNT_RESULT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+        ACCOUNT_RESULT=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
           \"account_identification\": \"${NEW_IBAN}\",
           \"party_id\": \"${SELECTED_PARTY_ID}\",
           \"base_currency\": \"CURRENCY_GBP\"
@@ -591,7 +591,7 @@ transaction_loop() {
                 echo -e "${YELLOW}  ► gRPC: CurrentAccountService/ExecuteDeposit${NC}"
                 echo -e "${YELLOW}    Request: {account_id: \"$SELECTED_ACCOUNT_ID\", amount: £$DEPOSIT_AMOUNT}${NC}"
 
-                RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+                RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
                   \"account_id\": \"$SELECTED_ACCOUNT_ID\",
                   \"amount\": {
                     \"amount\": {
@@ -603,8 +603,8 @@ transaction_loop() {
                 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit 2>&1)
 
                 if echo "$RESPONSE" | jq -e '.transactionId' >/dev/null 2>&1; then
-                    TXN_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
-                    NEW_BAL=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
+                    _TXN_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
+                    _NEW_BAL=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
                     echo -e "${GREEN}  ✓ Deposit Complete${NC}"
                     echo -e "${YELLOW}    Response:${NC}"
                     echo "$RESPONSE" | jq '{
@@ -748,7 +748,7 @@ show_health_status() {
     check_service_health() {
         local svc=$1
         local port=$2
-        health=$(grpcurl -plaintext localhost:$port grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
+        health=$(grpcurl -plaintext localhost:"$port" grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
         status=$(echo "$health" | jq -r '.status')
 
         if [ "$status" = "SERVING" ]; then
@@ -805,7 +805,7 @@ echo ""
 echo -e "${CYAN}► Step 1: Register Party (Customer)${NC}"
 echo -e "${YELLOW}  Party Service provides customer reference data for multi-tenancy${NC}"
 TIMESTAMP=$(date +%s)
-PARTY_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d '{
+PARTY_RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d '{
   "party_type": "PARTY_TYPE_PERSON",
   "legal_name": "Demo User",
   "display_name": "Demo Customer"
@@ -829,7 +829,7 @@ echo ""
 
 echo -e "${CYAN}► Step 2: Initiate Current Account${NC}"
 echo -e "${YELLOW}  Account linked to Party for ownership and validation${NC}"
-CREATE_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+CREATE_RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
   \"account_identification\": \"GB29NWBK$TIMESTAMP\",
   \"party_id\": \"$PARTY_ID\",
   \"base_currency\": \"CURRENCY_GBP\"
@@ -854,7 +854,7 @@ echo -e "${YELLOW}  * Automatic compensation if any step fails${NC}"
 echo ""
 
 # Interactive transaction loop (deposits and withdrawals)
-CURRENT_BALANCE=0
+_CURRENT_BALANCE=0
 TRANSACTION_COUNT=0
 while true; do
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -877,7 +877,7 @@ while true; do
     if [ "$AMOUNT" -ge 0 ]; then
         # Deposit
         echo -e "${GREEN}  ▲ Depositing: £$AMOUNT${NC}"
-        RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+        RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
           \"account_id\": \"$ACCOUNT_ID\",
           \"amount\": {
             \"amount\": {
@@ -890,7 +890,7 @@ while true; do
 
         if echo "$RESPONSE" | jq -e '.transactionId' >/dev/null 2>&1; then
             TRANSACTION_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
-            CURRENT_BALANCE=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
+            _CURRENT_BALANCE=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
             echo -e "${GREEN}  ✓ Deposit Completed:${NC} $TRANSACTION_ID"
             echo "$RESPONSE" | jq '{
               type: "DEPOSIT",
@@ -918,7 +918,7 @@ done
 # If no transactions were made, make a default deposit for the rest of the demo
 if [ "$TRANSACTION_COUNT" = "0" ]; then
     echo -e "${YELLOW}  Making initial deposit of £500 for demo...${NC}"
-    DEPOSIT_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+    DEPOSIT_RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
       \"account_id\": \"$ACCOUNT_ID\",
       \"amount\": {
         \"amount\": {
@@ -996,7 +996,7 @@ echo -e "${CYAN}► Testing load distribution across ${NEW_POS_PODS} pods:${NC}"
 echo -e "${YELLOW}  Executing 6 rapid-fire deposits to demonstrate round_robin...${NC}"
 SUCCESS_COUNT=0
 for _ in {1..6}; do
-    if grpcurl -plaintext ${TENANT_HEADER} -d "{
+    if grpcurl -plaintext "${TENANT_HEADER}" -d "{
       \"account_id\": \"$ACCOUNT_ID\",
       \"amount\": {
         \"amount\": {
@@ -1046,7 +1046,7 @@ echo -e "  ${YELLOW}PaymentOrderReference:${NC} $PAYMENT_ORDER_REF"
 echo -e "  ${YELLOW}Amount:${NC} £100"
 echo ""
 
-LIEN1=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+LIEN1=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
     \"amount\": {
@@ -1067,7 +1067,7 @@ echo -e "${CYAN}► Step 2: Retry the SAME request (simulating network retry)${N
 echo -e "  ${YELLOW}Same PaymentOrderReference:${NC} $PAYMENT_ORDER_REF"
 echo ""
 
-LIEN2=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+LIEN2=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
     \"amount\": {
@@ -1097,7 +1097,7 @@ echo ""
 
 # Clean up: Terminate the lien to release funds
 echo -e "${CYAN}► Cleanup: Terminating lien to release reserved funds${NC}"
-grpcurl -plaintext ${TENANT_HEADER} -d "{
+grpcurl -plaintext "${TENANT_HEADER}" -d "{
   \"lien_id\": \"$LIEN_ID\",
   \"reason\": \"Demo cleanup\"
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/TerminateLien >/dev/null 2>&1
@@ -1152,7 +1152,7 @@ echo -e "${MAGENTA}════════════════════�
 echo ""
 
 echo -e "${CYAN}► Listing position logs for account: ${ACCOUNT_ID}${NC}"
-POSITION_LOGS=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+POSITION_LOGS=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
   \"account_id\": \"$ACCOUNT_ID\"
 }" localhost:50053 meridian.position_keeping.v1.PositionKeepingService/ListFinancialPositionLogs)
 
@@ -1185,7 +1185,7 @@ echo -e "${MAGENTA}════════════════════�
 echo ""
 
 echo -e "${CYAN}► Listing booking logs for account: ${ACCOUNT_ID}${NC}"
-BOOKING_LOGS=$(grpcurl -plaintext ${TENANT_HEADER} -d "{}" localhost:50052 meridian.financial_accounting.v1.FinancialAccountingService/ListFinancialBookingLogs)
+BOOKING_LOGS=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{}" localhost:50052 meridian.financial_accounting.v1.FinancialAccountingService/ListFinancialBookingLogs)
 
 # Filter to show only logs matching our account
 echo "$BOOKING_LOGS" | jq --arg account_id "$ACCOUNT_ID" '{
@@ -1215,7 +1215,7 @@ echo -e "${MAGENTA}  Part 8: Final Account State & Summary${NC}"
 echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-FINAL_ACCOUNT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+FINAL_ACCOUNT=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
   \"account_id\": \"$ACCOUNT_ID\"
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount)
 
@@ -1272,7 +1272,7 @@ echo ""
 echo -e "${CYAN}Would you like to run the Horizon Integrity Proof demo?${NC}"
 echo -e "${YELLOW}This demonstrates resilience against phantom transactions (Post Office Horizon problem).${NC}"
 echo ""
-read -p "Run Horizon demo? [y/N] " run_horizon
+read -r -p "Run Horizon demo? [y/N] " run_horizon
 echo ""
 
 if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
@@ -1287,7 +1287,7 @@ if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
     echo -e "  ${YELLOW}2)${NC} Unhappy Path - Network failure simulation (aggressive timeout triggers retry)"
     echo -e "  ${CYAN}3)${NC} Both - Run happy path, then unhappy path"
     echo ""
-    read -p "Enter choice [1-3]: " horizon_choice
+    read -r -p "Enter choice [1-3]: " horizon_choice
 
     HORIZON_MODE=""
     case $horizon_choice in

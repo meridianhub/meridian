@@ -126,7 +126,7 @@ cmd_horizon() {
     echo -e "  ${YELLOW}2)${NC} Unhappy Path - Network failure simulation"
     echo -e "  ${CYAN}3)${NC} Both"
     echo ""
-    read -p "Enter choice [1-3]: " choice
+    read -r -p "Enter choice [1-3]: " choice
 
     local timeout_args=""
     case $choice in
@@ -155,7 +155,7 @@ cmd_horizon() {
     esac
 
     cd "$SCRIPT_DIR"
-    go run ./utilities/horizon-demo $timeout_args --output ./integrity_report.json "$@"
+    go run ./utilities/horizon-demo "$timeout_args" --output ./integrity_report.json "$@"
 }
 
 cmd_doctor() {
