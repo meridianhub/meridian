@@ -522,8 +522,9 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 
 	// Step 2: Post to ledger in FinancialAccounting service
 	var ledgerPostingID string
+	var bookingLogID string
 	saga.AddStep("post_ledger",
-		// Action: Create ledger posting
+		// Action: Create booking log and ledger posting
 		func(stepCtx context.Context) error {
 			s.logger.Info("executing post_ledger step",
 				"account_id", account.AccountID,
@@ -535,10 +536,33 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			// Convert MoneyAmount to google.type.Money for the request
 			moneyAmt := toMoneyAmount(amount)
 
-			// Call FinancialAccounting service
+			// First, initiate a financial booking log
+			bookingLogResp, err := s.finAcctClient.InitiateFinancialBookingLog(stepCtx,
+				&financialaccountingv1.InitiateFinancialBookingLogRequest{
+					FinancialAccountType:    commonpb.AccountType_ACCOUNT_TYPE_CURRENT,
+					ProductServiceReference: account.AccountID,
+					BusinessUnitReference:   "current-account-service",
+					ChartOfAccountsRules:    "DEPOSIT",
+					BaseCurrency:            commonpb.Currency_CURRENCY_GBP,
+					IdempotencyKey: &commonpb.IdempotencyKey{
+						Key: fmt.Sprintf("booking-log-%s", transactionID),
+					},
+				},
+			)
+			if err != nil {
+				caobservability.RecordExternalServiceError("financial_accounting", "initiate_booking_log")
+				return fmt.Errorf("failed to initiate booking log: %w", err)
+			}
+			bookingLogID = bookingLogResp.FinancialBookingLog.Id
+
+			s.logger.Info("booking log created",
+				"booking_log_id", bookingLogID,
+				"transaction_id", transactionID)
+
+			// Then capture the ledger posting with the booking log ID
 			resp, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
 				&financialaccountingv1.CaptureLedgerPostingRequest{
-					FinancialBookingLogId: account.AccountID, // Use account ID as booking log ID
+					FinancialBookingLogId: bookingLogID,
 					PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
 					PostingAmount:         moneyAmt.Amount,
 					AccountId:             account.AccountID,
@@ -557,6 +581,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 
 			s.logger.Info("post_ledger step completed",
 				"ledger_posting_id", ledgerPostingID,
+				"booking_log_id", bookingLogID,
 				"transaction_id", transactionID)
 
 			return nil
@@ -565,10 +590,11 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 		func(stepCtx context.Context) error {
 			s.logger.Info("compensating post_ledger step",
 				"ledger_posting_id", ledgerPostingID,
+				"booking_log_id", bookingLogID,
 				"transaction_id", transactionID)
 
-			if ledgerPostingID == "" {
-				s.logger.Warn("cannot compensate post_ledger: ledger posting ID not captured")
+			if bookingLogID == "" {
+				s.logger.Warn("cannot compensate post_ledger: booking log ID not captured")
 				return ErrLedgerPostingIDNotFound
 			}
 
@@ -582,7 +608,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			compTransactionID := fmt.Sprintf("COMP-%s", transactionID)
 			_, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
 				&financialaccountingv1.CaptureLedgerPostingRequest{
-					FinancialBookingLogId: account.AccountID,
+					FinancialBookingLogId: bookingLogID,
 					PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
 					PostingAmount:         moneyAmt.Amount,
 					AccountId:             account.AccountID,
@@ -601,7 +627,8 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			caobservability.RecordSagaCompensation("deposit", "post_ledger")
 
 			s.logger.Info("post_ledger compensation completed",
-				"ledger_posting_id", ledgerPostingID)
+				"ledger_posting_id", ledgerPostingID,
+				"booking_log_id", bookingLogID)
 
 			return nil
 		},
