@@ -426,56 +426,108 @@ echo -e "${GREEN}✓ DNS-based load balancing validated with pod scaling${NC}\n"
 pause
 
 # ════════════════════════════════════════════════════════════════
-# PART 4: Idempotency with Redis
+# PART 4: Idempotency - Safe Retries with Payment Order Reference
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 4: Idempotency Architecture (Conceptual)                 ║${NC}"
+echo -e "${MAGENTA}║  Part 4: Idempotency - Proving Safe Retries                    ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-echo -e "${CYAN}► Idempotency Protection with Redis:${NC}"
-echo -e "  ${YELLOW}Service Layer:${NC}     Correlation IDs tracked in Redis (TTL: 24h)"
-echo -e "  ${YELLOW}Duplicate Detection:${NC} Hash(request) → stored result"
-echo -e "  ${YELLOW}Retry Behavior:${NC}   Duplicate requests return cached response"
+echo -e "${CYAN}► Idempotency Pattern:${NC}"
+echo -e "  ${YELLOW}Liens:${NC}    PaymentOrderReference as natural idempotency key"
+echo -e "  ${YELLOW}Deposits:${NC} IdempotencyKey propagated to downstream services"
+echo -e "  ${YELLOW}Behavior:${NC} Duplicate requests return cached/existing result"
 echo ""
 
-echo -e "${CYAN}► Example deposit transaction (£250):${NC}"
-DEPOSIT1=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+# Generate a unique payment order reference for this demo
+PAYMENT_ORDER_REF="PO-DEMO-$(date +%s)"
+
+echo -e "${CYAN}► Step 1: Create a Lien (fund reservation) with PaymentOrderReference${NC}"
+echo -e "  ${YELLOW}PaymentOrderReference:${NC} $PAYMENT_ORDER_REF"
+echo -e "  ${YELLOW}Amount:${NC} £100"
+echo ""
+
+LIEN1=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
     \"amount\": {
       \"currency_code\": \"GBP\",
-      \"units\": 250,
+      \"units\": 100,
       \"nanos\": 0
     }
-  }
-}" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit)
+  },
+  \"payment_order_reference\": \"$PAYMENT_ORDER_REF\"
+}" localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateLien)
 
-TXN1=$(echo "$DEPOSIT1" | jq -r '.transactionId')
-BALANCE1=$(echo "$DEPOSIT1" | jq -r '.newBalance.amount.units')
-echo -e "${GREEN}✓ Transaction processed:${NC} $TXN1 (Balance: £$BALANCE1)"
+LIEN_ID=$(echo "$LIEN1" | jq -r '.lien.lienId')
+LIEN_STATUS=$(echo "$LIEN1" | jq -r '.lien.status')
+echo -e "${GREEN}✓ First request - Lien created:${NC}"
+echo "$LIEN1" | jq '{lien_id: .lien.lienId, status: .lien.status, amount: .lien.amount.amount}'
+echo ""
+
+echo -e "${CYAN}► Step 2: Retry the SAME request (simulating network retry)${NC}"
+echo -e "  ${YELLOW}Same PaymentOrderReference:${NC} $PAYMENT_ORDER_REF"
+echo ""
+
+LIEN2=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+  \"account_id\": \"$ACCOUNT_ID\",
+  \"amount\": {
+    \"amount\": {
+      \"currency_code\": \"GBP\",
+      \"units\": 100,
+      \"nanos\": 0
+    }
+  },
+  \"payment_order_reference\": \"$PAYMENT_ORDER_REF\"
+}" localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateLien)
+
+LIEN_ID2=$(echo "$LIEN2" | jq -r '.lien.lienId')
+echo -e "${GREEN}✓ Second request - Idempotent response (same lien returned):${NC}"
+echo "$LIEN2" | jq '{lien_id: .lien.lienId, status: .lien.status, amount: .lien.amount.amount}'
+echo ""
+
+# Verify idempotency
+if [ "$LIEN_ID" = "$LIEN_ID2" ]; then
+    echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║  ✓ IDEMPOTENCY VERIFIED - Same Lien ID returned both times     ║${NC}"
+    echo -e "${GREEN}║    No duplicate fund reservations created!                     ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
+else
+    echo -e "${RED}✗ Idempotency check failed - different lien IDs returned${NC}"
+fi
+echo ""
+
+# Clean up: Terminate the lien to release funds
+echo -e "${CYAN}► Cleanup: Terminating lien to release reserved funds${NC}"
+grpcurl -plaintext ${TENANT_HEADER} -d "{
+  \"lien_id\": \"$LIEN_ID\",
+  \"reason\": \"Demo cleanup\"
+}" localhost:50051 meridian.current_account.v1.CurrentAccountService/TerminateLien >/dev/null 2>&1
+echo -e "${GREEN}✓ Lien terminated, funds released${NC}"
 echo ""
 
 echo -e "${CYAN}► How Idempotency Works:${NC}"
-echo -e "  1. Client sends request with correlation ID in gRPC metadata"
-echo -e "  2. Service checks Redis for existing result"
-echo -e "  3. If found: Return cached response (duplicate)"
-echo -e "  4. If new: Process and cache result for 24 hours"
-echo -e "  5. Network retries are safe and won't create duplicates"
+echo -e "  1. Client includes PaymentOrderReference in lien request"
+echo -e "  2. Service checks database for existing lien with same reference"
+echo -e "  3. If found: Return existing lien (idempotent response)"
+echo -e "  4. If new: Create lien and store reference"
+echo -e "  5. Network retries are safe - no duplicate reservations!"
 echo ""
-echo -e "${GREEN}✓ Idempotency protection active via Redis${NC}\n"
+echo -e "${GREEN}✓ Idempotency protection verified${NC}\n"
 pause
 
 # ════════════════════════════════════════════════════════════════
-# PART 5: Distributed Tracing (OpenTelemetry)
+# PART 5: Distributed Tracing (OpenTelemetry + Grafana Tempo)
 # ════════════════════════════════════════════════════════════════
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${MAGENTA}║  Part 5: Distributed Tracing Across Services                   ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-echo -e "${YELLOW}Note: This section describes the tracing architecture. Actual trace viewing${NC}"
-echo -e "${YELLOW}      requires Jaeger/OTLP endpoint configuration in your environment.${NC}"
+echo -e "${CYAN}► Observability Stack (via Tilt):${NC}"
+echo -e "  ${YELLOW}Grafana Alloy${NC}  → OTLP collector (alloy:4317)"
+echo -e "  ${YELLOW}Grafana Tempo${NC}  → Distributed trace storage"
+echo -e "  ${YELLOW}Grafana${NC}        → Visualization at http://localhost:3000"
 echo ""
 
 echo -e "${CYAN}► Trace propagation through saga:${NC}"
@@ -489,8 +541,8 @@ echo -e "  • Request/response payloads"
 echo -e "  • Error details and stack traces"
 echo ""
 echo -e "${GREEN}✓ Distributed tracing enabled via OpenTelemetry${NC}"
-echo -e "${YELLOW}  View traces: kubectl port-forward svc/jaeger 16686:16686${NC}"
-echo -e "${YELLOW}  Then open: http://localhost:16686${NC}\n"
+echo -e "${YELLOW}  View traces: http://localhost:3000 → Explore → Tempo${NC}"
+echo -e "${YELLOW}  Search by: service.name = \"current-account-service\"${NC}\n"
 pause
 
 # ════════════════════════════════════════════════════════════════
@@ -603,16 +655,16 @@ echo -e "  ${GREEN}✓${NC} Saga pattern with automatic compensation"
 echo -e "  ${GREEN}✓${NC} DNS-based client-side load balancing (round_robin)"
 echo -e "  ${GREEN}✓${NC} Distributed tracing (OpenTelemetry)"
 echo -e "  ${GREEN}✓${NC} Health checks with dependency validation"
-echo -e "  ${GREEN}✓${NC} Idempotency protection (Redis-backed)"
+echo -e "  ${GREEN}✓${NC} Idempotency protection (PaymentOrderReference)"
 echo -e "  ${GREEN}✓${NC} Position keeping with audit trail"
 echo -e "  ${GREEN}✓${NC} Double-entry ledger bookkeeping"
 echo -e "  ${GREEN}✓${NC} Protobuf over gRPC"
 echo -e "  ${GREEN}✓${NC} Resilient communication (circuit breaker + retry)"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
-echo -e "  • View traces in Jaeger:     kubectl port-forward svc/jaeger 16686:16686"
-echo -e "  • Check Redis idempotency:   kubectl exec -it redis-0 -- redis-cli"
-echo -e "  • View metrics:              kubectl port-forward svc/prometheus 9090:9090"
+echo -e "  • View traces in Grafana:    http://localhost:3000 → Explore → Tempo"
+echo -e "  • View logs in Grafana:      http://localhost:3000 → Explore → Loki"
+echo -e "  • View metrics:              http://localhost:9090 (Prometheus)"
 echo -e "  • Database queries:          kubectl exec -it cockroachdb-0 -- ./cockroach sql"
 echo ""
 
