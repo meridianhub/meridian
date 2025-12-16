@@ -324,13 +324,13 @@ DEPOSIT_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   }
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit)
 
-TRANSACTION_ID=$(echo "$DEPOSIT_RESPONSE" | jq -r '.transaction_id')
+TRANSACTION_ID=$(echo "$DEPOSIT_RESPONSE" | jq -r '.transactionId')
 echo -e "${GREEN}✓ Deposit Completed via Saga:${NC} $TRANSACTION_ID"
 echo "$DEPOSIT_RESPONSE" | jq '{
-  transaction_id: .transaction_id,
+  transaction_id: .transactionId,
   status: .status,
-  new_balance: .new_balance.amount,
-  available_balance: .available_balance.amount
+  new_balance: .newBalance.amount,
+  available_balance: .availableBalance.amount
 }'
 echo ""
 pause
@@ -350,16 +350,16 @@ echo -e "  ${YELLOW}Load Balancing:${NC}      round_robin across all pod IPs"
 echo ""
 
 echo -e "${CYAN}► Current service endpoints (before scaling):${NC}"
-INITIAL_POS_PODS=$(kubectl get endpoints position-keeping -o json | jq '.subsets[].addresses | length')
-INITIAL_FIN_PODS=$(kubectl get endpoints financial-accounting -o json | jq '.subsets[].addresses | length')
+INITIAL_POS_PODS=$(kubectl get endpoints position-keeping -o json | jq '[.subsets[]?.addresses[]?] | length')
+INITIAL_FIN_PODS=$(kubectl get endpoints financial-accounting -o json | jq '[.subsets[]?.addresses[]?] | length')
 echo -e "  ${YELLOW}PositionKeeping:${NC}     $INITIAL_POS_PODS pods"
 echo -e "  ${YELLOW}FinancialAccounting:${NC} $INITIAL_FIN_PODS pods"
 kubectl get endpoints position-keeping financial-accounting -o json | jq -r '
   .items[] |
   {
     service: .metadata.name,
-    pods: [.subsets[].addresses[]?.ip],
-    ports: [.subsets[].ports[]?.port]
+    pods: [.subsets[]?.addresses[]?.ip],
+    ports: [.subsets[]?.ports[]?.port]
   }'
 echo ""
 
@@ -371,7 +371,7 @@ echo -e "${YELLOW}  Waiting for new pods to be ready...${NC}"
 SCALE_TIMEOUT=60
 SCALE_ELAPSED=0
 while [ $SCALE_ELAPSED -lt $SCALE_TIMEOUT ]; do
-    READY_PODS=$(kubectl get pods -l app=position-keeping -o json | jq '[.items[] | select(.status.phase == "Running" and .status.conditions[]? | select(.type == "Ready" and .status == "True"))] | length')
+    READY_PODS=$(kubectl get pods -l app=position-keeping -o json | jq '[.items[] | select(.status.phase == "Running") | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))] | length')
     if [ "$READY_PODS" -eq 3 ]; then
         echo -e "${GREEN}✓ All 3 replicas ready${NC}"
         break
@@ -383,12 +383,12 @@ done
 
 echo ""
 echo -e "${CYAN}► Service endpoints after scaling:${NC}"
-NEW_POS_PODS=$(kubectl get endpoints position-keeping -o json | jq '.subsets[].addresses | length')
+NEW_POS_PODS=$(kubectl get endpoints position-keeping -o json | jq '[.subsets[]?.addresses[]?] | length')
 echo -e "  ${YELLOW}PositionKeeping:${NC}     $INITIAL_POS_PODS → $NEW_POS_PODS pods (scaled up)"
 kubectl get endpoints position-keeping -o json | jq '{
   service: .metadata.name,
-  replica_count: (.subsets[].addresses | length),
-  pod_ips: [.subsets[].addresses[]?.ip]
+  replica_count: ([.subsets[]?.addresses[]?] | length),
+  pod_ips: [.subsets[]?.addresses[]?.ip]
 }'
 echo ""
 
@@ -450,8 +450,8 @@ DEPOSIT1=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   }
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit)
 
-TXN1=$(echo "$DEPOSIT1" | jq -r '.transaction_id')
-BALANCE1=$(echo "$DEPOSIT1" | jq -r '.new_balance.amount.units')
+TXN1=$(echo "$DEPOSIT1" | jq -r '.transactionId')
+BALANCE1=$(echo "$DEPOSIT1" | jq -r '.newBalance.amount.units')
 echo -e "${GREEN}✓ Transaction processed:${NC} $TXN1 (Balance: £$BALANCE1)"
 echo ""
 
@@ -506,12 +506,12 @@ POSITION_LOG=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
 }" localhost:50053 meridian.position_keeping.v1.PositionKeepingService/RetrieveFinancialPositionLog)
 
 echo "$POSITION_LOG" | jq '{
-  log_id: .log.log_id,
-  account_id: .log.account_id,
+  log_id: .log.logId,
+  account_id: .log.accountId,
   total_entries: (.log.entries | length),
   entries: [.log.entries[] | {
-    entry_id: .entry_id,
-    transaction_id: .transaction_id,
+    entry_id: .entryId,
+    transaction_id: .transactionId,
     direction: .direction,
     amount: .amount.amount,
     timestamp: .timestamp
@@ -535,14 +535,14 @@ BOOKING_LOG=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
 }" localhost:50052 meridian.financial_accounting.v1.FinancialAccountingService/RetrieveFinancialBookingLog)
 
 echo "$BOOKING_LOG" | jq '{
-  booking_log_id: .booking_log.financial_booking_log_id,
-  account_id: .booking_log.account_id,
-  total_postings: (.booking_log.ledger_postings | length),
-  postings: [.booking_log.ledger_postings[] | {
+  booking_log_id: .financialBookingLog.id,
+  product_service_ref: .financialBookingLog.productServiceReference,
+  total_postings: (.financialBookingLog.ledgerPostings | length),
+  postings: [.financialBookingLog.ledgerPostings[] | {
     id: .id,
-    direction: .posting_direction,
-    amount: .posting_amount,
-    value_date: .value_date
+    direction: .postingDirection,
+    amount: .postingAmount,
+    value_date: .valueDate
   }]
 }'
 echo ""
@@ -561,16 +561,16 @@ FINAL_ACCOUNT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
   \"account_id\": \"$ACCOUNT_ID\"
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount)
 
-FINAL_BALANCE=$(echo "$FINAL_ACCOUNT" | jq -r '.facility.current_balance.current_balance.amount.units')
-AVAILABLE=$(echo "$FINAL_ACCOUNT" | jq -r '.facility.current_balance.available_balance.amount.units')
+FINAL_BALANCE=$(echo "$FINAL_ACCOUNT" | jq -r '.facility.currentBalance.currentBalance.amount.units')
+AVAILABLE=$(echo "$FINAL_ACCOUNT" | jq -r '.facility.currentBalance.availableBalance.amount.units')
 
 echo "$FINAL_ACCOUNT" | jq '{
-  account_id: .facility.account_id,
-  status: .facility.account_status,
-  currency: .facility.base_currency,
-  balance: .facility.current_balance.current_balance.amount,
-  available: .facility.current_balance.available_balance.amount,
-  last_updated: .facility.current_balance.last_updated
+  account_id: .facility.accountId,
+  status: .facility.accountStatus,
+  currency: .facility.baseCurrency,
+  balance: .facility.currentBalance.currentBalance.amount,
+  available: .facility.currentBalance.availableBalance.amount,
+  last_updated: .facility.currentBalance.lastUpdated
 }'
 echo ""
 
