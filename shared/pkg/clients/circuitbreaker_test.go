@@ -517,8 +517,11 @@ func TestCircuitBreaker_MaxRequestsInHalfOpen(t *testing.T) {
 	}
 	require.Equal(t, gobreaker.StateOpen, cb.State())
 
-	// Wait for half-open
-	time.Sleep(150 * time.Millisecond)
+	// Poll for half-open state with timeout (more robust than fixed sleep under CI load)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) && cb.State() == gobreaker.StateOpen {
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Track requests that actually execute
 	var executedCount atomic.Int32
@@ -573,29 +576,94 @@ func TestCircuitBreaker_ReadyToTripFailureRatio(t *testing.T) {
 	cb := clients.NewCircuitBreaker(config, logger)
 	ctx := context.Background()
 
-	// Execute 2 failures and 2 successes (50% failure ratio, but < 6 requests)
-	for i := 0; i < 2; i++ {
+	t.Run("below_request_threshold", func(t *testing.T) {
+		// Execute 2 failures and 2 successes (50% failure ratio, but < 6 requests)
+		for i := 0; i < 2; i++ {
+			_, _ = cb.Execute(ctx, func() (any, error) {
+				return nil, errOperationFailed
+			})
+			_, _ = cb.Execute(ctx, func() (any, error) {
+				return successString, nil
+			})
+		}
+
+		// Should still be closed (only 4 requests)
+		assert.Equal(t, gobreaker.StateClosed, cb.State(),
+			"circuit should remain closed when below request threshold")
+	})
+
+	t.Run("above_threshold_with_high_failure_ratio", func(t *testing.T) {
+		// Execute 2 more failures (now 6 requests, 66% failure > 50%)
 		_, _ = cb.Execute(ctx, func() (any, error) {
 			return nil, errOperationFailed
 		})
 		_, _ = cb.Execute(ctx, func() (any, error) {
-			return successString, nil
+			return nil, errOperationFailed
+		})
+
+		// Should now be open (6 requests, 66% failure ratio > 50%)
+		assert.Equal(t, gobreaker.StateOpen, cb.State(),
+			"circuit should open when failure ratio exceeds threshold")
+	})
+}
+
+// TestCircuitBreaker_ContextCancellationInHalfOpen verifies context cancellation during half-open state
+func TestCircuitBreaker_ContextCancellationInHalfOpen(t *testing.T) {
+	// Not parallel - uses time-sensitive operations
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := clients.CircuitBreakerConfig{
+		Name:        "test-service",
+		MaxRequests: 1,
+		Interval:    60 * time.Second,
+		Timeout:     100 * time.Millisecond,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 2
+		},
+	}
+	cb := clients.NewCircuitBreaker(config, logger)
+
+	// Trip the circuit
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		_, _ = cb.Execute(ctx, func() (any, error) {
+			return nil, errOperationFailed
 		})
 	}
+	require.Equal(t, gobreaker.StateOpen, cb.State())
 
-	// Should still be closed (only 4 requests)
-	assert.Equal(t, gobreaker.StateClosed, cb.State())
+	// Poll for half-open state with timeout
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) && cb.State() == gobreaker.StateOpen {
+		time.Sleep(10 * time.Millisecond)
+	}
 
-	// Execute 2 more failures (now 6 requests, 66% failure > 50%)
-	_, _ = cb.Execute(ctx, func() (any, error) {
-		return nil, errOperationFailed
-	})
-	_, _ = cb.Execute(ctx, func() (any, error) {
-		return nil, errOperationFailed
-	})
+	// Create a context that will be cancelled during execution
+	ctx, cancel := context.WithCancel(context.Background())
 
-	// Should now be open (6 requests, 66% failure ratio > 50%)
-	assert.Equal(t, gobreaker.StateOpen, cb.State())
+	// Execute a request that takes longer than the context cancellation
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var execErr error
+	go func() {
+		defer wg.Done()
+		_, execErr = cb.Execute(ctx, func() (any, error) {
+			// Simulate a slow operation
+			time.Sleep(200 * time.Millisecond)
+			return successString, nil
+		})
+	}()
+
+	// Cancel the context while the request is in-flight
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	wg.Wait()
+
+	// The execution should return a context cancellation error
+	require.Error(t, execErr)
+	assert.ErrorIs(t, execErr, context.Canceled,
+		"should return context.Canceled when context is cancelled during half-open execution")
 }
 
 // Benchmark tests
