@@ -102,8 +102,14 @@ verify_services() {
 }
 
 echo -e "${YELLOW}Verifying services...${NC}"
+SERVICE_RETRY_COUNT=0
+MAX_SERVICE_RETRIES=10
 while ! verify_services; do
-    echo -e "${YELLOW}⚠ Services not yet running. Press any key to retry, or Ctrl+C to exit.${NC}"
+    SERVICE_RETRY_COUNT=$((SERVICE_RETRY_COUNT + 1))
+    if [ $SERVICE_RETRY_COUNT -ge $MAX_SERVICE_RETRIES ]; then
+        echo -e "${RED}⚠ Warning: $SERVICE_RETRY_COUNT retries - services may have issues starting${NC}"
+    fi
+    echo -e "${YELLOW}⚠ Services not yet running (attempt $SERVICE_RETRY_COUNT). Press any key to retry, or Ctrl+C to exit.${NC}"
     kubectl get pods 2>/dev/null | grep -E "(current-account|position-keeping|financial-accounting|party|tenant)" || true
     read -n 1 -s -r
     echo ""
@@ -230,8 +236,14 @@ run_health_checks() {
 
 run_health_checks
 
+HEALTH_RETRY_COUNT=0
+MAX_HEALTH_RETRIES=10
 while [ "$ALL_HEALTHY" != true ]; do
-    echo -e "${YELLOW}⚠ Some services are not fully healthy. Demo may have issues.${NC}"
+    HEALTH_RETRY_COUNT=$((HEALTH_RETRY_COUNT + 1))
+    if [ $HEALTH_RETRY_COUNT -ge $MAX_HEALTH_RETRIES ]; then
+        echo -e "${RED}⚠ Warning: $HEALTH_RETRY_COUNT retries - services may have persistent issues${NC}"
+    fi
+    echo -e "${YELLOW}⚠ Some services are not fully healthy (attempt $HEALTH_RETRY_COUNT). Demo may have issues.${NC}"
     echo -e "${YELLOW}  Press any key to retry health checks, or Ctrl+C to exit.${NC}\n"
     read -n 1 -s -r
     echo ""
