@@ -98,13 +98,9 @@ func (tc *testContainer) cleanup(t *testing.T) {
 func setupPlatformSchema(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
-	// Create platform schema
-	err := db.Exec("CREATE SCHEMA IF NOT EXISTS platform").Error
-	require.NoError(t, err)
-
-	// Create tenants table (simplified for tests)
-	err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS platform.tenants (
+	// Create tenant table (singular, unqualified - matches migration)
+	err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS tenant (
 			id VARCHAR(50) PRIMARY KEY,
 			display_name VARCHAR(255) NOT NULL,
 			status VARCHAR(20) NOT NULL DEFAULT 'active',
@@ -113,10 +109,10 @@ func setupPlatformSchema(t *testing.T, db *gorm.DB) {
 	`).Error
 	require.NoError(t, err)
 
-	// Create tenant_provisioning table
+	// Create tenant_provisioning table (singular, unqualified - matches migration)
 	err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS platform.tenant_provisioning (
-			tenant_id VARCHAR(50) PRIMARY KEY REFERENCES platform.tenants(id) ON DELETE RESTRICT,
+		CREATE TABLE IF NOT EXISTS tenant_provisioning (
+			tenant_id VARCHAR(50) PRIMARY KEY REFERENCES tenant(id) ON DELETE RESTRICT,
 			state VARCHAR(20) NOT NULL DEFAULT 'pending',
 			service_schemas JSONB NOT NULL DEFAULT '[]',
 			error_message TEXT,
@@ -134,7 +130,7 @@ func setupPlatformSchema(t *testing.T, db *gorm.DB) {
 func createTestTenant(t *testing.T, db *gorm.DB, tenantID string) {
 	t.Helper()
 	err := db.Exec(
-		"INSERT INTO platform.tenants (id, display_name) VALUES (?, ?)",
+		"INSERT INTO tenant (id, display_name) VALUES (?, ?)",
 		tenantID, "Test Tenant "+tenantID,
 	).Error
 	require.NoError(t, err)
@@ -338,7 +334,7 @@ func TestPostgresProvisioner_ProvisionSchemas_ConcurrentBlocked(t *testing.T) {
 
 	// Pre-create an in_progress status to simulate concurrent provisioning
 	tc.db.Exec(`
-		INSERT INTO platform.tenant_provisioning (tenant_id, state, service_schemas)
+		INSERT INTO tenant_provisioning (tenant_id, state, service_schemas)
 		VALUES (?, 'in_progress', '[]')
 	`, tenantID.String())
 

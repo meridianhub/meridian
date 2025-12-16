@@ -49,16 +49,10 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error
 	require.NoError(t, err, "Failed to enable pgcrypto extension")
 
-	// Create schemas (PostgreSQL supports schemas like CockroachDB)
-	err = db.Exec("CREATE SCHEMA IF NOT EXISTS current_account").Error
-	require.NoError(t, err, "Failed to create current_account schema")
-
-	err = db.Exec("CREATE SCHEMA IF NOT EXISTS current_account_audit").Error
-	require.NoError(t, err, "Failed to create current_account_audit schema")
-
-	// Create audit_outbox table
+	// Create audit_outbox table (unqualified, uses public schema)
+	// TableName method now returns unqualified "audit_outbox" for search_path routing
 	err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS current_account_audit.audit_outbox (
+		CREATE TABLE IF NOT EXISTS audit_outbox (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			table_name VARCHAR(100) NOT NULL,
 			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -80,7 +74,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	// Create indexes
 	err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
-		ON current_account_audit.audit_outbox(status, created_at)
+		ON audit_outbox(status, created_at)
 	`).Error
 	require.NoError(t, err, "Failed to create audit_outbox indexes")
 
@@ -126,13 +120,13 @@ func TestAuditOutbox_AtomicCommit(t *testing.T) {
 
 	// Verify outbox entry exists
 	var outbox AuditOutbox
-	err = db.Table("current_account_audit.audit_outbox").
+	err = db.Table("audit_outbox").
 		Where("record_id = ?", customer.ID).
 		First(&outbox).Error
 	require.NoError(t, err, "Audit outbox entry should exist")
 
 	// Verify outbox content
-	assert.Equal(t, "customers", outbox.Table, "Table name should be 'customers'")
+	assert.Equal(t, "customer", outbox.Table, "Table name should be 'customer'")
 	assert.Equal(t, "INSERT", outbox.Operation, "Operation should be 'INSERT'")
 	assert.Equal(t, "pending", outbox.Status, "Status should be 'pending'")
 	assert.NotEmpty(t, outbox.NewValues, "NewValues should contain customer data")
@@ -166,7 +160,7 @@ func TestAuditOutbox_RollbackOnBusinessFailure(t *testing.T) {
 
 		// Verify outbox entry exists within transaction
 		var count int64
-		tx.Table("current_account_audit.audit_outbox").
+		tx.Table("audit_outbox").
 			Where("record_id = ?", customer.ID).
 			Count(&count)
 		assert.Equal(t, int64(1), count, "Outbox entry should exist within transaction")
@@ -179,7 +173,7 @@ func TestAuditOutbox_RollbackOnBusinessFailure(t *testing.T) {
 
 	// Verify outbox entry was rolled back
 	var count int64
-	db.Table("current_account_audit.audit_outbox").Count(&count)
+	db.Table("audit_outbox").Count(&count)
 	assert.Equal(t, int64(0), count, "Outbox should be empty after rollback")
 
 	// Verify customer was also rolled back
@@ -213,7 +207,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
 
 	// Verify INSERT audit
 	var insertAudit AuditOutbox
-	err = db.Table("current_account_audit.audit_outbox").
+	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", customer.ID, "INSERT").
 		First(&insertAudit).Error
 	require.NoError(t, err, "INSERT audit should exist")
@@ -229,7 +223,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
 
 	// Verify UPDATE audit
 	var updateAudit AuditOutbox
-	err = db.Table("current_account_audit.audit_outbox").
+	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", customer.ID, "UPDATE").
 		First(&updateAudit).Error
 	require.NoError(t, err, "UPDATE audit should exist")
@@ -243,7 +237,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
 
 	// Verify DELETE audit
 	var deleteAudit AuditOutbox
-	err = db.Table("current_account_audit.audit_outbox").
+	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", customer.ID, "DELETE").
 		First(&deleteAudit).Error
 	require.NoError(t, err, "DELETE audit should exist")
@@ -253,7 +247,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
 
 	// Verify total audit count
 	var totalCount int64
-	db.Table("current_account_audit.audit_outbox").
+	db.Table("audit_outbox").
 		Where("record_id = ?", customer.ID).
 		Count(&totalCount)
 	assert.Equal(t, int64(3), totalCount, "Should have exactly 3 audit records (INSERT, UPDATE, DELETE)")
@@ -284,7 +278,7 @@ func TestAuditOutbox_CapturesChangedBy(t *testing.T) {
 
 	// Verify audit captures changed_by
 	var outbox AuditOutbox
-	err = db.Table("current_account_audit.audit_outbox").
+	err = db.Table("audit_outbox").
 		Where("record_id = ?", customer.ID).
 		First(&outbox).Error
 	require.NoError(t, err, "Audit outbox entry should exist")

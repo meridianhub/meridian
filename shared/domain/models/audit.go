@@ -52,8 +52,9 @@ type AuditOutbox struct {
 }
 
 // TableName overrides the table name for AuditOutbox.
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
 func (AuditOutbox) TableName() string {
-	return "current_account_audit.audit_outbox"
+	return "audit_outbox"
 }
 
 // AuditLog represents a permanent audit log entry.
@@ -74,8 +75,9 @@ type AuditLog struct {
 }
 
 // TableName overrides the table name for AuditLog.
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
 func (AuditLog) TableName() string {
-	return "current_account_audit.audit_log"
+	return "audit_log"
 }
 
 // recordAudit writes an audit outbox entry within the current transaction.
@@ -83,7 +85,7 @@ func (AuditLog) TableName() string {
 //
 // Parameters:
 //   - tx: The GORM transaction (must be non-nil)
-//   - tableName: The table being audited (e.g., "customers")
+//   - tableName: The table being audited (e.g., "customer")
 //   - operation: The operation type ("INSERT", "UPDATE", "DELETE")
 //   - recordID: The UUID of the record being audited
 //   - oldValue: The old state (nil for INSERT, populated for UPDATE/DELETE)
@@ -148,7 +150,7 @@ func recordAudit(tx *gorm.DB, tableName, operation string, recordID uuid.UUID, o
 // AfterCreate is a GORM hook that runs after INSERT operations on Customer.
 // It writes an audit outbox entry with the new customer data.
 func (c *Customer) AfterCreate(tx *gorm.DB) error {
-	return recordAudit(tx, "customers", "INSERT", c.ID, nil, c)
+	return recordAudit(tx, "customer", "INSERT", c.ID, nil, c)
 }
 
 // BeforeUpdate is a GORM hook that runs before UPDATE operations on Customer.
@@ -193,11 +195,11 @@ func (c *Customer) AfterUpdate(tx *gorm.DB) error {
 		return ErrOldValueNotFound
 	}
 
-	return recordAudit(tx, "customers", "UPDATE", c.ID, old, c)
+	return recordAudit(tx, "customer", "UPDATE", c.ID, old, c)
 }
 
 // AfterDelete is a GORM hook that runs after DELETE operations on Customer.
 // It writes an audit outbox entry with the deleted customer data.
 func (c *Customer) AfterDelete(tx *gorm.DB) error {
-	return recordAudit(tx, "customers", "DELETE", c.ID, c, nil)
+	return recordAudit(tx, "customer", "DELETE", c.ID, c, nil)
 }

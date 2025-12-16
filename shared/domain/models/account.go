@@ -35,8 +35,8 @@ type Account struct {
 }
 
 // TableName overrides the table name.
-// Uses unqualified name to allow PostgreSQL search_path to route queries
-// to organization-specific schemas (e.g., org_acme_bank.accounts).
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries
+// to tenant-specific schemas (e.g., tenant_acme_bank.account).
 func (Account) TableName() string {
-	return "accounts"
+	return "account"
 }

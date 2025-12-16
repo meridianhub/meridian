@@ -192,8 +192,9 @@ type {Entity}Entity struct {
     UpdatedBy string         `gorm:"not null"`
 }
 
+// TableName uses singular unqualified name to allow PostgreSQL search_path routing.
 func ({Entity}Entity) TableName() string {
-    return "{schema}.{table}"
+    return "{entity}"  // singular, unqualified (e.g., "party", "account")
 }
 ```
 

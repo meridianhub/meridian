@@ -590,8 +590,10 @@ type provisioningEntity struct {
 	Version         int        `gorm:"column:version"`
 }
 
+// TableName specifies the table name for GORM.
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
 func (provisioningEntity) TableName() string {
-	return "platform.tenant_provisioning"
+	return "tenant_provisioning"
 }
 
 // getProvisioningStatusLocked retrieves the status without acquiring the mutex.
@@ -619,8 +621,9 @@ func (p *PostgresProvisioner) saveProvisioningStatus(ctx context.Context, status
 
 	// Use PostgreSQL UPSERT (ON CONFLICT DO UPDATE)
 	// This is atomic and handles both insert and update cases
+	// Uses unqualified table name (tenant_provisioning) for search_path routing
 	upsertSQL := `
-		INSERT INTO platform.tenant_provisioning
+		INSERT INTO tenant_provisioning
 			(tenant_id, state, service_schemas, error_message, created_at, updated_at, deprovisioned_at, version)
 		VALUES
 			(?, ?, ?, ?, ?, ?, ?, 1)
@@ -630,7 +633,7 @@ func (p *PostgresProvisioner) saveProvisioningStatus(ctx context.Context, status
 			error_message = EXCLUDED.error_message,
 			updated_at = EXCLUDED.updated_at,
 			deprovisioned_at = EXCLUDED.deprovisioned_at,
-			version = platform.tenant_provisioning.version + 1
+			version = tenant_provisioning.version + 1
 	`
 
 	return p.db.WithContext(ctx).Exec(
