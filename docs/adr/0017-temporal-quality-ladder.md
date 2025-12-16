@@ -342,19 +342,25 @@ func TestPeriodQueries(t *testing.T) {
         {
             name:     "range overlap detection",
             setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 13:00+00')",
-            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start < '2025-01-15 12:30+00' AND period_end > '2025-01-15 12:00+00')",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start <= '2025-01-15 12:30+00' AND period_end >= '2025-01-15 12:00+00')",
             expected: true,
+        },
+        {
+            name:     "boundary point overlap (closed interval)",
+            setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 13:00+00')",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start <= '2025-01-15 14:00+00' AND period_end >= '2025-01-15 13:00+00')",
+            expected: true, // Periods [12:00, 13:00] and [13:00, 14:00] share boundary at 13:00
         },
         {
             name:     "non-overlapping ranges",
             setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 13:00+00')",
-            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start < '2025-01-15 11:00+00' AND period_end > '2025-01-15 10:00+00')",
+            query:    "SELECT EXISTS(SELECT 1 FROM measurements WHERE period_start <= '2025-01-15 11:00+00' AND period_end >= '2025-01-15 10:00+00')",
             expected: false,
         },
         {
             name:     "B-tree index used for period queries",
             setup:    "INSERT INTO measurements (period_start, period_end) VALUES ('2025-01-15 12:00+00', '2025-01-15 13:00+00')",
-            query:    "EXPLAIN SELECT * FROM measurements WHERE period_start < '2025-01-15 12:30+00' AND period_end > '2025-01-15 12:00+00'",
+            query:    "EXPLAIN SELECT * FROM measurements WHERE period_start <= '2025-01-15 12:30+00' AND period_end >= '2025-01-15 12:00+00'",
             expected: true, // Should show "Index Scan using idx_measurements_lookup"
         },
     }
@@ -370,8 +376,9 @@ func TestPeriodQueries(t *testing.T) {
 These tests validate:
 1. Point-in-range containment queries work correctly
 2. Instant-to-instant overlap detection (critical for duplicate prevention)
-3. Range overlap detection with explicit column comparisons
-4. B-tree composite index is used for period queries
+3. Range overlap detection with closed interval semantics (`<=` and `>=`)
+4. Boundary point overlap (periods sharing only an endpoint are considered overlapping)
+5. B-tree composite index is used for period queries
 
 ### 2. Source Authority Registry
 
