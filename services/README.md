@@ -19,16 +19,16 @@ flowchart LR
     end
 
     subgraph Platform["Meridian Platform"]
-        subgraph Services["Microservices"]
+        subgraph Services["Domain Services"]
             CA["CurrentAccount<br/>:50057"]
             PK["PositionKeeping<br/>:50053"]
             FA["FinancialAccounting<br/>:50052"]
             Party["Party<br/>:50055"]
             PO["PaymentOrder<br/>:50054, :8080"]
-            Tenant["Tenant<br/>:50056"]
         end
 
         subgraph Platform_Services["Platform Services"]
+            Tenant["Tenant<br/>:50056"]
             AW["audit-worker<br/>:8080"]
         end
 
@@ -81,8 +81,8 @@ flowchart LR
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
     classDef admin fill:#9c27b0,stroke:#6a1b9a,color:#fff
 
-    class CA,PK,FA,Party,PO,Tenant service
-    class AW platform
+    class CA,PK,FA,Party,PO service
+    class Tenant,AW platform
     class DB,Kafka,Redis storage
     class User,Gateway external
     class TenantCtl admin
@@ -92,8 +92,8 @@ flowchart LR
 
 - Solid arrows (`-->`) = Required runtime dependency
 - Dashed arrows (`-.->`) = Optional runtime dependency
-- Blue boxes = Microservices (domain services)
-- Grey boxes = Platform services (infrastructure)
+- Blue boxes = Domain services (BIAN service domains)
+- Grey boxes = Platform services (non-BIAN infrastructure)
 - Purple boxes = Admin tools (CLI)
 - Vertical cylinder `[(" ")]` = Database (CockroachDB)
 - Horizontal cylinder `@{ shape: das }` = Direct access storage (Kafka, Redis)
