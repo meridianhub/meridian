@@ -50,10 +50,10 @@ jobs:
 
       - name: Install Tilt
         run: |
-          # Pin to v0.36.0 for reproducible CI builds
+          # Use VERSION env var with master script (recommended approach)
           # Retry up to 3 times to handle transient GitHub release download issues
           for i in 1 2 3; do
-            if curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/v0.36.0/scripts/install.sh | bash; then
+            if curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | VERSION=0.36.0 bash; then
               echo "Tilt installed successfully on attempt $i"
               exit 0
             fi
