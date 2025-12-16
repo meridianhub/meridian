@@ -51,16 +51,10 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error
 	require.NoError(t, err, "Failed to enable pgcrypto extension")
 
-	// Create schemas (PostgreSQL supports schemas like CockroachDB)
-	err = db.Exec("CREATE SCHEMA IF NOT EXISTS current_account").Error
-	require.NoError(t, err, "Failed to create current_account schema")
-
-	err = db.Exec("CREATE SCHEMA IF NOT EXISTS current_account_audit").Error
-	require.NoError(t, err, "Failed to create current_account_audit schema")
-
-	// Create audit_outbox table
+	// Create audit_outbox table (unqualified, uses public schema)
+	// TableName method now returns unqualified "audit_outbox" for search_path routing
 	err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS current_account_audit.audit_outbox (
+		CREATE TABLE IF NOT EXISTS audit_outbox (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			table_name VARCHAR(100) NOT NULL,
 			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -82,13 +76,13 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	// Create indexes for audit_outbox
 	err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
-		ON current_account_audit.audit_outbox(status, created_at)
+		ON audit_outbox(status, created_at)
 	`).Error
 	require.NoError(t, err, "Failed to create audit_outbox indexes")
 
-	// Create audit_log table
+	// Create audit_log table (unqualified for search_path routing)
 	err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS current_account_audit.audit_log (
+		CREATE TABLE IF NOT EXISTS audit_log (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			table_name VARCHAR(100) NOT NULL,
 			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
@@ -107,19 +101,19 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	// Create indexes for audit_log
 	err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_log_table_name
-		ON current_account_audit.audit_log(table_name)
+		ON audit_log(table_name)
 	`).Error
 	require.NoError(t, err, "Failed to create audit_log table_name index")
 
 	err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_log_operation
-		ON current_account_audit.audit_log(operation)
+		ON audit_log(operation)
 	`).Error
 	require.NoError(t, err, "Failed to create audit_log operation index")
 
 	err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_log_record_id
-		ON current_account_audit.audit_log(record_id)
+		ON audit_log(record_id)
 	`).Error
 	require.NoError(t, err, "Failed to create audit_log record_id index")
 
@@ -141,7 +135,7 @@ func createTestEntry(t *testing.T, db *gorm.DB, status string) *models.AuditOutb
 
 	entry := &models.AuditOutbox{
 		ID:        uuid.New(),
-		Table:     "customers",
+		Table:     "customer", // singular table name for search_path routing
 		Operation: "INSERT",
 		RecordID:  uuid.New(),
 		NewValues: `{"id": "123", "name": "Test Customer"}`,
