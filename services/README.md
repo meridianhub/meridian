@@ -27,12 +27,9 @@ flowchart LR
             PO["PaymentOrder<br/>:50054, :8080"]
         end
 
-        subgraph Platform_Services["Platform Services"]
+        subgraph Infrastructure["Infrastructure"]
             Tenant["Tenant<br/>:50056"]
             AW["audit-worker<br/>:8080"]
-        end
-
-        subgraph Infrastructure["Infrastructure"]
             DB[("CockroachDB<br/>:26257")]
             Kafka@{ shape: das, label: "Kafka :9092" }
             Redis@{ shape: das, label: "Redis :6379" }
@@ -76,14 +73,12 @@ flowchart LR
     AW -->|"Write audit log"| DB
 
     classDef service fill:#4a90d9,stroke:#2d5a87,color:#fff
-    classDef platform fill:#607d8b,stroke:#455a64,color:#fff
     classDef storage fill:#50c878,stroke:#2d7a4a,color:#fff
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
     classDef admin fill:#9c27b0,stroke:#6a1b9a,color:#fff
 
     class CA,PK,FA,Party,PO service
-    class Tenant,AW platform
-    class DB,Kafka,Redis storage
+    class Tenant,AW,DB,Kafka,Redis storage
     class User,Gateway external
     class TenantCtl admin
 ```
@@ -93,10 +88,8 @@ flowchart LR
 - Solid arrows (`-->`) = Required runtime dependency
 - Dashed arrows (`-.->`) = Optional runtime dependency
 - Blue boxes = Domain services (BIAN service domains)
-- Grey boxes = Platform services (non-BIAN infrastructure)
+- Green boxes = Infrastructure (platform services, databases, messaging)
 - Purple boxes = Admin tools (CLI)
-- Vertical cylinder `[(" ")]` = Database (CockroachDB)
-- Horizontal cylinder `@{ shape: das }` = Direct access storage (Kafka, Redis)
 - Orange boxes = External systems
 
 ## Communication Protocols
