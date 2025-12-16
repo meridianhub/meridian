@@ -3,8 +3,11 @@ package clients_test
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -437,4 +440,234 @@ func TestCircuitBreaker_ResetAfterInterval(t *testing.T) {
 
 	// Circuit should still be closed because counts were reset after interval
 	assert.Equal(t, gobreaker.StateClosed, cb.State(), "should remain closed after interval reset")
+}
+
+// TestCircuitBreaker_ConcurrentOpenCircuit verifies all goroutines receive ErrOpenState when circuit is open
+func TestCircuitBreaker_ConcurrentOpenCircuit(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := clients.CircuitBreakerConfig{
+		Name:        "test-service",
+		MaxRequests: 1,
+		Interval:    60 * time.Second,
+		Timeout:     30 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 2
+		},
+	}
+	cb := clients.NewCircuitBreaker(config, logger)
+	ctx := context.Background()
+
+	// Trip the circuit
+	for i := 0; i < 2; i++ {
+		_, _ = cb.Execute(ctx, func() (any, error) {
+			return nil, errOperationFailed
+		})
+	}
+	require.Equal(t, gobreaker.StateOpen, cb.State())
+
+	// Launch multiple goroutines simultaneously hitting the open circuit
+	numGoroutines := 20
+	var wg sync.WaitGroup
+	var openStateErrors atomic.Int32
+
+	wg.Add(numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := cb.Execute(ctx, func() (any, error) {
+				return successString, nil
+			})
+			if errors.Is(err, gobreaker.ErrOpenState) {
+				openStateErrors.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// All goroutines should receive ErrOpenState
+	assert.Equal(t, int32(numGoroutines), openStateErrors.Load(),
+		"all goroutines should receive ErrOpenState when circuit is open")
+}
+
+// TestCircuitBreaker_MaxRequestsInHalfOpen verifies MaxRequests limits concurrent requests in half-open state
+func TestCircuitBreaker_MaxRequestsInHalfOpen(t *testing.T) {
+	// Not parallel - uses time-sensitive operations
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	maxRequests := uint32(2)
+	config := clients.CircuitBreakerConfig{
+		Name:        "test-service",
+		MaxRequests: maxRequests,
+		Interval:    60 * time.Second,
+		Timeout:     100 * time.Millisecond,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 2
+		},
+	}
+	cb := clients.NewCircuitBreaker(config, logger)
+	ctx := context.Background()
+
+	// Trip the circuit
+	for i := 0; i < 2; i++ {
+		_, _ = cb.Execute(ctx, func() (any, error) {
+			return nil, errOperationFailed
+		})
+	}
+	require.Equal(t, gobreaker.StateOpen, cb.State())
+
+	// Wait for half-open
+	time.Sleep(150 * time.Millisecond)
+
+	// Track requests that actually execute
+	var executedCount atomic.Int32
+	var tooManyRequestsCount atomic.Int32
+	var wg sync.WaitGroup
+	numGoroutines := 10
+
+	wg.Add(numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := cb.Execute(ctx, func() (any, error) {
+				executedCount.Add(1)
+				time.Sleep(50 * time.Millisecond) // Hold the slot
+				return successString, nil
+			})
+			if errors.Is(err, gobreaker.ErrTooManyRequests) {
+				tooManyRequestsCount.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Only MaxRequests should have executed, rest should get ErrTooManyRequests
+	executed := executedCount.Load()
+	tooMany := tooManyRequestsCount.Load()
+	assert.LessOrEqual(t, executed, int32(maxRequests),
+		"should not execute more than MaxRequests in half-open state")
+	assert.GreaterOrEqual(t, tooMany, int32(numGoroutines)-int32(maxRequests),
+		"excess requests should get ErrTooManyRequests")
+}
+
+// TestCircuitBreaker_ReadyToTripFailureRatio verifies custom ReadyToTrip with failure ratio
+func TestCircuitBreaker_ReadyToTripFailureRatio(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := clients.CircuitBreakerConfig{
+		Name:        "test-service",
+		MaxRequests: 1,
+		Interval:    60 * time.Second,
+		Timeout:     30 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			// Trip when failure ratio exceeds 50% with at least 6 requests
+			if counts.Requests < 6 {
+				return false
+			}
+			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+			return failureRatio > 0.5
+		},
+	}
+	cb := clients.NewCircuitBreaker(config, logger)
+	ctx := context.Background()
+
+	// Execute 2 failures and 2 successes (50% failure ratio, but < 6 requests)
+	for i := 0; i < 2; i++ {
+		_, _ = cb.Execute(ctx, func() (any, error) {
+			return nil, errOperationFailed
+		})
+		_, _ = cb.Execute(ctx, func() (any, error) {
+			return successString, nil
+		})
+	}
+
+	// Should still be closed (only 4 requests)
+	assert.Equal(t, gobreaker.StateClosed, cb.State())
+
+	// Execute 2 more failures (now 6 requests, 66% failure > 50%)
+	_, _ = cb.Execute(ctx, func() (any, error) {
+		return nil, errOperationFailed
+	})
+	_, _ = cb.Execute(ctx, func() (any, error) {
+		return nil, errOperationFailed
+	})
+
+	// Should now be open (6 requests, 66% failure ratio > 50%)
+	assert.Equal(t, gobreaker.StateOpen, cb.State())
+}
+
+// Benchmark tests
+
+// BenchmarkCircuitBreaker_Execute measures overhead of circuit breaker wrapper
+func BenchmarkCircuitBreaker_Execute(b *testing.B) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := clients.DefaultCircuitBreakerConfig("bench-service")
+	cb := clients.NewCircuitBreaker(config, logger)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = cb.Execute(ctx, func() (any, error) {
+			return successString, nil
+		})
+	}
+}
+
+// BenchmarkCircuitBreaker_Execute_Parallel measures circuit breaker under concurrent load
+func BenchmarkCircuitBreaker_Execute_Parallel(b *testing.B) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := clients.DefaultCircuitBreakerConfig("bench-service")
+	cb := clients.NewCircuitBreaker(config, logger)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = cb.Execute(ctx, func() (any, error) {
+				return successString, nil
+			})
+		}
+	})
+}
+
+// BenchmarkCircuitBreaker_StateCheck measures state check overhead
+func BenchmarkCircuitBreaker_StateCheck(b *testing.B) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := clients.DefaultCircuitBreakerConfig("bench-service")
+	cb := clients.NewCircuitBreaker(config, logger)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = cb.State()
+	}
+}
+
+// BenchmarkCircuitBreaker_OpenState measures execute performance when circuit is open
+func BenchmarkCircuitBreaker_OpenState(b *testing.B) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	config := clients.CircuitBreakerConfig{
+		Name:        "bench-service",
+		MaxRequests: 1,
+		Interval:    60 * time.Second,
+		Timeout:     60 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 1
+		},
+	}
+	cb := clients.NewCircuitBreaker(config, logger)
+	ctx := context.Background()
+
+	// Trip the circuit
+	_, _ = cb.Execute(ctx, func() (any, error) {
+		return nil, errOperationFailed
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = cb.Execute(ctx, func() (any, error) {
+			return successString, nil
+		})
+	}
 }
