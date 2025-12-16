@@ -17,9 +17,9 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 show_help() {
-    echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}Meridian Platform CLI${NC}                                         ${BLUE}║${NC}"
-    echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  ${BOLD}Meridian Platform CLI${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "${BOLD}Usage:${NC} meridian <command> [options]"
     echo ""
@@ -79,10 +79,10 @@ cmd_demo() {
 }
 
 cmd_horizon() {
-    echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}Horizon Integrity Proof${NC}                                       ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  Demonstrating resilience against phantom transactions         ${BLUE}║${NC}"
-    echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  ${BOLD}Horizon Integrity Proof${NC}"
+    echo -e "${BLUE}  Demonstrating resilience against phantom transactions${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
     echo ""
 
     # Check if Tilt is running
