@@ -149,7 +149,12 @@ jobs:
           echo "Verifying organization schemas and table naming..."
 
           # Expected singular table names (all services use unqualified names now)
-          EXPECTED_TABLES="account lien financial_booking_log ledger_posting party payment_order financial_position_log audit_trail_entry transaction_lineage transaction_log_entry"
+          # current-account: account, lien, audit_log, audit_outbox
+          # financial-accounting: financial_booking_log, ledger_posting
+          # party: party
+          # payment-order: payment_order
+          # position-keeping: financial_position_log, audit_trail_entry, transaction_lineage, transaction_log_entry
+          EXPECTED_TABLES="account lien audit_log audit_outbox financial_booking_log ledger_posting party payment_order financial_position_log audit_trail_entry transaction_lineage transaction_log_entry"
 
           for ORG in acme_bank test_org; do
             ORG_SCHEMA="org_${ORG}"
