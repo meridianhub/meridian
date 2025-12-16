@@ -101,6 +101,35 @@ verify_services() {
     kubectl get pods 2>/dev/null | grep -E "(current-account|position-keeping|financial-accounting|party|tenant)" | grep -q "Running"
 }
 
+# Display service status with replica counts (reusable function)
+show_service_status() {
+    echo -e "${CYAN}╭─────────────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${CYAN}│  Service                      Ready    Replicas    Status       │${NC}"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────────────────┤${NC}"
+
+    for svc in current-account position-keeping financial-accounting party tenant; do
+        # Get deployment info
+        READY=$(kubectl get deployment "$svc" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        DESIRED=$(kubectl get deployment "$svc" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+        READY=${READY:-0}
+
+        # Determine status color
+        if [ "$READY" = "$DESIRED" ] && [ "$READY" != "0" ]; then
+            STATUS="${GREEN}● Healthy${NC}"
+        elif [ "$READY" = "0" ]; then
+            STATUS="${RED}○ Down${NC}"
+        else
+            STATUS="${YELLOW}◐ Partial${NC}"
+        fi
+
+        # Pad service name for alignment
+        printf "${CYAN}│${NC}  %-28s %s/%s      %s/%s         %b    ${CYAN}│${NC}\n" \
+            "$svc" "$READY" "$READY" "$READY" "$DESIRED" "$STATUS"
+    done
+
+    echo -e "${CYAN}╰─────────────────────────────────────────────────────────────────╯${NC}"
+}
+
 echo -e "${YELLOW}Verifying services...${NC}"
 SERVICE_RETRY_COUNT=0
 MAX_SERVICE_RETRIES=10
@@ -110,12 +139,12 @@ while ! verify_services; do
         echo -e "${RED}⚠ Warning: $SERVICE_RETRY_COUNT retries - services may have issues starting${NC}"
     fi
     echo -e "${YELLOW}⚠ Services not yet running (attempt $SERVICE_RETRY_COUNT). Press any key to retry, or Ctrl+C to exit.${NC}"
-    kubectl get pods 2>/dev/null | grep -E "(current-account|position-keeping|financial-accounting|party|tenant)" || true
+    show_service_status
     read -n 1 -s -r
     echo ""
     echo -e "${CYAN}► Retrying...${NC}"
 done
-kubectl get pods | grep -E "(current-account|position-keeping|financial-accounting|party|tenant)"
+show_service_status
 echo -e "${GREEN}✓ All services running${NC}\n"
 
 # ════════════════════════════════════════════════════════════════
@@ -350,21 +379,12 @@ echo -e "  ${YELLOW}FinancialAccounting:${NC} dns:///financial-accounting.defaul
 echo -e "  ${YELLOW}Load Balancing:${NC}      round_robin across all pod IPs"
 echo ""
 
-echo -e "${CYAN}► Current service endpoints (before scaling):${NC}"
-INITIAL_POS_PODS=$(kubectl get endpoints position-keeping -o json | jq '[.subsets[]?.addresses[]?] | length')
-INITIAL_FIN_PODS=$(kubectl get endpoints financial-accounting -o json | jq '[.subsets[]?.addresses[]?] | length')
-echo -e "  ${YELLOW}PositionKeeping:${NC}     $INITIAL_POS_PODS pods"
-echo -e "  ${YELLOW}FinancialAccounting:${NC} $INITIAL_FIN_PODS pods"
-kubectl get endpoints position-keeping financial-accounting -o json | jq -r '
-  .items[] |
-  {
-    service: .metadata.name,
-    pods: [.subsets[]?.addresses[]?.ip],
-    ports: [.subsets[]?.ports[]?.port]
-  }'
+echo -e "${CYAN}► Current service status (before scaling):${NC}"
+INITIAL_POS_PODS=$(kubectl get deployment position-keeping -o jsonpath='{.spec.replicas}')
+show_service_status
 echo ""
 
-echo -e "${CYAN}► Scaling PositionKeeping to 3 replicas...${NC}"
+echo -e "${CYAN}► Scaling PositionKeeping from $INITIAL_POS_PODS to 3 replicas...${NC}"
 kubectl scale deployment position-keeping --replicas=3
 echo -e "${YELLOW}  Waiting for new pods to be ready...${NC}"
 
@@ -383,14 +403,10 @@ while [ $SCALE_ELAPSED -lt $SCALE_TIMEOUT ]; do
 done
 
 echo ""
-echo -e "${CYAN}► Service endpoints after scaling:${NC}"
-NEW_POS_PODS=$(kubectl get endpoints position-keeping -o json | jq '[.subsets[]?.addresses[]?] | length')
-echo -e "  ${YELLOW}PositionKeeping:${NC}     $INITIAL_POS_PODS → $NEW_POS_PODS pods (scaled up)"
-kubectl get endpoints position-keeping -o json | jq '{
-  service: .metadata.name,
-  replica_count: ([.subsets[]?.addresses[]?] | length),
-  pod_ips: [.subsets[]?.addresses[]?.ip]
-}'
+echo -e "${CYAN}► Service status after scaling:${NC}"
+show_service_status
+NEW_POS_PODS=$(kubectl get deployment position-keeping -o jsonpath='{.status.readyReplicas}')
+echo -e "  ${GREEN}PositionKeeping scaled: $INITIAL_POS_PODS → $NEW_POS_PODS replicas${NC}"
 echo ""
 
 echo -e "${CYAN}► Testing load distribution across ${NEW_POS_PODS} pods:${NC}"
