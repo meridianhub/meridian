@@ -169,11 +169,16 @@ func run(logger *slog.Logger) error {
 			return ErrJWKSURLRequired
 		}
 
+		// HTTP client with explicit timeout for JWKS fetches
+		httpClient := &http.Client{
+			Timeout: 10 * time.Second,
+		}
+
 		var err error
 		jwksProvider, err = auth.NewJWKSProvider(ctx, &auth.JWKSProviderConfig{
 			URL:        jwksURL,
 			RefreshTTL: 5 * time.Minute,
-			Client:     http.DefaultClient,
+			Client:     httpClient,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create JWKS provider: %w", err)
