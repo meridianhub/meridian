@@ -399,35 +399,12 @@ while true; do
             echo "$RESPONSE"
         fi
     else
-        # Withdrawal (remove the minus sign for the API)
+        # Withdrawal not yet implemented in API
         WITHDRAW_AMOUNT=${AMOUNT#-}
-        echo -e "${YELLOW}  ▼ Withdrawing: £$WITHDRAW_AMOUNT${NC}"
-        RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
-          \"account_id\": \"$ACCOUNT_ID\",
-          \"amount\": {
-            \"amount\": {
-              \"currency_code\": \"GBP\",
-              \"units\": $WITHDRAW_AMOUNT,
-              \"nanos\": 0
-            }
-          }
-        }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal 2>&1)
-
-        if echo "$RESPONSE" | jq -e '.transactionId' >/dev/null 2>&1; then
-            TRANSACTION_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
-            CURRENT_BALANCE=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
-            echo -e "${GREEN}  ✓ Withdrawal Completed:${NC} $TRANSACTION_ID"
-            echo "$RESPONSE" | jq '{
-              type: "WITHDRAWAL",
-              transaction_id: .transactionId,
-              status: .status,
-              new_balance: .newBalance.amount,
-              available_balance: .availableBalance.amount
-            }'
-        else
-            echo -e "${RED}  ✗ Withdrawal Failed (insufficient funds?):${NC}"
-            echo "$RESPONSE" | head -5
-        fi
+        echo -e "${YELLOW}  ▼ Withdrawal: £$WITHDRAW_AMOUNT${NC}"
+        echo -e "${YELLOW}  ⚠ ExecuteWithdrawal RPC not yet implemented in API${NC}"
+        echo -e "${YELLOW}    Future feature: Withdrawals will use the same saga pattern${NC}"
+        echo -e "${YELLOW}    Try: Liens (InitiateLien) for fund reservations${NC}"
     fi
     TRANSACTION_COUNT=$((TRANSACTION_COUNT + 1))
     echo ""
