@@ -410,7 +410,7 @@ select_party() {
 select_account() {
     echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${MAGENTA}║  Step 3: Select or Create Account                              ║${NC}"
-    echo -e "${MAGENTA}║  Party: ${SELECTED_PARTY_NAME}$(printf '%*s' $((44 - ${#SELECTED_PARTY_NAME})) '')║${NC}"
+    echo -e "${MAGENTA}║  Party: ${SELECTED_PARTY_NAME}$(printf '%*s' $((53 - ${#SELECTED_PARTY_NAME})) '')║${NC}"
     echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -519,18 +519,19 @@ select_account() {
 # Step 4: Interactive Transaction Loop
 # ─────────────────────────────────────────────────────────────────
 transaction_loop() {
-    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  Step 4: Transactions (Saga Pattern)                           ║${NC}"
-    echo -e "${MAGENTA}║  Account: ${SELECTED_ACCOUNT_IBAN:0:20}...                              ║${NC}"
-    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
+    # All display output goes to stderr so only navigation commands go to stdout
+    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}" >&2
+    echo -e "${MAGENTA}║  Step 4: Transactions (Saga Pattern)                           ║${NC}" >&2
+    echo -e "${MAGENTA}║  Account: ${SELECTED_ACCOUNT_IBAN:0:20}...                              ║${NC}" >&2
+    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}" >&2
+    echo "" >&2
 
-    echo -e "${YELLOW}  Saga Steps for each transaction:${NC}"
-    echo -e "${YELLOW}    1. Log position in PositionKeeping     (via gRPC)${NC}"
-    echo -e "${YELLOW}    2. Post ledger in FinancialAccounting  (via gRPC)${NC}"
-    echo -e "${YELLOW}    3. Update CurrentAccount balance       (local)${NC}"
-    echo -e "${YELLOW}  * Automatic compensation if any step fails${NC}"
-    echo ""
+    echo -e "${YELLOW}  Saga Steps for each transaction:${NC}" >&2
+    echo -e "${YELLOW}    1. Log position in PositionKeeping     (via gRPC)${NC}" >&2
+    echo -e "${YELLOW}    2. Post ledger in FinancialAccounting  (via gRPC)${NC}" >&2
+    echo -e "${YELLOW}    3. Update CurrentAccount balance       (local)${NC}" >&2
+    echo -e "${YELLOW}  * Automatic compensation if any step fails${NC}" >&2
+    echo "" >&2
 
     TRANSACTION_COUNT=0
     while true; do
@@ -539,48 +540,49 @@ transaction_loop() {
         CURRENT_BAL=$(run_sql "SELECT balance_units FROM ${SCHEMA}.accounts WHERE id = '${SELECTED_ACCOUNT_ID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
         CURRENT_BAL=${CURRENT_BAL:-0}
 
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${CYAN}  Current Balance: £${CURRENT_BAL}${NC}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo ""
-        echo -e "  Commands: ${GREEN}[amount]${NC} deposit | ${YELLOW}[-amount]${NC} withdraw (future)"
-        echo -e "            ${BLUE}[T]${NC}enant | ${BLUE}[P]${NC}arty | ${BLUE}[A]${NC}ccount | ${BLUE}[Q]${NC}uit"
-        echo ""
-        echo -e -n "${CYAN}Enter command: ${NC}"
-        read -r CMD
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+        echo -e "${CYAN}  Current Balance: £${CURRENT_BAL}${NC}" >&2
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+        echo "" >&2
+        echo -e "  Commands: ${GREEN}[amount]${NC} deposit | ${YELLOW}[-amount]${NC} withdraw (future)" >&2
+        echo -e "            ${BLUE}[T]${NC}enant | ${BLUE}[P]${NC}arty | ${BLUE}[A]${NC}ccount | ${BLUE}[Q]${NC}uit" >&2
+        echo "" >&2
+        echo -e -n "${CYAN}Enter command: ${NC}" >&2
+        read -r CMD </dev/tty
 
         case "$CMD" in
             [Tt])
-                echo ""
-                return "tenant"
+                echo "tenant"
+                return 0
                 ;;
             [Pp])
-                echo ""
-                return "party"
+                echo "party"
+                return 0
                 ;;
             [Aa])
-                echo ""
-                return "account"
+                echo "account"
+                return 0
                 ;;
             [Qq]|"")
                 if [ -z "$CMD" ] && [ $TRANSACTION_COUNT -eq 0 ]; then
-                    echo -e "${YELLOW}  (Enter Q to quit, or enter an amount to deposit)${NC}"
+                    echo -e "${YELLOW}  (Enter Q to quit, or enter an amount to deposit)${NC}" >&2
                     continue
                 fi
-                echo -e "${GREEN}✓ Transaction session complete ($TRANSACTION_COUNT transactions)${NC}"
-                return "quit"
+                echo -e "${GREEN}✓ Transaction session complete ($TRANSACTION_COUNT transactions)${NC}" >&2
+                echo "quit"
+                return 0
                 ;;
             -[0-9]*)
                 # Withdrawal (not implemented)
                 WITHDRAW_AMOUNT=${CMD#-}
-                echo -e "${YELLOW}  ▼ Withdrawal: £$WITHDRAW_AMOUNT${NC}"
-                echo -e "${YELLOW}  ⚠ ExecuteWithdrawal RPC not yet implemented${NC}"
-                echo -e "${YELLOW}    Future feature - withdrawals will use the same saga pattern${NC}"
+                echo -e "${YELLOW}  ▼ Withdrawal: £$WITHDRAW_AMOUNT${NC}" >&2
+                echo -e "${YELLOW}  ⚠ ExecuteWithdrawal RPC not yet implemented${NC}" >&2
+                echo -e "${YELLOW}    Future feature - withdrawals will use the same saga pattern${NC}" >&2
                 ;;
             [0-9]*)
                 # Deposit
                 DEPOSIT_AMOUNT="$CMD"
-                echo -e "${GREEN}  ▲ Depositing: £$DEPOSIT_AMOUNT${NC}"
+                echo -e "${GREEN}  ▲ Depositing: £$DEPOSIT_AMOUNT${NC}" >&2
 
                 RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
                   \"account_id\": \"$SELECTED_ACCOUNT_ID\",
@@ -596,24 +598,24 @@ transaction_loop() {
                 if echo "$RESPONSE" | jq -e '.transactionId' >/dev/null 2>&1; then
                     TXN_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
                     NEW_BAL=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
-                    echo -e "${GREEN}  ✓ Deposit Complete:${NC} $TXN_ID"
+                    echo -e "${GREEN}  ✓ Deposit Complete:${NC} $TXN_ID" >&2
                     echo "$RESPONSE" | jq '{
                       transaction_id: .transactionId,
                       status: .status,
                       new_balance: .newBalance.amount,
                       available_balance: .availableBalance.amount
-                    }'
+                    }' >&2
                     TRANSACTION_COUNT=$((TRANSACTION_COUNT + 1))
                 else
-                    echo -e "${RED}  ✗ Deposit Failed:${NC}"
-                    echo "$RESPONSE" | head -5
+                    echo -e "${RED}  ✗ Deposit Failed:${NC}" >&2
+                    echo "$RESPONSE" | head -5 >&2
                 fi
                 ;;
             *)
-                echo -e "${YELLOW}  Unknown command. Enter amount (e.g., 500) or navigation key.${NC}"
+                echo -e "${YELLOW}  Unknown command. Enter amount (e.g., 500) or navigation key.${NC}" >&2
                 ;;
         esac
-        echo ""
+        echo "" >&2
     done
 }
 
