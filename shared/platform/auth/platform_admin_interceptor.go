@@ -8,6 +8,35 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// Platform role constants used for authorization checks.
+const (
+	RolePlatformAdmin = "platform-admin"
+	RoleSuperAdmin    = "super-admin"
+)
+
+// validatePlatformAdminClaims extracts claims from context and validates that:
+// 1. Claims exist (populated by auth interceptor)
+// 2. No tenant_id claim is present (platform services are tenant-agnostic)
+// 3. User has platform-admin or super-admin role
+func validatePlatformAdminClaims(ctx context.Context) error {
+	claims, ok := ctx.Value(ClaimsContextKey).(*Claims)
+	if !ok {
+		return status.Error(codes.Internal, "authentication claims not found")
+	}
+
+	if claims.HasTenantID() {
+		return status.Error(codes.PermissionDenied,
+			"platform services do not accept tenant-scoped credentials")
+	}
+
+	if !claims.HasRole(RolePlatformAdmin) && !claims.HasRole(RoleSuperAdmin) {
+		return status.Error(codes.PermissionDenied,
+			"platform-admin or super-admin role required")
+	}
+
+	return nil
+}
+
 // PlatformAdminInterceptor validates that requests to platform-layer services
 // do NOT contain tenant_id claims. Platform services are tenant-agnostic and
 // should only be accessible to platform administrators.
@@ -22,25 +51,9 @@ func PlatformAdminInterceptor() grpc.UnaryServerInterceptor {
 		_ *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
-		// Extract claims from context (populated by auth interceptor)
-		claims, ok := ctx.Value(ClaimsContextKey).(*Claims)
-		if !ok {
-			// Auth interceptor should have populated claims
-			return nil, status.Error(codes.Internal, "authentication claims not found")
+		if err := validatePlatformAdminClaims(ctx); err != nil {
+			return nil, err
 		}
-
-		// Platform services MUST NOT receive tenant_id claims
-		if claims.HasTenantID() {
-			return nil, status.Error(codes.PermissionDenied,
-				"platform services do not accept tenant-scoped credentials")
-		}
-
-		// Verify platform-admin or super-admin role
-		if !claims.HasRole("platform-admin") && !claims.HasRole("super-admin") {
-			return nil, status.Error(codes.PermissionDenied,
-				"platform-admin or super-admin role required")
-		}
-
 		return handler(ctx, req)
 	}
 }
@@ -53,26 +66,9 @@ func PlatformAdminStreamInterceptor() grpc.StreamServerInterceptor {
 		_ *grpc.StreamServerInfo,
 		handler grpc.StreamHandler,
 	) error {
-		ctx := ss.Context()
-
-		// Extract claims from context (populated by auth interceptor)
-		claims, ok := ctx.Value(ClaimsContextKey).(*Claims)
-		if !ok {
-			return status.Error(codes.Internal, "authentication claims not found")
+		if err := validatePlatformAdminClaims(ss.Context()); err != nil {
+			return err
 		}
-
-		// Platform services MUST NOT receive tenant_id claims
-		if claims.HasTenantID() {
-			return status.Error(codes.PermissionDenied,
-				"platform services do not accept tenant-scoped credentials")
-		}
-
-		// Verify platform-admin or super-admin role
-		if !claims.HasRole("platform-admin") && !claims.HasRole("super-admin") {
-			return status.Error(codes.PermissionDenied,
-				"platform-admin or super-admin role required")
-		}
-
 		return handler(srv, ss)
 	}
 }

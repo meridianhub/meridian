@@ -169,6 +169,9 @@ func run(logger *slog.Logger) error {
 			return ErrJWKSURLRequired
 		}
 
+		// JWKS refresh TTL - configurable for key rotation scenarios
+		jwksRefreshTTL := getEnvAsDuration("AUTH_JWKS_REFRESH_TTL", 5*time.Minute)
+
 		// HTTP client with explicit timeout for JWKS fetches
 		httpClient := &http.Client{
 			Timeout: 10 * time.Second,
@@ -177,7 +180,7 @@ func run(logger *slog.Logger) error {
 		var err error
 		jwksProvider, err = auth.NewJWKSProvider(ctx, &auth.JWKSProviderConfig{
 			URL:        jwksURL,
-			RefreshTTL: 5 * time.Minute,
+			RefreshTTL: jwksRefreshTTL,
 			Client:     httpClient,
 		})
 		if err != nil {
@@ -208,7 +211,8 @@ func run(logger *slog.Logger) error {
 
 		logger.Info("platform authentication enabled",
 			"jwks_url", jwksURL,
-			"required_roles", []string{"platform-admin", "super-admin"})
+			"jwks_refresh_ttl", jwksRefreshTTL,
+			"required_roles", []string{auth.RolePlatformAdmin, auth.RoleSuperAdmin})
 	} else {
 		logger.Warn("platform authentication disabled",
 			"hint", "set AUTH_ENABLED=true and AUTH_JWKS_URL to enable authentication")
