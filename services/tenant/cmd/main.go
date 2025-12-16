@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -31,6 +34,9 @@ var (
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
+
+// ErrJWKSURLRequired is returned when AUTH_ENABLED is true but AUTH_JWKS_URL is not set.
+var ErrJWKSURLRequired = errors.New("AUTH_JWKS_URL is required when AUTH_ENABLED=true")
 
 func main() {
 	// Initialize structured logging
@@ -152,17 +158,83 @@ func run(logger *slog.Logger) error {
 	logger.Info("cached tenant registry started",
 		"refresh_interval", "60s")
 
+	// Initialize authentication (optional - disabled by default for development)
+	// In production, set AUTH_JWKS_URL to enable platform-admin authentication.
+	var authInterceptor *auth.Interceptor
+	var jwksProvider *auth.JWKSProvider
+	authEnabled := getEnvOrDefault("AUTH_ENABLED", "false") == "true"
+	if authEnabled {
+		jwksURL := getEnvOrDefault("AUTH_JWKS_URL", "")
+		if jwksURL == "" {
+			return ErrJWKSURLRequired
+		}
+
+		var err error
+		jwksProvider, err = auth.NewJWKSProvider(ctx, &auth.JWKSProviderConfig{
+			URL:        jwksURL,
+			RefreshTTL: 5 * time.Minute,
+			Client:     http.DefaultClient,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create JWKS provider: %w", err)
+		}
+		defer func() {
+			if err := jwksProvider.Close(); err != nil {
+				logger.Error("failed to close JWKS provider", "error", err)
+			}
+		}()
+
+		jwksValidator, err := auth.NewJWTValidatorWithJWKS(jwksProvider)
+		if err != nil {
+			return fmt.Errorf("failed to create JWT validator: %w", err)
+		}
+
+		authInterceptor, err = auth.NewAuthInterceptor(&auth.InterceptorConfig{
+			JWKSValidator: jwksValidator,
+			BypassMethods: []string{
+				"/grpc.health.v1.Health/Check",
+				"/grpc.health.v1.Health/Watch",
+				"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create auth interceptor: %w", err)
+		}
+
+		logger.Info("platform authentication enabled",
+			"jwks_url", jwksURL,
+			"required_roles", []string{"platform-admin", "super-admin"})
+	} else {
+		logger.Warn("platform authentication disabled",
+			"hint", "set AUTH_ENABLED=true and AUTH_JWKS_URL to enable authentication")
+	}
+
+	// Build interceptor chains based on auth configuration
+	var unaryInterceptors []grpc.UnaryServerInterceptor
+	var streamInterceptors []grpc.StreamServerInterceptor
+
+	// Tracing first
+	unaryInterceptors = append(unaryInterceptors, tracer.UnaryServerInterceptor())
+	streamInterceptors = append(streamInterceptors, tracer.StreamServerInterceptor())
+
+	// Auth interceptors (if enabled)
+	if authInterceptor != nil {
+		// Platform auth validates JWT without requiring tenant claims
+		unaryInterceptors = append(unaryInterceptors, authInterceptor.PlatformUnaryInterceptor())
+		streamInterceptors = append(streamInterceptors, authInterceptor.PlatformStreamInterceptor())
+		// Platform admin interceptor validates platform-admin role and rejects tenant-scoped tokens
+		unaryInterceptors = append(unaryInterceptors, auth.PlatformAdminInterceptor())
+		streamInterceptors = append(streamInterceptors, auth.PlatformAdminStreamInterceptor())
+	}
+
+	// Recovery last to catch all panics
+	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
+	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(logger))
+
 	// Create gRPC server with interceptor chain
-	// Order: tracing -> recovery (recovery last to catch all panics)
 	grpcServer := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(
-			tracer.UnaryServerInterceptor(),
-			interceptors.RecoveryUnaryInterceptor(logger),
-		),
-		grpc.ChainStreamInterceptor(
-			tracer.StreamServerInterceptor(),
-			interceptors.RecoveryStreamInterceptor(logger),
-		),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
 	)
 
 	// Register services

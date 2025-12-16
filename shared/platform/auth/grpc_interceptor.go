@@ -288,3 +288,96 @@ func RequireScope(requiredScopes ...string) grpc.UnaryServerInterceptor {
 		return handler(ctx, req)
 	}
 }
+
+// PlatformUnaryInterceptor returns a gRPC unary server interceptor for platform-layer
+// services. Unlike the standard UnaryInterceptor, this does NOT require tenant_id claims.
+// Platform services (like Tenant Service) are tenant-agnostic and operate in the platform
+// schema. Use this in combination with PlatformAdminInterceptor for full authorization.
+func (a *Interceptor) PlatformUnaryInterceptor() grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		// Check if method should bypass authentication
+		if a.bypassMethods[info.FullMethod] {
+			return handler(ctx, req)
+		}
+
+		// Authenticate and inject context (without tenant requirement)
+		newCtx, err := a.authenticatePlatform(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		return handler(newCtx, req)
+	}
+}
+
+// PlatformStreamInterceptor returns a gRPC stream server interceptor for platform-layer
+// services. Unlike the standard StreamInterceptor, this does NOT require tenant_id claims.
+func (a *Interceptor) PlatformStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(
+		srv interface{},
+		ss grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		// Check if method should bypass authentication
+		if a.bypassMethods[info.FullMethod] {
+			return handler(srv, ss)
+		}
+
+		// Authenticate and inject context (without tenant requirement)
+		newCtx, err := a.authenticatePlatform(ss.Context())
+		if err != nil {
+			return err
+		}
+
+		// Wrap stream with authenticated context
+		wrappedStream := &wrappedServerStream{
+			ServerStream: ss,
+			ctx:          newCtx,
+		}
+
+		return handler(srv, wrappedStream)
+	}
+}
+
+// authenticatePlatform extracts and validates the JWT token for platform services.
+// Unlike authenticate(), this does NOT require tenant_id claims.
+// Platform services are tenant-agnostic and operate in the platform schema.
+func (a *Interceptor) authenticatePlatform(ctx context.Context) (context.Context, error) {
+	// Extract token from metadata
+	token, err := extractTokenFromMetadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("extract token: %w", status.Error(codes.Unauthenticated, err.Error()))
+	}
+
+	// Validate token
+	var claims *Claims
+	if a.useJWKS {
+		claims, err = a.jwksValidator.ValidateToken(ctx, token)
+	} else {
+		claims, err = a.validator.ValidateToken(token)
+	}
+
+	if err != nil {
+		if errors.Is(err, ErrTokenExpired) {
+			return nil, fmt.Errorf("validate token: %w", status.Error(codes.Unauthenticated, "token expired"))
+		}
+		if errors.Is(err, ErrInvalidSignature) || errors.Is(err, ErrInvalidToken) {
+			return nil, fmt.Errorf("validate token: %w", status.Error(codes.Unauthenticated, "invalid token"))
+		}
+		return nil, fmt.Errorf("validate token: %w", status.Error(codes.Unauthenticated, "authentication failed"))
+	}
+
+	// Inject claims into context (no tenant requirement for platform services)
+	ctx = context.WithValue(ctx, UserIDContextKey, claims.UserID)
+	ctx = context.WithValue(ctx, RolesContextKey, claims.Roles)
+	ctx = context.WithValue(ctx, ScopesContextKey, claims.Scopes)
+	ctx = context.WithValue(ctx, ClaimsContextKey, claims)
+
+	return ctx, nil
+}
