@@ -148,80 +148,530 @@ show_service_status
 echo -e "${GREEN}✓ All services running${NC}\n"
 
 # ════════════════════════════════════════════════════════════════
-# PART 0: Tenant Provisioning (Always Multi-Tenant)
+# INTERACTIVE DEMO FUNCTIONS
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Setup: Tenant Provisioning                                    ║${NC}"
-echo -e "${MAGENTA}║  System is always multi-tenant - provisioning demo tenant      ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
-echo ""
 
-echo -e "${CYAN}► Checking/provisioning demo tenant: ${DEMO_TENANT}${NC}"
-
-# Check if tenant service is available
 TENANT_SERVICE_PORT=50056
-if grpcurl -plaintext localhost:${TENANT_SERVICE_PORT} grpc.health.v1.Health/Check >/dev/null 2>&1; then
-    # Try to create the tenant (idempotent - will fail gracefully if exists)
-    TENANT_RESULT=$(grpcurl -plaintext -d "{
-      \"tenant_id\": \"${DEMO_TENANT}\",
-      \"display_name\": \"Demo Tenant\",
-      \"settlement_asset\": \"GBP\"
-    }" localhost:${TENANT_SERVICE_PORT} meridian.tenant.v1.TenantService/InitiateTenant 2>&1) || true
+SELECTED_TENANT=""
+SELECTED_PARTY_ID=""
+SELECTED_PARTY_NAME=""
+SELECTED_ACCOUNT_ID=""
+SELECTED_ACCOUNT_IBAN=""
 
-    if echo "$TENANT_RESULT" | grep -q "tenant_id"; then
-        echo -e "${GREEN}✓ Tenant '${DEMO_TENANT}' provisioned successfully${NC}"
-        echo "$TENANT_RESULT" | jq '{tenant_id: .tenant.tenant_id, status: .tenant.status, display_name: .tenant.display_name}' 2>/dev/null || true
-    elif echo "$TENANT_RESULT" | grep -qi "already exists\|AlreadyExists"; then
-        echo -e "${GREEN}✓ Tenant '${DEMO_TENANT}' already exists (idempotent)${NC}"
+# Helper: Run SQL query against CockroachDB
+run_sql() {
+    kubectl exec cockroachdb-0 -- ./cockroach sql --insecure -d meridian -e "$1" 2>/dev/null
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 1: Interactive Tenant Selection/Creation
+# ─────────────────────────────────────────────────────────────────
+select_tenant() {
+    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${MAGENTA}║  Step 1: Select or Create Tenant                               ║${NC}"
+    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    # List existing tenants via gRPC
+    echo -e "${CYAN}► Loading existing tenants...${NC}"
+    TENANTS_JSON=$(grpcurl -plaintext localhost:${TENANT_SERVICE_PORT} \
+        meridian.tenant.v1.TenantService/ListTenants 2>/dev/null || echo '{"tenants":[]}')
+
+    # Parse tenants into arrays
+    TENANT_IDS=()
+    TENANT_NAMES=()
+    TENANT_STATUSES=()
+
+    while IFS= read -r line; do
+        TENANT_IDS+=("$line")
+    done < <(echo "$TENANTS_JSON" | jq -r '.tenants[]?.tenantId // empty')
+
+    while IFS= read -r line; do
+        TENANT_NAMES+=("$line")
+    done < <(echo "$TENANTS_JSON" | jq -r '.tenants[]?.displayName // empty')
+
+    while IFS= read -r line; do
+        TENANT_STATUSES+=("$line")
+    done < <(echo "$TENANTS_JSON" | jq -r '.tenants[]?.status // empty')
+
+    echo ""
+    if [ ${#TENANT_IDS[@]} -eq 0 ]; then
+        echo -e "${YELLOW}  No existing tenants found${NC}"
     else
-        echo -e "${YELLOW}⚠ Tenant provisioning result: ${TENANT_RESULT}${NC}"
-        echo -e "${YELLOW}  Continuing with demo - tenant may need manual setup${NC}"
+        echo -e "${CYAN}╭────────────────────────────────────────────────────────────────╮${NC}"
+        echo -e "${CYAN}│  #   Tenant ID          Display Name          Status           │${NC}"
+        echo -e "${CYAN}├────────────────────────────────────────────────────────────────┤${NC}"
+
+        for i in "${!TENANT_IDS[@]}"; do
+            NUM=$((i + 1))
+            TID="${TENANT_IDS[$i]}"
+            TNAME="${TENANT_NAMES[$i]:-$TID}"
+            TSTATUS="${TENANT_STATUSES[$i]}"
+
+            # Get party/account counts for this tenant
+            SCHEMA="org_${TID}"
+            PARTY_COUNT=$(run_sql "SELECT COUNT(*) FROM ${SCHEMA}.parties;" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+            ACCOUNT_COUNT=$(run_sql "SELECT COUNT(*) FROM ${SCHEMA}.accounts;" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+            PARTY_COUNT=${PARTY_COUNT:-0}
+            ACCOUNT_COUNT=${ACCOUNT_COUNT:-0}
+
+            printf "${CYAN}│${NC}  %-3s %-18s %-22s %-15s ${CYAN}│${NC}\n" \
+                "$NUM)" "$TID" "$TNAME" "(${PARTY_COUNT}P/${ACCOUNT_COUNT}A)"
+        done
+        echo -e "${CYAN}╰────────────────────────────────────────────────────────────────╯${NC}"
     fi
-else
-    echo -e "${YELLOW}⚠ Tenant Service not available at localhost:${TENANT_SERVICE_PORT}${NC}"
-    echo -e "${YELLOW}  Ensure tenant '${DEMO_TENANT}' is manually provisioned${NC}"
-    echo -e "${YELLOW}  Continuing with demo...${NC}"
-fi
-echo ""
 
-# Validate database schema was provisioned
-echo -e "${CYAN}► Validating database schema provisioning...${NC}"
-SCHEMA_NAME="org_${DEMO_TENANT}"
-EXPECTED_TABLES="parties accounts liens financial_position_logs payment_orders"
+    echo ""
+    echo -e "  ${GREEN}N)${NC} Create new tenant"
+    echo ""
 
-validate_schema() {
-    # Check if schema exists and has expected tables
-    TABLES=$(kubectl exec cockroachdb-0 -- ./cockroach sql --insecure -d meridian -e \
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = '${SCHEMA_NAME}';" 2>/dev/null | tail -n +2)
+    # Get selection
+    DEFAULT_SELECTION="1"
+    if [ ${#TENANT_IDS[@]} -eq 0 ]; then
+        DEFAULT_SELECTION="N"
+    fi
 
-    if [ -z "$TABLES" ]; then
+    echo -e -n "${CYAN}Select tenant [1-${#TENANT_IDS[@]}, N, Enter=${DEFAULT_SELECTION}]: ${NC}"
+    read -r TENANT_CHOICE
+    TENANT_CHOICE=${TENANT_CHOICE:-$DEFAULT_SELECTION}
+
+    if [[ "$TENANT_CHOICE" =~ ^[Nn]$ ]]; then
+        # Create new tenant
+        echo ""
+        echo -e -n "${CYAN}Enter new tenant ID (lowercase, no spaces): ${NC}"
+        read -r NEW_TENANT_ID
+        NEW_TENANT_ID=${NEW_TENANT_ID:-"demo-$(date +%s)"}
+
+        echo -e -n "${CYAN}Enter display name [${NEW_TENANT_ID}]: ${NC}"
+        read -r NEW_TENANT_NAME
+        NEW_TENANT_NAME=${NEW_TENANT_NAME:-$NEW_TENANT_ID}
+
+        echo -e "${YELLOW}  Creating tenant '${NEW_TENANT_ID}'...${NC}"
+        TENANT_RESULT=$(grpcurl -plaintext -d "{
+          \"tenant_id\": \"${NEW_TENANT_ID}\",
+          \"display_name\": \"${NEW_TENANT_NAME}\",
+          \"settlement_asset\": \"GBP\"
+        }" localhost:${TENANT_SERVICE_PORT} meridian.tenant.v1.TenantService/InitiateTenant 2>&1) || true
+
+        if echo "$TENANT_RESULT" | jq -e '.tenant.tenantId' >/dev/null 2>&1; then
+            echo -e "${GREEN}✓ Tenant '${NEW_TENANT_ID}' created successfully${NC}"
+            SELECTED_TENANT="$NEW_TENANT_ID"
+        else
+            echo -e "${RED}✗ Failed to create tenant: ${TENANT_RESULT}${NC}"
+            return 1
+        fi
+    elif [[ "$TENANT_CHOICE" =~ ^[0-9]+$ ]] && [ "$TENANT_CHOICE" -ge 1 ] && [ "$TENANT_CHOICE" -le ${#TENANT_IDS[@]} ]; then
+        SELECTED_TENANT="${TENANT_IDS[$((TENANT_CHOICE - 1))]}"
+        echo -e "${GREEN}✓ Selected tenant: ${SELECTED_TENANT}${NC}"
+    else
+        echo -e "${RED}Invalid selection${NC}"
         return 1
     fi
 
-    # Check for key tables
-    for table in $EXPECTED_TABLES; do
-        if ! echo "$TABLES" | grep -q "^${table}$"; then
-            echo -e "${YELLOW}  Missing table: ${table}${NC}"
-            return 1
-        fi
-    done
-    return 0
+    # Update tenant header for subsequent calls
+    TENANT_HEADER="-H x-tenant-id:${SELECTED_TENANT}"
+    echo ""
 }
 
-if validate_schema; then
-    TABLE_COUNT=$(kubectl exec cockroachdb-0 -- ./cockroach sql --insecure -d meridian -e \
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${SCHEMA_NAME}';" 2>/dev/null | tail -n 1)
-    echo -e "${GREEN}✓ Schema '${SCHEMA_NAME}' validated: ${TABLE_COUNT} tables provisioned${NC}"
-else
-    echo -e "${YELLOW}⚠ Schema '${SCHEMA_NAME}' may not be fully provisioned${NC}"
-    echo -e "${YELLOW}  Press any key to retry validation, or Ctrl+C to exit${NC}"
-    while ! validate_schema; do
-        read -n 1 -s -r
-        echo -e "${CYAN}► Retrying schema validation...${NC}"
+# ─────────────────────────────────────────────────────────────────
+# Step 2: Interactive Party Selection/Creation
+# ─────────────────────────────────────────────────────────────────
+select_party() {
+    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${MAGENTA}║  Step 2: Select or Create Party                                ║${NC}"
+    echo -e "${MAGENTA}║  Tenant: ${SELECTED_TENANT}$(printf '%*s' $((42 - ${#SELECTED_TENANT})) '')║${NC}"
+    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    # Query parties from database
+    echo -e "${CYAN}► Loading existing parties...${NC}"
+    SCHEMA="org_${SELECTED_TENANT}"
+
+    PARTIES_SQL="SELECT id, party_type, legal_name, display_name FROM ${SCHEMA}.parties ORDER BY created_at DESC LIMIT 20;"
+    PARTIES_RAW=$(run_sql "$PARTIES_SQL" 2>/dev/null | tail -n +2 || echo "")
+
+    PARTY_IDS=()
+    PARTY_TYPES=()
+    PARTY_NAMES=()
+
+    while IFS=$'\t' read -r pid ptype lname dname; do
+        [ -z "$pid" ] && continue
+        PARTY_IDS+=("$pid")
+        PARTY_TYPES+=("$ptype")
+        PARTY_NAMES+=("${dname:-$lname}")
+    done <<< "$PARTIES_RAW"
+
+    echo ""
+    if [ ${#PARTY_IDS[@]} -eq 0 ]; then
+        echo -e "${YELLOW}  No existing parties found${NC}"
+    else
+        echo -e "${CYAN}╭─────────────────────────────────────────────────────────────────╮${NC}"
+        echo -e "${CYAN}│  #   Party Name                    Type         Accounts       │${NC}"
+        echo -e "${CYAN}├─────────────────────────────────────────────────────────────────┤${NC}"
+
+        for i in "${!PARTY_IDS[@]}"; do
+            NUM=$((i + 1))
+            PID="${PARTY_IDS[$i]}"
+            PTYPE="${PARTY_TYPES[$i]}"
+            PNAME="${PARTY_NAMES[$i]}"
+
+            # Get account count for this party
+            ACCT_COUNT=$(run_sql "SELECT COUNT(*) FROM ${SCHEMA}.accounts WHERE party_id = '${PID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+            ACCT_COUNT=${ACCT_COUNT:-0}
+
+            # Shorten type for display
+            PTYPE_SHORT=$(echo "$PTYPE" | sed 's/PARTY_TYPE_//')
+
+            printf "${CYAN}│${NC}  %-3s %-30s %-12s %-14s ${CYAN}│${NC}\n" \
+                "$NUM)" "${PNAME:0:30}" "${PTYPE_SHORT}" "($ACCT_COUNT accounts)"
+        done
+        echo -e "${CYAN}╰─────────────────────────────────────────────────────────────────╯${NC}"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}P)${NC} Create new Person"
+    echo -e "  ${GREEN}O)${NC} Create new Organization"
+    echo ""
+
+    DEFAULT_SELECTION="P"
+    if [ ${#PARTY_IDS[@]} -gt 0 ]; then
+        DEFAULT_SELECTION="1"
+    fi
+
+    echo -e -n "${CYAN}Select party [1-${#PARTY_IDS[@]}, P, O, Enter=${DEFAULT_SELECTION}]: ${NC}"
+    read -r PARTY_CHOICE
+    PARTY_CHOICE=${PARTY_CHOICE:-$DEFAULT_SELECTION}
+
+    if [[ "$PARTY_CHOICE" =~ ^[Pp]$ ]]; then
+        # Create new person
+        echo ""
+        echo -e -n "${CYAN}Enter first name: ${NC}"
+        read -r FIRST_NAME
+        FIRST_NAME=${FIRST_NAME:-"John"}
+
+        echo -e -n "${CYAN}Enter last name: ${NC}"
+        read -r LAST_NAME
+        LAST_NAME=${LAST_NAME:-"Smith"}
+
+        LEGAL_NAME="${FIRST_NAME} ${LAST_NAME}"
+        echo -e "${YELLOW}  Creating person '${LEGAL_NAME}'...${NC}"
+
+        PARTY_RESULT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+          \"party_type\": \"PARTY_TYPE_PERSON\",
+          \"legal_name\": \"${LEGAL_NAME}\",
+          \"display_name\": \"${LEGAL_NAME}\"
+        }" localhost:50055 meridian.party.v1.PartyService/RegisterParty 2>&1)
+
+        if echo "$PARTY_RESULT" | jq -e '.party.partyId' >/dev/null 2>&1; then
+            SELECTED_PARTY_ID=$(echo "$PARTY_RESULT" | jq -r '.party.partyId')
+            SELECTED_PARTY_NAME="$LEGAL_NAME"
+            echo -e "${GREEN}✓ Person '${LEGAL_NAME}' created: ${SELECTED_PARTY_ID}${NC}"
+        else
+            echo -e "${RED}✗ Failed to create party: ${PARTY_RESULT}${NC}"
+            return 1
+        fi
+    elif [[ "$PARTY_CHOICE" =~ ^[Oo]$ ]]; then
+        # Create new organization
+        echo ""
+        echo -e -n "${CYAN}Enter organization name: ${NC}"
+        read -r ORG_NAME
+        ORG_NAME=${ORG_NAME:-"Acme Ltd"}
+
+        echo -e "${YELLOW}  Creating organization '${ORG_NAME}'...${NC}"
+
+        PARTY_RESULT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+          \"party_type\": \"PARTY_TYPE_ORGANIZATION\",
+          \"legal_name\": \"${ORG_NAME}\",
+          \"display_name\": \"${ORG_NAME}\"
+        }" localhost:50055 meridian.party.v1.PartyService/RegisterParty 2>&1)
+
+        if echo "$PARTY_RESULT" | jq -e '.party.partyId' >/dev/null 2>&1; then
+            SELECTED_PARTY_ID=$(echo "$PARTY_RESULT" | jq -r '.party.partyId')
+            SELECTED_PARTY_NAME="$ORG_NAME"
+            echo -e "${GREEN}✓ Organization '${ORG_NAME}' created: ${SELECTED_PARTY_ID}${NC}"
+        else
+            echo -e "${RED}✗ Failed to create party: ${PARTY_RESULT}${NC}"
+            return 1
+        fi
+    elif [[ "$PARTY_CHOICE" =~ ^[0-9]+$ ]] && [ "$PARTY_CHOICE" -ge 1 ] && [ "$PARTY_CHOICE" -le ${#PARTY_IDS[@]} ]; then
+        SELECTED_PARTY_ID="${PARTY_IDS[$((PARTY_CHOICE - 1))]}"
+        SELECTED_PARTY_NAME="${PARTY_NAMES[$((PARTY_CHOICE - 1))]}"
+        echo -e "${GREEN}✓ Selected party: ${SELECTED_PARTY_NAME} (${SELECTED_PARTY_ID})${NC}"
+    else
+        echo -e "${RED}Invalid selection${NC}"
+        return 1
+    fi
+    echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 3: Interactive Account Selection/Creation
+# ─────────────────────────────────────────────────────────────────
+select_account() {
+    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${MAGENTA}║  Step 3: Select or Create Account                              ║${NC}"
+    echo -e "${MAGENTA}║  Party: ${SELECTED_PARTY_NAME}$(printf '%*s' $((44 - ${#SELECTED_PARTY_NAME})) '')║${NC}"
+    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    # Query accounts for this party
+    echo -e "${CYAN}► Loading existing accounts...${NC}"
+    SCHEMA="org_${SELECTED_TENANT}"
+
+    ACCOUNTS_SQL="SELECT id, iban, currency, balance_units, status FROM ${SCHEMA}.accounts WHERE party_id = '${SELECTED_PARTY_ID}' ORDER BY created_at DESC LIMIT 20;"
+    ACCOUNTS_RAW=$(run_sql "$ACCOUNTS_SQL" 2>/dev/null | tail -n +2 || echo "")
+
+    ACCOUNT_IDS=()
+    ACCOUNT_IBANS=()
+    ACCOUNT_BALANCES=()
+    ACCOUNT_STATUSES=()
+
+    while IFS=$'\t' read -r aid aiban acurr abal astatus; do
+        [ -z "$aid" ] && continue
+        ACCOUNT_IDS+=("$aid")
+        ACCOUNT_IBANS+=("$aiban")
+        ACCOUNT_BALANCES+=("${abal:-0}")
+        ACCOUNT_STATUSES+=("$astatus")
+    done <<< "$ACCOUNTS_RAW"
+
+    echo ""
+    if [ ${#ACCOUNT_IDS[@]} -eq 0 ]; then
+        echo -e "${YELLOW}  No existing accounts found for this party${NC}"
+    else
+        echo -e "${CYAN}╭─────────────────────────────────────────────────────────────────╮${NC}"
+        echo -e "${CYAN}│  #   IBAN                         Balance          Status      │${NC}"
+        echo -e "${CYAN}├─────────────────────────────────────────────────────────────────┤${NC}"
+
+        for i in "${!ACCOUNT_IDS[@]}"; do
+            NUM=$((i + 1))
+            AIBAN="${ACCOUNT_IBANS[$i]}"
+            ABAL="${ACCOUNT_BALANCES[$i]}"
+            ASTATUS="${ACCOUNT_STATUSES[$i]}"
+
+            # Format balance
+            ABAL_FMT="£$(printf "%'.0f" "$ABAL" 2>/dev/null || echo "$ABAL")"
+
+            # Shorten status
+            ASTATUS_SHORT=$(echo "$ASTATUS" | sed 's/ACCOUNT_STATUS_//')
+
+            # Truncate IBAN for display
+            AIBAN_SHORT="${AIBAN:0:8}...${AIBAN: -4}"
+
+            printf "${CYAN}│${NC}  %-3s %-28s %12s          %-10s ${CYAN}│${NC}\n" \
+                "$NUM)" "$AIBAN_SHORT" "$ABAL_FMT" "$ASTATUS_SHORT"
+        done
+        echo -e "${CYAN}╰─────────────────────────────────────────────────────────────────╯${NC}"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}N)${NC} Create new account"
+    echo ""
+
+    DEFAULT_SELECTION="N"
+    if [ ${#ACCOUNT_IDS[@]} -gt 0 ]; then
+        DEFAULT_SELECTION="1"
+    fi
+
+    echo -e -n "${CYAN}Select account [1-${#ACCOUNT_IDS[@]}, N, Enter=${DEFAULT_SELECTION}]: ${NC}"
+    read -r ACCOUNT_CHOICE
+    ACCOUNT_CHOICE=${ACCOUNT_CHOICE:-$DEFAULT_SELECTION}
+
+    if [[ "$ACCOUNT_CHOICE" =~ ^[Nn]$ ]]; then
+        # Create new account
+        TIMESTAMP=$(date +%s)
+        NEW_IBAN="GB29NWBK${TIMESTAMP}"
+
+        echo -e "${YELLOW}  Creating new GBP account...${NC}"
+
+        ACCOUNT_RESULT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+          \"account_identification\": \"${NEW_IBAN}\",
+          \"party_id\": \"${SELECTED_PARTY_ID}\",
+          \"base_currency\": \"CURRENCY_GBP\"
+        }" localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateCurrentAccount 2>&1)
+
+        if echo "$ACCOUNT_RESULT" | jq -e '.accountId' >/dev/null 2>&1; then
+            SELECTED_ACCOUNT_ID=$(echo "$ACCOUNT_RESULT" | jq -r '.accountId')
+            SELECTED_ACCOUNT_IBAN="$NEW_IBAN"
+            echo -e "${GREEN}✓ Account created: ${SELECTED_ACCOUNT_ID}${NC}"
+            echo "$ACCOUNT_RESULT" | jq '{
+              account_id: .accountId,
+              iban: .facility.accountIdentification,
+              currency: .facility.baseCurrency,
+              balance: .facility.currentBalance.currentBalance.amount
+            }'
+        else
+            echo -e "${RED}✗ Failed to create account: ${ACCOUNT_RESULT}${NC}"
+            return 1
+        fi
+    elif [[ "$ACCOUNT_CHOICE" =~ ^[0-9]+$ ]] && [ "$ACCOUNT_CHOICE" -ge 1 ] && [ "$ACCOUNT_CHOICE" -le ${#ACCOUNT_IDS[@]} ]; then
+        SELECTED_ACCOUNT_ID="${ACCOUNT_IDS[$((ACCOUNT_CHOICE - 1))]}"
+        SELECTED_ACCOUNT_IBAN="${ACCOUNT_IBANS[$((ACCOUNT_CHOICE - 1))]}"
+        SELECTED_BALANCE="${ACCOUNT_BALANCES[$((ACCOUNT_CHOICE - 1))]}"
+        echo -e "${GREEN}✓ Selected account: ${SELECTED_ACCOUNT_IBAN:0:8}...${SELECTED_ACCOUNT_IBAN: -4} (Balance: £${SELECTED_BALANCE})${NC}"
+    else
+        echo -e "${RED}Invalid selection${NC}"
+        return 1
+    fi
+    echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 4: Interactive Transaction Loop
+# ─────────────────────────────────────────────────────────────────
+transaction_loop() {
+    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${MAGENTA}║  Step 4: Transactions (Saga Pattern)                           ║${NC}"
+    echo -e "${MAGENTA}║  Account: ${SELECTED_ACCOUNT_IBAN:0:20}...                              ║${NC}"
+    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    echo -e "${YELLOW}  Saga Steps for each transaction:${NC}"
+    echo -e "${YELLOW}    1. Log position in PositionKeeping     (via gRPC)${NC}"
+    echo -e "${YELLOW}    2. Post ledger in FinancialAccounting  (via gRPC)${NC}"
+    echo -e "${YELLOW}    3. Update CurrentAccount balance       (local)${NC}"
+    echo -e "${YELLOW}  * Automatic compensation if any step fails${NC}"
+    echo ""
+
+    TRANSACTION_COUNT=0
+    while true; do
+        # Get current balance
+        SCHEMA="org_${SELECTED_TENANT}"
+        CURRENT_BAL=$(run_sql "SELECT balance_units FROM ${SCHEMA}.accounts WHERE id = '${SELECTED_ACCOUNT_ID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+        CURRENT_BAL=${CURRENT_BAL:-0}
+
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${CYAN}  Current Balance: £${CURRENT_BAL}${NC}"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo -e "  Commands: ${GREEN}[amount]${NC} deposit | ${YELLOW}[-amount]${NC} withdraw (future)"
+        echo -e "            ${BLUE}[T]${NC}enant | ${BLUE}[P]${NC}arty | ${BLUE}[A]${NC}ccount | ${BLUE}[Q]${NC}uit"
+        echo ""
+        echo -e -n "${CYAN}Enter command: ${NC}"
+        read -r CMD
+
+        case "$CMD" in
+            [Tt])
+                echo ""
+                return "tenant"
+                ;;
+            [Pp])
+                echo ""
+                return "party"
+                ;;
+            [Aa])
+                echo ""
+                return "account"
+                ;;
+            [Qq]|"")
+                if [ -z "$CMD" ] && [ $TRANSACTION_COUNT -eq 0 ]; then
+                    echo -e "${YELLOW}  (Enter Q to quit, or enter an amount to deposit)${NC}"
+                    continue
+                fi
+                echo -e "${GREEN}✓ Transaction session complete ($TRANSACTION_COUNT transactions)${NC}"
+                return "quit"
+                ;;
+            -[0-9]*)
+                # Withdrawal (not implemented)
+                WITHDRAW_AMOUNT=${CMD#-}
+                echo -e "${YELLOW}  ▼ Withdrawal: £$WITHDRAW_AMOUNT${NC}"
+                echo -e "${YELLOW}  ⚠ ExecuteWithdrawal RPC not yet implemented${NC}"
+                echo -e "${YELLOW}    Future feature - withdrawals will use the same saga pattern${NC}"
+                ;;
+            [0-9]*)
+                # Deposit
+                DEPOSIT_AMOUNT="$CMD"
+                echo -e "${GREEN}  ▲ Depositing: £$DEPOSIT_AMOUNT${NC}"
+
+                RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+                  \"account_id\": \"$SELECTED_ACCOUNT_ID\",
+                  \"amount\": {
+                    \"amount\": {
+                      \"currency_code\": \"GBP\",
+                      \"units\": $DEPOSIT_AMOUNT,
+                      \"nanos\": 0
+                    }
+                  }
+                }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit 2>&1)
+
+                if echo "$RESPONSE" | jq -e '.transactionId' >/dev/null 2>&1; then
+                    TXN_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
+                    NEW_BAL=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
+                    echo -e "${GREEN}  ✓ Deposit Complete:${NC} $TXN_ID"
+                    echo "$RESPONSE" | jq '{
+                      transaction_id: .transactionId,
+                      status: .status,
+                      new_balance: .newBalance.amount,
+                      available_balance: .availableBalance.amount
+                    }'
+                    TRANSACTION_COUNT=$((TRANSACTION_COUNT + 1))
+                else
+                    echo -e "${RED}  ✗ Deposit Failed:${NC}"
+                    echo "$RESPONSE" | head -5
+                fi
+                ;;
+            *)
+                echo -e "${YELLOW}  Unknown command. Enter amount (e.g., 500) or navigation key.${NC}"
+                ;;
+        esac
+        echo ""
     done
-    echo -e "${GREEN}✓ Schema '${SCHEMA_NAME}' now validated${NC}"
-fi
+}
+
+# ════════════════════════════════════════════════════════════════
+# INTERACTIVE DEMO MAIN LOOP
+# ════════════════════════════════════════════════════════════════
+
+run_interactive_demo() {
+    local JUMP_TO="tenant"
+
+    while true; do
+        case "$JUMP_TO" in
+            tenant)
+                select_tenant || continue
+                JUMP_TO="party"
+                ;;
+            party)
+                select_party || { JUMP_TO="tenant"; continue; }
+                JUMP_TO="account"
+                ;;
+            account)
+                select_account || { JUMP_TO="party"; continue; }
+                JUMP_TO="transactions"
+                ;;
+            transactions)
+                RESULT=$(transaction_loop)
+                case "$RESULT" in
+                    tenant) JUMP_TO="tenant" ;;
+                    party) JUMP_TO="party" ;;
+                    account) JUMP_TO="account" ;;
+                    quit) break ;;
+                esac
+                ;;
+        esac
+    done
+}
+
+# Run the interactive demo
+run_interactive_demo
+
 echo ""
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}  Interactive session complete!${NC}"
+echo -e "${GREEN}  Context: Tenant=${SELECTED_TENANT}, Party=${SELECTED_PARTY_NAME}${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "${YELLOW}Continue to advanced demo sections? (Health, Load Balancing, Tracing, etc.)${NC}"
+echo -e -n "${CYAN}[Y/n]: ${NC}"
+read -r CONTINUE_DEMO
+if [[ "$CONTINUE_DEMO" =~ ^[Nn]$ ]]; then
+    echo -e "${GREEN}Demo complete. Goodbye!${NC}"
+    exit 0
+fi
+
+# Set up for remaining demo sections using selected context
+DEMO_TENANT="$SELECTED_TENANT"
+ACCOUNT_ID="$SELECTED_ACCOUNT_ID"
+PARTY_ID="$SELECTED_PARTY_ID"
 
 # ════════════════════════════════════════════════════════════════
 # PART 1: Health Checks & Service Discovery
