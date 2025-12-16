@@ -2,6 +2,8 @@
 # Meridian Platform Demo - Enterprise Banking Microservices
 # Demonstrates: Saga Pattern, Load Balancing, Tracing, Health, Idempotency
 
+# shellcheck disable=SC2086  # TENANT_HEADER must word-split for grpcurl -H flag
+
 set -e
 
 # Trap handler to clean up background Tilt process
@@ -356,7 +358,7 @@ select_party() {
         LEGAL_NAME="${FIRST_NAME} ${LAST_NAME}"
         echo -e "${YELLOW}  Creating person '${LEGAL_NAME}'...${NC}"
 
-        PARTY_RESULT=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+        PARTY_RESULT=$(grpcurl -plaintext $TENANT_HEADER -d "{
           \"party_type\": \"PARTY_TYPE_PERSON\",
           \"legal_name\": \"${LEGAL_NAME}\",
           \"display_name\": \"${LEGAL_NAME}\"
@@ -379,7 +381,7 @@ select_party() {
 
         echo -e "${YELLOW}  Creating organization '${ORG_NAME}'...${NC}"
 
-        PARTY_RESULT=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+        PARTY_RESULT=$(grpcurl -plaintext $TENANT_HEADER -d "{
           \"party_type\": \"PARTY_TYPE_ORGANIZATION\",
           \"legal_name\": \"${ORG_NAME}\",
           \"display_name\": \"${ORG_NAME}\"
@@ -485,7 +487,7 @@ select_account() {
 
         echo -e "${YELLOW}  Creating new GBP account...${NC}"
 
-        ACCOUNT_RESULT=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+        ACCOUNT_RESULT=$(grpcurl -plaintext $TENANT_HEADER -d "{
           \"account_identification\": \"${NEW_IBAN}\",
           \"party_id\": \"${SELECTED_PARTY_ID}\",
           \"base_currency\": \"CURRENCY_GBP\"
@@ -591,7 +593,7 @@ transaction_loop() {
                 echo -e "${YELLOW}  ► gRPC: CurrentAccountService/ExecuteDeposit${NC}"
                 echo -e "${YELLOW}    Request: {account_id: \"$SELECTED_ACCOUNT_ID\", amount: £$DEPOSIT_AMOUNT}${NC}"
 
-                RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+                RESPONSE=$(grpcurl -plaintext $TENANT_HEADER -d "{
                   \"account_id\": \"$SELECTED_ACCOUNT_ID\",
                   \"amount\": {
                     \"amount\": {
@@ -805,7 +807,7 @@ echo ""
 echo -e "${CYAN}► Step 1: Register Party (Customer)${NC}"
 echo -e "${YELLOW}  Party Service provides customer reference data for multi-tenancy${NC}"
 TIMESTAMP=$(date +%s)
-PARTY_RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d '{
+PARTY_RESPONSE=$(grpcurl -plaintext $TENANT_HEADER -d '{
   "party_type": "PARTY_TYPE_PERSON",
   "legal_name": "Demo User",
   "display_name": "Demo Customer"
@@ -829,7 +831,7 @@ echo ""
 
 echo -e "${CYAN}► Step 2: Initiate Current Account${NC}"
 echo -e "${YELLOW}  Account linked to Party for ownership and validation${NC}"
-CREATE_RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+CREATE_RESPONSE=$(grpcurl -plaintext $TENANT_HEADER -d "{
   \"account_identification\": \"GB29NWBK$TIMESTAMP\",
   \"party_id\": \"$PARTY_ID\",
   \"base_currency\": \"CURRENCY_GBP\"
@@ -877,7 +879,7 @@ while true; do
     if [ "$AMOUNT" -ge 0 ]; then
         # Deposit
         echo -e "${GREEN}  ▲ Depositing: £$AMOUNT${NC}"
-        RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+        RESPONSE=$(grpcurl -plaintext $TENANT_HEADER -d "{
           \"account_id\": \"$ACCOUNT_ID\",
           \"amount\": {
             \"amount\": {
@@ -918,7 +920,7 @@ done
 # If no transactions were made, make a default deposit for the rest of the demo
 if [ "$TRANSACTION_COUNT" = "0" ]; then
     echo -e "${YELLOW}  Making initial deposit of £500 for demo...${NC}"
-    DEPOSIT_RESPONSE=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+    DEPOSIT_RESPONSE=$(grpcurl -plaintext $TENANT_HEADER -d "{
       \"account_id\": \"$ACCOUNT_ID\",
       \"amount\": {
         \"amount\": {
@@ -996,7 +998,7 @@ echo -e "${CYAN}► Testing load distribution across ${NEW_POS_PODS} pods:${NC}"
 echo -e "${YELLOW}  Executing 6 rapid-fire deposits to demonstrate round_robin...${NC}"
 SUCCESS_COUNT=0
 for _ in {1..6}; do
-    if grpcurl -plaintext "${TENANT_HEADER}" -d "{
+    if grpcurl -plaintext $TENANT_HEADER -d "{
       \"account_id\": \"$ACCOUNT_ID\",
       \"amount\": {
         \"amount\": {
@@ -1046,7 +1048,7 @@ echo -e "  ${YELLOW}PaymentOrderReference:${NC} $PAYMENT_ORDER_REF"
 echo -e "  ${YELLOW}Amount:${NC} £100"
 echo ""
 
-LIEN1=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+LIEN1=$(grpcurl -plaintext $TENANT_HEADER -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
     \"amount\": {
@@ -1067,7 +1069,7 @@ echo -e "${CYAN}► Step 2: Retry the SAME request (simulating network retry)${N
 echo -e "  ${YELLOW}Same PaymentOrderReference:${NC} $PAYMENT_ORDER_REF"
 echo ""
 
-LIEN2=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+LIEN2=$(grpcurl -plaintext $TENANT_HEADER -d "{
   \"account_id\": \"$ACCOUNT_ID\",
   \"amount\": {
     \"amount\": {
@@ -1097,7 +1099,7 @@ echo ""
 
 # Clean up: Terminate the lien to release funds
 echo -e "${CYAN}► Cleanup: Terminating lien to release reserved funds${NC}"
-grpcurl -plaintext "${TENANT_HEADER}" -d "{
+grpcurl -plaintext $TENANT_HEADER -d "{
   \"lien_id\": \"$LIEN_ID\",
   \"reason\": \"Demo cleanup\"
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/TerminateLien >/dev/null 2>&1
@@ -1152,7 +1154,7 @@ echo -e "${MAGENTA}════════════════════�
 echo ""
 
 echo -e "${CYAN}► Listing position logs for account: ${ACCOUNT_ID}${NC}"
-POSITION_LOGS=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+POSITION_LOGS=$(grpcurl -plaintext $TENANT_HEADER -d "{
   \"account_id\": \"$ACCOUNT_ID\"
 }" localhost:50053 meridian.position_keeping.v1.PositionKeepingService/ListFinancialPositionLogs)
 
@@ -1185,7 +1187,7 @@ echo -e "${MAGENTA}════════════════════�
 echo ""
 
 echo -e "${CYAN}► Listing booking logs for account: ${ACCOUNT_ID}${NC}"
-BOOKING_LOGS=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{}" localhost:50052 meridian.financial_accounting.v1.FinancialAccountingService/ListFinancialBookingLogs)
+BOOKING_LOGS=$(grpcurl -plaintext $TENANT_HEADER -d "{}" localhost:50052 meridian.financial_accounting.v1.FinancialAccountingService/ListFinancialBookingLogs)
 
 # Filter to show only logs matching our account
 echo "$BOOKING_LOGS" | jq --arg account_id "$ACCOUNT_ID" '{
@@ -1215,7 +1217,7 @@ echo -e "${MAGENTA}  Part 8: Final Account State & Summary${NC}"
 echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-FINAL_ACCOUNT=$(grpcurl -plaintext "${TENANT_HEADER}" -d "{
+FINAL_ACCOUNT=$(grpcurl -plaintext $TENANT_HEADER -d "{
   \"account_id\": \"$ACCOUNT_ID\"
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount)
 
