@@ -12,24 +12,25 @@ import (
 var ErrJSONMapScanFailed = errors.New("failed to scan JSONMap: value is neither []byte nor string")
 
 // TenantEntity is the database representation of a tenant.
-// Stored in the platform.tenants table.
+// Uses singular, unqualified name per database-per-service architecture.
 type TenantEntity struct {
 	ID              string     `gorm:"column:id;primaryKey"`
 	DisplayName     string     `gorm:"column:display_name;not null"`
 	SettlementAsset string     `gorm:"column:settlement_asset;not null"`
-	Subdomain       *string    `gorm:"column:subdomain;uniqueIndex:idx_tenants_subdomain"`
+	Subdomain       *string    `gorm:"column:subdomain;uniqueIndex:idx_tenant_subdomain"`
 	Status          string     `gorm:"column:status;not null;default:provisioning"`
-	CreatedAt       time.Time  `gorm:"column:created_at;not null;autoCreateTime;index:idx_tenants_created_at,sort:desc"`
+	CreatedAt       time.Time  `gorm:"column:created_at;not null;autoCreateTime;index:idx_tenant_created_at,sort:desc"`
 	DeprovisionedAt *time.Time `gorm:"column:deprovisioned_at"`
 	Metadata        JSONMap    `gorm:"column:metadata;type:jsonb;default:'{}'"`
 	Version         int        `gorm:"column:version;not null;default:1"`
-	PartyID         *string    `gorm:"column:party_id;index:idx_tenants_party_id"`
+	PartyID         *string    `gorm:"column:party_id;index:idx_tenant_party_id"`
 	ErrorMessage    *string    `gorm:"column:error_message"`
 }
 
 // TableName returns the table name for GORM.
+// Uses singular, unqualified name per database-per-service architecture.
 func (TenantEntity) TableName() string {
-	return "platform.tenants"
+	return "tenant"
 }
 
 // JSONMap is a custom type for JSONB columns.

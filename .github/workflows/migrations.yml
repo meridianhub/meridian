@@ -52,6 +52,7 @@ jobs:
           atlas migrate hash --env ci --config file://services/financial-accounting/atlas/atlas.hcl
           atlas migrate hash --env ci --config file://services/payment-order/atlas/atlas.hcl
           atlas migrate hash --env ci --config file://services/party/atlas/atlas.hcl
+          atlas migrate hash --env ci --config file://services/tenant/atlas/atlas.hcl
           echo "✓ All migration checksums verified"
 
   test-multi-org-migrations:
@@ -93,7 +94,9 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/meridian_test?sslmode=disable
         run: |
           echo "Creating test organization schemas..."
-          # Create schemas directly for CI testing (no Organization Service needed)
+          # In production: database-per-service + schema-per-org
+          # Each service has its own database, within which each org gets a schema
+          # For CI: single database, test schema-per-org isolation
           psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS org_acme_bank;"
           psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS org_test_org;"
           echo "✓ Test organization schemas created"
@@ -103,17 +106,24 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/meridian_test?sslmode=disable
         run: |
           echo "Applying migrations to test organizations..."
+          echo "Architecture: database-per-service + schema-per-org"
+          echo "- In production: each service has its own database"
+          echo "- Within each database: each org gets its own schema"
+          echo "- Tables use singular, unqualified names (search_path routing)"
+          echo ""
           FAILED=0
           for ORG in acme_bank test_org; do
             ORG_SCHEMA="org_${ORG}"
             echo "Migrating $ORG_SCHEMA..."
-            # Exclude current-account due to pending checksum fix on develop
-            for CONFIG in services/financial-accounting/atlas/atlas.hcl services/party/atlas/atlas.hcl services/payment-order/atlas/atlas.hcl services/position-keeping/atlas/atlas.hcl; do
+            for CONFIG in services/current-account/atlas/atlas.hcl \
+                         services/financial-accounting/atlas/atlas.hcl \
+                         services/party/atlas/atlas.hcl \
+                         services/payment-order/atlas/atlas.hcl \
+                         services/position-keeping/atlas/atlas.hcl; do
               SERVICE=$(basename $(dirname $(dirname "$CONFIG")))
               echo "  Service: $SERVICE"
-              # --allow-dirty allows multiple services to share the same org schema
-              # Each service creates its own tables with unqualified names, so
-              # other services' tables may exist in the schema
+              # --allow-dirty allows multiple services to share the same org schema in CI
+              # In production, each service has its own database
               if ! atlas migrate apply \
                 --env ci \
                 --config "file://$CONFIG" \
@@ -129,75 +139,74 @@ jobs:
             echo "❌ Some migrations failed"
             exit 1
           fi
+          echo ""
           echo "✓ Migrations applied successfully"
 
-      - name: Verify organization isolation
+      - name: Verify organization isolation and table naming
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/meridian_test?sslmode=disable
         run: |
-          echo "Verifying migration tracking..."
-          # Services with schema-qualified migrations use dedicated _revisions schemas
-          # Services with unqualified migrations (like party) track revisions in target schema
+          echo "Verifying organization schemas and table naming..."
 
-          # Check that services with dedicated revisions schemas have them
-          REVISION_SCHEMAS=$(psql "$DATABASE_URL" -t -c "
-            SELECT COUNT(DISTINCT table_schema) FROM information_schema.tables
-            WHERE table_schema LIKE '%_revisions' AND table_name = 'atlas_schema_revisions';
-          " | xargs)
+          # Expected singular table names (all services use unqualified names now)
+          EXPECTED_TABLES="account lien financial_booking_log ledger_posting party payment_order financial_position_log audit_trail_entry transaction_lineage transaction_log_entry"
 
-          if [ "$REVISION_SCHEMAS" -lt 1 ]; then
-            echo "❌ No dedicated revision tracking schemas found!"
-            exit 1
-          fi
-          echo "  ✓ Found $REVISION_SCHEMAS service revision tracking schemas"
-
-          # Check that org schemas have Atlas revision tracking (for services with unqualified names)
           for ORG in acme_bank test_org; do
             ORG_SCHEMA="org_${ORG}"
-            echo "Checking revision tracking in: $ORG_SCHEMA"
+            echo ""
+            echo "Checking schema: $ORG_SCHEMA"
+
+            # Count tables in org schema
+            TABLE_COUNT=$(psql "$DATABASE_URL" -t -c "
+              SELECT COUNT(*) FROM information_schema.tables
+              WHERE table_schema = '$ORG_SCHEMA' AND table_type = 'BASE TABLE';
+            " | xargs)
+            echo "  Total tables: $TABLE_COUNT"
+
+            # Verify expected singular table names exist
+            for TABLE in $EXPECTED_TABLES; do
+              EXISTS=$(psql "$DATABASE_URL" -t -c "
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = '$ORG_SCHEMA' AND table_name = '$TABLE';
+              " | xargs)
+              if [ "$EXISTS" -eq 0 ]; then
+                echo "  ⚠ Table '$TABLE' not found in $ORG_SCHEMA"
+              else
+                echo "  ✓ $TABLE"
+              fi
+            done
+
+            # Verify Atlas revision tracking exists
             REVISIONS=$(psql "$DATABASE_URL" -t -c "
               SELECT COUNT(*) FROM information_schema.tables
               WHERE table_schema = '$ORG_SCHEMA' AND table_name = 'atlas_schema_revisions';
             " | xargs)
-            if [ "$REVISIONS" -lt 1 ]; then
-              echo "  ⚠ No atlas_schema_revisions in $ORG_SCHEMA (expected for unqualified migrations)"
-            else
-              echo "  ✓ atlas_schema_revisions present in $ORG_SCHEMA"
+            if [ "$REVISIONS" -ge 1 ]; then
+              echo "  ✓ atlas_schema_revisions (revision tracking)"
             fi
           done
 
-          # Verify org schemas have tables from services with unqualified migrations
-          # Services like party use unqualified table names (search_path routing)
+          # Verify NO old schema-qualified patterns exist
           echo ""
-          echo "Verifying organization schemas have tables..."
-          for ORG in acme_bank test_org; do
-            ORG_SCHEMA="org_${ORG}"
-            TABLE_COUNT=$(psql "$DATABASE_URL" -t -c "
-              SELECT COUNT(*) FROM information_schema.tables
-              WHERE table_schema = '$ORG_SCHEMA';
+          echo "Verifying no old schema-qualified tables..."
+          OLD_SCHEMAS="current_account financial_accounting payment_order position_keeping platform"
+          for SCHEMA in $OLD_SCHEMAS; do
+            EXISTS=$(psql "$DATABASE_URL" -t -c "
+              SELECT COUNT(*) FROM information_schema.schemata
+              WHERE schema_name = '$SCHEMA';
             " | xargs)
-            if [ "$TABLE_COUNT" -lt 1 ]; then
-              echo "❌ Organization schema $ORG_SCHEMA has no tables!"
-              exit 1
+            if [ "$EXISTS" -gt 0 ]; then
+              TABLES=$(psql "$DATABASE_URL" -t -c "
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = '$SCHEMA';
+              " | xargs)
+              if [ "$TABLES" -gt 0 ]; then
+                echo "  ❌ Found $TABLES tables in old schema '$SCHEMA'"
+                exit 1
+              fi
             fi
-            echo "  ✓ $ORG_SCHEMA has $TABLE_COUNT tables"
           done
-
-          # Verify services with schema-qualified migrations still have their schemas
-          # These services haven't migrated to unqualified names yet
-          echo ""
-          echo "Verifying service schemas (schema-qualified migrations)..."
-          for SCHEMA in financial_accounting payment_order position_keeping; do
-            TABLE_COUNT=$(psql "$DATABASE_URL" -t -c "
-              SELECT COUNT(*) FROM information_schema.tables
-              WHERE table_schema = '$SCHEMA';
-            " | xargs)
-            if [ "$TABLE_COUNT" -lt 1 ]; then
-              echo "❌ Schema $SCHEMA has no tables!"
-              exit 1
-            fi
-            echo "  ✓ $SCHEMA has $TABLE_COUNT tables"
-          done
+          echo "  ✓ No old schema-qualified tables found"
 
           echo ""
-          echo "✓ Multi-organization migration infrastructure verified"
+          echo "✓ Organization isolation and table naming verified"

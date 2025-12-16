@@ -37,7 +37,8 @@ type FinancialBookingLogEntity struct {
 	Version int `gorm:"not null"`
 }
 
-// TableName overrides the default table name with schema prefix
+// TableName overrides the default table name.
+// Uses singular, unqualified name per database-per-service architecture.
 func (FinancialBookingLogEntity) TableName() string {
-	return "financial_accounting.financial_booking_logs"
+	return "financial_booking_log"
 }

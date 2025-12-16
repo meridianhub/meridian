@@ -14,7 +14,7 @@ type LedgerPostingEntity struct {
 	ID uuid.UUID `gorm:"type:uuid;primaryKey"`
 
 	// Foreign key to booking log
-	FinancialBookingLogID uuid.UUID `gorm:"type:uuid;not null;index:idx_financial_accounting_ledger_postings_booking_log_id;constraint:OnDelete:RESTRICT"`
+	FinancialBookingLogID uuid.UUID `gorm:"type:uuid;not null;index:idx_ledger_posting_booking_log_id;constraint:OnDelete:RESTRICT"`
 
 	// Business fields
 	PostingDirection string    `gorm:"not null;size:10"`
@@ -36,7 +36,8 @@ type LedgerPostingEntity struct {
 	DeletedAt gorm.DeletedAt `gorm:"index"` // Soft delete
 }
 
-// TableName overrides the default table name with schema prefix
+// TableName overrides the default table name.
+// Uses singular, unqualified name per database-per-service architecture.
 func (LedgerPostingEntity) TableName() string {
-	return "financial_accounting.ledger_postings"
+	return "ledger_posting"
 }
