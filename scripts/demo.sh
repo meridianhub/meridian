@@ -231,39 +231,45 @@ echo -e "${MAGENTA}║  Part 1: Health Checks & Service Readiness               
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-ALL_HEALTHY=true
-
-check_health() {
-    local service=$1
-    local port=$2
-    echo -e "${CYAN}► Checking $service service health...${NC}"
-    local health
-    health=$(grpcurl -plaintext localhost:$port grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
-    local status
-    status=$(echo "$health" | jq -r '.status')
-    echo "$health" | jq "{service: \"$service\", status: .status}"
-
-    if [ "$status" != "SERVING" ]; then
-        ALL_HEALTHY=false
-        if [ "$status" = "UNKNOWN" ]; then
-            echo -e "  ${YELLOW}⚠ Service not responding or health check unavailable${NC}"
-        else
-            echo -e "  ${RED}✗ Service not healthy: $status${NC}"
-        fi
-    fi
-    echo ""
-}
-
-run_health_checks() {
+# Display health check status in table format
+show_health_status() {
     ALL_HEALTHY=true
-    check_health "current-account" 50051
-    check_health "position-keeping" 50053
-    check_health "financial-accounting" 50052
-    check_health "payment-order" 50054
-    check_health "party" 50055
+
+    echo -e "${CYAN}╭─────────────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${CYAN}│  Service                      Port     gRPC Health Status       │${NC}"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────────────────┤${NC}"
+
+    declare -A services=(
+        ["current-account"]=50051
+        ["position-keeping"]=50053
+        ["financial-accounting"]=50052
+        ["payment-order"]=50054
+        ["party"]=50055
+    )
+
+    for svc in current-account position-keeping financial-accounting payment-order party; do
+        port=${services[$svc]}
+        health=$(grpcurl -plaintext localhost:$port grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
+        status=$(echo "$health" | jq -r '.status')
+
+        if [ "$status" = "SERVING" ]; then
+            STATUS_DISPLAY="${GREEN}● SERVING${NC}"
+        elif [ "$status" = "UNKNOWN" ]; then
+            STATUS_DISPLAY="${YELLOW}○ UNKNOWN${NC}"
+            ALL_HEALTHY=false
+        else
+            STATUS_DISPLAY="${RED}✗ $status${NC}"
+            ALL_HEALTHY=false
+        fi
+
+        printf "${CYAN}│${NC}  %-28s %-8s %b         ${CYAN}│${NC}\n" "$svc" "$port" "$STATUS_DISPLAY"
+    done
+
+    echo -e "${CYAN}╰─────────────────────────────────────────────────────────────────╯${NC}"
 }
 
-run_health_checks
+ALL_HEALTHY=true
+show_health_status
 
 HEALTH_RETRY_COUNT=0
 MAX_HEALTH_RETRIES=10
@@ -277,7 +283,7 @@ while [ "$ALL_HEALTHY" != true ]; do
     read -n 1 -s -r
     echo ""
     echo -e "${CYAN}► Retrying health checks...${NC}\n"
-    run_health_checks
+    show_health_status
 done
 
 echo -e "${GREEN}✓ All services healthy and ready${NC}\n"
