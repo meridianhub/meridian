@@ -1,6 +1,7 @@
-// Atlas configuration for Position Keeping schema
+// Atlas configuration for Position Keeping Service
 // BIAN Service Domain: Position Keeping
 // Pre-ledger transaction log and position tracking
+// Uses database-per-service architecture with unqualified table names
 
 data "external_schema" "gorm" {
   program = [
@@ -8,26 +9,21 @@ data "external_schema" "gorm" {
     "run",
     "-mod=mod",
     "./utilities/atlas-loader",
-    "--schema=position_keeping"
+    "--service=position-keeping"
   ]
 }
 
 env "local" {
-  // Schema-specific migration directory
+  // Service-specific migration directory
   migration {
     dir = "file://services/position-keeping/migrations"
-    revisions_schema = "position_keeping_revisions"
   }
 
-  // Dev database
+  // Dev database - uses default public schema
   dev = "docker://postgres/16/dev"
 
   // Source schema from GORM models via external loader
   src = data.external_schema.gorm.url
-
-  // Schema configuration
-  // Position-keeping is independent per BIAN domain (ADR-002) - no cross-schema dependencies
-  schemas = ["position_keeping"]
 
   // Lint configuration to catch dangerous changes
   lint {
@@ -46,14 +42,11 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/position-keeping/migrations"
-    revisions_schema = "position_keeping_revisions"
   }
 
   dev = "docker://postgres/16/dev"
 
   src = data.external_schema.gorm.url
-
-  schemas = ["position_keeping"]
 
   lint {
     destructive {
@@ -70,12 +63,10 @@ env "ci" {
 
 env "production" {
   // Production environment - apply only, never diff
-  url = getenv("PROD_DATABASE_URL")
+  // URL points to service-specific database (meridian_position_keeping)
+  url = getenv("DATABASE_URL")
 
   migration {
     dir = "file://services/position-keeping/migrations"
-    revisions_schema = "position_keeping_revisions"
   }
-
-  schemas = ["position_keeping"]
 }

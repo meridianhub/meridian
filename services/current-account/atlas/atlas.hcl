@@ -1,6 +1,7 @@
-// Atlas configuration for Current Account schema
+// Atlas configuration for Current Account Service
 // BIAN Service Domain: Current Account
-// Manages customers and their accounts
+// Manages accounts and liens
+// Uses database-per-service architecture with unqualified table names
 
 data "external_schema" "gorm" {
   program = [
@@ -8,26 +9,21 @@ data "external_schema" "gorm" {
     "run",
     "-mod=mod",
     "./utilities/atlas-loader",
-    "--schema=current_account"
+    "--service=current-account"
   ]
 }
 
 env "local" {
-  // Schema-specific migration directory
+  // Service-specific migration directory
   migration {
     dir = "file://services/current-account/migrations"
-    // Use schema-specific revisions table to avoid conflicts with other services
-    revisions_schema = "current_account_revisions"
   }
 
-  // Dev database - include current_account schema in search path
+  // Dev database - uses default public schema
   dev = "docker://postgres/16/dev"
 
   // Source schema from GORM models via external loader
   src = data.external_schema.gorm.url
-
-  // Schema configuration
-  schemas = ["current_account"]
 
   // Lint configuration to catch dangerous changes
   lint {
@@ -46,14 +42,11 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/current-account/migrations"
-    revisions_schema = "current_account_revisions"
   }
 
   dev = "docker://postgres/16/dev"
 
   src = data.external_schema.gorm.url
-
-  schemas = ["current_account"]
 
   lint {
     destructive {
@@ -70,12 +63,10 @@ env "ci" {
 
 env "production" {
   // Production environment - apply only, never diff
-  url = getenv("PROD_DATABASE_URL")
+  // URL points to service-specific database (meridian_current_account)
+  url = getenv("DATABASE_URL")
 
   migration {
     dir = "file://services/current-account/migrations"
-    revisions_schema = "current_account_revisions"
   }
-
-  schemas = ["current_account"]
 }

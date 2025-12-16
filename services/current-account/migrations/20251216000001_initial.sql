@@ -1,12 +1,10 @@
 -- Current Account Service Schema
 -- Consolidated migration for clean slate deployment
+-- Uses unqualified table names (relies on database-per-service architecture)
 
--- Create schema
-CREATE SCHEMA IF NOT EXISTS "current_account";
-
--- Create "accounts" table
+-- Create "account" table (singular, unqualified)
 -- Note: No customers table - party data managed by Party Service via gRPC
-CREATE TABLE "current_account"."accounts" (
+CREATE TABLE "account" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "created_by" character varying(100) NOT NULL,
@@ -43,20 +41,20 @@ CREATE TABLE "current_account"."accounts" (
   PRIMARY KEY ("id")
 );
 
--- Indexes for accounts
-CREATE UNIQUE INDEX "idx_current_account_accounts_account_id" ON "current_account"."accounts" ("account_id");
-CREATE UNIQUE INDEX "idx_current_account_accounts_account_identification" ON "current_account"."accounts" ("account_identification");
-CREATE INDEX "idx_current_account_accounts_party_id" ON "current_account"."accounts" ("party_id");
-CREATE INDEX "idx_current_account_accounts_deleted_at" ON "current_account"."accounts" ("deleted_at");
-CREATE INDEX "idx_current_account_accounts_opened_at" ON "current_account"."accounts" ("opened_at");
-CREATE INDEX "idx_current_account_accounts_closed_at" ON "current_account"."accounts" ("closed_at");
+-- Indexes for account
+CREATE UNIQUE INDEX "idx_account_account_id" ON "account" ("account_id");
+CREATE UNIQUE INDEX "idx_account_account_identification" ON "account" ("account_identification");
+CREATE INDEX "idx_account_party_id" ON "account" ("party_id");
+CREATE INDEX "idx_account_deleted_at" ON "account" ("deleted_at");
+CREATE INDEX "idx_account_opened_at" ON "account" ("opened_at");
+CREATE INDEX "idx_account_closed_at" ON "account" ("closed_at");
 
 -- Comment documenting party_id
-COMMENT ON COLUMN "current_account"."accounts"."party_id" IS
+COMMENT ON COLUMN "account"."party_id" IS
   'References a party in the Party Service (accessed via gRPC). Not a foreign key constraint as Party Service is a separate microservice.';
 
--- Create "liens" table for tracking holds on account balances
-CREATE TABLE "current_account"."liens" (
+-- Create "lien" table for tracking holds on account balances (singular, unqualified)
+CREATE TABLE "lien" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "account_id" uuid NOT NULL,
   "amount_cents" bigint NOT NULL,
@@ -69,12 +67,12 @@ CREATE TABLE "current_account"."liens" (
   "updated_at" timestamptz NOT NULL DEFAULT now(),
   "version" bigint NOT NULL DEFAULT 1,
   PRIMARY KEY ("id"),
-  CONSTRAINT "chk_liens_amount_cents" CHECK (amount_cents > 0),
-  CONSTRAINT "chk_liens_status" CHECK (status IN ('ACTIVE', 'EXECUTED', 'TERMINATED')),
-  CONSTRAINT "fk_liens_account" FOREIGN KEY ("account_id") REFERENCES "current_account"."accounts" ("id") ON UPDATE NO ACTION ON DELETE RESTRICT
+  CONSTRAINT "chk_lien_amount_cents" CHECK (amount_cents > 0),
+  CONSTRAINT "chk_lien_status" CHECK (status IN ('ACTIVE', 'EXECUTED', 'TERMINATED')),
+  CONSTRAINT "fk_lien_account" FOREIGN KEY ("account_id") REFERENCES "account" ("id") ON UPDATE NO ACTION ON DELETE RESTRICT
 );
 
--- Indexes for liens
-CREATE INDEX "idx_liens_account_status" ON "current_account"."liens" ("account_id", "status");
-CREATE UNIQUE INDEX "idx_liens_payment_order" ON "current_account"."liens" ("payment_order_reference");
-CREATE INDEX "idx_liens_expires_at" ON "current_account"."liens" ("expires_at");
+-- Indexes for lien
+CREATE INDEX "idx_lien_account_status" ON "lien" ("account_id", "status");
+CREATE UNIQUE INDEX "idx_lien_payment_order" ON "lien" ("payment_order_reference");
+CREATE INDEX "idx_lien_expires_at" ON "lien" ("expires_at");
