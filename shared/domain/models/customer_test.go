@@ -8,8 +8,8 @@ import (
 
 func TestCustomer_TableName(t *testing.T) {
 	customer := Customer{}
-	if customer.TableName() != "current_account.customers" {
-		t.Errorf("TableName() = %v, want %v", customer.TableName(), "current_account.customers")
+	if customer.TableName() != "customer" {
+		t.Errorf("TableName() = %v, want %v", customer.TableName(), "customer")
 	}
 }
 

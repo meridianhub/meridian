@@ -8,7 +8,7 @@ import (
 )
 
 // FinancialPositionLog represents the aggregate root for position keeping.
-// Maps to position_keeping.financial_position_logs table.
+// Maps to financial_position_log table (singular, unqualified for search_path routing).
 type FinancialPositionLog struct {
 	BaseModel
 
@@ -33,12 +33,13 @@ type FinancialPositionLog struct {
 }
 
 // TableName specifies the table name for GORM.
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
 func (FinancialPositionLog) TableName() string {
-	return "position_keeping.financial_position_logs"
+	return "financial_position_log"
 }
 
 // TransactionLogEntry represents a single transaction entry in the position log.
-// Maps to position_keeping.transaction_log_entries table.
+// Maps to transaction_log_entry table (singular, unqualified for search_path routing).
 type TransactionLogEntry struct {
 	BaseModel
 
@@ -61,12 +62,13 @@ type TransactionLogEntry struct {
 }
 
 // TableName specifies the table name for GORM.
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
 func (TransactionLogEntry) TableName() string {
-	return "position_keeping.transaction_log_entries"
+	return "transaction_log_entry"
 }
 
 // TransactionLineage tracks parent-child relationships between transactions.
-// Maps to position_keeping.transaction_lineages table.
+// Maps to transaction_lineage table (singular, unqualified for search_path routing).
 type TransactionLineage struct {
 	BaseModel
 
@@ -83,12 +85,13 @@ type TransactionLineage struct {
 }
 
 // TableName specifies the table name for GORM.
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
 func (TransactionLineage) TableName() string {
-	return "position_keeping.transaction_lineages"
+	return "transaction_lineage"
 }
 
 // AuditTrailEntry captures audit information for compliance.
-// Maps to position_keeping.audit_trail_entries table.
+// Maps to audit_trail_entry table (singular, unqualified for search_path routing).
 type AuditTrailEntry struct {
 	BaseModel
 
@@ -107,6 +110,7 @@ type AuditTrailEntry struct {
 }
 
 // TableName specifies the table name for GORM.
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
 func (AuditTrailEntry) TableName() string {
-	return "position_keeping.audit_trail_entries"
+	return "audit_trail_entry"
 }

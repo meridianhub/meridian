@@ -19,7 +19,9 @@ type Customer struct {
 	Accounts []Account `gorm:"foreignKey:CustomerID;constraint:OnDelete:RESTRICT" json:"accounts,omitempty"`
 }
 
-// TableName overrides the table name used by Customer to `current_account.customers`
+// TableName overrides the table name.
+// Uses singular unqualified name to allow PostgreSQL search_path to route queries
+// to tenant-specific schemas (e.g., tenant_acme_bank.customer).
 func (Customer) TableName() string {
-	return "current_account.customers"
+	return "customer"
 }
