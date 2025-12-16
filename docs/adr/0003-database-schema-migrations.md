@@ -16,7 +16,7 @@ instructions: |
 
 # 3. Database Schema Migrations with Atlas
 
-Date: 2025-10-25 (Revised: 2025-10-25)
+Date: 2025-10-25 (Revised: 2025-12-16)
 
 ## Status
 
@@ -137,36 +137,74 @@ domain models
 
 ## Implementation Details
 
+### Database Architecture
+
+**Database-per-service with schema-per-org:**
+
+```
+Database: meridian_party              (service-specific)
+  └── Schema: org_acme_bank           (org-specific)
+       └── Table: party               (singular, unqualified)
+  └── Schema: org_demo_corp
+       └── Table: party
+
+Database: meridian_current_account
+  └── Schema: org_acme_bank
+       └── Tables: account, lien, audit_log, audit_outbox
+```
+
+- Each service has its own PostgreSQL database
+- Each organization gets its own schema within each service database
+- Connection URL includes `search_path` for org routing: `postgres://...?search_path=org_acme_bank`
+- Queries use unqualified table names; PostgreSQL resolves via `search_path`
+
+### Naming Conventions
+
+**Table names:**
+- **Singular nouns**: `account`, `party`, `lien` (not `accounts`, `parties`, `liens`)
+- **Unqualified**: No schema prefix in migrations (relies on `search_path`)
+- **Snake_case**: `payment_order`, `audit_trail_entry`
+
+**Compound names follow the pattern `<context>_<entity>`:**
+- `payment_order` - an order for payment
+- `ledger_posting` - a posting to a ledger
+- `audit_trail_entry` - an entry in an audit trail
+- `financial_booking_log` - a log entry for financial bookings
+
+**Rationale:**
+- Singular names read naturally in queries: `SELECT * FROM party WHERE id = $1`
+- Unqualified names enable transparent org routing via `search_path`
+- Consistent with Rails/ActiveRecord conventions
+
 ### Project Structure
 
 ```text
 project-root/
-├── atlas/                              # Atlas configuration directory (per-schema)
-│   ├── current_account/
-│   │   └── atlas.hcl                   # Current Account schema config
-│   ├── position_keeping/
-│   │   └── atlas.hcl                   # Position Keeping schema config
-│   ├── financial_accounting/
-│   │   └── atlas.hcl                   # Financial Accounting schema config
-│   ├── payment_order/
-│   │   └── atlas.hcl                   # Payment Order schema config
-│   └── shared/
-│       └── atlas.hcl                   # Shared audit factory schema config
-├── internal/
-│   ├── domain/
-│   │   └── booking_log.go              # Pure domain models (no persistence tags)
-│   └── adapters/
-│       └── persistence/
-│           ├── booking_log_entity.go   # Database entities (GORM tags, source of truth for DB)
-│           └── booking_log_repository.go
-└── migrations/                         # Generated migrations from entities (per-schema)
-    ├── current_account/
-    │   ├── 20250125120000_initial.sql
-    │   └── atlas.sum
-    ├── position_keeping/
-    │   └── ...
-    └── financial_accounting/
-        └── ...
+├── services/                           # Service-specific code and migrations
+│   ├── current-account/
+│   │   ├── atlas/
+│   │   │   └── atlas.hcl               # Service-specific Atlas config
+│   │   ├── migrations/
+│   │   │   ├── 20251216000001_initial.sql
+│   │   │   └── atlas.sum
+│   │   └── adapters/
+│   │       └── persistence/
+│   │           ├── account_entity.go   # Database entities (GORM tags)
+│   │           └── lien_entity.go
+│   ├── party/
+│   │   ├── atlas/
+│   │   │   └── atlas.hcl
+│   │   ├── migrations/
+│   │   │   └── ...
+│   │   └── adapters/
+│   │       └── persistence/
+│   │           └── party_entity.go
+│   └── ...                             # Other services follow same pattern
+├── shared/
+│   └── domain/
+│       └── models/                     # Shared domain models (no persistence tags)
+└── utilities/
+    └── atlas-loader/                   # GORM schema loader for Atlas
 ```
 
 ### Database Entity as Source of Truth for Persistence
@@ -208,9 +246,10 @@ type BookingLogEntity struct {
     DeletedAt       *time.Time `gorm:"index"`
 }
 
-// TableName overrides the default table name
+// TableName overrides the default table name.
+// Uses singular, unqualified name per naming conventions.
 func (BookingLogEntity) TableName() string {
-    return "financial_booking_logs"
+    return "financial_booking_log"
 }
 ```
 
@@ -342,11 +381,11 @@ atlas migrate diff add_narrative \
   --config atlas/financial_accounting/atlas.hcl
 ```
 
-**Generated migration (migrations/financial_accounting/20250125120000_add_narrative.sql):**
+**Generated migration (services/financial-accounting/migrations/20250125120000_add_narrative.sql):**
 
 ```sql
--- Add column "narrative_text" to table: "financial_booking_logs"
-ALTER TABLE "financial_booking_logs"
+-- Add column "narrative_text" to table: "financial_booking_log"
+ALTER TABLE "financial_booking_log"
   ADD COLUMN "narrative_text" text;
 ```
 
