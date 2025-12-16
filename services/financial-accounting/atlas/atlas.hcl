@@ -9,7 +9,7 @@ data "external_schema" "gorm" {
     "run",
     "-mod=mod",
     "./utilities/atlas-loader",
-    "--service=financial-accounting"
+    "--schema=financial_accounting"
   ]
 }
 

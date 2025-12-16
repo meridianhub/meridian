@@ -9,7 +9,7 @@ data "external_schema" "gorm" {
     "run",
     "-mod=mod",
     "./utilities/atlas-loader",
-    "--service=current-account"
+    "--schema=current_account"
   ]
 }
 
