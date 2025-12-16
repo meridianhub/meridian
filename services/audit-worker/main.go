@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -51,6 +52,9 @@ func setupRoutes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "audit-worker v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
 	})
+
+	// Prometheus metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
 }
 
 // createServer creates an HTTP server with proper security timeouts
