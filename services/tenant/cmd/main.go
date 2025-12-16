@@ -214,25 +214,36 @@ func run(logger *slog.Logger) error {
 			"hint", "set AUTH_ENABLED=true and AUTH_JWKS_URL to enable authentication")
 	}
 
-	// Build interceptor chains based on auth configuration
+	// Build interceptor chains based on auth configuration.
+	//
+	// Interceptor chain order (executed in sequence):
+	//   1. Tracing      - Creates OpenTelemetry span for the request
+	//   2. PlatformAuth - Validates JWT and populates claims in context (no tenant requirement)
+	//   3. PlatformAdmin - Requires platform-admin/super-admin role, rejects tenant-scoped tokens
+	//   4. Recovery     - Catches panics and converts them to gRPC errors
+	//
+	// Order matters because:
+	//   - Tracing must be first to capture the full request lifecycle including auth failures
+	//   - PlatformAuth must precede PlatformAdmin to populate claims that PlatformAdmin validates
+	//   - Recovery must be last to catch panics from any preceding interceptor or handler
 	var unaryInterceptors []grpc.UnaryServerInterceptor
 	var streamInterceptors []grpc.StreamServerInterceptor
 
-	// Tracing first
+	// 1. Tracing - captures full request lifecycle
 	unaryInterceptors = append(unaryInterceptors, tracer.UnaryServerInterceptor())
 	streamInterceptors = append(streamInterceptors, tracer.StreamServerInterceptor())
 
-	// Auth interceptors (if enabled)
+	// 2-3. Auth interceptors (if enabled)
 	if authInterceptor != nil {
-		// Platform auth validates JWT without requiring tenant claims
+		// 2. PlatformAuth - validates JWT without requiring tenant claims, populates claims in context
 		unaryInterceptors = append(unaryInterceptors, authInterceptor.PlatformUnaryInterceptor())
 		streamInterceptors = append(streamInterceptors, authInterceptor.PlatformStreamInterceptor())
-		// Platform admin interceptor validates platform-admin role and rejects tenant-scoped tokens
+		// 3. PlatformAdmin - requires platform-admin/super-admin role, rejects tenant-scoped tokens
 		unaryInterceptors = append(unaryInterceptors, auth.PlatformAdminInterceptor())
 		streamInterceptors = append(streamInterceptors, auth.PlatformAdminStreamInterceptor())
 	}
 
-	// Recovery last to catch all panics
+	// 4. Recovery - catches panics from any preceding interceptor or handler
 	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
 	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(logger))
 

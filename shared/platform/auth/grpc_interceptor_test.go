@@ -806,3 +806,317 @@ func TestTenantContext(t *testing.T) {
 		assert.Equal(t, "acme_bank", tenantID.String())
 	})
 }
+
+func TestPlatformUnaryInterceptor(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	validator, err := NewJWTValidator(publicKey)
+	require.NoError(t, err)
+
+	t.Run("success with valid token without tenant claim", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create valid token WITHOUT tenant_id (platform services don't require it)
+		claims := &Claims{
+			UserID: "admin-123",
+			Roles:  []string{"platform-admin"},
+			Scopes: []string{"read", "write"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/meridian.tenant.v1.TenantService/InitiateTenant"}
+		resp, err := interceptor.PlatformUnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Verify claims were injected into context
+		resultCtx := resp.(context.Context)
+		userID, ok := GetUserIDFromContext(resultCtx)
+		assert.True(t, ok)
+		assert.Equal(t, "admin-123", userID)
+
+		roles, ok := GetRolesFromContext(resultCtx)
+		assert.True(t, ok)
+		assert.Equal(t, []string{"platform-admin"}, roles)
+
+		// Verify NO tenant in context (platform services don't inject tenant)
+		_, hasTenant := tenant.FromContext(resultCtx)
+		assert.False(t, hasTenant, "platform interceptor should not inject tenant context")
+	})
+
+	t.Run("success with token that has tenant claim", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Platform interceptor accepts tokens WITH tenant claims too
+		// (PlatformAdminInterceptor is responsible for rejecting them)
+		claims := &Claims{
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/meridian.tenant.v1.TenantService/InitiateTenant"}
+		resp, err := interceptor.PlatformUnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Verify claims were injected into context
+		resultCtx := resp.(context.Context)
+		claimsFromCtx, ok := GetClaimsFromContext(resultCtx)
+		assert.True(t, ok)
+		assert.Equal(t, "acme_bank", claimsFromCtx.TenantID)
+	})
+
+	t.Run("bypass authentication for whitelisted method", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator:     validator,
+			BypassMethods: []string{"/grpc.health.v1.Health/Check"},
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// No authorization header
+		ctx := context.Background()
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/grpc.health.v1.Health/Check"}
+		resp, err := interceptor.PlatformUnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("error with missing authorization header", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/meridian.tenant.v1.TenantService/InitiateTenant"}
+		resp, err := interceptor.PlatformUnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+	})
+
+	t.Run("error with invalid token", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer invalid.token.here")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/meridian.tenant.v1.TenantService/InitiateTenant"}
+		resp, err := interceptor.PlatformUnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+	})
+
+	t.Run("error with expired token", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create expired token
+		claims := &Claims{
+			UserID: "admin-123",
+			Roles:  []string{"platform-admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)), // Expired 1 hour ago
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/meridian.tenant.v1.TenantService/InitiateTenant"}
+		resp, err := interceptor.PlatformUnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+		assert.Contains(t, st.Message(), "expired")
+	})
+}
+
+func TestPlatformStreamInterceptor(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	validator, err := NewJWTValidator(publicKey)
+	require.NoError(t, err)
+
+	t.Run("success with valid token without tenant claim", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create valid token WITHOUT tenant_id
+		claims := &Claims{
+			UserID: "admin-123",
+			Roles:  []string{"platform-admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		stream := &mockServerStream{ctx: ctx}
+
+		info := &grpc.StreamServerInfo{FullMethod: "/meridian.tenant.v1.TenantService/WatchTenants"}
+
+		// Custom handler to verify context
+		var handlerCtx context.Context
+		handler := func(_ interface{}, s grpc.ServerStream) error {
+			handlerCtx = s.Context()
+			return nil
+		}
+
+		err = interceptor.PlatformStreamInterceptor()(nil, stream, info, handler)
+
+		assert.NoError(t, err)
+
+		// Verify claims were injected into context
+		userID, ok := GetUserIDFromContext(handlerCtx)
+		assert.True(t, ok)
+		assert.Equal(t, "admin-123", userID)
+
+		// Verify NO tenant in context
+		_, hasTenant := tenant.FromContext(handlerCtx)
+		assert.False(t, hasTenant, "platform interceptor should not inject tenant context")
+	})
+
+	t.Run("bypass authentication for whitelisted method", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator:     validator,
+			BypassMethods: []string{"/grpc.health.v1.Health/Watch"},
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		stream := &mockServerStream{ctx: ctx}
+
+		info := &grpc.StreamServerInfo{FullMethod: "/grpc.health.v1.Health/Watch"}
+
+		handler := func(_ interface{}, _ grpc.ServerStream) error {
+			return nil
+		}
+
+		err = interceptor.PlatformStreamInterceptor()(nil, stream, info, handler)
+
+		assert.NoError(t, err)
+	})
+
+	t.Run("error with missing authorization header", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		stream := &mockServerStream{ctx: ctx}
+
+		info := &grpc.StreamServerInfo{FullMethod: "/meridian.tenant.v1.TenantService/WatchTenants"}
+
+		handler := func(_ interface{}, _ grpc.ServerStream) error {
+			return nil
+		}
+
+		err = interceptor.PlatformStreamInterceptor()(nil, stream, info, handler)
+
+		assert.Error(t, err)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+	})
+
+	t.Run("error with invalid token", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer invalid.token.here")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		stream := &mockServerStream{ctx: ctx}
+
+		info := &grpc.StreamServerInfo{FullMethod: "/meridian.tenant.v1.TenantService/WatchTenants"}
+
+		handler := func(_ interface{}, _ grpc.ServerStream) error {
+			return nil
+		}
+
+		err = interceptor.PlatformStreamInterceptor()(nil, stream, info, handler)
+
+		assert.Error(t, err)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+	})
+}
