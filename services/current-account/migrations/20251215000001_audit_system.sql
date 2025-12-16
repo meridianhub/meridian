@@ -1,6 +1,6 @@
 -- Current Account Audit System
 -- Static audit table creation (CockroachDB compatible)
--- Audit logging will be handled at application level via GORM hooks
+-- Audit logging handled at application level via GORM hooks
 -- See ADR-0009 for rationale
 
 -- Create audit schema

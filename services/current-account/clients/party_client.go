@@ -57,7 +57,7 @@ type PartyGRPCClient struct {
 
 // PartyClientConfig holds configuration for the Party client
 type PartyClientConfig struct {
-	// Target is the gRPC server address (e.g., "localhost:50054" or "party-service:50054")
+	// Target is the gRPC server address (e.g., "localhost:50055" or "party-service:50055")
 	//
 	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
 	// This field is maintained for backward compatibility with tests and local development.
@@ -102,7 +102,7 @@ type PartyClientConfig struct {
 //	config := &clients.PartyClientConfig{
 //	    ServiceName: "party-service",
 //	    Namespace:   "default",
-//	    Port:        50054,
+//	    Port:        50055,  // Party service port
 //	    Timeout:     30 * time.Second,
 //	    Tracer:      tracer,
 //	}
@@ -110,7 +110,7 @@ type PartyClientConfig struct {
 // 2. Legacy direct connection (for backward compatibility):
 //
 //	config := &clients.PartyClientConfig{
-//	    Target:  "party-service:50054",
+//	    Target:  "party-service:50055",
 //	    Timeout: 30 * time.Second,
 //	    Tracer:  tracer,
 //	}

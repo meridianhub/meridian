@@ -45,7 +45,7 @@ VOUCHERS_TO_PAY=500  # Exchange rate: 50 vouchers per GPU-hour
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║  Cross-Organization Settlement Demo                            ║${NC}"
-echo -e "${BLUE}║  UN WFP buys GPU compute time from Motive AI                  ║${NC}"
+echo -e "${BLUE}║  UN WFP buys GPU compute time from Motive AI                   ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 

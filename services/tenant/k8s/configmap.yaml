@@ -20,6 +20,9 @@ data:
   GRPC_PORT: "50056"
   GRPC_MAX_CONCURRENT_STREAMS: "100"
 
+  # Schema provisioning - creates org_{tenant_id} schemas on tenant creation
+  SCHEMA_PROVISIONING_ENABLED: "true"
+
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "tenant-service"
   OTEL_SAMPLING_RATE: "0.1"

@@ -212,6 +212,7 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 	// Note: party_id is a reference to Party Service (no FK constraint)
 	accountID := uuid.New()
 	partyID := uuid.New() // References a party in Party Service (no local FK)
+	now := time.Now()
 	account := &capersistence.CurrentAccountEntity{
 		ID:                    accountID,
 		AccountID:             "ACC-LIEN-001",
@@ -223,8 +224,9 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		Balance:               50000,
 		AvailableBalance:      40000,
 		OverdraftLimit:        5000,
-		CreatedAt:             time.Now(),
-		UpdatedAt:             time.Now(),
+		BalanceUpdatedAt:      &now, // Required by NOT NULL constraint in migration
+		CreatedAt:             now,
+		UpdatedAt:             now,
 		CreatedBy:             "system",
 		UpdatedBy:             "system",
 	}
@@ -356,6 +358,7 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 	partyID := uuid.New() // References a party in Party Service
 
 	// Entity fields must match migration schema columns exactly
+	now := time.Now()
 	entity := &capersistence.CurrentAccountEntity{
 		ID:                    uuid.New(),
 		AccountID:             "ACC-TEST-001",           // Business identifier - matches account_id column
@@ -367,8 +370,9 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 		Balance:               10000,
 		AvailableBalance:      8000,
 		OverdraftLimit:        5000,
-		CreatedAt:             time.Now(),
-		UpdatedAt:             time.Now(),
+		BalanceUpdatedAt:      &now, // Required by NOT NULL constraint in migration
+		CreatedAt:             now,
+		UpdatedAt:             now,
 		CreatedBy:             "system",
 		UpdatedBy:             "system",
 	}

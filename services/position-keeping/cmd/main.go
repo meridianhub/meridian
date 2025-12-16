@@ -20,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
@@ -161,6 +162,11 @@ func run(logger *slog.Logger) error {
 		unaryInterceptors = append(unaryInterceptors, container.AuthInterceptor.UnaryInterceptor())
 		streamInterceptors = append(streamInterceptors, container.AuthInterceptor.StreamInterceptor())
 		logger.Info("auth interceptor enabled in chain")
+	} else {
+		// When auth is disabled, use TenantExtractionInterceptor to get tenant from header
+		unaryInterceptors = append(unaryInterceptors, auth.TenantExtractionInterceptor())
+		streamInterceptors = append(streamInterceptors, auth.TenantExtractionStreamInterceptor())
+		logger.Info("tenant extraction interceptor enabled (auth disabled)")
 	}
 
 	// 4. Recovery (last in chain to catch all panics)

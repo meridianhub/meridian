@@ -109,7 +109,7 @@ func run(logger *slog.Logger) error {
 		"load_balancing", "DNS-based round_robin")
 
 	// Create service with external clients and capture the clients for health checking
-	currentAccountService, posKeepingClient, finAcctClient, err := createServiceWithClients(
+	currentAccountService, svcClients, err := createServiceWithClients(
 		repo,
 		lienRepo,
 		namespace,
@@ -142,6 +142,11 @@ func run(logger *slog.Logger) error {
 		unaryInterceptors = append(unaryInterceptors, authInterceptor.UnaryInterceptor())
 		streamInterceptors = append(streamInterceptors, authInterceptor.StreamInterceptor())
 		logger.Info("auth interceptor enabled in chain")
+	} else {
+		// When auth is disabled, use TenantExtractionInterceptor to get tenant from header
+		unaryInterceptors = append(unaryInterceptors, auth.TenantExtractionInterceptor())
+		streamInterceptors = append(streamInterceptors, auth.TenantExtractionStreamInterceptor())
+		logger.Info("tenant extraction interceptor enabled (auth disabled)")
 	}
 
 	// 3. Recovery (last in chain to catch all panics)
@@ -157,13 +162,16 @@ func run(logger *slog.Logger) error {
 	pb.RegisterCurrentAccountServiceServer(grpcServer, currentAccountService)
 
 	// Register health check service with dependency checking
+	// Health clients bypass the circuit breaker used for business operations
 	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
-		Repository:                repo,
-		PositionKeepingClient:     posKeepingClient,
-		FinancialAccountingClient: finAcctClient,
-		Logger:                    logger,
-		ServiceName:               "current-account",
-		CheckTimeout:              5 * time.Second,
+		Repository:                      repo,
+		PositionKeepingClient:           svcClients.positionKeeping,
+		PositionKeepingHealthClient:     svcClients.positionKeepingHealth,
+		FinancialAccountingClient:       svcClients.financialAccounting,
+		FinancialAccountingHealthClient: svcClients.financialAccountingHealth,
+		Logger:                          logger,
+		ServiceName:                     "current-account",
+		CheckTimeout:                    5 * time.Second,
 	})
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 
@@ -333,6 +341,15 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 	return value
 }
 
+// serviceClients holds the clients created by createServiceWithClients.
+type serviceClients struct {
+	positionKeeping     clients.PositionKeepingClient
+	financialAccounting clients.FinancialAccountingClient
+	// Health clients bypass the circuit breaker for health checks
+	positionKeepingHealth     grpc_health_v1.HealthClient
+	financialAccountingHealth grpc_health_v1.HealthClient
+}
+
 // createServiceWithClients creates the service and returns it along with the external clients
 // for use in health checking. This approach creates the clients once and shares them between
 // the service and health checker to avoid duplicate connections.
@@ -344,7 +361,7 @@ func createServiceWithClients(
 	namespace string,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
-) (*service.Service, clients.PositionKeepingClient, clients.FinancialAccountingClient, error) {
+) (*service.Service, *serviceClients, error) {
 	// Create Position Keeping client with DNS-based load balancing
 	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
 		ServiceName: "position-keeping",
@@ -354,7 +371,7 @@ func createServiceWithClients(
 		Tracer:      tracer,
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create position keeping client: %w", err)
+		return nil, nil, fmt.Errorf("failed to create position keeping client: %w", err)
 	}
 
 	// Wrap with resilience patterns (circuit breaker + retry)
@@ -374,7 +391,7 @@ func createServiceWithClients(
 		Tracer:      tracer,
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create financial accounting client: %w", err)
+		return nil, nil, fmt.Errorf("failed to create financial accounting client: %w", err)
 	}
 
 	// Wrap with resilience patterns (circuit breaker + retry)
@@ -389,12 +406,12 @@ func createServiceWithClients(
 	partyGRPCClient, err := clients.NewPartyClient(&clients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   namespace,
-		Port:        50054,
+		Port:        50055, // Party service port (see services/party/k8s/service.yaml)
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create party client: %w", err)
+		return nil, nil, fmt.Errorf("failed to create party client: %w", err)
 	}
 
 	// Wrap with resilience patterns (circuit breaker + retry)
@@ -416,11 +433,19 @@ func createServiceWithClients(
 		tracer,
 	)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
+		return nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
 	}
 
-	// Return the service and the clients for use in health checking
-	return svc, resilientPosKeepingClient, resilientFinAcctClient, nil
+	// Create health clients from the underlying gRPC connections
+	// These bypass the circuit breaker to avoid health checks tripping business operation circuit breakers
+	clients := &serviceClients{
+		positionKeeping:           resilientPosKeepingClient,
+		financialAccounting:       resilientFinAcctClient,
+		positionKeepingHealth:     grpc_health_v1.NewHealthClient(posKeepingGRPCClient.Conn()),
+		financialAccountingHealth: grpc_health_v1.NewHealthClient(finAcctGRPCClient.Conn()),
+	}
+
+	return svc, clients, nil
 }
 
 // getEnvAsBool returns the environment variable value as bool or default

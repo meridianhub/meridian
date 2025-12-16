@@ -131,7 +131,7 @@ fi
 # Check if golangci-lint is installed
 if ! command -v golangci-lint &> /dev/null; then
     echo -e "${YELLOW}⚠${NC}  golangci-lint not found, installing..."
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.5.0
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.5.0
 fi
 
 # Format staged Go files with gofumpt

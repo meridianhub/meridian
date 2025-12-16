@@ -54,6 +54,7 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -282,14 +283,21 @@ func (c *Config) Validate() error {
 }
 
 // DefaultConfig returns a configuration with standard BIAN services.
+// Migration paths default to /migrations/* for container deployment.
+// Override via environment variable MIGRATIONS_BASE_PATH for local development.
 func DefaultConfig() *Config {
+	basePath := os.Getenv("MIGRATIONS_BASE_PATH")
+	if basePath == "" {
+		basePath = "/migrations" // Default for container deployment
+	}
+
 	return &Config{
 		Services: []ServiceConfig{
-			{Name: "party", MigrationPath: "services/party/migrations"},
-			{Name: "current-account", MigrationPath: "services/current-account/migrations"},
-			{Name: "position-keeping", MigrationPath: "services/position-keeping/migrations"},
-			{Name: "financial-accounting", MigrationPath: "services/financial-accounting/migrations"},
-			{Name: "payment-order", MigrationPath: "services/payment-order/migrations"},
+			{Name: "party", MigrationPath: basePath + "/party"},
+			{Name: "current-account", MigrationPath: basePath + "/current-account"},
+			{Name: "position-keeping", MigrationPath: basePath + "/position-keeping"},
+			{Name: "financial-accounting", MigrationPath: basePath + "/financial-accounting"},
+			{Name: "payment-order", MigrationPath: basePath + "/payment-order"},
 		},
 		ProvisioningTimeout: 30 * time.Second,
 		DataRetentionPeriod: 7 * 365 * 24 * time.Hour, // 7 years

@@ -270,8 +270,8 @@ func (s *PositionKeepingService) checkIdempotencyAndAcquireLock(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
 ) (*idempotency.Key, *positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
-	// No idempotency key provided
-	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
+	// No idempotency key provided or idempotency service not configured
+	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" || s.idempotency == nil {
 		return nil, nil, nil
 	}
 
