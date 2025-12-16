@@ -30,9 +30,7 @@ func PlatformAdminInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		// Platform services MUST NOT receive tenant_id claims
-		_, err := claims.GetTenantID()
-		if err == nil {
-			// Tenant ID present - reject request
+		if claims.HasTenantID() {
 			return nil, status.Error(codes.PermissionDenied,
 				"platform services do not accept tenant-scoped credentials")
 		}
@@ -64,8 +62,7 @@ func PlatformAdminStreamInterceptor() grpc.StreamServerInterceptor {
 		}
 
 		// Platform services MUST NOT receive tenant_id claims
-		_, err := claims.GetTenantID()
-		if err == nil {
+		if claims.HasTenantID() {
 			return status.Error(codes.PermissionDenied,
 				"platform services do not accept tenant-scoped credentials")
 		}
