@@ -1,0 +1,23 @@
+# Shellcheck configuration for Meridian project
+# https://www.shellcheck.net/wiki/
+
+# Disable SC1091: Not following sourced files (can't verify in CI)
+disable=SC1091
+
+# Disable SC2034: Variable appears unused (often intentional for parsing/exports)
+disable=SC2034
+
+# Disable SC2155: Declare and assign separately (too noisy for local vars)
+disable=SC2155
+
+# Disable SC2064: Trap with expanding variables (often intentional)
+disable=SC2064
+
+# Disable SC2120: Function references arguments but none passed (false positive for exported functions)
+disable=SC2120
+
+# Disable SC2262: Alias in same parsing unit (fix these scripts to use functions)
+disable=SC2262
+
+# TODO: Re-enable these and fix scripts incrementally:
+# - SC2086: Double quote to prevent globbing (many existing scripts need fixes)

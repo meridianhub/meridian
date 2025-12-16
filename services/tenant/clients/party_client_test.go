@@ -15,7 +15,7 @@ func TestNewPartyClient_RequiresTarget(t *testing.T) {
 
 func TestNewPartyClient_Success(t *testing.T) {
 	client, err := NewPartyClient(&PartyClientConfig{
-		Target: "localhost:50054",
+		Target: "localhost:50055",
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, client)
@@ -28,7 +28,7 @@ func TestNewPartyClient_Success(t *testing.T) {
 
 func TestNewPartyClient_DefaultTimeout(t *testing.T) {
 	client, err := NewPartyClient(&PartyClientConfig{
-		Target: "localhost:50054",
+		Target: "localhost:50055",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 30*time.Second, client.timeout)
@@ -38,7 +38,7 @@ func TestNewPartyClient_DefaultTimeout(t *testing.T) {
 func TestNewPartyClient_CustomTimeout(t *testing.T) {
 	customTimeout := 10 * time.Second
 	client, err := NewPartyClient(&PartyClientConfig{
-		Target:  "localhost:50054",
+		Target:  "localhost:50055",
 		Timeout: customTimeout,
 	})
 	require.NoError(t, err)

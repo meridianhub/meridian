@@ -157,6 +157,11 @@ func run(logger *slog.Logger) error {
 		unaryInterceptors = append(unaryInterceptors, authInterceptor.UnaryInterceptor())
 		streamInterceptors = append(streamInterceptors, authInterceptor.StreamInterceptor())
 		logger.Info("auth interceptor enabled in chain")
+	} else {
+		// When auth is disabled, use TenantExtractionInterceptor to get tenant from header
+		unaryInterceptors = append(unaryInterceptors, auth.TenantExtractionInterceptor())
+		streamInterceptors = append(streamInterceptors, auth.TenantExtractionStreamInterceptor())
+		logger.Info("tenant extraction interceptor enabled (auth disabled)")
 	}
 
 	// 3. Recovery (last in chain to catch all panics)

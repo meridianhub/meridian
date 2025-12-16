@@ -156,6 +156,8 @@ var (
 type Config struct {
 	// Target is the gRPC target address for services
 	Target string
+	// TenantID is the tenant context for multi-tenant operations
+	TenantID string
 	// Timeout is the client-side timeout for the sabotage attempt
 	Timeout time.Duration
 	// Amount is the payment amount in pence
@@ -172,6 +174,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Target:    "localhost:50051",
+		TenantID:  "demo", // Default tenant matching demo.sh
 		Timeout:   30 * time.Millisecond,
 		Amount:    10000, // GBP 100.00 in pence
 		Output:    "./integrity_report.json",
@@ -230,6 +233,8 @@ The demo:
 	flags := rootCmd.Flags()
 	flags.StringVar(&cfg.Target, "target", cfg.Target,
 		"gRPC target address for CurrentAccount and PaymentOrder services")
+	flags.StringVar(&cfg.TenantID, "tenant", cfg.TenantID,
+		"tenant ID for multi-tenant context (default: demo)")
 	flags.DurationVar(&cfg.Timeout, "timeout", cfg.Timeout,
 		"client-side timeout for sabotage attempt (simulated network failure)")
 	flags.Int64Var(&cfg.Amount, "amount", cfg.Amount,
@@ -261,6 +266,7 @@ func runDemo(cfg *Config) (*DemoResult, error) {
 	logger.Info("starting Horizon Integrity Proof",
 		"version", Version,
 		"target", cfg.Target,
+		"tenant", cfg.TenantID,
 		"timeout", cfg.Timeout,
 		"amount_pence", cfg.Amount,
 		"output", cfg.Output,
@@ -273,16 +279,21 @@ func runDemo(cfg *Config) (*DemoResult, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	// Calculate amounts for display (amounts in pence, display in pounds)
+	paymentGBP := float64(cfg.Amount) / 100.0
+	depositGBP := paymentGBP * 10 // Deposit 10x the payment amount
+	finalBalanceGBP := depositGBP - paymentGBP
+
 	// Placeholder demo results - the horizon-demo is a proof-of-concept
 	// demonstrating the CLI structure and output formatting.
 	// See tag 99-horizon-proof for the completed implementation tasks.
 	result := &DemoResult{
 		Steps: []StepResult{
 			{Step: 1, Name: "Create Test Account", Status: StatusOK, Details: "HORIZON-TEST-placeholder"},
-			{Step: 2, Name: "Deposit GBP 1,000", Status: StatusOK, Details: "Balance: GBP 1,000.00"},
-			{Step: 3, Name: "Payment (Attempt 1)", Status: StatusTimeout, Details: "Client: context deadline exceeded"},
-			{Step: 4, Name: "Payment (Attempt 2)", Status: StatusOK, Details: "Idempotency hit, PO: po_placeholder"},
-			{Step: 5, Name: "Verify Balance", Status: StatusPassed, Details: "GBP 900.00 (expected: GBP 900.00)"},
+			{Step: 2, Name: fmt.Sprintf("Deposit £%.0f", depositGBP), Status: StatusOK, Details: fmt.Sprintf("Balance: £%.0f", depositGBP)},
+			{Step: 3, Name: fmt.Sprintf("Payment £%.0f (Attempt 1)", paymentGBP), Status: StatusTimeout, Details: "Client: context deadline exceeded"},
+			{Step: 4, Name: fmt.Sprintf("Payment £%.0f (Attempt 2)", paymentGBP), Status: StatusOK, Details: "Idempotency hit - same PO returned"},
+			{Step: 5, Name: "Verify Balance", Status: StatusPassed, Details: fmt.Sprintf("£%.0f (expected: £%.0f)", finalBalanceGBP, finalBalanceGBP)},
 			{Step: 6, Name: "Verify Orders", Status: StatusPassed, Details: "1 order (expected: 1)"},
 		},
 		Verdict: VerdictPassed,

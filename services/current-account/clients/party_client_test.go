@@ -22,7 +22,7 @@ func TestNewPartyClient_Success(t *testing.T) {
 	t.Parallel()
 
 	cfg := &clients.PartyClientConfig{
-		Target:  "localhost:50054",
+		Target:  "localhost:50055",
 		Timeout: 10 * time.Second,
 	}
 
@@ -53,7 +53,7 @@ func TestNewPartyClient_DefaultTimeout(t *testing.T) {
 	t.Parallel()
 
 	cfg := &clients.PartyClientConfig{
-		Target:  "localhost:50054",
+		Target:  "localhost:50055",
 		Timeout: 0, // Should default to 30 seconds
 	}
 
@@ -70,7 +70,7 @@ func TestNewPartyClient_CustomTimeout(t *testing.T) {
 
 	customTimeout := 5 * time.Minute
 	cfg := &clients.PartyClientConfig{
-		Target:  "localhost:50054",
+		Target:  "localhost:50055",
 		Timeout: customTimeout,
 	}
 
@@ -87,7 +87,7 @@ func TestNewPartyClient_WithTracer(t *testing.T) {
 
 	tracer := &observability.Tracer{}
 	cfg := &clients.PartyClientConfig{
-		Target:  "localhost:50054",
+		Target:  "localhost:50055",
 		Timeout: 10 * time.Second,
 		Tracer:  tracer,
 	}
@@ -104,7 +104,7 @@ func TestNewPartyClient_DefaultDialOptions(t *testing.T) {
 	t.Parallel()
 
 	cfg := &clients.PartyClientConfig{
-		Target:      "localhost:50054",
+		Target:      "localhost:50055",
 		Timeout:     10 * time.Second,
 		DialOptions: nil, // Should use default insecure credentials
 	}
@@ -124,7 +124,7 @@ func TestNewPartyClient_CustomDialOptions(t *testing.T) {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 	cfg := &clients.PartyClientConfig{
-		Target:      "localhost:50054",
+		Target:      "localhost:50055",
 		Timeout:     10 * time.Second,
 		DialOptions: customOpts,
 	}
@@ -161,11 +161,11 @@ func TestNewPartyClient_ValidTargetFormats(t *testing.T) {
 	}{
 		{
 			name:   "host and port",
-			target: "localhost:50054",
+			target: "localhost:50055",
 		},
 		{
 			name:   "IP and port",
-			target: "127.0.0.1:50054",
+			target: "127.0.0.1:50055",
 		},
 		{
 			name:   "service name",
@@ -177,7 +177,7 @@ func TestNewPartyClient_ValidTargetFormats(t *testing.T) {
 		},
 		{
 			name:   "kubernetes service",
-			target: "party-service.default.svc.cluster.local:50054",
+			target: "party-service.default.svc.cluster.local:50055",
 		},
 	}
 
@@ -204,7 +204,7 @@ func TestPartyClient_Close_Success(t *testing.T) {
 	t.Parallel()
 
 	cfg := &clients.PartyClientConfig{
-		Target:  "localhost:50054",
+		Target:  "localhost:50055",
 		Timeout: 10 * time.Second,
 	}
 
@@ -222,7 +222,7 @@ func TestPartyClient_Close_Multiple(t *testing.T) {
 	t.Parallel()
 
 	cfg := &clients.PartyClientConfig{
-		Target:  "localhost:50054",
+		Target:  "localhost:50055",
 		Timeout: 10 * time.Second,
 	}
 
@@ -246,7 +246,7 @@ func TestNewPartyClient_DNSBasedMode(t *testing.T) {
 	cfg := &clients.PartyClientConfig{
 		ServiceName: "party-service",
 		Namespace:   "default",
-		Port:        50054,
+		Port:        50055,
 		Timeout:     10 * time.Second,
 	}
 
@@ -264,7 +264,7 @@ func TestNewPartyClient_DNSBasedMode_DefaultNamespace(t *testing.T) {
 	cfg := &clients.PartyClientConfig{
 		ServiceName: "party-service",
 		Namespace:   "", // Should default to "default"
-		Port:        50054,
+		Port:        50055,
 		Timeout:     10 * time.Second,
 	}
 
@@ -283,7 +283,7 @@ func TestNewPartyClient_DNSBasedMode_WithTracer(t *testing.T) {
 	cfg := &clients.PartyClientConfig{
 		ServiceName: "party-service",
 		Namespace:   "test-namespace",
-		Port:        50054,
+		Port:        50055,
 		Timeout:     10 * time.Second,
 		Tracer:      tracer,
 	}
@@ -303,7 +303,7 @@ func TestNewPartyClient_PrefersDNSOverTarget(t *testing.T) {
 	cfg := &clients.PartyClientConfig{
 		ServiceName: "party-service",
 		Namespace:   "default",
-		Port:        50054,
+		Port:        50055,
 		Target:      "ignored:9999", // Should be ignored
 		Timeout:     10 * time.Second,
 	}

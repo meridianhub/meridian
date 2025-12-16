@@ -558,7 +558,7 @@ Provided scripts make onboarding easy:
 
 # ✓ ctlptl installed
 
-# ✓ Tilt v0.33.1 installed
+# ✓ Tilt v0.36.0 installed
 
 # ✗ Kubernetes cluster not accessible
 

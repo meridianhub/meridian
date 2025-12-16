@@ -47,6 +47,14 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 # Copy binary from builder
 COPY --from=builder /build/tenant /tenant
 
+# Copy service migrations for tenant provisioning (with ownership for nonroot user)
+# These are applied to org_{tenant_id} schemas during tenant provisioning
+COPY --from=builder --chown=65532:65532 /build/services/party/migrations /migrations/party
+COPY --from=builder --chown=65532:65532 /build/services/current-account/migrations /migrations/current-account
+COPY --from=builder --chown=65532:65532 /build/services/position-keeping/migrations /migrations/position-keeping
+COPY --from=builder --chown=65532:65532 /build/services/financial-accounting/migrations /migrations/financial-accounting
+COPY --from=builder --chown=65532:65532 /build/services/payment-order/migrations /migrations/payment-order
+
 # Use non-root user (distroless default: 65532:65532)
 USER nonroot:nonroot
 

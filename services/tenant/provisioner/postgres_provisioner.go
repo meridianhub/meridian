@@ -376,9 +376,13 @@ func (p *PostgresProvisioner) applyServiceMigrations(ctx context.Context, schema
 			// Process the migration content to remove schema prefixes
 			processedSQL := p.processMigrationSQL(mig.Content, schemaName)
 
-			// Execute migration
-			if err := tx.Exec(processedSQL).Error; err != nil {
-				return fmt.Errorf("execute migration %s: %w", mig.Filename, err)
+			// Split into individual statements and execute one at a time
+			// CockroachDB doesn't support multiple statements in prepared statements
+			statements := splitSQLStatements(processedSQL)
+			for _, stmt := range statements {
+				if err := tx.Exec(stmt).Error; err != nil {
+					return fmt.Errorf("execute migration %s: %w", mig.Filename, err)
+				}
 			}
 
 			return nil
@@ -487,6 +491,75 @@ func (p *PostgresProvisioner) processMigrationSQL(sql, schemaName string) string
 	}
 
 	return sql
+}
+
+// splitSQLStatements splits SQL content into individual statements.
+// Handles semicolons inside single quotes and comments.
+// CockroachDB requires statements to be executed individually.
+//
+//nolint:gocognit,gocyclo // State machine for SQL parsing necessarily has multiple conditions
+func splitSQLStatements(sql string) []string {
+	var statements []string
+	var current strings.Builder
+	inString := false
+	inLineComment := false
+	inBlockComment := false
+
+	for i := 0; i < len(sql); i++ {
+		c := sql[i]
+
+		// Handle line comments
+		if !inString && !inBlockComment && i+1 < len(sql) && c == '-' && sql[i+1] == '-' {
+			inLineComment = true
+		}
+		if inLineComment && c == '\n' {
+			inLineComment = false
+		}
+
+		// Handle block comments
+		if !inString && !inLineComment && i+1 < len(sql) && c == '/' && sql[i+1] == '*' {
+			inBlockComment = true
+		}
+		if inBlockComment && i+1 < len(sql) && c == '*' && sql[i+1] == '/' {
+			current.WriteByte(c)
+			current.WriteByte(sql[i+1])
+			i++
+			inBlockComment = false
+			continue
+		}
+
+		// Handle string literals (single quotes)
+		if !inLineComment && !inBlockComment && c == '\'' {
+			// Check for escaped quote ''
+			if i+1 < len(sql) && sql[i+1] == '\'' {
+				current.WriteByte(c)
+				current.WriteByte(sql[i+1])
+				i++
+				continue
+			}
+			inString = !inString
+		}
+
+		// Split on semicolon outside strings and comments
+		if c == ';' && !inString && !inLineComment && !inBlockComment {
+			stmt := strings.TrimSpace(current.String())
+			if stmt != "" {
+				statements = append(statements, stmt)
+			}
+			current.Reset()
+			continue
+		}
+
+		current.WriteByte(c)
+	}
+
+	// Add final statement if any
+	stmt := strings.TrimSpace(current.String())
+	if stmt != "" {
+		statements = append(statements, stmt)
+	}
+
+	return statements
 }
 
 // createInitialServiceStatuses creates the initial service status list.

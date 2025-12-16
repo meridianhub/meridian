@@ -145,9 +145,9 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.CaptureLedgerPostingRequest,
 ) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
-	// Check idempotency
+	// Check idempotency (only if service is configured and key is provided)
 	var idempotencyKey idempotency.Key
-	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
+	if s.idempotency != nil && req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
 		idempotencyKey = idempotency.Key{
 			Namespace: "financial-accounting",
 			Operation: "capture-posting",
@@ -236,8 +236,8 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		LedgerPosting: toProtoLedgerPosting(posting),
 	}
 
-	// Store result for idempotency
-	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
+	// Store result for idempotency (only if service configured and key provided)
+	if s.idempotency != nil && req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
 		ttl := defaultIdempotencyTTL
 		if req.IdempotencyKey.TtlSeconds > 0 {
 			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
@@ -653,20 +653,22 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check idempotency
-	result, err := s.idempotency.Check(ctx, idempotencyKey)
-	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-			if result != nil && result.Status == idempotency.StatusCompleted {
-				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+	// Check idempotency (skip if service not configured - e.g., Redis unavailable in dev)
+	if s.idempotency != nil {
+		result, err := s.idempotency.Check(ctx, idempotencyKey)
+		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+				if result != nil && result.Status == idempotency.StatusCompleted {
+					return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+				}
 			}
+			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
 		}
-		return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
-	}
 
-	// Mark as pending to prevent concurrent processing
-	if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+		// Mark as pending to prevent concurrent processing
+		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+		}
 	}
 
 	// Validate account type
@@ -721,19 +723,21 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 
 	// TODO(75-async-audit#5): Publish FinancialBookingLogInitiatedEvent for inter-service coordination
 
-	// Store idempotency result
-	ttl := defaultIdempotencyTTL
-	if req.IdempotencyKey.TtlSeconds > 0 {
-		ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
+	// Store idempotency result (only if service configured)
+	if s.idempotency != nil {
+		ttl := defaultIdempotencyTTL
+		if req.IdempotencyKey.TtlSeconds > 0 {
+			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
+		}
+		idempResult := idempotency.Result{
+			Key:         idempotencyKey,
+			Status:      idempotency.StatusCompleted,
+			Data:        nil,
+			CompletedAt: time.Now(),
+			TTL:         ttl,
+		}
+		_ = s.idempotency.StoreResult(ctx, idempResult)
 	}
-	idempResult := idempotency.Result{
-		Key:         idempotencyKey,
-		Status:      idempotency.StatusCompleted,
-		Data:        nil,
-		CompletedAt: time.Now(),
-		TTL:         ttl,
-	}
-	_ = s.idempotency.StoreResult(ctx, idempResult)
 
 	// Convert to proto response
 	return &financialaccountingv1.InitiateFinancialBookingLogResponse{

@@ -72,10 +72,10 @@ func TestSaveNewAccount(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	// AccountID is now mapped to IBAN in the database (account_number column)
-	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -84,15 +84,14 @@ func TestSaveNewAccount(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Verify account was saved - FindByID now searches by account_number (IBAN)
-	retrieved, err := repo.FindByID(ctx, iban)
+	// Verify account was saved - FindByID searches by account_id (ACC-xxx format)
+	retrieved, err := repo.FindByID(ctx, accountID)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	// AccountID is now set from AccountIdentification in toDomain
-	if retrieved.AccountID != iban {
-		t.Errorf("Expected %s, got %s", iban, retrieved.AccountID)
+	if retrieved.AccountID != accountID {
+		t.Errorf("Expected %s, got %s", accountID, retrieved.AccountID)
 	}
 }
 
@@ -102,9 +101,10 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -112,7 +112,7 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify newly created account has version 1
-	retrieved, err := repo.FindByID(ctx, iban)
+	retrieved, err := repo.FindByID(ctx, accountID)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(1), retrieved.Version, "New account should have version 1")
@@ -124,9 +124,10 @@ func TestSaveUpdateExisting(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -148,7 +149,7 @@ func TestSaveUpdateExisting(t *testing.T) {
 	}
 
 	// Verify balance was updated
-	retrieved, err := repo.FindByID(ctx, iban)
+	retrieved, err := repo.FindByID(ctx, accountID)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
@@ -182,9 +183,10 @@ func TestFindByIBAN(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -192,14 +194,17 @@ func TestFindByIBAN(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
+	// FindByIBAN searches by account_identification (IBAN)
 	retrieved, err := repo.FindByIBAN(ctx, iban)
 	if err != nil {
 		t.Fatalf("FindByIBAN failed: %v", err)
 	}
 
-	// AccountID is now set from AccountIdentification (IBAN) in toDomain
-	if retrieved.AccountID != iban {
-		t.Errorf("Expected %s, got %s", iban, retrieved.AccountID)
+	if retrieved.AccountID != accountID {
+		t.Errorf("Expected AccountID %s, got %s", accountID, retrieved.AccountID)
+	}
+	if retrieved.AccountIdentification != iban {
+		t.Errorf("Expected IBAN %s, got %s", iban, retrieved.AccountIdentification)
 	}
 }
 
@@ -210,13 +215,15 @@ func TestFindByPartyID(t *testing.T) {
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
 
-	// Create two accounts for same party
+	// Create two accounts for same party with distinct account IDs and IBANs
+	accountID1 := "ACC-" + uuid.New().String()[:8]
+	accountID2 := "ACC-" + uuid.New().String()[:8]
 	iban1 := "GB82WEST12345698765432"
 	iban2 := "GB82WEST98765432123456"
 
-	account1, err := domain.NewCurrentAccount(iban1, iban1, partyID, "GBP")
+	account1, err := domain.NewCurrentAccount(accountID1, iban1, partyID, "GBP")
 	require.NoError(t, err)
-	account2, err := domain.NewCurrentAccount(iban2, iban2, partyID, "EUR")
+	account2, err := domain.NewCurrentAccount(accountID2, iban2, partyID, "EUR")
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -243,9 +250,10 @@ func TestDeleteAccount(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -253,13 +261,13 @@ func TestDeleteAccount(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Delete account by IBAN
-	if err := repo.Delete(ctx, iban); err != nil {
+	// Delete account by account_id (ACC-xxx format)
+	if err := repo.Delete(ctx, accountID); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
 	// Should not be found after soft delete
-	_, err = repo.FindByID(ctx, iban)
+	_, err = repo.FindByID(ctx, accountID)
 	if !errors.Is(err, ErrAccountNotFound) {
 		t.Errorf("Expected ErrAccountNotFound after delete, got %v", err)
 	}
@@ -271,24 +279,25 @@ func TestOptimisticLocking(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
 	// ctx already provided by setupTestDB
 
 	// Create initial account
-	account1, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account1, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 	if err := repo.Save(ctx, account1); err != nil {
 		t.Fatalf("Initial save failed: %v", err)
 	}
 
 	// Load same account in two "transactions"
-	account2, err := repo.FindByID(ctx, iban)
+	account2, err := repo.FindByID(ctx, accountID)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	account3, err := repo.FindByID(ctx, iban)
+	account3, err := repo.FindByID(ctx, accountID)
 	if err != nil {
 		t.Fatalf("FindByID failed: %v", err)
 	}
@@ -320,7 +329,7 @@ func TestOptimisticLocking(t *testing.T) {
 	}
 
 	// Verify first transaction's changes persisted
-	final, err := repo.FindByID(ctx, iban)
+	final, err := repo.FindByID(ctx, accountID)
 	if err != nil {
 		t.Fatalf("Final FindByID failed: %v", err)
 	}
@@ -468,9 +477,10 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Create context with authenticated user AND tenant (tenant required for multi-tenant operations)
@@ -483,7 +493,7 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 
 	// Verify audit fields were set from context
 	var entity CurrentAccountEntity
-	err = db.Where("account_identification = ?", iban).First(&entity).Error
+	err = db.Where("account_id = ?", accountID).First(&entity).Error
 	require.NoError(t, err)
 
 	assert.Equal(t, testUserID, entity.CreatedBy, "created_by should be set from context")
@@ -496,9 +506,10 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Use empty context (no user)
@@ -510,7 +521,7 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 
 	// Verify audit fields default to "system"
 	var entity CurrentAccountEntity
-	err = db.Where("account_identification = ?", iban).First(&entity).Error
+	err = db.Where("account_id = ?", accountID).First(&entity).Error
 	require.NoError(t, err)
 
 	assert.Equal(t, "system", entity.CreatedBy, "created_by should default to 'system'")
@@ -523,9 +534,10 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 
 	repo := NewRepository(db)
 	partyID := uuid.New().String()
+	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(iban, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
 	require.NoError(t, err)
 
 	// Create with user1 (ctx already has tenant from setupTestDB)
@@ -546,7 +558,7 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 
 	// Verify created_by preserved but updated_by changed
 	var entity CurrentAccountEntity
-	err = db.Where("account_identification = ?", iban).First(&entity).Error
+	err = db.Where("account_id = ?", accountID).First(&entity).Error
 	require.NoError(t, err)
 
 	assert.Equal(t, user1, entity.CreatedBy, "created_by should be preserved from original creation")
