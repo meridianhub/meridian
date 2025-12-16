@@ -7,9 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
-	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
-	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/shared/pkg/health"
@@ -31,12 +28,14 @@ type HealthChecker struct {
 
 // HealthCheckerConfig contains configuration for creating a new HealthChecker.
 type HealthCheckerConfig struct {
-	Repository                *persistence.Repository
-	PositionKeepingClient     clients.PositionKeepingClient
-	FinancialAccountingClient clients.FinancialAccountingClient
-	Logger                    *slog.Logger
-	ServiceName               string        // Defaults to "current-account"
-	CheckTimeout              time.Duration // Defaults to 5 seconds
+	Repository                      *persistence.Repository
+	PositionKeepingClient           clients.PositionKeepingClient
+	PositionKeepingHealthClient     grpc_health_v1.HealthClient // For health checks (bypasses circuit breaker)
+	FinancialAccountingClient       clients.FinancialAccountingClient
+	FinancialAccountingHealthClient grpc_health_v1.HealthClient // For health checks (bypasses circuit breaker)
+	Logger                          *slog.Logger
+	ServiceName                     string        // Defaults to "current-account"
+	CheckTimeout                    time.Duration // Defaults to 5 seconds
 }
 
 // NewHealthChecker creates a new health checker with dependency checking.
@@ -72,16 +71,16 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 	}
 
 	// Add optional external service checkers (degrade gracefully if unavailable)
-	if config.PositionKeepingClient != nil {
+	if config.PositionKeepingHealthClient != nil {
 		checkers = append(checkers, NewPositionKeepingHealthChecker(
-			config.PositionKeepingClient,
+			config.PositionKeepingHealthClient,
 			config.CheckTimeout,
 		))
 	}
 
-	if config.FinancialAccountingClient != nil {
+	if config.FinancialAccountingHealthClient != nil {
 		checkers = append(checkers, NewFinancialAccountingHealthChecker(
-			config.FinancialAccountingClient,
+			config.FinancialAccountingHealthClient,
 			config.CheckTimeout,
 		))
 	}
@@ -325,16 +324,20 @@ func (d *DatabaseHealthChecker) Check(ctx context.Context) health.ComponentResul
 }
 
 // PositionKeepingHealthChecker checks PositionKeeping service connectivity.
+// It uses the standard gRPC health check protocol to avoid tripping circuit breakers
+// and to bypass tenant context requirements that business operations need.
 type PositionKeepingHealthChecker struct {
-	client  clients.PositionKeepingClient
-	timeout time.Duration
+	healthClient grpc_health_v1.HealthClient
+	timeout      time.Duration
 }
 
 // NewPositionKeepingHealthChecker creates a new PositionKeeping health checker.
-func NewPositionKeepingHealthChecker(client clients.PositionKeepingClient, timeout time.Duration) *PositionKeepingHealthChecker {
+// It accepts a gRPC health client to check the service's health endpoint directly,
+// avoiding the circuit breaker that wraps business operations.
+func NewPositionKeepingHealthChecker(healthClient grpc_health_v1.HealthClient, timeout time.Duration) *PositionKeepingHealthChecker {
 	return &PositionKeepingHealthChecker{
-		client:  client,
-		timeout: timeout,
+		healthClient: healthClient,
+		timeout:      timeout,
 	}
 }
 
@@ -346,6 +349,9 @@ func (p *PositionKeepingHealthChecker) Name() string {
 // Check performs a PositionKeeping service health check.
 // This is a degraded check - if the service is unavailable, the system operates
 // in degraded mode without position tracking.
+//
+// Uses the standard gRPC health check protocol which doesn't require tenant context
+// and bypasses the circuit breaker used for business operations.
 func (p *PositionKeepingHealthChecker) Check(ctx context.Context) health.ComponentResult {
 	start := time.Now()
 
@@ -353,12 +359,10 @@ func (p *PositionKeepingHealthChecker) Check(ctx context.Context) health.Compone
 	checkCtx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	// Attempt a lightweight read operation (list with limit 1)
-	// This verifies the service is reachable without side effects
-	_, err := p.client.ListFinancialPositionLogs(checkCtx, &positionkeepingv1.ListFinancialPositionLogsRequest{
-		Pagination: &commonv1.Pagination{
-			PageSize: 1,
-		},
+	// Use standard gRPC health check protocol
+	// This doesn't require tenant context and doesn't trip the circuit breaker
+	resp, err := p.healthClient.Check(checkCtx, &grpc_health_v1.HealthCheckRequest{
+		Service: "position-keeping",
 	})
 
 	responseTime := time.Since(start)
@@ -371,6 +375,9 @@ func (p *PositionKeepingHealthChecker) Check(ctx context.Context) health.Compone
 		// Degraded rather than unhealthy (service can operate without it)
 		status = health.StatusDegraded
 		message = fmt.Sprintf("positionkeeping service unreachable (degraded): %v", err)
+	} else if resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+		status = health.StatusDegraded
+		message = fmt.Sprintf("positionkeeping service not serving (status: %s)", resp.Status.String())
 	}
 
 	// Check context cancellation (timeout)
@@ -393,16 +400,20 @@ func (p *PositionKeepingHealthChecker) Check(ctx context.Context) health.Compone
 }
 
 // FinancialAccountingHealthChecker checks FinancialAccounting service connectivity.
+// It uses the standard gRPC health check protocol to avoid tripping circuit breakers
+// and to bypass tenant context requirements that business operations need.
 type FinancialAccountingHealthChecker struct {
-	client  clients.FinancialAccountingClient
-	timeout time.Duration
+	healthClient grpc_health_v1.HealthClient
+	timeout      time.Duration
 }
 
 // NewFinancialAccountingHealthChecker creates a new FinancialAccounting health checker.
-func NewFinancialAccountingHealthChecker(client clients.FinancialAccountingClient, timeout time.Duration) *FinancialAccountingHealthChecker {
+// It accepts a gRPC health client to check the service's health endpoint directly,
+// avoiding the circuit breaker that wraps business operations.
+func NewFinancialAccountingHealthChecker(healthClient grpc_health_v1.HealthClient, timeout time.Duration) *FinancialAccountingHealthChecker {
 	return &FinancialAccountingHealthChecker{
-		client:  client,
-		timeout: timeout,
+		healthClient: healthClient,
+		timeout:      timeout,
 	}
 }
 
@@ -414,6 +425,9 @@ func (f *FinancialAccountingHealthChecker) Name() string {
 // Check performs a FinancialAccounting service health check.
 // This is a degraded check - if the service is unavailable, the system operates
 // in degraded mode without ledger posting.
+//
+// Uses the standard gRPC health check protocol which doesn't require tenant context
+// and bypasses the circuit breaker used for business operations.
 func (f *FinancialAccountingHealthChecker) Check(ctx context.Context) health.ComponentResult {
 	start := time.Now()
 
@@ -421,12 +435,10 @@ func (f *FinancialAccountingHealthChecker) Check(ctx context.Context) health.Com
 	checkCtx, cancel := context.WithTimeout(ctx, f.timeout)
 	defer cancel()
 
-	// Attempt a lightweight read operation (list with limit 1)
-	// This verifies the service is reachable without side effects
-	_, err := f.client.ListFinancialBookingLogs(checkCtx, &financialaccountingv1.ListFinancialBookingLogsRequest{
-		Pagination: &commonv1.Pagination{
-			PageSize: 1,
-		},
+	// Use standard gRPC health check protocol
+	// This doesn't require tenant context and doesn't trip the circuit breaker
+	resp, err := f.healthClient.Check(checkCtx, &grpc_health_v1.HealthCheckRequest{
+		Service: "financial-accounting",
 	})
 
 	responseTime := time.Since(start)
@@ -439,6 +451,9 @@ func (f *FinancialAccountingHealthChecker) Check(ctx context.Context) health.Com
 		// Degraded rather than unhealthy (service can operate without it)
 		status = health.StatusDegraded
 		message = fmt.Sprintf("financialaccounting service unreachable (degraded): %v", err)
+	} else if resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+		status = health.StatusDegraded
+		message = fmt.Sprintf("financialaccounting service not serving (status: %s)", resp.Status.String())
 	}
 
 	// Check context cancellation (timeout)

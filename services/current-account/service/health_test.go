@@ -14,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 )
@@ -40,12 +41,14 @@ func TestNewHealthChecker(t *testing.T) {
 		{
 			name: "valid configuration with all dependencies",
 			config: HealthCheckerConfig{
-				Repository:                setupTestRepository(t),
-				PositionKeepingClient:     &mockPositionKeepingClient{},
-				FinancialAccountingClient: &mockFinancialAccountingClient{},
-				Logger:                    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-				ServiceName:               "test-service",
-				CheckTimeout:              3 * time.Second,
+				Repository:                      setupTestRepository(t),
+				PositionKeepingClient:           &mockPositionKeepingClient{},
+				PositionKeepingHealthClient:     &mockGRPCHealthClient{status: grpc_health_v1.HealthCheckResponse_SERVING},
+				FinancialAccountingClient:       &mockFinancialAccountingClient{},
+				FinancialAccountingHealthClient: &mockGRPCHealthClient{status: grpc_health_v1.HealthCheckResponse_SERVING},
+				Logger:                          slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+				ServiceName:                     "test-service",
+				CheckTimeout:                    3 * time.Second,
 			},
 			wantPanic: false,
 		},
@@ -59,8 +62,10 @@ func TestNewHealthChecker(t *testing.T) {
 		{
 			name: "missing repository panics",
 			config: HealthCheckerConfig{
-				PositionKeepingClient:     &mockPositionKeepingClient{},
-				FinancialAccountingClient: &mockFinancialAccountingClient{},
+				PositionKeepingClient:           &mockPositionKeepingClient{},
+				PositionKeepingHealthClient:     &mockGRPCHealthClient{status: grpc_health_v1.HealthCheckResponse_SERVING},
+				FinancialAccountingClient:       &mockFinancialAccountingClient{},
+				FinancialAccountingHealthClient: &mockGRPCHealthClient{status: grpc_health_v1.HealthCheckResponse_SERVING},
 			},
 			wantPanic: true,
 		},
@@ -95,15 +100,23 @@ func TestHealthChecker_Check_AllHealthy(t *testing.T) {
 	posClient := &mockPositionKeepingClient{
 		failOnUpdate: false,
 	}
+	posHealthClient := &mockGRPCHealthClient{
+		status: grpc_health_v1.HealthCheckResponse_SERVING,
+	}
 	finClient := &mockFinancialAccountingClient{
 		failOnCapture: false,
 	}
+	finHealthClient := &mockGRPCHealthClient{
+		status: grpc_health_v1.HealthCheckResponse_SERVING,
+	}
 
 	checker := NewHealthChecker(HealthCheckerConfig{
-		Repository:                repo,
-		PositionKeepingClient:     posClient,
-		FinancialAccountingClient: finClient,
-		Logger:                    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		Repository:                      repo,
+		PositionKeepingClient:           posClient,
+		PositionKeepingHealthClient:     posHealthClient,
+		FinancialAccountingClient:       finClient,
+		FinancialAccountingHealthClient: finHealthClient,
+		Logger:                          slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
 
 	ctx := context.Background()
@@ -365,10 +378,10 @@ func TestDatabaseHealthChecker(t *testing.T) {
 }
 
 func TestPositionKeepingHealthChecker_Healthy(t *testing.T) {
-	client := &mockPositionKeepingClient{
-		failOnUpdate: false,
+	healthClient := &mockGRPCHealthClient{
+		status: grpc_health_v1.HealthCheckResponse_SERVING,
 	}
-	checker := NewPositionKeepingHealthChecker(client, 5*time.Second)
+	checker := NewPositionKeepingHealthChecker(healthClient, 5*time.Second)
 
 	ctx := context.Background()
 	result := checker.Check(ctx)
@@ -378,14 +391,14 @@ func TestPositionKeepingHealthChecker_Healthy(t *testing.T) {
 	assert.NoError(t, result.Error)
 	assert.Contains(t, result.Message, "reachable")
 	assert.Greater(t, result.ResponseTime, time.Duration(0))
-	assert.Equal(t, 1, client.listCalls)
+	assert.Equal(t, 1, healthClient.calls)
 }
 
 func TestFinancialAccountingHealthChecker_Healthy(t *testing.T) {
-	client := &mockFinancialAccountingClient{
-		failOnCapture: false,
+	healthClient := &mockGRPCHealthClient{
+		status: grpc_health_v1.HealthCheckResponse_SERVING,
 	}
-	checker := NewFinancialAccountingHealthChecker(client, 5*time.Second)
+	checker := NewFinancialAccountingHealthChecker(healthClient, 5*time.Second)
 
 	ctx := context.Background()
 	result := checker.Check(ctx)
@@ -395,7 +408,7 @@ func TestFinancialAccountingHealthChecker_Healthy(t *testing.T) {
 	assert.NoError(t, result.Error)
 	assert.Contains(t, result.Message, "reachable")
 	assert.Greater(t, result.ResponseTime, time.Duration(0))
-	assert.Equal(t, 1, client.listCalls)
+	assert.Equal(t, 1, healthClient.calls)
 }
 
 // TestHealthChecker_Watch tests the streaming health check implementation
@@ -482,4 +495,29 @@ func (m *mockHealthWatchServer) SendHeader(_ metadata.MD) error {
 }
 
 func (m *mockHealthWatchServer) SetTrailer(_ metadata.MD) {
+}
+
+// mockGRPCHealthClient implements grpc_health_v1.HealthClient for testing
+type mockGRPCHealthClient struct {
+	status grpc_health_v1.HealthCheckResponse_ServingStatus
+	err    error
+	calls  int
+}
+
+func (m *mockGRPCHealthClient) Check(_ context.Context, _ *grpc_health_v1.HealthCheckRequest, _ ...grpc.CallOption) (*grpc_health_v1.HealthCheckResponse, error) {
+	m.calls++
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &grpc_health_v1.HealthCheckResponse{Status: m.status}, nil
+}
+
+var errNotImplemented = errors.New("not implemented in mock")
+
+func (m *mockGRPCHealthClient) Watch(_ context.Context, _ *grpc_health_v1.HealthCheckRequest, _ ...grpc.CallOption) (grpc_health_v1.Health_WatchClient, error) {
+	return nil, errNotImplemented
+}
+
+func (m *mockGRPCHealthClient) List(_ context.Context, _ *grpc_health_v1.HealthListRequest, _ ...grpc.CallOption) (*grpc_health_v1.HealthListResponse, error) {
+	return nil, errNotImplemented
 }
