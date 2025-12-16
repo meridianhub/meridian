@@ -729,3 +729,221 @@ func TestPostgresPool_Integration_ReadOnlyTransaction(t *testing.T) {
 	})
 	assert.Error(t, err)
 }
+
+// TestPostgresPool_Integration_DatabaseNameInConnectionString verifies that different
+// database names can be used in connection strings to support per-service database isolation.
+// This test validates the database-per-service architecture pattern where each service
+// connects to its own database (e.g., meridian_current_account, meridian_position_keeping).
+func TestPostgresPool_Integration_DatabaseNameInConnectionString(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	ctx := context.Background()
+
+	t.Run("pool connects to custom database name", func(t *testing.T) {
+		// Create PostgreSQL container with a custom database name
+		// This simulates a service-specific database like "meridian_current_account"
+		customDBName := "meridian_test_service"
+		pgContainer, err := postgres.Run(ctx,
+			"postgres:15-alpine",
+			postgres.WithDatabase(customDBName),
+			postgres.WithUsername("test_user"),
+			postgres.WithPassword("test_password"),
+			testcontainers.WithWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(60*time.Second)),
+		)
+		require.NoError(t, err, "failed to start postgres container")
+		defer func() { _ = pgContainer.Terminate(ctx) }()
+
+		// Get connection string - it will include the custom database name
+		connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+		require.NoError(t, err, "failed to get connection string")
+
+		// Verify the connection string contains our database name
+		assert.Contains(t, connStr, customDBName,
+			"connection string should contain custom database name")
+
+		// Create pool with the connection string
+		cfg := DefaultConfig(connStr)
+		pool, err := NewPostgresPool(ctx, cfg)
+		require.NoError(t, err, "failed to create postgres pool")
+		defer func() { _ = pool.Close() }()
+
+		// Verify we can connect and query the correct database
+		var currentDB string
+		err = pool.QueryRowContext(ctx, "SELECT current_database()").Scan(&currentDB)
+		require.NoError(t, err, "failed to query current database")
+		assert.Equal(t, customDBName, currentDB,
+			"pool should connect to the database specified in connection string")
+	})
+
+	t.Run("Stats works correctly with custom database", func(t *testing.T) {
+		// Create container with service-specific database name
+		serviceName := "meridian_position_keeping"
+		pgContainer, err := postgres.Run(ctx,
+			"postgres:15-alpine",
+			postgres.WithDatabase(serviceName),
+			postgres.WithUsername("test_user"),
+			postgres.WithPassword("test_password"),
+			testcontainers.WithWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(60*time.Second)),
+		)
+		require.NoError(t, err)
+		defer func() { _ = pgContainer.Terminate(ctx) }()
+
+		connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+		require.NoError(t, err)
+
+		cfg := DefaultConfig(connStr)
+		cfg.MaxConnections = 10
+		cfg.MinConnections = 2
+
+		pool, err := NewPostgresPool(ctx, cfg)
+		require.NoError(t, err)
+		defer func() { _ = pool.Close() }()
+
+		// Verify Stats() works correctly
+		stats := pool.Stats()
+		assert.Equal(t, 10, stats.MaxOpenConnections,
+			"Stats should reflect configured max connections")
+		assert.GreaterOrEqual(t, stats.OpenConnections, 0,
+			"OpenConnections should be non-negative")
+	})
+
+	t.Run("invalid database name fails during Ping", func(t *testing.T) {
+		// Create container with a valid database
+		pgContainer, err := postgres.Run(ctx,
+			"postgres:15-alpine",
+			postgres.WithDatabase("valid_db"),
+			postgres.WithUsername("test_user"),
+			postgres.WithPassword("test_password"),
+			testcontainers.WithWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(60*time.Second)),
+		)
+		require.NoError(t, err)
+		defer func() { _ = pgContainer.Terminate(ctx) }()
+
+		// Get the host and port, but use an invalid database name
+		host, err := pgContainer.Host(ctx)
+		require.NoError(t, err)
+		port, err := pgContainer.MappedPort(ctx, "5432/tcp")
+		require.NoError(t, err)
+
+		// Create connection string with non-existent database
+		invalidConnStr := fmt.Sprintf(
+			"postgres://test_user:test_password@%s:%s/nonexistent_database?sslmode=disable",
+			host, port.Port())
+
+		cfg := DefaultConfig(invalidConnStr)
+		_, err = NewPostgresPool(ctx, cfg)
+		// NewPostgresPool calls Ping internally, so it should fail for invalid database
+		assert.Error(t, err, "should fail when connecting to non-existent database")
+		assert.Contains(t, err.Error(), "failed to ping database",
+			"error should indicate ping failure")
+	})
+}
+
+// TestPostgresPool_Integration_MultiplePools verifies that multiple pools can be
+// created simultaneously for different databases. This validates the per-service
+// database architecture where each microservice maintains its own connection pool.
+func TestPostgresPool_Integration_MultiplePools(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	ctx := context.Background()
+
+	// Create two separate containers simulating two service databases
+	db1Container, err := postgres.Run(ctx,
+		"postgres:15-alpine",
+		postgres.WithDatabase("meridian_service_a"),
+		postgres.WithUsername("test_user"),
+		postgres.WithPassword("test_password"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60*time.Second)),
+	)
+	require.NoError(t, err, "failed to start first postgres container")
+	defer func() { _ = db1Container.Terminate(ctx) }()
+
+	db2Container, err := postgres.Run(ctx,
+		"postgres:15-alpine",
+		postgres.WithDatabase("meridian_service_b"),
+		postgres.WithUsername("test_user"),
+		postgres.WithPassword("test_password"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60*time.Second)),
+	)
+	require.NoError(t, err, "failed to start second postgres container")
+	defer func() { _ = db2Container.Terminate(ctx) }()
+
+	// Get connection strings
+	connStr1, err := db1Container.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err)
+
+	connStr2, err := db2Container.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err)
+
+	// Create pools for both databases
+	pool1, err := NewPostgresPool(ctx, DefaultConfig(connStr1))
+	require.NoError(t, err, "failed to create pool for service_a")
+	defer func() { _ = pool1.Close() }()
+
+	pool2, err := NewPostgresPool(ctx, DefaultConfig(connStr2))
+	require.NoError(t, err, "failed to create pool for service_b")
+	defer func() { _ = pool2.Close() }()
+
+	// Verify each pool connects to its respective database
+	var db1Name, db2Name string
+	err = pool1.QueryRowContext(ctx, "SELECT current_database()").Scan(&db1Name)
+	require.NoError(t, err)
+	assert.Equal(t, "meridian_service_a", db1Name)
+
+	err = pool2.QueryRowContext(ctx, "SELECT current_database()").Scan(&db2Name)
+	require.NoError(t, err)
+	assert.Equal(t, "meridian_service_b", db2Name)
+
+	// Create tables in each database and verify isolation
+	_, err = pool1.ExecContext(ctx, `CREATE TABLE service_a_data (id SERIAL PRIMARY KEY, value TEXT)`)
+	require.NoError(t, err)
+
+	_, err = pool2.ExecContext(ctx, `CREATE TABLE service_b_data (id SERIAL PRIMARY KEY, value TEXT)`)
+	require.NoError(t, err)
+
+	// Insert data into service_a's table
+	_, err = pool1.ExecContext(ctx, `INSERT INTO service_a_data (value) VALUES ('from_service_a')`)
+	require.NoError(t, err)
+
+	// Insert data into service_b's table
+	_, err = pool2.ExecContext(ctx, `INSERT INTO service_b_data (value) VALUES ('from_service_b')`)
+	require.NoError(t, err)
+
+	// Verify data isolation - service_a should not see service_b's table
+	var count int
+	err = pool1.QueryRowContext(ctx, `SELECT COUNT(*) FROM service_a_data`).Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "service_a should have its own data")
+
+	// Service_a's pool should not have service_b's table
+	rows, err := pool1.QueryContext(ctx, `SELECT * FROM service_b_data`)
+	if rows != nil {
+		defer func() { _ = rows.Close() }()
+		// Consume rows to get any deferred error
+		for rows.Next() {
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			err = rowsErr
+		}
+	}
+	assert.Error(t, err, "service_a should not see service_b's tables")
+}
