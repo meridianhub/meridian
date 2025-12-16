@@ -574,3 +574,123 @@ Calculates coupling metrics:
 * [BIAN Service Boundaries](../architecture/bian-service-boundaries.md)
 * [Boundary Migration Plan](../architecture/boundary-migration-plan.md)
 * Coupling analysis scripts: `scripts/analyze-coupling.sh`, `scripts/calculate-coupling-metrics.sh`
+
+---
+
+## Amendment: Database Architecture Implementation (2025-12-16)
+
+### Context
+
+ADR-002 specified database-per-service in Rule 4, but didn't detail the actual database architecture. After implementing database migrations (Task Master: database-per-service), we formalized the production database structure.
+
+### Decision
+
+Each microservice has its own CockroachDB database with tenant isolation via schemas:
+
+**Database naming:**
+
+| Service | Database |
+|---------|----------|
+| Tenant Service | `meridian_platform` |
+| Current Account | `meridian_current_account` |
+| Financial Accounting | `meridian_financial_accounting` |
+| Position Keeping | `meridian_position_keeping` |
+| Payment Order | `meridian_payment_order` |
+| Party | `meridian_party` |
+
+### Multi-Tenancy Architecture
+
+**Schema-per-tenant within each service database:**
+
+```text
+Database: meridian_current_account
+  └── Schema: org_acme_bank        (tenant-specific)
+       └── Tables: account, lien, audit_log
+  └── Schema: org_demo_corp        (tenant-specific)
+       └── Tables: account, lien, audit_log
+
+Database: meridian_party
+  └── Schema: org_acme_bank
+       └── Tables: party
+  └── Schema: org_demo_corp
+       └── Tables: party
+```
+
+**Tenant routing via `search_path`:**
+
+```go
+// Connection URL includes tenant schema
+connStr := fmt.Sprintf(
+    "postgres://%s:%s@%s/%s?search_path=%s",
+    user, password, host, database, tenantSchema,
+)
+// Queries use unqualified table names
+db.Query("SELECT * FROM account WHERE id = $1", accountID)
+// PostgreSQL resolves via search_path: org_acme_bank.account
+```
+
+### Table Naming Conventions
+
+**Singular nouns, unqualified:**
+
+| Pattern | Example | Rationale |
+|---------|---------|-----------|
+| Singular | `account` (not `accounts`) | Natural in queries: `SELECT * FROM account` |
+| Unqualified | No schema prefix | Enables transparent tenant routing |
+| Snake_case | `payment_order`, `audit_trail_entry` | Consistent with SQL conventions |
+
+**Compound naming follows `<context>_<entity>`:**
+
+- `payment_order` - an order for payment
+- `ledger_posting` - a posting to a ledger
+- `financial_booking_log` - a log entry for financial bookings
+
+### Database Access Control
+
+**Principle of least privilege:**
+
+```sql
+-- Each service has dedicated database user
+CREATE USER current_account_svc WITH PASSWORD '...';
+
+-- User only has access to its own database
+GRANT ALL ON DATABASE meridian_current_account TO current_account_svc;
+
+-- No cross-database access (CockroachDB enforces this)
+-- current_account_svc CANNOT access meridian_party
+```
+
+**Cross-service data access:**
+
+- **Allowed**: gRPC calls between services
+- **Forbidden**: SQL queries to other service databases
+
+### Migration Strategy
+
+See [Database-Per-Service Migration Runbook](../runbooks/database-per-service-migration.md) for:
+
+- Step-by-step migration guide
+- Rollback procedures
+- Verification checklists
+- Lessons learned
+
+### Consequences
+
+**Positive:**
+
+* ✅ True database-level isolation (not just schema)
+* ✅ Independent scaling per service database
+* ✅ Service failure cannot corrupt other service data
+* ✅ Clear audit boundaries per BIAN domain
+* ✅ Simplified backup/restore per service
+
+**Negative:**
+
+* ❌ More databases to manage (6 instead of 1)
+* ❌ Cannot JOIN across services (must use gRPC)
+* ❌ Distributed transactions require saga pattern
+
+### References
+
+* [ADR-003: Database Schema Migrations](./0003-database-schema-migrations.md)
+* [Migration Runbook](../runbooks/database-per-service-migration.md)
