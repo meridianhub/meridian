@@ -43,9 +43,9 @@ func TestAtlasLoaderBinary(t *testing.T) {
 			wantStdout: []string{
 				"CREATE TABLE",
 				"customers",
-				"account",                // singular table names
-				"financial_position_log", // singular table names
-				"transaction_log_entry",  // singular table names
+				"accounts",                // shared domain models use GORM default plural naming
+				"financial_position_logs", // shared domain models use GORM default plural naming
+				"transaction_log_entries", // shared domain models use GORM default plural naming
 			},
 			wantNotStdout: []string{
 				"CREATE SCHEMA", // No schema statement without filter
@@ -58,12 +58,12 @@ func TestAtlasLoaderBinary(t *testing.T) {
 			wantStdout: []string{
 				"CREATE SCHEMA IF NOT EXISTS current_account",
 				"customers",
-				"account", // singular table name
-				"lien",    // singular table name for balance holds
+				"account", // service entity uses singular table name
+				"lien",    // service entity uses singular table name for balance holds
 			},
 			wantNotStdout: []string{
-				"financial_position_log", // position_keeping model should not be included
-				"transaction_log_entry",  // position_keeping model should not be included
+				"financial_position_logs", // position_keeping model should not be included
+				"transaction_log_entries", // position_keeping model should not be included
 			},
 		},
 		{
@@ -73,11 +73,11 @@ func TestAtlasLoaderBinary(t *testing.T) {
 			wantStdout: []string{
 				"CREATE SCHEMA IF NOT EXISTS current_account",
 				"CREATE SCHEMA IF NOT EXISTS position_keeping",
-				"account",                // Included for FK reference (singular)
-				"financial_position_log", // position_keeping aggregate root (singular)
-				"transaction_log_entry",  // position_keeping model (singular)
-				"transaction_lineage",    // position_keeping model (singular)
-				"audit_trail_entry",      // position_keeping model (singular)
+				"accounts",                // shared Account model uses GORM default plural naming
+				"financial_position_logs", // shared domain model uses GORM default plural naming
+				"transaction_log_entries", // shared domain model uses GORM default plural naming
+				"transaction_lineages",    // shared domain model uses GORM default plural naming
+				"audit_trail_entries",     // shared domain model uses GORM default plural naming
 				// Note: customers table also included because Account has FK to Customer
 				// GORM requires the full FK chain for proper constraint generation
 			},
@@ -164,9 +164,9 @@ func TestOutputFormat(t *testing.T) {
 		assert.Contains(t, output, `"current_account"."customers"`, "customers table should be schema-qualified")
 
 		// Verify unqualified table names for multi-org tables (account, lien)
-		// These use singular, unqualified names to allow PostgreSQL search_path routing
-		assert.Contains(t, output, `CREATE TABLE "account"`, "account table should be unqualified for search_path routing")
-		assert.Contains(t, output, `CREATE TABLE "lien"`, "lien table should be unqualified for search_path routing")
+		// Service-specific entities use singular names for search_path routing
+		assert.Contains(t, output, `CREATE TABLE "account"`, "account table should be singular and unqualified")
+		assert.Contains(t, output, `CREATE TABLE "lien"`, "lien table should be singular and unqualified")
 
 		// Verify no SQL syntax errors (basic check)
 		assert.NotContains(t, output, ";;", "should not have double semicolons")
