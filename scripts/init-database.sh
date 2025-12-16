@@ -1,10 +1,10 @@
 #!/bin/bash
-# Initialize CockroachDB database and user for local development
+# Initialize CockroachDB databases and users for local development
 #
 # This script:
 # 1. Waits for CockroachDB pod to be ready
-# 2. Creates the meridian database and user
-# 3. Grants necessary permissions
+# 2. Creates service-specific databases with isolated users
+# 3. Grants necessary permissions (each user can only access their own database)
 #
 # IMPORTANT: For LOCAL DEVELOPMENT ONLY
 # Production databases should be initialized through proper migration tooling
@@ -15,7 +15,18 @@ NAMESPACE="${NAMESPACE:-default}"
 POD_NAME="${POD_NAME:-cockroachdb-0}"
 TIMEOUT="${TIMEOUT:-60}"
 
-echo "Initializing CockroachDB database..."
+# Service databases and their users
+# Format: database_name:user_name
+DATABASES=(
+  "meridian_platform:meridian_platform_user"
+  "meridian_current_account:meridian_current_account_user"
+  "meridian_financial_accounting:meridian_financial_accounting_user"
+  "meridian_position_keeping:meridian_position_keeping_user"
+  "meridian_payment_order:meridian_payment_order_user"
+  "meridian_party:meridian_party_user"
+)
+
+echo "Initializing CockroachDB databases..."
 
 # Fast-fail: Check if pod exists first
 if ! kubectl get pod/"$POD_NAME" -n "$NAMESPACE" &>/dev/null; then
@@ -39,26 +50,43 @@ fi
 
 echo "✓ $POD_NAME is ready"
 
-# Create database and user
-echo "Creating meridian database and user..."
-SQL_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
-  cockroach sql --insecure -e \
-  "CREATE DATABASE IF NOT EXISTS meridian; \
-   CREATE USER IF NOT EXISTS meridian; \
-   GRANT ALL ON DATABASE meridian TO meridian;" 2>&1) || {
-  echo "ERROR: Failed to initialize database"
-  echo "SQL output: $SQL_OUTPUT"
-  exit 1
-}
+# Create databases and users with restricted access
+FAILED=0
+for ENTRY in "${DATABASES[@]}"; do
+  DB_NAME="${ENTRY%%:*}"
+  USER_NAME="${ENTRY##*:}"
 
-if echo "$SQL_OUTPUT" | grep -qE "CREATE|GRANT"; then
-  echo "✓ Database and user initialized successfully"
-elif echo "$SQL_OUTPUT" | grep -qiE "error|failed"; then
-  echo "ERROR: Database initialization encountered an error"
-  echo "SQL output: $SQL_OUTPUT"
+  echo "Creating database '$DB_NAME' with user '$USER_NAME'..."
+  SQL_OUTPUT=$(kubectl exec "$POD_NAME" -n "$NAMESPACE" -- \
+    cockroach sql --insecure -e \
+    "CREATE DATABASE IF NOT EXISTS $DB_NAME; \
+     CREATE USER IF NOT EXISTS $USER_NAME; \
+     GRANT ALL ON DATABASE $DB_NAME TO $USER_NAME;" 2>&1) || {
+    echo "ERROR: Failed to initialize database '$DB_NAME'"
+    echo "SQL output: $SQL_OUTPUT"
+    FAILED=1
+    continue
+  }
+
+  if echo "$SQL_OUTPUT" | grep -qiE "error|failed"; then
+    echo "ERROR: Database '$DB_NAME' initialization encountered an error"
+    echo "SQL output: $SQL_OUTPUT"
+    FAILED=1
+  else
+    echo "✓ Database '$DB_NAME' initialized with user '$USER_NAME'"
+  fi
+done
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "ERROR: One or more database initializations failed"
   exit 1
-else
-  echo "✓ Database and user already exist (idempotent)"
 fi
 
-echo "✓ Database initialization complete!"
+echo
+echo "✓ All databases initialized successfully!"
+echo "  Databases created: ${#DATABASES[@]}"
+for ENTRY in "${DATABASES[@]}"; do
+  DB_NAME="${ENTRY%%:*}"
+  USER_NAME="${ENTRY##*:}"
+  echo "    - $DB_NAME ($USER_NAME)"
+done
