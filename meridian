@@ -18,7 +18,7 @@ NC='\033[0m'
 
 show_help() {
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}Meridian Platform CLI${NC}                                        ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${BOLD}Meridian Platform CLI${NC}                                         ${BLUE}║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${BOLD}Usage:${NC} meridian <command> [options]"
@@ -80,8 +80,8 @@ cmd_demo() {
 
 cmd_horizon() {
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}Horizon Integrity Proof${NC}                                      ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  Demonstrating resilience against phantom transactions        ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${BOLD}Horizon Integrity Proof${NC}                                       ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  Demonstrating resilience against phantom transactions         ${BLUE}║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -141,12 +141,12 @@ cmd_horizon() {
         3)
             echo -e "\n${CYAN}Running Happy Path...${NC}"
             cd "$SCRIPT_DIR"
-            go run ./cmd/horizon-demo --timeout 5000ms --output ./integrity_report_happy.json "$@"
+            go run ./utilities/horizon-demo --timeout 5000ms --output ./integrity_report_happy.json "$@"
             echo ""
             echo -e "${YELLOW}Press any key to continue to Unhappy Path...${NC}"
             read -n 1 -s -r
             echo -e "\n${CYAN}Running Unhappy Path...${NC}"
-            go run ./cmd/horizon-demo --timeout 30ms --output ./integrity_report_unhappy.json "$@"
+            go run ./utilities/horizon-demo --timeout 30ms --output ./integrity_report_unhappy.json "$@"
             return
             ;;
         *)
@@ -155,7 +155,7 @@ cmd_horizon() {
     esac
 
     cd "$SCRIPT_DIR"
-    go run ./cmd/horizon-demo $timeout_args --output ./integrity_report.json "$@"
+    go run ./utilities/horizon-demo $timeout_args --output ./integrity_report.json "$@"
 }
 
 cmd_doctor() {

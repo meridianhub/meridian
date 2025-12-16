@@ -482,7 +482,6 @@ LIEN1=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
 }" localhost:50051 meridian.current_account.v1.CurrentAccountService/InitiateLien)
 
 LIEN_ID=$(echo "$LIEN1" | jq -r '.lien.lienId')
-LIEN_STATUS=$(echo "$LIEN1" | jq -r '.lien.status')
 echo -e "${GREEN}✓ First request - Lien created:${NC}"
 echo "$LIEN1" | jq '{lien_id: .lien.lienId, status: .lien.status, amount: .lien.amount.amount}'
 echo ""
@@ -744,7 +743,7 @@ if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
         echo -e "${CYAN}► Running: $mode_desc${NC}"
         echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-        go run ./cmd/horizon-demo --timeout "${timeout_ms}ms" --output "$output_file"
+        go run ./utilities/horizon-demo --timeout "${timeout_ms}ms" --output "$output_file"
         local exit_code=$?
 
         if [ -f "$output_file" ]; then
