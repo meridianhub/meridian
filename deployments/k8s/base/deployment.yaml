@@ -44,14 +44,9 @@ spec:
         - name: http
           containerPort: 8080
           protocol: TCP
-        - name: grpc
-          containerPort: 9090
-          protocol: TCP
         env:
         - name: PORT
           value: "8080"
-        - name: GRPC_PORT
-          value: "9090"
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:

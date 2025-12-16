@@ -615,7 +615,6 @@ k8s_resource(
   'audit-worker',
   port_forwards=[
     '8080:8080',  # HTTP API
-    '9090:9090',  # gRPC API
   ],
   resource_deps=[
     'generate-proto',  # Ensures proto files are generated before building
@@ -624,7 +623,7 @@ k8s_resource(
     'kafka-cluster',
     'keycloak',
   ],
-  labels=['microservices'],
+  labels=['infrastructure'],
   # Group RBAC and config resources under the main app
   objects=[
     'audit-worker:serviceaccount',

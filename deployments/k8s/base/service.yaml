@@ -8,7 +8,6 @@ metadata:
     tier: backend
 spec:
   type: ClusterIP
-  clusterIP: None  # Headless service for gRPC client-side load balancing
   selector:
     app: audit-worker
     component: audit
@@ -16,9 +15,5 @@ spec:
   - name: http
     port: 8080
     targetPort: http
-    protocol: TCP
-  - name: grpc
-    port: 9090
-    targetPort: grpc
     protocol: TCP
   sessionAffinity: None
