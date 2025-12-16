@@ -159,8 +159,7 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
 			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
 				if result != nil && result.Status == idempotency.StatusCompleted {
-					// TODO: Deserialize cached response from result.Data
-					// For now, return AlreadyExists error
+					// TODO(tech-debt-cleanup#2): Deserialize cached response from result.Data
 					return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
 				}
 			}
@@ -229,13 +228,8 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		return nil, status.Errorf(codes.Internal, "failed to save posting: %v", err)
 	}
 
-	// Publish domain event (placeholder - actual event will be implemented in event subtask)
-	// TODO: Implement LedgerPostingCapturedEvent and publish it
-	// event := &events.LedgerPostingCapturedEvent{...}
-	// if err := s.eventPublisher.Publish(ctx, event); err != nil {
-	//     // Log error but don't fail the request (event publishing is best-effort)
-	//     // In production, consider using outbox pattern for guaranteed delivery
-	// }
+	// TODO(75-async-audit#5): Implement LedgerPostingCapturedEvent and publish it
+	// Will use Kafka audit events with outbox pattern for guaranteed delivery
 
 	// Convert to proto response
 	response := &financialaccountingv1.CaptureLedgerPostingResponse{
@@ -249,12 +243,11 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
 		}
 
-		// TODO: Serialize response to bytes for storage
-		// For now, just mark as completed
+		// TODO(tech-debt-cleanup#2): Serialize response to bytes for storage
 		result := idempotency.Result{
 			Key:         idempotencyKey,
 			Status:      idempotency.StatusCompleted,
-			Data:        nil, // TODO: Serialize response
+			Data:        nil, // TODO(tech-debt-cleanup#2): Serialize response
 			CompletedAt: time.Now(),
 			TTL:         ttl,
 		}
@@ -609,11 +602,7 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 	}
 
 	// Publish domain event (placeholder - actual event will be implemented in event subtask)
-	// TODO: Implement LedgerPostingUpdatedEvent and publish it
-	// event := &events.LedgerPostingUpdatedEvent{...}
-	// if err := s.eventPublisher.Publish(ctx, event); err != nil {
-	//     // Log error but don't fail the request
-	// }
+	// TODO(75-async-audit#5): Implement LedgerPostingUpdatedEvent and publish it
 
 	// Convert to proto response
 	return &financialaccountingv1.UpdateLedgerPostingResponse{
@@ -730,7 +719,7 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to save booking log: %v", err)
 	}
 
-	// TODO: Publish FinancialBookingLogInitiatedEvent for inter-service coordination
+	// TODO(75-async-audit#5): Publish FinancialBookingLogInitiatedEvent for inter-service coordination
 
 	// Store idempotency result
 	ttl := defaultIdempotencyTTL
@@ -846,7 +835,7 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to update booking log: %v", err)
 	}
 
-	// TODO: Publish FinancialBookingLogUpdatedEvent for inter-service coordination
+	// TODO(75-async-audit#5): Publish FinancialBookingLogUpdatedEvent for inter-service coordination
 
 	// Convert to proto response
 	return &financialaccountingv1.UpdateFinancialBookingLogResponse{

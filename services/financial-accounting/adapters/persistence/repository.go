@@ -375,8 +375,8 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 
 		// Apply cursor-based pagination using created_at + id
 		// Page token format: <timestamp>_<uuid>
-		// TODO: Implement proper cursor-based pagination
-		_ = params.PageToken // Unused for now, will be implemented in future iteration
+		// TODO(tech-debt-cleanup#1): Implement proper cursor-based pagination
+		_ = params.PageToken // Unused for now
 
 		// Fetch results with limit
 		var entities []FinancialBookingLogEntity
@@ -543,8 +543,8 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 
 		// Apply cursor-based pagination using created_at + id
 		// Page token format: <timestamp>_<uuid>
-		// TODO: Implement proper cursor-based pagination
-		_ = params.PageToken // Unused for now, will be implemented in future iteration
+		// TODO(tech-debt-cleanup#1): Implement proper cursor-based pagination
+		_ = params.PageToken // Unused for now
 
 		// Fetch results with limit
 		var entities []LedgerPostingEntity

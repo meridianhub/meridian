@@ -1,10 +1,8 @@
 // Package clients provides gRPC client wrappers for external service communication.
 //
-// TODO: The PartyClient implementation shares significant code with
-// services/current-account/clients/party_client.go. Consider extracting shared
-// connection setup logic to shared/pkg/clients in a future refactoring effort.
-// The clients have different interfaces (Tenant uses RegisterParty, CurrentAccount
-// uses ValidateParty/GetParty), but the connection initialization is duplicated.
+// TODO(223-shared-client-patterns): The PartyClient implementation shares significant code with
+// services/current-account/clients/party_client.go. Extract shared connection setup logic
+// to shared/pkg/clients. See GitHub issue #223 for the full extraction plan.
 package clients
 
 import (
