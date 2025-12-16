@@ -239,16 +239,10 @@ show_health_status() {
     echo -e "${CYAN}│  Service                      Port     gRPC Health Status       │${NC}"
     echo -e "${CYAN}├─────────────────────────────────────────────────────────────────┤${NC}"
 
-    declare -A services=(
-        ["current-account"]=50051
-        ["position-keeping"]=50053
-        ["financial-accounting"]=50052
-        ["payment-order"]=50054
-        ["party"]=50055
-    )
-
-    for svc in current-account position-keeping financial-accounting payment-order party; do
-        port=${services[$svc]}
+    # Check each service with its port (no associative arrays for macOS bash compatibility)
+    check_service_health() {
+        local svc=$1
+        local port=$2
         health=$(grpcurl -plaintext localhost:$port grpc.health.v1.Health/Check 2>/dev/null || echo '{"status":"UNKNOWN"}')
         status=$(echo "$health" | jq -r '.status')
 
@@ -263,7 +257,13 @@ show_health_status() {
         fi
 
         printf "${CYAN}│${NC}  %-28s %-8s %b         ${CYAN}│${NC}\n" "$svc" "$port" "$STATUS_DISPLAY"
-    done
+    }
+
+    check_service_health "current-account" 50051
+    check_service_health "position-keeping" 50053
+    check_service_health "financial-accounting" 50052
+    check_service_health "payment-order" 50054
+    check_service_health "party" 50055
 
     echo -e "${CYAN}╰─────────────────────────────────────────────────────────────────╯${NC}"
 }
