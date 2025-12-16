@@ -109,20 +109,15 @@ func TestMigrationsMatchEntities(t *testing.T) {
 
 	// Now test that each entity can operate against the migrated schema
 	// These will fail if columns are missing or misnamed
+	//
+	// With database-per-service architecture, all entities use unqualified table names
+	// in the default public schema. No search_path manipulation needed.
 
-	// CurrentAccount entities use unqualified table names (accounts, liens) and rely on
-	// PostgreSQL search_path for schema routing. Set search_path to current_account schema.
 	t.Run("CurrentAccount/AccountEntity", func(t *testing.T) {
-		// Set search_path to current_account schema for unqualified table names
-		caDB := gormDB.Exec("SET search_path TO current_account, public")
-		require.NoError(t, caDB.Error, "Failed to set search_path for CurrentAccount tests")
 		testCurrentAccountEntity(t, gormDB)
 	})
 
 	t.Run("CurrentAccount/LienEntity", func(t *testing.T) {
-		// Set search_path to current_account schema for unqualified table names
-		caDB := gormDB.Exec("SET search_path TO current_account, public")
-		require.NoError(t, caDB.Error, "Failed to set search_path for CurrentAccount tests")
 		testLienEntity(t, gormDB)
 	})
 

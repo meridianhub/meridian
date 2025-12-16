@@ -1,6 +1,7 @@
-// Atlas configuration for Payment Order schema
+// Atlas configuration for Payment Order Service
 // BIAN Service Domain: Payment Order
 // Manages payment orders and saga orchestration for payment processing
+// Uses database-per-service architecture with unqualified table names
 
 data "external_schema" "gorm" {
   program = [
@@ -13,20 +14,16 @@ data "external_schema" "gorm" {
 }
 
 env "local" {
-  // Schema-specific migration directory
+  // Service-specific migration directory
   migration {
     dir = "file://services/payment-order/migrations"
-    revisions_schema = "payment_order_revisions"
   }
 
-  // Dev database - include payment_order schema in search path
+  // Dev database - uses default public schema
   dev = "docker://postgres/16/dev"
 
   // Source schema from GORM models via external loader
   src = data.external_schema.gorm.url
-
-  // Schema configuration
-  schemas = ["payment_order"]
 
   // Lint configuration to catch dangerous changes
   lint {
@@ -45,14 +42,11 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/payment-order/migrations"
-    revisions_schema = "payment_order_revisions"
   }
 
   dev = "docker://postgres/16/dev"
 
   src = data.external_schema.gorm.url
-
-  schemas = ["payment_order"]
 
   lint {
     destructive {
@@ -69,12 +63,10 @@ env "ci" {
 
 env "production" {
   // Production environment - apply only, never diff
-  url = getenv("PROD_DATABASE_URL")
+  // URL points to service-specific database (meridian_payment_order)
+  url = getenv("DATABASE_URL")
 
   migration {
     dir = "file://services/payment-order/migrations"
-    revisions_schema = "payment_order_revisions"
   }
-
-  schemas = ["payment_order"]
 }

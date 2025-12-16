@@ -41,8 +41,7 @@ type CurrentAccountEntity struct {
 }
 
 // TableName overrides the default table name.
-// Uses unqualified name to allow PostgreSQL search_path to route queries
-// to organization-specific schemas (e.g., org_acme_bank.accounts).
+// Uses singular, unqualified name per database-per-service architecture.
 func (CurrentAccountEntity) TableName() string {
-	return "accounts"
+	return "account"
 }

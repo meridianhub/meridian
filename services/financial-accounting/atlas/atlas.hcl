@@ -1,6 +1,7 @@
-// Atlas configuration for Financial Accounting schema
+// Atlas configuration for Financial Accounting Service
 // BIAN Service Domain: Financial Accounting
 // Manages ledger postings and financial booking logs
+// Uses database-per-service architecture with unqualified table names
 
 data "external_schema" "gorm" {
   program = [
@@ -13,21 +14,16 @@ data "external_schema" "gorm" {
 }
 
 env "local" {
-  // Schema-specific migration directory
+  // Service-specific migration directory
   migration {
     dir = "file://services/financial-accounting/migrations"
-    // Use schema-specific revisions table to avoid conflicts with other services
-    revisions_schema = "financial_accounting_revisions"
   }
 
-  // Dev database
+  // Dev database - uses default public schema
   dev = "docker://postgres/16/dev"
 
   // Source schema from GORM models via external loader
   src = data.external_schema.gorm.url
-
-  // Schema configuration
-  schemas = ["financial_accounting"]
 
   // Lint configuration to catch dangerous changes
   lint {
@@ -46,14 +42,11 @@ env "local" {
 env "ci" {
   migration {
     dir = "file://services/financial-accounting/migrations"
-    revisions_schema = "financial_accounting_revisions"
   }
 
   dev = "docker://postgres/16/dev"
 
   src = data.external_schema.gorm.url
-
-  schemas = ["financial_accounting"]
 
   lint {
     destructive {
@@ -70,12 +63,10 @@ env "ci" {
 
 env "production" {
   // Production environment - apply only, never diff
-  url = getenv("PROD_DATABASE_URL")
+  // URL points to service-specific database (meridian_financial_accounting)
+  url = getenv("DATABASE_URL")
 
   migration {
     dir = "file://services/financial-accounting/migrations"
-    revisions_schema = "financial_accounting_revisions"
   }
-
-  schemas = ["financial_accounting"]
 }

@@ -11,6 +11,8 @@ import (
 	capersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	fapersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	partypersistence "github.com/meridianhub/meridian/services/party/adapters/persistence"
+	popersistence "github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
+	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/domain/models"
 )
 
@@ -19,11 +21,13 @@ const (
 	schemaPositionKeeping     = "position_keeping"
 	schemaFinancialAccounting = "financial_accounting"
 	schemaParty               = "party"
+	schemaPaymentOrder        = "payment_order"
+	schemaPlatform            = "platform"
 )
 
 func main() {
 	// Parse schema filter flag
-	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping, financial_accounting, party)")
+	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping, financial_accounting, party, payment_order, platform)")
 	flag.Parse()
 
 	// Determine which models to load based on schema filter
@@ -61,6 +65,16 @@ func main() {
 		modelList = []interface{}{
 			&partypersistence.PartyEntity{},
 		}
+	case schemaPaymentOrder:
+		// Payment order service for payment processing
+		modelList = []interface{}{
+			&popersistence.PaymentOrderEntity{},
+		}
+	case schemaPlatform:
+		// Platform/tenant service for multi-tenancy management
+		modelList = []interface{}{
+			&tenantpersistence.TenantEntity{},
+		}
 	case "":
 		// No filter - load all models (for backward compatibility)
 		modelList = []interface{}{
@@ -82,9 +96,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Prepend CREATE SCHEMA statements for all referenced schemas
-	// Note: party schema uses unqualified table names for multi-tenant support,
-	// so no CREATE SCHEMA is prepended - the schema is set via search_path
+	// Prepend CREATE SCHEMA statements for referenced schemas.
+	// With database-per-service architecture, most services use unqualified table names
+	// in the default public schema. Only legacy services (position_keeping, financial_accounting,
+	// current_account) still use schema-qualified names.
 	output := stmts
 	if *schemaFilter != "" {
 		var schemaStmt string
@@ -94,13 +109,15 @@ func main() {
 			schemaStmt = "CREATE SCHEMA IF NOT EXISTS current_account;\nCREATE SCHEMA IF NOT EXISTS position_keeping;\n\n"
 		case schemaFinancialAccounting:
 			schemaStmt = "CREATE SCHEMA IF NOT EXISTS financial_accounting;\n\n"
-		case schemaParty:
-			// Party uses unqualified table names for multi-tenant schema routing.
+		case schemaCurrentAccount:
+			schemaStmt = "CREATE SCHEMA IF NOT EXISTS current_account;\n\n"
+		case schemaParty, schemaPaymentOrder, schemaPlatform:
+			// These services use unqualified table names for multi-tenant schema routing.
 			// Schema is created externally during org provisioning or set via search_path.
 			// No CREATE SCHEMA prepended here.
 			schemaStmt = ""
 		default:
-			schemaStmt = fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s;\n\n", *schemaFilter)
+			schemaStmt = ""
 		}
 		output = schemaStmt + stmts
 	}

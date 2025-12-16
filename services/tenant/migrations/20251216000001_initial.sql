@@ -1,11 +1,10 @@
 -- Tenant Service Schema
 -- Platform infrastructure for multi-tenant isolation
 -- Consolidated migration for clean slate deployment
+-- Uses unqualified table names (relies on database-per-service architecture)
 
-CREATE SCHEMA IF NOT EXISTS platform;
-
--- Tenants registry table
-CREATE TABLE platform.tenants (
+-- Tenant registry table (singular, unqualified)
+CREATE TABLE tenant (
     -- Tenant ID (alphanumeric + underscore, 1-50 chars)
     -- Used for schema routing (org_{id} schema) and API subdomain
     id VARCHAR(50) PRIMARY KEY,
@@ -45,28 +44,28 @@ CREATE TABLE platform.tenants (
     CONSTRAINT valid_status CHECK (status IN ('provisioning', 'active', 'suspended', 'provisioning_failed', 'deprovisioned'))
 );
 
--- Indexes for tenants
-CREATE INDEX idx_tenants_status ON platform.tenants(status);
-CREATE INDEX idx_tenants_status_created_at ON platform.tenants(status, created_at DESC);
-CREATE UNIQUE INDEX idx_tenants_subdomain ON platform.tenants(subdomain) WHERE subdomain IS NOT NULL;
-CREATE INDEX idx_tenants_created_at ON platform.tenants(created_at DESC);
-CREATE INDEX idx_tenants_party_id ON platform.tenants(party_id);
+-- Indexes for tenant
+CREATE INDEX idx_tenant_status ON tenant(status);
+CREATE INDEX idx_tenant_status_created_at ON tenant(status, created_at DESC);
+CREATE UNIQUE INDEX idx_tenant_subdomain ON tenant(subdomain) WHERE subdomain IS NOT NULL;
+CREATE INDEX idx_tenant_created_at ON tenant(created_at DESC);
+CREATE INDEX idx_tenant_party_id ON tenant(party_id);
 
--- Comments for tenants
-COMMENT ON TABLE platform.tenants IS 'Multi-tenant platform registry';
-COMMENT ON COLUMN platform.tenants.id IS 'Unique tenant identifier, used for schema routing (org_{id})';
-COMMENT ON COLUMN platform.tenants.settlement_asset IS 'Primary asset for this tenant (ISO currency code or custom asset)';
-COMMENT ON COLUMN platform.tenants.subdomain IS 'API subdomain for tenant-specific endpoints';
-COMMENT ON COLUMN platform.tenants.party_id IS 'Reference to corresponding Party in BIAN Party Reference Data Directory (auto-populated on tenant creation)';
-COMMENT ON COLUMN platform.tenants.metadata IS 'Flexible JSON storage for features, quotas, and tenant-specific config';
-COMMENT ON COLUMN platform.tenants.version IS 'Optimistic locking version for concurrent updates';
-COMMENT ON COLUMN platform.tenants.error_message IS 'Error details when status is provisioning_failed';
+-- Comments for tenant
+COMMENT ON TABLE tenant IS 'Multi-tenant platform registry';
+COMMENT ON COLUMN tenant.id IS 'Unique tenant identifier, used for schema routing (org_{id})';
+COMMENT ON COLUMN tenant.settlement_asset IS 'Primary asset for this tenant (ISO currency code or custom asset)';
+COMMENT ON COLUMN tenant.subdomain IS 'API subdomain for tenant-specific endpoints';
+COMMENT ON COLUMN tenant.party_id IS 'Reference to corresponding Party in BIAN Party Reference Data Directory (auto-populated on tenant creation)';
+COMMENT ON COLUMN tenant.metadata IS 'Flexible JSON storage for features, quotas, and tenant-specific config';
+COMMENT ON COLUMN tenant.version IS 'Optimistic locking version for concurrent updates';
+COMMENT ON COLUMN tenant.error_message IS 'Error details when status is provisioning_failed';
 
--- Tenant provisioning status table
-CREATE TABLE platform.tenant_provisioning (
-    -- Foreign key to tenants table
+-- Tenant provisioning status table (singular, unqualified)
+CREATE TABLE tenant_provisioning (
+    -- Foreign key to tenant table
     -- ON DELETE RESTRICT: Cannot delete tenant while provisioning record exists (audit trail)
-    tenant_id VARCHAR(50) PRIMARY KEY REFERENCES platform.tenants(id) ON DELETE RESTRICT,
+    tenant_id VARCHAR(50) PRIMARY KEY REFERENCES tenant(id) ON DELETE RESTRICT,
 
     -- Provisioning lifecycle state
     -- Values: 'pending', 'in_progress', 'active', 'failed', 'deprovisioned'
@@ -96,12 +95,12 @@ CREATE TABLE platform.tenant_provisioning (
 );
 
 -- Indexes for tenant_provisioning
-CREATE INDEX idx_tenant_provisioning_state ON platform.tenant_provisioning(state);
-CREATE INDEX idx_tenant_provisioning_updated_at ON platform.tenant_provisioning(updated_at DESC);
+CREATE INDEX idx_tenant_provisioning_state ON tenant_provisioning(state);
+CREATE INDEX idx_tenant_provisioning_updated_at ON tenant_provisioning(updated_at DESC);
 
 -- Comments for tenant_provisioning
-COMMENT ON TABLE platform.tenant_provisioning IS 'Tracks schema provisioning state for multi-tenant isolation';
-COMMENT ON COLUMN platform.tenant_provisioning.tenant_id IS 'Tenant ID, references platform.tenants';
-COMMENT ON COLUMN platform.tenant_provisioning.state IS 'Provisioning lifecycle: pending → in_progress → active/failed';
-COMMENT ON COLUMN platform.tenant_provisioning.service_schemas IS 'JSONB array of per-service provisioning status';
-COMMENT ON COLUMN platform.tenant_provisioning.error_message IS 'Error details when state is failed';
+COMMENT ON TABLE tenant_provisioning IS 'Tracks schema provisioning state for multi-tenant isolation';
+COMMENT ON COLUMN tenant_provisioning.tenant_id IS 'Tenant ID, references tenant table';
+COMMENT ON COLUMN tenant_provisioning.state IS 'Provisioning lifecycle: pending → in_progress → active/failed';
+COMMENT ON COLUMN tenant_provisioning.service_schemas IS 'JSONB array of per-service provisioning status';
+COMMENT ON COLUMN tenant_provisioning.error_message IS 'Error details when state is failed';
