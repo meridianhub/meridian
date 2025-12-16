@@ -399,7 +399,7 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 		event := &domain.TransactionPosted{
 			LogID:            log.LogID,
 			AccountID:        log.AccountID,
-			PostingReference: "", // TODO: Add to proto if needed
+			PostingReference: "", // TODO(tech-debt-cleanup#3): Add to proto if needed
 			Reason:           req.StatusUpdate.StatusReason,
 			PostedBy:         req.AuditEntry.GetUserId(),
 			CorrelationID:    correlationID,
@@ -412,7 +412,7 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			LogID:         log.LogID,
 			AccountID:     log.AccountID,
 			FailureReason: req.StatusUpdate.StatusReason,
-			ErrorCode:     "", // TODO: Add to proto if needed
+			ErrorCode:     "", // TODO(tech-debt-cleanup#3): Add to proto if needed
 			CorrelationID: correlationID,
 			Timestamp:     time.Now().UTC(),
 			Version:       log.Version,

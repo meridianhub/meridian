@@ -22,9 +22,8 @@ func TestNewPositionKeepingService(t *testing.T) {
 	})
 
 	t.Run("creates service with nil checks", func(t *testing.T) {
-		// TODO: Add nil parameter validation in constructor
+		// TODO(tech-debt-cleanup#4): Add nil parameter validation in constructor
 		// Currently the constructor accepts nil dependencies
-		// This test documents the expected future behavior
 		t.Skip("Nil validation not yet implemented")
 	})
 }

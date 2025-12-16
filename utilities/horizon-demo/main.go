@@ -273,15 +273,9 @@ func runDemo(cfg *Config) (*DemoResult, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	// TODO: Implement demo logic in subsequent tasks
-	// Task 2: gRPC client setup
-	// Task 3: Pre-flight setup (create account, deposit)
-	// Task 4: Sabotage attempt with timeout
-	// Task 5: Idempotency retry
-	// Task 6-7: Forensic audit
-	// Task 9-10: Report generation
-
-	// For now, return a placeholder result to demonstrate the output formatting
+	// Placeholder demo results - the horizon-demo is a proof-of-concept
+	// demonstrating the CLI structure and output formatting.
+	// See tag 99-horizon-proof for the completed implementation tasks.
 	result := &DemoResult{
 		Steps: []StepResult{
 			{Step: 1, Name: "Create Test Account", Status: StatusOK, Details: "HORIZON-TEST-placeholder"},
@@ -297,8 +291,7 @@ func runDemo(cfg *Config) (*DemoResult, error) {
 	// Print ASCII table
 	printASCIITable(os.Stdout, result)
 
-	// TODO: Task 9 will implement actual JSON report generation
-	// For now, just log the configured output path
+	// JSON report generation is a future enhancement
 	logger.Debug("report output configured", "path", cfg.Output)
 
 	// Execute cleanup unless --no-cleanup is specified
@@ -412,12 +405,8 @@ func getVerdictMessage(v Verdict) string {
 }
 
 // executeCleanup attempts to clean up the test account created during the demo.
+// Currently a no-op as the demo uses placeholder data.
 func executeCleanup(logger *slog.Logger, accountID string) error {
-	// TODO: Implement actual cleanup logic in subsequent tasks
-	// This will call CurrentAccountService to close/delete the test account
 	logger.Debug("cleanup would delete account", "account_id", accountID)
-
-	// For now, cleanup is a no-op since we don't have actual gRPC clients yet
-	// The cleanup will be implemented when Task 2 (gRPC client setup) is complete
 	return nil
 }

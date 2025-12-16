@@ -30,8 +30,7 @@ jobs:
 
       - name: Run markdownlint
         run: npm run lint:md
-        # TODO: Change continue-on-error to 'false' once all existing markdown issues are resolved
-        # Currently allows gradual migration without blocking development
+        # TODO(tech-debt-cleanup#6): Change continue-on-error to 'false' once all existing markdown issues are resolved
         continue-on-error: true
         id: markdown-lint
 

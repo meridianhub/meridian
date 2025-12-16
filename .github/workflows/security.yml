@@ -41,7 +41,7 @@ jobs:
         go install golang.org/x/vuln/cmd/govulncheck@latest
         # GO-2025-4155: crypto/x509 vulnerability - fix requires Go 1.25.5 (not yet released)
         # Temporarily filter this specific CVE until Go 1.25.5 is available
-        # TODO: Remove this workaround when Go 1.25.5 is released
+        # TODO(tech-debt-cleanup#5): Remove this workaround when Go 1.25.5 is released
         govulncheck -format json ./... > vulncheck-results.json || true
 
         # Check for vulnerabilities excluding GO-2025-4155

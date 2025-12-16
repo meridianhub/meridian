@@ -28,8 +28,8 @@ const (
 )
 
 // CurrentAccount represents a BIAN current account facility domain model
-// TODO(immutability): Phase 2 - refactor to value semantics with value receivers
-// See docs/immutability-audit.md for full refactoring plan
+// TODO(tech-debt-cleanup#7): Phase 2 - refactor to value semantics with value receivers
+// See docs/archive/immutability-audit.md for full refactoring plan
 type CurrentAccount struct {
 	ID                    uuid.UUID
 	AccountID             string
