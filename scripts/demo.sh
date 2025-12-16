@@ -306,7 +306,7 @@ select_party() {
         echo -e "${YELLOW}  No existing parties found${NC}"
     else
         echo -e "${CYAN}╭─────────────────────────────────────────────────────────────────╮${NC}"
-        echo -e "${CYAN}│  #   Party Name                    Type         Accounts       │${NC}"
+        echo -e "${CYAN}│  #   Party Name                    Type         Accounts        │${NC}"
         echo -e "${CYAN}├─────────────────────────────────────────────────────────────────┤${NC}"
 
         for i in "${!PARTY_IDS[@]}"; do
@@ -418,7 +418,8 @@ select_account() {
     echo -e "${CYAN}► Loading existing accounts...${NC}"
     SCHEMA="org_${SELECTED_TENANT}"
 
-    ACCOUNTS_SQL="SELECT id, account_identification, currency, balance, status FROM ${SCHEMA}.accounts WHERE party_id = '${SELECTED_PARTY_ID}' ORDER BY created_at DESC LIMIT 20;"
+    # Note: account_id (ACC-xxx) is the API identifier, not the UUID
+    ACCOUNTS_SQL="SELECT account_id, account_identification, currency, balance, status FROM ${SCHEMA}.accounts WHERE party_id = '${SELECTED_PARTY_ID}' ORDER BY created_at DESC LIMIT 20;"
     ACCOUNTS_RAW=$(run_sql "$ACCOUNTS_SQL" 2>/dev/null | tail -n +2 || echo "")
 
     ACCOUNT_IDS=()
@@ -438,9 +439,9 @@ select_account() {
     if [ ${#ACCOUNT_IDS[@]} -eq 0 ]; then
         echo -e "${YELLOW}  No existing accounts found for this party${NC}"
     else
-        echo -e "${CYAN}╭─────────────────────────────────────────────────────────────────╮${NC}"
-        echo -e "${CYAN}│  #   IBAN                         Balance          Status      │${NC}"
-        echo -e "${CYAN}├─────────────────────────────────────────────────────────────────┤${NC}"
+        echo -e "${CYAN}╭───────────────────────────────────────────────────────────────────╮${NC}"
+        echo -e "${CYAN}│  #   IBAN                         Balance          Status         │${NC}"
+        echo -e "${CYAN}├───────────────────────────────────────────────────────────────────┤${NC}"
 
         for i in "${!ACCOUNT_IDS[@]}"; do
             NUM=$((i + 1))
@@ -461,7 +462,7 @@ select_account() {
             printf "${CYAN}│${NC}  %-3s %-28s %12s          %-10s ${CYAN}│${NC}\n" \
                 "$NUM)" "$AIBAN_SHORT" "$ABAL_FMT" "$ASTATUS_SHORT"
         done
-        echo -e "${CYAN}╰─────────────────────────────────────────────────────────────────╯${NC}"
+        echo -e "${CYAN}╰───────────────────────────────────────────────────────────────────╯${NC}"
     fi
 
     echo ""
@@ -539,7 +540,7 @@ transaction_loop() {
     while true; do
         # Get current balance (stored in pence, display in pounds)
         SCHEMA="org_${SELECTED_TENANT}"
-        CURRENT_BAL_PENCE=$(run_sql "SELECT balance FROM ${SCHEMA}.accounts WHERE id = '${SELECTED_ACCOUNT_ID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+        CURRENT_BAL_PENCE=$(run_sql "SELECT balance FROM ${SCHEMA}.accounts WHERE account_id = '${SELECTED_ACCOUNT_ID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
         CURRENT_BAL_PENCE=${CURRENT_BAL_PENCE:-0}
         CURRENT_BAL=$(echo "scale=2; $CURRENT_BAL_PENCE / 100" | bc 2>/dev/null || echo "$CURRENT_BAL_PENCE")
 
@@ -586,6 +587,9 @@ transaction_loop() {
                 # Deposit
                 DEPOSIT_AMOUNT="$CMD"
                 echo -e "${GREEN}  ▲ Depositing: £$DEPOSIT_AMOUNT${NC}"
+                echo ""
+                echo -e "${YELLOW}  ► gRPC: CurrentAccountService/ExecuteDeposit${NC}"
+                echo -e "${YELLOW}    Request: {account_id: \"$SELECTED_ACCOUNT_ID\", amount: £$DEPOSIT_AMOUNT}${NC}"
 
                 RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
                   \"account_id\": \"$SELECTED_ACCOUNT_ID\",
@@ -601,17 +605,19 @@ transaction_loop() {
                 if echo "$RESPONSE" | jq -e '.transactionId' >/dev/null 2>&1; then
                     TXN_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
                     NEW_BAL=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
-                    echo -e "${GREEN}  ✓ Deposit Complete:${NC} $TXN_ID"
+                    echo -e "${GREEN}  ✓ Deposit Complete${NC}"
+                    echo -e "${YELLOW}    Response:${NC}"
                     echo "$RESPONSE" | jq '{
                       transaction_id: .transactionId,
                       status: .status,
                       new_balance: .newBalance.amount,
                       available_balance: .availableBalance.amount
-                    }'
+                    }' | sed 's/^/    /'
                     TRANSACTION_COUNT=$((TRANSACTION_COUNT + 1))
                 else
-                    echo -e "${RED}  ✗ Deposit Failed:${NC}"
-                    echo "$RESPONSE" | head -5
+                    echo -e "${RED}  ✗ Deposit Failed${NC}"
+                    echo -e "${YELLOW}    Response:${NC}"
+                    echo "$RESPONSE" | head -5 | sed 's/^/    /'
                 fi
                 ;;
             *)
