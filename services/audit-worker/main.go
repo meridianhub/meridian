@@ -83,7 +83,7 @@ func getDBConnectionString() string {
 	if connStr == "" {
 		// Default for local development (matches Tiltfile)
 		// #nosec G101 -- Local development credential only, overridden by DATABASE_URL in production
-		connStr = "postgres://meridian:meridian@localhost:26257/meridian?sslmode=disable"
+		connStr = "postgres://meridian_platform_user@localhost:26257/meridian_platform?sslmode=disable"
 	}
 	return connStr
 }

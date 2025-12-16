@@ -23,7 +23,7 @@ metadata:
   name: current-account-db
 type: Opaque
 stringData:
-  DATABASE_URL: "postgres://meridian:meridian@cockroachdb:26257/meridian?sslmode=disable"
+  DATABASE_URL: "postgres://meridian_current_account_user@cockroachdb:26257/meridian_current_account?sslmode=disable"
 ```
 
 **⚠️ WARNING:** These secrets contain development-only credentials. **NEVER** use these credentials in production.
@@ -253,7 +253,7 @@ kind: Secret
 metadata:
   name: current-account-db
 stringData:
-  DATABASE_URL: "postgres://meridian:meridian@localhost:5432/meridian"
+  DATABASE_URL: "postgres://meridian_current_account_user@localhost:5432/meridian_current_account"
 ```
 
 **After (Production):**

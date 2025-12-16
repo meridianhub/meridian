@@ -303,7 +303,7 @@ atlas migrate diff initial \
 atlas migrate apply \
   --env local \
   --config file://services/{service}/atlas/atlas.hcl \
-  --url "postgres://meridian:meridian@localhost:26257/{service}?sslmode=disable"
+  --url "postgres://meridian_{service}_user@localhost:26257/meridian_{service}?sslmode=disable"
 ```
 
 **Migration file naming**: `YYYYMMDDHHMMSS_description.sql`
@@ -312,7 +312,7 @@ atlas migrate apply \
 
 ```bash
 # Query database to confirm schema
-psql -h localhost -p 26257 -U meridian -d meridian -c "\dt {schema}.*"
+psql -h localhost -p 26257 -U meridian_{service}_user -d meridian_{service} -c "\dt"
 ```
 
 ---
