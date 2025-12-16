@@ -34,10 +34,10 @@ pause() {
     echo ""
 }
 
-echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Meridian Banking Platform - Comprehensive Demo                ║${NC}"
-echo -e "${BLUE}║  Saga • Load Balancing • Tracing • Health • Idempotency        ║${NC}"
-echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}  Meridian Banking Platform - Comprehensive Demo${NC}"
+echo -e "${BLUE}  Saga • Load Balancing • Tracing • Health • Idempotency${NC}"
+echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 # Check prerequisites
@@ -167,9 +167,9 @@ run_sql() {
 # Step 1: Interactive Tenant Selection/Creation
 # ─────────────────────────────────────────────────────────────────
 select_tenant() {
-    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  Step 1: Select or Create Tenant                               ║${NC}"
-    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${MAGENTA}  Step 1: Select or Create Tenant${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
     echo ""
 
     # List existing tenants via gRPC
@@ -277,10 +277,10 @@ select_tenant() {
 # Step 2: Interactive Party Selection/Creation
 # ─────────────────────────────────────────────────────────────────
 select_party() {
-    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  Step 2: Select or Create Party                                ║${NC}"
-    echo -e "${MAGENTA}║  Tenant: ${SELECTED_TENANT}$(printf '%*s' $((42 - ${#SELECTED_TENANT})) '')║${NC}"
-    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${MAGENTA}  Step 2: Select or Create Party${NC}"
+    echo -e "${MAGENTA}  Tenant: ${SELECTED_TENANT}${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
     echo ""
 
     # Query parties from database
@@ -408,10 +408,10 @@ select_party() {
 # Step 3: Interactive Account Selection/Creation
 # ─────────────────────────────────────────────────────────────────
 select_account() {
-    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  Step 3: Select or Create Account                              ║${NC}"
-    echo -e "${MAGENTA}║  Party: ${SELECTED_PARTY_NAME}$(printf '%*s' $((53 - ${#SELECTED_PARTY_NAME})) '')║${NC}"
-    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${MAGENTA}  Step 3: Select or Create Account${NC}"
+    echo -e "${MAGENTA}  Party: ${SELECTED_PARTY_NAME}${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
     echo ""
 
     # Query accounts for this party
@@ -448,8 +448,9 @@ select_account() {
             ABAL="${ACCOUNT_BALANCES[$i]}"
             ASTATUS="${ACCOUNT_STATUSES[$i]}"
 
-            # Format balance
-            ABAL_FMT="£$(printf "%'.0f" "$ABAL" 2>/dev/null || echo "$ABAL")"
+            # Format balance (stored in pence, display in pounds)
+            ABAL_GBP=$(echo "scale=2; $ABAL / 100" | bc 2>/dev/null || echo "$ABAL")
+            ABAL_FMT="£${ABAL_GBP}"
 
             # Shorten status
             ASTATUS_SHORT=$(echo "$ASTATUS" | sed 's/ACCOUNT_STATUS_//')
@@ -507,7 +508,8 @@ select_account() {
         SELECTED_ACCOUNT_ID="${ACCOUNT_IDS[$((ACCOUNT_CHOICE - 1))]}"
         SELECTED_ACCOUNT_IBAN="${ACCOUNT_IBANS[$((ACCOUNT_CHOICE - 1))]}"
         SELECTED_BALANCE="${ACCOUNT_BALANCES[$((ACCOUNT_CHOICE - 1))]}"
-        echo -e "${GREEN}✓ Selected account: ${SELECTED_ACCOUNT_IBAN:0:8}...${SELECTED_ACCOUNT_IBAN: -4} (Balance: £${SELECTED_BALANCE})${NC}"
+        SELECTED_BALANCE_GBP=$(echo "scale=2; $SELECTED_BALANCE / 100" | bc 2>/dev/null || echo "$SELECTED_BALANCE")
+        echo -e "${GREEN}✓ Selected account: ${SELECTED_ACCOUNT_IBAN:0:8}...${SELECTED_ACCOUNT_IBAN: -4} (Balance: £${SELECTED_BALANCE_GBP})${NC}"
     else
         echo -e "${RED}Invalid selection${NC}"
         return 1
@@ -520,10 +522,10 @@ select_account() {
 # ─────────────────────────────────────────────────────────────────
 transaction_loop() {
     # Sets NAVIGATION_RESULT global variable for navigation state
-    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  Step 4: Transactions (Saga Pattern)                           ║${NC}"
-    echo -e "${MAGENTA}║  Account: ${SELECTED_ACCOUNT_IBAN:0:20}...                              ║${NC}"
-    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${MAGENTA}  Step 4: Transactions (Saga Pattern)${NC}"
+    echo -e "${MAGENTA}  Account: ${SELECTED_ACCOUNT_IBAN}${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
     echo ""
 
     echo -e "${YELLOW}  Saga Steps for each transaction:${NC}"
@@ -535,10 +537,11 @@ transaction_loop() {
 
     TRANSACTION_COUNT=0
     while true; do
-        # Get current balance
+        # Get current balance (stored in pence, display in pounds)
         SCHEMA="org_${SELECTED_TENANT}"
-        CURRENT_BAL=$(run_sql "SELECT balance FROM ${SCHEMA}.accounts WHERE id = '${SELECTED_ACCOUNT_ID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
-        CURRENT_BAL=${CURRENT_BAL:-0}
+        CURRENT_BAL_PENCE=$(run_sql "SELECT balance FROM ${SCHEMA}.accounts WHERE id = '${SELECTED_ACCOUNT_ID}';" 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+        CURRENT_BAL_PENCE=${CURRENT_BAL_PENCE:-0}
+        CURRENT_BAL=$(echo "scale=2; $CURRENT_BAL_PENCE / 100" | bc 2>/dev/null || echo "$CURRENT_BAL_PENCE")
 
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${CYAN}  Current Balance: £${CURRENT_BAL}${NC}"
@@ -679,9 +682,9 @@ PARTY_ID="$SELECTED_PARTY_ID"
 # ════════════════════════════════════════════════════════════════
 # PART 1: Health Checks & Service Discovery
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 1: Health Checks & Service Readiness                     ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${MAGENTA}  Part 1: Health Checks & Service Readiness${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 # Display health check status in table format
@@ -745,9 +748,9 @@ pause
 # ════════════════════════════════════════════════════════════════
 # PART 2: Saga Pattern - Distributed Transaction with Compensation
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 2: Saga Pattern - Distributed Transaction                ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${MAGENTA}  Part 2: Saga Pattern - Distributed Transaction${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 echo -e "${CYAN}► Step 1: Register Party (Customer)${NC}"
@@ -891,9 +894,9 @@ pause
 # ════════════════════════════════════════════════════════════════
 # PART 3: DNS-Based Load Balancing with Pod Scaling
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 3: DNS-Based Client-Side Load Balancing                  ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${MAGENTA}  Part 3: DNS-Based Client-Side Load Balancing${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 echo -e "${CYAN}► Service Discovery Configuration:${NC}"
@@ -975,9 +978,9 @@ pause
 # ════════════════════════════════════════════════════════════════
 # PART 4: Idempotency - Safe Retries with Payment Order Reference
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 4: Idempotency - Proving Safe Retries                    ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${MAGENTA}  Part 4: Idempotency - Proving Safe Retries${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 echo -e "${CYAN}► Idempotency Pattern:${NC}"
@@ -1034,10 +1037,10 @@ echo ""
 
 # Verify idempotency
 if [ "$LIEN_ID" = "$LIEN_ID2" ]; then
-    echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║  ✓ IDEMPOTENCY VERIFIED - Same Lien ID returned both times     ║${NC}"
-    echo -e "${GREEN}║    No duplicate fund reservations created!                     ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  ✓ IDEMPOTENCY VERIFIED - Same Lien ID returned both times${NC}"
+    echo -e "${GREEN}    No duplicate fund reservations created!${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
 else
     echo -e "${RED}✗ Idempotency check failed - different lien IDs returned${NC}"
 fi
@@ -1065,9 +1068,9 @@ pause
 # ════════════════════════════════════════════════════════════════
 # PART 5: Distributed Tracing (OpenTelemetry + Grafana Tempo)
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 5: Distributed Tracing Across Services                   ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${MAGENTA}  Part 5: Distributed Tracing Across Services${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 echo -e "${CYAN}► Observability Stack (via Tilt):${NC}"
@@ -1094,9 +1097,9 @@ pause
 # ════════════════════════════════════════════════════════════════
 # PART 6: Position Keeping - Transaction History
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 6: Position Keeping - Transaction Audit Trail            ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${MAGENTA}  Part 6: Position Keeping - Transaction Audit Trail${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 echo -e "${CYAN}► Listing position logs for account: ${ACCOUNT_ID}${NC}"
@@ -1127,9 +1130,9 @@ pause
 # ════════════════════════════════════════════════════════════════
 # PART 7: Financial Accounting - Double-Entry Ledger
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 7: Financial Accounting - Double-Entry Bookkeeping       ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${MAGENTA}  Part 7: Financial Accounting - Double-Entry Bookkeeping${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 echo -e "${CYAN}► Listing booking logs for account: ${ACCOUNT_ID}${NC}"
@@ -1158,9 +1161,9 @@ pause
 # ════════════════════════════════════════════════════════════════
 # PART 8: Final Account State
 # ════════════════════════════════════════════════════════════════
-echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║  Part 8: Final Account State & Summary                         ║${NC}"
-echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${MAGENTA}  Part 8: Final Account State & Summary${NC}"
+echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
 FINAL_ACCOUNT=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
@@ -1183,9 +1186,9 @@ echo ""
 # ════════════════════════════════════════════════════════════════
 # SUMMARY
 # ════════════════════════════════════════════════════════════════
-echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Demo Complete! Enterprise Features Validated                  ║${NC}"
-echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}  Demo Complete! Enterprise Features Validated${NC}"
+echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "${GREEN}Account Summary:${NC}"
 echo -e "  Account ID:   $ACCOUNT_ID"
@@ -1224,10 +1227,10 @@ read -p "Run Horizon demo? [y/N] " run_horizon
 echo ""
 
 if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
-    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  Part 9: Horizon Integrity Proof                               ║${NC}"
-    echo -e "${MAGENTA}║  Demonstrating resilience against phantom transactions         ║${NC}"
-    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${MAGENTA}  Part 9: Horizon Integrity Proof${NC}"
+    echo -e "${MAGENTA}  Demonstrating resilience against phantom transactions${NC}"
+    echo -e "${MAGENTA}════════════════════════════════════════════════════════════════${NC}"
     echo ""
 
     echo -e "${CYAN}Select demo mode:${NC}"
@@ -1298,14 +1301,14 @@ if [[ "$run_horizon" =~ ^[Yy]$ ]]; then
             echo ""
 
             if [ "$verdict" = "PASSED" ]; then
-                echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-                echo -e "${GREEN}║  INTEGRITY PROOF PASSED                                        ║${NC}"
-                echo -e "${GREEN}║  No phantom transactions. Idempotency guarantees hold.         ║${NC}"
-                echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
+                echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+                echo -e "${GREEN}  INTEGRITY PROOF PASSED${NC}"
+                echo -e "${GREEN}  No phantom transactions. Idempotency guarantees hold.${NC}"
+                echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
             else
-                echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
-                echo -e "${YELLOW}║  INTEGRITY PROOF: $verdict                                     ║${NC}"
-                echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════╝${NC}"
+                echo -e "${YELLOW}════════════════════════════════════════════════════════════════${NC}"
+                echo -e "${YELLOW}  INTEGRITY PROOF: $verdict${NC}"
+                echo -e "${YELLOW}════════════════════════════════════════════════════════════════${NC}"
             fi
         fi
         return $exit_code
