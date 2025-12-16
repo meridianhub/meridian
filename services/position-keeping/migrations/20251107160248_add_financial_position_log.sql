@@ -123,7 +123,7 @@ ALTER TABLE "position_keeping"."transaction_log_entries"
   CHECK (char_length("currency") = 3);
 ALTER TABLE "position_keeping"."transaction_log_entries"
   ADD CONSTRAINT "chk_transaction_log_entries_direction"
-  CHECK ("direction" IN ('debit', 'credit'));
+  CHECK ("direction" IN ('DEBIT', 'CREDIT'));
 ALTER TABLE "position_keeping"."financial_position_logs"
   ADD CONSTRAINT "chk_financial_position_logs_current_status"
   CHECK ("current_status" IN ('PENDING', 'RECONCILED', 'POSTED', 'CANCELLED', 'FAILED', 'REJECTED', 'AMENDED', 'REVERSED'));
