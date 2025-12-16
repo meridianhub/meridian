@@ -46,6 +46,9 @@ linters:
     - gocritic       # Additional safety diagnostics
     - bodyclose      # HTTP response bodies must be closed
 
+    # Architecture linters
+    - depguard       # Enforce dependency constraints and block dangerous packages
+
   disable:
     - varnamelen     # Too strict for production code
     - testpackage    # Allow internal testing
@@ -253,6 +256,57 @@ linters:
         - opinionated
       # Note: ifElseChain, elseif, unlambda, exitAfterDefer, assignOp are
       # already disabled by disabled-tags: [style]
+
+    depguard:
+      # Enforce dependency constraints - block deprecated packages and prevent test
+      # packages from leaking into production code
+      rules:
+        # Main rule applies to production Go files only (excludes test files)
+        main:
+          # Only apply to non-test files
+          files:
+            - "!**/*_test.go"
+            - "!**/testhelpers/**"
+            - "!**/testfixtures/**"
+            - "!**/testdb/**"
+            - "!**/tests/**"
+          # Lax mode: allow all packages except those explicitly denied
+          list-mode: lax
+          deny:
+            # Deprecated packages
+            - pkg: "io/ioutil"
+              desc: "Deprecated since Go 1.16: use io and os packages instead"
+            - pkg: "github.com/pkg/errors"
+              desc: "Deprecated: use standard library errors with fmt.Errorf and %w"
+
+            # Test-only packages that should not be in production code
+            - pkg: "testing"
+              desc: "testing package should only be imported in test files"
+            - pkg: "github.com/stretchr/testify"
+              desc: "testify should only be imported in test files"
+            - pkg: "github.com/stretchr/testify/assert"
+              desc: "testify/assert should only be imported in test files"
+            - pkg: "github.com/stretchr/testify/require"
+              desc: "testify/require should only be imported in test files"
+            - pkg: "github.com/stretchr/testify/mock"
+              desc: "testify/mock should only be imported in test files"
+            - pkg: "github.com/stretchr/testify/suite"
+              desc: "testify/suite should only be imported in test files"
+            - pkg: "github.com/testcontainers/testcontainers-go"
+              desc: "testcontainers should only be imported in test files"
+
+        # Test files: only block deprecated packages
+        tests:
+          files:
+            - "**/*_test.go"
+            - "**/testhelpers/**"
+            - "**/testfixtures/**"
+            - "**/testdb/**"
+            - "**/tests/**"
+          list-mode: lax
+          deny:
+            - pkg: "io/ioutil"
+              desc: "Deprecated since Go 1.16: use io and os packages instead"
 
 formatters:
   enable:
