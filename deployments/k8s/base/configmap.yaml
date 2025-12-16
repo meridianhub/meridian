@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: meridian-config
+  name: audit-worker-config
   labels:
-    app: meridian
-    component: ledger
+    app: audit-worker
+    component: audit
 data:
   log_level: "info"
   log_format: "json"

@@ -1,17 +1,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: meridian
+  name: audit-worker
   labels:
-    app: meridian
-    component: ledger
+    app: audit-worker
+    component: audit
     tier: backend
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: meridian
-      component: ledger
+      app: audit-worker
+      component: audit
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -20,15 +20,15 @@ spec:
   template:
     metadata:
       labels:
-        app: meridian
-        component: ledger
+        app: audit-worker
+        component: audit
         tier: backend
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: meridian
+      serviceAccountName: audit-worker
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -37,8 +37,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-      - name: meridian
-        image: meridian:latest
+      - name: audit-worker
+        image: audit-worker:latest
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
@@ -55,12 +55,12 @@ spec:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: meridian-db
+              name: audit-worker-db
               key: DATABASE_URL
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
-              name: meridian-config
+              name: audit-worker-config
               key: log_level
         - name: POD_NAME
           valueFrom:
@@ -120,14 +120,14 @@ spec:
         - name: tmp
           mountPath: /tmp
         - name: config
-          mountPath: /etc/meridian
+          mountPath: /etc/audit-worker
           readOnly: true
       volumes:
       - name: tmp
         emptyDir: {}
       - name: config
         configMap:
-          name: meridian-config
+          name: audit-worker-config
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -138,6 +138,6 @@ spec:
                 - key: app
                   operator: In
                   values:
-                  - meridian
+                  - audit-worker
               topologyKey: kubernetes.io/hostname
       terminationGracePeriodSeconds: 30

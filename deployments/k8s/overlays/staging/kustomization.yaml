@@ -2,13 +2,13 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 metadata:
-  name: meridian-staging
+  name: audit-worker-staging
 
 namespace: staging
 
 labels:
 - pairs:
-    app: meridian
+    app: audit-worker
     environment: staging
     managed-by: kustomize
 
@@ -17,7 +17,7 @@ resources:
 
 # ConfigMap for staging environment
 configMapGenerator:
-- name: meridian-config
+- name: audit-worker-config
   behavior: merge
   literals:
   - log_level=info
@@ -29,7 +29,7 @@ patches:
 # Production-like replicas (2 for staging)
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/replicas
@@ -38,7 +38,7 @@ patches:
 # Production-like resource limits
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources
@@ -53,7 +53,7 @@ patches:
 # Add staging-specific env vars
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: add
       path: /spec/template/spec/containers/0/env/-
@@ -69,15 +69,15 @@ patches:
 # Add monitoring annotations
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: add
       path: /spec/template/metadata/annotations/datadog.io~1logs
       value: "true"
     - op: add
       path: /spec/template/metadata/annotations/datadog.io~1tags
-      value: "env:staging,service:meridian"
+      value: "env:staging,service:audit-worker"
 
 images:
-- name: meridian
+- name: audit-worker
   newTag: staging-latest

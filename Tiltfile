@@ -559,7 +559,7 @@ k8s_resource(
 # Use Dockerfile.dev for local development (has tar/rm for Tilt)
 # Use Dockerfile for production builds (distroless)
 docker_build(
-  'meridian',
+  'audit-worker',
   context='.',
   dockerfile='Dockerfile.dev',
   build_args={
@@ -569,7 +569,6 @@ docker_build(
   },
   live_update=[
     # Sync Go source code
-    sync('./utilities', '/app/utilities'),
     sync('./services', '/app/services'),
     sync('./shared', '/app/shared'),
     sync('./go.mod', '/app/go.mod'),
@@ -577,19 +576,19 @@ docker_build(
 
     # Rebuild binary on changes (fast incremental builds)
     run(
-      'cd /app && go build -o meridian ./utilities/meridian',
-      trigger=['./utilities', './services', './shared'],
+      'cd /app && go build -o audit-worker ./services/audit-worker',
+      trigger=['./services', './shared'],
     ),
 
     # Restart the service using HUP signal
-    run('kill -HUP 1', trigger=['./utilities', './services', './shared']),
+    run('kill -HUP 1', trigger=['./services', './shared']),
   ],
 )
 
 # Deploy Kubernetes manifests
 k8s_yaml(kustomize('deployments/k8s/base'))
 
-# Meridian DB Secret - for local development only
+# audit-worker DB Secret - for local development only
 # Uses the same CockroachDB credentials as other services
 # NOTE: Production deployments must use External Secrets Operator or Sealed Secrets
 secret_path = 'deployments/k8s/base/secret.yaml'
@@ -602,9 +601,9 @@ else:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: meridian-db
+  name: audit-worker-db
   labels:
-    app: meridian
+    app: audit-worker
 type: Opaque
 stringData:
   # Local development connection string - CockroachDB in insecure mode
@@ -613,7 +612,7 @@ stringData:
 
 # Set resource dependencies
 k8s_resource(
-  'meridian',
+  'audit-worker',
   port_forwards=[
     '8080:8080',  # HTTP API
     '9090:9090',  # gRPC API
@@ -628,11 +627,11 @@ k8s_resource(
   labels=['microservices'],
   # Group RBAC and config resources under the main app
   objects=[
-    'meridian:serviceaccount',
-    'meridian:role',
-    'meridian:rolebinding',
-    'meridian-config:configmap',
-    # Note: meridian-version ConfigMap omitted (Kustomize hash suffix changes with content)
+    'audit-worker:serviceaccount',
+    'audit-worker:role',
+    'audit-worker:rolebinding',
+    'audit-worker-config:configmap',
+    # Note: audit-worker-version ConfigMap omitted (Kustomize hash suffix changes with content)
     # Tilt will still deploy it via kustomize, just not explicitly tracked here
   ],
 )

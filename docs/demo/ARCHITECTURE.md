@@ -189,7 +189,9 @@ CurrentAccount Service (consumer):
 
 ### Kubernetes (Tilt for local dev)
 
-- 3 replicas of meridian service (CurrentAccount + FinancialAccounting)
+- CurrentAccount Service (gRPC microservice)
+- FinancialAccounting Service (gRPC microservice)
+- audit-worker Service (3 replicas - processes audit log entries)
 - 3 Kafka brokers (KRaft cluster with quorum, no Zookeeper)
   - kafka-0, kafka-1, kafka-2 form KRaft quorum
   - Replication factor: 2 (tolerates 1 broker failure)

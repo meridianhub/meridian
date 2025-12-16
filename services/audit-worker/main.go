@@ -1,4 +1,6 @@
-// Package main is the entry point for the Meridian open banking ledger service.
+// Package main is the entry point for the audit-worker service.
+// The audit-worker processes audit log entries from the outbox table,
+// moving them to the audit log with retry logic and metrics collection.
 package main
 
 import (
@@ -47,7 +49,7 @@ func setupRoutes(mux *http.ServeMux) {
 	// Root endpoint
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, "Meridian v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
+		_, _ = fmt.Fprintf(w, "audit-worker v%s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
 	})
 }
 
@@ -110,7 +112,7 @@ func setupDatabase(_ context.Context) (*gorm.DB, error) {
 }
 
 func main() {
-	log.Printf("Meridian v%s (commit: %s, built: %s)", Version, Commit, BuildDate)
+	log.Printf("audit-worker v%s (commit: %s, built: %s)", Version, Commit, BuildDate)
 
 	// Setup logger
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
