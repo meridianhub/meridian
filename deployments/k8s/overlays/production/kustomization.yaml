@@ -2,13 +2,13 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 metadata:
-  name: meridian-production
+  name: audit-worker-production
 
 namespace: production
 
 labels:
 - pairs:
-    app: meridian
+    app: audit-worker
     environment: production
     managed-by: kustomize
 
@@ -18,7 +18,7 @@ resources:
 
 # ConfigMap for production environment
 configMapGenerator:
-- name: meridian-config
+- name: audit-worker-config
   behavior: merge
   literals:
   - log_level=warn
@@ -30,7 +30,7 @@ patches:
 # High availability with 3 replicas minimum
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/replicas
@@ -39,7 +39,7 @@ patches:
 # Production resource limits (same as base, keeping strict)
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources
@@ -54,7 +54,7 @@ patches:
 # Stricter rolling update strategy
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/strategy/rollingUpdate/maxUnavailable
@@ -66,7 +66,7 @@ patches:
 # Production health check settings
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/livenessProbe/failureThreshold
@@ -81,7 +81,7 @@ patches:
 # Add production-specific env vars
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: add
       path: /spec/template/spec/containers/0/env/-
@@ -97,24 +97,24 @@ patches:
 # Add monitoring and tracing annotations
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: add
       path: /spec/template/metadata/annotations/datadog.io~1logs
       value: "true"
     - op: add
       path: /spec/template/metadata/annotations/datadog.io~1tags
-      value: "env:production,service:meridian,criticality:high"
+      value: "env:production,service:audit-worker,criticality:high"
 
 # Increase termination grace period for production
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/template/spec/terminationGracePeriodSeconds
       value: 60
 
 images:
-- name: meridian
+- name: audit-worker
   newTag: stable

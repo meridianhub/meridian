@@ -41,6 +41,15 @@ coverage.out
 *.out
 __debug_bin
 
+# Service binaries (built from services/*/)
+/audit-worker
+/current-account
+/financial-accounting
+/party
+/payment-order
+/position-keeping
+/tenant
+
 # Generated protobuf files (regenerate with buf or make proto)
 *.pb.go
 *.pb.validate.go

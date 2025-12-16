@@ -2,13 +2,13 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 metadata:
-  name: meridian-base
+  name: audit-worker-base
 
 namespace: default
 
 labels:
 - pairs:
-    app: meridian
+    app: audit-worker
     managed-by: kustomize
 
 resources:
@@ -22,11 +22,11 @@ resources:
 - rolebinding.yaml
 
 images:
-- name: meridian
+- name: audit-worker
   newTag: latest
 
 configMapGenerator:
-- name: meridian-version
+- name: audit-worker-version
   literals:
   - version=dev
   - commit=unknown
@@ -35,4 +35,4 @@ configMapGenerator:
 generatorOptions:
   disableNameSuffixHash: false
   labels:
-    app: meridian
+    app: audit-worker

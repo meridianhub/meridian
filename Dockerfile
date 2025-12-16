@@ -1,4 +1,4 @@
-# Meridian - Multi-Stage Dockerfile for Production Images
+# audit-worker - Multi-Stage Dockerfile for Production Images
 # Optimized for security, size, and performance
 
 # Build stage
@@ -29,11 +29,11 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -ldflags="-w -s -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
     -a -installsuffix cgo \
-    -o meridian \
-    ./utilities/meridian
+    -o audit-worker \
+    ./services/audit-worker
 
 # Verify the binary exists and is executable
-RUN test -x meridian && echo "Binary built successfully"
+RUN test -x audit-worker && echo "Binary built successfully"
 
 # Runtime stage - distroless for minimal attack surface
 FROM gcr.io/distroless/static:nonroot
@@ -45,7 +45,7 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
 # Copy binary from builder
-COPY --from=builder /build/meridian /meridian
+COPY --from=builder /build/audit-worker /audit-worker
 
 # Use non-root user (distroless default: 65532:65532)
 USER nonroot:nonroot
@@ -57,4 +57,4 @@ EXPOSE 8080
 # HEALTHCHECK not needed in distroless image (lacks curl/wget)
 
 # Run the binary
-ENTRYPOINT ["/meridian"]
+ENTRYPOINT ["/audit-worker"]

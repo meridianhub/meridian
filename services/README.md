@@ -19,16 +19,17 @@ flowchart LR
     end
 
     subgraph Platform["Meridian Platform"]
-        subgraph Services["Microservices"]
+        subgraph Services["Domain Services"]
             CA["CurrentAccount<br/>:50057"]
             PK["PositionKeeping<br/>:50053"]
             FA["FinancialAccounting<br/>:50052"]
             Party["Party<br/>:50055"]
             PO["PaymentOrder<br/>:50054, :8080"]
-            Tenant["Tenant<br/>:50056"]
         end
 
         subgraph Infrastructure["Infrastructure"]
+            Tenant["Tenant<br/>:50056"]
+            AW["audit-worker<br/>:8080"]
             DB[("CockroachDB<br/>:26257")]
             Kafka@{ shape: das, label: "Kafka :9092" }
             Redis@{ shape: das, label: "Redis :6379" }
@@ -67,13 +68,17 @@ flowchart LR
     FA -.->|"Idempotency"| Redis
     PO -.->|"Idempotency"| Redis
 
+    %% audit-worker connections
+    AW -->|"Poll outbox"| DB
+    AW -->|"Write audit log"| DB
+
     classDef service fill:#4a90d9,stroke:#2d5a87,color:#fff
     classDef storage fill:#50c878,stroke:#2d7a4a,color:#fff
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
     classDef admin fill:#9c27b0,stroke:#6a1b9a,color:#fff
 
-    class CA,PK,FA,Party,PO,Tenant service
-    class DB,Kafka,Redis storage
+    class CA,PK,FA,Party,PO service
+    class Tenant,AW,DB,Kafka,Redis storage
     class User,Gateway external
     class TenantCtl admin
 ```
@@ -82,10 +87,9 @@ flowchart LR
 
 - Solid arrows (`-->`) = Required runtime dependency
 - Dashed arrows (`-.->`) = Optional runtime dependency
-- Blue boxes = Microservices
+- Blue boxes = Domain services (BIAN service domains)
+- Green boxes = Infrastructure (platform services, databases, messaging)
 - Purple boxes = Admin tools (CLI)
-- Vertical cylinder `[(" ")]` = Database (CockroachDB)
-- Horizontal cylinder `@{ shape: das }` = Direct access storage (Kafka, Redis)
 - Orange boxes = External systems
 
 ## Communication Protocols
@@ -202,6 +206,7 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | Party | 50055 | - | 9090 |
 | PaymentOrder | 50054 | 8080 | 9090 |
 | Tenant | 50056 | - | 9090 |
+| audit-worker | - | 8080 | 8080 |
 
 ## Observability
 
@@ -253,7 +258,7 @@ See [ADR-0009](../docs/adr/0009-application-level-audit-logging.md) for architec
 1. **Audit Schema**: Dedicated `{service}_audit` schema with `audit_log` table
 2. **Outbox Table**: `audit_outbox` table written atomically with business transaction
 3. **GORM Hooks**: `AfterCreate`, `BeforeUpdate`, `AfterUpdate`, `AfterDelete` hooks
-4. **Worker**: Background goroutine processing outbox → audit_log
+4. **Worker**: The `audit-worker` service polls the outbox and moves entries to `audit_log`
 
 **Key Guarantees:**
 

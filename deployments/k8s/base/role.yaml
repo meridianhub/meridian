@@ -1,10 +1,10 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: meridian
+  name: audit-worker
   labels:
-    app: meridian
-    component: ledger
+    app: audit-worker
+    component: audit
     managed-by: kustomize
 rules:
 # Pod metadata (POD_NAME, POD_NAMESPACE, POD_IP) is injected via downward API
@@ -14,14 +14,14 @@ rules:
 - apiGroups: [""]
   resources: ["configmaps"]
   verbs: ["get", "watch"]
-  resourceNames: ["meridian-config", "meridian-build-info"]
+  resourceNames: ["audit-worker-config", "audit-worker-build-info"]
 
 # Allow reading Secrets for database credentials and API keys
 # Note: In production, use external secret management (Vault, AWS Secrets Manager)
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get"]
-  resourceNames: ["meridian-secrets"]
+  resourceNames: ["audit-worker-secrets"]
 
 # No write permissions - application should not modify Kubernetes resources
 # No access to other namespaces - namespace isolation enforced

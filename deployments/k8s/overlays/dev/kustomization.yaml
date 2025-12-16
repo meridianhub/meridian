@@ -2,13 +2,13 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 metadata:
-  name: meridian-dev
+  name: audit-worker-dev
 
 namespace: dev
 
 labels:
 - pairs:
-    app: meridian
+    app: audit-worker
     environment: dev
     managed-by: kustomize
 
@@ -17,7 +17,7 @@ resources:
 
 # ConfigMap for dev environment
 configMapGenerator:
-- name: meridian-config
+- name: audit-worker-config
   behavior: merge
   literals:
   - log_level=debug
@@ -29,7 +29,7 @@ patches:
 # Reduce replicas for local/dev
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/replicas
@@ -38,7 +38,7 @@ patches:
 # Relaxed resource limits for dev
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources
@@ -53,7 +53,7 @@ patches:
 # Faster health check intervals for dev
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/livenessProbe/initialDelaySeconds
@@ -71,7 +71,7 @@ patches:
 # Add dev-specific env vars
 - target:
     kind: Deployment
-    name: meridian
+    name: audit-worker
   patch: |-
     - op: add
       path: /spec/template/spec/containers/0/env/-
@@ -85,5 +85,5 @@ patches:
         value: "true"
 
 images:
-- name: meridian
+- name: audit-worker
   newTag: dev-latest

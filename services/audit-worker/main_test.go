@@ -63,7 +63,7 @@ func TestRootEndpoint(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
-	expected := "Meridian vtest-version (commit: test-commit, built: test-date)\n"
+	expected := "audit-worker vtest-version (commit: test-commit, built: test-date)\n"
 	if w.Body.String() != expected {
 		t.Errorf("Expected body %q, got %q", expected, w.Body.String())
 	}
