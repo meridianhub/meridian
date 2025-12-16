@@ -340,7 +340,7 @@ echo "$CREATE_RESPONSE" | jq '{
 }'
 echo ""
 
-echo -e "${CYAN}► Step 3: Execute Deposit - Saga Orchestration${NC}"
+echo -e "${CYAN}► Step 3: Transactions - Saga Orchestration${NC}"
 echo -e "${YELLOW}  Saga Steps:${NC}"
 echo -e "${YELLOW}    1. Log position in PositionKeeping     (via gRPC)${NC}"
 echo -e "${YELLOW}    2. Post ledger in FinancialAccounting  (via gRPC)${NC}"
@@ -348,52 +348,93 @@ echo -e "${YELLOW}    3. Update CurrentAccount balance       (local)${NC}"
 echo -e "${YELLOW}  * Automatic compensation if any step fails${NC}"
 echo ""
 
-# Interactive deposit loop
+# Interactive transaction loop (deposits and withdrawals)
 CURRENT_BALANCE=0
+TRANSACTION_COUNT=0
 while true; do
-    echo -e -n "${CYAN}Enter deposit amount (default: 500, Enter to continue): ${NC}"
-    read -r DEPOSIT_AMOUNT
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e -n "${CYAN}Enter amount (+deposit / -withdrawal) or Enter to continue: ${NC}"
+    read -r AMOUNT
 
     # If empty input, break and continue to next section
-    if [ -z "$DEPOSIT_AMOUNT" ]; then
-        echo -e "${GREEN}✓ Deposit demonstration complete${NC}"
+    if [ -z "$AMOUNT" ]; then
+        echo -e "${GREEN}✓ Transaction demonstration complete ($TRANSACTION_COUNT transactions)${NC}"
         break
     fi
 
-    # Validate input is a number
-    if ! [[ "$DEPOSIT_AMOUNT" =~ ^[0-9]+$ ]]; then
-        echo -e "${RED}✗ Please enter a valid number${NC}"
+    # Validate input is a number (positive or negative)
+    if ! [[ "$AMOUNT" =~ ^-?[0-9]+$ ]]; then
+        echo -e "${RED}✗ Please enter a valid number (e.g., 500 for deposit, -100 for withdrawal)${NC}"
         continue
     fi
 
-    echo -e "${YELLOW}  Depositing: £$DEPOSIT_AMOUNT${NC}"
+    # Determine if deposit or withdrawal
+    if [ "$AMOUNT" -ge 0 ]; then
+        # Deposit
+        echo -e "${GREEN}  ▲ Depositing: £$AMOUNT${NC}"
+        RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+          \"account_id\": \"$ACCOUNT_ID\",
+          \"amount\": {
+            \"amount\": {
+              \"currency_code\": \"GBP\",
+              \"units\": $AMOUNT,
+              \"nanos\": 0
+            }
+          }
+        }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit 2>&1)
 
-    DEPOSIT_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
-      \"account_id\": \"$ACCOUNT_ID\",
-      \"amount\": {
-        \"amount\": {
-          \"currency_code\": \"GBP\",
-          \"units\": $DEPOSIT_AMOUNT,
-          \"nanos\": 0
-        }
-      }
-    }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteDeposit)
+        if echo "$RESPONSE" | jq -e '.transactionId' >/dev/null 2>&1; then
+            TRANSACTION_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
+            CURRENT_BALANCE=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
+            echo -e "${GREEN}  ✓ Deposit Completed:${NC} $TRANSACTION_ID"
+            echo "$RESPONSE" | jq '{
+              type: "DEPOSIT",
+              transaction_id: .transactionId,
+              status: .status,
+              new_balance: .newBalance.amount,
+              available_balance: .availableBalance.amount
+            }'
+        else
+            echo -e "${RED}  ✗ Deposit Failed:${NC}"
+            echo "$RESPONSE"
+        fi
+    else
+        # Withdrawal (remove the minus sign for the API)
+        WITHDRAW_AMOUNT=${AMOUNT#-}
+        echo -e "${YELLOW}  ▼ Withdrawing: £$WITHDRAW_AMOUNT${NC}"
+        RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
+          \"account_id\": \"$ACCOUNT_ID\",
+          \"amount\": {
+            \"amount\": {
+              \"currency_code\": \"GBP\",
+              \"units\": $WITHDRAW_AMOUNT,
+              \"nanos\": 0
+            }
+          }
+        }" localhost:50051 meridian.current_account.v1.CurrentAccountService/ExecuteWithdrawal 2>&1)
 
-    TRANSACTION_ID=$(echo "$DEPOSIT_RESPONSE" | jq -r '.transactionId')
-    CURRENT_BALANCE=$(echo "$DEPOSIT_RESPONSE" | jq -r '.newBalance.amount.units // 0')
-
-    echo -e "${GREEN}✓ Deposit Completed via Saga:${NC} $TRANSACTION_ID"
-    echo "$DEPOSIT_RESPONSE" | jq '{
-      transaction_id: .transactionId,
-      status: .status,
-      new_balance: .newBalance.amount,
-      available_balance: .availableBalance.amount
-    }'
+        if echo "$RESPONSE" | jq -e '.transactionId' >/dev/null 2>&1; then
+            TRANSACTION_ID=$(echo "$RESPONSE" | jq -r '.transactionId')
+            CURRENT_BALANCE=$(echo "$RESPONSE" | jq -r '.newBalance.amount.units // 0')
+            echo -e "${GREEN}  ✓ Withdrawal Completed:${NC} $TRANSACTION_ID"
+            echo "$RESPONSE" | jq '{
+              type: "WITHDRAWAL",
+              transaction_id: .transactionId,
+              status: .status,
+              new_balance: .newBalance.amount,
+              available_balance: .availableBalance.amount
+            }'
+        else
+            echo -e "${RED}  ✗ Withdrawal Failed (insufficient funds?):${NC}"
+            echo "$RESPONSE" | head -5
+        fi
+    fi
+    TRANSACTION_COUNT=$((TRANSACTION_COUNT + 1))
     echo ""
 done
 
-# If no deposits were made, make a default one for the rest of the demo
-if [ "$CURRENT_BALANCE" = "0" ]; then
+# If no transactions were made, make a default deposit for the rest of the demo
+if [ "$TRANSACTION_COUNT" = "0" ]; then
     echo -e "${YELLOW}  Making initial deposit of £500 for demo...${NC}"
     DEPOSIT_RESPONSE=$(grpcurl -plaintext ${TENANT_HEADER} -d "{
       \"account_id\": \"$ACCOUNT_ID\",
