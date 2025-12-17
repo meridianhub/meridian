@@ -20,14 +20,24 @@ var (
 
 	// ErrOldValueNotFound is returned when old value is not found in context
 	ErrOldValueNotFound = errors.New("old customer values not found in context")
+
+	// ErrAccountOldValueType is returned when old account value has incorrect type in context
+	ErrAccountOldValueType = errors.New("failed to retrieve old account values from context: invalid type")
+
+	// ErrAccountOldValueNotFound is returned when old account value is not found in context
+	ErrAccountOldValueNotFound = errors.New("old account values not found in context")
 )
 
 // contextKey is a private type for context keys to avoid collisions
 type contextKey string
 
-// auditOldValueKey is the context key used to store old values before an UPDATE operation.
+// auditOldValueKey is the context key used to store old Customer values before an UPDATE operation.
 // This allows BeforeUpdate hook to capture the old state and pass it to AfterUpdate hook.
-const auditOldValueKey contextKey = "audit:old_value"
+const auditOldValueKey contextKey = "audit:old_value:customer"
+
+// auditAccountOldValueKey is the context key used to store old Account values before an UPDATE operation.
+// This allows BeforeUpdate hook to capture the old state and pass it to AfterUpdate hook.
+const auditAccountOldValueKey contextKey = "audit:old_value:account"
 
 // AuditOutbox represents an audit record waiting to be processed by the background worker.
 // Records are written to the outbox within the same transaction as the business operation,
