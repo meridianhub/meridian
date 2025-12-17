@@ -61,7 +61,7 @@ type PostgresProvisioner struct {
 // Returns an error if the config is invalid or any database connection fails.
 func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvisioner, error) {
 	if platformDB == nil {
-		return nil, fmt.Errorf("platformDB cannot be nil")
+		return nil, ErrNilPlatformDB
 	}
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)

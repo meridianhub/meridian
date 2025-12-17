@@ -68,4 +68,7 @@ var (
 
 	// ErrCloseConnections indicates one or more database connections failed to close.
 	ErrCloseConnections = errors.New("failed to close database connections")
+
+	// ErrNilPlatformDB indicates the platformDB parameter was nil.
+	ErrNilPlatformDB = errors.New("platformDB cannot be nil")
 )
