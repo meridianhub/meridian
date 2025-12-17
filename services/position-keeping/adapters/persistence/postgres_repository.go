@@ -124,7 +124,7 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 	// Insert main financial_position_log
 	userID := audit.GetUserFromContext(ctx)
 	logQuery := `
-		INSERT INTO financial_position_logs (
+		INSERT INTO financial_position_log (
 			id, created_at, created_by, updated_at, updated_by,
 			log_id, account_id, version,
 			current_status, previous_status, status_updated_at, status_reason, failure_reason,
@@ -198,11 +198,11 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 		return err
 	}
 
-	// Use COPY for bulk insert of financial_position_logs
+	// Use COPY for bulk insert of financial_position_log
 	userID := audit.GetUserFromContext(ctx)
 	copyCount, err := tx.CopyFrom(
 		ctx,
-		pgx.Identifier{"financial_position_logs"},
+		pgx.Identifier{"financial_position_log"},
 		[]string{
 			"id", "created_at", "created_by", "updated_at", "updated_by",
 			"log_id", "account_id", "version",
@@ -281,7 +281,7 @@ func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*do
 			SELECT id, created_at, updated_at, log_id, account_id, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
 				reconciliation_status
-			FROM financial_position_logs
+			FROM financial_position_log
 			WHERE log_id = $1 AND deleted_at IS NULL`
 
 		var dbID uuid.UUID
@@ -350,7 +350,7 @@ func (r *PostgresRepository) FindByAccountID(ctx context.Context, accountID stri
 			SELECT id, created_at, updated_at, log_id, account_id, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
 				reconciliation_status
-			FROM financial_position_logs
+			FROM financial_position_log
 			WHERE account_id = $1 AND deleted_at IS NULL
 			ORDER BY created_at DESC`
 
@@ -392,7 +392,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 
 	// Get current database ID
 	var dbID uuid.UUID
-	err = tx.QueryRow(ctx, "SELECT id FROM financial_position_logs WHERE log_id = $1 AND deleted_at IS NULL", log.LogID).Scan(&dbID)
+	err = tx.QueryRow(ctx, "SELECT id FROM financial_position_log WHERE log_id = $1 AND deleted_at IS NULL", log.LogID).Scan(&dbID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
@@ -407,7 +407,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	userID := audit.GetUserFromContext(ctx)
 
 	updateQuery := `
-		UPDATE financial_position_logs
+		UPDATE financial_position_log
 		SET updated_at = $1, updated_by = $2, version = $3,
 			current_status = $4, previous_status = $5, status_updated_at = $6,
 			status_reason = $7, failure_reason = $8, reconciliation_status = $9
@@ -430,7 +430,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	}
 
 	// Delete and re-insert transaction log entries (simplest approach for aggregate updates)
-	_, err = tx.Exec(ctx, "DELETE FROM transaction_log_entries WHERE financial_position_log_id = $1", dbID)
+	_, err = tx.Exec(ctx, "DELETE FROM transaction_log_entry WHERE financial_position_log_id = $1", dbID)
 	if err != nil {
 		return fmt.Errorf("failed to delete old transaction log entries: %w", err)
 	}
@@ -440,7 +440,7 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 	}
 
 	// Delete and re-insert transaction lineage
-	_, err = tx.Exec(ctx, "DELETE FROM transaction_lineages WHERE financial_position_log_id = $1", dbID)
+	_, err = tx.Exec(ctx, "DELETE FROM transaction_lineage WHERE financial_position_log_id = $1", dbID)
 	if err != nil {
 		return fmt.Errorf("failed to delete old transaction lineage: %w", err)
 	}
@@ -492,7 +492,7 @@ func (r *PostgresRepository) List(ctx context.Context, filter domain.PositionLog
 			SELECT id, created_at, updated_at, log_id, account_id, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
 				reconciliation_status
-			FROM financial_position_logs
+			FROM financial_position_log
 			WHERE deleted_at IS NULL`
 
 		args := []any{}
@@ -560,7 +560,7 @@ func (r *PostgresRepository) FindPendingForReconciliation(ctx context.Context, l
 			SELECT id, created_at, updated_at, log_id, account_id, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
 				reconciliation_status
-			FROM financial_position_logs
+			FROM financial_position_log
 			WHERE deleted_at IS NULL
 				AND current_status = 'PENDING'
 				AND reconciliation_status = 'UNRECONCILED'
@@ -596,7 +596,7 @@ func (r *PostgresRepository) insertTransactionLogEntries(ctx context.Context, tx
 	}
 
 	query := `
-		INSERT INTO transaction_log_entries (
+		INSERT INTO transaction_log_entry (
 			id, created_at, created_by, updated_at, updated_by,
 			entry_id, financial_position_log_id, transaction_id, account_id,
 			amount_cents, currency, direction, timestamp, description, reference, source
@@ -649,7 +649,7 @@ func (r *PostgresRepository) insertTransactionLineage(ctx context.Context, tx pg
 
 	userID := audit.GetUserFromContext(ctx)
 	query := `
-		INSERT INTO transaction_lineages (
+		INSERT INTO transaction_lineage (
 			id, created_at, created_by, updated_at, updated_by,
 			financial_position_log_id, transaction_id, parent_transaction_id,
 			child_transaction_ids, related_transaction_ids, transaction_type
@@ -677,7 +677,7 @@ func (r *PostgresRepository) insertAuditTrailEntries(ctx context.Context, tx pgx
 	}
 
 	query := `
-		INSERT INTO audit_trail_entries (
+		INSERT INTO audit_trail_entry (
 			id, created_at, created_by, updated_at, updated_by,
 			audit_id, financial_position_log_id, timestamp, user_id,
 			action, details, ip_address, system_context
@@ -723,7 +723,7 @@ func (r *PostgresRepository) loadTransactionLogEntriesTx(ctx context.Context, tx
 	query := `
 		SELECT entry_id, transaction_id, account_id, amount_cents, currency,
 			direction, timestamp, description, reference, source
-		FROM transaction_log_entries
+		FROM transaction_log_entry
 		WHERE financial_position_log_id = $1 AND deleted_at IS NULL
 		ORDER BY timestamp ASC`
 
@@ -778,7 +778,7 @@ func (r *PostgresRepository) loadTransactionLineageTx(ctx context.Context, tx pg
 	query := `
 		SELECT transaction_id, parent_transaction_id, child_transaction_ids,
 			related_transaction_ids, transaction_type
-		FROM transaction_lineages
+		FROM transaction_lineage
 		WHERE financial_position_log_id = $1 AND deleted_at IS NULL`
 
 	var transactionID uuid.UUID
@@ -830,7 +830,7 @@ func (r *PostgresRepository) loadTransactionLineageTx(ctx context.Context, tx pg
 func (r *PostgresRepository) getExistingAuditIDs(ctx context.Context, tx pgx.Tx, financialPosLogID uuid.UUID) (map[uuid.UUID]struct{}, error) {
 	query := `
 		SELECT audit_id
-		FROM audit_trail_entries
+		FROM audit_trail_entry
 		WHERE financial_position_log_id = $1 AND deleted_at IS NULL`
 
 	rows, err := tx.Query(ctx, query, financialPosLogID)
@@ -855,7 +855,7 @@ func (r *PostgresRepository) getExistingAuditIDs(ctx context.Context, tx pgx.Tx,
 func (r *PostgresRepository) loadAuditTrailEntriesTx(ctx context.Context, tx pgx.Tx, financialPosLogID uuid.UUID, log *domain.FinancialPositionLog) error {
 	query := `
 		SELECT audit_id, timestamp, user_id, action, details, ip_address, system_context
-		FROM audit_trail_entries
+		FROM audit_trail_entry
 		WHERE financial_position_log_id = $1 AND deleted_at IS NULL
 		ORDER BY timestamp ASC`
 
@@ -917,7 +917,7 @@ func (r *PostgresRepository) loadTransactionLogEntriesBatchTx(ctx context.Contex
 	query := fmt.Sprintf(`
 		SELECT financial_position_log_id, entry_id, transaction_id, account_id, amount_cents, currency,
 			direction, timestamp, description, reference, source
-		FROM transaction_log_entries
+		FROM transaction_log_entry
 		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL
 		ORDER BY financial_position_log_id, timestamp ASC`, strings.Join(placeholders, ","))
 
@@ -988,7 +988,7 @@ func (r *PostgresRepository) loadTransactionLineageBatchTx(ctx context.Context, 
 	query := fmt.Sprintf(`
 		SELECT financial_position_log_id, transaction_id, parent_transaction_id, child_transaction_ids,
 			related_transaction_ids, transaction_type
-		FROM transaction_lineages
+		FROM transaction_lineage
 		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL`, strings.Join(placeholders, ","))
 
 	rows, err := tx.Query(ctx, query, args...)
@@ -1064,7 +1064,7 @@ func (r *PostgresRepository) loadAuditTrailEntriesBatchTx(ctx context.Context, t
 
 	query := fmt.Sprintf(`
 		SELECT financial_position_log_id, audit_id, timestamp, user_id, action, details, ip_address, system_context
-		FROM audit_trail_entries
+		FROM audit_trail_entry
 		WHERE financial_position_log_id IN (%s) AND deleted_at IS NULL
 		ORDER BY financial_position_log_id, timestamp ASC`, strings.Join(placeholders, ","))
 
@@ -1189,7 +1189,7 @@ func (r *PostgresRepository) getLogIDMap(ctx context.Context, tx pgx.Tx, logs []
 
 	query := fmt.Sprintf(`
 		SELECT id, log_id
-		FROM financial_position_logs
+		FROM financial_position_log
 		WHERE log_id IN (%s)`, strings.Join(placeholders, ","))
 
 	rows, err := tx.Query(ctx, query, args...)
