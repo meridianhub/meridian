@@ -1,10 +1,13 @@
 package models
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 // FinancialPositionLog represents the aggregate root for position keeping.
@@ -113,4 +116,140 @@ type AuditTrailEntry struct {
 // Uses singular unqualified name to allow PostgreSQL search_path to route queries.
 func (AuditTrailEntry) TableName() string {
 	return "audit_trail_entry"
+}
+
+// Context keys for storing old values during UPDATE operations.
+// These allow BeforeUpdate hooks to pass old state to AfterUpdate hooks.
+const (
+	financialPositionLogOldValueKey contextKey = "audit:financial_position_log:old_value"
+	transactionLogEntryOldValueKey  contextKey = "audit:transaction_log_entry:old_value"
+)
+
+// Audit hook errors for FinancialPositionLog and TransactionLogEntry
+var (
+	// ErrFinancialPositionLogOldValueType is returned when old value has incorrect type in context
+	ErrFinancialPositionLogOldValueType = fmt.Errorf("failed to retrieve old financial_position_log values from context: invalid type")
+
+	// ErrFinancialPositionLogOldValueNotFound is returned when old value is not found in context
+	ErrFinancialPositionLogOldValueNotFound = fmt.Errorf("old financial_position_log values not found in context")
+
+	// ErrTransactionLogEntryOldValueType is returned when old value has incorrect type in context
+	ErrTransactionLogEntryOldValueType = fmt.Errorf("failed to retrieve old transaction_log_entry values from context: invalid type")
+
+	// ErrTransactionLogEntryOldValueNotFound is returned when old value is not found in context
+	ErrTransactionLogEntryOldValueNotFound = fmt.Errorf("old transaction_log_entry values not found in context")
+)
+
+// AfterCreate is a GORM hook that runs after INSERT operations on FinancialPositionLog.
+// It writes an audit outbox entry with the new financial position log data.
+func (f *FinancialPositionLog) AfterCreate(tx *gorm.DB) error {
+	return recordAudit(tx, "financial_position_log", "INSERT", f.ID, nil, f)
+}
+
+// BeforeUpdate is a GORM hook that runs before UPDATE operations on FinancialPositionLog.
+// It captures the old values BEFORE the update happens and stores them in the transaction context.
+func (f *FinancialPositionLog) BeforeUpdate(tx *gorm.DB) error {
+	// First, call the base model's BeforeUpdate to handle UpdatedBy
+	if err := f.BaseModel.BeforeUpdate(tx); err != nil {
+		return err
+	}
+
+	// Capture old values before the update
+	var old FinancialPositionLog
+	if err := tx.First(&old, f.ID).Error; err != nil {
+		return fmt.Errorf("failed to fetch old financial_position_log values: %w", err)
+	}
+
+	// Store old values in transaction context for AfterUpdate to access
+	if tx.Statement != nil && tx.Statement.Context != nil {
+		ctx := context.WithValue(tx.Statement.Context, financialPositionLogOldValueKey, &old)
+		tx.Statement.Context = ctx
+	}
+
+	return nil
+}
+
+// AfterUpdate is a GORM hook that runs after UPDATE operations on FinancialPositionLog.
+// It retrieves the old values from context and writes an audit outbox entry.
+func (f *FinancialPositionLog) AfterUpdate(tx *gorm.DB) error {
+	// Retrieve old values from context (captured in BeforeUpdate)
+	var old *FinancialPositionLog
+	if tx.Statement != nil && tx.Statement.Context != nil {
+		if oldValue := tx.Statement.Context.Value(financialPositionLogOldValueKey); oldValue != nil {
+			var ok bool
+			old, ok = oldValue.(*FinancialPositionLog)
+			if !ok {
+				return ErrFinancialPositionLogOldValueType
+			}
+		}
+	}
+
+	if old == nil {
+		return ErrFinancialPositionLogOldValueNotFound
+	}
+
+	return recordAudit(tx, "financial_position_log", "UPDATE", f.ID, old, f)
+}
+
+// AfterDelete is a GORM hook that runs after DELETE operations on FinancialPositionLog.
+// It writes an audit outbox entry with the deleted financial position log data.
+func (f *FinancialPositionLog) AfterDelete(tx *gorm.DB) error {
+	return recordAudit(tx, "financial_position_log", "DELETE", f.ID, f, nil)
+}
+
+// AfterCreate is a GORM hook that runs after INSERT operations on TransactionLogEntry.
+// It writes an audit outbox entry with the new transaction log entry data.
+func (t *TransactionLogEntry) AfterCreate(tx *gorm.DB) error {
+	return recordAudit(tx, "transaction_log_entry", "INSERT", t.ID, nil, t)
+}
+
+// BeforeUpdate is a GORM hook that runs before UPDATE operations on TransactionLogEntry.
+// It captures the old values BEFORE the update happens and stores them in the transaction context.
+func (t *TransactionLogEntry) BeforeUpdate(tx *gorm.DB) error {
+	// First, call the base model's BeforeUpdate to handle UpdatedBy
+	if err := t.BaseModel.BeforeUpdate(tx); err != nil {
+		return err
+	}
+
+	// Capture old values before the update
+	var old TransactionLogEntry
+	if err := tx.First(&old, t.ID).Error; err != nil {
+		return fmt.Errorf("failed to fetch old transaction_log_entry values: %w", err)
+	}
+
+	// Store old values in transaction context for AfterUpdate to access
+	if tx.Statement != nil && tx.Statement.Context != nil {
+		ctx := context.WithValue(tx.Statement.Context, transactionLogEntryOldValueKey, &old)
+		tx.Statement.Context = ctx
+	}
+
+	return nil
+}
+
+// AfterUpdate is a GORM hook that runs after UPDATE operations on TransactionLogEntry.
+// It retrieves the old values from context and writes an audit outbox entry.
+func (t *TransactionLogEntry) AfterUpdate(tx *gorm.DB) error {
+	// Retrieve old values from context (captured in BeforeUpdate)
+	var old *TransactionLogEntry
+	if tx.Statement != nil && tx.Statement.Context != nil {
+		if oldValue := tx.Statement.Context.Value(transactionLogEntryOldValueKey); oldValue != nil {
+			var ok bool
+			old, ok = oldValue.(*TransactionLogEntry)
+			if !ok {
+				return ErrTransactionLogEntryOldValueType
+			}
+		}
+	}
+
+	if old == nil {
+		return ErrTransactionLogEntryOldValueNotFound
+	}
+
+	return recordAudit(tx, "transaction_log_entry", "UPDATE", t.ID, old, t)
+}
+
+// AfterDelete is a GORM hook that runs after DELETE operations on TransactionLogEntry.
+// It writes an audit outbox entry with the deleted transaction log entry data.
+func (t *TransactionLogEntry) AfterDelete(tx *gorm.DB) error {
+	return recordAudit(tx, "transaction_log_entry", "DELETE", t.ID, t, nil)
 }
