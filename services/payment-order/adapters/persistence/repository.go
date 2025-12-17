@@ -333,31 +333,42 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Con
 
 // Update updates an existing payment order with optimistic locking.
 // The context must contain the tenant ID for schema routing.
+// Records an audit entry capturing the old and new state for compliance tracking.
 func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentOrder) error {
-	entity := toEntity(po)
+	newEntity := toEntity(po)
 
+	//nolint:contextcheck // Context accessed from tx.Statement.Context per GORM audit hook convention
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Fetch old entity state for audit trail BEFORE update
+		var oldEntity PaymentOrderEntity
+		if err := tx.Where("id = ?", newEntity.ID).First(&oldEntity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPaymentOrderNotFound
+			}
+			return err
+		}
+
 		// Optimistic locking: use WHERE clause with version check
 		result := tx.Model(&PaymentOrderEntity{}).
-			Where("id = ? AND version = ?", entity.ID, po.Version).
+			Where("id = ? AND version = ?", newEntity.ID, po.Version).
 			Updates(map[string]interface{}{
-				"status":                  entity.Status,
-				"lien_id":                 entity.LienID,
-				"gateway_reference_id":    entity.GatewayReferenceID,
-				"ledger_booking_id":       entity.LedgerBookingID,
-				"causation_id":            entity.CausationID,
-				"failure_reason":          entity.FailureReason,
-				"error_code":              entity.ErrorCode,
-				"lien_execution_status":   entity.LienExecutionStatus,
-				"lien_execution_attempts": entity.LienExecutionAttempts,
-				"lien_execution_error":    entity.LienExecutionError,
-				"updated_at":              entity.UpdatedAt,
-				"reserved_at":             entity.ReservedAt,
-				"executing_at":            entity.ExecutingAt,
-				"completed_at":            entity.CompletedAt,
-				"failed_at":               entity.FailedAt,
-				"cancelled_at":            entity.CancelledAt,
-				"reversed_at":             entity.ReversedAt,
+				"status":                  newEntity.Status,
+				"lien_id":                 newEntity.LienID,
+				"gateway_reference_id":    newEntity.GatewayReferenceID,
+				"ledger_booking_id":       newEntity.LedgerBookingID,
+				"causation_id":            newEntity.CausationID,
+				"failure_reason":          newEntity.FailureReason,
+				"error_code":              newEntity.ErrorCode,
+				"lien_execution_status":   newEntity.LienExecutionStatus,
+				"lien_execution_attempts": newEntity.LienExecutionAttempts,
+				"lien_execution_error":    newEntity.LienExecutionError,
+				"updated_at":              newEntity.UpdatedAt,
+				"reserved_at":             newEntity.ReservedAt,
+				"executing_at":            newEntity.ExecutingAt,
+				"completed_at":            newEntity.CompletedAt,
+				"failed_at":               newEntity.FailedAt,
+				"cancelled_at":            newEntity.CancelledAt,
+				"reversed_at":             newEntity.ReversedAt,
 				"version":                 po.Version + 1,
 			})
 
@@ -369,7 +380,10 @@ func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentO
 			return ErrPaymentOrderVersionConflict
 		}
 
-		return nil
+		// Record audit entry for the update (explicit audit for Map-based Updates)
+		// Update newEntity version to match what we just wrote to DB
+		newEntity.Version = po.Version + 1
+		return recordAudit(tx, "payment_order", "UPDATE", newEntity.ID, &oldEntity, newEntity)
 	})
 	if err != nil {
 		return err
