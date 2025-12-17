@@ -164,8 +164,9 @@ func (p *PartyEntity) BeforeUpdate(tx *gorm.DB) error {
 	}
 
 	// Capture old values before the update
+	// Use Unscoped() to find records even if soft-deleted (for audit completeness)
 	var old PartyEntity
-	if err := tx.First(&old, p.ID).Error; err != nil {
+	if err := tx.Unscoped().First(&old, p.ID).Error; err != nil {
 		return fmt.Errorf("failed to fetch old party values: %w", err)
 	}
 
