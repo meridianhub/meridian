@@ -80,9 +80,12 @@ SELECT
     changed_by,
     CASE
         WHEN operation = 'UPDATE' THEN
-            (SELECT json_object_agg(key, value)
-             FROM jsonb_each(new_values)
-             WHERE new_values->key IS DISTINCT FROM old_values->key)
+            COALESCE(
+                (SELECT json_object_agg(key, value)
+                 FROM jsonb_each(new_values)
+                 WHERE new_values->key IS DISTINCT FROM old_values->key),
+                '{}'::json
+            )
         ELSE NULL
     END AS changed_fields,
     transaction_id

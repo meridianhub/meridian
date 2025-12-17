@@ -288,8 +288,15 @@ func TestAuditOutbox_MetadataChanges(t *testing.T) {
 	err = json.Unmarshal([]byte(updateAudit.NewValues), &newValues)
 	require.NoError(t, err, "Failed to unmarshal new values")
 
-	oldMetadata := oldValues["Metadata"].(map[string]interface{})
-	newMetadata := newValues["Metadata"].(map[string]interface{})
+	oldMetadataRaw, ok := oldValues["Metadata"]
+	require.True(t, ok, "Metadata should exist in old values")
+	oldMetadata, ok := oldMetadataRaw.(map[string]interface{})
+	require.True(t, ok, "Metadata should be a map in old values")
+
+	newMetadataRaw, ok := newValues["Metadata"]
+	require.True(t, ok, "Metadata should exist in new values")
+	newMetadata, ok := newMetadataRaw.(map[string]interface{})
+	require.True(t, ok, "Metadata should be a map in new values")
 
 	assert.Equal(t, "free", oldMetadata["tier"], "Old tier should be 'free'")
 	assert.Equal(t, "enterprise", newMetadata["tier"], "New tier should be 'enterprise'")
