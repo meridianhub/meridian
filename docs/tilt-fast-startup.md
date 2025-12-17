@@ -61,7 +61,8 @@ tilt up
 
 ### Running Tests Manually
 
-When fast startup mode is enabled, tests are not automatically run on startup. You can trigger them manually in several ways:
+When fast startup mode is enabled, tests are not automatically run on startup. You can trigger them
+manually in several ways:
 
 #### Via Tilt CLI
 

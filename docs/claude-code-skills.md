@@ -35,6 +35,7 @@ For detailed information about creating and using skills, see [docs/skills/READM
 
 - Incident response procedures
 - Disaster recovery procedures
+- Database-per-service migration guide
 
 **Service Documentation** (in `services/*/`):
 
