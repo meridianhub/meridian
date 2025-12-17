@@ -246,7 +246,7 @@ type ServiceConfig struct {
 	// The provisioner will create org_{tenant_id} schemas in this database.
 	//
 	// If empty, falls back to a constructed URL based on service name:
-	// postgres://{service}_user@cockroachdb:26257/meridian_{service}?sslmode=disable
+	// postgres://meridian_{service}_user@cockroachdb:26257/meridian_{service}?sslmode=disable
 	DatabaseURL string
 }
 
