@@ -86,6 +86,16 @@ func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvi
 			}
 			return nil, fmt.Errorf("failed to connect to %s database: %w", svc.Name, err)
 		}
+
+		// Configure connection pool - provisioner doesn't need many connections
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, fmt.Errorf("get underlying DB for %s: %w", svc.Name, err)
+		}
+		sqlDB.SetMaxOpenConns(5)
+		sqlDB.SetMaxIdleConns(2)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+
 		serviceDbs[svc.Name] = db
 	}
 
@@ -424,7 +434,10 @@ func (p *PostgresProvisioner) createSchemaInDB(ctx context.Context, db *gorm.DB,
 func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName string) error {
 	// Iterate over config.Services for deterministic order (easier debugging)
 	for _, svc := range p.config.Services {
-		serviceDB := p.serviceDbs[svc.Name]
+		serviceDB, ok := p.serviceDbs[svc.Name]
+		if !ok || serviceDB == nil {
+			return fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
+		}
 		query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quoteIdentifier(schemaName))
 		if err := serviceDB.WithContext(ctx).Exec(query).Error; err != nil {
 			return fmt.Errorf("drop schema in %s: %w", svc.Name, err)
@@ -842,10 +855,12 @@ func (p *PostgresProvisioner) Close() error {
 		}
 		sqlDB, err := db.DB()
 		if err != nil {
+			p.logger.Warn("failed to get underlying DB for close", "service", svc.Name, "error", err)
 			errs = append(errs, fmt.Errorf("%s: get DB: %w", svc.Name, err))
 			continue
 		}
 		if err := sqlDB.Close(); err != nil {
+			p.logger.Warn("failed to close database connection", "service", svc.Name, "error", err)
 			errs = append(errs, fmt.Errorf("%s: close: %w", svc.Name, err))
 		}
 	}

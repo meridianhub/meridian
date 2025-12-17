@@ -26,8 +26,11 @@ data:
 
   # Service database URLs for multi-database provisioning
   # Each service has its own database where org_{tenant_id} schemas are created.
-  # Note: For production, use Kubernetes Secrets for DATABASE_URL values
-  # containing credentials. These URLs use service account authentication.
+  #
+  # Security notes:
+  # - For production, use Kubernetes Secrets for DATABASE_URL values containing credentials
+  # - Consider sslmode=verify-full for production (sslmode=disable is for local dev only)
+  # - These example URLs use service account authentication without passwords
   PARTY_DATABASE_URL: "postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable"
   CURRENT_ACCOUNT_DATABASE_URL: "postgres://meridian_current_account_user@cockroachdb:26257/meridian_current_account?sslmode=disable"
   POSITION_KEEPING_DATABASE_URL: "postgres://meridian_position_keeping_user@cockroachdb:26257/meridian_position_keeping?sslmode=disable"
