@@ -431,17 +431,25 @@ func (p *PostgresProvisioner) createSchemaInDB(ctx context.Context, db *gorm.DB,
 }
 
 // dropSchemaInAllDBs drops the org_{tenant_id} schema from all service databases.
+// This function attempts to drop schemas from ALL databases, collecting errors
+// along the way rather than failing on the first error. This ensures best-effort
+// cleanup even when some databases encounter issues.
 func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName string) error {
+	var errs []error
 	// Iterate over config.Services for deterministic order (easier debugging)
 	for _, svc := range p.config.Services {
 		serviceDB, ok := p.serviceDbs[svc.Name]
 		if !ok || serviceDB == nil {
-			return fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
+			errs = append(errs, fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name))
+			continue
 		}
 		query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quoteIdentifier(schemaName))
 		if err := serviceDB.WithContext(ctx).Exec(query).Error; err != nil {
-			return fmt.Errorf("drop schema in %s: %w", svc.Name, err)
+			errs = append(errs, fmt.Errorf("drop schema in %s: %w", svc.Name, err))
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%w: %w", ErrDeprovisioningFailed, errors.Join(errs...))
 	}
 	return nil
 }
