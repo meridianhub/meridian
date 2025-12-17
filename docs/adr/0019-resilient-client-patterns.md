@@ -231,7 +231,8 @@ For multi-service transactions requiring compensation on failure.
 ```go
 saga := clients.NewSagaOrchestrator(logger)
 
-var positionTxnID string
+// Each step captures its own transaction ID for compensation
+var positionTxnID, postingTxnID string
 
 // Step 1: Record position
 saga.AddStep(
@@ -255,12 +256,15 @@ saga.AddStep(
 saga.AddStep(
     "PostToLedger",
     func(ctx context.Context) error {
-        _, err := accountingClient.CapturePosting(ctx, postingReq)
+        resp, err := accountingClient.CapturePosting(ctx, postingReq)
+        if err == nil {
+            postingTxnID = resp.PostingId  // Save posting ID for compensation
+        }
         return err
     },
     func(ctx context.Context) error {
         _, err := accountingClient.ReversePosting(ctx, &pb.ReverseRequest{
-            TransactionId: positionTxnID,
+            PostingId: postingTxnID,  // Use posting-specific ID
         })
         return err
     },
