@@ -94,9 +94,9 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 	_, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS position_keeping`)
 	require.NoError(t, err)
 
-	// Create financial_position_logs table
+	// Create financial_position_log table (singular to match production migration)
 	_, err = pool.Exec(ctx, `
-		CREATE TABLE position_keeping.financial_position_logs (
+		CREATE TABLE position_keeping.financial_position_log (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			created_at timestamptz NOT NULL DEFAULT now(),
 			created_by character varying(100) NOT NULL,
@@ -119,14 +119,14 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 
 	// Create indexes
 	_, err = pool.Exec(ctx, `
-		CREATE UNIQUE INDEX idx_position_keeping_financial_position_logs_log_id
-		ON position_keeping.financial_position_logs (log_id)
+		CREATE UNIQUE INDEX idx_position_keeping_financial_position_log_log_id
+		ON position_keeping.financial_position_log (log_id)
 	`)
 	require.NoError(t, err)
 
-	// Create transaction_log_entries table
+	// Create transaction_log_entry table (singular to match production migration)
 	_, err = pool.Exec(ctx, `
-		CREATE TABLE position_keeping.transaction_log_entries (
+		CREATE TABLE position_keeping.transaction_log_entry (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			created_at timestamptz NOT NULL DEFAULT now(),
 			created_by character varying(100) NOT NULL,
@@ -145,17 +145,17 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			reference character varying(100) NULL,
 			source character varying(50) NOT NULL,
 			PRIMARY KEY (id),
-			CONSTRAINT fk_transaction_log_entries_financial_position_log
+			CONSTRAINT fk_transaction_log_entry_financial_position_log
 				FOREIGN KEY (financial_position_log_id)
-				REFERENCES position_keeping.financial_position_logs(id)
+				REFERENCES position_keeping.financial_position_log(id)
 				ON DELETE CASCADE
 		)
 	`)
 	require.NoError(t, err)
 
-	// Create transaction_lineages table
+	// Create transaction_lineage table (singular to match production migration)
 	_, err = pool.Exec(ctx, `
-		CREATE TABLE position_keeping.transaction_lineages (
+		CREATE TABLE position_keeping.transaction_lineage (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			created_at timestamptz NOT NULL DEFAULT now(),
 			created_by character varying(100) NOT NULL,
@@ -169,17 +169,17 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			related_transaction_ids jsonb NOT NULL DEFAULT '[]',
 			transaction_type character varying(50) NOT NULL,
 			PRIMARY KEY (id),
-			CONSTRAINT fk_transaction_lineages_financial_position_log
+			CONSTRAINT fk_transaction_lineage_financial_position_log
 				FOREIGN KEY (financial_position_log_id)
-				REFERENCES position_keeping.financial_position_logs(id)
+				REFERENCES position_keeping.financial_position_log(id)
 				ON DELETE CASCADE
 		)
 	`)
 	require.NoError(t, err)
 
-	// Create audit_trail_entries table
+	// Create audit_trail_entry table (singular to match production migration)
 	_, err = pool.Exec(ctx, `
-		CREATE TABLE position_keeping.audit_trail_entries (
+		CREATE TABLE position_keeping.audit_trail_entry (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			created_at timestamptz NOT NULL DEFAULT now(),
 			created_by character varying(100) NOT NULL,
@@ -195,9 +195,9 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			ip_address character varying(45) NULL,
 			system_context jsonb NULL,
 			PRIMARY KEY (id),
-			CONSTRAINT fk_audit_trail_entries_financial_position_log
+			CONSTRAINT fk_audit_trail_entry_financial_position_log
 				FOREIGN KEY (financial_position_log_id)
-				REFERENCES position_keeping.financial_position_logs(id)
+				REFERENCES position_keeping.financial_position_log(id)
 				ON DELETE CASCADE
 		)
 	`)

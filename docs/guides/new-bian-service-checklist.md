@@ -282,7 +282,65 @@ atlas migrate status --env local --config file://services/{service}/atlas/atlas.
 
 ---
 
-### Task 5: Generate Initial Schema Migration
+### Task 5: Database Setup (Database-Per-Service Architecture)
+
+**Location**: PostgreSQL/CockroachDB administration
+
+Set up the dedicated database for the new service following the database-per-service architecture.
+
+**Steps:**
+
+#### Step 5.1: Create Service Database
+
+```sql
+-- Connect as admin user
+CREATE DATABASE meridian_{service};
+```
+
+#### Step 5.2: Create Service User
+
+```sql
+-- Create dedicated user with restricted access
+CREATE USER {service}_svc WITH PASSWORD '<secure-password>';
+
+-- Grant access only to this service's database
+GRANT ALL ON DATABASE meridian_{service} TO {service}_svc;
+```
+
+#### Step 5.3: Verify Isolation
+
+```sql
+-- As {service}_svc, verify cannot access other databases
+\c meridian_party
+-- Should fail: permission denied
+```
+
+**Table naming convention:**
+
+Use **singular, unqualified** table names:
+
+```go
+// Entity TableName() method - REQUIRED
+func (EntityName) TableName() string {
+    return "entity_name"  // singular, no schema prefix
+}
+```
+
+**Why singular**: Natural SQL syntax (`FROM account` not `FROM accounts`)
+**Why unqualified**: Allows PostgreSQL `search_path` to route to tenant schemas
+
+**Reference**: [Database-Per-Service Migration Runbook](../runbooks/database-per-service-migration.md)
+
+**Verification:**
+
+```bash
+# Verify database exists and user can connect
+psql -h localhost -U {service}_svc -d meridian_{service} -c "SELECT current_database();"
+```
+
+---
+
+### Task 6: Generate Initial Schema Migration
 
 **Location**: `services/{service}/migrations/`
 
@@ -299,11 +357,11 @@ atlas migrate diff initial \
 # Review generated SQL in services/{service}/migrations/
 # Verify: tables, constraints, indexes, enums
 
-# Apply migration locally
+# Apply migration locally (uses credentials from Task 5)
 atlas migrate apply \
   --env local \
   --config file://services/{service}/atlas/atlas.hcl \
-  --url "postgres://meridian_{service}_user@localhost:26257/meridian_{service}?sslmode=disable"
+  --url "postgres://{service}_svc@localhost:26257/meridian_{service}?sslmode=disable"
 ```
 
 **Migration file naming**: `YYYYMMDDHHMMSS_description.sql`
@@ -311,13 +369,13 @@ atlas migrate apply \
 **Verification:**
 
 ```bash
-# Query database to confirm schema
-psql -h localhost -p 26257 -U meridian_{service}_user -d meridian_{service} -c "\dt"
+# Query database to confirm schema (uses credentials from Task 5)
+psql -h localhost -p 26257 -U {service}_svc -d meridian_{service} -c "\dt"
 ```
 
 ---
 
-### Task 6: gRPC Service Handler
+### Task 7: gRPC Service Handler
 
 **Location**: `services/{service}/service/`
 
@@ -386,7 +444,7 @@ go test ./services/{service}/service/... -v
 
 ---
 
-### Task 7: Health Check Implementation
+### Task 8: Health Check Implementation
 
 **Location**: `services/{service}/service/health.go`
 
@@ -435,7 +493,7 @@ grpcurl -plaintext localhost:50055 grpc.health.v1.Health/Check
 
 ---
 
-### Task 8: Service Entry Point
+### Task 9: Service Entry Point
 
 **Location**: `services/{service}/cmd/`
 
@@ -502,7 +560,7 @@ grpcurl -plaintext localhost:50055 list
 
 ---
 
-### Task 9: Dockerfile
+### Task 10: Dockerfile
 
 **Location**: `services/{service}/cmd/Dockerfile`
 
@@ -550,7 +608,7 @@ docker run --rm -e DATABASE_URL="postgres://..." {service}:dev
 
 ---
 
-### Task 10: Kubernetes Manifests
+### Task 11: Kubernetes Manifests
 
 **Location**: `services/{service}/k8s/`
 
@@ -627,7 +685,7 @@ kubectl apply --dry-run=client -f services/{service}/k8s/
 
 ---
 
-### Task 11: Tilt Integration
+### Task 12: Tilt Integration
 
 **Location**: `Tiltfile` (root)
 
@@ -672,7 +730,7 @@ tilt up
 
 ---
 
-### Task 12: Integration Tests
+### Task 13: Integration Tests
 
 **Location**: `services/{service}/service/` or `tests/`
 
@@ -748,14 +806,15 @@ Follow [ADR-009](../adr/0009-application-level-audit-logging.md) for application
 
 This checklist can be used to generate Task Master tasks:
 
-1. Each numbered task (1-12) becomes a Task Master task
+1. Each numbered task (1-13) becomes a Task Master task
 2. Dependencies follow the logical order:
    - Task 2 depends on Task 1 (domain needs proto types)
    - Task 3 depends on Task 2 (persistence needs domain)
-   - Task 5 depends on Task 4 (migration needs atlas config)
-   - Task 6 depends on Tasks 2, 3 (service needs domain and persistence)
-   - Tasks 8-11 depend on Task 6 (deployment needs service)
-   - Task 12 depends on all previous tasks
+   - Task 5 depends on Task 4 (database setup needs atlas config)
+   - Task 6 depends on Tasks 4, 5 (migration needs atlas and database)
+   - Task 7 depends on Tasks 2, 3 (service needs domain and persistence)
+   - Tasks 9-12 depend on Task 7 (deployment needs service)
+   - Task 13 depends on all previous tasks
 
 3. To generate tasks for a new service:
 
@@ -777,3 +836,4 @@ task-master parse-prd docs/guides/new-{service}-service-checklist.md
 - [ADR-015: Standard Service Directory Structure](../adr/0015-standard-service-directory-structure.md)
 - [Circuit Breaker Usage Guide](circuit-breaker-usage.md)
 - [Testcontainers Usage Guide](testcontainers-usage.md)
+- [Database-Per-Service Migration Runbook](../runbooks/database-per-service-migration.md)
