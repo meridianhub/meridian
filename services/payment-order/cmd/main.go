@@ -15,12 +15,13 @@ import (
 	"syscall"
 	"time"
 
-	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	webhookhttp "github.com/meridianhub/meridian/services/payment-order/adapters/http"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
+	payclients "github.com/meridianhub/meridian/services/payment-order/clients"
 	"github.com/meridianhub/meridian/services/payment-order/service"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
@@ -311,29 +312,8 @@ func (s *simpleHealthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, server 
 	return server.Context().Err()
 }
 
-// currentAccountGRPCClient implements service.CurrentAccountClient using gRPC.
-type currentAccountGRPCClient struct {
-	conn   *grpc.ClientConn
-	client currentaccountv1.CurrentAccountServiceClient
-}
-
-func (c *currentAccountGRPCClient) InitiateLien(ctx context.Context, req *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
-	return c.client.InitiateLien(ctx, req)
-}
-
-func (c *currentAccountGRPCClient) TerminateLien(ctx context.Context, req *currentaccountv1.TerminateLienRequest) (*currentaccountv1.TerminateLienResponse, error) {
-	return c.client.TerminateLien(ctx, req)
-}
-
-func (c *currentAccountGRPCClient) ExecuteLien(ctx context.Context, req *currentaccountv1.ExecuteLienRequest) (*currentaccountv1.ExecuteLienResponse, error) {
-	return c.client.ExecuteLien(ctx, req)
-}
-
-func (c *currentAccountGRPCClient) Close() error {
-	return c.conn.Close()
-}
-
-// createCurrentAccountClient creates the CurrentAccount gRPC client.
+// createCurrentAccountClient creates the CurrentAccount gRPC client with resilience patterns.
+// The client is wrapped with circuit breaker and retry logic using shared/pkg/clients.
 func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.CurrentAccountClient, func(), error) {
 	target := fmt.Sprintf("dns:///current-account.%s.svc.cluster.local:50051", namespace)
 	logger.Info("connecting to current-account service", "target", target)
@@ -347,10 +327,32 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.
 		return nil, nil, fmt.Errorf("failed to connect to current-account service: %w", err)
 	}
 
-	client := &currentAccountGRPCClient{
-		conn:   conn,
-		client: currentaccountv1.NewCurrentAccountServiceClient(conn),
+	// Configure resilience settings from environment
+	resilientConfig := sharedclients.ResilientClientConfig{
+		// Circuit breaker settings
+		CircuitBreakerName:     "current-account",
+		CircuitBreakerTimeout:  getEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval: getEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		MaxRequests:            getEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       getEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+
+		// Retry settings
+		MaxRetries:          getEnvAsInt("CURRENT_ACCOUNT_MAX_RETRIES", 3),
+		InitialInterval:     getEnvAsDuration("CURRENT_ACCOUNT_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
+		MaxInterval:         getEnvAsDuration("CURRENT_ACCOUNT_RETRY_MAX_INTERVAL", 5*time.Second),
+		Multiplier:          getEnvAsFloat("CURRENT_ACCOUNT_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: getEnvAsFloat("CURRENT_ACCOUNT_RETRY_RANDOMIZATION", 0.5),
+
+		Logger: logger,
 	}
+
+	logger.Info("current-account client configured with resilience patterns",
+		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
+		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
+		"max_retries", resilientConfig.MaxRetries,
+	)
+
+	client := payclients.NewResilientCurrentAccountClient(conn, resilientConfig)
 
 	cleanup := func() {
 		if err := client.Close(); err != nil {
