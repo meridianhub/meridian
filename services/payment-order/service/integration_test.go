@@ -55,6 +55,7 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.PaymentOrderEntity{},
+		&persistence.AuditOutbox{},
 	})
 
 	// Create tenant schema
@@ -63,8 +64,8 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
 	require.NoError(t, err)
 
-	// Create payment_orders table in tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.payment_orders (
+	// Create payment_order table in tenant schema (singular per entity TableName())
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.payment_order (
 		id UUID PRIMARY KEY,
 		debtor_account_id VARCHAR(255) NOT NULL,
 		creditor_reference VARCHAR(255) NOT NULL,
@@ -84,12 +85,32 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		lien_execution_attempts INTEGER DEFAULT 0,
 		lien_execution_error TEXT,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 		reserved_at TIMESTAMP WITH TIME ZONE,
 		executing_at TIMESTAMP WITH TIME ZONE,
 		completed_at TIMESTAMP WITH TIME ZONE,
 		failed_at TIMESTAMP WITH TIME ZONE,
 		cancelled_at TIMESTAMP WITH TIME ZONE,
 		reversed_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create audit_outbox table in tenant schema (required for audit hooks)
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		table_name VARCHAR(100) NOT NULL,
+		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+		record_id UUID NOT NULL,
+		old_values JSONB,
+		new_values JSONB,
+		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		retry_count INT NOT NULL DEFAULT 0,
+		last_error TEXT,
+		changed_by VARCHAR(100),
+		transaction_id VARCHAR(100),
+		client_ip VARCHAR(45),
+		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
