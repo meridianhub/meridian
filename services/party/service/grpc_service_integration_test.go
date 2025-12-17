@@ -28,6 +28,7 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.PartyEntity{},
+		&persistence.PartyAuditOutbox{},
 	})
 
 	// Create the tenant schema for tests
@@ -36,8 +37,8 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the parties table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.parties (
+	// Create the party table in the tenant schema (note: singular 'party' to match entity)
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party (
 		id UUID PRIMARY KEY,
 		party_type VARCHAR(20) NOT NULL,
 		legal_name VARCHAR(255) NOT NULL,
@@ -52,6 +53,25 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 		created_by VARCHAR(255),
 		updated_by VARCHAR(255),
 		UNIQUE(external_reference, external_reference_type)
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the audit_outbox table in the tenant schema (required for audit hooks)
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		table_name VARCHAR(100) NOT NULL,
+		operation VARCHAR(10) NOT NULL,
+		record_id UUID NOT NULL,
+		old_values TEXT,
+		new_values TEXT,
+		status VARCHAR(20) NOT NULL DEFAULT 'pending',
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		retry_count INT NOT NULL DEFAULT 0,
+		last_error TEXT,
+		changed_by VARCHAR(100),
+		transaction_id VARCHAR(100),
+		client_ip VARCHAR(45),
+		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
