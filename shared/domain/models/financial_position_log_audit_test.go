@@ -48,6 +48,9 @@ func setupPositionKeepingTestDB(t *testing.T) (*gorm.DB, func()) {
 	require.NoError(t, err, "Failed to enable pgcrypto extension")
 
 	// Create audit_outbox table (unqualified, uses public schema)
+	// Note: Uses TEXT for old_values/new_values to match AuditOutbox model (gorm type:text)
+	// The production migration uses JSONB but the model uses string type, which works
+	// because PostgreSQL can cast valid JSON strings to JSONB
 	err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_outbox (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
