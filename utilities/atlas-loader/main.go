@@ -16,6 +16,9 @@ import (
 	"github.com/meridianhub/meridian/shared/domain/models"
 )
 
+// Schema filter constants for selecting service-specific models.
+// With database-per-service architecture, each service has its own database
+// and tenant provisioner creates org_{tenant_id} schemas as needed.
 const (
 	schemaCurrentAccount      = "current_account"
 	schemaPositionKeeping     = "position_keeping"
@@ -96,33 +99,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Prepend CREATE SCHEMA statements for referenced schemas.
-	// With database-per-service architecture, most services use unqualified table names
-	// in the default public schema. Only legacy services (position_keeping, financial_accounting,
-	// current_account) still use schema-qualified names.
-	output := stmts
-	if *schemaFilter != "" {
-		var schemaStmt string
-		switch *schemaFilter {
-		case schemaPositionKeeping:
-			// For position_keeping, we need both schemas since transactions reference accounts
-			schemaStmt = "CREATE SCHEMA IF NOT EXISTS current_account;\nCREATE SCHEMA IF NOT EXISTS position_keeping;\n\n"
-		case schemaFinancialAccounting:
-			schemaStmt = "CREATE SCHEMA IF NOT EXISTS financial_accounting;\n\n"
-		case schemaCurrentAccount:
-			schemaStmt = "CREATE SCHEMA IF NOT EXISTS current_account;\n\n"
-		case schemaParty, schemaPaymentOrder, schemaPlatform:
-			// These services use unqualified table names for multi-tenant schema routing.
-			// Schema is created externally during org provisioning or set via search_path.
-			// No CREATE SCHEMA prepended here.
-			schemaStmt = ""
-		default:
-			schemaStmt = ""
-		}
-		output = schemaStmt + stmts
-	}
-
-	if _, err := io.WriteString(os.Stdout, output); err != nil {
+	// Output table DDL directly without schema creation statements.
+	// With database-per-service architecture:
+	// - Each service has its own database (meridian_current_account, meridian_party, etc.)
+	// - Tenant provisioner creates org_{tenant_id} schemas before running migrations
+	// - Tables use unqualified names with search_path routing to tenant schemas
+	if _, err := io.WriteString(os.Stdout, stmts); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write schema: %v\n", err)
 		os.Exit(1)
 	}

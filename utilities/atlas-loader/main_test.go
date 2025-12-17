@@ -48,7 +48,7 @@ func TestAtlasLoaderBinary(t *testing.T) {
 				"transaction_log_entry",  // singular table name for search_path routing
 			},
 			wantNotStdout: []string{
-				"CREATE SCHEMA", // No schema statement without filter
+				"CREATE SCHEMA", // No schema statements - tenant provisioner creates schemas
 			},
 		},
 		{
@@ -56,12 +56,13 @@ func TestAtlasLoaderBinary(t *testing.T) {
 			args:         []string{"-schema=current_account"},
 			wantExitCode: 0,
 			wantStdout: []string{
-				"CREATE SCHEMA IF NOT EXISTS current_account",
+				"CREATE TABLE",
 				"customer", // singular table name for search_path routing
 				"account",  // singular table name for search_path routing
 				"lien",     // singular table name for search_path routing
 			},
 			wantNotStdout: []string{
+				"CREATE SCHEMA",          // No schema statements - tenant provisioner creates schemas
 				"financial_position_log", // position_keeping model should not be included
 				"transaction_log_entry",  // position_keeping model should not be included
 			},
@@ -71,8 +72,7 @@ func TestAtlasLoaderBinary(t *testing.T) {
 			args:         []string{"-schema=position_keeping"},
 			wantExitCode: 0,
 			wantStdout: []string{
-				"CREATE SCHEMA IF NOT EXISTS current_account",
-				"CREATE SCHEMA IF NOT EXISTS position_keeping",
+				"CREATE TABLE",
 				"account",                // singular table name for search_path routing
 				"financial_position_log", // singular table name for search_path routing
 				"transaction_log_entry",  // singular table name for search_path routing
@@ -82,7 +82,7 @@ func TestAtlasLoaderBinary(t *testing.T) {
 				// GORM requires the full FK chain for proper constraint generation
 			},
 			wantNotStdout: []string{
-				// All necessary models are included for FK integrity
+				"CREATE SCHEMA", // No schema statements - tenant provisioner creates schemas
 			},
 		},
 		{
@@ -155,9 +155,9 @@ func TestOutputFormat(t *testing.T) {
 
 		output := stdout.String()
 
-		// Verify SQL statement format
-		assert.True(t, strings.HasPrefix(output, "CREATE SCHEMA"), "output should start with CREATE SCHEMA")
-		assert.Contains(t, output, "CREATE TABLE", "output should contain CREATE TABLE")
+		// Verify SQL statement format - output contains only table DDL, no schema creation
+		assert.True(t, strings.HasPrefix(output, "CREATE TABLE"), "output should start with CREATE TABLE")
+		assert.NotContains(t, output, "CREATE SCHEMA", "output should not contain CREATE SCHEMA - tenant provisioner handles schema creation")
 		assert.Contains(t, output, "PRIMARY KEY", "output should contain PRIMARY KEY")
 
 		// Verify unqualified singular table names for search_path routing
