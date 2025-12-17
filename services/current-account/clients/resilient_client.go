@@ -1,17 +1,31 @@
+// Package clients provides gRPC client wrappers with resilience patterns.
+//
+// This package provides service-specific resilient client wrappers that delegate
+// to the shared implementation in github.com/meridianhub/meridian/shared/pkg/clients.
+//
+// # Service-Specific Wrappers
+//
+// Each wrapper maintains the domain-specific client interface while using the shared
+// ResilientClient for all resilience logic (circuit breaker, retry, etc.):
+//
+//   - ResilientPositionKeepingClient - wraps PositionKeepingClient
+//   - ResilientFinancialAccountingClient - wraps FinancialAccountingClient
+//   - ResilientPartyClient - wraps PartyClient
+//
+// # Backward Compatibility
+//
+// This package re-exports types from shared/pkg/clients for backward compatibility.
+// New code should import directly from github.com/meridianhub/meridian/shared/pkg/clients.
 package clients
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
-	"time"
 
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
-	"github.com/sony/gobreaker/v2"
 )
 
 // ErrTypeAssertion is returned when a type assertion fails in executeWithResilience.
@@ -20,115 +34,39 @@ var ErrTypeAssertion = sharedclients.ErrTypeAssertion
 
 // ResilientPositionKeepingClient wraps PositionKeepingClient with resilience patterns
 type ResilientPositionKeepingClient struct {
-	client         PositionKeepingClient
-	circuitBreaker *sharedclients.CircuitBreaker
-	retryConfig    sharedclients.RetryConfig
-	logger         *slog.Logger
+	client          PositionKeepingClient
+	resilientClient *sharedclients.ResilientClient
 }
 
 // ResilientFinancialAccountingClient wraps FinancialAccountingClient with resilience patterns
 type ResilientFinancialAccountingClient struct {
-	client         FinancialAccountingClient
-	circuitBreaker *sharedclients.CircuitBreaker
-	retryConfig    sharedclients.RetryConfig
-	logger         *slog.Logger
+	client          FinancialAccountingClient
+	resilientClient *sharedclients.ResilientClient
 }
 
 // ResilientPartyClient wraps PartyClient with resilience patterns
 type ResilientPartyClient struct {
-	client         PartyClient
-	circuitBreaker *sharedclients.CircuitBreaker
-	retryConfig    sharedclients.RetryConfig
-	logger         *slog.Logger
+	client          PartyClient
+	resilientClient *sharedclients.ResilientClient
 }
 
 // ResilientClientConfig is an alias to the shared implementation.
 // Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
 type ResilientClientConfig = sharedclients.ResilientClientConfig
 
-// applyConfigDefaults applies default values to ResilientClientConfig and returns circuit breaker and retry configs
-func applyConfigDefaults(config *ResilientClientConfig, defaultName string) (sharedclients.CircuitBreakerConfig, sharedclients.RetryConfig) {
-	// Apply logger default
-	if config.Logger == nil {
-		config.Logger = slog.Default()
-	}
-
-	// Apply circuit breaker defaults
-	if config.CircuitBreakerName == "" {
-		config.CircuitBreakerName = defaultName
-	}
-	if config.CircuitBreakerTimeout == 0 {
-		config.CircuitBreakerTimeout = 30 * time.Second
-	}
-	if config.CircuitBreakerInterval == 0 {
-		config.CircuitBreakerInterval = 60 * time.Second
-	}
-	if config.MaxRequests == 0 {
-		config.MaxRequests = 1
-	}
-	if config.FailureThreshold == 0 {
-		config.FailureThreshold = 5
-	}
-
-	// Create circuit breaker config
-	cbConfig := sharedclients.CircuitBreakerConfig{
-		Name:        config.CircuitBreakerName,
-		MaxRequests: config.MaxRequests,
-		Interval:    config.CircuitBreakerInterval,
-		Timeout:     config.CircuitBreakerTimeout,
-		ReadyToTrip: func(counts gobreaker.Counts) bool {
-			return counts.ConsecutiveFailures >= config.FailureThreshold
-		},
-		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			config.Logger.Info("circuit breaker state changed",
-				"service", name,
-				"from", from.String(),
-				"to", to.String())
-		},
-	}
-
-	// Apply retry defaults
-	if config.MaxRetries == 0 {
-		config.MaxRetries = 3
-	}
-	if config.InitialInterval == 0 {
-		config.InitialInterval = 100 * time.Millisecond
-	}
-	if config.MaxInterval == 0 {
-		config.MaxInterval = 5 * time.Second
-	}
-	if config.Multiplier == 0 {
-		config.Multiplier = 2.0
-	}
-	if config.RandomizationFactor == 0 {
-		config.RandomizationFactor = 0.5
-	}
-
-	// Create retry config
-	retryConfig := sharedclients.RetryConfig{
-		MaxRetries:          config.MaxRetries,
-		InitialInterval:     config.InitialInterval,
-		MaxInterval:         config.MaxInterval,
-		Multiplier:          config.Multiplier,
-		RandomizationFactor: config.RandomizationFactor,
-	}
-
-	return cbConfig, retryConfig
-}
-
 // NewResilientPositionKeepingClient creates a resilient wrapper around PositionKeepingClient
 func NewResilientPositionKeepingClient(
 	client PositionKeepingClient,
 	config ResilientClientConfig,
 ) *ResilientPositionKeepingClient {
-	cbConfig, retryConfig := applyConfigDefaults(&config, "position-keeping")
-	cb := sharedclients.NewCircuitBreaker(cbConfig, config.Logger)
+	// Apply default name if not provided
+	if config.CircuitBreakerName == "" {
+		config.CircuitBreakerName = "position-keeping"
+	}
 
 	return &ResilientPositionKeepingClient{
-		client:         client,
-		circuitBreaker: cb,
-		retryConfig:    retryConfig,
-		logger:         config.Logger,
+		client:          client,
+		resilientClient: sharedclients.NewResilientClient(config),
 	}
 }
 
@@ -137,14 +75,14 @@ func NewResilientFinancialAccountingClient(
 	client FinancialAccountingClient,
 	config ResilientClientConfig,
 ) *ResilientFinancialAccountingClient {
-	cbConfig, retryConfig := applyConfigDefaults(&config, "financial-accounting")
-	cb := sharedclients.NewCircuitBreaker(cbConfig, config.Logger)
+	// Apply default name if not provided
+	if config.CircuitBreakerName == "" {
+		config.CircuitBreakerName = "financial-accounting"
+	}
 
 	return &ResilientFinancialAccountingClient{
-		client:         client,
-		circuitBreaker: cb,
-		retryConfig:    retryConfig,
-		logger:         config.Logger,
+		client:          client,
+		resilientClient: sharedclients.NewResilientClient(config),
 	}
 }
 
@@ -153,59 +91,15 @@ func NewResilientPartyClient(
 	client PartyClient,
 	config ResilientClientConfig,
 ) *ResilientPartyClient {
-	cbConfig, retryConfig := applyConfigDefaults(&config, "party")
-	cb := sharedclients.NewCircuitBreaker(cbConfig, config.Logger)
+	// Apply default name if not provided
+	if config.CircuitBreakerName == "" {
+		config.CircuitBreakerName = "party"
+	}
 
 	return &ResilientPartyClient{
-		client:         client,
-		circuitBreaker: cb,
-		retryConfig:    retryConfig,
-		logger:         config.Logger,
+		client:          client,
+		resilientClient: sharedclients.NewResilientClient(config),
 	}
-}
-
-// executeWithResilience wraps a call with circuit breaker and retry logic
-func executeWithResilience[T any](
-	ctx context.Context,
-	cb *sharedclients.CircuitBreaker,
-	retryConfig sharedclients.RetryConfig,
-	logger *slog.Logger,
-	operationName string,
-	fn func() (T, error),
-) (T, error) {
-	var result T
-
-	// Wrap the operation with retry logic
-	err := sharedclients.Retry(ctx, retryConfig, func() error {
-		// Execute through circuit breaker
-		res, err := cb.Execute(ctx, func() (any, error) {
-			return fn()
-		})
-		if err != nil {
-			logger.Debug("operation failed",
-				"operation", operationName,
-				"error", err)
-			return fmt.Errorf("circuit breaker execution failed: %w", err)
-		}
-
-		// Type assertion with check
-		var ok bool
-		result, ok = res.(T)
-		if !ok {
-			return fmt.Errorf("%w: expected %T, got %T", ErrTypeAssertion, result, res)
-		}
-		return nil
-	})
-	if err != nil {
-		// Check if circuit breaker is open
-		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
-			logger.Warn("circuit breaker open",
-				"operation", operationName)
-		}
-		return result, fmt.Errorf("resilient operation failed for %s: %w", operationName, err)
-	}
-
-	return result, nil
 }
 
 // InitiateFinancialPositionLog creates a new financial position log with resilience
@@ -213,11 +107,9 @@ func (r *ResilientPositionKeepingClient) InitiateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
 ) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"InitiateFinancialPositionLog",
 		func() (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
 			return r.client.InitiateFinancialPositionLog(ctx, req)
@@ -230,11 +122,9 @@ func (r *ResilientPositionKeepingClient) UpdateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
 ) (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"UpdateFinancialPositionLog",
 		func() (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
 			return r.client.UpdateFinancialPositionLog(ctx, req)
@@ -247,11 +137,9 @@ func (r *ResilientPositionKeepingClient) RetrieveFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.RetrieveFinancialPositionLogRequest,
 ) (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"RetrieveFinancialPositionLog",
 		func() (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
 			return r.client.RetrieveFinancialPositionLog(ctx, req)
@@ -266,11 +154,9 @@ func (r *ResilientPositionKeepingClient) BulkImportTransactions(
 	ctx context.Context,
 	req *positionkeepingv1.BulkImportTransactionsRequest,
 ) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilienceNoRetry(
 		ctx,
-		r.circuitBreaker,
-		sharedclients.NoRetryConfig(), // No retries - not idempotent
-		r.logger,
+		r.resilientClient,
 		"BulkImportTransactions",
 		func() (*positionkeepingv1.BulkImportTransactionsResponse, error) {
 			return r.client.BulkImportTransactions(ctx, req)
@@ -283,11 +169,9 @@ func (r *ResilientPositionKeepingClient) ListFinancialPositionLogs(
 	ctx context.Context,
 	req *positionkeepingv1.ListFinancialPositionLogsRequest,
 ) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"ListFinancialPositionLogs",
 		func() (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
 			return r.client.ListFinancialPositionLogs(ctx, req)
@@ -308,11 +192,9 @@ func (r *ResilientFinancialAccountingClient) InitiateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.InitiateFinancialBookingLogRequest,
 ) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"InitiateFinancialBookingLog",
 		func() (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
 			return r.client.InitiateFinancialBookingLog(ctx, req)
@@ -327,11 +209,9 @@ func (r *ResilientFinancialAccountingClient) UpdateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
 ) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilienceNoRetry(
 		ctx,
-		r.circuitBreaker,
-		sharedclients.NoRetryConfig(), // No retries - not idempotent
-		r.logger,
+		r.resilientClient,
 		"UpdateFinancialBookingLog",
 		func() (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
 			return r.client.UpdateFinancialBookingLog(ctx, req)
@@ -344,11 +224,9 @@ func (r *ResilientFinancialAccountingClient) RetrieveFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.RetrieveFinancialBookingLogRequest,
 ) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"RetrieveFinancialBookingLog",
 		func() (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
 			return r.client.RetrieveFinancialBookingLog(ctx, req)
@@ -361,11 +239,9 @@ func (r *ResilientFinancialAccountingClient) ListFinancialBookingLogs(
 	ctx context.Context,
 	req *financialaccountingv1.ListFinancialBookingLogsRequest,
 ) (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"ListFinancialBookingLogs",
 		func() (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
 			return r.client.ListFinancialBookingLogs(ctx, req)
@@ -381,11 +257,9 @@ func (r *ResilientFinancialAccountingClient) CaptureLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.CaptureLedgerPostingRequest,
 ) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilienceNoRetry(
 		ctx,
-		r.circuitBreaker,
-		sharedclients.NoRetryConfig(), // No retries - server-side idempotency not yet confirmed
-		r.logger,
+		r.resilientClient,
 		"CaptureLedgerPosting",
 		func() (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
 			return r.client.CaptureLedgerPosting(ctx, req)
@@ -398,11 +272,9 @@ func (r *ResilientFinancialAccountingClient) RetrieveLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.RetrieveLedgerPostingRequest,
 ) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"RetrieveLedgerPosting",
 		func() (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
 			return r.client.RetrieveLedgerPosting(ctx, req)
@@ -420,11 +292,9 @@ func (r *ResilientFinancialAccountingClient) Close() error {
 
 // ValidateParty checks if a party exists and is active with resilience
 func (r *ResilientPartyClient) ValidateParty(ctx context.Context, partyID string) error {
-	_, err := executeWithResilience(
+	_, err := sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"ValidateParty",
 		func() (struct{}, error) {
 			return struct{}{}, r.client.ValidateParty(ctx, partyID)
@@ -435,11 +305,9 @@ func (r *ResilientPartyClient) ValidateParty(ctx context.Context, partyID string
 
 // GetParty retrieves full party details by ID with resilience
 func (r *ResilientPartyClient) GetParty(ctx context.Context, partyID string) (*partyv1.Party, error) {
-	return executeWithResilience(
+	return sharedclients.ExecuteWithResilience(
 		ctx,
-		r.circuitBreaker,
-		r.retryConfig,
-		r.logger,
+		r.resilientClient,
 		"GetParty",
 		func() (*partyv1.Party, error) {
 			return r.client.GetParty(ctx, partyID)
