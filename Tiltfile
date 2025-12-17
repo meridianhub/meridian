@@ -621,7 +621,7 @@ metadata:
 type: Opaque
 stringData:
   # Local development connection string - CockroachDB in insecure mode
-  DATABASE_URL: "postgres://meridian@cockroachdb:26257/meridian?sslmode=disable"
+  DATABASE_URL: "postgres://meridian_platform_user@cockroachdb:26257/meridian_platform?sslmode=disable"
 '''))
 
 # Set resource dependencies

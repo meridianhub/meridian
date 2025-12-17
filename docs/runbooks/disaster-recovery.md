@@ -123,11 +123,17 @@ this with your specific:
 
    # Example using CockroachDB backup:
 
-   cockroach sql --execute="RESTORE DATABASE meridian FROM 's3://backups/latest';"
+   # Restore all service databases from backup
+   cockroach sql --execute="RESTORE DATABASE meridian_current_account FROM 's3://backups/latest/current_account';"
+   cockroach sql --execute="RESTORE DATABASE meridian_financial_accounting FROM 's3://backups/latest/financial_accounting';"
+   cockroach sql --execute="RESTORE DATABASE meridian_position_keeping FROM 's3://backups/latest/position_keeping';"
+   cockroach sql --execute="RESTORE DATABASE meridian_payment_order FROM 's3://backups/latest/payment_order';"
+   cockroach sql --execute="RESTORE DATABASE meridian_party FROM 's3://backups/latest/party';"
+   cockroach sql --execute="RESTORE DATABASE meridian_platform FROM 's3://backups/latest/platform';"
 
-   # Verify data integrity
-
-   cockroach sql --execute="SELECT COUNT(*) FROM meridian.transactions;"
+   # Verify data integrity for each service database
+   cockroach sql --execute="SELECT COUNT(*) FROM meridian_current_account.accounts;"
+   cockroach sql --execute="SELECT COUNT(*) FROM meridian_position_keeping.financial_position_logs;"
 ```
 
 1. **Verify and test** (150-180 minutes)
@@ -191,7 +197,13 @@ this with your specific:
 
    # Restore to point in time before corruption
 
-   cockroach sql --execute="RESTORE DATABASE meridian FROM 's3://backups/2025-10-28-00-00';"
+   # Restore each service database to point in time before corruption
+   cockroach sql --execute="RESTORE DATABASE meridian_current_account FROM 's3://backups/2025-10-28-00-00/current_account';"
+   cockroach sql --execute="RESTORE DATABASE meridian_financial_accounting FROM 's3://backups/2025-10-28-00-00/financial_accounting';"
+   cockroach sql --execute="RESTORE DATABASE meridian_position_keeping FROM 's3://backups/2025-10-28-00-00/position_keeping';"
+   cockroach sql --execute="RESTORE DATABASE meridian_payment_order FROM 's3://backups/2025-10-28-00-00/payment_order';"
+   cockroach sql --execute="RESTORE DATABASE meridian_party FROM 's3://backups/2025-10-28-00-00/party';"
+   cockroach sql --execute="RESTORE DATABASE meridian_platform FROM 's3://backups/2025-10-28-00-00/platform';"
 ```
 
 1. **Verify data integrity**
@@ -204,7 +216,7 @@ this with your specific:
 
    # Validate critical data
 
-   cockroach sql --execute="SELECT COUNT(*) FROM meridian.accounts;"
+   cockroach sql --execute="SELECT COUNT(*) FROM meridian_current_account.accounts;"
 
 ```text
 
@@ -257,7 +269,9 @@ this with your specific:
 
    # Verify database replication
 
-   cockroach sql --execute="SHOW RANGES FROM DATABASE meridian;"
+   # Verify replication for all service databases
+   cockroach sql --execute="SHOW RANGES FROM DATABASE meridian_current_account;"
+   cockroach sql --execute="SHOW RANGES FROM DATABASE meridian_platform;"
 ```
 
 1. **Monitor switchover** (60-120 minutes)
@@ -383,7 +397,10 @@ aws s3 ls s3://meridian-backups/production/ --recursive | grep $(date +%Y-%m-%d)
 
 # Monthly: Restore to staging
 
-cockroach sql --database=staging --execute="RESTORE DATABASE meridian FROM 's3://backups/latest';"
+# Restore all service databases to staging
+cockroach sql --database=staging --execute="RESTORE DATABASE meridian_current_account FROM 's3://backups/latest/current_account';"
+cockroach sql --database=staging --execute="RESTORE DATABASE meridian_platform FROM 's3://backups/latest/platform';"
+# Repeat for other service databases as needed
 
 # Quarterly: Full DR drill
 

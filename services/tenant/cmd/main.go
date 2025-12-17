@@ -332,7 +332,7 @@ func run(logger *slog.Logger) error {
 
 // initDatabase initializes the database connection with connection pooling.
 func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
-	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian:meridian@cockroachdb:26257/meridian?sslmode=disable")
+	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian_platform_user@cockroachdb:26257/meridian_platform?sslmode=disable")
 
 	// Open database connection
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
