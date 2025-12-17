@@ -25,6 +25,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&FinancialBookingLogEntity{},
 		&LedgerPostingEntity{},
+		&AuditOutbox{},
 	})
 
 	// Create the tenant schema for tests
@@ -68,6 +69,25 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		created_by VARCHAR(255),
 		updated_by VARCHAR(255),
 		deleted_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create audit_outbox table for GORM hooks
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		table_name VARCHAR(100) NOT NULL,
+		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+		record_id UUID NOT NULL,
+		old_values JSONB,
+		new_values JSONB,
+		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		retry_count INT NOT NULL DEFAULT 0,
+		last_error TEXT,
+		changed_by VARCHAR(100),
+		transaction_id VARCHAR(100),
+		client_ip INET,
+		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
@@ -559,4 +579,390 @@ func TestForeignKeyOnDeleteRestrict(t *testing.T) {
 	var pgErr *pgconn.PgError
 	require.True(t, errors.As(err, &pgErr), "expected Postgres error, got %T: %v", err, err)
 	assert.Equal(t, "23503", pgErr.Code, "expected foreign key violation error code")
+}
+
+// ====================
+// Audit Integration Tests
+// ====================
+
+// setupTestDBWithAudit creates test database with audit tables
+func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
+	t.Helper()
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{
+		&FinancialBookingLogEntity{},
+		&LedgerPostingEntity{},
+		&AuditOutbox{},
+		&AuditLog{},
+	})
+
+	// Create the tenant schema for tests
+	tid := tenant.TenantID(testTenantID)
+	schemaName := tid.SchemaName()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create tables in tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_log (
+		id UUID PRIMARY KEY,
+		financial_account_type VARCHAR(50) NOT NULL,
+		product_service_reference VARCHAR(255) NOT NULL,
+		business_unit_reference VARCHAR(255) NOT NULL,
+		chart_of_accounts_rules TEXT NOT NULL,
+		base_currency VARCHAR(3) NOT NULL,
+		status VARCHAR(50) NOT NULL,
+		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255),
+		version BIGINT NOT NULL DEFAULT 1,
+		deleted_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_posting (
+		id UUID PRIMARY KEY,
+		financial_booking_log_id UUID NOT NULL,
+		posting_direction VARCHAR(10) NOT NULL,
+		amount_cents BIGINT NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		account_id VARCHAR(255) NOT NULL,
+		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
+		posting_result VARCHAR(1000),
+		status VARCHAR(50) NOT NULL,
+		correlation_id VARCHAR(255),
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255),
+		deleted_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create audit tables
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		table_name VARCHAR(100) NOT NULL,
+		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+		record_id UUID NOT NULL,
+		old_values JSONB,
+		new_values JSONB,
+		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		retry_count INT NOT NULL DEFAULT 0,
+		last_error TEXT,
+		changed_by VARCHAR(100),
+		transaction_id VARCHAR(100),
+		client_ip INET,
+		user_agent TEXT
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_log (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		table_name VARCHAR(100) NOT NULL,
+		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+		record_id UUID NOT NULL,
+		changed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		changed_by VARCHAR(100),
+		old_values JSONB,
+		new_values JSONB,
+		transaction_id VARCHAR(100),
+		client_ip INET,
+		user_agent TEXT
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Set default search_path to include tenant schema
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	require.NoError(t, err)
+
+	// Create context with tenant
+	ctx := tenant.WithTenant(context.Background(), tid)
+
+	return db, ctx, cleanup
+}
+
+// TestAuditBookingLogCreate verifies that creating a booking log creates an audit outbox entry
+func TestAuditBookingLogCreate(t *testing.T) {
+	db, _, cleanup := setupTestDBWithAudit(t)
+	defer cleanup()
+
+	// Create a booking log
+	bookingLog := &FinancialBookingLogEntity{
+		ID:                      uuid.New(),
+		FinancialAccountType:    "ASSET",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "PENDING",
+		IdempotencyKey:          "audit-test-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.Create(bookingLog).Error)
+
+	// Verify audit outbox entry was created
+	var outbox AuditOutbox
+	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID, "financial_booking_log").First(&outbox).Error
+	require.NoError(t, err)
+
+	assert.Equal(t, "INSERT", outbox.Operation)
+	assert.Equal(t, "pending", outbox.Status)
+	assert.NotNil(t, outbox.NewValues)
+	assert.Nil(t, outbox.OldValues) // No old values for INSERT
+}
+
+// TestAuditBookingLogUpdate verifies that updating a booking log creates an audit outbox entry
+func TestAuditBookingLogUpdate(t *testing.T) {
+	db, _, cleanup := setupTestDBWithAudit(t)
+	defer cleanup()
+
+	// Create a booking log
+	bookingLog := &FinancialBookingLogEntity{
+		ID:                      uuid.New(),
+		FinancialAccountType:    "ASSET",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "PENDING",
+		IdempotencyKey:          "audit-update-test-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.Create(bookingLog).Error)
+
+	// Update the booking log
+	bookingLog.Status = "POSTED"
+	bookingLog.UpdatedAt = time.Now()
+	require.NoError(t, db.Save(bookingLog).Error)
+
+	// Verify both INSERT and UPDATE audit outbox entries exist
+	var outboxEntries []AuditOutbox
+	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID, "financial_booking_log").
+		Order("created_at ASC").
+		Find(&outboxEntries).Error
+	require.NoError(t, err)
+	require.Len(t, outboxEntries, 2, "Expected both INSERT and UPDATE audit entries")
+
+	// Verify INSERT entry
+	assert.Equal(t, "INSERT", outboxEntries[0].Operation)
+
+	// Verify UPDATE entry
+	assert.Equal(t, "UPDATE", outboxEntries[1].Operation)
+	assert.NotNil(t, outboxEntries[1].OldValues) // Old values for UPDATE
+	assert.NotNil(t, outboxEntries[1].NewValues) // New values for UPDATE
+}
+
+// TestAuditBookingLogDelete verifies that deleting a booking log creates an audit outbox entry
+func TestAuditBookingLogDelete(t *testing.T) {
+	db, _, cleanup := setupTestDBWithAudit(t)
+	defer cleanup()
+
+	// Create a booking log
+	bookingLog := &FinancialBookingLogEntity{
+		ID:                      uuid.New(),
+		FinancialAccountType:    "ASSET",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "PENDING",
+		IdempotencyKey:          "audit-delete-test-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.Create(bookingLog).Error)
+
+	// Delete the booking log (soft delete via GORM)
+	require.NoError(t, db.Delete(bookingLog).Error)
+
+	// Verify both INSERT and DELETE audit outbox entries exist
+	var outboxEntries []AuditOutbox
+	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID, "financial_booking_log").
+		Order("created_at ASC").
+		Find(&outboxEntries).Error
+	require.NoError(t, err)
+	require.Len(t, outboxEntries, 2, "Expected both INSERT and DELETE audit entries")
+
+	// Verify DELETE entry
+	assert.Equal(t, "DELETE", outboxEntries[1].Operation)
+	assert.NotNil(t, outboxEntries[1].OldValues) // Old values for DELETE
+	assert.Nil(t, outboxEntries[1].NewValues)    // No new values for DELETE
+}
+
+// TestAuditLedgerPostingCreate verifies that creating a ledger posting creates an audit outbox entry
+func TestAuditLedgerPostingCreate(t *testing.T) {
+	db, _, cleanup := setupTestDBWithAudit(t)
+	defer cleanup()
+
+	// Create a booking log first (for FK)
+	bookingLogID := uuid.New()
+	bookingLog := &FinancialBookingLogEntity{
+		ID:                      bookingLogID,
+		FinancialAccountType:    "ASSET",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "PENDING",
+		IdempotencyKey:          "audit-posting-test-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.Create(bookingLog).Error)
+
+	// Create a ledger posting
+	posting := &LedgerPostingEntity{
+		ID:                    uuid.New(),
+		FinancialBookingLogID: bookingLogID,
+		PostingDirection:      "DEBIT",
+		AmountCents:           10050,
+		Currency:              "GBP",
+		AccountID:             "ACC-001",
+		ValueDate:             time.Now(),
+		Status:                "PENDING",
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+	require.NoError(t, db.Create(posting).Error)
+
+	// Verify audit outbox entry was created for the posting
+	var outbox AuditOutbox
+	err := db.Where("record_id = ? AND table_name = ?", posting.ID, "ledger_posting").First(&outbox).Error
+	require.NoError(t, err)
+
+	assert.Equal(t, "INSERT", outbox.Operation)
+	assert.Equal(t, "pending", outbox.Status)
+}
+
+// TestAuditLedgerPostingUpdate verifies that updating a ledger posting creates an audit outbox entry
+func TestAuditLedgerPostingUpdate(t *testing.T) {
+	db, _, cleanup := setupTestDBWithAudit(t)
+	defer cleanup()
+
+	// Create a booking log first (for FK)
+	bookingLogID := uuid.New()
+	bookingLog := &FinancialBookingLogEntity{
+		ID:                      bookingLogID,
+		FinancialAccountType:    "ASSET",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "PENDING",
+		IdempotencyKey:          "audit-posting-update-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.Create(bookingLog).Error)
+
+	// Create a ledger posting
+	posting := &LedgerPostingEntity{
+		ID:                    uuid.New(),
+		FinancialBookingLogID: bookingLogID,
+		PostingDirection:      "DEBIT",
+		AmountCents:           10050,
+		Currency:              "GBP",
+		AccountID:             "ACC-001",
+		ValueDate:             time.Now(),
+		Status:                "PENDING",
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+	require.NoError(t, db.Create(posting).Error)
+
+	// Update the posting
+	posting.Status = "POSTED"
+	posting.PostingResult = "Success"
+	posting.UpdatedAt = time.Now()
+	require.NoError(t, db.Save(posting).Error)
+
+	// Verify both INSERT and UPDATE audit outbox entries exist
+	var outboxEntries []AuditOutbox
+	err := db.Where("record_id = ? AND table_name = ?", posting.ID, "ledger_posting").
+		Order("created_at ASC").
+		Find(&outboxEntries).Error
+	require.NoError(t, err)
+	require.Len(t, outboxEntries, 2, "Expected both INSERT and UPDATE audit entries")
+
+	// Verify UPDATE entry
+	assert.Equal(t, "UPDATE", outboxEntries[1].Operation)
+	assert.NotNil(t, outboxEntries[1].OldValues)
+	assert.NotNil(t, outboxEntries[1].NewValues)
+}
+
+// TestAuditOutboxStatusValues verifies the status constraint values work correctly
+func TestAuditOutboxStatusValues(t *testing.T) {
+	db, _, cleanup := setupTestDBWithAudit(t)
+	defer cleanup()
+
+	testCases := []struct {
+		name   string
+		status string
+		valid  bool
+	}{
+		{"pending status", "pending", true},
+		{"processing status", "processing", true},
+		{"completed status", "completed", true},
+		{"failed status", "failed", true},
+		{"invalid status", "invalid", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			outbox := &AuditOutbox{
+				ID:        uuid.New(),
+				Table:     "test_table",
+				Operation: "INSERT",
+				RecordID:  uuid.New(),
+				Status:    tc.status,
+				CreatedAt: time.Now(),
+			}
+
+			err := db.Create(outbox).Error
+			if tc.valid {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
+// TestAuditChangedByDefaultsToSystem verifies that changed_by defaults to "system" when no user context
+func TestAuditChangedByDefaultsToSystem(t *testing.T) {
+	db, _, cleanup := setupTestDBWithAudit(t)
+	defer cleanup()
+
+	// Create a booking log without user context
+	bookingLog := &FinancialBookingLogEntity{
+		ID:                      uuid.New(),
+		FinancialAccountType:    "ASSET",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "PENDING",
+		IdempotencyKey:          "audit-system-user-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.Create(bookingLog).Error)
+
+	// Verify audit entry has "system" as changed_by
+	var outbox AuditOutbox
+	err := db.Where("record_id = ?", bookingLog.ID).First(&outbox).Error
+	require.NoError(t, err)
+
+	require.NotNil(t, outbox.ChangedBy)
+	assert.Equal(t, "system", *outbox.ChangedBy)
 }
