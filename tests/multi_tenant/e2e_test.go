@@ -124,6 +124,7 @@ type e2eTestInfra struct {
 	pgContainer *postgres.PostgresContainer
 	pool        *db.PostgresPool
 	gormDB      *gorm.DB
+	connStr     string
 
 	// Redis
 	redisContainer *redis.RedisContainer
@@ -134,7 +135,7 @@ type e2eTestInfra struct {
 
 	// Services
 	tenantSvc *tenantService.Service
-	prov      provisioner.SchemaProvisioner
+	prov      *provisioner.PostgresProvisioner
 
 	// Logger
 	logger *slog.Logger
@@ -193,6 +194,7 @@ func (infra *e2eTestInfra) setupPostgres(ctx context.Context, t *testing.T) {
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err, "failed to get connection string")
+	infra.connStr = connStr
 
 	// Create db.PostgresPool for tenant scope operations
 	cfg := db.DefaultConfig(connStr)
@@ -277,7 +279,7 @@ func (infra *e2eTestInfra) setupServices(t *testing.T) {
 	// Create provisioner config (without actual migrations for test)
 	provConfig := &provisioner.Config{
 		Services: []provisioner.ServiceConfig{
-			{Name: "party", MigrationPath: "/nonexistent"}, // No migrations in test
+			{Name: "party", MigrationPath: "/nonexistent", DatabaseURL: infra.connStr}, // No migrations in test
 		},
 		ProvisioningTimeout: 30 * time.Second,
 		DataRetentionPeriod: 0, // No retention for tests
@@ -300,6 +302,9 @@ func (infra *e2eTestInfra) cleanup() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	if infra.prov != nil {
+		_ = infra.prov.Close()
+	}
 	if infra.redisClient != nil {
 		_ = infra.redisClient.Close()
 	}

@@ -23,6 +23,7 @@ import (
 type testContainer struct {
 	container *postgres.PostgresContainer
 	db        *gorm.DB
+	connStr   string // Connection string for service databases
 	migDir    string // Temporary directory for test migrations
 }
 
@@ -66,6 +67,7 @@ func setupTestContainer(t *testing.T) *testContainer {
 	return &testContainer{
 		container: pgContainer,
 		db:        db,
+		connStr:   connStr,
 		migDir:    migDir,
 	}
 }
@@ -165,16 +167,17 @@ func TestPostgresProvisioner_ProvisionSchemas(t *testing.T) {
 
 	config := &Config{
 		Services: []ServiceConfig{
-			{Name: "test-service", MigrationPath: svcDir},
+			{Name: "test-service", MigrationPath: svcDir, DatabaseURL: tc.connStr},
 		},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision schemas
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Verify schema was created
@@ -193,7 +196,7 @@ func TestPostgresProvisioner_ProvisionSchemas(t *testing.T) {
 	assert.True(t, tableExists, "Table should exist in tenant schema")
 
 	// Verify provisioning status
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateActive, status.State)
 	assert.Len(t, status.Services, 1)
@@ -215,22 +218,23 @@ func TestPostgresProvisioner_ProvisionSchemas_Idempotent(t *testing.T) {
 	`)
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "simple-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "simple-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision twice
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err, "Second call should succeed (idempotent)")
 
 	// Status should still be active
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateActive, status.State)
 }
@@ -263,16 +267,17 @@ func TestPostgresProvisioner_ProvisionSchemas_MultipleServices(t *testing.T) {
 
 	config := &Config{
 		Services: []ServiceConfig{
-			{Name: "party", MigrationPath: partyDir},
-			{Name: "current-account", MigrationPath: accountDir},
+			{Name: "party", MigrationPath: partyDir, DatabaseURL: tc.connStr},
+			{Name: "current-account", MigrationPath: accountDir, DatabaseURL: tc.connStr},
 		},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Verify both tables exist
@@ -284,7 +289,7 @@ func TestPostgresProvisioner_ProvisionSchemas_MultipleServices(t *testing.T) {
 	assert.True(t, accountsExists, "accounts table should exist")
 
 	// Verify status shows both services
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Len(t, status.Services, 2)
 	for _, svc := range status.Services {
@@ -307,19 +312,20 @@ func TestPostgresProvisioner_ProvisionSchemas_MigrationFailure(t *testing.T) {
 	`)
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "bad-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "bad-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrMigrationFailed)
 
 	// Status should be failed
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateFailed, status.State)
 	assert.NotEmpty(t, status.ErrorMessage)
@@ -339,14 +345,15 @@ func TestPostgresProvisioner_ProvisionSchemas_ConcurrentBlocked(t *testing.T) {
 	`, tenantID.String())
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "test", MigrationPath: tc.migDir}},
+		Services:            []ServiceConfig{{Name: "test", MigrationPath: tc.migDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	assert.ErrorIs(t, err, ErrProvisioningInProgress)
 }
 
@@ -364,23 +371,24 @@ func TestPostgresProvisioner_DeprovisionSchemas(t *testing.T) {
 	`)
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "deprov-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "deprov-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision first
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Deprovision
-	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	err = prov.DeprovisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Verify status is deprovisioned (soft delete)
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateDeprovisioned, status.State)
 	assert.NotNil(t, status.DeprovisionedAt)
@@ -402,25 +410,26 @@ func TestPostgresProvisioner_DeprovisionSchemas_Idempotent(t *testing.T) {
 	require.NoError(t, os.MkdirAll(svcDir, 0o755))
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "idem-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "idem-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision and deprovision
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
-	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	err = prov.DeprovisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Second deprovision should succeed (idempotent)
-	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	err = prov.DeprovisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateDeprovisioned, status.State)
 }
@@ -436,26 +445,27 @@ func TestPostgresProvisioner_ProvisionSchemas_AfterDeprovisioned(t *testing.T) {
 	require.NoError(t, os.MkdirAll(svcDir, 0o755))
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "reprov-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "reprov-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision and then deprovision
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
-	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	err = prov.DeprovisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Attempting to re-provision a deprovisioned tenant should fail
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	assert.ErrorIs(t, err, ErrAlreadyDeprovisioned)
 
 	// Status should remain deprovisioned
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateDeprovisioned, status.State)
 }
@@ -474,24 +484,25 @@ func TestPostgresProvisioner_PurgeSchemas(t *testing.T) {
 	`)
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "purge-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "purge-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 		DataRetentionPeriod: 0, // No retention for test
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Deprovision
-	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	err = prov.DeprovisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Purge
-	err = provisioner.PurgeSchemas(context.Background(), tenantID)
+	err = prov.PurgeSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Schema should be gone
@@ -500,7 +511,7 @@ func TestPostgresProvisioner_PurgeSchemas(t *testing.T) {
 	assert.False(t, schemaExists, "Schema should be dropped after purge")
 
 	// Status record should be gone
-	_, err = provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	_, err = prov.GetProvisioningStatus(context.Background(), tenantID)
 	assert.ErrorIs(t, err, ErrProvisioningStatusNotFound)
 }
 
@@ -515,19 +526,20 @@ func TestPostgresProvisioner_PurgeSchemas_NotDeprovisioned(t *testing.T) {
 	require.NoError(t, os.MkdirAll(svcDir, 0o755))
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "active-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "active-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision but don't deprovision
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Purge should fail
-	err = provisioner.PurgeSchemas(context.Background(), tenantID)
+	err = prov.PurgeSchemas(context.Background(), tenantID)
 	assert.ErrorIs(t, err, ErrNotDeprovisioned)
 }
 
@@ -542,23 +554,24 @@ func TestPostgresProvisioner_PurgeSchemas_RetentionNotElapsed(t *testing.T) {
 	require.NoError(t, os.MkdirAll(svcDir, 0o755))
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "retained-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "retained-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 		DataRetentionPeriod: 7 * 24 * time.Hour, // 7 days
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision and deprovision
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
-	err = provisioner.DeprovisionSchemas(context.Background(), tenantID)
+	err = prov.DeprovisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Purge should fail - retention period not elapsed
-	err = provisioner.PurgeSchemas(context.Background(), tenantID)
+	err = prov.PurgeSchemas(context.Background(), tenantID)
 	assert.ErrorIs(t, err, ErrRetentionPeriodNotElapsed)
 }
 
@@ -570,15 +583,16 @@ func TestPostgresProvisioner_GetProvisioningStatus_NotFound(t *testing.T) {
 	require.NoError(t, os.MkdirAll(svcDir, 0o755))
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "dummy-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "dummy-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	tenantID := tenant.MustNewTenantID("unknown_tenant")
-	_, err = provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	_, err = prov.GetProvisioningStatus(context.Background(), tenantID)
 	assert.ErrorIs(t, err, ErrProvisioningStatusNotFound)
 }
 
@@ -598,17 +612,18 @@ func TestPostgresProvisioner_ProvisionSchemas_Timeout(t *testing.T) {
 	`)
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "slow-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "slow-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 500 * time.Millisecond, // Short timeout to trigger before pg_sleep(5) completes
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	err = provisioner.ProvisionSchemas(ctx, tenantID)
+	err = prov.ProvisionSchemas(ctx, tenantID)
 	assert.Error(t, err) // Should timeout or get context error
 }
 
@@ -620,15 +635,16 @@ func TestPostgresProvisioner_ProvisionSchemas_NoMigrationDirectory(t *testing.T)
 	createTestTenant(t, tc.db, tenantID.String())
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "missing-service", MigrationPath: "/nonexistent/path"}},
+		Services:            []ServiceConfig{{Name: "missing-service", MigrationPath: "/nonexistent/path", DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Should succeed - missing migrations directory is valid (creates empty schema)
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Schema should still be created
@@ -662,14 +678,15 @@ func TestPostgresProvisioner_ProvisionSchemas_MultipleMigrationFiles(t *testing.
 	`)
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "multi-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "multi-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
 	// Verify all migrations applied
@@ -684,7 +701,7 @@ func TestPostgresProvisioner_ProvisionSchemas_MultipleMigrationFiles(t *testing.
 	assert.True(t, hasNameColumn)
 
 	// Verify version is the last migration
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, "20251203000000", status.Services[0].MigrationVersion)
 }
@@ -709,18 +726,19 @@ func TestPostgresProvisioner_ProvisionSchemas_SchemaIsolation(t *testing.T) {
 	`)
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "isolated-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "isolated-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// Provision both tenants
-	err = provisioner.ProvisionSchemas(context.Background(), tenant1)
+	err = prov.ProvisionSchemas(context.Background(), tenant1)
 	require.NoError(t, err)
 
-	err = provisioner.ProvisionSchemas(context.Background(), tenant2)
+	err = prov.ProvisionSchemas(context.Background(), tenant2)
 	require.NoError(t, err)
 
 	// Insert data into tenant1's schema
@@ -755,18 +773,19 @@ func TestPostgresProvisioner_RetryAfterFailure(t *testing.T) {
 	`)
 
 	config := &Config{
-		Services:            []ServiceConfig{{Name: "retry-service", MigrationPath: svcDir}},
+		Services:            []ServiceConfig{{Name: "retry-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
 		ProvisioningTimeout: 30 * time.Second,
 	}
 
-	provisioner, err := NewPostgresProvisioner(tc.db, config)
+	prov, err := NewPostgresProvisioner(tc.db, config)
 	require.NoError(t, err)
+	defer prov.Close()
 
 	// First attempt fails
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	assert.Error(t, err)
 
-	status, err := provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateFailed, status.State)
 
@@ -776,10 +795,10 @@ func TestPostgresProvisioner_RetryAfterFailure(t *testing.T) {
 	`)
 
 	// Retry should succeed
-	err = provisioner.ProvisionSchemas(context.Background(), tenantID)
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
 
-	status, err = provisioner.GetProvisioningStatus(context.Background(), tenantID)
+	status, err = prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateActive, status.State)
 }

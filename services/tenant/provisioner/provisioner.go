@@ -54,7 +54,9 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -239,6 +241,14 @@ type ServiceConfig struct {
 	// MigrationPath is the path to the service's migration files.
 	// These migrations use unqualified table names (no schema prefix).
 	MigrationPath string
+
+	// DatabaseURL is the connection string for this service's database.
+	// In database-per-service architecture, each service has its own database.
+	// The provisioner will create org_{tenant_id} schemas in this database.
+	//
+	// If empty, falls back to a constructed URL based on service name:
+	// postgres://meridian_{service}_user@cockroachdb:26257/meridian_{service}?sslmode=disable
+	DatabaseURL string
 }
 
 // Config holds configuration for the schema provisioner.
@@ -278,6 +288,9 @@ func (c *Config) Validate() error {
 		if svc.MigrationPath == "" {
 			return fmt.Errorf("%w: %s", ErrEmptyMigrationPath, svc.Name)
 		}
+		// Note: DatabaseURL is intentionally not validated here.
+		// Empty DatabaseURL is valid because getServiceDatabaseURL() provides
+		// fallback URLs based on service name for backward compatibility.
 	}
 	return nil
 }
@@ -285,6 +298,15 @@ func (c *Config) Validate() error {
 // DefaultConfig returns a configuration with standard BIAN services.
 // Migration paths default to /migrations/* for container deployment.
 // Override via environment variable MIGRATIONS_BASE_PATH for local development.
+//
+// Database URLs are constructed from environment variables:
+//   - PARTY_DATABASE_URL
+//   - CURRENT_ACCOUNT_DATABASE_URL
+//   - POSITION_KEEPING_DATABASE_URL
+//   - FINANCIAL_ACCOUNTING_DATABASE_URL
+//   - PAYMENT_ORDER_DATABASE_URL
+//
+// If not set, fallback URLs are constructed based on service name.
 func DefaultConfig() *Config {
 	basePath := os.Getenv("MIGRATIONS_BASE_PATH")
 	if basePath == "" {
@@ -293,13 +315,59 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Services: []ServiceConfig{
-			{Name: "party", MigrationPath: basePath + "/party"},
-			{Name: "current-account", MigrationPath: basePath + "/current-account"},
-			{Name: "position-keeping", MigrationPath: basePath + "/position-keeping"},
-			{Name: "financial-accounting", MigrationPath: basePath + "/financial-accounting"},
-			{Name: "payment-order", MigrationPath: basePath + "/payment-order"},
+			{
+				Name:          "party",
+				MigrationPath: basePath + "/party",
+				DatabaseURL:   getServiceDatabaseURL("party"),
+			},
+			{
+				Name:          "current-account",
+				MigrationPath: basePath + "/current-account",
+				DatabaseURL:   getServiceDatabaseURL("current-account"),
+			},
+			{
+				Name:          "position-keeping",
+				MigrationPath: basePath + "/position-keeping",
+				DatabaseURL:   getServiceDatabaseURL("position-keeping"),
+			},
+			{
+				Name:          "financial-accounting",
+				MigrationPath: basePath + "/financial-accounting",
+				DatabaseURL:   getServiceDatabaseURL("financial-accounting"),
+			},
+			{
+				Name:          "payment-order",
+				MigrationPath: basePath + "/payment-order",
+				DatabaseURL:   getServiceDatabaseURL("payment-order"),
+			},
 		},
 		ProvisioningTimeout: 30 * time.Second,
 		DataRetentionPeriod: 7 * 365 * 24 * time.Hour, // 7 years
 	}
+}
+
+// getServiceDatabaseURL constructs database URL from environment variables.
+// Pattern: {SERVICE_NAME}_DATABASE_URL (uppercase with hyphens replaced by underscores)
+// Example: PARTY_DATABASE_URL, CURRENT_ACCOUNT_DATABASE_URL
+//
+// If the environment variable is not set, falls back to a constructed URL:
+// postgres://meridian_{service}_user@cockroachdb:26257/meridian_{service}?sslmode=disable
+func getServiceDatabaseURL(serviceName string) string {
+	envKey := strings.ToUpper(strings.ReplaceAll(serviceName, "-", "_")) + "_DATABASE_URL"
+	url := os.Getenv(envKey)
+	if url != "" {
+		return url
+	}
+
+	// Fallback to constructed URL for backward compatibility.
+	// WARNING: Fallback URLs use sslmode=disable which is only suitable for local dev.
+	// In production, always set explicit DATABASE_URL environment variables with
+	// appropriate SSL settings (e.g., sslmode=verify-full).
+	slog.Warn("using fallback database URL (not recommended for production)",
+		"service", serviceName,
+		"env_var", envKey,
+		"hint", "Set "+envKey+" environment variable with appropriate SSL settings")
+	dbName := "meridian_" + strings.ReplaceAll(serviceName, "-", "_")
+	user := dbName + "_user"
+	return fmt.Sprintf("postgres://%s@cockroachdb:26257/%s?sslmode=disable", user, dbName)
 }
