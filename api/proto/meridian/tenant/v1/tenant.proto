@@ -232,8 +232,10 @@ message ListTenantsResponse {
 message ReconcileMigrationsRequest {
   // tenant_id is the specific tenant to reconcile (optional).
   // If empty, reconciles all active tenants.
+  // If provided, must match the tenant ID pattern (alphanumeric + underscore).
   string tenant_id = 1 [(buf.validate.field).string = {
     max_len: 50
+    // Pattern allows empty string for "reconcile all active tenants" mode
     pattern: "^[a-zA-Z0-9_]*$"
   }];
 }

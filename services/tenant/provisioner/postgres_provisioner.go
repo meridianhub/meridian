@@ -469,12 +469,12 @@ func (p *PostgresProvisioner) ReconcileMigrations(ctx context.Context, tenantID 
 
 	var (
 		reconciledCount int
-		errors          []string
+		errs            []string
 	)
 
 	for _, tid := range tenantsToReconcile {
 		if ctx.Err() != nil {
-			errors = append(errors, fmt.Sprintf("context cancelled: %v", ctx.Err()))
+			errs = append(errs, fmt.Sprintf("context cancelled: %v", ctx.Err()))
 			break
 		}
 
@@ -483,7 +483,7 @@ func (p *PostgresProvisioner) ReconcileMigrations(ctx context.Context, tenantID 
 			logger.Error("failed to reconcile tenant",
 				"tenant_id", tid.String(),
 				"error", err)
-			errors = append(errors, fmt.Sprintf("%s: %v", tid.String(), err))
+			errs = append(errs, fmt.Sprintf("%s: %v", tid.String(), err))
 			continue
 		}
 
@@ -495,9 +495,9 @@ func (p *PostgresProvisioner) ReconcileMigrations(ctx context.Context, tenantID 
 
 	logger.Info("migration reconciliation completed",
 		"reconciled_count", reconciledCount,
-		"error_count", len(errors))
+		"error_count", len(errs))
 
-	return reconciledCount, errors
+	return reconciledCount, errs
 }
 
 // getTenantsToReconcile returns the list of tenant IDs to reconcile.
@@ -552,11 +552,21 @@ func (p *PostgresProvisioner) reconcileTenantMigrations(ctx context.Context, ten
 	anyMigrationsApplied := false
 
 	// Check each service for new migrations
-	for i, svc := range p.config.Services {
-		// Get the current version for this service
+	for _, svc := range p.config.Services {
+		// Get the current version for this service by name (not index)
+		// This handles cases where services are added/removed from config after provisioning
+		svcStatus := status.getServiceStatus(svc.Name)
 		currentVersion := ""
-		if i < len(status.Services) {
-			currentVersion = status.Services[i].MigrationVersion
+		if svcStatus != nil {
+			currentVersion = svcStatus.MigrationVersion
+		}
+
+		// Warn if service has no recorded version - could indicate config drift
+		if currentVersion == "" {
+			logger.Warn("service has no recorded migration version, skipping reconciliation",
+				"service", svc.Name,
+				"hint", "this may indicate the service was added after initial provisioning")
+			continue
 		}
 
 		// Read all migration files
@@ -590,9 +600,9 @@ func (p *PostgresProvisioner) reconcileTenantMigrations(ctx context.Context, ten
 			return anyMigrationsApplied, fmt.Errorf("apply migrations for %s: %w", svc.Name, err)
 		}
 
-		// Update service status
-		if i < len(status.Services) {
-			status.Services[i].MigrationVersion = latestVersion
+		// Update service status by name
+		if svcStatus != nil {
+			svcStatus.MigrationVersion = latestVersion
 		}
 		anyMigrationsApplied = true
 
@@ -614,12 +624,11 @@ func (p *PostgresProvisioner) reconcileTenantMigrations(ctx context.Context, ten
 
 // filterMigrationsAfter returns migrations with version > currentVersion.
 // Migrations are already sorted by filename/version from readMigrationFiles.
+//
+// If currentVersion is empty, returns nil as a safety guard. The caller
+// (reconcileTenantMigrations) handles empty versions explicitly with a warning.
 func filterMigrationsAfter(migrations []migration, currentVersion string) []migration {
 	if currentVersion == "" {
-		// No migrations applied yet - but we're in reconciliation, so the tenant
-		// should already have been provisioned. Return empty to avoid re-applying
-		// all migrations (they should already exist).
-		// This handles edge cases where MigrationVersion wasn't recorded.
 		return nil
 	}
 

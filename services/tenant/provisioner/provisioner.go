@@ -214,6 +214,18 @@ type ProvisioningStatus struct {
 	DeprovisionedAt *time.Time
 }
 
+// getServiceStatus returns the status for a specific service by name.
+// Returns nil if the service is not found in the status (e.g., service was added
+// to config after this tenant was provisioned).
+func (s *ProvisioningStatus) getServiceStatus(serviceName string) *ServiceSchemaStatus {
+	for i := range s.Services {
+		if s.Services[i].ServiceName == serviceName {
+			return &s.Services[i]
+		}
+	}
+	return nil
+}
+
 // ServiceSchemaStatus tracks provisioning progress for a single service's schema.
 type ServiceSchemaStatus struct {
 	// ServiceName identifies the BIAN service (e.g., "party", "current-account").

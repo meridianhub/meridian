@@ -361,6 +361,10 @@ func (s *Service) toDomainStatus(status pb.TenantStatus) (domain.Status, error) 
 // When services add new migrations after tenants are created, existing tenant
 // schemas may be missing these migrations. This operation detects and applies
 // new migrations to bring tenant schemas up to date.
+//
+// TODO: Add authorization check - this is an admin/operator operation that
+// modifies database schemas across tenants and should be restricted to
+// privileged roles (e.g., platform-admin) once the auth framework is in place.
 func (s *Service) ReconcileMigrations(ctx context.Context, req *pb.ReconcileMigrationsRequest) (*pb.ReconcileMigrationsResponse, error) {
 	if s.provisioner == nil {
 		return nil, status.Error(codes.FailedPrecondition, "schema provisioning not enabled")
