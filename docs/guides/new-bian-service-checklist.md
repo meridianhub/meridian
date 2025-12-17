@@ -357,11 +357,11 @@ atlas migrate diff initial \
 # Review generated SQL in services/{service}/migrations/
 # Verify: tables, constraints, indexes, enums
 
-# Apply migration locally
+# Apply migration locally (uses credentials from Task 5)
 atlas migrate apply \
   --env local \
   --config file://services/{service}/atlas/atlas.hcl \
-  --url "postgres://meridian_{service}_user@localhost:26257/meridian_{service}?sslmode=disable"
+  --url "postgres://{service}_svc@localhost:26257/meridian_{service}?sslmode=disable"
 ```
 
 **Migration file naming**: `YYYYMMDDHHMMSS_description.sql`
@@ -369,8 +369,8 @@ atlas migrate apply \
 **Verification:**
 
 ```bash
-# Query database to confirm schema
-psql -h localhost -p 26257 -U meridian_{service}_user -d meridian_{service} -c "\dt"
+# Query database to confirm schema (uses credentials from Task 5)
+psql -h localhost -p 26257 -U {service}_svc -d meridian_{service} -c "\dt"
 ```
 
 ---
