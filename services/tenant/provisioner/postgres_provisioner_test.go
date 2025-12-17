@@ -874,3 +874,260 @@ func TestQuoteIdentifier(t *testing.T) {
 		})
 	}
 }
+
+// TestPostgresProvisioner_ReconcileMigrations tests the migration reconciliation feature.
+func TestPostgresProvisioner_ReconcileMigrations(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Create test tenant
+	tenantID := tenant.MustNewTenantID("reconcile_test")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	// Create initial migrations
+	svcDir := filepath.Join(tc.migDir, "reconcile-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_initial.sql", `
+		CREATE TABLE initial_table (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name VARCHAR(100) NOT NULL
+		);
+	`)
+
+	config := &Config{
+		Services:            []ServiceConfig{{Name: "reconcile-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Initial provisioning
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Verify initial state
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, "20251201000000", status.Services[0].MigrationVersion)
+
+	// Add a new migration
+	createTestMigration(t, svcDir, "20251202000000_add_column.sql", `
+		ALTER TABLE initial_table ADD COLUMN description TEXT;
+	`)
+
+	// Reconcile migrations
+	count, errs := prov.ReconcileMigrations(context.Background(), &tenantID)
+	assert.Empty(t, errs, "Reconciliation should succeed without errors")
+	assert.Equal(t, 1, count, "Should have reconciled 1 tenant")
+
+	// Verify new migration version
+	status, err = prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, "20251202000000", status.Services[0].MigrationVersion)
+
+	// Verify column was added
+	var columnExists bool
+	tc.db.Raw(`
+		SELECT EXISTS(
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = ? AND table_name = 'initial_table' AND column_name = 'description'
+		)
+	`, tenantID.SchemaName()).Scan(&columnExists)
+	assert.True(t, columnExists, "Column should exist after reconciliation")
+}
+
+// TestPostgresProvisioner_ReconcileMigrations_NoNewMigrations tests that reconciliation
+// is a no-op when there are no new migrations.
+func TestPostgresProvisioner_ReconcileMigrations_NoNewMigrations(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("no_changes")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	svcDir := filepath.Join(tc.migDir, "noop-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_only.sql", `
+		CREATE TABLE only_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services:            []ServiceConfig{{Name: "noop-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Initial provisioning
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Reconcile - should be a no-op
+	count, errs := prov.ReconcileMigrations(context.Background(), &tenantID)
+	assert.Empty(t, errs)
+	assert.Equal(t, 0, count, "No tenants should have been reconciled")
+
+	// Version should remain unchanged
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, "20251201000000", status.Services[0].MigrationVersion)
+}
+
+// TestPostgresProvisioner_ReconcileMigrations_AllTenants tests reconciling all active tenants.
+func TestPostgresProvisioner_ReconcileMigrations_AllTenants(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Create multiple tenants
+	tenant1 := tenant.MustNewTenantID("tenant_one")
+	tenant2 := tenant.MustNewTenantID("tenant_two")
+	createTestTenant(t, tc.db, tenant1.String())
+	createTestTenant(t, tc.db, tenant2.String())
+
+	svcDir := filepath.Join(tc.migDir, "multi-tenant-svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_base.sql", `
+		CREATE TABLE base_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services:            []ServiceConfig{{Name: "multi-tenant-svc", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Provision both tenants
+	err = prov.ProvisionSchemas(context.Background(), tenant1)
+	require.NoError(t, err)
+	err = prov.ProvisionSchemas(context.Background(), tenant2)
+	require.NoError(t, err)
+
+	// Add a new migration
+	createTestMigration(t, svcDir, "20251203000000_add_index.sql", `
+		CREATE INDEX idx_base_table_id ON base_table(id);
+	`)
+
+	// Reconcile all tenants (pass nil for tenantID)
+	count, errs := prov.ReconcileMigrations(context.Background(), nil)
+	assert.Empty(t, errs)
+	assert.Equal(t, 2, count, "Should have reconciled 2 tenants")
+
+	// Verify both tenants have new version
+	status1, err := prov.GetProvisioningStatus(context.Background(), tenant1)
+	require.NoError(t, err)
+	assert.Equal(t, "20251203000000", status1.Services[0].MigrationVersion)
+
+	status2, err := prov.GetProvisioningStatus(context.Background(), tenant2)
+	require.NoError(t, err)
+	assert.Equal(t, "20251203000000", status2.Services[0].MigrationVersion)
+}
+
+// TestPostgresProvisioner_ReconcileMigrations_SkipsNonActive tests that reconciliation
+// skips tenants that are not in active state.
+func TestPostgresProvisioner_ReconcileMigrations_SkipsNonActive(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("deprovisioned_tenant")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	svcDir := filepath.Join(tc.migDir, "skip-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_init.sql", `
+		CREATE TABLE skip_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services:            []ServiceConfig{{Name: "skip-service", MigrationPath: svcDir, DatabaseURL: tc.connStr}},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Provision tenant
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Deprovision tenant
+	err = prov.DeprovisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Add new migration
+	createTestMigration(t, svcDir, "20251202000000_new.sql", `
+		ALTER TABLE skip_table ADD COLUMN foo TEXT;
+	`)
+
+	// Reconcile - should skip deprovisioned tenant
+	count, errs := prov.ReconcileMigrations(context.Background(), &tenantID)
+	assert.Empty(t, errs)
+	assert.Equal(t, 0, count, "Deprovisioned tenant should be skipped")
+
+	// Version should remain at initial
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, "20251201000000", status.Services[0].MigrationVersion)
+}
+
+// TestFilterMigrationsAfter tests the filterMigrationsAfter helper function.
+func TestFilterMigrationsAfter(t *testing.T) {
+	tests := []struct {
+		name           string
+		migrations     []migration
+		currentVersion string
+		expectedCount  int
+		expectedFirst  string
+	}{
+		{
+			name: "filters older migrations",
+			migrations: []migration{
+				{Version: "20251201000000", Filename: "20251201000000_a.sql"},
+				{Version: "20251202000000", Filename: "20251202000000_b.sql"},
+				{Version: "20251203000000", Filename: "20251203000000_c.sql"},
+			},
+			currentVersion: "20251201000000",
+			expectedCount:  2,
+			expectedFirst:  "20251202000000",
+		},
+		{
+			name: "returns empty when no newer migrations",
+			migrations: []migration{
+				{Version: "20251201000000", Filename: "20251201000000_a.sql"},
+			},
+			currentVersion: "20251201000000",
+			expectedCount:  0,
+		},
+		{
+			name: "returns empty for empty current version",
+			migrations: []migration{
+				{Version: "20251201000000", Filename: "20251201000000_a.sql"},
+			},
+			currentVersion: "",
+			expectedCount:  0,
+		},
+		{
+			name:           "handles empty migrations list",
+			migrations:     []migration{},
+			currentVersion: "20251201000000",
+			expectedCount:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterMigrationsAfter(tt.migrations, tt.currentVersion)
+			assert.Len(t, result, tt.expectedCount)
+			if tt.expectedCount > 0 {
+				assert.Equal(t, tt.expectedFirst, result[0].Version)
+			}
+		})
+	}
+}
