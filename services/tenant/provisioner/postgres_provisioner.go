@@ -60,6 +60,9 @@ type PostgresProvisioner struct {
 //
 // Returns an error if the config is invalid or any database connection fails.
 func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvisioner, error) {
+	if platformDB == nil {
+		return nil, fmt.Errorf("platformDB cannot be nil")
+	}
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -823,8 +826,12 @@ func isAlreadyExistsError(err error) bool {
 		strings.Contains(errStr, "duplicate")
 }
 
-// Close closes all service database connections.
+// Close closes all service database connections created by this provisioner.
 // This should be called during graceful shutdown to release database resources.
+//
+// Note: platformDB is NOT closed here because it is an injected dependency.
+// The caller (typically main.go) is responsible for closing platformDB separately,
+// as it may be shared with other components.
 func (p *PostgresProvisioner) Close() error {
 	var errs []error
 	// Iterate over config.Services for deterministic order (easier debugging)
