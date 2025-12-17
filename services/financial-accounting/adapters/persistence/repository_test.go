@@ -41,10 +41,12 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		business_unit_reference VARCHAR(255) NOT NULL,
 		chart_of_accounts_rules TEXT NOT NULL,
 		base_currency VARCHAR(3) NOT NULL,
-		status VARCHAR(20) NOT NULL,
+		status VARCHAR(50) NOT NULL,
 		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255),
 		version BIGINT NOT NULL DEFAULT 1,
 		deleted_at TIMESTAMP WITH TIME ZONE
 	)`, schemaName)).Error
@@ -53,15 +55,18 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_posting (
 		id UUID PRIMARY KEY,
 		financial_booking_log_id UUID NOT NULL,
-		posting_direction VARCHAR(20) NOT NULL,
+		posting_direction VARCHAR(10) NOT NULL,
 		amount_cents BIGINT NOT NULL,
 		currency VARCHAR(3) NOT NULL,
 		account_id VARCHAR(255) NOT NULL,
 		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
-		posting_result TEXT NOT NULL,
-		status VARCHAR(20) NOT NULL,
-		correlation_id VARCHAR(255) NOT NULL,
+		posting_result VARCHAR(1000),
+		status VARCHAR(50) NOT NULL,
+		correlation_id VARCHAR(255),
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255),
 		deleted_at TIMESTAMP WITH TIME ZONE
 	)`, schemaName)).Error
 	require.NoError(t, err)
