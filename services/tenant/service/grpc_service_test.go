@@ -22,9 +22,37 @@ import (
 	"gorm.io/gorm"
 )
 
+// createAuditOutboxTable creates the audit_outbox table required for GORM hooks on TenantEntity.
+// This is needed in tests because the table is created by migration, not GORM AutoMigrate.
+func createAuditOutboxTable(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_outbox (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			table_name VARCHAR(100) NOT NULL,
+			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+			record_id VARCHAR(50) NOT NULL,
+			old_values TEXT,
+			new_values TEXT,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			changed_by VARCHAR(100),
+			transaction_id VARCHAR(100),
+			client_ip VARCHAR(45),
+			user_agent TEXT
+		)
+	`).Error
+	if err != nil {
+		t.Fatalf("Failed to create audit_outbox table: %v", err)
+	}
+}
+
 func setupTest(t *testing.T) (*Service, *gorm.DB, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	// Pass nil for provisioner and partyClient - skipped in basic tests
@@ -402,6 +430,7 @@ func (m *mockPartyClient) Close() error {
 func setupTestWithPartyClient(t *testing.T, partyClient *mockPartyClient) (*Service, *gorm.DB, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	svc := NewService(repo, nil, partyClient, logger)
@@ -411,6 +440,7 @@ func setupTestWithPartyClient(t *testing.T, partyClient *mockPartyClient) (*Serv
 func setupTestWithProvisioner(t *testing.T, mockProv *provisioner.MockProvisioner) (*Service, *gorm.DB, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	svc := NewService(repo, mockProv, nil, logger)

@@ -16,7 +16,34 @@ import (
 
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-	return testdb.SetupPostgres(t, []interface{}{&TenantEntity{}})
+
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&TenantEntity{}})
+
+	// Create audit_outbox table (required for GORM hooks)
+	// Note: Tenant service uses string IDs (varchar(50)) for record_id
+	err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_outbox (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			table_name VARCHAR(100) NOT NULL,
+			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+			record_id VARCHAR(50) NOT NULL,
+			old_values TEXT,
+			new_values TEXT,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			changed_by VARCHAR(100),
+			transaction_id VARCHAR(100),
+			client_ip VARCHAR(45),
+			user_agent TEXT
+		)
+	`).Error
+	if err != nil {
+		t.Fatalf("Failed to create audit_outbox table: %v", err)
+	}
+
+	return db, cleanup
 }
 
 func newTestTenant(id string) *domain.Tenant {
