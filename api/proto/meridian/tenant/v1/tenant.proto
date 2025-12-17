@@ -228,6 +228,25 @@ message ListTenantsResponse {
   string next_page_token = 2;
 }
 
+// ReconcileMigrationsRequest is the request to apply new migrations to existing tenants.
+message ReconcileMigrationsRequest {
+  // tenant_id is the specific tenant to reconcile (optional).
+  // If empty, reconciles all active tenants.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    max_len: 50
+    pattern: "^[a-zA-Z0-9_]*$"
+  }];
+}
+
+// ReconcileMigrationsResponse is the response after reconciling migrations.
+message ReconcileMigrationsResponse {
+  // reconciled_count is the number of tenants that had migrations applied.
+  int32 reconciled_count = 1;
+
+  // errors contains per-tenant error messages (reconciliation continues despite failures).
+  repeated string errors = 2;
+}
+
 // TenantService provides platform tenant lifecycle management.
 //
 // Design Notes:
@@ -271,6 +290,21 @@ service TenantService {
   rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse) {
     option (google.api.http) = {
       get: "/v1/tenants"
+    };
+  }
+
+  // ReconcileMigrations applies new migrations to existing tenant schemas.
+  // When services add new migrations after tenants are created, existing tenant
+  // schemas may be missing these migrations. This operation detects and applies
+  // new migrations to bring tenant schemas up to date.
+  rpc ReconcileMigrations(ReconcileMigrationsRequest) returns (ReconcileMigrationsResponse) {
+    option (google.api.http) = {
+      post: "/v1/tenants:reconcile-migrations"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Reconcile migrations for tenant schemas"
+      description: "Applies new migrations to existing tenant schemas. Safe to call multiple times."
     };
   }
 }

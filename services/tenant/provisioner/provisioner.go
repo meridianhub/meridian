@@ -121,6 +121,25 @@ type SchemaProvisioner interface {
 	// Returns ErrProvisioningStatusNotFound if no provisioning record exists.
 	// Note: Deprovisioned tenants still have a status record (for audit trail).
 	GetProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error)
+
+	// ReconcileMigrations applies any new migrations that have been added since
+	// tenant provisioning for the specified tenant(s).
+	//
+	// When services add new migrations after tenants are created, existing tenant
+	// schemas may not have these migrations applied. This method detects and applies
+	// new migrations to bring tenant schemas up to date.
+	//
+	// Idempotency: Safe to call multiple times; already-applied migrations are skipped
+	// based on the MigrationVersion recorded in ServiceSchemaStatus.
+	//
+	// Parameters:
+	//   - tenantID: If non-nil, reconciles only that tenant. If nil, reconciles all
+	//     active tenants.
+	//
+	// Returns:
+	//   - reconciledCount: Number of tenants that had migrations applied
+	//   - errors: Per-tenant errors (reconciliation continues despite individual failures)
+	ReconcileMigrations(ctx context.Context, tenantID *tenant.TenantID) (reconciledCount int, errors []string)
 }
 
 // ProvisioningState represents the lifecycle state of schema provisioning.

@@ -439,6 +439,248 @@ func (p *PostgresProvisioner) GetProvisioningStatus(ctx context.Context, tenantI
 	return p.getProvisioningStatusLocked(ctx, tenantID)
 }
 
+// ReconcileMigrations detects and applies new migrations to existing tenant schemas.
+//
+// This method addresses schema drift that occurs when services add new migrations
+// after tenants are created. It scans migration directories, compares with
+// the recorded MigrationVersion for each service, and applies any newer migrations.
+//
+// If tenantID is nil, all active tenants are reconciled. Individual tenant failures
+// don't stop processing of other tenants - errors are collected and returned.
+func (p *PostgresProvisioner) ReconcileMigrations(ctx context.Context, tenantID *tenant.TenantID) (int, []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	logger := p.logger.With("operation", "reconcile_migrations")
+
+	// Determine which tenants to reconcile
+	tenantsToReconcile, err := p.getTenantsToReconcile(ctx, tenantID)
+	if err != nil {
+		logger.Error("failed to get tenants to reconcile", "error", err)
+		return 0, []string{fmt.Sprintf("get tenants: %v", err)}
+	}
+
+	if len(tenantsToReconcile) == 0 {
+		logger.Info("no tenants to reconcile")
+		return 0, nil
+	}
+
+	logger.Info("starting migration reconciliation", "tenant_count", len(tenantsToReconcile))
+
+	var (
+		reconciledCount int
+		errors          []string
+	)
+
+	for _, tid := range tenantsToReconcile {
+		if ctx.Err() != nil {
+			errors = append(errors, fmt.Sprintf("context cancelled: %v", ctx.Err()))
+			break
+		}
+
+		applied, err := p.reconcileTenantMigrations(ctx, tid)
+		if err != nil {
+			logger.Error("failed to reconcile tenant",
+				"tenant_id", tid.String(),
+				"error", err)
+			errors = append(errors, fmt.Sprintf("%s: %v", tid.String(), err))
+			continue
+		}
+
+		if applied {
+			reconciledCount++
+			logger.Info("tenant migrations reconciled", "tenant_id", tid.String())
+		}
+	}
+
+	logger.Info("migration reconciliation completed",
+		"reconciled_count", reconciledCount,
+		"error_count", len(errors))
+
+	return reconciledCount, errors
+}
+
+// getTenantsToReconcile returns the list of tenant IDs to reconcile.
+// If tenantID is non-nil, returns just that tenant. Otherwise returns all active tenants.
+func (p *PostgresProvisioner) getTenantsToReconcile(ctx context.Context, tenantID *tenant.TenantID) ([]tenant.TenantID, error) {
+	if tenantID != nil {
+		return []tenant.TenantID{*tenantID}, nil
+	}
+
+	// Query all active tenants from the platform database
+	var entities []provisioningEntity
+	result := p.platformDB.WithContext(ctx).
+		Where("state = ?", string(StateActive)).
+		Find(&entities)
+	if result.Error != nil {
+		return nil, fmt.Errorf("query active tenants: %w", result.Error)
+	}
+
+	tenants := make([]tenant.TenantID, 0, len(entities))
+	for _, entity := range entities {
+		tid, err := tenant.NewTenantID(entity.TenantID)
+		if err != nil {
+			p.logger.Warn("invalid tenant ID in provisioning table",
+				"tenant_id", entity.TenantID,
+				"error", err)
+			continue
+		}
+		tenants = append(tenants, tid)
+	}
+
+	return tenants, nil
+}
+
+// reconcileTenantMigrations applies new migrations to a single tenant.
+// Returns true if any migrations were applied, false otherwise.
+func (p *PostgresProvisioner) reconcileTenantMigrations(ctx context.Context, tenantID tenant.TenantID) (bool, error) {
+	logger := p.logger.With("tenant_id", tenantID.String())
+
+	// Get current provisioning status
+	status, err := p.getProvisioningStatusLocked(ctx, tenantID)
+	if err != nil {
+		return false, fmt.Errorf("get provisioning status: %w", err)
+	}
+
+	// Only reconcile active tenants
+	if status.State != StateActive {
+		logger.Debug("skipping non-active tenant", "state", status.State)
+		return false, nil
+	}
+
+	schemaName := tenantID.SchemaName()
+	anyMigrationsApplied := false
+
+	// Check each service for new migrations
+	for i, svc := range p.config.Services {
+		// Get the current version for this service
+		currentVersion := ""
+		if i < len(status.Services) {
+			currentVersion = status.Services[i].MigrationVersion
+		}
+
+		// Read all migration files
+		migrations, err := p.readMigrationFiles(svc.MigrationPath)
+		if err != nil {
+			return anyMigrationsApplied, fmt.Errorf("read migrations for %s: %w", svc.Name, err)
+		}
+
+		// Filter migrations newer than current version
+		newMigrations := filterMigrationsAfter(migrations, currentVersion)
+
+		if len(newMigrations) == 0 {
+			logger.Debug("no new migrations for service", "service", svc.Name)
+			continue
+		}
+
+		logger.Info("applying new migrations",
+			"service", svc.Name,
+			"current_version", currentVersion,
+			"new_migration_count", len(newMigrations))
+
+		// Get the database connection for this service
+		serviceDB, ok := p.serviceDbs[svc.Name]
+		if !ok {
+			return anyMigrationsApplied, fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
+		}
+
+		// Apply new migrations
+		latestVersion, err := p.applyMigrationList(ctx, serviceDB, schemaName, newMigrations)
+		if err != nil {
+			return anyMigrationsApplied, fmt.Errorf("apply migrations for %s: %w", svc.Name, err)
+		}
+
+		// Update service status
+		if i < len(status.Services) {
+			status.Services[i].MigrationVersion = latestVersion
+		}
+		anyMigrationsApplied = true
+
+		logger.Debug("service migrations applied",
+			"service", svc.Name,
+			"new_version", latestVersion)
+	}
+
+	// Save updated status if any migrations were applied
+	if anyMigrationsApplied {
+		status.UpdatedAt = time.Now()
+		if err := p.saveProvisioningStatus(ctx, status); err != nil {
+			return true, fmt.Errorf("save updated status: %w", err)
+		}
+	}
+
+	return anyMigrationsApplied, nil
+}
+
+// filterMigrationsAfter returns migrations with version > currentVersion.
+// Migrations are already sorted by filename/version from readMigrationFiles.
+func filterMigrationsAfter(migrations []migration, currentVersion string) []migration {
+	if currentVersion == "" {
+		// No migrations applied yet - but we're in reconciliation, so the tenant
+		// should already have been provisioned. Return empty to avoid re-applying
+		// all migrations (they should already exist).
+		// This handles edge cases where MigrationVersion wasn't recorded.
+		return nil
+	}
+
+	var result []migration
+	for _, mig := range migrations {
+		if mig.Version > currentVersion {
+			result = append(result, mig)
+		}
+	}
+	return result
+}
+
+// applyMigrationList applies a specific list of migrations to a tenant schema.
+// This is extracted from applyServiceMigrationsToDB to support both initial
+// provisioning (all migrations) and reconciliation (subset of migrations).
+func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.DB, schemaName string, migrations []migration) (string, error) {
+	if len(migrations) == 0 {
+		return "", nil
+	}
+
+	// Set search_path to the tenant schema for unqualified table names
+	setPathQuery := fmt.Sprintf("SET search_path TO %s, public", quoteIdentifier(schemaName))
+
+	var lastVersion string
+	for _, mig := range migrations {
+		if ctx.Err() != nil {
+			return lastVersion, ctx.Err()
+		}
+
+		// Execute migration within a transaction
+		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(setPathQuery).Error; err != nil {
+				return fmt.Errorf("set search_path: %w", err)
+			}
+
+			processedSQL := p.processMigrationSQL(mig.Content, schemaName)
+			statements := splitSQLStatements(processedSQL)
+
+			for _, stmt := range statements {
+				if err := tx.Exec(stmt).Error; err != nil {
+					return fmt.Errorf("execute migration %s: %w", mig.Filename, err)
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			// Check if error is due to existing objects (idempotency)
+			if isAlreadyExistsError(err) {
+				lastVersion = mig.Version
+				continue
+			}
+			return lastVersion, err
+		}
+
+		lastVersion = mig.Version
+	}
+
+	return lastVersion, nil
+}
+
 // createSchemaInDB creates the org_{tenant_id} schema in the specified database.
 func (p *PostgresProvisioner) createSchemaInDB(ctx context.Context, db *gorm.DB, schemaName string) error {
 	query := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(schemaName))

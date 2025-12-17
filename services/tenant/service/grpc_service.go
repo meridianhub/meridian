@@ -356,3 +356,36 @@ func (s *Service) toDomainStatus(status pb.TenantStatus) (domain.Status, error) 
 		return "", ErrUnknownStatus
 	}
 }
+
+// ReconcileMigrations applies new migrations to existing tenant schemas.
+// When services add new migrations after tenants are created, existing tenant
+// schemas may be missing these migrations. This operation detects and applies
+// new migrations to bring tenant schemas up to date.
+func (s *Service) ReconcileMigrations(ctx context.Context, req *pb.ReconcileMigrationsRequest) (*pb.ReconcileMigrationsResponse, error) {
+	if s.provisioner == nil {
+		return nil, status.Error(codes.FailedPrecondition, "schema provisioning not enabled")
+	}
+
+	// Parse tenant ID if provided
+	var tenantID *tenant.TenantID
+	if req.TenantId != "" {
+		tid, err := tenant.NewTenantID(req.TenantId)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid tenant_id: %v", err)
+		}
+		tenantID = &tid
+	}
+
+	// Perform reconciliation
+	reconciledCount, errs := s.provisioner.ReconcileMigrations(ctx, tenantID)
+
+	s.logger.Info("migration reconciliation completed",
+		"tenant_id", req.TenantId,
+		"reconciled_count", reconciledCount,
+		"error_count", len(errs))
+
+	return &pb.ReconcileMigrationsResponse{
+		ReconciledCount: int32(reconciledCount),
+		Errors:          errs,
+	}, nil
+}

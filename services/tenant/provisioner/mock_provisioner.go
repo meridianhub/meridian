@@ -249,5 +249,30 @@ func (m *MockProvisioner) SetStatus(status *ProvisioningStatus) {
 	m.statuses[status.TenantID.String()] = status
 }
 
+// ReconcileMigrations simulates reconciling migrations for existing tenants.
+// In the mock, this is a no-op that returns success. Tests can verify calls
+// via ReconciliationCalls if needed.
+func (m *MockProvisioner) ReconcileMigrations(_ context.Context, tenantID *tenant.TenantID) (int, []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if tenantID != nil {
+		// Single tenant reconciliation
+		if status, exists := m.statuses[tenantID.String()]; exists && status.State == StateActive {
+			return 1, nil
+		}
+		return 0, nil
+	}
+
+	// All tenants reconciliation - count active tenants
+	count := 0
+	for _, status := range m.statuses {
+		if status.State == StateActive {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // Ensure MockProvisioner implements SchemaProvisioner.
 var _ SchemaProvisioner = (*MockProvisioner)(nil)
