@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
     -- Additional context
     transaction_id VARCHAR(100),
-    client_ip INET,
+    client_ip VARCHAR(45),
     user_agent TEXT
 );
 
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS audit_outbox (
     -- Additional context
     changed_by VARCHAR(100),
     transaction_id VARCHAR(100),
-    client_ip INET,
+    client_ip VARCHAR(45),
     user_agent TEXT
 );
 
