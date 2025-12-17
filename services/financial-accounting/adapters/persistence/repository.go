@@ -274,25 +274,25 @@ func (r *LedgerRepository) SaveBookingLog(ctx context.Context, log *domain.Finan
 
 // UpdateBookingLog updates an existing financial booking log.
 // The context must contain the tenant ID for schema routing.
+// Uses Save() to trigger GORM hooks for audit logging.
 func (r *LedgerRepository) UpdateBookingLog(ctx context.Context, log *domain.FinancialBookingLog) error {
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		result := tx.Model(&FinancialBookingLogEntity{}).
-			Where("id = ?", log.ID).
-			Updates(map[string]interface{}{
-				"status":                  string(log.Status),
-				"chart_of_accounts_rules": log.ChartOfAccountsRules,
-				"updated_at":              log.UpdatedAt,
-			})
-
-		if result.Error != nil {
-			return result.Error
+		// Fetch existing entity to apply updates (required for Save() to trigger hooks)
+		var existing FinancialBookingLogEntity
+		if err := tx.First(&existing, "id = ?", log.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrBookingLogNotFound
+			}
+			return err
 		}
 
-		if result.RowsAffected == 0 {
-			return ErrBookingLogNotFound
-		}
+		// Apply partial updates
+		existing.Status = string(log.Status)
+		existing.ChartOfAccountsRules = log.ChartOfAccountsRules
+		existing.UpdatedAt = log.UpdatedAt
 
-		return nil
+		// Use Save() to trigger GORM hooks (BeforeUpdate, AfterUpdate)
+		return tx.Save(&existing).Error
 	})
 }
 

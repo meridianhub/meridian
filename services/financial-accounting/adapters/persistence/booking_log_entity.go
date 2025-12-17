@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,8 +60,6 @@ var (
 	ErrNilTransaction = errors.New("tx cannot be nil for audit recording")
 	// ErrOldValueType is returned when old value has incorrect type in context
 	ErrOldValueType = errors.New("failed to retrieve old values from context: invalid type")
-	// ErrOldValueNotFound is returned when old value is not found in context
-	ErrOldValueNotFound = errors.New("old values not found in context")
 )
 
 // AuditOutbox represents an audit record waiting to be processed by the background worker.
@@ -226,6 +225,10 @@ func (e *FinancialBookingLogEntity) AfterUpdate(tx *gorm.DB) error {
 
 	// Skip if old values weren't captured (happens with partial updates via db.Model().Update())
 	if old == nil {
+		slog.Warn("audit skipped: old values not captured for booking log update",
+			"table", "financial_booking_log",
+			"record_id", e.ID,
+			"reason", "partial update via db.Model().Update() bypasses BeforeUpdate hook")
 		return nil
 	}
 

@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -96,6 +97,10 @@ func (e *LedgerPostingEntity) AfterUpdate(tx *gorm.DB) error {
 
 	// Skip if old values weren't captured (happens with partial updates via db.Model().Update())
 	if old == nil {
+		slog.Warn("audit skipped: old values not captured for ledger posting update",
+			"table", "ledger_posting",
+			"record_id", e.ID,
+			"reason", "partial update via db.Model().Update() bypasses BeforeUpdate hook")
 		return nil
 	}
 
