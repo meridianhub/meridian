@@ -22,11 +22,10 @@ import (
 	"gorm.io/gorm"
 )
 
-func setupTest(t *testing.T) (*Service, *gorm.DB, func()) {
+// createAuditOutboxTable creates the audit_outbox table required for GORM hooks on TenantEntity.
+// This is needed in tests because the table is created by migration, not GORM AutoMigrate.
+func createAuditOutboxTable(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
-
-	// Create audit_outbox table (required for GORM hooks on TenantEntity)
 	err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_outbox (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -48,7 +47,12 @@ func setupTest(t *testing.T) (*Service, *gorm.DB, func()) {
 	if err != nil {
 		t.Fatalf("Failed to create audit_outbox table: %v", err)
 	}
+}
 
+func setupTest(t *testing.T) (*Service, *gorm.DB, func()) {
+	t.Helper()
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	// Pass nil for provisioner and partyClient - skipped in basic tests
@@ -426,6 +430,7 @@ func (m *mockPartyClient) Close() error {
 func setupTestWithPartyClient(t *testing.T, partyClient *mockPartyClient) (*Service, *gorm.DB, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	svc := NewService(repo, nil, partyClient, logger)
@@ -435,6 +440,7 @@ func setupTestWithPartyClient(t *testing.T, partyClient *mockPartyClient) (*Serv
 func setupTestWithProvisioner(t *testing.T, mockProv *provisioner.MockProvisioner) (*Service, *gorm.DB, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	svc := NewService(repo, mockProv, nil, logger)
