@@ -284,9 +284,13 @@ atlas migrate status --env local --config file://services/{service}/atlas/atlas.
 
 ### Task 5: Database Setup (Database-Per-Service Architecture)
 
-**Location**: PostgreSQL/CockroachDB administration
+**Location**: CockroachDB administration
 
 Set up the dedicated database for the new service following the database-per-service architecture.
+
+> **Note**: Meridian uses CockroachDB (port 26257) which implements the PostgreSQL wire protocol.
+> This means `postgres://` connection strings and `psql` CLI tools work, but the underlying
+> database is CockroachDB.
 
 **Steps:**
 
@@ -327,15 +331,15 @@ func (EntityName) TableName() string {
 ```
 
 **Why singular**: Natural SQL syntax (`FROM account` not `FROM accounts`)
-**Why unqualified**: Allows PostgreSQL `search_path` to route to tenant schemas
+**Why unqualified**: Allows `search_path` to route queries to tenant schemas
 
 **Reference**: [Database-Per-Service Migration Runbook](../runbooks/database-per-service-migration.md)
 
 **Verification:**
 
 ```bash
-# Verify database exists and user can connect
-psql -h localhost -U {service}_svc -d meridian_{service} -c "SELECT current_database();"
+# Verify database exists and user can connect (CockroachDB on port 26257)
+psql -h localhost -p 26257 -U {service}_svc -d meridian_{service} -c "SELECT current_database();"
 ```
 
 ---
