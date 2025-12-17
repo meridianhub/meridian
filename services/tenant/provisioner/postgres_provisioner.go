@@ -68,51 +68,9 @@ func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvi
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Initialize service database connections
-	serviceDbs := make(map[string]*gorm.DB)
-	for _, svc := range config.Services {
-		db, err := gorm.Open(postgres.Open(svc.DatabaseURL), &gorm.Config{
-			SkipDefaultTransaction: true,
-			PrepareStmt:            true,
-		})
-		if err != nil {
-			// Clean up already-opened connections on failure
-			for name, openedDB := range serviceDbs {
-				if sqlDB, dbErr := openedDB.DB(); dbErr == nil {
-					if closeErr := sqlDB.Close(); closeErr != nil {
-						slog.Default().Warn("failed to close database during cleanup",
-							"service", name, "error", closeErr)
-					}
-				}
-			}
-			return nil, fmt.Errorf("failed to connect to %s database: %w", svc.Name, err)
-		}
-
-		// Configure connection pool - provisioner doesn't need many connections
-		sqlDB, err := db.DB()
-		if err != nil {
-			// Note: If db.DB() fails, we cannot properly close the GORM connection
-			// since that requires the underlying *sql.DB. This is an edge case that
-			// indicates a fundamental issue with the connection. Log and continue
-			// with cleanup of other connections.
-			slog.Default().Error("failed to get underlying DB (connection may leak)",
-				"service", svc.Name, "error", err)
-			// Clean up already-opened connections
-			for name, openedDB := range serviceDbs {
-				if innerDB, dbErr := openedDB.DB(); dbErr == nil {
-					if closeErr := innerDB.Close(); closeErr != nil {
-						slog.Default().Warn("failed to close database during cleanup",
-							"service", name, "error", closeErr)
-					}
-				}
-			}
-			return nil, fmt.Errorf("get underlying DB for %s: %w", svc.Name, err)
-		}
-		sqlDB.SetMaxOpenConns(5)
-		sqlDB.SetMaxIdleConns(2)
-		sqlDB.SetConnMaxLifetime(time.Hour)
-
-		serviceDbs[svc.Name] = db
+	serviceDbs, err := openServiceConnections(config.Services)
+	if err != nil {
+		return nil, err
 	}
 
 	return &PostgresProvisioner{
@@ -121,6 +79,55 @@ func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvi
 		config:     config,
 		logger:     slog.Default().With("component", "provisioner"),
 	}, nil
+}
+
+// openServiceConnections opens database connections for all services.
+// On failure, it closes any already-opened connections.
+func openServiceConnections(services []ServiceConfig) (map[string]*gorm.DB, error) {
+	serviceDbs := make(map[string]*gorm.DB)
+
+	for _, svc := range services {
+		db, err := gorm.Open(postgres.Open(svc.DatabaseURL), &gorm.Config{
+			SkipDefaultTransaction: true,
+			PrepareStmt:            true,
+		})
+		if err != nil {
+			closeServiceConnections(serviceDbs)
+			return nil, fmt.Errorf("failed to connect to %s database: %w", svc.Name, err)
+		}
+
+		sqlDB, err := db.DB()
+		if err != nil {
+			// Note: If db.DB() fails, we cannot properly close this GORM connection
+			// since that requires the underlying *sql.DB. Log the potential leak.
+			slog.Default().Error("failed to get underlying DB (connection may leak)",
+				"service", svc.Name, "error", err)
+			closeServiceConnections(serviceDbs)
+			return nil, fmt.Errorf("get underlying DB for %s: %w", svc.Name, err)
+		}
+
+		// Configure connection pool - provisioner doesn't need many connections
+		sqlDB.SetMaxOpenConns(5)
+		sqlDB.SetMaxIdleConns(2)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+
+		serviceDbs[svc.Name] = db
+	}
+
+	return serviceDbs, nil
+}
+
+// closeServiceConnections closes all connections in the map.
+// Used for cleanup during initialization failures.
+func closeServiceConnections(serviceDbs map[string]*gorm.DB) {
+	for name, db := range serviceDbs {
+		if sqlDB, err := db.DB(); err == nil {
+			if closeErr := sqlDB.Close(); closeErr != nil {
+				slog.Default().Warn("failed to close database during cleanup",
+					"service", name, "error", closeErr)
+			}
+		}
+	}
 }
 
 // ProvisionSchemas creates the org_{tenant_id} schema and applies all service migrations.
