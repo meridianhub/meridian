@@ -138,16 +138,18 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 	}
 
 	// Create the schema IN EACH SERVICE DATABASE
+	// Iterate over config.Services for deterministic order (easier debugging)
 	schemaName := tenantID.SchemaName()
-	for serviceName, serviceDB := range p.serviceDbs {
+	for _, svc := range p.config.Services {
+		serviceDB := p.serviceDbs[svc.Name]
 		if err := p.createSchemaInDB(ctx, serviceDB, schemaName); err != nil {
 			logger.Error("failed to create schema in service database",
-				"service", serviceName,
+				"service", svc.Name,
 				"error", err)
-			p.markProvisioningFailed(ctx, status, fmt.Sprintf("create schema in %s: %v", serviceName, err))
-			return fmt.Errorf("%w: %s: %w", ErrSchemaCreationFailed, serviceName, err)
+			p.markProvisioningFailed(ctx, status, fmt.Sprintf("create schema in %s: %v", svc.Name, err))
+			return fmt.Errorf("%w: %s: %w", ErrSchemaCreationFailed, svc.Name, err)
 		}
-		logger.Debug("schema created in service database", "service", serviceName)
+		logger.Debug("schema created in service database", "service", svc.Name)
 	}
 
 	// Apply migrations for each service
@@ -417,10 +419,12 @@ func (p *PostgresProvisioner) createSchemaInDB(ctx context.Context, db *gorm.DB,
 
 // dropSchemaInAllDBs drops the org_{tenant_id} schema from all service databases.
 func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName string) error {
-	for serviceName, serviceDB := range p.serviceDbs {
+	// Iterate over config.Services for deterministic order (easier debugging)
+	for _, svc := range p.config.Services {
+		serviceDB := p.serviceDbs[svc.Name]
 		query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quoteIdentifier(schemaName))
 		if err := serviceDB.WithContext(ctx).Exec(query).Error; err != nil {
-			return fmt.Errorf("drop schema in %s: %w", serviceName, err)
+			return fmt.Errorf("drop schema in %s: %w", svc.Name, err)
 		}
 	}
 	return nil
@@ -823,18 +827,23 @@ func isAlreadyExistsError(err error) bool {
 // This should be called during graceful shutdown to release database resources.
 func (p *PostgresProvisioner) Close() error {
 	var errs []error
-	for name, db := range p.serviceDbs {
+	// Iterate over config.Services for deterministic order (easier debugging)
+	for _, svc := range p.config.Services {
+		db, ok := p.serviceDbs[svc.Name]
+		if !ok {
+			continue
+		}
 		sqlDB, err := db.DB()
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: get DB: %w", name, err))
+			errs = append(errs, fmt.Errorf("%s: get DB: %w", svc.Name, err))
 			continue
 		}
 		if err := sqlDB.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("%s: close: %w", name, err))
+			errs = append(errs, fmt.Errorf("%s: close: %w", svc.Name, err))
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("%w: %v", ErrCloseConnections, errs)
+		return fmt.Errorf("%w: %w", ErrCloseConnections, errors.Join(errs...))
 	}
 	return nil
 }

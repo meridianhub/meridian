@@ -287,6 +287,9 @@ func (c *Config) Validate() error {
 		if svc.MigrationPath == "" {
 			return fmt.Errorf("%w: %s", ErrEmptyMigrationPath, svc.Name)
 		}
+		// Note: DatabaseURL is intentionally not validated here.
+		// Empty DatabaseURL is valid because getServiceDatabaseURL() provides
+		// fallback URLs based on service name for backward compatibility.
 	}
 	return nil
 }
