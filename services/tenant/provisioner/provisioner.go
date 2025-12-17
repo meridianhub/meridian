@@ -54,6 +54,7 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -358,7 +359,14 @@ func getServiceDatabaseURL(serviceName string) string {
 		return url
 	}
 
-	// Fallback to constructed URL for backward compatibility
+	// Fallback to constructed URL for backward compatibility.
+	// WARNING: Fallback URLs use sslmode=disable which is only suitable for local dev.
+	// In production, always set explicit DATABASE_URL environment variables with
+	// appropriate SSL settings (e.g., sslmode=verify-full).
+	slog.Warn("using fallback database URL (not recommended for production)",
+		"service", serviceName,
+		"env_var", envKey,
+		"hint", "Set "+envKey+" environment variable with appropriate SSL settings")
 	dbName := "meridian_" + strings.ReplaceAll(serviceName, "-", "_")
 	user := dbName + "_user"
 	return fmt.Sprintf("postgres://%s@cockroachdb:26257/%s?sslmode=disable", user, dbName)

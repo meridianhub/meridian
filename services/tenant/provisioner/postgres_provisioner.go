@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -90,6 +91,21 @@ func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvi
 		// Configure connection pool - provisioner doesn't need many connections
 		sqlDB, err := db.DB()
 		if err != nil {
+			// Note: If db.DB() fails, we cannot properly close the GORM connection
+			// since that requires the underlying *sql.DB. This is an edge case that
+			// indicates a fundamental issue with the connection. Log and continue
+			// with cleanup of other connections.
+			slog.Default().Error("failed to get underlying DB (connection may leak)",
+				"service", svc.Name, "error", err)
+			// Clean up already-opened connections
+			for name, openedDB := range serviceDbs {
+				if innerDB, dbErr := openedDB.DB(); dbErr == nil {
+					if closeErr := innerDB.Close(); closeErr != nil {
+						slog.Default().Warn("failed to close database during cleanup",
+							"service", name, "error", closeErr)
+					}
+				}
+			}
 			return nil, fmt.Errorf("get underlying DB for %s: %w", svc.Name, err)
 		}
 		sqlDB.SetMaxOpenConns(5)
@@ -284,24 +300,16 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 }
 
 // maskDatabaseURL redacts password from connection string for logging.
-func maskDatabaseURL(url string) string {
-	if strings.Contains(url, "@") {
-		parts := strings.SplitN(url, "@", 2)
-		if len(parts) == 2 {
-			userPart := strings.SplitN(parts[0], ":", 2)
-			if len(userPart) == 2 && strings.Contains(parts[0], ":") {
-				// Only mask if there's actually a password (user:pass format)
-				prefix := strings.SplitN(parts[0], "//", 2)
-				if len(prefix) == 2 {
-					userPass := strings.SplitN(prefix[1], ":", 2)
-					if len(userPass) == 2 {
-						return prefix[0] + "//" + userPass[0] + ":***@" + parts[1]
-					}
-				}
-			}
-		}
+// Uses url.Parse for robust handling of various URL formats.
+func maskDatabaseURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.User == nil {
+		return rawURL
 	}
-	return url
+	if _, hasPassword := u.User.Password(); hasPassword {
+		u.User = url.UserPassword(u.User.Username(), "***")
+	}
+	return u.String()
 }
 
 // markProvisioningFailed updates status to failed state with error message.
