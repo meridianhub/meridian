@@ -108,11 +108,22 @@ func run(logger *slog.Logger) error {
 	provisioningEnabled := getEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false")
 	if provisioningEnabled == "true" {
 		config := provisioner.DefaultConfig()
+
+		// Pass platform database connection (for tenant_provisioning table).
+		// The provisioner will also connect to each service's database for schema creation.
 		prov, err := provisioner.NewPostgresProvisioner(db, config)
 		if err != nil {
 			return fmt.Errorf("failed to create schema provisioner: %w", err)
 		}
 		schemaProvisioner = prov
+
+		// Clean up service database connections on shutdown
+		defer func() {
+			if err := prov.Close(); err != nil {
+				logger.Error("failed to close provisioner connections", "error", err)
+			}
+		}()
+
 		logger.Info("schema provisioner initialized",
 			"services", len(config.Services),
 			"provisioning_timeout", config.ProvisioningTimeout)

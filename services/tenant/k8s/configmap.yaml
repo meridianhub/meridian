@@ -21,7 +21,16 @@ data:
   GRPC_MAX_CONCURRENT_STREAMS: "100"
 
   # Schema provisioning - creates org_{tenant_id} schemas on tenant creation
+  # When enabled, the provisioner connects to each service's database to create tenant schemas.
   SCHEMA_PROVISIONING_ENABLED: "true"
+
+  # Service database URLs for multi-database provisioning
+  # Each service has its own database where org_{tenant_id} schemas are created.
+  PARTY_DATABASE_URL: "postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable"
+  CURRENT_ACCOUNT_DATABASE_URL: "postgres://meridian_current_account_user@cockroachdb:26257/meridian_current_account?sslmode=disable"
+  POSITION_KEEPING_DATABASE_URL: "postgres://meridian_position_keeping_user@cockroachdb:26257/meridian_position_keeping?sslmode=disable"
+  FINANCIAL_ACCOUNTING_DATABASE_URL: "postgres://meridian_financial_accounting_user@cockroachdb:26257/meridian_financial_accounting?sslmode=disable"
+  PAYMENT_ORDER_DATABASE_URL: "postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable"
 
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "tenant-service"

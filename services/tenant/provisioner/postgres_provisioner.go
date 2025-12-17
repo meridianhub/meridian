@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -26,9 +27,19 @@ var errAlreadyProvisioned = errors.New("already provisioned")
 // PostgresProvisioner implements SchemaProvisioner for PostgreSQL databases.
 // It creates org_{tenant_id} schemas and applies service migrations using SQL files.
 //
+// In database-per-service architecture, schemas are created in each service's
+// dedicated database rather than a single shared database.
+//
 // Thread-safe for concurrent use via mutex protection around status operations.
 type PostgresProvisioner struct {
-	db     *gorm.DB
+	// platformDB connects to meridian_platform for tenant_provisioning table.
+	// This is the single source of truth for provisioning status tracking.
+	platformDB *gorm.DB
+
+	// serviceDbs holds database connections indexed by service name.
+	// Each service has its own database where org_{tenant_id} schemas are created.
+	serviceDbs map[string]*gorm.DB
+
 	config *Config
 	logger *slog.Logger
 
@@ -39,25 +50,56 @@ type PostgresProvisioner struct {
 }
 
 // NewPostgresProvisioner creates a new PostgreSQL schema provisioner.
-// Returns an error if the config is invalid.
-func NewPostgresProvisioner(db *gorm.DB, config *Config) (*PostgresProvisioner, error) {
+//
+// Parameters:
+//   - platformDB: Connection to meridian_platform database for tenant_provisioning table.
+//   - config: Configuration with service definitions including their database URLs.
+//
+// The constructor establishes connections to all service databases defined in config.
+// Each service database will have org_{tenant_id} schemas created during provisioning.
+//
+// Returns an error if the config is invalid or any database connection fails.
+func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvisioner, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	// Initialize service database connections
+	serviceDbs := make(map[string]*gorm.DB)
+	for _, svc := range config.Services {
+		db, err := gorm.Open(postgres.Open(svc.DatabaseURL), &gorm.Config{
+			SkipDefaultTransaction: true,
+			PrepareStmt:            true,
+		})
+		if err != nil {
+			// Clean up already-opened connections on failure
+			for name, openedDB := range serviceDbs {
+				if sqlDB, dbErr := openedDB.DB(); dbErr == nil {
+					if closeErr := sqlDB.Close(); closeErr != nil {
+						slog.Default().Warn("failed to close database during cleanup",
+							"service", name, "error", closeErr)
+					}
+				}
+			}
+			return nil, fmt.Errorf("failed to connect to %s database: %w", svc.Name, err)
+		}
+		serviceDbs[svc.Name] = db
+	}
+
 	return &PostgresProvisioner{
-		db:     db,
-		config: config,
-		logger: slog.Default().With("component", "provisioner"),
+		platformDB: platformDB,
+		serviceDbs: serviceDbs,
+		config:     config,
+		logger:     slog.Default().With("component", "provisioner"),
 	}, nil
 }
 
 // ProvisionSchemas creates the org_{tenant_id} schema and applies all service migrations.
 //
-// The function performs the following steps:
-//  1. Creates or updates the provisioning status record to 'in_progress'
-//  2. Creates the org_{tenant_id} schema (CREATE SCHEMA IF NOT EXISTS)
-//  3. For each configured service, applies migrations to the tenant schema
+// In database-per-service architecture, the function:
+//  1. Creates or updates the provisioning status record to 'in_progress' (in platform DB)
+//  2. Creates the org_{tenant_id} schema in EACH service's database
+//  3. For each configured service, applies migrations to the tenant schema in that service's database
 //  4. Updates the provisioning status to 'active' on success or 'failed' on error
 //
 // Idempotency: Safe to call multiple times. Already-created schemas are skipped,
@@ -68,7 +110,7 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 
 	startTime := time.Now()
 	logger := p.logger.With("tenant_id", tenantID.String(), "schema", tenantID.SchemaName())
-	logger.Info("starting schema provisioning")
+	logger.Info("starting schema provisioning", "services_count", len(p.config.Services))
 
 	// Validate and prepare provisioning status
 	status, err := p.prepareProvisioningStatus(ctx, tenantID)
@@ -95,14 +137,18 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 		return ErrProvisioningTimeout
 	}
 
-	// Create the schema
+	// Create the schema IN EACH SERVICE DATABASE
 	schemaName := tenantID.SchemaName()
-	if err := p.createSchema(ctx, schemaName); err != nil {
-		logger.Error("failed to create schema", "error", err)
-		p.markProvisioningFailed(ctx, status, fmt.Sprintf("create schema: %v", err))
-		return fmt.Errorf("%w: %w", ErrSchemaCreationFailed, err)
+	for serviceName, serviceDB := range p.serviceDbs {
+		if err := p.createSchemaInDB(ctx, serviceDB, schemaName); err != nil {
+			logger.Error("failed to create schema in service database",
+				"service", serviceName,
+				"error", err)
+			p.markProvisioningFailed(ctx, status, fmt.Sprintf("create schema in %s: %v", serviceName, err))
+			return fmt.Errorf("%w: %s: %w", ErrSchemaCreationFailed, serviceName, err)
+		}
+		logger.Debug("schema created in service database", "service", serviceName)
 	}
-	logger.Debug("schema created successfully")
 
 	// Apply migrations for each service
 	if err := p.provisionAllServices(ctx, status, schemaName); err != nil {
@@ -170,6 +216,7 @@ func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, ten
 }
 
 // provisionAllServices applies migrations for each configured service.
+// Each service's migrations are applied to that service's dedicated database.
 func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *ProvisioningStatus, schemaName string) error {
 	logger := p.logger.With("tenant_id", status.TenantID.String(), "schema", schemaName)
 
@@ -180,7 +227,18 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			return ErrProvisioningTimeout
 		}
 
-		logger.Debug("provisioning service", "service", svc.Name, "migration_path", svc.MigrationPath)
+		// Get the database connection for this service
+		serviceDB, ok := p.serviceDbs[svc.Name]
+		if !ok {
+			logger.Error("service database not found", "service", svc.Name)
+			p.markProvisioningFailed(ctx, status, fmt.Sprintf("no database connection for service: %s", svc.Name))
+			return fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
+		}
+
+		logger.Debug("provisioning service",
+			"service", svc.Name,
+			"migration_path", svc.MigrationPath,
+			"database_url", maskDatabaseURL(svc.DatabaseURL))
 
 		// Update service status to created
 		status.Services[i].State = ServiceStateCreated
@@ -189,8 +247,8 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			logger.Warn("failed to save intermediate status", "error", err, "service", svc.Name)
 		}
 
-		// Apply migrations
-		version, err := p.applyServiceMigrations(ctx, schemaName, svc)
+		// Apply migrations TO SERVICE DATABASE
+		version, err := p.applyServiceMigrationsToDB(ctx, serviceDB, schemaName, svc)
 		if err != nil {
 			logger.Error("service migration failed", "service", svc.Name, "error", err)
 			status.Services[i].State = ServiceStateFailed
@@ -208,6 +266,27 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 		}
 	}
 	return nil
+}
+
+// maskDatabaseURL redacts password from connection string for logging.
+func maskDatabaseURL(url string) string {
+	if strings.Contains(url, "@") {
+		parts := strings.SplitN(url, "@", 2)
+		if len(parts) == 2 {
+			userPart := strings.SplitN(parts[0], ":", 2)
+			if len(userPart) == 2 && strings.Contains(parts[0], ":") {
+				// Only mask if there's actually a password (user:pass format)
+				prefix := strings.SplitN(parts[0], "//", 2)
+				if len(prefix) == 2 {
+					userPass := strings.SplitN(prefix[1], ":", 2)
+					if len(userPass) == 2 {
+						return prefix[0] + "//" + userPass[0] + ":***@" + parts[1]
+					}
+				}
+			}
+		}
+	}
+	return url
 }
 
 // markProvisioningFailed updates status to failed state with error message.
@@ -305,13 +384,13 @@ func (p *PostgresProvisioner) PurgeSchemas(ctx context.Context, tenantID tenant.
 		}
 	}
 
-	// Drop the schema
+	// Drop the schema from ALL service databases
 	schemaName := tenantID.SchemaName()
-	if err := p.dropSchema(ctx, schemaName); err != nil {
-		logger.Error("failed to drop schema", "error", err)
+	if err := p.dropSchemaInAllDBs(ctx, schemaName); err != nil {
+		logger.Error("failed to drop schemas from service databases", "error", err)
 		return fmt.Errorf("%w: %w", ErrDeprovisioningFailed, err)
 	}
-	logger.Debug("schema dropped successfully")
+	logger.Debug("schemas dropped from all service databases")
 
 	// Remove the provisioning record
 	if err := p.deleteProvisioningStatus(ctx, tenantID); err != nil {
@@ -330,22 +409,27 @@ func (p *PostgresProvisioner) GetProvisioningStatus(ctx context.Context, tenantI
 	return p.getProvisioningStatusLocked(ctx, tenantID)
 }
 
-// createSchema creates the org_{tenant_id} schema if it doesn't exist.
-func (p *PostgresProvisioner) createSchema(ctx context.Context, schemaName string) error {
-	// Use quote_ident for proper escaping
+// createSchemaInDB creates the org_{tenant_id} schema in the specified database.
+func (p *PostgresProvisioner) createSchemaInDB(ctx context.Context, db *gorm.DB, schemaName string) error {
 	query := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(schemaName))
-	return p.db.WithContext(ctx).Exec(query).Error
+	return db.WithContext(ctx).Exec(query).Error
 }
 
-// dropSchema drops the org_{tenant_id} schema and all its contents.
-func (p *PostgresProvisioner) dropSchema(ctx context.Context, schemaName string) error {
-	query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quoteIdentifier(schemaName))
-	return p.db.WithContext(ctx).Exec(query).Error
+// dropSchemaInAllDBs drops the org_{tenant_id} schema from all service databases.
+func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName string) error {
+	for serviceName, serviceDB := range p.serviceDbs {
+		query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quoteIdentifier(schemaName))
+		if err := serviceDB.WithContext(ctx).Exec(query).Error; err != nil {
+			return fmt.Errorf("drop schema in %s: %w", serviceName, err)
+		}
+	}
+	return nil
 }
 
-// applyServiceMigrations applies all migration files for a service to the tenant schema.
+// applyServiceMigrationsToDB applies all migration files for a service to the tenant schema
+// in the specified service database.
 // Returns the version string of the last applied migration.
-func (p *PostgresProvisioner) applyServiceMigrations(ctx context.Context, schemaName string, svc ServiceConfig) (string, error) {
+func (p *PostgresProvisioner) applyServiceMigrationsToDB(ctx context.Context, db *gorm.DB, schemaName string, svc ServiceConfig) (string, error) {
 	// Read migration files
 	migrations, err := p.readMigrationFiles(svc.MigrationPath)
 	if err != nil {
@@ -366,8 +450,8 @@ func (p *PostgresProvisioner) applyServiceMigrations(ctx context.Context, schema
 			return lastVersion, ctx.Err()
 		}
 
-		// Execute migration within a transaction
-		err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Execute migration within a transaction ON SERVICE DATABASE
+		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			// Set search_path
 			if err := tx.Exec(setPathQuery).Error; err != nil {
 				return fmt.Errorf("set search_path: %w", err)
@@ -600,7 +684,7 @@ func (provisioningEntity) TableName() string {
 // Caller must hold the mutex.
 func (p *PostgresProvisioner) getProvisioningStatusLocked(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error) {
 	var entity provisioningEntity
-	result := p.db.WithContext(ctx).Where("tenant_id = ?", tenantID.String()).First(&entity)
+	result := p.platformDB.WithContext(ctx).Where("tenant_id = ?", tenantID.String()).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrProvisioningStatusNotFound
@@ -636,7 +720,7 @@ func (p *PostgresProvisioner) saveProvisioningStatus(ctx context.Context, status
 			version = tenant_provisioning.version + 1
 	`
 
-	return p.db.WithContext(ctx).Exec(
+	return p.platformDB.WithContext(ctx).Exec(
 		upsertSQL,
 		entity.TenantID,
 		entity.State,
@@ -650,7 +734,7 @@ func (p *PostgresProvisioner) saveProvisioningStatus(ctx context.Context, status
 
 // deleteProvisioningStatus removes the provisioning status record.
 func (p *PostgresProvisioner) deleteProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) error {
-	return p.db.WithContext(ctx).
+	return p.platformDB.WithContext(ctx).
 		Where("tenant_id = ?", tenantID.String()).
 		Delete(&provisioningEntity{}).Error
 }
@@ -733,6 +817,26 @@ func isAlreadyExistsError(err error) bool {
 	errStr := strings.ToLower(err.Error())
 	return strings.Contains(errStr, "already exists") ||
 		strings.Contains(errStr, "duplicate")
+}
+
+// Close closes all service database connections.
+// This should be called during graceful shutdown to release database resources.
+func (p *PostgresProvisioner) Close() error {
+	var errs []error
+	for name, db := range p.serviceDbs {
+		sqlDB, err := db.DB()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: get DB: %w", name, err))
+			continue
+		}
+		if err := sqlDB.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("%s: close: %w", name, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%w: %v", ErrCloseConnections, errs)
+	}
+	return nil
 }
 
 // Ensure PostgresProvisioner implements SchemaProvisioner.

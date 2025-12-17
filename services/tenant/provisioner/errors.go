@@ -61,4 +61,11 @@ var (
 
 	// ErrEmptyMigrationPath indicates a service has an empty migration path.
 	ErrEmptyMigrationPath = errors.New("service has empty migration path")
+
+	// ErrServiceDatabaseNotFound indicates a service database connection was not found.
+	// This occurs when the service name in config doesn't match a database connection.
+	ErrServiceDatabaseNotFound = errors.New("service database not found")
+
+	// ErrCloseConnections indicates one or more database connections failed to close.
+	ErrCloseConnections = errors.New("failed to close database connections")
 )
