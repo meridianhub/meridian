@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -362,10 +363,29 @@ func (s *Service) toDomainStatus(status pb.TenantStatus) (domain.Status, error) 
 // schemas may be missing these migrations. This operation detects and applies
 // new migrations to bring tenant schemas up to date.
 //
-// TODO: Add authorization check - this is an admin/operator operation that
-// modifies database schemas across tenants and should be restricted to
-// privileged roles (e.g., platform-admin) once the auth framework is in place.
+// This endpoint requires platform-admin or super-admin role authorization.
+// Migration reconciliation is a platform-layer operation that affects all tenants
+// globally, equivalent to DBA-level privileges.
 func (s *Service) ReconcileMigrations(ctx context.Context, req *pb.ReconcileMigrationsRequest) (*pb.ReconcileMigrationsResponse, error) {
+	// Authorization check - must be performed before any business logic.
+	// ReconcileMigrations is a platform-layer operation requiring elevated privileges.
+	claims, ok := auth.GetClaimsFromContext(ctx)
+	if !ok {
+		s.logger.Warn("migration reconciliation attempted without authentication claims")
+		return nil, status.Error(codes.Unauthenticated, "authentication required")
+	}
+
+	if !claims.HasRole(auth.RolePlatformAdmin) && !claims.HasRole(auth.RoleSuperAdmin) {
+		s.logger.Warn("unauthorized migration reconciliation attempt",
+			"user_id", claims.UserID,
+			"roles", claims.Roles)
+		return nil, status.Error(codes.PermissionDenied, "platform-admin or super-admin role required for migration operations")
+	}
+
+	s.logger.Info("migration reconciliation authorized",
+		"user_id", claims.UserID,
+		"roles", claims.Roles)
+
 	if s.provisioner == nil {
 		return nil, status.Error(codes.FailedPrecondition, "schema provisioning not enabled")
 	}

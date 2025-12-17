@@ -12,6 +12,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -569,4 +570,224 @@ func TestService_InitiateTenant_WithoutProvisioner(t *testing.T) {
 	// Should be active immediately (no provisioning)
 	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
 	assert.Equal(t, int32(1), resp.Tenant.Version) // Only one version (created)
+}
+
+// Tests for ReconcileMigrations authorization
+
+func TestReconcileMigrations_Authorization(t *testing.T) {
+	// Create a mock provisioner
+	mockProvisioner := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+	})
+
+	// Create service with mock provisioner
+	svc := NewService(nil, mockProvisioner, nil, slog.Default())
+
+	tests := []struct {
+		name         string
+		claims       *auth.Claims
+		expectError  bool
+		expectedCode codes.Code
+		expectedMsg  string
+	}{
+		{
+			name: "platform-admin allowed",
+			claims: &auth.Claims{
+				UserID: "admin-123",
+				Roles:  []string{auth.RolePlatformAdmin},
+			},
+			expectError: false,
+		},
+		{
+			name: "super-admin allowed",
+			claims: &auth.Claims{
+				UserID: "admin-456",
+				Roles:  []string{auth.RoleSuperAdmin},
+			},
+			expectError: false,
+		},
+		{
+			name: "platform-admin with other roles allowed",
+			claims: &auth.Claims{
+				UserID: "admin-789",
+				Roles:  []string{"user", auth.RolePlatformAdmin, "viewer"},
+			},
+			expectError: false,
+		},
+		{
+			name: "operator denied",
+			claims: &auth.Claims{
+				UserID: "user-123",
+				Roles:  []string{"operator"},
+			},
+			expectError:  true,
+			expectedCode: codes.PermissionDenied,
+			expectedMsg:  "platform-admin or super-admin role required",
+		},
+		{
+			name: "tenant admin denied",
+			claims: &auth.Claims{
+				UserID: "user-456",
+				Roles:  []string{"admin"}, // tenant-scoped admin, not platform-admin
+			},
+			expectError:  true,
+			expectedCode: codes.PermissionDenied,
+			expectedMsg:  "platform-admin or super-admin role required",
+		},
+		{
+			name: "no roles denied",
+			claims: &auth.Claims{
+				UserID: "user-789",
+				Roles:  []string{},
+			},
+			expectError:  true,
+			expectedCode: codes.PermissionDenied,
+			expectedMsg:  "platform-admin or super-admin role required",
+		},
+		{
+			name: "user role denied",
+			claims: &auth.Claims{
+				UserID: "user-101",
+				Roles:  []string{"user", "viewer", "auditor"},
+			},
+			expectError:  true,
+			expectedCode: codes.PermissionDenied,
+			expectedMsg:  "platform-admin or super-admin role required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create context with claims
+			ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, tt.claims)
+
+			// Execute
+			resp, err := svc.ReconcileMigrations(ctx, &pb.ReconcileMigrationsRequest{})
+
+			// Assert
+			if tt.expectError {
+				require.Error(t, err)
+				st, ok := status.FromError(err)
+				require.True(t, ok, "error should be a gRPC status")
+				assert.Equal(t, tt.expectedCode, st.Code())
+				assert.Contains(t, st.Message(), tt.expectedMsg)
+				assert.Nil(t, resp)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, resp)
+			}
+		})
+	}
+}
+
+func TestReconcileMigrations_MissingClaims(t *testing.T) {
+	// Create a mock provisioner
+	mockProvisioner := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+	})
+
+	// Create service with mock provisioner
+	svc := NewService(nil, mockProvisioner, nil, slog.Default())
+
+	// Context without claims
+	ctx := context.Background()
+
+	// Execute
+	resp, err := svc.ReconcileMigrations(ctx, &pb.ReconcileMigrationsRequest{})
+
+	// Assert
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok, "error should be a gRPC status")
+	assert.Equal(t, codes.Unauthenticated, st.Code())
+	assert.Contains(t, st.Message(), "authentication required")
+	assert.Nil(t, resp)
+}
+
+func TestReconcileMigrations_NoProvisioner(t *testing.T) {
+	// Create service without provisioner
+	svc := NewService(nil, nil, nil, slog.Default())
+
+	// Create context with valid claims
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// Execute
+	resp, err := svc.ReconcileMigrations(ctx, &pb.ReconcileMigrationsRequest{})
+
+	// Assert - should fail with FailedPrecondition because provisioner is nil
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok, "error should be a gRPC status")
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "schema provisioning not enabled")
+	assert.Nil(t, resp)
+}
+
+func TestReconcileMigrations_AuthorizationBeforeProvisioner(t *testing.T) {
+	// Test that authorization check happens BEFORE provisioner check.
+	// This is important: we want to reject unauthorized users before
+	// revealing any details about system configuration.
+
+	// Create service WITHOUT provisioner (nil)
+	svc := NewService(nil, nil, nil, slog.Default())
+
+	// Create context with unauthorized claims
+	claims := &auth.Claims{
+		UserID: "user-123",
+		Roles:  []string{"user"},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// Execute
+	resp, err := svc.ReconcileMigrations(ctx, &pb.ReconcileMigrationsRequest{})
+
+	// Assert - should fail with PermissionDenied (not FailedPrecondition)
+	// This proves authorization check happens before provisioner check
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok, "error should be a gRPC status")
+	assert.Equal(t, codes.PermissionDenied, st.Code(), "authorization should be checked before provisioner availability")
+	assert.Contains(t, st.Message(), "platform-admin or super-admin role required")
+	assert.Nil(t, resp)
+}
+
+func TestReconcileMigrations_SuccessfulReconciliation(t *testing.T) {
+	// Create a mock provisioner with some active tenants
+	mockProvisioner := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+		{Name: "current-account", MigrationPath: "/migrations/current-account"},
+	})
+
+	// Add some tenant statuses that would be reconciled
+	mockProvisioner.SetStatus(&provisioner.ProvisioningStatus{
+		TenantID: "acme_bank",
+		State:    provisioner.StateActive,
+	})
+	mockProvisioner.SetStatus(&provisioner.ProvisioningStatus{
+		TenantID: "beta_corp",
+		State:    provisioner.StateActive,
+	})
+
+	// Create service with mock provisioner
+	svc := NewService(nil, mockProvisioner, nil, slog.Default())
+
+	// Create context with platform-admin claims
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// Execute - reconcile all tenants
+	resp, err := svc.ReconcileMigrations(ctx, &pb.ReconcileMigrationsRequest{})
+
+	// Assert
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, int32(2), resp.ReconciledCount, "should have reconciled 2 active tenants")
+	assert.Empty(t, resp.Errors, "should have no errors")
 }
