@@ -19,13 +19,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
     changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     changed_by VARCHAR(100),
 
-    -- Change details
-    old_values JSONB,
-    new_values JSONB,
+    -- Change details (TEXT to match GORM model - contains JSON strings)
+    old_values TEXT,
+    new_values TEXT,
 
     -- Additional context
     transaction_id VARCHAR(100),
-    client_ip INET,
+    client_ip VARCHAR(45),
     user_agent TEXT
 );
 
@@ -48,9 +48,9 @@ CREATE TABLE IF NOT EXISTS audit_outbox (
     -- Record identification
     record_id UUID NOT NULL,
 
-    -- Change details
-    old_values JSONB,
-    new_values JSONB,
+    -- Change details (TEXT to match GORM model - contains JSON strings)
+    old_values TEXT,
+    new_values TEXT,
 
     -- Processing status (includes 'completed' for successful processing)
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS audit_outbox (
     -- Additional context
     changed_by VARCHAR(100),
     transaction_id VARCHAR(100),
-    client_ip INET,
+    client_ip VARCHAR(45),
     user_agent TEXT
 );
 
@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS audit_outbox (
 CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created ON audit_outbox(status, created_at);
 
 -- Create helper view for easy audit queries
+-- Note: old_values and new_values are TEXT containing JSON, cast to JSONB for comparison
 CREATE OR REPLACE VIEW change_summary AS
 SELECT
     id,
@@ -78,10 +79,10 @@ SELECT
     changed_at,
     changed_by,
     CASE
-        WHEN operation = 'UPDATE' THEN
+        WHEN operation = 'UPDATE' AND new_values IS NOT NULL AND old_values IS NOT NULL THEN
             (SELECT json_object_agg(key, value)
-             FROM jsonb_each(new_values)
-             WHERE new_values->key IS DISTINCT FROM old_values->key)
+             FROM jsonb_each(new_values::jsonb)
+             WHERE (new_values::jsonb)->key IS DISTINCT FROM (old_values::jsonb)->key)
         ELSE NULL
     END AS changed_fields,
     transaction_id
