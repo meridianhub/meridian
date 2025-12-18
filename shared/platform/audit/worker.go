@@ -101,11 +101,11 @@ func NewAuditWorker(db *gorm.DB, schema string, logger *slog.Logger) *Worker {
 func (w *Worker) Start(ctx context.Context) {
 	w.wg.Add(1)
 	go w.run(ctx)
+	// Note: schema is already in logger context from NewAuditWorker
 	w.logger.Info("audit worker started",
 		"batch_size", w.batchSize,
 		"poll_interval", w.pollInterval,
-		"max_retries", w.maxRetries,
-		"schema", w.schema)
+		"max_retries", w.maxRetries)
 }
 
 // Stop initiates graceful shutdown of the worker.
