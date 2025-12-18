@@ -1225,3 +1225,219 @@ func TestEndToEnd_PostingLifecycle(t *testing.T) {
 	assert.Equal(t, postingID, listResp.LedgerPostings[0].Id)
 	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, listResp.LedgerPostings[0].Status)
 }
+
+// ============================================================================
+// UpdateFinancialBookingLog Integration Tests - Double-Entry Balance Validation
+// ============================================================================
+
+// createTestBookingLogWithStatus creates a booking log with specified status for testing
+func createTestBookingLogWithStatus(t *testing.T, db *gorm.DB, ctx context.Context, status string) uuid.UUID {
+	t.Helper()
+
+	bookingLogID := uuid.New()
+	bookingLog := &persistence.FinancialBookingLogEntity{
+		ID:                      bookingLogID,
+		FinancialAccountType:    "DEBIT",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  status,
+		IdempotencyKey:          "test-key-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.WithContext(ctx).Create(bookingLog).Error)
+
+	return bookingLogID
+}
+
+// createTestPosting creates a ledger posting for testing double-entry validation
+func createTestPosting(t *testing.T, db *gorm.DB, ctx context.Context, bookingLogID uuid.UUID, direction string, amountCents int64) uuid.UUID {
+	t.Helper()
+
+	postingID := uuid.New()
+	posting := &persistence.LedgerPostingEntity{
+		ID:                    postingID,
+		FinancialBookingLogID: bookingLogID,
+		PostingDirection:      direction,
+		AmountCents:           amountCents,
+		Currency:              "GBP",
+		AccountID:             "ACC-" + uuid.New().String()[:8],
+		ValueDate:             time.Now(),
+		Status:                "PENDING",
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+	require.NoError(t, db.WithContext(ctx).Create(posting).Error)
+
+	return postingID
+}
+
+// TestUpdateFinancialBookingLog_Integration_BalancedPostings_Success tests that
+// transitioning to POSTED status succeeds when postings are balanced (debits == credits).
+func TestUpdateFinancialBookingLog_Integration_BalancedPostings_Success(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	// Create a booking log in PENDING status
+	bookingLogID := createTestBookingLogWithStatus(t, ts.db, ts.ctx, "PENDING")
+
+	// Create balanced postings: 100.00 debit + 100.00 credit
+	createTestPosting(t, ts.db, ts.ctx, bookingLogID, "DEBIT", 10000)  // 100.00
+	createTestPosting(t, ts.db, ts.ctx, bookingLogID, "CREDIT", 10000) // 100.00
+
+	// Attempt to transition to POSTED
+	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     bookingLogID.String(),
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	})
+
+	// Should succeed with balanced postings
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, resp.FinancialBookingLog.Status)
+}
+
+// TestUpdateFinancialBookingLog_Integration_MultipleBalancedPostings tests that
+// multiple postings that sum to balanced amounts allow POSTED transition.
+func TestUpdateFinancialBookingLog_Integration_MultipleBalancedPostings(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	// Create a booking log in PENDING status
+	bookingLogID := createTestBookingLogWithStatus(t, ts.db, ts.ctx, "PENDING")
+
+	// Create multiple postings: 2 debits (50 + 50) = 1 credit (100)
+	createTestPosting(t, ts.db, ts.ctx, bookingLogID, "DEBIT", 5000)   // 50.00
+	createTestPosting(t, ts.db, ts.ctx, bookingLogID, "DEBIT", 5000)   // 50.00
+	createTestPosting(t, ts.db, ts.ctx, bookingLogID, "CREDIT", 10000) // 100.00
+
+	// Attempt to transition to POSTED
+	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     bookingLogID.String(),
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	})
+
+	// Should succeed with balanced postings
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, resp.FinancialBookingLog.Status)
+}
+
+// TestUpdateFinancialBookingLog_Integration_UnbalancedPostings_FailedPrecondition tests that
+// transitioning to POSTED status fails when debits != credits.
+func TestUpdateFinancialBookingLog_Integration_UnbalancedPostings_FailedPrecondition(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	// Create a booking log in PENDING status
+	bookingLogID := createTestBookingLogWithStatus(t, ts.db, ts.ctx, "PENDING")
+
+	// Create unbalanced postings: 100.00 debit + 50.00 credit
+	createTestPosting(t, ts.db, ts.ctx, bookingLogID, "DEBIT", 10000) // 100.00
+	createTestPosting(t, ts.db, ts.ctx, bookingLogID, "CREDIT", 5000) // 50.00
+
+	// Attempt to transition to POSTED
+	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     bookingLogID.String(),
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	})
+
+	// Should fail with FailedPrecondition
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "cannot post unbalanced booking log")
+	assert.Contains(t, st.Message(), "debits=")
+	assert.Contains(t, st.Message(), "credits=")
+	assert.Contains(t, st.Message(), "imbalance=")
+}
+
+// TestUpdateFinancialBookingLog_Integration_NoPostings_FailedPrecondition tests that
+// transitioning to POSTED status fails when there are no postings.
+func TestUpdateFinancialBookingLog_Integration_NoPostings_FailedPrecondition(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	// Create a booking log in PENDING status with no postings
+	bookingLogID := createTestBookingLogWithStatus(t, ts.db, ts.ctx, "PENDING")
+
+	// Attempt to transition to POSTED with no postings
+	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     bookingLogID.String(),
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	})
+
+	// Should fail with FailedPrecondition
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "cannot post booking log with no postings")
+}
+
+// TestUpdateFinancialBookingLog_Integration_NonPostedTransition_SkipsValidation tests that
+// transitions to non-POSTED statuses (FAILED, CANCELLED) skip balance validation.
+func TestUpdateFinancialBookingLog_Integration_NonPostedTransition_SkipsValidation(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	// Create a booking log in PENDING status with unbalanced postings
+	bookingLogID := createTestBookingLogWithStatus(t, ts.db, ts.ctx, "PENDING")
+	createTestPosting(t, ts.db, ts.ctx, bookingLogID, "DEBIT", 10000) // 100.00, no credit
+
+	// Transition to FAILED should succeed (balance validation not required)
+	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     bookingLogID.String(),
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED, resp.FinancialBookingLog.Status)
+}
+
+// TestUpdateFinancialBookingLog_Integration_CancelledTransition_SkipsValidation tests that
+// transitions to CANCELLED skip balance validation.
+func TestUpdateFinancialBookingLog_Integration_CancelledTransition_SkipsValidation(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	// Create a booking log in PENDING status with no postings
+	bookingLogID := createTestBookingLogWithStatus(t, ts.db, ts.ctx, "PENDING")
+
+	// Transition to CANCELLED should succeed without postings
+	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     bookingLogID.String(),
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED, resp.FinancialBookingLog.Status)
+}

@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -12,6 +14,7 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
@@ -821,6 +824,42 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 	if !isValidBookingLogTransition(bookingLog.Status, newStatus) {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"invalid status transition from %s to %s", bookingLog.Status, newStatus)
+	}
+
+	// Enforce double-entry bookkeeping constraint when transitioning to POSTED
+	if newStatus == domain.TransactionStatusPosted {
+		postings, err := s.repository.GetPostingsByBookingLogID(ctx, bookingLogID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to retrieve postings for balance validation: %v", err)
+		}
+
+		// Empty postings are not allowed for POSTED status
+		if len(postings) == 0 {
+			observability.RecordDoubleEntryValidation("unbalanced")
+			return nil, status.Error(codes.FailedPrecondition,
+				"cannot post booking log with no postings")
+		}
+
+		// Calculate debit and credit totals
+		debitTotal := decimal.Zero
+		creditTotal := decimal.Zero
+		for _, posting := range postings {
+			switch posting.Direction {
+			case domain.PostingDirectionDebit:
+				debitTotal = debitTotal.Add(posting.Amount.Amount())
+			case domain.PostingDirectionCredit:
+				creditTotal = creditTotal.Add(posting.Amount.Amount())
+			}
+		}
+
+		// Validate double-entry balance
+		if !debitTotal.Equal(creditTotal) {
+			imbalance := debitTotal.Sub(creditTotal)
+			observability.RecordDoubleEntryValidation("unbalanced")
+			return nil, status.Error(codes.FailedPrecondition,
+				fmt.Sprintf("cannot post unbalanced booking log: debits=%s credits=%s imbalance=%s",
+					debitTotal.String(), creditTotal.String(), imbalance.String()))
+		}
 	}
 
 	// Apply status update
