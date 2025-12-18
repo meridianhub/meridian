@@ -710,7 +710,7 @@ func TestAudit_CreateParty_WritesAuditOutboxEntry(t *testing.T) {
 	auditEntry := auditEntries[0]
 	assert.Equal(t, "party", auditEntry.Table, "Table name should be 'party'")
 	assert.Equal(t, "INSERT", auditEntry.Operation, "Operation should be INSERT")
-	assert.Equal(t, party.ID(), auditEntry.RecordID, "Record ID should match party ID")
+	assert.Equal(t, party.ID().String(), auditEntry.RecordID, "Record ID should match party ID")
 	assert.Equal(t, "pending", auditEntry.Status, "Status should be pending")
 	assert.Empty(t, auditEntry.OldValues, "Old values should be empty for INSERT")
 	assert.NotEmpty(t, auditEntry.NewValues, "New values should contain party data")

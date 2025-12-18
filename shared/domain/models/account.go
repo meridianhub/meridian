@@ -2,11 +2,10 @@
 package models
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"gorm.io/gorm"
 )
 
@@ -44,10 +43,22 @@ func (Account) TableName() string {
 	return "account"
 }
 
+// AuditID returns the record ID as a string for audit logging.
+// Implements the audit.Auditable interface.
+func (a Account) AuditID() string {
+	return a.ID.String()
+}
+
+// AuditTableName returns the table name for audit logging.
+// Implements the audit.Auditable interface.
+func (a Account) AuditTableName() string {
+	return a.TableName()
+}
+
 // AfterCreate is a GORM hook that runs after INSERT operations on Account.
 // It writes an audit outbox entry with the new account data.
 func (a *Account) AfterCreate(tx *gorm.DB) error {
-	return recordAudit(tx, "account", "INSERT", a.ID, nil, a)
+	return audit.RecordCreate(tx, *a)
 }
 
 // BeforeUpdate is a GORM hook that runs before UPDATE operations on Account.
@@ -57,46 +68,17 @@ func (a *Account) BeforeUpdate(tx *gorm.DB) error {
 	if err := a.BaseModel.BeforeUpdate(tx); err != nil {
 		return err
 	}
-
-	// Capture old values before the update
-	var old Account
-	if err := tx.First(&old, a.ID).Error; err != nil {
-		return fmt.Errorf("failed to fetch old account values: %w", err)
-	}
-
-	// Store old values in transaction context for AfterUpdate to access
-	if tx.Statement != nil && tx.Statement.Context != nil {
-		ctx := context.WithValue(tx.Statement.Context, auditAccountOldValueKey, &old)
-		tx.Statement.Context = ctx
-	}
-
-	return nil
+	return audit.CaptureOldValue(tx, *a)
 }
 
 // AfterUpdate is a GORM hook that runs after UPDATE operations on Account.
 // It retrieves the old values from context and writes an audit outbox entry.
 func (a *Account) AfterUpdate(tx *gorm.DB) error {
-	// Retrieve old values from context (captured in BeforeUpdate)
-	var old *Account
-	if tx.Statement != nil && tx.Statement.Context != nil {
-		if oldValue := tx.Statement.Context.Value(auditAccountOldValueKey); oldValue != nil {
-			var ok bool
-			old, ok = oldValue.(*Account)
-			if !ok {
-				return ErrAccountOldValueType
-			}
-		}
-	}
-
-	if old == nil {
-		return ErrAccountOldValueNotFound
-	}
-
-	return recordAudit(tx, "account", "UPDATE", a.ID, old, a)
+	return audit.RecordUpdate(tx, *a)
 }
 
 // AfterDelete is a GORM hook that runs after DELETE operations on Account.
 // It writes an audit outbox entry with the deleted account data.
 func (a *Account) AfterDelete(tx *gorm.DB) error {
-	return recordAudit(tx, "account", "DELETE", a.ID, a, nil)
+	return audit.RecordDelete(tx, *a)
 }

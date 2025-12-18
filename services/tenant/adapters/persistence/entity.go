@@ -33,6 +33,18 @@ func (TenantEntity) TableName() string {
 	return "tenant"
 }
 
+// AuditID returns the record ID as a string for audit logging.
+// Implements the audit.Auditable interface.
+func (t TenantEntity) AuditID() string {
+	return t.ID
+}
+
+// AuditTableName returns the table name for audit logging.
+// Implements the audit.Auditable interface.
+func (t TenantEntity) AuditTableName() string {
+	return t.TableName()
+}
+
 // JSONMap is a custom type for JSONB columns.
 type JSONMap map[string]interface{}
 
