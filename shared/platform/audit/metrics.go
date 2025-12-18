@@ -49,6 +49,66 @@ var (
 		Help:      "Age of audit entries when processed (time from creation to processing)",
 		Buckets:   prometheus.DefBuckets,
 	})
+
+	// Kafka-based audit metrics
+
+	// kafkaEventsPublished counts audit events published to Kafka
+	kafkaEventsPublished = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_kafka",
+		Name:      "events_published_total",
+		Help:      "Total number of audit events published to Kafka",
+	}, []string{"schema", "operation", "status"})
+
+	// kafkaEventsConsumed counts audit events consumed from Kafka
+	kafkaEventsConsumed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_kafka",
+		Name:      "events_consumed_total",
+		Help:      "Total number of audit events consumed from Kafka",
+	}, []string{"schema", "operation", "status"})
+
+	// kafkaPublishDuration tracks the duration of Kafka publish operations
+	kafkaPublishDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_kafka",
+		Name:      "publish_duration_seconds",
+		Help:      "Duration of Kafka publish operations in seconds",
+		Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+	})
+
+	// kafkaConsumeDuration tracks the duration of Kafka consume/process operations
+	kafkaConsumeDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_kafka",
+		Name:      "consume_duration_seconds",
+		Help:      "Duration of Kafka consume and process operations in seconds",
+		Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+	})
+
+	// kafkaConsumerLag tracks the consumer lag in messages
+	kafkaConsumerLag = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_kafka",
+		Name:      "consumer_lag_messages",
+		Help:      "Number of messages the consumer is behind the latest offset",
+	})
+
+	// kafkaFallbackUsed counts when Kafka publishing failed and outbox fallback was used
+	kafkaFallbackUsed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_kafka",
+		Name:      "fallback_used_total",
+		Help:      "Number of times Kafka publish failed and outbox fallback was used",
+	}, []string{"schema", "reason"})
+
+	// kafkaDLQMessages counts messages sent to DLQ
+	kafkaDLQMessages = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_kafka",
+		Name:      "dlq_messages_total",
+		Help:      "Total number of messages sent to dead letter queue",
+	}, []string{"schema", "reason"})
 )
 
 // RecordOutboxDepthBySchema updates the gauge for the number of pending entries for a specific schema.
@@ -74,4 +134,41 @@ func RecordProcessingDuration(seconds float64) {
 // RecordEntryAge observes the age of an entry when it is processed
 func RecordEntryAge(ageSeconds float64) {
 	entryAge.Observe(ageSeconds)
+}
+
+// RecordKafkaPublished increments the counter for events published to Kafka.
+// status should be "success" or "failure".
+func RecordKafkaPublished(schema, operation, status string) {
+	kafkaEventsPublished.WithLabelValues(schema, operation, status).Inc()
+}
+
+// RecordKafkaConsumed increments the counter for events consumed from Kafka.
+// status should be "success" or "failure".
+func RecordKafkaConsumed(schema, operation, status string) {
+	kafkaEventsConsumed.WithLabelValues(schema, operation, status).Inc()
+}
+
+// RecordKafkaPublishDuration observes the duration of a Kafka publish operation.
+func RecordKafkaPublishDuration(seconds float64) {
+	kafkaPublishDuration.Observe(seconds)
+}
+
+// RecordKafkaConsumeDuration observes the duration of a Kafka consume operation.
+func RecordKafkaConsumeDuration(seconds float64) {
+	kafkaConsumeDuration.Observe(seconds)
+}
+
+// RecordKafkaConsumerLag sets the current consumer lag.
+func RecordKafkaConsumerLag(lag float64) {
+	kafkaConsumerLag.Set(lag)
+}
+
+// RecordKafkaFallback increments the counter when outbox fallback is used.
+func RecordKafkaFallback(schema, reason string) {
+	kafkaFallbackUsed.WithLabelValues(schema, reason).Inc()
+}
+
+// RecordKafkaDLQ increments the counter when a message is sent to DLQ.
+func RecordKafkaDLQ(schema, reason string) {
+	kafkaDLQMessages.WithLabelValues(schema, reason).Inc()
 }

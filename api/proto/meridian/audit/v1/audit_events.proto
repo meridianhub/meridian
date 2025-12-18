@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package meridian.audit.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/audit/v1;auditv1";
+
+// AuditOperation represents the type of database operation that was performed.
+enum AuditOperation {
+  // AUDIT_OPERATION_UNSPECIFIED is the default unspecified value.
+  AUDIT_OPERATION_UNSPECIFIED = 0;
+  // AUDIT_OPERATION_INSERT indicates a new record was created.
+  AUDIT_OPERATION_INSERT = 1;
+  // AUDIT_OPERATION_UPDATE indicates an existing record was modified.
+  AUDIT_OPERATION_UPDATE = 2;
+  // AUDIT_OPERATION_DELETE indicates a record was deleted.
+  AUDIT_OPERATION_DELETE = 3;
+}
+
+// AuditEvent represents a change to a database record that must be captured
+// for compliance and audit trail purposes. Published to the 'audit.events' topic.
+//
+// This event is produced by GORM hooks in each service and consumed by the
+// audit consumer service for permanent storage in the audit_log table.
+message AuditEvent {
+  // event_id uniquely identifies this audit event instance.
+  string event_id = 1 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // table_name is the database table that was modified.
+  // Uses unqualified name (e.g., "customers" not "party.customers").
+  string table_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // operation indicates what type of change occurred.
+  AuditOperation operation = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // record_id is the identifier of the modified record.
+  // Supports both UUID and custom string identifiers.
+  string record_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+
+  // old_values contains the JSON representation of the record before modification.
+  // Empty for INSERT operations.
+  string old_values = 5 [(buf.validate.field).string = {
+    max_len: 1048576
+  }];
+
+  // new_values contains the JSON representation of the record after modification.
+  // Empty for DELETE operations.
+  string new_values = 6 [(buf.validate.field).string = {
+    max_len: 1048576
+  }];
+
+  // changed_by identifies the user who made the change.
+  // Falls back to "system" for unauthenticated operations.
+  string changed_by = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // transaction_id links this audit record to the business transaction.
+  // Used for correlation with other service operations.
+  string transaction_id = 8 [(buf.validate.field).string = {
+    max_len: 100
+  }];
+
+  // client_ip is the IP address of the client that initiated the change.
+  // Supports both IPv4 and IPv6 addresses.
+  string client_ip = 9 [(buf.validate.field).string = {
+    max_len: 45
+  }];
+
+  // user_agent is the HTTP user agent string from the client request.
+  string user_agent = 10 [(buf.validate.field).string = {
+    max_len: 500
+  }];
+
+  // timestamp when the change occurred.
+  google.protobuf.Timestamp timestamp = 11 [(buf.validate.field).required = true];
+
+  // schema_name identifies the service schema (e.g., "party", "current_account").
+  // Used by the consumer to route to the correct audit_log table.
+  string schema_name = 12 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // correlation_id links related audit events across services.
+  string correlation_id = 13 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this change.
+  string causation_id = 14 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // idempotency_key for deduplication during replay scenarios.
+  string idempotency_key = 15 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // metadata contains additional context for debugging and tracing.
+  map<string, string> metadata = 16;
+}

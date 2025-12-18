@@ -8,6 +8,19 @@ import (
 const (
 	// DefaultClientID is the default Kafka client identifier.
 	DefaultClientID = "meridian-service"
+
+	// AuditEventsTopic is the Kafka topic for audit events.
+	AuditEventsTopic = "audit.events"
+	// AuditEventsDLQTopic is the dead letter queue for failed audit events.
+	AuditEventsDLQTopic = "audit.events.dlq"
+
+	// AuditConsumerGroup is the consumer group for audit event processing.
+	AuditConsumerGroup = "audit-consumer-group"
+
+	// DefaultAuditRetentionDays is the default retention period for audit topics.
+	// Compliance requirements typically mandate 7 years, but Kafka retention
+	// is set to 30 days as audit_log provides permanent storage.
+	DefaultAuditRetentionDays = 30
 )
 
 var (
@@ -59,4 +72,55 @@ func DefaultConfig() Config {
 		BootstrapServers: "localhost:9092",
 		ClientID:         DefaultClientID,
 	}
+}
+
+// AuditTopicConfig contains configuration for audit-related Kafka topics.
+type AuditTopicConfig struct {
+	// EventsTopic is the topic for publishing audit events.
+	EventsTopic string
+	// DLQTopic is the dead letter queue for failed audit events.
+	DLQTopic string
+	// ConsumerGroup is the consumer group ID for audit processing.
+	ConsumerGroup string
+	// RetentionDays is the number of days to retain messages in the topic.
+	RetentionDays int
+	// Partitions is the number of partitions for the audit topic.
+	Partitions int
+	// ReplicationFactor is the replication factor for the audit topic.
+	ReplicationFactor int
+}
+
+// DefaultAuditTopicConfig returns the default configuration for audit topics.
+func DefaultAuditTopicConfig() AuditTopicConfig {
+	return AuditTopicConfig{
+		EventsTopic:       AuditEventsTopic,
+		DLQTopic:          AuditEventsDLQTopic,
+		ConsumerGroup:     AuditConsumerGroup,
+		RetentionDays:     DefaultAuditRetentionDays,
+		Partitions:        6,
+		ReplicationFactor: 3,
+	}
+}
+
+// AuditTopicConfigFromEnv creates audit topic configuration from environment variables.
+// Falls back to defaults for any unset variables.
+//
+// Environment variables:
+// - AUDIT_KAFKA_TOPIC: Topic name for audit events (default: "audit.events")
+// - AUDIT_KAFKA_DLQ_TOPIC: Dead letter queue topic (default: "audit.events.dlq")
+// - AUDIT_KAFKA_CONSUMER_GROUP: Consumer group ID (default: "audit-consumer-group")
+func AuditTopicConfigFromEnv() AuditTopicConfig {
+	config := DefaultAuditTopicConfig()
+
+	if topic := os.Getenv("AUDIT_KAFKA_TOPIC"); topic != "" {
+		config.EventsTopic = topic
+	}
+	if dlqTopic := os.Getenv("AUDIT_KAFKA_DLQ_TOPIC"); dlqTopic != "" {
+		config.DLQTopic = dlqTopic
+	}
+	if group := os.Getenv("AUDIT_KAFKA_CONSUMER_GROUP"); group != "" {
+		config.ConsumerGroup = group
+	}
+
+	return config
 }

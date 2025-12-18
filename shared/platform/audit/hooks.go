@@ -219,8 +219,29 @@ func RecordDelete[T Auditable](tx *gorm.DB, entity T) error {
 	return recordAudit(tx, entity.AuditTableName(), "DELETE", entity.AuditID(), entity, nil)
 }
 
-// recordAudit writes an audit outbox entry within the current transaction.
+// Global schema name for the current service.
+// Set by the service during initialization.
+var (
+	globalSchemaName string
+)
+
+// SetSchemaName sets the schema name for audit events.
+// This should be called during service initialization.
+func SetSchemaName(schema string) {
+	globalSchemaName = schema
+}
+
+// GetSchemaName returns the configured schema name.
+func GetSchemaName() string {
+	return globalSchemaName
+}
+
+// recordAudit writes an audit record using Kafka with outbox fallback.
 // This is the internal implementation used by all public helper functions.
+//
+// The function attempts to publish to Kafka first (if configured and enabled).
+// If Kafka publishing fails or is not available, it falls back to writing
+// to the audit_outbox table for reliable eventual processing.
 func recordAudit(tx *gorm.DB, tableName, operation, recordID string, oldValue, newValue interface{}) error {
 	if tx == nil {
 		return ErrNilTransaction
@@ -246,30 +267,22 @@ func recordAudit(tx *gorm.DB, tableName, operation, recordID string, oldValue, n
 	}
 
 	// Extract user ID from context
-	var changedBy *string
+	changedBy := DefaultAuditUser
 	if tx.Statement != nil && tx.Statement.Context != nil {
 		if userID := GetUserFromContext(tx.Statement.Context); userID != "" {
-			changedBy = &userID
+			changedBy = userID
 		}
 	}
-	if changedBy == nil {
-		defaultUser := DefaultAuditUser
-		changedBy = &defaultUser
-	}
 
-	// Create audit outbox entry
-	outbox := AuditOutbox{
-		ID:        uuid.New(),
-		Table:     tableName,
-		Operation: operation,
-		RecordID:  recordID,
-		OldValues: oldJSON,
-		NewValues: newJSON,
-		Status:    "pending",
-		ChangedBy: changedBy,
-		CreatedAt: time.Now(),
-	}
-
-	// Write to outbox within the same transaction
-	return tx.Create(&outbox).Error
+	// Use Kafka with outbox fallback
+	return publishToKafkaWithFallback(
+		tx,
+		tableName,
+		operation,
+		recordID,
+		oldJSON,
+		newJSON,
+		changedBy,
+		globalSchemaName,
+	)
 }
