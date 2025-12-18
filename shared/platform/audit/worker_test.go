@@ -20,10 +20,18 @@ import (
 	"gorm.io/gorm"
 )
 
-// setupTestDB creates a PostgreSQL container with GORM for testing.
+// testHelper provides a common interface for both testing.T and testing.B
+// to enable shared setup code between tests and benchmarks.
+type testHelper interface {
+	Helper()
+	Fatalf(format string, args ...interface{})
+}
+
+// setupAuditDB creates a PostgreSQL container with GORM for testing/benchmarking.
 // PostgreSQL is used instead of SQLite to match production CockroachDB behavior.
-func setupTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
+// Returns the database connection and a cleanup function.
+func setupAuditDB(h testHelper) (*gorm.DB, func()) {
+	h.Helper()
 
 	ctx := context.Background()
 
@@ -38,23 +46,32 @@ func setupTestDB(t *testing.T) *gorm.DB {
 				WithOccurrence(2).
 				WithStartupTimeout(60*time.Second)),
 	)
-	require.NoError(t, err, "Failed to start postgres container")
+	if err != nil {
+		h.Fatalf("Failed to start postgres container: %v", err)
+	}
 
 	// Get connection string
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err, "Failed to get connection string")
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to get connection string: %v", err)
+	}
 
 	// Connect with GORM
 	db, err := gorm.Open(postgresdriver.Open(connStr), &gorm.Config{})
-	require.NoError(t, err, "Failed to connect to test database")
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to connect to test database: %v", err)
+	}
 
 	// Enable pgcrypto extension for gen_random_uuid() function
-	err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error
-	require.NoError(t, err, "Failed to enable pgcrypto extension")
+	if err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to enable pgcrypto extension: %v", err)
+	}
 
 	// Create audit_outbox table (unqualified, uses public schema)
-	// TableName method now returns unqualified "audit_outbox" for search_path routing
-	err = db.Exec(`
+	if err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_outbox (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			table_name VARCHAR(100) NOT NULL,
@@ -71,18 +88,22 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			client_ip VARCHAR(45),
 			user_agent TEXT
 		)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_outbox table")
+	`).Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to create audit_outbox table: %v", err)
+	}
 
 	// Create indexes for audit_outbox
-	err = db.Exec(`
+	if err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
 		ON audit_outbox(status, created_at)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_outbox indexes")
+	`).Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to create audit_outbox indexes: %v", err)
+	}
 
 	// Create audit_log table (unqualified for search_path routing)
-	err = db.Exec(`
+	if err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_log (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			table_name VARCHAR(100) NOT NULL,
@@ -96,37 +117,33 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			client_ip VARCHAR(45),
 			user_agent TEXT
 		)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_log table")
+	`).Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to create audit_log table: %v", err)
+	}
 
-	// Create indexes for audit_log
-	err = db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_log_table_name
-		ON audit_log(table_name)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_log table_name index")
+	// Create indexes for audit_log (ignore errors for non-critical indexes)
+	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_table_name ON audit_log(table_name)`).Error
+	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_operation ON audit_log(operation)`).Error
+	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_record_id ON audit_log(record_id)`).Error
 
-	err = db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_log_operation
-		ON audit_log(operation)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_log operation index")
-
-	err = db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_log_record_id
-		ON audit_log(record_id)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_log record_id index")
-
-	// Register cleanup
-	t.Cleanup(func() {
+	cleanup := func() {
 		sqlDB, _ := db.DB()
 		if sqlDB != nil {
 			_ = sqlDB.Close()
 		}
 		_ = pgContainer.Terminate(ctx)
-	})
+	}
 
+	return db, cleanup
+}
+
+// setupTestDB creates a PostgreSQL container with GORM for testing.
+// PostgreSQL is used instead of SQLite to match production CockroachDB behavior.
+func setupTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, cleanup := setupAuditDB(t)
+	t.Cleanup(cleanup)
 	return db
 }
 
@@ -773,116 +790,9 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 
 // setupBenchmarkDB creates a PostgreSQL container for benchmarks.
 // Returns the database connection and a cleanup function.
+// Uses the shared setupAuditDB helper to avoid code duplication.
 func setupBenchmarkDB(b *testing.B) (*gorm.DB, func()) {
-	b.Helper()
-
-	ctx := context.Background()
-
-	// Create PostgreSQL container
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:15-alpine",
-		postgres.WithDatabase("bench_db"),
-		postgres.WithUsername("bench_user"),
-		postgres.WithPassword("bench_password"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second)),
-	)
-	if err != nil {
-		b.Fatalf("Failed to start postgres container: %v", err)
-	}
-
-	// Get connection string
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		_ = pgContainer.Terminate(ctx)
-		b.Fatalf("Failed to get connection string: %v", err)
-	}
-
-	// Connect with GORM
-	db, err := gorm.Open(postgresdriver.Open(connStr), &gorm.Config{})
-	if err != nil {
-		_ = pgContainer.Terminate(ctx)
-		b.Fatalf("Failed to connect to test database: %v", err)
-	}
-
-	// Enable pgcrypto extension for gen_random_uuid() function
-	err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error
-	if err != nil {
-		_ = pgContainer.Terminate(ctx)
-		b.Fatalf("Failed to enable pgcrypto extension: %v", err)
-	}
-
-	// Create audit_outbox table
-	err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS audit_outbox (
-			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			table_name VARCHAR(100) NOT NULL,
-			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-			record_id UUID NOT NULL,
-			old_values TEXT,
-			new_values TEXT,
-			status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'failed', 'completed')),
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			retry_count INTEGER NOT NULL DEFAULT 0,
-			last_error TEXT,
-			changed_by VARCHAR(100),
-			transaction_id VARCHAR(100),
-			client_ip VARCHAR(45),
-			user_agent TEXT
-		)
-	`).Error
-	if err != nil {
-		_ = pgContainer.Terminate(ctx)
-		b.Fatalf("Failed to create audit_outbox table: %v", err)
-	}
-
-	// Create indexes for audit_outbox
-	err = db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
-		ON audit_outbox(status, created_at)
-	`).Error
-	if err != nil {
-		_ = pgContainer.Terminate(ctx)
-		b.Fatalf("Failed to create audit_outbox indexes: %v", err)
-	}
-
-	// Create audit_log table
-	err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS audit_log (
-			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			table_name VARCHAR(100) NOT NULL,
-			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-			record_id UUID NOT NULL,
-			old_values TEXT,
-			new_values TEXT,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			changed_by VARCHAR(100),
-			transaction_id VARCHAR(100),
-			client_ip VARCHAR(45),
-			user_agent TEXT
-		)
-	`).Error
-	if err != nil {
-		_ = pgContainer.Terminate(ctx)
-		b.Fatalf("Failed to create audit_log table: %v", err)
-	}
-
-	// Create indexes for audit_log
-	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_table_name ON audit_log(table_name)`).Error
-	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_operation ON audit_log(operation)`).Error
-	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_record_id ON audit_log(record_id)`).Error
-
-	cleanup := func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			_ = sqlDB.Close()
-		}
-		_ = pgContainer.Terminate(ctx)
-	}
-
-	return db, cleanup
+	return setupAuditDB(b)
 }
 
 // createBenchmarkEntries creates N audit outbox entries for benchmarking.
@@ -936,18 +846,18 @@ func runWorkerThroughputBenchmark(b *testing.B, batchSize int) {
 
 	ctx := context.Background()
 
-	// Track total records processed
-	totalRecords := 0
+	// Total records to process
+	totalRecords := b.N * batchSize
+
+	// Pre-create all entries before starting the benchmark timer
+	// This ensures we're only measuring processBatch performance
+	createBenchmarkEntries(b, db, totalRecords)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		// Create entries for this batch
-		createBenchmarkEntries(b, db, batchSize)
-		totalRecords += batchSize
-
-		// Process the batch
+		// Process the batch (entries already exist)
 		if err := worker.processBatch(ctx); err != nil {
 			b.Fatalf("Failed to process batch: %v", err)
 		}
