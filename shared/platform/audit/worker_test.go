@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/meridianhub/meridian/shared/domain/models"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -130,14 +130,14 @@ func setupTestDB(t *testing.T) *gorm.DB {
 }
 
 // createTestEntry creates a single audit outbox entry for testing.
-func createTestEntry(t *testing.T, db *gorm.DB, status string) *models.AuditOutbox {
+func createTestEntry(t *testing.T, db *gorm.DB, status string) *AuditOutbox {
 	t.Helper()
 
-	entry := &models.AuditOutbox{
+	entry := &AuditOutbox{
 		ID:        uuid.New(),
 		Table:     "customer", // singular table name for search_path routing
 		Operation: "INSERT",
-		RecordID:  uuid.New(),
+		RecordID:  uuid.New().String(),
 		NewValues: `{"id": "123", "name": "Test Customer"}`,
 		Status:    status,
 		CreatedAt: time.Now(),
@@ -169,7 +169,7 @@ func waitForProcessing(t *testing.T, db *gorm.DB, expectedCompleted int, timeout
 
 	for {
 		var count int64
-		err := db.Model(&models.AuditOutbox{}).
+		err := db.Model(&AuditOutbox{}).
 			Where("status = ?", statusCompleted).
 			Count(&count).Error
 		require.NoError(t, err, "Failed to count completed entries")
@@ -211,7 +211,7 @@ func TestAuditWorker_ProcessBatch_Success(t *testing.T) {
 
 	// Verify all have status='completed'
 	var completed int64
-	err := db.Model(&models.AuditOutbox{}).
+	err := db.Model(&AuditOutbox{}).
 		Where("status = ?", statusCompleted).
 		Count(&completed).Error
 	require.NoError(t, err)
@@ -219,7 +219,7 @@ func TestAuditWorker_ProcessBatch_Success(t *testing.T) {
 
 	// Verify no pending entries remain
 	var pending int64
-	err = db.Model(&models.AuditOutbox{}).
+	err = db.Model(&AuditOutbox{}).
 		Where("status = ?", statusPending).
 		Count(&pending).Error
 	require.NoError(t, err)
@@ -248,7 +248,7 @@ func TestAuditWorker_ProcessBatch_BatchSize(t *testing.T) {
 
 	// Verify exactly 100 were processed
 	var completed int64
-	err = db.Model(&models.AuditOutbox{}).
+	err = db.Model(&AuditOutbox{}).
 		Where("status = ?", statusCompleted).
 		Count(&completed).Error
 	require.NoError(t, err)
@@ -256,7 +256,7 @@ func TestAuditWorker_ProcessBatch_BatchSize(t *testing.T) {
 
 	// Verify 150 remain pending
 	var pending int64
-	err = db.Model(&models.AuditOutbox{}).
+	err = db.Model(&AuditOutbox{}).
 		Where("status = ?", statusPending).
 		Count(&pending).Error
 	require.NoError(t, err)
@@ -284,7 +284,7 @@ func TestAuditWorker_ProcessEntry_Idempotency(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify entry is still completed and unchanged
-	var updated models.AuditOutbox
+	var updated AuditOutbox
 	err = db.First(&updated, entry.ID).Error
 	require.NoError(t, err)
 	assert.Equal(t, statusCompleted, updated.Status, "Status should still be completed")
@@ -405,11 +405,11 @@ func TestAuditWorker_ResetStuckEntries(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create entries with status='processing' and old timestamp
-	stuckEntry := &models.AuditOutbox{
+	stuckEntry := &AuditOutbox{
 		ID:        uuid.New(),
 		Table:     "customers",
 		Operation: "INSERT",
-		RecordID:  uuid.New(),
+		RecordID:  uuid.New().String(),
 		NewValues: `{"id": "123", "name": "Test Customer"}`,
 		Status:    statusProcessing,
 		CreatedAt: time.Now().Add(-10 * time.Minute), // 10 minutes ago (older than defaultProcessingAge)
@@ -418,11 +418,11 @@ func TestAuditWorker_ResetStuckEntries(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create recent processing entry (should not be reset)
-	recentEntry := &models.AuditOutbox{
+	recentEntry := &AuditOutbox{
 		ID:        uuid.New(),
 		Table:     "customers",
 		Operation: "INSERT",
-		RecordID:  uuid.New(),
+		RecordID:  uuid.New().String(),
 		NewValues: `{"id": "456", "name": "Recent Customer"}`,
 		Status:    statusProcessing,
 		CreatedAt: time.Now().Add(-1 * time.Minute), // 1 minute ago (newer than defaultProcessingAge)
@@ -438,13 +438,13 @@ func TestAuditWorker_ResetStuckEntries(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify stuck entry status back to 'pending'
-	var updatedStuckEntry models.AuditOutbox
+	var updatedStuckEntry AuditOutbox
 	err = db.First(&updatedStuckEntry, stuckEntry.ID).Error
 	require.NoError(t, err)
 	assert.Equal(t, statusPending, updatedStuckEntry.Status, "Stuck entry should be reset to pending")
 
 	// Verify recent entry is still 'processing'
-	var updatedRecentEntry models.AuditOutbox
+	var updatedRecentEntry AuditOutbox
 	err = db.First(&updatedRecentEntry, recentEntry.ID).Error
 	require.NoError(t, err)
 	assert.Equal(t, statusProcessing, updatedRecentEntry.Status, "Recent entry should still be processing")
@@ -485,7 +485,7 @@ func TestAuditWorker_ConcurrentSafety(t *testing.T) {
 
 	// Verify all entries are completed
 	var completed int64
-	err := db.Model(&models.AuditOutbox{}).
+	err := db.Model(&AuditOutbox{}).
 		Where("status = ?", statusCompleted).
 		Count(&completed).Error
 	require.NoError(t, err)
@@ -493,7 +493,7 @@ func TestAuditWorker_ConcurrentSafety(t *testing.T) {
 
 	// Verify no entries were left in other states
 	var total int64
-	err = db.Model(&models.AuditOutbox{}).Count(&total).Error
+	err = db.Model(&AuditOutbox{}).Count(&total).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(100), total, "Total entries should be 100")
 
@@ -521,7 +521,7 @@ func TestAuditWorker_ProcessBatch_EmptyQueue(t *testing.T) {
 
 	// Verify no entries exist
 	var count int64
-	err = db.Model(&models.AuditOutbox{}).Count(&count).Error
+	err = db.Model(&AuditOutbox{}).Count(&count).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count, "No entries should exist")
 }
@@ -670,7 +670,7 @@ func TestAuditWorker_Stop_MultipleCallsSafe(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	var processed int64
-	db.Model(&models.AuditOutbox{}).Where("status = ?", "completed").Count(&processed)
+	db.Model(&AuditOutbox{}).Where("status = ?", "completed").Count(&processed)
 	if processed > 0 {
 		t.Errorf("Worker processed entries after Stop(), expected 0 but got %d", processed)
 	}
@@ -690,7 +690,7 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 	createTestEntries(t, db, 5)
 
 	// Fetch the created entries for verification later
-	var entries []models.AuditOutbox
+	var entries []AuditOutbox
 	err := db.Where("status = ?", statusPending).Find(&entries).Error
 	if err != nil {
 		t.Fatalf("Failed to fetch outbox entries: %v", err)
@@ -722,7 +722,7 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 
 	// Verify all outbox entries were processed
 	var completed int64
-	db.Model(&models.AuditOutbox{}).Where("status = ?", "completed").Count(&completed)
+	db.Model(&AuditOutbox{}).Where("status = ?", "completed").Count(&completed)
 	if completed != 5 {
 		t.Errorf("Expected 5 completed outbox entries, got %d", completed)
 	}
@@ -740,13 +740,13 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 			ID            uuid.UUID
 			Table         string `gorm:"column:table_name"`
 			Operation     string
-			RecordID      uuid.UUID `gorm:"column:record_id"`
-			OldValues     string    `gorm:"column:old_values"`
-			NewValues     string    `gorm:"column:new_values"`
-			ChangedBy     *string   `gorm:"column:changed_by"`
-			TransactionID *string   `gorm:"column:transaction_id"`
-			ClientIP      *string   `gorm:"column:client_ip"`
-			UserAgent     *string   `gorm:"column:user_agent"`
+			RecordID      string  `gorm:"column:record_id"`
+			OldValues     string  `gorm:"column:old_values"`
+			NewValues     string  `gorm:"column:new_values"`
+			ChangedBy     *string `gorm:"column:changed_by"`
+			TransactionID *string `gorm:"column:transaction_id"`
+			ClientIP      *string `gorm:"column:client_ip"`
+			UserAgent     *string `gorm:"column:user_agent"`
 		}
 
 		err := db.Table("current_account_audit.audit_log").

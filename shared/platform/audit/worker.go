@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/domain/models"
 	"gorm.io/gorm"
 )
 
@@ -146,7 +145,7 @@ func (w *Worker) resetStuckEntries(ctx context.Context) error {
 	stuckThreshold := time.Now().Add(-defaultProcessingAge)
 
 	result := w.db.WithContext(ctx).
-		Model(&models.AuditOutbox{}).
+		Model(&AuditOutbox{}).
 		Where("status = ?", statusProcessing).
 		Where("created_at < ?", stuckThreshold).
 		Update("status", statusPending)
@@ -176,7 +175,7 @@ func (w *Worker) processBatch(ctx context.Context) error {
 		RecordProcessingDuration(time.Since(start).Seconds())
 	}()
 
-	var entries []models.AuditOutbox
+	var entries []AuditOutbox
 
 	// Fetch pending entries, ordered by creation time for FIFO processing
 	result := w.db.WithContext(ctx).
@@ -192,7 +191,7 @@ func (w *Worker) processBatch(ctx context.Context) error {
 	// Record outbox depth (pending entries count)
 	var pendingCount int64
 	if err := w.db.WithContext(ctx).
-		Model(&models.AuditOutbox{}).
+		Model(&AuditOutbox{}).
 		Where("status = ?", statusPending).
 		Count(&pendingCount).Error; err == nil {
 		RecordOutboxDepth(int(pendingCount))
@@ -246,7 +245,7 @@ func (w *Worker) processBatch(ctx context.Context) error {
 // On success: Status is set to 'completed'
 // On failure with retries remaining: Status is set back to 'pending', RetryCount incremented
 // On failure with retries exhausted: Status is set to 'failed'
-func (w *Worker) processEntry(ctx context.Context, entry *models.AuditOutbox) error {
+func (w *Worker) processEntry(ctx context.Context, entry *AuditOutbox) error {
 	// Record entry age (time from creation to processing)
 	entryAge := time.Since(entry.CreatedAt).Seconds()
 	RecordEntryAge(entryAge)
@@ -284,8 +283,8 @@ func (w *Worker) processEntry(ctx context.Context, entry *models.AuditOutbox) er
 //
 // The function copies all relevant fields from the outbox entry to the audit log,
 // excluding worker-specific fields (status, retry_count, last_error).
-func (w *Worker) insertAuditLog(ctx context.Context, entry *models.AuditOutbox) error {
-	auditLog := &models.AuditLog{
+func (w *Worker) insertAuditLog(ctx context.Context, entry *AuditOutbox) error {
+	auditLog := &AuditLog{
 		Table:         entry.Table,
 		Operation:     entry.Operation,
 		RecordID:      entry.RecordID,
@@ -307,7 +306,7 @@ func (w *Worker) insertAuditLog(ctx context.Context, entry *models.AuditOutbox) 
 
 // handleProcessingError handles failures during entry processing.
 // It implements retry logic with exponential backoff and failure state management.
-func (w *Worker) handleProcessingError(ctx context.Context, entry *models.AuditOutbox, processingErr error) error {
+func (w *Worker) handleProcessingError(ctx context.Context, entry *AuditOutbox, processingErr error) error {
 	entry.RetryCount++
 	errorMsg := processingErr.Error()
 	entry.LastError = &errorMsg
@@ -348,7 +347,7 @@ func (w *Worker) handleProcessingError(ctx context.Context, entry *models.AuditO
 
 // updateStatus updates the status of an audit entry.
 // This is a helper method to encapsulate status updates with error handling.
-func (w *Worker) updateStatus(ctx context.Context, entry *models.AuditOutbox, status string) error {
+func (w *Worker) updateStatus(ctx context.Context, entry *AuditOutbox, status string) error {
 	entry.Status = status
 	result := w.db.WithContext(ctx).
 		Model(entry).
