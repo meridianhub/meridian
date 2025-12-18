@@ -216,7 +216,7 @@ func TestAuditWorker_ProcessBatch_Success(t *testing.T) {
 	createTestEntries(t, db, 10)
 
 	// Start worker with faster poll interval for testing
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	worker.pollInterval = 100 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -256,7 +256,7 @@ func TestAuditWorker_ProcessBatch_BatchSize(t *testing.T) {
 	createTestEntries(t, db, 250)
 
 	// Create worker with batch size of 100
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	worker.batchSize = 100
 	ctx := context.Background()
 
@@ -294,7 +294,7 @@ func TestAuditWorker_ProcessEntry_Idempotency(t *testing.T) {
 	originalUpdatedAt := entry.CreatedAt
 
 	// Create worker
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	ctx := context.Background()
 
 	// Process batch (should skip completed entry)
@@ -324,7 +324,7 @@ func TestAuditWorker_ProcessEntry_RetryLogic(t *testing.T) {
 	entry := createTestEntry(t, db, statusPending)
 
 	// Create worker with custom max retries
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	worker.maxRetries = 3
 	ctx := context.Background()
 
@@ -387,7 +387,7 @@ func TestAuditWorker_GracefulShutdown(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Start worker
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -449,7 +449,7 @@ func TestAuditWorker_ResetStuckEntries(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create worker and run resetStuckEntries
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	ctx := context.Background()
 
 	err = worker.resetStuckEntries(ctx)
@@ -487,7 +487,7 @@ func TestAuditWorker_ConcurrentSafety(t *testing.T) {
 
 	workers := make([]*Worker, 3)
 	for i := 0; i < 3; i++ {
-		worker := NewAuditWorker(db, nil)
+		worker := NewAuditWorker(db, "", nil)
 		worker.pollInterval = 100 * time.Millisecond // Faster polling for test
 		workers[i] = worker
 		worker.Start(ctx)
@@ -530,7 +530,7 @@ func TestAuditWorker_ProcessBatch_EmptyQueue(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create worker
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	ctx := context.Background()
 
 	// Process batch with empty queue
@@ -556,7 +556,7 @@ func TestAuditWorker_ProcessEntry_ContextCancellation(t *testing.T) {
 	entry := createTestEntry(t, db, statusPending)
 
 	// Create worker
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 
 	// Create cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -583,7 +583,7 @@ func TestAuditWorker_MultipleStartStop(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create first worker
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 
 	// Start and stop
 	ctx, cancel := context.WithCancel(context.Background())
@@ -598,7 +598,7 @@ func TestAuditWorker_MultipleStartStop(t *testing.T) {
 	// on the same worker instance. Instead, we verify that a single Stop() works correctly.
 
 	// For a fresh start, create a new worker instance
-	worker2 := NewAuditWorker(db, nil)
+	worker2 := NewAuditWorker(db, "", nil)
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 	worker2.Start(ctx2)
@@ -614,7 +614,7 @@ func TestAuditWorker_Configuration(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create worker with custom settings
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	worker.batchSize = 50
 	worker.pollInterval = 10 * time.Second
 	worker.maxRetries = 5
@@ -642,7 +642,7 @@ func TestAuditWorker_ProcessBatch_PartialFailure(t *testing.T) {
 	createTestEntries(t, db, 10)
 
 	// Create worker
-	worker := NewAuditWorker(db, nil)
+	worker := NewAuditWorker(db, "", nil)
 	ctx := context.Background()
 
 	// Process batch
@@ -661,7 +661,7 @@ func TestAuditWorker_Stop_MultipleCallsSafe(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	worker := NewAuditWorker(db, logger)
+	worker := NewAuditWorker(db, "", logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -718,14 +718,15 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 	}
 
 	// Verify audit_log table starts empty
+	// Note: Using unqualified table name since test worker uses empty schema (public schema)
 	var initialCount int64
-	db.Table("current_account_audit.audit_log").Count(&initialCount)
+	db.Table("audit_log").Count(&initialCount)
 	if initialCount != 0 {
 		t.Fatalf("Expected audit_log to be empty, but found %d entries", initialCount)
 	}
 
 	// Create and start worker
-	worker := NewAuditWorker(db, logger)
+	worker := NewAuditWorker(db, "", logger)
 	worker.pollInterval = 100 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -747,7 +748,7 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 
 	// Verify audit_log entries were created
 	var auditLogCount int64
-	db.Table("current_account_audit.audit_log").Count(&auditLogCount)
+	db.Table("audit_log").Count(&auditLogCount)
 	if auditLogCount != 5 {
 		t.Errorf("Expected 5 audit_log entries, got %d", auditLogCount)
 	}
@@ -767,7 +768,7 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 			UserAgent     *string `gorm:"column:user_agent"`
 		}
 
-		err := db.Table("current_account_audit.audit_log").
+		err := db.Table("audit_log").
 			Where("record_id = ? AND operation = ?", entry.RecordID, entry.Operation).
 			First(&auditLog).Error
 		if err != nil {
@@ -800,11 +801,11 @@ func createBenchmarkEntries(b *testing.B, db *gorm.DB, count int) {
 	b.Helper()
 
 	for i := 0; i < count; i++ {
-		entry := &models.AuditOutbox{
+		entry := &AuditOutbox{
 			ID:        uuid.New(),
 			Table:     "customer",
 			Operation: "INSERT",
-			RecordID:  uuid.New(),
+			RecordID:  uuid.New().String(),
 			NewValues: `{"id": "123", "customer_number": "CUST001", "first_name": "Benchmark", "last_name": "Test", "email": "bench@example.com", "status": "active"}`,
 			Status:    statusPending,
 			CreatedAt: time.Now(),
@@ -841,7 +842,7 @@ func runWorkerThroughputBenchmark(b *testing.B, batchSize int) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	// Create worker with specified batch size
-	worker := NewAuditWorker(db, logger)
+	worker := NewAuditWorker(db, "", logger)
 	worker.batchSize = batchSize
 
 	ctx := context.Background()
@@ -885,17 +886,17 @@ func BenchmarkAuditWorkerProcessEntry(b *testing.B) {
 	defer cleanup()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	worker := NewAuditWorker(db, logger)
+	worker := NewAuditWorker(db, "", logger)
 	ctx := context.Background()
 
 	// Create all entries upfront
-	entries := make([]*models.AuditOutbox, b.N)
+	entries := make([]*AuditOutbox, b.N)
 	for i := 0; i < b.N; i++ {
-		entry := &models.AuditOutbox{
+		entry := &AuditOutbox{
 			ID:        uuid.New(),
 			Table:     "customer",
 			Operation: "INSERT",
-			RecordID:  uuid.New(),
+			RecordID:  uuid.New().String(),
 			NewValues: `{"id": "123", "name": "Test"}`,
 			Status:    statusPending,
 			CreatedAt: time.Now(),
@@ -936,7 +937,7 @@ func BenchmarkAuditWorkerE2E(b *testing.B) {
 	createBenchmarkEntries(b, db, totalEntries)
 
 	// Create and start worker with fast poll interval
-	worker := NewAuditWorker(db, logger)
+	worker := NewAuditWorker(db, "", logger)
 	worker.pollInterval = 10 * time.Millisecond
 	worker.batchSize = 100
 
@@ -959,7 +960,7 @@ func BenchmarkAuditWorkerE2E(b *testing.B) {
 			b.Fatalf("Timeout waiting for entries to be processed")
 		case <-ticker.C:
 			var completed int64
-			if err := db.Model(&models.AuditOutbox{}).
+			if err := db.Model(&AuditOutbox{}).
 				Where("status = ?", statusCompleted).
 				Count(&completed).Error; err != nil {
 				b.Fatalf("Failed to count completed entries: %v", err)

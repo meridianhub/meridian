@@ -8,29 +8,53 @@ import (
 )
 
 var (
-	// outboxDepth tracks the number of pending entries in the audit outbox
+	// outboxDepth tracks the number of pending entries in the audit outbox (deprecated, use outboxDepthBySchema)
 	outboxDepth = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: "meridian",
 		Subsystem: "audit_worker",
 		Name:      "outbox_depth_total",
-		Help:      "Number of pending entries in the audit outbox",
+		Help:      "Number of pending entries in the audit outbox (deprecated, use outbox_depth_by_schema)",
 	})
 
-	// outboxProcessed counts successfully processed audit entries
+	// outboxDepthBySchema tracks the number of pending entries per schema
+	outboxDepthBySchema = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_worker",
+		Name:      "outbox_depth_by_schema",
+		Help:      "Number of pending entries in the audit outbox by schema",
+	}, []string{"schema"})
+
+	// outboxProcessed counts successfully processed audit entries (deprecated, use outboxProcessedBySchema)
 	outboxProcessed = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "meridian",
 		Subsystem: "audit_worker",
 		Name:      "outbox_processed_total",
-		Help:      "Total number of successfully processed audit entries",
+		Help:      "Total number of successfully processed audit entries (deprecated, use outbox_processed_by_schema)",
 	})
 
-	// outboxFailed counts failed audit entries (retries exhausted)
+	// outboxProcessedBySchema counts successfully processed audit entries per schema
+	outboxProcessedBySchema = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_worker",
+		Name:      "outbox_processed_by_schema",
+		Help:      "Total number of successfully processed audit entries by schema",
+	}, []string{"schema"})
+
+	// outboxFailed counts failed audit entries (deprecated, use outboxFailedBySchema)
 	outboxFailed = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "meridian",
 		Subsystem: "audit_worker",
 		Name:      "outbox_failed_total",
-		Help:      "Total number of failed audit entries (retries exhausted)",
+		Help:      "Total number of failed audit entries (deprecated, use outbox_failed_by_schema)",
 	})
+
+	// outboxFailedBySchema counts failed audit entries per schema
+	outboxFailedBySchema = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_worker",
+		Name:      "outbox_failed_by_schema",
+		Help:      "Total number of failed audit entries by schema",
+	}, []string{"schema"})
 
 	// processingDuration tracks the duration of batch processing operations
 	processingDuration = promauto.NewHistogram(prometheus.HistogramOpts{
@@ -51,18 +75,39 @@ var (
 	})
 )
 
-// RecordOutboxDepth updates the gauge for the number of pending entries
+// RecordOutboxDepth updates the gauge for the number of pending entries (deprecated)
 func RecordOutboxDepth(depth int) {
 	outboxDepth.Set(float64(depth))
 }
 
-// RecordProcessed increments the counter for successfully processed entries
+// RecordOutboxDepthBySchema updates the gauge for the number of pending entries for a specific schema
+func RecordOutboxDepthBySchema(schema string, depth int) {
+	outboxDepthBySchema.WithLabelValues(schema).Set(float64(depth))
+	// Also update the aggregate metric for backwards compatibility
+	outboxDepth.Set(float64(depth))
+}
+
+// RecordProcessed increments the counter for successfully processed entries (deprecated)
 func RecordProcessed() {
 	outboxProcessed.Inc()
 }
 
-// RecordFailed increments the counter for failed entries (retries exhausted)
+// RecordProcessedBySchema increments the counter for successfully processed entries for a specific schema
+func RecordProcessedBySchema(schema string) {
+	outboxProcessedBySchema.WithLabelValues(schema).Inc()
+	// Also update the aggregate metric for backwards compatibility
+	outboxProcessed.Inc()
+}
+
+// RecordFailed increments the counter for failed entries (deprecated)
 func RecordFailed() {
+	outboxFailed.Inc()
+}
+
+// RecordFailedBySchema increments the counter for failed entries for a specific schema
+func RecordFailedBySchema(schema string) {
+	outboxFailedBySchema.WithLabelValues(schema).Inc()
+	// Also update the aggregate metric for backwards compatibility
 	outboxFailed.Inc()
 }
 

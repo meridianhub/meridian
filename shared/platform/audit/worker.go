@@ -37,12 +37,18 @@ const (
 	statusProcessing = "processing"
 	statusFailed     = "failed"
 	statusCompleted  = "completed"
+
+	// Table names
+	tableAuditOutbox = "audit_outbox"
+	tableAuditLog    = "audit_log"
 )
 
 // Worker is a background processor that moves audit records from the outbox to the audit log.
 // It implements graceful shutdown and parallel processing within batches.
+// Each worker processes a single schema, supporting the per-service audit worker pattern (ADR-0020).
 type Worker struct {
 	db           *gorm.DB
+	schema       string // PostgreSQL schema name (e.g., "party_audit", "current_account_audit")
 	batchSize    int
 	pollInterval time.Duration
 	maxRetries   int
@@ -52,25 +58,33 @@ type Worker struct {
 	wg           sync.WaitGroup
 }
 
-// NewAuditWorker creates a new audit worker with default settings.
+// NewAuditWorker creates a new audit worker for a specific service schema.
 // The worker processes audit outbox entries in batches and moves them to the audit log.
+// Per ADR-0020, each service runs its own embedded worker processing its local schema.
 //
 // Parameters:
 //   - db: GORM database connection
+//   - schema: PostgreSQL schema name (e.g., "party_audit", "current_account_audit")
 //   - logger: Structured logger (uses slog.Default() if nil)
 //
 // Returns a configured Worker ready to start processing.
-func NewAuditWorker(db *gorm.DB, logger *slog.Logger) *Worker {
+//
+// Example:
+//
+//	auditWorker := audit.NewAuditWorker(db, "party_audit", logger)
+//	auditWorker.Start(ctx)
+func NewAuditWorker(db *gorm.DB, schema string, logger *slog.Logger) *Worker {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	return &Worker{
 		db:           db,
+		schema:       schema,
 		batchSize:    defaultBatchSize,
 		pollInterval: defaultPollInterval,
 		maxRetries:   defaultMaxRetries,
-		logger:       logger,
+		logger:       logger.With("schema", schema),
 		shutdown:     make(chan struct{}),
 	}
 }
@@ -90,7 +104,8 @@ func (w *Worker) Start(ctx context.Context) {
 	w.logger.Info("audit worker started",
 		"batch_size", w.batchSize,
 		"poll_interval", w.pollInterval,
-		"max_retries", w.maxRetries)
+		"max_retries", w.maxRetries,
+		"schema", w.schema)
 }
 
 // Stop initiates graceful shutdown of the worker.
@@ -103,6 +118,22 @@ func (w *Worker) Stop() {
 	})
 	w.wg.Wait()
 	w.logger.Info("audit worker stopped")
+}
+
+// outboxTable returns the schema-qualified audit_outbox table name.
+func (w *Worker) outboxTable() string {
+	if w.schema == "" {
+		return tableAuditOutbox
+	}
+	return w.schema + "." + tableAuditOutbox
+}
+
+// auditLogTable returns the schema-qualified audit_log table name.
+func (w *Worker) auditLogTable() string {
+	if w.schema == "" {
+		return tableAuditLog
+	}
+	return w.schema + "." + tableAuditLog
 }
 
 // run is the main processing loop that polls the outbox and processes batches.
@@ -145,7 +176,7 @@ func (w *Worker) resetStuckEntries(ctx context.Context) error {
 	stuckThreshold := time.Now().Add(-defaultProcessingAge)
 
 	result := w.db.WithContext(ctx).
-		Model(&AuditOutbox{}).
+		Table(w.outboxTable()).
 		Where("status = ?", statusProcessing).
 		Where("created_at < ?", stuckThreshold).
 		Update("status", statusPending)
@@ -179,6 +210,7 @@ func (w *Worker) processBatch(ctx context.Context) error {
 
 	// Fetch pending entries, ordered by creation time for FIFO processing
 	result := w.db.WithContext(ctx).
+		Table(w.outboxTable()).
 		Where("status = ?", statusPending).
 		Order("created_at ASC").
 		Limit(w.batchSize).
@@ -191,10 +223,10 @@ func (w *Worker) processBatch(ctx context.Context) error {
 	// Record outbox depth (pending entries count)
 	var pendingCount int64
 	if err := w.db.WithContext(ctx).
-		Model(&AuditOutbox{}).
+		Table(w.outboxTable()).
 		Where("status = ?", statusPending).
 		Count(&pendingCount).Error; err == nil {
-		RecordOutboxDepth(int(pendingCount))
+		RecordOutboxDepthBySchema(w.schema, int(pendingCount))
 	}
 
 	if len(entries) == 0 {
@@ -267,7 +299,7 @@ func (w *Worker) processEntry(ctx context.Context, entry *AuditOutbox) error {
 	}
 
 	// Record successful processing
-	RecordProcessed()
+	RecordProcessedBySchema(w.schema)
 
 	w.logger.Debug("audit entry processed successfully",
 		"entry_id", entry.ID,
@@ -297,7 +329,7 @@ func (w *Worker) insertAuditLog(ctx context.Context, entry *AuditOutbox) error {
 		CreatedAt:     time.Now(),
 	}
 
-	if err := w.db.WithContext(ctx).Create(auditLog).Error; err != nil {
+	if err := w.db.WithContext(ctx).Table(w.auditLogTable()).Create(auditLog).Error; err != nil {
 		return fmt.Errorf("failed to insert audit log entry: %w", err)
 	}
 
@@ -315,7 +347,7 @@ func (w *Worker) handleProcessingError(ctx context.Context, entry *AuditOutbox, 
 	if entry.RetryCount >= w.maxRetries {
 		entry.Status = statusFailed
 		// Record failed entry (retries exhausted)
-		RecordFailed()
+		RecordFailedBySchema(w.schema)
 		w.logger.Error("audit entry moved to failed state",
 			"entry_id", entry.ID,
 			"table", entry.Table,
@@ -337,7 +369,14 @@ func (w *Worker) handleProcessingError(ctx context.Context, entry *AuditOutbox, 
 	}
 
 	// Update the entry with new status and retry information
-	result := w.db.WithContext(ctx).Save(entry)
+	result := w.db.WithContext(ctx).
+		Table(w.outboxTable()).
+		Where("id = ?", entry.ID).
+		Updates(map[string]interface{}{
+			"status":      entry.Status,
+			"retry_count": entry.RetryCount,
+			"last_error":  entry.LastError,
+		})
 	if result.Error != nil {
 		return fmt.Errorf("failed to update entry after processing error: %w", result.Error)
 	}
@@ -350,7 +389,8 @@ func (w *Worker) handleProcessingError(ctx context.Context, entry *AuditOutbox, 
 func (w *Worker) updateStatus(ctx context.Context, entry *AuditOutbox, status string) error {
 	entry.Status = status
 	result := w.db.WithContext(ctx).
-		Model(entry).
+		Table(w.outboxTable()).
+		Where("id = ?", entry.ID).
 		Update("status", status)
 
 	if result.Error != nil {
