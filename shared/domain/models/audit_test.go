@@ -556,3 +556,228 @@ func TestAccountAudit_CapturesAllOperations(t *testing.T) {
 		Count(&totalCount)
 	assert.Equal(t, int64(3), totalCount, "Should have exactly 3 audit records for account (INSERT, UPDATE, DELETE)")
 }
+
+// setupBenchmarkDB creates a PostgreSQL container for benchmarks.
+// Returns the database connection and a cleanup function.
+func setupBenchmarkDB(b *testing.B) (*gorm.DB, func()) {
+	b.Helper()
+
+	ctx := context.Background()
+
+	// Create PostgreSQL container
+	pgContainer, err := postgres.Run(ctx,
+		"postgres:15-alpine",
+		postgres.WithDatabase("bench_db"),
+		postgres.WithUsername("bench_user"),
+		postgres.WithPassword("bench_password"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60*time.Second)),
+	)
+	if err != nil {
+		b.Fatalf("Failed to start postgres container: %v", err)
+	}
+
+	// Get connection string
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		b.Fatalf("Failed to get connection string: %v", err)
+	}
+
+	// Connect with GORM
+	db, err := gorm.Open(postgresdriver.Open(connStr), &gorm.Config{})
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		b.Fatalf("Failed to connect to test database: %v", err)
+	}
+
+	// Enable pgcrypto extension for gen_random_uuid() function
+	err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		b.Fatalf("Failed to enable pgcrypto extension: %v", err)
+	}
+
+	// Create audit_outbox table
+	err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_outbox (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			table_name VARCHAR(100) NOT NULL,
+			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+			record_id UUID NOT NULL,
+			old_values TEXT,
+			new_values TEXT,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'failed')),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			changed_by VARCHAR(100),
+			transaction_id VARCHAR(100),
+			client_ip VARCHAR(45),
+			user_agent TEXT
+		)
+	`).Error
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		b.Fatalf("Failed to create audit_outbox table: %v", err)
+	}
+
+	// Create indexes
+	err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
+		ON audit_outbox(status, created_at)
+	`).Error
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		b.Fatalf("Failed to create audit_outbox indexes: %v", err)
+	}
+
+	// Migrate Customer and Account tables
+	err = db.AutoMigrate(&Customer{}, &Account{})
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		b.Fatalf("Failed to migrate Customer and Account tables: %v", err)
+	}
+
+	cleanup := func() {
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+		_ = pgContainer.Terminate(ctx)
+	}
+
+	return db, cleanup
+}
+
+// BenchmarkAuditOutboxOverhead measures the overhead of writing audit entries
+// within a transaction. ADR-0009 target: <5ms per operation.
+//
+// This benchmark measures the Customer INSERT operation which includes:
+// 1. Customer INSERT to customers table
+// 2. Audit outbox INSERT to audit_outbox table (via AfterCreate hook)
+//
+// Run with: go test -bench=BenchmarkAuditOutboxOverhead -benchmem ./shared/domain/models/
+func BenchmarkAuditOutboxOverhead(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		// Use UUID suffix to guarantee uniqueness across iterations
+		uniqueID := uuid.New().String()[:8]
+		customer := &Customer{
+			CustomerNumber: "CUST" + uniqueID,
+			FirstName:      "Benchmark",
+			LastName:       "Customer",
+			Email:          "bench" + uniqueID + "@example.com",
+			Status:         "active",
+		}
+		if err := db.Create(customer).Error; err != nil {
+			b.Fatalf("Failed to create customer: %v", err)
+		}
+	}
+
+	b.StopTimer()
+
+	// Report results with ADR-0009 target
+	nsPerOp := float64(b.Elapsed().Nanoseconds()) / float64(b.N)
+	msPerOp := nsPerOp / 1_000_000
+	b.ReportMetric(msPerOp, "ms/op")
+
+	// Log target comparison (informational, not enforced in benchmark)
+	b.Logf("ADR-0009 target: <5ms, actual: %.3fms per operation", msPerOp)
+}
+
+// BenchmarkAuditOutboxOverhead_Account measures Account INSERT with audit.
+// Account has more fields than Customer, testing serialization overhead.
+func BenchmarkAuditOutboxOverhead_Account(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	// Create a customer first (required for foreign key)
+	customer := &Customer{
+		CustomerNumber: "CUSTBENCH001",
+		FirstName:      "Benchmark",
+		LastName:       "Parent",
+		Email:          "benchmark.parent@example.com",
+		Status:         "active",
+	}
+	if err := db.Create(customer).Error; err != nil {
+		b.Fatalf("Failed to create customer: %v", err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		// Use UUID suffix to guarantee uniqueness across iterations
+		uniqueID := uuid.New().String()[:8]
+		account := &Account{
+			AccountNumber: "GB82WEST" + uniqueID,
+			AccountType:   "current",
+			Currency:      "GBP",
+			Status:        "active",
+			CustomerID:    customer.ID,
+			Balance:       int64(i * 100),
+		}
+		if err := db.Create(account).Error; err != nil {
+			b.Fatalf("Failed to create account: %v", err)
+		}
+	}
+
+	b.StopTimer()
+
+	nsPerOp := float64(b.Elapsed().Nanoseconds()) / float64(b.N)
+	msPerOp := nsPerOp / 1_000_000
+	b.ReportMetric(msPerOp, "ms/op")
+	b.Logf("ADR-0009 target: <5ms, actual: %.3fms per operation", msPerOp)
+}
+
+// BenchmarkAuditOutboxOverhead_Update measures UPDATE operation overhead.
+// UPDATE requires BeforeUpdate hook to capture old values, which adds
+// an additional SELECT query.
+func BenchmarkAuditOutboxOverhead_Update(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	// Create customers to update
+	customers := make([]*Customer, b.N)
+	for i := 0; i < b.N; i++ {
+		// Use UUID suffix to guarantee uniqueness across iterations
+		uniqueID := uuid.New().String()[:8]
+		customer := &Customer{
+			CustomerNumber: "CUSTUPD" + uniqueID,
+			FirstName:      "Update",
+			LastName:       "Test",
+			Email:          "update" + uniqueID + "@example.com",
+			Status:         "active",
+		}
+		if err := db.Create(customer).Error; err != nil {
+			b.Fatalf("Failed to create customer for update: %v", err)
+		}
+		customers[i] = customer
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		customers[i].FirstName = "Updated"
+		customers[i].Status = "suspended"
+		if err := db.Save(customers[i]).Error; err != nil {
+			b.Fatalf("Failed to update customer: %v", err)
+		}
+	}
+
+	b.StopTimer()
+
+	nsPerOp := float64(b.Elapsed().Nanoseconds()) / float64(b.N)
+	msPerOp := nsPerOp / 1_000_000
+	b.ReportMetric(msPerOp, "ms/op")
+	b.Logf("ADR-0009 target: <5ms, UPDATE actual: %.3fms per operation", msPerOp)
+}
