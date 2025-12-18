@@ -800,11 +800,11 @@ func createBenchmarkEntries(b *testing.B, db *gorm.DB, count int) {
 	b.Helper()
 
 	for i := 0; i < count; i++ {
-		entry := &models.AuditOutbox{
+		entry := &AuditOutbox{
 			ID:        uuid.New(),
 			Table:     "customer",
 			Operation: "INSERT",
-			RecordID:  uuid.New(),
+			RecordID:  uuid.New().String(),
 			NewValues: `{"id": "123", "customer_number": "CUST001", "first_name": "Benchmark", "last_name": "Test", "email": "bench@example.com", "status": "active"}`,
 			Status:    statusPending,
 			CreatedAt: time.Now(),
@@ -889,13 +889,13 @@ func BenchmarkAuditWorkerProcessEntry(b *testing.B) {
 	ctx := context.Background()
 
 	// Create all entries upfront
-	entries := make([]*models.AuditOutbox, b.N)
+	entries := make([]*AuditOutbox, b.N)
 	for i := 0; i < b.N; i++ {
-		entry := &models.AuditOutbox{
+		entry := &AuditOutbox{
 			ID:        uuid.New(),
 			Table:     "customer",
 			Operation: "INSERT",
-			RecordID:  uuid.New(),
+			RecordID:  uuid.New().String(),
 			NewValues: `{"id": "123", "name": "Test"}`,
 			Status:    statusPending,
 			CreatedAt: time.Now(),
@@ -959,7 +959,7 @@ func BenchmarkAuditWorkerE2E(b *testing.B) {
 			b.Fatalf("Timeout waiting for entries to be processed")
 		case <-ticker.C:
 			var completed int64
-			if err := db.Model(&models.AuditOutbox{}).
+			if err := db.Model(&AuditOutbox{}).
 				Where("status = ?", statusCompleted).
 				Count(&completed).Error; err != nil {
 				b.Fatalf("Failed to count completed entries: %v", err)
