@@ -17,10 +17,18 @@ import (
 
 var errForcedTransactionFailure = gorm.ErrInvalidTransaction
 
-// setupTestDB creates a PostgreSQL container with GORM for testing
-// PostgreSQL is used instead of SQLite to match production CockroachDB behavior
-func setupTestDB(t *testing.T) (*gorm.DB, func()) {
-	t.Helper()
+// testHelper provides a common interface for both testing.T and testing.B
+// to enable shared setup code between tests and benchmarks.
+type testHelper interface {
+	Helper()
+	Fatalf(format string, args ...interface{})
+}
+
+// setupModelsDB creates a PostgreSQL container with GORM for testing/benchmarking.
+// PostgreSQL is used instead of SQLite to match production CockroachDB behavior.
+// Also migrates Customer and Account tables required for domain model tests.
+func setupModelsDB(h testHelper) (*gorm.DB, func()) {
+	h.Helper()
 
 	ctx := context.Background()
 
@@ -35,23 +43,32 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 				WithOccurrence(2).
 				WithStartupTimeout(60*time.Second)),
 	)
-	require.NoError(t, err, "Failed to start postgres container")
+	if err != nil {
+		h.Fatalf("Failed to start postgres container: %v", err)
+	}
 
 	// Get connection string
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err, "Failed to get connection string")
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to get connection string: %v", err)
+	}
 
 	// Connect with GORM
 	db, err := gorm.Open(postgresdriver.Open(connStr), &gorm.Config{})
-	require.NoError(t, err, "Failed to connect to test database")
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to connect to test database: %v", err)
+	}
 
 	// Enable pgcrypto extension for gen_random_uuid() function
-	err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error
-	require.NoError(t, err, "Failed to enable pgcrypto extension")
+	if err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to enable pgcrypto extension: %v", err)
+	}
 
 	// Create audit_outbox table (unqualified, uses public schema)
-	// TableName method now returns unqualified "audit_outbox" for search_path routing
-	err = db.Exec(`
+	if err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_outbox (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			table_name VARCHAR(100) NOT NULL,
@@ -68,19 +85,25 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 			client_ip VARCHAR(45),
 			user_agent TEXT
 		)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_outbox table")
+	`).Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to create audit_outbox table: %v", err)
+	}
 
 	// Create indexes
-	err = db.Exec(`
+	if err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
 		ON audit_outbox(status, created_at)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_outbox indexes")
+	`).Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to create audit_outbox indexes: %v", err)
+	}
 
 	// Migrate Customer and Account tables
-	err = db.AutoMigrate(&Customer{}, &Account{})
-	require.NoError(t, err, "Failed to migrate Customer and Account tables")
+	if err = db.AutoMigrate(&Customer{}, &Account{}); err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to migrate Customer and Account tables: %v", err)
+	}
 
 	cleanup := func() {
 		sqlDB, _ := db.DB()
@@ -91,6 +114,13 @@ func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	}
 
 	return db, cleanup
+}
+
+// setupTestDB creates a PostgreSQL container with GORM for testing.
+// PostgreSQL is used instead of SQLite to match production CockroachDB behavior.
+func setupTestDB(t *testing.T) (*gorm.DB, func()) {
+	t.Helper()
+	return setupModelsDB(t)
 }
 
 // TestAuditOutbox_AtomicCommit verifies that audit outbox entry is created atomically
@@ -555,4 +585,141 @@ func TestAccountAudit_CapturesAllOperations(t *testing.T) {
 		Where("record_id = ? AND table_name = ?", account.ID, "account").
 		Count(&totalCount)
 	assert.Equal(t, int64(3), totalCount, "Should have exactly 3 audit records for account (INSERT, UPDATE, DELETE)")
+}
+
+// setupBenchmarkDB creates a PostgreSQL container for benchmarks.
+// Returns the database connection and a cleanup function.
+// Uses the shared setupModelsDB helper to avoid code duplication.
+func setupBenchmarkDB(b *testing.B) (*gorm.DB, func()) {
+	return setupModelsDB(b)
+}
+
+// BenchmarkAuditOutboxOverhead measures the overhead of writing audit entries
+// within a transaction. ADR-0009 target: <5ms per operation.
+//
+// This benchmark measures the Customer INSERT operation which includes:
+// 1. Customer INSERT to customers table
+// 2. Audit outbox INSERT to audit_outbox table (via AfterCreate hook)
+//
+// Run with: go test -bench=BenchmarkAuditOutboxOverhead -benchmem ./shared/domain/models/
+func BenchmarkAuditOutboxOverhead(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		// Use UUID suffix to guarantee uniqueness across iterations
+		uniqueID := uuid.New().String()[:8]
+		customer := &Customer{
+			CustomerNumber: "CUST" + uniqueID,
+			FirstName:      "Benchmark",
+			LastName:       "Customer",
+			Email:          "bench" + uniqueID + "@example.com",
+			Status:         "active",
+		}
+		if err := db.Create(customer).Error; err != nil {
+			b.Fatalf("Failed to create customer: %v", err)
+		}
+	}
+
+	b.StopTimer()
+
+	// Report results with ADR-0009 target
+	nsPerOp := float64(b.Elapsed().Nanoseconds()) / float64(b.N)
+	msPerOp := nsPerOp / 1_000_000
+	b.ReportMetric(msPerOp, "ms/op")
+
+	// Log target comparison (informational, not enforced in benchmark)
+	b.Logf("ADR-0009 target: <5ms, actual: %.3fms per operation", msPerOp)
+}
+
+// BenchmarkAuditOutboxOverhead_Account measures Account INSERT with audit.
+// Account has more fields than Customer, testing serialization overhead.
+func BenchmarkAuditOutboxOverhead_Account(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	// Create a customer first (required for foreign key)
+	customer := &Customer{
+		CustomerNumber: "CUSTBENCH001",
+		FirstName:      "Benchmark",
+		LastName:       "Parent",
+		Email:          "benchmark.parent@example.com",
+		Status:         "active",
+	}
+	if err := db.Create(customer).Error; err != nil {
+		b.Fatalf("Failed to create customer: %v", err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		// Use UUID suffix to guarantee uniqueness across iterations
+		uniqueID := uuid.New().String()[:8]
+		account := &Account{
+			AccountNumber: "GB82WEST" + uniqueID,
+			AccountType:   "current",
+			Currency:      "GBP",
+			Status:        "active",
+			CustomerID:    customer.ID,
+			Balance:       int64(i * 100),
+		}
+		if err := db.Create(account).Error; err != nil {
+			b.Fatalf("Failed to create account: %v", err)
+		}
+	}
+
+	b.StopTimer()
+
+	nsPerOp := float64(b.Elapsed().Nanoseconds()) / float64(b.N)
+	msPerOp := nsPerOp / 1_000_000
+	b.ReportMetric(msPerOp, "ms/op")
+	b.Logf("ADR-0009 target: <5ms, actual: %.3fms per operation", msPerOp)
+}
+
+// BenchmarkAuditOutboxOverhead_Update measures UPDATE operation overhead.
+// UPDATE requires BeforeUpdate hook to capture old values, which adds
+// an additional SELECT query.
+func BenchmarkAuditOutboxOverhead_Update(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	// Create customers to update
+	customers := make([]*Customer, b.N)
+	for i := 0; i < b.N; i++ {
+		// Use UUID suffix to guarantee uniqueness across iterations
+		uniqueID := uuid.New().String()[:8]
+		customer := &Customer{
+			CustomerNumber: "CUSTUPD" + uniqueID,
+			FirstName:      "Update",
+			LastName:       "Test",
+			Email:          "update" + uniqueID + "@example.com",
+			Status:         "active",
+		}
+		if err := db.Create(customer).Error; err != nil {
+			b.Fatalf("Failed to create customer for update: %v", err)
+		}
+		customers[i] = customer
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		customers[i].FirstName = "Updated"
+		customers[i].Status = "suspended"
+		if err := db.Save(customers[i]).Error; err != nil {
+			b.Fatalf("Failed to update customer: %v", err)
+		}
+	}
+
+	b.StopTimer()
+
+	nsPerOp := float64(b.Elapsed().Nanoseconds()) / float64(b.N)
+	msPerOp := nsPerOp / 1_000_000
+	b.ReportMetric(msPerOp, "ms/op")
+	b.Logf("ADR-0009 target: <5ms, UPDATE actual: %.3fms per operation", msPerOp)
 }

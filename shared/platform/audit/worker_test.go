@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -19,10 +20,18 @@ import (
 	"gorm.io/gorm"
 )
 
-// setupTestDB creates a PostgreSQL container with GORM for testing.
+// testHelper provides a common interface for both testing.T and testing.B
+// to enable shared setup code between tests and benchmarks.
+type testHelper interface {
+	Helper()
+	Fatalf(format string, args ...interface{})
+}
+
+// setupAuditDB creates a PostgreSQL container with GORM for testing/benchmarking.
 // PostgreSQL is used instead of SQLite to match production CockroachDB behavior.
-func setupTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
+// Returns the database connection and a cleanup function.
+func setupAuditDB(h testHelper) (*gorm.DB, func()) {
+	h.Helper()
 
 	ctx := context.Background()
 
@@ -37,23 +46,32 @@ func setupTestDB(t *testing.T) *gorm.DB {
 				WithOccurrence(2).
 				WithStartupTimeout(60*time.Second)),
 	)
-	require.NoError(t, err, "Failed to start postgres container")
+	if err != nil {
+		h.Fatalf("Failed to start postgres container: %v", err)
+	}
 
 	// Get connection string
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err, "Failed to get connection string")
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to get connection string: %v", err)
+	}
 
 	// Connect with GORM
 	db, err := gorm.Open(postgresdriver.Open(connStr), &gorm.Config{})
-	require.NoError(t, err, "Failed to connect to test database")
+	if err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to connect to test database: %v", err)
+	}
 
 	// Enable pgcrypto extension for gen_random_uuid() function
-	err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error
-	require.NoError(t, err, "Failed to enable pgcrypto extension")
+	if err = db.Exec("CREATE EXTENSION IF NOT EXISTS pgcrypto").Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to enable pgcrypto extension: %v", err)
+	}
 
 	// Create audit_outbox table (unqualified, uses public schema)
-	// TableName method now returns unqualified "audit_outbox" for search_path routing
-	err = db.Exec(`
+	if err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_outbox (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			table_name VARCHAR(100) NOT NULL,
@@ -70,18 +88,22 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			client_ip VARCHAR(45),
 			user_agent TEXT
 		)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_outbox table")
+	`).Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to create audit_outbox table: %v", err)
+	}
 
 	// Create indexes for audit_outbox
-	err = db.Exec(`
+	if err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
 		ON audit_outbox(status, created_at)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_outbox indexes")
+	`).Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to create audit_outbox indexes: %v", err)
+	}
 
 	// Create audit_log table (unqualified for search_path routing)
-	err = db.Exec(`
+	if err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_log (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			table_name VARCHAR(100) NOT NULL,
@@ -95,37 +117,33 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			client_ip VARCHAR(45),
 			user_agent TEXT
 		)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_log table")
+	`).Error; err != nil {
+		_ = pgContainer.Terminate(ctx)
+		h.Fatalf("Failed to create audit_log table: %v", err)
+	}
 
-	// Create indexes for audit_log
-	err = db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_log_table_name
-		ON audit_log(table_name)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_log table_name index")
+	// Create indexes for audit_log (ignore errors for non-critical indexes)
+	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_table_name ON audit_log(table_name)`).Error
+	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_operation ON audit_log(operation)`).Error
+	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_record_id ON audit_log(record_id)`).Error
 
-	err = db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_log_operation
-		ON audit_log(operation)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_log operation index")
-
-	err = db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_log_record_id
-		ON audit_log(record_id)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_log record_id index")
-
-	// Register cleanup
-	t.Cleanup(func() {
+	cleanup := func() {
 		sqlDB, _ := db.DB()
 		if sqlDB != nil {
 			_ = sqlDB.Close()
 		}
 		_ = pgContainer.Terminate(ctx)
-	})
+	}
 
+	return db, cleanup
+}
+
+// setupTestDB creates a PostgreSQL container with GORM for testing.
+// PostgreSQL is used instead of SQLite to match production CockroachDB behavior.
+func setupTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, cleanup := setupAuditDB(t)
+	t.Cleanup(cleanup)
 	return db
 }
 
@@ -768,4 +786,199 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 			t.Errorf("RecordID mismatch: expected %s, got %s", entry.RecordID, auditLog.RecordID)
 		}
 	}
+}
+
+// setupBenchmarkDB creates a PostgreSQL container for benchmarks.
+// Returns the database connection and a cleanup function.
+// Uses the shared setupAuditDB helper to avoid code duplication.
+func setupBenchmarkDB(b *testing.B) (*gorm.DB, func()) {
+	return setupAuditDB(b)
+}
+
+// createBenchmarkEntries creates N audit outbox entries for benchmarking.
+func createBenchmarkEntries(b *testing.B, db *gorm.DB, count int) {
+	b.Helper()
+
+	for i := 0; i < count; i++ {
+		entry := &models.AuditOutbox{
+			ID:        uuid.New(),
+			Table:     "customer",
+			Operation: "INSERT",
+			RecordID:  uuid.New(),
+			NewValues: `{"id": "123", "customer_number": "CUST001", "first_name": "Benchmark", "last_name": "Test", "email": "bench@example.com", "status": "active"}`,
+			Status:    statusPending,
+			CreatedAt: time.Now(),
+		}
+
+		if err := db.Create(entry).Error; err != nil {
+			b.Fatalf("Failed to create benchmark entry: %v", err)
+		}
+	}
+}
+
+// BenchmarkAuditWorkerThroughput measures the worker's processing throughput.
+// ADR-0009 target: >1000 records/second.
+//
+// This benchmark measures how fast the worker can process audit outbox entries
+// by calling processBatch directly. It tests batch sizes of 10, 100, and 1000.
+//
+// Run with: go test -bench=BenchmarkAuditWorkerThroughput -benchmem ./shared/platform/audit/
+func BenchmarkAuditWorkerThroughput(b *testing.B) {
+	batchSizes := []int{10, 100, 1000}
+
+	for _, batchSize := range batchSizes {
+		batchSize := batchSize // capture for closure
+		b.Run(fmt.Sprintf("batch_%d", batchSize), func(b *testing.B) {
+			runWorkerThroughputBenchmark(b, batchSize)
+		})
+	}
+}
+
+func runWorkerThroughputBenchmark(b *testing.B, batchSize int) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// Create worker with specified batch size
+	worker := NewAuditWorker(db, logger)
+	worker.batchSize = batchSize
+
+	ctx := context.Background()
+
+	// Total records to process: we create entries per iteration to ensure
+	// each processBatch call has fresh entries to process.
+	// We stop timer during entry creation to measure only processBatch.
+	totalRecords := 0
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		// Stop timer during entry creation
+		b.StopTimer()
+		createBenchmarkEntries(b, db, batchSize)
+		totalRecords += batchSize
+		b.StartTimer()
+
+		// Process the batch (fresh entries created above)
+		if err := worker.processBatch(ctx); err != nil {
+			b.Fatalf("Failed to process batch: %v", err)
+		}
+	}
+
+	b.StopTimer()
+
+	// Calculate throughput
+	elapsedSec := b.Elapsed().Seconds()
+	throughput := float64(totalRecords) / elapsedSec
+
+	b.ReportMetric(throughput, "records/sec")
+	b.Logf("ADR-0009 target: >1000 records/sec, actual: %.0f records/sec (batch size: %d, total records: %d)",
+		throughput, batchSize, totalRecords)
+}
+
+// BenchmarkAuditWorkerProcessEntry measures single entry processing time.
+// This helps identify per-entry overhead vs batch overhead.
+func BenchmarkAuditWorkerProcessEntry(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	worker := NewAuditWorker(db, logger)
+	ctx := context.Background()
+
+	// Create all entries upfront
+	entries := make([]*models.AuditOutbox, b.N)
+	for i := 0; i < b.N; i++ {
+		entry := &models.AuditOutbox{
+			ID:        uuid.New(),
+			Table:     "customer",
+			Operation: "INSERT",
+			RecordID:  uuid.New(),
+			NewValues: `{"id": "123", "name": "Test"}`,
+			Status:    statusPending,
+			CreatedAt: time.Now(),
+		}
+		if err := db.Create(entry).Error; err != nil {
+			b.Fatalf("Failed to create entry: %v", err)
+		}
+		entries[i] = entry
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		if err := worker.processEntry(ctx, entries[i]); err != nil {
+			b.Fatalf("Failed to process entry: %v", err)
+		}
+	}
+
+	b.StopTimer()
+
+	nsPerOp := float64(b.Elapsed().Nanoseconds()) / float64(b.N)
+	msPerOp := nsPerOp / 1_000_000
+	b.ReportMetric(msPerOp, "ms/op")
+	b.Logf("Per-entry processing time: %.3fms", msPerOp)
+}
+
+// BenchmarkAuditWorkerE2E measures end-to-end throughput with the worker
+// running in the background. This simulates real-world conditions.
+func BenchmarkAuditWorkerE2E(b *testing.B) {
+	db, cleanup := setupBenchmarkDB(b)
+	defer cleanup()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// Create 1000 entries before starting
+	const totalEntries = 1000
+	createBenchmarkEntries(b, db, totalEntries)
+
+	// Create and start worker with fast poll interval
+	worker := NewAuditWorker(db, logger)
+	worker.pollInterval = 10 * time.Millisecond
+	worker.batchSize = 100
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	b.ResetTimer()
+
+	// Start worker
+	worker.Start(ctx)
+
+	// Wait for all entries to be processed
+	timeout := time.After(30 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			b.Fatalf("Timeout waiting for entries to be processed")
+		case <-ticker.C:
+			var completed int64
+			if err := db.Model(&models.AuditOutbox{}).
+				Where("status = ?", statusCompleted).
+				Count(&completed).Error; err != nil {
+				b.Fatalf("Failed to count completed entries: %v", err)
+			}
+			if completed >= totalEntries {
+				goto done
+			}
+		}
+	}
+done:
+
+	b.StopTimer()
+	worker.Stop()
+
+	// Calculate throughput
+	elapsedSec := b.Elapsed().Seconds()
+	throughput := float64(totalEntries) / elapsedSec
+
+	b.ReportMetric(throughput, "records/sec")
+	b.Logf("ADR-0009 target: >1000 records/sec, E2E actual: %.0f records/sec (%d records in %.2fs)",
+		throughput, totalEntries, elapsedSec)
 }
