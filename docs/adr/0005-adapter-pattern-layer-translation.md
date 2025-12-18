@@ -65,7 +65,7 @@ prevent drift.
            ↑ Port (interface)
            │
 ┌──────────┴────────────────────────────┐
-│   Adapters (Translation Layer)       │
+│   Adapters (Translation Layer)        │
 │   - Domain ↔ Entity                   │
 │   - Domain ↔ Event                    │
 │   - Domain ↔ DTO                      │
