@@ -22,7 +22,11 @@ const testTenantID = "test_tenant"
 func setupTestServices(t *testing.T) (*service.PostingService, context.Context, func()) {
 	t.Helper()
 
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.LedgerPostingEntity{}, &persistence.FinancialBookingLogEntity{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{
+		&persistence.LedgerPostingEntity{},
+		&persistence.FinancialBookingLogEntity{},
+		&persistence.AuditOutbox{},
+	})
 
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
@@ -30,8 +34,8 @@ func setupTestServices(t *testing.T) (*service.PostingService, context.Context, 
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
 	require.NoError(t, err)
 
-	// Create tables in tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_logs (
+	// Create tables in tenant schema (singular names to match production)
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.financial_booking_log (
 		id UUID PRIMARY KEY,
 		financial_account_type VARCHAR(50) NOT NULL,
 		product_service_reference VARCHAR(255) NOT NULL,
@@ -42,12 +46,14 @@ func setupTestServices(t *testing.T) (*service.PostingService, context.Context, 
 		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255),
 		version BIGINT NOT NULL DEFAULT 1,
 		deleted_at TIMESTAMP WITH TIME ZONE
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_postings (
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.ledger_posting (
 		id UUID PRIMARY KEY,
 		financial_booking_log_id UUID NOT NULL,
 		posting_direction VARCHAR(20) NOT NULL,
@@ -55,11 +61,33 @@ func setupTestServices(t *testing.T) (*service.PostingService, context.Context, 
 		currency VARCHAR(3) NOT NULL,
 		account_id VARCHAR(255) NOT NULL,
 		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
-		posting_result TEXT NOT NULL,
+		posting_result TEXT,
 		status VARCHAR(20) NOT NULL,
-		correlation_id VARCHAR(255) NOT NULL,
+		correlation_id VARCHAR(255),
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_by VARCHAR(255),
+		updated_by VARCHAR(255),
 		deleted_at TIMESTAMP WITH TIME ZONE
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create audit_outbox table for GORM hooks
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		table_name VARCHAR(100) NOT NULL,
+		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+		record_id UUID NOT NULL,
+		old_values JSONB,
+		new_values JSONB,
+		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		retry_count INT NOT NULL DEFAULT 0,
+		last_error TEXT,
+		changed_by VARCHAR(100),
+		transaction_id VARCHAR(100),
+		client_ip INET,
+		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
