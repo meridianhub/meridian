@@ -11,6 +11,74 @@ permissions:
 
 jobs:
   # =============================================================================
+  # Benchmark Comparison (detailed analysis against develop branch)
+  # =============================================================================
+  # This runs full benchmarks with statistical comparison against develop.
+  # PRs run basic benchmarks; nightly runs the full comparison.
+
+  benchmark-comparison:
+    name: Benchmark Comparison
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for branch comparison
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Run current benchmarks
+        run: |
+          echo "Running benchmarks on current HEAD..."
+          go test -bench=. -benchmem -count=5 ./shared/domain/models/ ./shared/platform/audit/ > new.txt 2>&1 || true
+
+      - name: Run develop branch benchmarks
+        run: |
+          echo "Checking out develop branch for comparison..."
+          git stash --include-untracked || true
+          git checkout origin/develop -- shared/domain/models/ shared/platform/audit/ 2>/dev/null || true
+
+          echo "Running benchmarks on develop..."
+          go test -bench=. -benchmem -count=5 ./shared/domain/models/ ./shared/platform/audit/ > old.txt 2>&1 || true
+
+          # Restore current branch
+          git checkout - -- . 2>/dev/null || true
+          git stash pop || true
+
+      - name: Generate comparison report
+        run: |
+          echo "## Nightly Benchmark Comparison" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Comparing HEAD against develop branch" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f old.txt ] && [ -f new.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            benchstat old.txt new.txt >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Comparison failed" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Benchmark files not available for comparison" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # =============================================================================
   # Full Integration Tests (including slow/timing-sensitive tests)
   # =============================================================================
   # These tests are timing-sensitive (network timeouts, exponential backoff)
