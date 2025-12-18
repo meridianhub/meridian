@@ -15,6 +15,7 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
@@ -33,15 +34,16 @@ import (
 
 // Service errors
 var (
-	ErrRepositoryNil           = errors.New("repository cannot be nil")
-	ErrCurrentAccountClientNil = errors.New("current account client cannot be nil")
-	ErrPaymentGatewayNil       = errors.New("payment gateway cannot be nil")
-	ErrAmountRequired          = errors.New("amount is required")
-	ErrInvalidNanos            = errors.New("nanos must be in range [-999999999, 999999999]")
-	ErrPaymentRejected         = errors.New("payment rejected by gateway")
-	ErrUnexpectedGatewayStatus = errors.New("unexpected gateway status")
-	ErrIdempotencyKeyTooLong   = errors.New("idempotency key exceeds maximum length")
-	ErrMalformedLienResponse   = errors.New("current account service returned empty or malformed lien response")
+	ErrRepositoryNil                = errors.New("repository cannot be nil")
+	ErrCurrentAccountClientNil      = errors.New("current account client cannot be nil")
+	ErrFinancialAccountingClientNil = errors.New("financial accounting client cannot be nil")
+	ErrPaymentGatewayNil            = errors.New("payment gateway cannot be nil")
+	ErrAmountRequired               = errors.New("amount is required")
+	ErrInvalidNanos                 = errors.New("nanos must be in range [-999999999, 999999999]")
+	ErrPaymentRejected              = errors.New("payment rejected by gateway")
+	ErrUnexpectedGatewayStatus      = errors.New("unexpected gateway status")
+	ErrIdempotencyKeyTooLong        = errors.New("idempotency key exceeds maximum length")
+	ErrMalformedLienResponse        = errors.New("current account service returned empty or malformed lien response")
 )
 
 // Kafka topic constants
@@ -71,6 +73,19 @@ type CurrentAccountClient interface {
 	TerminateLien(ctx context.Context, req *currentaccountv1.TerminateLienRequest) (*currentaccountv1.TerminateLienResponse, error)
 	// ExecuteLien converts a reservation to an actual debit
 	ExecuteLien(ctx context.Context, req *currentaccountv1.ExecuteLienRequest) (*currentaccountv1.ExecuteLienResponse, error)
+	// Close terminates the client connection
+	Close() error
+}
+
+// FinancialAccountingClient defines the interface for communicating with the FinancialAccounting service
+// for ledger posting operations on payment completion.
+type FinancialAccountingClient interface {
+	// InitiateFinancialBookingLog creates a new financial booking log
+	InitiateFinancialBookingLog(ctx context.Context, req *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error)
+	// CaptureLedgerPosting creates a new ledger posting entry
+	CaptureLedgerPosting(ctx context.Context, req *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error)
+	// UpdateFinancialBookingLog updates an existing booking log (e.g., to transition status to POSTED)
+	UpdateFinancialBookingLog(ctx context.Context, req *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error)
 	// Close terminates the client connection
 	Close() error
 }
@@ -122,27 +137,29 @@ const (
 // Service implements the PaymentOrderService gRPC service
 type Service struct {
 	pb.UnimplementedPaymentOrderServiceServer
-	repo                     persistence.Repository
-	currentAccountClient     CurrentAccountClient
-	paymentGateway           gateway.PaymentGateway
-	kafkaPublisher           KafkaPublisher
-	logger                   *slog.Logger
-	tracer                   *observability.Tracer
-	sagaTimeout              time.Duration
-	defaultPageSize          int
-	maxPageSize              int
-	maxIdempotencyKeyLength  int
-	lienExecutionRetryConfig *clients.RetryConfig // nil means use default
+	repo                      persistence.Repository
+	currentAccountClient      CurrentAccountClient
+	financialAccountingClient FinancialAccountingClient
+	paymentGateway            gateway.PaymentGateway
+	kafkaPublisher            KafkaPublisher
+	logger                    *slog.Logger
+	tracer                    *observability.Tracer
+	sagaTimeout               time.Duration
+	defaultPageSize           int
+	maxPageSize               int
+	maxIdempotencyKeyLength   int
+	lienExecutionRetryConfig  *clients.RetryConfig // nil means use default
 }
 
 // Config contains configuration for creating a new Service
 type Config struct {
-	Repository           persistence.Repository
-	CurrentAccountClient CurrentAccountClient
-	PaymentGateway       gateway.PaymentGateway
-	KafkaPublisher       KafkaPublisher
-	Logger               *slog.Logger
-	Tracer               *observability.Tracer
+	Repository                persistence.Repository
+	CurrentAccountClient      CurrentAccountClient
+	FinancialAccountingClient FinancialAccountingClient
+	PaymentGateway            gateway.PaymentGateway
+	KafkaPublisher            KafkaPublisher
+	Logger                    *slog.Logger
+	Tracer                    *observability.Tracer
 	// SagaTimeout is the maximum duration for saga orchestration.
 	// If zero, DefaultSagaTimeout is used.
 	SagaTimeout time.Duration
@@ -185,6 +202,9 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 	if config.CurrentAccountClient == nil {
 		return nil, ErrCurrentAccountClientNil
 	}
+	if config.FinancialAccountingClient == nil {
+		return nil, ErrFinancialAccountingClientNil
+	}
 	if config.PaymentGateway == nil {
 		return nil, ErrPaymentGatewayNil
 	}
@@ -218,17 +238,18 @@ func NewServiceWithConfig(config Config) (*Service, error) {
 	}
 
 	return &Service{
-		repo:                     config.Repository,
-		currentAccountClient:     config.CurrentAccountClient,
-		paymentGateway:           config.PaymentGateway,
-		kafkaPublisher:           config.KafkaPublisher,
-		logger:                   logger,
-		tracer:                   config.Tracer,
-		sagaTimeout:              sagaTimeout,
-		defaultPageSize:          defaultPageSize,
-		maxPageSize:              maxPageSize,
-		maxIdempotencyKeyLength:  maxIdempotencyKeyLength,
-		lienExecutionRetryConfig: config.LienExecutionRetryConfig, // nil means use default
+		repo:                      config.Repository,
+		currentAccountClient:      config.CurrentAccountClient,
+		financialAccountingClient: config.FinancialAccountingClient,
+		paymentGateway:            config.PaymentGateway,
+		kafkaPublisher:            config.KafkaPublisher,
+		logger:                    logger,
+		tracer:                    config.Tracer,
+		sagaTimeout:               sagaTimeout,
+		defaultPageSize:           defaultPageSize,
+		maxPageSize:               maxPageSize,
+		maxIdempotencyKeyLength:   maxIdempotencyKeyLength,
+		lienExecutionRetryConfig:  config.LienExecutionRetryConfig, // nil means use default
 	}, nil
 }
 

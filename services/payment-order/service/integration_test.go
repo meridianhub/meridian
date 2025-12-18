@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
@@ -39,12 +40,15 @@ import (
 
 // Mock errors for testing
 var (
-	errMockInitiateLienFailure  = errors.New("mock initiate lien failure")
-	errMockTerminateLienFailure = errors.New("mock terminate lien failure")
-	errMockExecuteLienFailure   = errors.New("mock execute lien failure")
-	errMockGatewayFailure       = errors.New("mock gateway failure")
-	errGatewayTimeout           = errors.New("gateway timeout")
-	errLedgerUnavailable        = errors.New("ledger service unavailable")
+	errMockInitiateLienFailure       = errors.New("mock initiate lien failure")
+	errMockTerminateLienFailure      = errors.New("mock terminate lien failure")
+	errMockExecuteLienFailure        = errors.New("mock execute lien failure")
+	errMockGatewayFailure            = errors.New("mock gateway failure")
+	errGatewayTimeout                = errors.New("gateway timeout")
+	errLedgerUnavailable             = errors.New("ledger service unavailable")
+	errMockInitiateBookingLogFailure = errors.New("mock initiate booking log failure")
+	errMockCaptureLedgerPostingFail  = errors.New("mock capture ledger posting failure")
+	errMockUpdateBookingLogFailure   = errors.New("mock update booking log failure")
 )
 
 const integrationTestTenantID = "test_tenant"
@@ -300,6 +304,97 @@ func (m *mockPaymentGateway) SendPayment(ctx context.Context, _ gateway.PaymentR
 	}, nil
 }
 
+// mockFinancialAccountingClient implements FinancialAccountingClient for integration testing.
+type mockFinancialAccountingClient struct {
+	mu                        sync.RWMutex
+	initiateBookingLogCalls   int32
+	captureLedgerPostingCalls int32
+	updateBookingLogCalls     int32
+	failOnInitiate            bool
+	failOnCapture             bool
+	failOnUpdate              bool
+	initiateErr               error
+	captureErr                error
+	updateErr                 error
+	bookingLogCounter         int32
+	postingCounter            int32
+	lastBookingLogID          string
+	lastPostingID             string
+}
+
+func newMockFinancialAccountingClient() *mockFinancialAccountingClient {
+	return &mockFinancialAccountingClient{}
+}
+
+func (m *mockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+	atomic.AddInt32(&m.initiateBookingLogCalls, 1)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.failOnInitiate {
+		if m.initiateErr != nil {
+			return nil, m.initiateErr
+		}
+		return nil, errMockInitiateBookingLogFailure
+	}
+
+	m.bookingLogCounter++
+	bookingLogID := "BL-" + uuid.New().String()
+	m.lastBookingLogID = bookingLogID
+
+	return &financialaccountingv1.InitiateFinancialBookingLogResponse{
+		FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
+			Id: bookingLogID,
+		},
+	}, nil
+}
+
+func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+	atomic.AddInt32(&m.captureLedgerPostingCalls, 1)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.failOnCapture {
+		if m.captureErr != nil {
+			return nil, m.captureErr
+		}
+		return nil, errMockCaptureLedgerPostingFail
+	}
+
+	m.postingCounter++
+	postingID := "LP-" + uuid.New().String()
+	m.lastPostingID = postingID
+
+	return &financialaccountingv1.CaptureLedgerPostingResponse{
+		LedgerPosting: &financialaccountingv1.LedgerPosting{
+			Id: postingID,
+		},
+	}, nil
+}
+
+func (m *mockFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	atomic.AddInt32(&m.updateBookingLogCalls, 1)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.failOnUpdate {
+		if m.updateErr != nil {
+			return nil, m.updateErr
+		}
+		return nil, errMockUpdateBookingLogFailure
+	}
+
+	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
+		FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
+			Id: m.lastBookingLogID,
+		},
+	}, nil
+}
+
+func (m *mockFinancialAccountingClient) Close() error {
+	return nil
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -382,12 +477,13 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
-		SagaTimeout:          30 * time.Second,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
+		SagaTimeout:               30 * time.Second,
 	})
 	require.NoError(t, err)
 
@@ -452,11 +548,12 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -525,11 +622,12 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -593,11 +691,12 @@ func TestIntegration_InsufficientFunds_SagaFails(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -634,11 +733,12 @@ func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -679,11 +779,12 @@ func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -722,11 +823,12 @@ func TestIntegration_ConcurrentPayments_SameAccount(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -798,12 +900,13 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
-		SagaTimeout:          3 * time.Second, // Short timeout for test
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
+		SagaTimeout:               3 * time.Second, // Short timeout for test
 	})
 	require.NoError(t, err)
 
@@ -853,11 +956,12 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -907,11 +1011,12 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -995,11 +1100,12 @@ func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -1081,11 +1187,12 @@ func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -1127,11 +1234,12 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -1195,11 +1303,12 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 
@@ -1303,11 +1412,12 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 	logger := integrationTestLogger()
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGW,
-		KafkaPublisher:       nil, // Optional for tests
-		Logger:               logger,
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: newMockFinancialAccountingClient(),
+		PaymentGateway:            mockGW,
+		KafkaPublisher:            nil, // Optional for tests
+		Logger:                    logger,
 	})
 	require.NoError(t, err)
 

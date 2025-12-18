@@ -42,10 +42,11 @@ func BenchmarkInitiatePaymentOrder(b *testing.B) {
 	}
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGateway,
-		Logger:               benchLogger(),
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: &MockFinancialAccountingClient{},
+		PaymentGateway:            mockGateway,
+		Logger:                    benchLogger(),
 		// Use fast retry config to avoid delays in benchmarks
 		LienExecutionRetryConfig: &clients.RetryConfig{
 			MaxRetries:      1,
@@ -203,10 +204,11 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 	mockGateway := &MockPaymentGateway{}
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGateway,
-		Logger:               benchLogger(),
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: &MockFinancialAccountingClient{},
+		PaymentGateway:            mockGateway,
+		Logger:                    benchLogger(),
 		LienExecutionRetryConfig: &clients.RetryConfig{
 			MaxRetries:      1,
 			InitialInterval: 1,
@@ -281,10 +283,11 @@ func BenchmarkCancelPaymentOrder(b *testing.B) {
 	mockGateway := &MockPaymentGateway{}
 
 	svc, err := NewServiceWithConfig(Config{
-		Repository:           repo,
-		CurrentAccountClient: mockCA,
-		PaymentGateway:       mockGateway,
-		Logger:               benchLogger(),
+		Repository:                repo,
+		CurrentAccountClient:      mockCA,
+		FinancialAccountingClient: &MockFinancialAccountingClient{},
+		PaymentGateway:            mockGateway,
+		Logger:                    benchLogger(),
 	})
 	if err != nil {
 		b.Fatalf("failed to create service: %v", err)
