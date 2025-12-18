@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Errors returned by the audit Consumer.
@@ -25,7 +27,18 @@ var (
 	ErrUnexpectedMessageType = errors.New("unexpected message type")
 	// ErrInvalidOperation is returned when the operation in the event is invalid.
 	ErrInvalidOperation = errors.New("invalid operation")
+	// ErrInvalidSchemaName is returned when the schema name contains invalid characters.
+	ErrInvalidSchemaName = errors.New("invalid schema name")
 )
+
+// schemaNamePattern validates PostgreSQL schema names to prevent SQL injection.
+// Schema names must start with a letter or underscore, followed by letters, digits, or underscores.
+var schemaNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// isValidSchemaName checks if a schema name is safe for use in SQL statements.
+func isValidSchemaName(name string) bool {
+	return schemaNamePattern.MatchString(name) && len(name) <= 63 // PostgreSQL max identifier length
+}
 
 // Consumer processes audit events from Kafka and writes them to the audit_log table.
 // It provides at-least-once processing guarantees with DLQ support for failed messages.
@@ -220,6 +233,14 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		schema = "unknown"
 	}
 
+	// Handle potentially nil timestamp
+	var createdAt time.Time
+	if event.Timestamp != nil {
+		createdAt = event.Timestamp.AsTime()
+	} else {
+		createdAt = time.Now()
+	}
+
 	// Create audit log entry
 	auditLog := AuditLog{
 		ID:        uuid.New(),
@@ -228,7 +249,7 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		RecordID:  event.RecordId,
 		OldValues: event.OldValues,
 		NewValues: event.NewValues,
-		CreatedAt: event.Timestamp.AsTime(),
+		CreatedAt: createdAt,
 	}
 
 	if event.ChangedBy != "" {
@@ -247,6 +268,11 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 	// Write to audit_log using the schema from the event
 	db := c.db
 	if event.SchemaName != "" {
+		// Validate schema name to prevent SQL injection
+		if !isValidSchemaName(event.SchemaName) {
+			RecordKafkaConsumed(schema, operation, "failure")
+			return fmt.Errorf("%w: %s", ErrInvalidSchemaName, event.SchemaName)
+		}
 		// Set search_path to the service schema for routing
 		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", event.SchemaName))
 	}
@@ -262,7 +288,7 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 	RecordKafkaConsumeDuration(time.Since(startTime).Seconds())
 
 	// Record event age (time from creation to processing)
-	eventAge := time.Since(event.Timestamp.AsTime()).Seconds()
+	eventAge := time.Since(createdAt).Seconds()
 	RecordEntryAge(eventAge)
 
 	log.Printf("DEBUG: Processed audit event: table=%s operation=%s record=%s",
@@ -289,6 +315,7 @@ func protoToOperation(op auditv1.AuditOperation) string {
 // ProcessOutboxFallback processes any pending entries in the audit_outbox table
 // that were written as a fallback when Kafka publishing failed.
 // This ensures no audit records are lost.
+// Uses SELECT FOR UPDATE SKIP LOCKED to prevent race conditions when multiple workers run concurrently.
 func (c *Consumer) ProcessOutboxFallback(ctx context.Context, schema string, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 100
@@ -296,12 +323,18 @@ func (c *Consumer) ProcessOutboxFallback(ctx context.Context, schema string, bat
 
 	db := c.db
 	if schema != "" {
+		// Validate schema name to prevent SQL injection
+		if !isValidSchemaName(schema) {
+			return 0, fmt.Errorf("%w: %s", ErrInvalidSchemaName, schema)
+		}
 		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", schema))
 	}
 
-	// Fetch pending entries
+	// Fetch and lock pending entries atomically using FOR UPDATE SKIP LOCKED
+	// This prevents race conditions when multiple workers run concurrently
 	var entries []AuditOutbox
 	if err := db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 		Where("status = ?", "pending").
 		Order("created_at ASC").
 		Limit(batchSize).
