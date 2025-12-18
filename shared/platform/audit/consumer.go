@@ -312,10 +312,52 @@ func protoToOperation(op auditv1.AuditOperation) string {
 	return ""
 }
 
+// processOutboxEntry processes a single outbox entry within a transaction.
+// Returns nil on success, gorm.ErrRecordNotFound if entry was already processed,
+// or other error on failure.
+func processOutboxEntry(_ context.Context, tx *gorm.DB, entryID uuid.UUID) error {
+	// Lock the specific entry to ensure it's still pending
+	var lockedEntry AuditOutbox
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+		Where("id = ? AND status = ?", entryID, "pending").
+		First(&lockedEntry).Error; err != nil {
+		return err
+	}
+
+	// Mark as processing
+	if err := tx.Model(&lockedEntry).Update("status", "processing").Error; err != nil {
+		return err
+	}
+
+	// Create audit log entry
+	auditLog := AuditLog{
+		ID:            uuid.New(),
+		Table:         lockedEntry.Table,
+		Operation:     lockedEntry.Operation,
+		RecordID:      lockedEntry.RecordID,
+		OldValues:     lockedEntry.OldValues,
+		NewValues:     lockedEntry.NewValues,
+		CreatedAt:     lockedEntry.CreatedAt,
+		ChangedBy:     lockedEntry.ChangedBy,
+		TransactionID: lockedEntry.TransactionID,
+		ClientIP:      lockedEntry.ClientIP,
+		UserAgent:     lockedEntry.UserAgent,
+	}
+
+	// Insert into audit_log
+	if err := tx.Create(&auditLog).Error; err != nil {
+		return err
+	}
+
+	// Mark as completed
+	return tx.Model(&lockedEntry).Update("status", "completed").Error
+}
+
 // ProcessOutboxFallback processes any pending entries in the audit_outbox table
 // that were written as a fallback when Kafka publishing failed.
 // This ensures no audit records are lost.
-// Uses SELECT FOR UPDATE SKIP LOCKED to prevent race conditions when multiple workers run concurrently.
+// Each entry is processed in its own transaction with FOR UPDATE locking to prevent
+// race conditions when multiple workers run concurrently.
 func (c *Consumer) ProcessOutboxFallback(ctx context.Context, schema string, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 100
@@ -330,67 +372,42 @@ func (c *Consumer) ProcessOutboxFallback(ctx context.Context, schema string, bat
 		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", schema))
 	}
 
-	// Fetch and lock pending entries atomically using FOR UPDATE SKIP LOCKED
-	// This prevents race conditions when multiple workers run concurrently
-	var entries []AuditOutbox
+	// Fetch pending entry IDs without locking (just for iteration)
+	var entryIDs []uuid.UUID
 	if err := db.WithContext(ctx).
-		Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+		Model(&AuditOutbox{}).
 		Where("status = ?", "pending").
 		Order("created_at ASC").
 		Limit(batchSize).
-		Find(&entries).Error; err != nil {
+		Pluck("id", &entryIDs).Error; err != nil {
 		return 0, fmt.Errorf("failed to fetch pending outbox entries: %w", err)
 	}
 
-	if len(entries) == 0 {
+	if len(entryIDs) == 0 {
 		return 0, nil
 	}
 
 	processed := 0
-	for _, entry := range entries {
-		// Mark as processing
-		if err := db.WithContext(ctx).
-			Model(&entry).
-			Update("status", "processing").Error; err != nil {
-			log.Printf("WARN: Failed to mark outbox entry as processing: %v", err)
-			continue
-		}
-
-		// Create audit log entry
-		auditLog := AuditLog{
-			ID:            uuid.New(),
-			Table:         entry.Table,
-			Operation:     entry.Operation,
-			RecordID:      entry.RecordID,
-			OldValues:     entry.OldValues,
-			NewValues:     entry.NewValues,
-			CreatedAt:     entry.CreatedAt,
-			ChangedBy:     entry.ChangedBy,
-			TransactionID: entry.TransactionID,
-			ClientIP:      entry.ClientIP,
-			UserAgent:     entry.UserAgent,
-		}
-
-		// Insert into audit_log
-		if err := db.WithContext(ctx).Create(&auditLog).Error; err != nil {
-			// Mark as failed
+	for _, entryID := range entryIDs {
+		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			return processOutboxEntry(ctx, tx, entryID)
+		})
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue // Entry was already processed
+			}
+			// Mark as failed outside transaction
 			errMsg := err.Error()
-			db.WithContext(ctx).Model(&entry).Updates(map[string]interface{}{
-				"status":      "failed",
-				"last_error":  errMsg,
-				"retry_count": gorm.Expr("retry_count + 1"),
-			})
-			log.Printf("ERROR: Failed to insert audit log from outbox: %v", err)
+			db.WithContext(ctx).Model(&AuditOutbox{}).
+				Where("id = ?", entryID).
+				Updates(map[string]interface{}{
+					"status":      "failed",
+					"last_error":  errMsg,
+					"retry_count": gorm.Expr("retry_count + 1"),
+				})
+			log.Printf("ERROR: Failed to process outbox entry: %v", err)
 			continue
 		}
-
-		// Mark as completed
-		if err := db.WithContext(ctx).
-			Model(&entry).
-			Update("status", "completed").Error; err != nil {
-			log.Printf("WARN: Failed to mark outbox entry as completed: %v", err)
-		}
-
 		processed++
 	}
 
