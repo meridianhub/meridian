@@ -80,11 +80,11 @@ func RecordOutboxDepth(depth int) {
 	outboxDepth.Set(float64(depth))
 }
 
-// RecordOutboxDepthBySchema updates the gauge for the number of pending entries for a specific schema
+// RecordOutboxDepthBySchema updates the gauge for the number of pending entries for a specific schema.
+// Note: Does not update aggregate outboxDepth since multiple concurrent workers would produce
+// misleading aggregates. Use outbox_depth_by_schema for accurate per-schema monitoring.
 func RecordOutboxDepthBySchema(schema string, depth int) {
 	outboxDepthBySchema.WithLabelValues(schema).Set(float64(depth))
-	// Also update the aggregate metric for backwards compatibility
-	outboxDepth.Set(float64(depth))
 }
 
 // RecordProcessed increments the counter for successfully processed entries (deprecated)
@@ -92,11 +92,10 @@ func RecordProcessed() {
 	outboxProcessed.Inc()
 }
 
-// RecordProcessedBySchema increments the counter for successfully processed entries for a specific schema
+// RecordProcessedBySchema increments the counter for successfully processed entries for a specific schema.
+// Note: Does not update aggregate outboxProcessed since individual services should use per-schema metrics.
 func RecordProcessedBySchema(schema string) {
 	outboxProcessedBySchema.WithLabelValues(schema).Inc()
-	// Also update the aggregate metric for backwards compatibility
-	outboxProcessed.Inc()
 }
 
 // RecordFailed increments the counter for failed entries (deprecated)
@@ -104,11 +103,10 @@ func RecordFailed() {
 	outboxFailed.Inc()
 }
 
-// RecordFailedBySchema increments the counter for failed entries for a specific schema
+// RecordFailedBySchema increments the counter for failed entries for a specific schema.
+// Note: Does not update aggregate outboxFailed since individual services should use per-schema metrics.
 func RecordFailedBySchema(schema string) {
 	outboxFailedBySchema.WithLabelValues(schema).Inc()
-	// Also update the aggregate metric for backwards compatibility
-	outboxFailed.Inc()
 }
 
 // RecordProcessingDuration observes the duration of a batch processing operation
