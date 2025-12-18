@@ -846,18 +846,22 @@ func runWorkerThroughputBenchmark(b *testing.B, batchSize int) {
 
 	ctx := context.Background()
 
-	// Total records to process
-	totalRecords := b.N * batchSize
-
-	// Pre-create all entries before starting the benchmark timer
-	// This ensures we're only measuring processBatch performance
-	createBenchmarkEntries(b, db, totalRecords)
+	// Total records to process: we create entries per iteration to ensure
+	// each processBatch call has fresh entries to process.
+	// We stop timer during entry creation to measure only processBatch.
+	totalRecords := 0
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		// Process the batch (entries already exist)
+		// Stop timer during entry creation
+		b.StopTimer()
+		createBenchmarkEntries(b, db, batchSize)
+		totalRecords += batchSize
+		b.StartTimer()
+
+		// Process the batch (fresh entries created above)
 		if err := worker.processBatch(ctx); err != nil {
 			b.Fatalf("Failed to process batch: %v", err)
 		}
