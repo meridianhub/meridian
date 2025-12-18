@@ -20,7 +20,7 @@ const testTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PartyEntity{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PartyEntity{}, &PartyAuditOutbox{}})
 
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
@@ -28,8 +28,8 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the parties table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.parties (
+	// Create the party table in the tenant schema (note: singular 'party' to match entity)
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party (
 		id UUID PRIMARY KEY,
 		party_type VARCHAR(20) NOT NULL,
 		legal_name VARCHAR(255) NOT NULL,
@@ -44,6 +44,25 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		created_by VARCHAR(255),
 		updated_by VARCHAR(255),
 		UNIQUE(external_reference, external_reference_type)
+	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the audit_outbox table in the tenant schema (required for audit hooks)
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		table_name VARCHAR(100) NOT NULL,
+		operation VARCHAR(10) NOT NULL,
+		record_id UUID NOT NULL,
+		old_values TEXT,
+		new_values TEXT,
+		status VARCHAR(20) NOT NULL DEFAULT 'pending',
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		retry_count INT NOT NULL DEFAULT 0,
+		last_error TEXT,
+		changed_by VARCHAR(100),
+		transaction_id VARCHAR(100),
+		client_ip VARCHAR(45),
+		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
@@ -654,3 +673,168 @@ func TestPing_WorksWithoutOrganizationContext(t *testing.T) {
 
 // Note: hasTenantContext tests removed - the system is always multi-tenant.
 // Tenant context is always required for all business service operations.
+
+// Audit Tests
+
+func TestAudit_CreateParty_WritesAuditOutboxEntry(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Create a party using direct GORM to trigger hooks
+	party, err := domain.NewParty(domain.PartyTypePerson, "John Doe Audit Test")
+	require.NoError(t, err)
+
+	entity := &PartyEntity{
+		ID:        party.ID(),
+		PartyType: string(party.PartyType()),
+		LegalName: party.LegalName(),
+		Status:    string(party.Status()),
+		Version:   party.Version(),
+		CreatedAt: party.CreatedAt(),
+		UpdatedAt: party.UpdatedAt(),
+		CreatedBy: "test-user",
+		UpdatedBy: "test-user",
+	}
+
+	// Create using GORM directly to ensure hooks fire
+	err = db.WithContext(ctx).Create(entity).Error
+	require.NoError(t, err)
+
+	// Verify audit outbox entry was created
+	var auditEntries []PartyAuditOutbox
+	err = db.WithContext(ctx).Where("record_id = ?", party.ID()).Find(&auditEntries).Error
+	require.NoError(t, err)
+
+	require.Len(t, auditEntries, 1, "Expected one audit entry for party creation")
+
+	auditEntry := auditEntries[0]
+	assert.Equal(t, "party", auditEntry.Table, "Table name should be 'party'")
+	assert.Equal(t, "INSERT", auditEntry.Operation, "Operation should be INSERT")
+	assert.Equal(t, party.ID(), auditEntry.RecordID, "Record ID should match party ID")
+	assert.Equal(t, "pending", auditEntry.Status, "Status should be pending")
+	assert.Empty(t, auditEntry.OldValues, "Old values should be empty for INSERT")
+	assert.NotEmpty(t, auditEntry.NewValues, "New values should contain party data")
+	assert.NotNil(t, auditEntry.ChangedBy, "ChangedBy should be set")
+}
+
+func TestAudit_CreateParty_AuditContainsPartyFields(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Create a party with specific fields to verify in audit
+	party, err := domain.NewParty(domain.PartyTypeOrganization, "Acme Corp Ltd")
+	require.NoError(t, err)
+
+	displayName := "Acme"
+	extRef := "12345678"
+	extRefType := string(domain.ExternalReferenceTypeCompaniesHouse)
+
+	entity := &PartyEntity{
+		ID:                    party.ID(),
+		PartyType:             string(domain.PartyTypeOrganization),
+		LegalName:             "Acme Corp Ltd",
+		DisplayName:           &displayName,
+		Status:                string(domain.PartyStatusActive),
+		ExternalReference:     &extRef,
+		ExternalReferenceType: &extRefType,
+		Version:               1,
+		CreatedAt:             party.CreatedAt(),
+		UpdatedAt:             party.UpdatedAt(),
+		CreatedBy:             "test-user",
+		UpdatedBy:             "test-user",
+	}
+
+	err = db.WithContext(ctx).Create(entity).Error
+	require.NoError(t, err)
+
+	// Verify audit contains the expected fields
+	var auditEntry PartyAuditOutbox
+	err = db.WithContext(ctx).Where("record_id = ?", party.ID()).First(&auditEntry).Error
+	require.NoError(t, err)
+
+	// The new_values should contain JSON with party fields
+	assert.Contains(t, auditEntry.NewValues, "Acme Corp Ltd", "Audit should contain legal_name")
+	assert.Contains(t, auditEntry.NewValues, "ORGANIZATION", "Audit should contain party_type")
+	assert.Contains(t, auditEntry.NewValues, "ACTIVE", "Audit should contain status")
+	assert.Contains(t, auditEntry.NewValues, "12345678", "Audit should contain external_reference")
+}
+
+func TestAudit_CreateParty_WithUserContext_SetsChangedBy(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Add user to context
+	testUserID := "user-456"
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, testUserID)
+
+	party, err := domain.NewParty(domain.PartyTypePerson, "User Context Test")
+	require.NoError(t, err)
+
+	entity := &PartyEntity{
+		ID:        party.ID(),
+		PartyType: string(party.PartyType()),
+		LegalName: party.LegalName(),
+		Status:    string(party.Status()),
+		Version:   1,
+		CreatedAt: party.CreatedAt(),
+		UpdatedAt: party.UpdatedAt(),
+		CreatedBy: testUserID,
+		UpdatedBy: testUserID,
+	}
+
+	err = db.WithContext(ctx).Create(entity).Error
+	require.NoError(t, err)
+
+	// Verify changed_by was set from context
+	var auditEntry PartyAuditOutbox
+	err = db.WithContext(ctx).Where("record_id = ?", party.ID()).First(&auditEntry).Error
+	require.NoError(t, err)
+
+	require.NotNil(t, auditEntry.ChangedBy, "ChangedBy should be set")
+	assert.Equal(t, testUserID, *auditEntry.ChangedBy, "ChangedBy should match user from context")
+}
+
+func TestAudit_DeleteParty_WritesAuditOutboxEntry(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Create a party first
+	party, err := domain.NewParty(domain.PartyTypePerson, "To Be Deleted")
+	require.NoError(t, err)
+
+	entity := &PartyEntity{
+		ID:        party.ID(),
+		PartyType: string(party.PartyType()),
+		LegalName: party.LegalName(),
+		Status:    string(party.Status()),
+		Version:   1,
+		CreatedAt: party.CreatedAt(),
+		UpdatedAt: party.UpdatedAt(),
+		CreatedBy: "test-user",
+		UpdatedBy: "test-user",
+	}
+
+	err = db.WithContext(ctx).Create(entity).Error
+	require.NoError(t, err)
+
+	// Now delete using GORM Delete (which triggers AfterDelete hook)
+	err = db.WithContext(ctx).Delete(entity).Error
+	require.NoError(t, err)
+
+	// Verify audit entries - should have INSERT and DELETE
+	var auditEntries []PartyAuditOutbox
+	err = db.WithContext(ctx).Where("record_id = ?", party.ID()).Order("created_at").Find(&auditEntries).Error
+	require.NoError(t, err)
+
+	require.Len(t, auditEntries, 2, "Expected two audit entries (INSERT and DELETE)")
+
+	// First entry should be INSERT
+	assert.Equal(t, "INSERT", auditEntries[0].Operation)
+
+	// Second entry should be DELETE
+	deleteEntry := auditEntries[1]
+	assert.Equal(t, "DELETE", deleteEntry.Operation, "Operation should be DELETE")
+	assert.Equal(t, "party", deleteEntry.Table)
+	assert.NotEmpty(t, deleteEntry.OldValues, "Old values should contain deleted party data")
+	assert.Empty(t, deleteEntry.NewValues, "New values should be empty for DELETE")
+}
