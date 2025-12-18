@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/current-account/clients"
 
@@ -333,6 +334,47 @@ func (m *MockPaymentGateway) SendPayment(_ context.Context, req gateway.PaymentR
 	return m.response, nil
 }
 
+// MockFinancialAccountingClient implements FinancialAccountingClient for testing
+type MockFinancialAccountingClient struct {
+	initiateResp   *financialaccountingv1.InitiateFinancialBookingLogResponse
+	initiateErr    error
+	captureResp    *financialaccountingv1.CaptureLedgerPostingResponse
+	captureErr     error
+	updateResp     *financialaccountingv1.UpdateFinancialBookingLogResponse
+	updateErr      error
+	initiateCalled bool
+	captureCalled  bool
+	updateCalled   bool
+}
+
+func (m *MockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+	m.initiateCalled = true
+	if m.initiateErr != nil {
+		return nil, m.initiateErr
+	}
+	return m.initiateResp, nil
+}
+
+func (m *MockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+	m.captureCalled = true
+	if m.captureErr != nil {
+		return nil, m.captureErr
+	}
+	return m.captureResp, nil
+}
+
+func (m *MockFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	m.updateCalled = true
+	if m.updateErr != nil {
+		return nil, m.updateErr
+	}
+	return m.updateResp, nil
+}
+
+func (m *MockFinancialAccountingClient) Close() error {
+	return nil
+}
+
 // Helper to create a valid InitiatePaymentOrderRequest
 // nolint:unparam // debtorAccountID is parameterized for test clarity even if currently constant
 func newInitiateRequest(idempotencyKey, debtorAccountID, creditorRef string, amountCents int64) *pb.InitiatePaymentOrderRequest {
@@ -391,11 +433,21 @@ func TestNewServiceWithConfig(t *testing.T) {
 			wantErr: ErrCurrentAccountClientNil,
 		},
 		{
+			name: "nil financial accounting client returns error",
+			config: Config{
+				Repository:                NewMockRepository(),
+				CurrentAccountClient:      &MockCurrentAccountClient{},
+				FinancialAccountingClient: nil,
+			},
+			wantErr: ErrFinancialAccountingClientNil,
+		},
+		{
 			name: "nil payment gateway returns error",
 			config: Config{
-				Repository:           NewMockRepository(),
-				CurrentAccountClient: &MockCurrentAccountClient{},
-				PaymentGateway:       nil,
+				Repository:                NewMockRepository(),
+				CurrentAccountClient:      &MockCurrentAccountClient{},
+				FinancialAccountingClient: &MockFinancialAccountingClient{},
+				PaymentGateway:            nil,
 			},
 			wantErr: ErrPaymentGatewayNil,
 		},
@@ -407,6 +459,22 @@ func TestNewServiceWithConfig(t *testing.T) {
 			assert.ErrorIs(t, err, tt.wantErr)
 		})
 	}
+}
+
+// Test NewServiceWithConfig_Success verifies service creation with all required dependencies
+func TestNewServiceWithConfig_Success(t *testing.T) {
+	config := Config{
+		Repository:                NewMockRepository(),
+		CurrentAccountClient:      &MockCurrentAccountClient{},
+		FinancialAccountingClient: &MockFinancialAccountingClient{},
+		PaymentGateway:            &MockPaymentGateway{},
+	}
+
+	svc, err := NewServiceWithConfig(config)
+
+	require.NoError(t, err)
+	assert.NotNil(t, svc)
+	assert.NotNil(t, svc.financialAccountingClient)
 }
 
 // Test InitiatePaymentOrder

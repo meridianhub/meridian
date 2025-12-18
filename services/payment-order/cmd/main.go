@@ -109,11 +109,17 @@ func run(logger *slog.Logger) error {
 	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
 
 	// Create external clients
-	currentAccountClient, cleanup, err := createCurrentAccountClient(namespace, logger)
+	currentAccountClient, caCleanup, err := createCurrentAccountClient(namespace, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create current account client: %w", err)
 	}
-	defer cleanup()
+	defer caCleanup()
+
+	financialAccountingClient, faCleanup, err := createFinancialAccountingClient(namespace, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create financial accounting client: %w", err)
+	}
+	defer faCleanup()
 
 	// Create payment gateway
 	paymentGateway := createPaymentGateway(logger)
@@ -127,12 +133,13 @@ func run(logger *slog.Logger) error {
 
 	// Create payment order service
 	paymentOrderService, err := service.NewServiceWithConfig(service.Config{
-		Repository:           repo,
-		CurrentAccountClient: currentAccountClient,
-		PaymentGateway:       paymentGateway,
-		KafkaPublisher:       kafkaProducer,
-		Logger:               logger,
-		Tracer:               tracer,
+		Repository:                repo,
+		CurrentAccountClient:      currentAccountClient,
+		FinancialAccountingClient: financialAccountingClient,
+		PaymentGateway:            paymentGateway,
+		KafkaPublisher:            kafkaProducer,
+		Logger:                    logger,
+		Tracer:                    tracer,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create payment order service: %w", err)
@@ -357,6 +364,57 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.
 	cleanup := func() {
 		if err := client.Close(); err != nil {
 			logger.Error("failed to close current-account client", "error", err)
+		}
+	}
+
+	return client, cleanup, nil
+}
+
+// createFinancialAccountingClient creates the FinancialAccounting gRPC client with resilience patterns.
+// The client is wrapped with circuit breaker and retry logic using shared/pkg/clients.
+func createFinancialAccountingClient(namespace string, logger *slog.Logger) (service.FinancialAccountingClient, func(), error) {
+	target := fmt.Sprintf("dns:///financial-accounting.%s.svc.cluster.local:50051", namespace)
+	logger.Info("connecting to financial-accounting service", "target", target)
+
+	conn, err := grpc.NewClient(
+		target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to connect to financial-accounting service: %w", err)
+	}
+
+	// Configure resilience settings from environment
+	resilientConfig := sharedclients.ResilientClientConfig{
+		// Circuit breaker settings
+		CircuitBreakerName:     "financial-accounting",
+		CircuitBreakerTimeout:  getEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval: getEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		MaxRequests:            getEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       getEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+
+		// Retry settings
+		MaxRetries:          getEnvAsInt("FINANCIAL_ACCOUNTING_MAX_RETRIES", 3),
+		InitialInterval:     getEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
+		MaxInterval:         getEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_MAX_INTERVAL", 5*time.Second),
+		Multiplier:          getEnvAsFloat("FINANCIAL_ACCOUNTING_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: getEnvAsFloat("FINANCIAL_ACCOUNTING_RETRY_RANDOMIZATION", 0.5),
+
+		Logger: logger,
+	}
+
+	logger.Info("financial-accounting client configured with resilience patterns",
+		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
+		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
+		"max_retries", resilientConfig.MaxRetries,
+	)
+
+	client := payclients.NewResilientFinancialAccountingClient(conn, resilientConfig)
+
+	cleanup := func() {
+		if err := client.Close(); err != nil {
+			logger.Error("failed to close financial-accounting client", "error", err)
 		}
 	}
 
