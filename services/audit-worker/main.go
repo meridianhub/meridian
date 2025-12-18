@@ -88,14 +88,13 @@ func getDBConnectionString() string {
 	return connStr
 }
 
-// getAuditSchema returns the audit schema from environment or default
+// getAuditSchema returns the audit schema from environment.
 // Per ADR-0020, each service should run its own embedded worker.
-// This centralized worker is maintained for backwards compatibility.
+// The AUDIT_SCHEMA environment variable must be set to specify which schema to process.
 func getAuditSchema() string {
 	schema := os.Getenv("AUDIT_SCHEMA")
 	if schema == "" {
-		// Default to current_account_audit for backwards compatibility
-		schema = "current_account_audit"
+		log.Fatal("AUDIT_SCHEMA environment variable is required")
 	}
 	return schema
 }
@@ -145,8 +144,7 @@ func main() {
 	log.Println("Database connection established")
 
 	// Start audit worker
-	// Per ADR-0020, this centralized worker is being deprecated in favor of per-service workers.
-	// The schema parameter allows specifying which audit schema to process.
+	// The AUDIT_SCHEMA env var specifies which audit schema this worker processes.
 	schema := getAuditSchema()
 	auditWorker := audit.NewAuditWorker(gormDB, schema, logger)
 	workerCtx, workerCancel := context.WithCancel(ctx)
