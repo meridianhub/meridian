@@ -69,7 +69,7 @@ stateDiagram-v2
         Original remains for audit trail.
         Terminal state.
     end note
-```sql
+```
 
 ### Status Transition Rules
 
@@ -123,7 +123,7 @@ message InitiateFinancialPositionLogRequest {
 message InitiateFinancialPositionLogResponse {
   FinancialPositionLog log = 1;                // Created log (always present)
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -292,7 +292,7 @@ Response: {
     // ... (same as first response)
   }
 }
-```text
+```
 
 ---
 
@@ -319,7 +319,7 @@ message InitiateFinancialPositionLogBatchResponse {
   int32 success_count = 4;                     // Successful creations
   int32 failure_count = 5;                     // Failed creations
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -463,7 +463,7 @@ Response: {
   ]
 }
 // Note: No logs created due to atomicity
-```text
+```
 
 ---
 
@@ -489,7 +489,7 @@ message UpdateFinancialPositionLogRequest {
 message UpdateFinancialPositionLogResponse {
   FinancialPositionLog log = 1;                // Updated log
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -653,7 +653,7 @@ Response: {
     }
   ]
 }
-```text
+```
 
 ---
 
@@ -674,7 +674,7 @@ message RetrieveFinancialPositionLogRequest {
 message RetrieveFinancialPositionLogResponse {
   FinancialPositionLog log = 1;  // Complete log (always present)
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -770,7 +770,7 @@ Response: {
     }
   ]
 }
-```text
+```
 
 ---
 
@@ -797,7 +797,7 @@ message BulkImportTransactionsResponse {
   int32 failed_count = 3;                      // Failure count
   repeated string failure_details = 4;         // Error descriptions
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -939,7 +939,7 @@ Response: {
     "Entry[1]: transaction_id 'not-a-uuid' is not a valid UUID"
   ]
 }
-```text
+```
 
 ---
 
@@ -964,7 +964,7 @@ message ListFinancialPositionLogsResponse {
   repeated FinancialPositionLog logs = 1;      // Matching logs
   meridian.common.v1.PaginationResponse pagination = 2;  // Next page token
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -1083,7 +1083,7 @@ Response: {
   ],
   "pagination": { /* ... */ }
 }
-```sql
+```
 
 ---
 
@@ -1151,7 +1151,7 @@ WHERE
   log_id = $2
   AND version = $3  -- Optimistic lock check
 RETURNING *
-```sql
+```
 
 **Conflict Resolution:**
 
@@ -1210,7 +1210,7 @@ Transaction A (deposit)
 ├─ Transaction B (fee deduction) [child]
 ├─ Transaction C (interest calculation) [child]
 └─ Transaction D (reversal) [related]
-```protobuf
+```
 
 ## Audit Trail Completeness
 
@@ -1264,7 +1264,7 @@ Use `ListFinancialPositionLogs` with `date_range` filter:
   "status": "TRANSACTION_STATUS_POSTED",
   "pagination": { "page_size": 1000 }
 }
-```text
+```
 
 ### Reconciliation Guarantees
 

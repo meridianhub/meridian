@@ -58,7 +58,7 @@ message ExampleEvent {
   string aggregate_id = 2;                   // ID of the aggregate (account_id, booking_log_id, etc.)
   // ... other business fields
 }
-```text
+```
 
 ### Field Conventions
 
@@ -117,7 +117,7 @@ google.type.Money amount = 4 [
     expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
   }
 ];
-```go
+```
 
 **Important**: CEL constraints on `google.type.Money` provide documentation but don't generate runtime validation. Service layer MUST enforce money constraints.
 
@@ -209,7 +209,7 @@ sequenceDiagram
     Kafka-->>FinancialAccounting: TransactionCompletedEvent (async)
     Kafka-->>PositionKeeping: TransactionCompletedEvent (async)
     Kafka-->>Reporting: TransactionCompletedEvent (async)
-```sql
+```
 
 **Publishing Rules:**
 
@@ -242,7 +242,7 @@ sequenceDiagram
     Kafka-->>CurrentAccount: TransactionCapturedEvent
     Note over CurrentAccount: Both confirmations received,<br/>mark transaction complete
     CurrentAccount->>Kafka: Publish TransactionCompletedEvent
-```text
+```
 
 **Choreography Rules:**
 
@@ -278,7 +278,7 @@ sequenceDiagram
 
         OutboxPollingWorker->>Database: UPDATE events as processed
     end
-```sql
+```
 
 **Outbox Pattern Benefits:**
 
@@ -313,7 +313,7 @@ CREATE TABLE audit_outbox (
 
 CREATE INDEX idx_outbox_unprocessed ON audit_outbox (created_at)
 WHERE processed_at IS NULL;
-```text
+```
 
 ### Pattern 4: Idempotent Event Consumption
 
@@ -342,7 +342,7 @@ sequenceDiagram
     Database-->>Consumer: Found (already processed)
     Consumer->>Consumer: Skip processing
     Consumer->>Kafka: Commit offset
-```sql
+```
 
 **Idempotency Implementation:**
 
@@ -364,7 +364,7 @@ CREATE TABLE event_idempotency (
 
 CREATE INDEX idx_idempotency_expiry ON event_idempotency (processed_at);
 -- Cleanup job: DELETE WHERE processed_at < NOW() - INTERVAL '7 days'
-```sql
+```
 
 ---
 
@@ -476,7 +476,7 @@ func (s *AccountService) CreateAccount(ctx context.Context, req *pb.CreateAccoun
     // Event will be published by background outbox worker
     return &pb.AccountResponse{Account: account.ToProto()}, nil
 }
-```text
+```
 
 ---
 
@@ -496,7 +496,7 @@ consumerConfig := kafka.ConsumerConfig{
     PollTimeout:      100 * time.Millisecond,
     HandlerTimeout:   30 * time.Second,
 }
-```protobuf
+```
 
 **Key Settings:**
 
@@ -563,7 +563,7 @@ func (c *TransactionInitiatedConsumer) handleMessage(ctx context.Context, key []
     // 6. Success - Kafka consumer will commit offset automatically
     return nil
 }
-```text
+```
 
 ### Dead Letter Queue (DLQ) Pattern
 
@@ -599,7 +599,7 @@ func (c *ProtoConsumer) processMessage(ctx context.Context, msg *kafka.Message) 
 
     return nil
 }
-```text
+```
 
 **DLQ Topic Naming:**
 
@@ -623,7 +623,7 @@ func (c *ProtoConsumer) processMessage(ctx context.Context, msg *kafka.Message) 
     "causation_id": "event-xyz-456"
   }
 }
-```protobuf
+```
 
 ### Consumer Error Handling Strategy
 
@@ -654,7 +654,7 @@ if err := handler(ctx, key, msg); err != nil {
 
 // Success - commit offset
 consumer.CommitMessage(msg)
-```text
+```
 
 **Implication:** Consumers MUST be idempotent (handle duplicate events safely).
 
@@ -676,7 +676,7 @@ partitionKey := event.AccountId
 
 kafka.Publish(ctx, topic, partitionKey, event)
 // All events for account-1 go to the same partition → ordered delivery
-```text
+```
 
 ### Handling Out-of-Order Events
 
@@ -711,7 +711,7 @@ func (c *AccountConsumer) handleEvent(ctx context.Context, event *eventsv1.Accou
 
     return c.accountRepo.Update(ctx, account)
 }
-```text
+```
 
 ### Partition Strategy
 
@@ -723,7 +723,7 @@ kafka-topics --create \
   --partitions 3 \
   --replication-factor 3 \
   --config retention.ms=604800000  # 7 days
-```text
+```
 
 **Partition Count Guidelines:**
 
@@ -766,7 +766,7 @@ message AccountCreatedEvent {
   string created_by = 4;           // NEW: optional field
   map<string, string> metadata = 5; // NEW: optional field
 }
-```text
+```
 
 **CI Validation:** `buf breaking --against main` passes
 
@@ -781,7 +781,7 @@ message AccountSuspendedEvent {
   google.protobuf.Timestamp suspended_until = 4;
   // ...
 }
-```sql
+```
 
 **Topic Strategy:** New event = new topic (`current-account.account-suspended.v1`)
 
@@ -808,7 +808,7 @@ Examples:
 - current-account.account-created.v1
 - financial-accounting.ledger-posting-captured.v1
 - position-keeping.transaction-captured.v1
-```text
+```
 
 **Version Increments:**
 
@@ -825,7 +825,7 @@ current-account.account-status-changed.v1
 
 # BIAN 14.0 adds "Suspend" behavior qualifier
 current-account.account-suspended.v1  ← New event type, NOT v2 of status-changed
-```text
+```
 
 ### CI/CD Schema Validation
 
@@ -855,7 +855,7 @@ jobs:
 
       - name: Check for breaking changes
         run: buf breaking --against '.git#branch=main'
-```text
+```
 
 **Result:** Pull requests with breaking proto changes fail CI
 
@@ -871,7 +871,7 @@ jobs:
 Service:    current-account | financial-accounting | position-keeping
 Event Name: account-created | ledger-posting-captured | transaction-captured
 Version:    v1 | v2 | v3
-```text
+```
 
 **Examples:**
 
@@ -892,7 +892,7 @@ kafka-topics --create \
   --config cleanup.policy=delete \
   --config compression.type=producer \
   --config min.insync.replicas=2
-```sql
+```
 
 | Setting | Value | Rationale |
 |---------|-------|-----------|
@@ -955,7 +955,7 @@ rate(kafka_producer_publish_errors_total[5m]) > 0
 
 # Outbox lag (oldest unprocessed event)
 kafka_producer_outbox_lag_seconds > 60
-```protobuf
+```
 
 ### Consumer Metrics
 
@@ -977,7 +977,7 @@ kafka_consumer_lag{group="financial-accounting-deposit-consumer"} > 1000
 
 # DLQ messages
 rate(kafka_consumer_dlq_messages_total[5m]) > 0
-```text
+```
 
 ### Distributed Tracing
 
@@ -1018,7 +1018,7 @@ func (c *EventConsumer) handleWithTracing(ctx context.Context, event *eventsv1.A
     // Process event with trace context
     return c.processEvent(ctx, event)
 }
-```text
+```
 
 **Trace Visualization (Jaeger/Tempo):**
 
@@ -1034,7 +1034,7 @@ Trace: Create Account (trace_id=abc123)
 └─ Span: PositionKeeping.ConsumeAccountCreated (100ms)
    ├─ Span: Database.CreatePositionLog (40ms)
    └─ Span: Kafka.Publish TransactionCapturedEvent (10ms)
-```text
+```
 
 ### Logging Standards
 
@@ -1057,7 +1057,7 @@ log.Error("Failed to publish event",
     "error", err,
     "retry_count", retryCount,
 )
-```text
+```
 
 **Consumer Logs:**
 
@@ -1077,7 +1077,7 @@ log.Error("Failed to process event",
     "retry_count", retryCount,
     "will_send_to_dlq", willSendToDLQ,
 )
-```text
+```
 
 ---
 
@@ -1114,7 +1114,7 @@ func TestAccountCreatedEvent_Serialization(t *testing.T) {
     assert.Equal(t, original.AccountId, deserialized.AccountId)
     assert.Equal(t, original.BaseCurrency, deserialized.BaseCurrency)
 }
-```text
+```
 
 ### Integration Tests: End-to-End Event Flow
 
@@ -1149,7 +1149,7 @@ func TestCreateAccount_PublishesEvent(t *testing.T) {
         t.Fatal("Timeout waiting for event")
     }
 }
-```text
+```
 
 ### Contract Tests: Consumer Expectations
 
@@ -1179,7 +1179,7 @@ func TestAccountCreatedConsumer_HandleEvent(t *testing.T) {
     assert.Equal(t, "account-123", bookingLog.AccountID)
     assert.Equal(t, commonv1.Currency_CURRENCY_GBP, bookingLog.BaseCurrency)
 }
-```text
+```
 
 ### Idempotency Tests
 
@@ -1210,7 +1210,7 @@ func TestConsumer_Idempotency(t *testing.T) {
     require.NoError(t, err)
     assert.Len(t, logs, 1)  // Still only 1 booking log
 }
-```sql
+```
 
 ---
 
@@ -1254,7 +1254,7 @@ kafka-consumer-groups --bootstrap-server kafka:9092 \
 # Output:
 # TOPIC                                       PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
 # current-account.transaction-initiated.v1    0          1000            5000            4000  ← LAG
-```sql
+```
 
 **Resolution:**
 
@@ -1279,7 +1279,7 @@ FROM audit_outbox
 WHERE processed_at IS NULL
 ORDER BY created_at ASC
 LIMIT 10;
-```sql
+```
 
 **Resolution:**
 
@@ -1305,7 +1305,7 @@ log.Warn("Duplicate event detected",
     "idempotency_key", event.IdempotencyKey,
     "account_id", event.AccountId,
 )
-```sql
+```
 
 **Resolution:**
 
@@ -1328,7 +1328,7 @@ log.Warn("Duplicate event detected",
 kafka-console-consumer --bootstrap-server kafka:9092 \
   --topic financial-accounting.ledger-posting-captured.v1.dlq \
   --from-beginning
-```sql
+```
 
 **Resolution:**
 
@@ -1413,7 +1413,7 @@ sequenceDiagram
     Kafka-->>FA: TransactionCompletedEvent
     Kafka-->>PK: TransactionCompletedEvent
     Note over FA,PK: Services update internal state<br/>to mark transaction finalized
-```text
+```
 
 **Event Sequence:**
 
@@ -1434,7 +1434,7 @@ Command: ExecuteDeposit (causation_id = cmd-123)
        ├─> LedgerPostingCapturedEvent (event_id = evt-2, causation_id = evt-1)
        ├─> TransactionCapturedEvent (event_id = evt-3, causation_id = evt-1)
        └─> TransactionCompletedEvent (event_id = evt-4, causation_id = evt-1)
-```text
+```
 
 ---
 

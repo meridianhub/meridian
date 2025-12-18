@@ -725,7 +725,7 @@ internal/current-account/
 └── adapters/
     └── persistence/     # Database adapters
         └── repository.go # Audit log persistence
-```text
+```
 
 **Key Characteristics:**
 
@@ -754,7 +754,7 @@ internal/position-keeping/
 │       └── kafka_event_publisher.go  # Kafka event adapter
 └── app/
     └── container.go         # Dependency injection container
-```text
+```
 
 **Key Characteristics:**
 
@@ -780,7 +780,7 @@ internal/financial-accounting/
     └── messaging/              # Event-driven adapters
         ├── deposit_consumer.go      # Kafka deposit event consumer
         └── accounting_event_publisher.go  # Accounting event publisher
-```text
+```
 
 **Key Characteristics:**
 
@@ -827,14 +827,14 @@ import "github.com/meridianhub/meridian/internal/financial-accounting/service"
 // CORRECT - Use proto-defined gRPC client
 import pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 import fa_pb "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
-```text
+```
 
 **Detection:**
 
 ```bash
 # Automated detection via coupling analysis
 ./scripts/analyze-coupling.sh | jq '.violations[] | select(.type == "cross-service-internal-import")'
-```sql
+```
 
 #### Rule 2: Proto-Only Inter-Service Communication
 
@@ -880,14 +880,14 @@ publisher.Publish(ctx, event)
 // FORBIDDEN - Direct function call to another service
 import "github.com/meridianhub/meridian/internal/position-keeping/service"
 result := service.CreateTransactionLog(log)  // ❌ NOT ALLOWED
-```text
+```
 
 **Contract Evolution:**
 
 ```bash
 # Validate proto changes for breaking modifications
 buf breaking --against '.git#branch=develop'
-```sql
+```
 
 #### Rule 3: Platform Code in `pkg/platform/` Only
 
@@ -920,7 +920,7 @@ import "github.com/meridianhub/meridian/internal/platform/observability"
 
 // TARGET (COMPLIANT) - Migration target
 import "github.com/meridianhub/meridian/pkg/platform/observability"
-```sql
+```
 
 **Migration Checklist:**
 
@@ -967,7 +967,7 @@ db.Exec("UPDATE financial_accounting.booking_log SET status = ?", status)
 // CORRECT - Use gRPC to query other service's data
 client.RetrieveFinancialPositionLog(ctx, &pb.RetrieveRequest{LogId: logID})
 client.UpdateFinancialBookingLog(ctx, &pb.UpdateRequest{LogId: logID, Status: status})
-```text
+```
 
 **Database Connection Isolation:**
 
@@ -978,7 +978,7 @@ db, err := sql.Open("postgres", os.Getenv("CURRENT_ACCOUNT_DB_URL"))
 
 // internal/position-keeping/app/container.go
 db, err := sql.Open("postgres", os.Getenv("POSITION_KEEPING_DB_URL"))
-```protobuf
+```
 
 #### Rule 5: Service-Specific Business Logic
 
@@ -1032,7 +1032,7 @@ func (a *Account) ValidateOverdraftLimit(amount Money) error {
 // FORBIDDEN - Domain logic in shared package
 // pkg/domain/account.go (THIS SHOULD NOT EXIST)
 func ValidateOverdraft(amount, limit Money) error { ... }
-```sql
+```
 
 ### Allowed Dependency Directions
 
@@ -1125,7 +1125,7 @@ faClient.InitiateBookingLog(...)
 // internal/financial-accounting/service/posting_service.go
 import ca_pb "meridian/current_account/v1"  // ❌ NOT ALLOWED
 caClient.RetrieveAccount(...)
-```protobuf
+```
 
 **Solution:** Introduce events or shared data entities to break the cycle
 
@@ -1145,7 +1145,7 @@ caClient.RetrieveAccount(...)
 // internal/position-keeping/service/position_service.go
 import fa_pb "meridian/financial_accounting/v1"  // ❌ NOT ALLOWED
 faClient.InitiateBookingLog(...)
-```text
+```
 
 **Solution:** Position-keeping publishes events; other services consume and react
 
@@ -1168,7 +1168,7 @@ pkClient.UpdateFinancialPositionLog(ctx, &pb.UpdateRequest{
         Amount: depositAmount,  // ❌ Missing double-entry validation
     },
 })
-```sql
+```
 
 **Solution:** Current-account MUST call financial-accounting first, which then publishes events to position-keeping
 
@@ -1253,7 +1253,7 @@ pkClient.UpdateFinancialPositionLog(ctx, &pb.UpdateRequest{
 
 # Check for violations
 jq '.violations | length' docs/architecture/coupling-metrics.json
-```protobuf
+```
 
 **Detects:**
 
@@ -1276,7 +1276,7 @@ if [[ $violations -gt 0 ]]; then
     ./scripts/analyze-coupling.sh | jq '.violations'
     exit 1
 fi
-```text
+```
 
 **GitHub Actions Workflow:**
 
@@ -1296,7 +1296,7 @@ jobs:
             echo "::error::$violations coupling violations detected"
             exit 1
           fi
-```protobuf
+```
 
 #### Code Review Checklist
 
@@ -1324,7 +1324,7 @@ lint-coupling:
 
 # Integration with existing linting
 make lint-coupling
-```sql
+```
 
 **IDE Integration (IntelliJ IDEA / GoLand):**
 
@@ -1495,7 +1495,7 @@ resp, err := pkClient.ListFinancialPositionLogs(ctx, &pb.ListRequest{
     AccountId: accountID,
     Pagination: &common.Pagination{PageSize: 100},
 })
-```sql
+```
 
 #### CurrentAccount → FinancialAccounting
 
@@ -1522,7 +1522,7 @@ resp, err := faClient.CaptureLedgerPosting(ctx, &pb.CaptureRequest{
     PostingAmount:         amount,
     AccountId:             accountID,
 })
-```sql
+```
 
 ### Asynchronous Communication (Kafka)
 
@@ -1758,7 +1758,7 @@ graph TD
         L9["⚫ Gray: Databases (service-owned)"]
         L10["🔴 Red: Event Streaming (Kafka)"]
     end
-```text
+```
 
 ### Architecture Diagram Interpretation
 

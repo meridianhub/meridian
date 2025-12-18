@@ -67,7 +67,7 @@ stateDiagram-v2
         Not included in financial reports.
         failure_reason stored for audit.
     end note
-```text
+```
 
 ### Ledger Posting Status State Machine
 
@@ -111,7 +111,7 @@ stateDiagram-v2
         Reversal creates opposite posting.
         Terminal state for original posting.
     end note
-```protobuf
+```
 
 ## Double-Entry Invariants
 
@@ -121,7 +121,7 @@ The FinancialAccounting service enforces fundamental double-entry bookkeeping pr
 
 ```text
 Assets = Liabilities + Equity
-```text
+```
 
 ### Posting Balance Invariant
 
@@ -129,7 +129,7 @@ For every `FinancialBookingLog`, the following MUST hold before transitioning to
 
 ```text
 sum(postings WHERE posting_direction = DEBIT) = sum(postings WHERE posting_direction = CREDIT)
-```protobuf
+```
 
 **Enforcement:**
 
@@ -143,7 +143,7 @@ All posting amounts MUST be positive (> 0):
 
 ```text
 posting_amount.units > 0 || (posting_amount.units == 0 && posting_amount.nanos > 0)
-```sql
+```
 
 **Rationale:**
 
@@ -157,7 +157,7 @@ All postings within a booking log MUST use the same currency:
 
 ```text
 All postings.posting_amount.currency_code = booking_log.base_currency
-```text
+```
 
 ## API Operations
 
@@ -183,7 +183,7 @@ message InitiateFinancialBookingLogRequest {
 message InitiateFinancialBookingLogResponse {
   FinancialBookingLog financial_booking_log = 1;  // Created log
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -267,7 +267,7 @@ Response: {
     "postings": []  // Empty initially
   }
 }
-```text
+```
 
 ---
 
@@ -290,7 +290,7 @@ message UpdateFinancialBookingLogRequest {
 message UpdateFinancialBookingLogResponse {
   FinancialBookingLog financial_booking_log = 1;  // Updated log
 }
-```go
+```
 
 **Behavioral Semantics:**
 
@@ -365,7 +365,7 @@ if debit_sum != credit_sum:
 
 if len(postings) == 0:
   return FAILED_PRECONDITION("Cannot post empty booking log")
-```text
+```
 
 **Concurrency:**
 
@@ -446,7 +446,7 @@ Response: {
     "updated_at": "2025-11-19T13:20:00Z"
   }
 }
-```text
+```
 
 ---
 
@@ -467,7 +467,7 @@ message RetrieveFinancialBookingLogRequest {
 message RetrieveFinancialBookingLogResponse {
   FinancialBookingLog financial_booking_log = 1;  // Complete log
 }
-```text
+```
 
 **Behavioral Semantics:**
 
@@ -535,7 +535,7 @@ message ListFinancialBookingLogsResponse {
   repeated FinancialBookingLog financial_booking_logs = 1;  // Matching logs
   meridian.common.v1.PaginationResponse pagination = 2;     // Next page token
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -602,7 +602,7 @@ message CaptureLedgerPostingRequest {
 message CaptureLedgerPostingResponse {
   LedgerPosting ledger_posting = 1;           // Created posting
 }
-```protobuf
+```
 
 **Behavioral Semantics:**
 
@@ -775,7 +775,7 @@ Response: {
     }
   ]
 }
-```text
+```
 
 ---
 
@@ -798,7 +798,7 @@ message UpdateLedgerPostingRequest {
 message UpdateLedgerPostingResponse {
   LedgerPosting ledger_posting = 1;               // Updated posting
 }
-```text
+```
 
 **Behavioral Semantics:**
 
@@ -859,7 +859,7 @@ message RetrieveLedgerPostingRequest {
 message RetrieveLedgerPostingResponse {
   LedgerPosting ledger_posting = 1;  // Complete posting
 }
-```text
+```
 
 **Behavioral Semantics:**
 
@@ -902,7 +902,7 @@ message ListLedgerPostingsResponse {
   repeated LedgerPosting ledger_postings = 1;    // Matching postings
   meridian.common.v1.PaginationResponse pagination = 2;  // Next page token
 }
-```sql
+```
 
 **Behavioral Semantics:**
 
@@ -1024,7 +1024,7 @@ Response: {
   ],
   "pagination": { /* ... */ }
 }
-```sql
+```
 
 ---
 
@@ -1143,7 +1143,7 @@ message DepositEvent {
   string transaction_id = 3;
   google.protobuf.Timestamp timestamp = 4;
 }
-```sql
+```
 
 **Consumer Implementation**: `internal/financial-accounting/adapters/messaging/deposit_consumer.go`
 
@@ -1176,7 +1176,7 @@ message PostingCompleteEvent {
   repeated LedgerPosting postings = 2;
   google.protobuf.Timestamp posted_at = 3;
 }
-```protobuf
+```
 
 **Publisher Implementation**: `internal/financial-accounting/adapters/messaging/accounting_event_publisher.go` (9 usages detected)
 
@@ -1250,13 +1250,13 @@ ListLedgerPostings(status=POSTED)
   → Sum(amount WHERE direction=DEBIT)
   → Sum(amount WHERE direction=CREDIT)
   → Display accounts with non-zero balance
-```text
+```
 
 **Invariant Validation:**
 
 ```text
 Sum(all debit balances) = Sum(all credit balances)
-```text
+```
 
 If this invariant fails, indicates data corruption or unbalanced postings.
 
@@ -1275,7 +1275,7 @@ ListLedgerPostings(
 )
   → Order by value_date DESC
   → Display: date, description, debit, credit, running balance
-```text
+```
 
 ### Balance Sheet
 
@@ -1289,7 +1289,7 @@ Liability accounts: Sum(CREDIT) - Sum(DEBIT)
 Equity accounts: Sum(CREDIT) - Sum(DEBIT)
 
 Invariant: Assets = Liabilities + Equity
-```text
+```
 
 ### Income Statement (Profit & Loss)
 
@@ -1302,7 +1302,7 @@ Revenue accounts: Sum(CREDIT) - Sum(DEBIT) for period
 Expense accounts: Sum(DEBIT) - Sum(CREDIT) for period
 
 Net Income = Revenue - Expenses
-```text
+```
 
 ## Future Enhancements
 

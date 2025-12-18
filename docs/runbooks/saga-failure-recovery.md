@@ -314,7 +314,7 @@ compensation failed: timeout
      -d @compensation.json \
      "https://api.positionkeeping/v1/logs/ACC-123/entries"
 
-```text
+   ```
 
 1. **Verify net balance is zero:**
 
@@ -326,7 +326,7 @@ compensation failed: timeout
 
    # Verify: sum(CREDIT) - sum(DEBIT) = 0
 
-```
+   ```
 
 1. **Document in incident log:**
    - Correlation ID
@@ -360,7 +360,7 @@ compensation failed: timeout
 
    curl "https://api.financialaccounting/v1/postings?idempotency_key=TXN-456"
 
-```text
+   ```
 
 1. **Determine actual state:**
    - If external services show entries: Execute compensation manually

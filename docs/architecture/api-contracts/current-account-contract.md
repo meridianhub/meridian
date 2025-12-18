@@ -65,7 +65,7 @@ stateDiagram-v2
         Terminal state (irreversible).
         Balance must be zero.
     end note
-```text
+```
 
 ### State Transition Rules
 
@@ -118,7 +118,7 @@ message InitiateCurrentAccountResponse {
   string account_id = 1;                       // Generated account ID
   CurrentAccountFacility facility = 2;         // Complete facility details
 }
-```text
+```
 
 **Behavioral Semantics:**
 
@@ -224,7 +224,7 @@ Response: {
     }
   ]
 }
-```text
+```
 
 ---
 
@@ -251,7 +251,7 @@ message ExecuteDepositResponse {
   meridian.common.v1.MoneyAmount available_balance = 4;    // Updated available
   TransactionStatus status = 5;                // Transaction status
 }
-```text
+```
 
 **Behavioral Semantics:**
 
@@ -360,7 +360,7 @@ sequenceDiagram
         FinancialAccounting-->>CurrentAccount: Error
         CurrentAccount-->>Client: Error (UNAVAILABLE)
     end
-```text
+```
 
 **Compensation Operations:**
 
@@ -456,7 +456,7 @@ Response: {
     }
   ]
 }
-```text
+```
 
 ---
 
@@ -476,7 +476,7 @@ message RetrieveCurrentAccountRequest {
 message RetrieveCurrentAccountResponse {
   CurrentAccountFacility facility = 1;         // Complete facility details
 }
-```text
+```
 
 **Behavioral Semantics:**
 
@@ -616,7 +616,7 @@ Response: {
     }
   ]
 }
-```text
+```
 
 ---
 
@@ -673,7 +673,7 @@ SET
 WHERE
   account_id = $2
   AND version = $3  -- Optimistic lock check
-```text
+```
 
 **Conflict Resolution:**
 

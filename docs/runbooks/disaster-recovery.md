@@ -78,7 +78,7 @@ this with your specific:
 
    # If completely down, proceed to rebuild
 
-```text
+   ```
 
 1. **Deploy new cluster** (15-60 minutes)
 
@@ -95,7 +95,7 @@ this with your specific:
 
    kubectl get nodes
    kubectl get namespaces
-```
+   ```
 
 1. **Restore configurations** (60-90 minutes)
 
@@ -113,7 +113,7 @@ this with your specific:
 
    kubectl get all -n production
 
-```text
+   ```
 
 1. **Restore database** (90-150 minutes)
 
@@ -134,7 +134,7 @@ this with your specific:
    # Verify data integrity for each service database
    cockroach sql --execute="SELECT COUNT(*) FROM meridian_current_account.accounts;"
    cockroach sql --execute="SELECT COUNT(*) FROM meridian_position_keeping.financial_position_logs;"
-```
+   ```
 
 1. **Verify and test** (150-180 minutes)
 
@@ -152,7 +152,7 @@ this with your specific:
 
    stern -n production meridian --since 5m
 
-```text
+   ```
 
 ### Scenario 2: Database Corruption
 
@@ -171,7 +171,7 @@ this with your specific:
    # Verify no active connections
 
    cockroach sql --execute="SHOW SESSIONS;"
-```
+   ```
 
 1. **Assess corruption scope**
 
@@ -185,7 +185,7 @@ this with your specific:
 
    cockroach sql --execute="SELECT * FROM system.range_log WHERE info LIKE '%corruption%';"
 
-```text
+   ```
 
 1. **Restore from backup**
 
@@ -204,7 +204,7 @@ this with your specific:
    cockroach sql --execute="RESTORE DATABASE meridian_payment_order FROM 's3://backups/2025-10-28-00-00/payment_order';"
    cockroach sql --execute="RESTORE DATABASE meridian_party FROM 's3://backups/2025-10-28-00-00/party';"
    cockroach sql --execute="RESTORE DATABASE meridian_platform FROM 's3://backups/2025-10-28-00-00/platform';"
-```
+   ```
 
 1. **Verify data integrity**
 
@@ -218,7 +218,7 @@ this with your specific:
 
    cockroach sql --execute="SELECT COUNT(*) FROM meridian_current_account.accounts;"
 
-```text
+   ```
 
 1. **Resume operations**
 
@@ -231,7 +231,7 @@ this with your specific:
    # Monitor for errors
 
    kubectl logs -n production -l app=meridian --tail=100
-```
+   ```
 
 ### Scenario 3: Regional Outage
 
@@ -253,7 +253,7 @@ this with your specific:
      --hosted-zone-id Z123456 \
      --change-batch file://dns-failover.json
 
-```text
+   ```
 
 1. **Verify DR cluster** (30-60 minutes)
 
@@ -272,7 +272,7 @@ this with your specific:
    # Verify replication for all service databases
    cockroach sql --execute="SHOW RANGES FROM DATABASE meridian_current_account;"
    cockroach sql --execute="SHOW RANGES FROM DATABASE meridian_platform;"
-```
+   ```
 
 1. **Monitor switchover** (60-120 minutes)
 
@@ -290,7 +290,7 @@ this with your specific:
 
    kubectl get events -n production --sort-by='.lastTimestamp'
 
-```text
+   ```
 
 1. **Post-recovery actions** (when primary region recovers)
 
@@ -302,7 +302,7 @@ this with your specific:
 
    # Plan switchback during maintenance window
 
-```
+   ```
 
 ### Scenario 4: Ransomware / Security Breach
 
@@ -336,7 +336,7 @@ this with your specific:
 
    kubectl scale deployment meridian -n production --replicas=0
 
-```text
+   ```
 
 1. **Preserve evidence**
 
@@ -353,7 +353,7 @@ this with your specific:
    # Export network policies and RBAC
 
    kubectl get networkpolicies,roles,rolebindings -n production -o yaml > incident-rbac-$(date +%s).yaml
-```
+   ```
 
 1. **Engage security team**
    - Contact: <security@your-domain.com>
@@ -376,7 +376,7 @@ this with your specific:
 
    # Rotate all secrets, API keys, certificates
 
-```text
+   ```
 
 1. **Post-incident hardening**
    - Review all RBAC permissions

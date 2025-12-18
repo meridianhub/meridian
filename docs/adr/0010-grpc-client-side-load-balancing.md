@@ -250,7 +250,7 @@ Load testing confirms:
    creds, err := credentials.NewClientTLSFromFile("ca.pem", "")
    conn, err := grpc.NewClient(cfg, grpc.WithTransportCredentials(creds))
 
-```text
+```
 
 1. **Certificate Management**:
    - Use cert-manager for automatic certificate provisioning
