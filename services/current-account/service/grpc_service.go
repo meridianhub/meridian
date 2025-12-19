@@ -19,6 +19,7 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -56,16 +57,9 @@ type Service struct {
 	posKeepingClient clients.PositionKeepingClient
 	finAcctClient    clients.FinancialAccountingClient
 	partyClient      clients.PartyClient
-	accountConfig    *AccountConfig
+	accountConfig    *config.AccountConfig
 	logger           *slog.Logger
 	tracer           *observability.Tracer
-}
-
-// AccountConfig holds configuration for internal accounts used in transaction routing.
-// This is used for deposits to route the debit side to the clearing account.
-type AccountConfig struct {
-	// DepositClearingAccountID is the account ID for deposit clearing (debit side).
-	DepositClearingAccountID string
 }
 
 // Config contains configuration for creating a new Service with external clients
@@ -101,7 +95,7 @@ func NewServiceWithExistingClients(
 	posKeepingClient clients.PositionKeepingClient,
 	finAcctClient clients.FinancialAccountingClient,
 	partyClient clients.PartyClient,
-	accountConfig *AccountConfig,
+	accountConfig *config.AccountConfig,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
 ) (*Service, error) {
@@ -533,6 +527,11 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 	// Step 2: Post to ledger in FinancialAccounting service with double-entry bookkeeping
 	// Creates a BookingLog, posts DEBIT to clearing account, posts CREDIT to customer account,
 	// then transitions BookingLog to POSTED (triggering balance validation).
+	// These variables are intentionally declared outside the saga step closures to allow
+	// data sharing between the action and compensation functions. When a closure captures
+	// a variable (e.g., bookingLogID), both the action and compensation closures reference
+	// the same memory location, allowing the action to set values that the compensation
+	// can later read if rollback is needed.
 	var debitPostingID string
 	var creditPostingID string
 	var bookingLogID string
@@ -627,6 +626,55 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			)
 			if err != nil {
 				caobservability.RecordExternalServiceError("financial_accounting", "capture_credit_posting")
+
+				// CRITICAL: If debit was posted but credit fails, we must compensate the debit inline.
+				// The saga won't consider this step complete, so saga compensation won't run.
+				if debitPosted {
+					s.logger.Warn("credit posting failed after debit succeeded, creating inline compensation",
+						"clearing_account_id", clearingAccountID,
+						"transaction_id", transactionID,
+						"error", err)
+
+					// Compensate debit: Create CREDIT to clearing account
+					compDebitID := fmt.Sprintf("COMP-%s-debit", transactionID)
+					_, compErr := s.finAcctClient.CaptureLedgerPosting(stepCtx,
+						&financialaccountingv1.CaptureLedgerPostingRequest{
+							FinancialBookingLogId: bookingLogID,
+							PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+							PostingAmount:         moneyAmt.Amount,
+							AccountId:             clearingAccountID,
+							ValueDate:             timestamppb.Now(),
+							IdempotencyKey:        &commonpb.IdempotencyKey{Key: compDebitID},
+						},
+					)
+					if compErr != nil {
+						s.logger.Error("failed to compensate debit posting after credit failure",
+							"booking_log_id", bookingLogID,
+							"clearing_account_id", clearingAccountID,
+							"transaction_id", transactionID,
+							"error", compErr)
+						caobservability.RecordInlineCompensationFailure("deposit", "debit")
+					}
+
+					// Try to transition BookingLog to CANCELLED
+					_, cancelErr := s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
+						&financialaccountingv1.UpdateFinancialBookingLogRequest{
+							Id:     bookingLogID,
+							Status: commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
+						},
+					)
+					if cancelErr != nil {
+						s.logger.Warn("failed to transition booking log to CANCELLED after credit failure",
+							"booking_log_id", bookingLogID,
+							"transaction_id", transactionID,
+							"error", cancelErr)
+					} else {
+						s.logger.Info("booking log transitioned to CANCELLED after credit failure",
+							"booking_log_id", bookingLogID,
+							"transaction_id", transactionID)
+					}
+				}
+
 				return fmt.Errorf("failed to post credit to customer account: %w", err)
 			}
 			creditPostingID = creditResp.LedgerPosting.Id
@@ -672,7 +720,11 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 					)
 					if compErr != nil {
 						s.logger.Error("failed to compensate credit posting inline",
+							"booking_log_id", bookingLogID,
+							"account_id", account.AccountID,
+							"transaction_id", transactionID,
 							"error", compErr)
+						caobservability.RecordInlineCompensationFailure("deposit", "credit")
 					}
 				}
 
@@ -691,18 +743,33 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 					)
 					if compErr != nil {
 						s.logger.Error("failed to compensate debit posting inline",
+							"booking_log_id", bookingLogID,
+							"clearing_account_id", clearingAccountID,
+							"transaction_id", transactionID,
 							"error", compErr)
+						caobservability.RecordInlineCompensationFailure("deposit", "debit")
 					}
 				}
 
 				// Try to transition BookingLog to CANCELLED
 				if debitPosted || creditPosted {
-					_, _ = s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
+					_, cancelErr := s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
 						&financialaccountingv1.UpdateFinancialBookingLogRequest{
 							Id:     bookingLogID,
 							Status: commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
 						},
 					)
+					if cancelErr != nil {
+						// Log but don't fail - the compensating entries are more important
+						s.logger.Warn("failed to transition booking log to CANCELLED during inline compensation",
+							"booking_log_id", bookingLogID,
+							"transaction_id", transactionID,
+							"error", cancelErr)
+					} else {
+						s.logger.Info("booking log transitioned to CANCELLED during inline compensation",
+							"booking_log_id", bookingLogID,
+							"transaction_id", transactionID)
+					}
 				}
 
 				return fmt.Errorf("failed to transition booking log to POSTED: %w", err)

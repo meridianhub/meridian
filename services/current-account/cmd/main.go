@@ -365,18 +365,15 @@ func createServiceWithClients(
 ) (*service.Service, *serviceClients, error) {
 	// Load account configuration for clearing accounts
 	// This is optional - if not configured, deposits will use single-entry mode (backward compatible)
-	var accountConfig *service.AccountConfig
-	cfg, err := config.LoadAccountConfig()
-	if err != nil {
+	accountConfig, cfgErr := config.LoadAccountConfig()
+	if cfgErr != nil {
 		// Log warning but continue - double-entry is optional for backward compatibility
 		logger.Warn("account configuration not loaded, double-entry bookkeeping disabled",
-			"error", err)
+			"error", cfgErr)
+		accountConfig = nil // Explicit nil for clarity
 	} else {
-		accountConfig = &service.AccountConfig{
-			DepositClearingAccountID: cfg.DepositClearingAccountID,
-		}
 		logger.Info("account configuration loaded",
-			"deposit_clearing_account_id", cfg.DepositClearingAccountID)
+			"deposit_clearing_account_id", accountConfig.DepositClearingAccountID)
 	}
 
 	// Create Position Keeping client with DNS-based load balancing
