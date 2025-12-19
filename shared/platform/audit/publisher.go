@@ -20,6 +20,8 @@ var (
 	ErrPublisherDisabled = errors.New("audit publisher disabled: no bootstrap servers configured")
 	// ErrEventsNotDelivered indicates some events were not delivered during shutdown.
 	ErrEventsNotDelivered = errors.New("audit events not delivered")
+	// ErrEmptyRecordID indicates the event has no record ID for partitioning.
+	ErrEmptyRecordID = errors.New("event RecordId cannot be empty")
 )
 
 // Publisher handles publishing audit events to Kafka.
@@ -106,9 +108,15 @@ func (p *Publisher) IsEnabled() bool {
 
 // Publish sends an audit event to Kafka.
 // Returns nil if Kafka publishing is disabled or if the publisher is nil.
+// Returns ErrEmptyRecordID if the event has no record ID for partitioning.
 func (p *Publisher) Publish(ctx context.Context, event *auditv1.AuditEvent) error {
 	if p == nil || !p.IsEnabled() {
 		return nil
+	}
+
+	// Validate RecordId to ensure proper partitioning
+	if event.RecordId == "" {
+		return ErrEmptyRecordID
 	}
 
 	// Use record_id as the partition key for locality

@@ -40,6 +40,13 @@ func isValidSchemaName(name string) bool {
 	return schemaNamePattern.MatchString(name) && len(name) <= 63 // PostgreSQL max identifier length
 }
 
+// quoteIdentifier safely quotes a PostgreSQL identifier using double quotes.
+// This provides defense-in-depth alongside schema validation.
+func quoteIdentifier(name string) string {
+	// PostgreSQL identifiers: escape double quotes by doubling them
+	return `"` + name + `"`
+}
+
 // Consumer processes audit events from Kafka and writes them to the audit_log table.
 // It provides at-least-once processing guarantees with DLQ support for failed messages.
 type Consumer struct {
@@ -265,6 +272,11 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		auditLog.UserAgent = &event.UserAgent
 	}
 
+	// Check for context cancellation before expensive DB operation
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Write to audit_log using the schema from the event
 	db := c.db
 	if event.SchemaName != "" {
@@ -273,8 +285,8 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 			RecordKafkaConsumed(schema, operation, "failure")
 			return fmt.Errorf("%w: %s", ErrInvalidSchemaName, event.SchemaName)
 		}
-		// Set search_path to the service schema for routing
-		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", event.SchemaName))
+		// Set search_path using quoted identifier for defense-in-depth
+		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(event.SchemaName)))
 	}
 
 	if err := db.WithContext(ctx).Create(&auditLog).Error; err != nil {
@@ -315,17 +327,22 @@ func protoToOperation(op auditv1.AuditOperation) string {
 // processOutboxEntry processes a single outbox entry within a transaction.
 // Returns nil on success, gorm.ErrRecordNotFound if entry was already processed,
 // or other error on failure.
-func processOutboxEntry(_ context.Context, tx *gorm.DB, entryID uuid.UUID) error {
+func processOutboxEntry(ctx context.Context, tx *gorm.DB, entryID uuid.UUID) error {
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Lock the specific entry to ensure it's still pending
 	var lockedEntry AuditOutbox
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 		Where("id = ? AND status = ?", entryID, "pending").
 		First(&lockedEntry).Error; err != nil {
 		return err
 	}
 
 	// Mark as processing
-	if err := tx.Model(&lockedEntry).Update("status", "processing").Error; err != nil {
+	if err := tx.WithContext(ctx).Model(&lockedEntry).Update("status", "processing").Error; err != nil {
 		return err
 	}
 
@@ -345,12 +362,12 @@ func processOutboxEntry(_ context.Context, tx *gorm.DB, entryID uuid.UUID) error
 	}
 
 	// Insert into audit_log
-	if err := tx.Create(&auditLog).Error; err != nil {
+	if err := tx.WithContext(ctx).Create(&auditLog).Error; err != nil {
 		return err
 	}
 
 	// Mark as completed
-	return tx.Model(&lockedEntry).Update("status", "completed").Error
+	return tx.WithContext(ctx).Model(&lockedEntry).Update("status", "completed").Error
 }
 
 // ProcessOutboxFallback processes any pending entries in the audit_outbox table
@@ -369,7 +386,8 @@ func (c *Consumer) ProcessOutboxFallback(ctx context.Context, schema string, bat
 		if !isValidSchemaName(schema) {
 			return 0, fmt.Errorf("%w: %s", ErrInvalidSchemaName, schema)
 		}
-		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", schema))
+		// Set search_path using quoted identifier for defense-in-depth
+		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(schema)))
 	}
 
 	// Fetch pending entry IDs without locking (just for iteration)

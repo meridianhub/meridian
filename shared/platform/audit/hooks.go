@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -221,18 +222,24 @@ func RecordDelete[T Auditable](tx *gorm.DB, entity T) error {
 
 // Global schema name for the current service.
 // Set by the service during initialization.
+// Protected by mutex for thread-safe access.
 var (
 	globalSchemaName string
+	schemaMu         sync.RWMutex
 )
 
 // SetSchemaName sets the schema name for audit events.
 // This should be called during service initialization.
 func SetSchemaName(schema string) {
+	schemaMu.Lock()
+	defer schemaMu.Unlock()
 	globalSchemaName = schema
 }
 
 // GetSchemaName returns the configured schema name.
 func GetSchemaName() string {
+	schemaMu.RLock()
+	defer schemaMu.RUnlock()
 	return globalSchemaName
 }
 
