@@ -127,7 +127,7 @@ func (r *Repository) withForUpdateScope(ctx context.Context, fn func(tx *gorm.DB
 //
 // Alternative: Use FindByIDForUpdate() with SELECT FOR UPDATE for pessimistic locking
 // within a transaction when you need guaranteed exclusive access.
-func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) error {
+func (r *Repository) Save(ctx context.Context, account domain.CurrentAccount) error {
 	entity, err := toEntity(ctx, account)
 	if err != nil {
 		return err
@@ -175,9 +175,6 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 				return ErrVersionConflict
 			}
 
-			// Update the domain model's version to reflect the new database state
-			account.Version = account.Version + 1
-
 			return nil
 		}
 
@@ -199,8 +196,8 @@ func (r *Repository) Save(ctx context.Context, account *domain.CurrentAccount) e
 
 // FindByID retrieves an account by its internal account ID (e.g., "ACC-xxx").
 // In multi-org mode, the context must contain the organization ID for schema routing.
-func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
-	var account *domain.CurrentAccount
+func (r *Repository) FindByID(ctx context.Context, accountID string) (domain.CurrentAccount, error) {
+	var account domain.CurrentAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("account_id = ? AND deleted_at IS NULL", accountID).First(&entity)
@@ -217,7 +214,7 @@ func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.Cu
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return domain.CurrentAccount{}, err
 	}
 	return account, nil
 }
@@ -230,8 +227,8 @@ func (r *Repository) FindByID(ctx context.Context, accountID string) (*domain.Cu
 // has the organization scope set. When using WithTx(), the caller is responsible for setting
 // the org scope on the outer transaction. This method will set the org scope if not already
 // in a transaction, but when called via WithTx(), it uses the existing transaction directly.
-func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*domain.CurrentAccount, error) {
-	var account *domain.CurrentAccount
+func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (domain.CurrentAccount, error) {
+	var account domain.CurrentAccount
 
 	// Perform the FOR UPDATE query, wrapping in org-scoped transaction if needed
 	err := r.withForUpdateScope(ctx, func(tx *gorm.DB) error {
@@ -253,15 +250,15 @@ func (r *Repository) FindByIDForUpdate(ctx context.Context, accountID string) (*
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return domain.CurrentAccount{}, err
 	}
 	return account, nil
 }
 
 // FindByIBAN retrieves an account by its IBAN (stored in account_identification column).
 // In multi-org mode, the context must contain the organization ID for schema routing.
-func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.CurrentAccount, error) {
-	var account *domain.CurrentAccount
+func (r *Repository) FindByIBAN(ctx context.Context, iban string) (domain.CurrentAccount, error) {
+	var account domain.CurrentAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("account_identification = ? AND deleted_at IS NULL", iban).First(&entity)
@@ -278,15 +275,15 @@ func (r *Repository) FindByIBAN(ctx context.Context, iban string) (*domain.Curre
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return domain.CurrentAccount{}, err
 	}
 	return account, nil
 }
 
 // FindByUUID retrieves an account by its internal UUID.
 // In multi-org mode, the context must contain the organization ID for schema routing.
-func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
-	var account *domain.CurrentAccount
+func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (domain.CurrentAccount, error) {
+	var account domain.CurrentAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entity CurrentAccountEntity
 		result := tx.Where("id = ? AND deleted_at IS NULL", id).First(&entity)
@@ -303,7 +300,7 @@ func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.Curr
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return domain.CurrentAccount{}, err
 	}
 	return account, nil
 }
@@ -316,8 +313,8 @@ func (r *Repository) FindByUUID(ctx context.Context, id uuid.UUID) (*domain.Curr
 // has the organization scope set. When using WithTx(), the caller is responsible for setting
 // the org scope on the outer transaction. This method will set the org scope if not already
 // in a transaction, but when called via WithTx(), it uses the existing transaction directly.
-func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.CurrentAccount, error) {
-	var account *domain.CurrentAccount
+func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (domain.CurrentAccount, error) {
+	var account domain.CurrentAccount
 
 	// Perform the FOR UPDATE query, wrapping in org-scoped transaction if needed
 	err := r.withForUpdateScope(ctx, func(tx *gorm.DB) error {
@@ -339,15 +336,15 @@ func (r *Repository) FindByUUIDForUpdate(ctx context.Context, id uuid.UUID) (*do
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return domain.CurrentAccount{}, err
 	}
 	return account, nil
 }
 
 // FindByPartyID retrieves all accounts for a party.
 // In multi-org mode, the context must contain the organization ID for schema routing.
-func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]*domain.CurrentAccount, error) {
-	var accounts []*domain.CurrentAccount
+func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]domain.CurrentAccount, error) {
+	var accounts []domain.CurrentAccount
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entities []CurrentAccountEntity
 		result := tx.Where("party_id = ? AND deleted_at IS NULL", partyID).Find(&entities)
@@ -356,7 +353,7 @@ func (r *Repository) FindByPartyID(ctx context.Context, partyID string) ([]*doma
 			return result.Error
 		}
 
-		accounts = make([]*domain.CurrentAccount, 0, len(entities))
+		accounts = make([]domain.CurrentAccount, 0, len(entities))
 		for _, entity := range entities {
 			account, err := toDomain(&entity)
 			if err != nil {
@@ -392,54 +389,56 @@ func (r *Repository) Ping() error {
 // toEntity converts domain model to database entity
 // Note: The entity schema matches migrations/current_account/*.sql
 // OverdraftEnabled is derived from OverdraftLimit > 0
-func toEntity(ctx context.Context, account *domain.CurrentAccount) (*CurrentAccountEntity, error) {
+func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccountEntity, error) {
 	// Parse PartyID as UUID - domain model uses string for flexibility
-	partyUUID, err := uuid.Parse(account.PartyID)
+	partyUUID, err := uuid.Parse(account.PartyID())
 	if err != nil {
-		return nil, fmt.Errorf("invalid party ID %q: %w", account.PartyID, err)
+		return nil, fmt.Errorf("invalid party ID %q: %w", account.PartyID(), err)
 	}
 
 	// Extract audit user from context (falls back to "system" if not available)
 	auditUser := audit.GetUserFromContext(ctx)
 
+	balanceUpdatedAt := account.BalanceUpdatedAt()
+
 	return &CurrentAccountEntity{
-		ID:                    account.ID,
-		AccountID:             account.AccountID,             // Business account identifier
-		AccountIdentification: account.AccountIdentification, // IBAN stored in account_identification
-		AccountType:           "current",                     // Default for current accounts
-		Currency:              string(account.Balance.Currency()),
-		Status:                string(account.Status),
+		ID:                    account.ID(),
+		AccountID:             account.AccountID(),             // Business account identifier
+		AccountIdentification: account.AccountIdentification(), // IBAN stored in account_identification
+		AccountType:           "current",                       // Default for current accounts
+		Currency:              string(account.Balance().Currency()),
+		Status:                string(account.Status()),
 		PartyID:               partyUUID,
-		Balance:               account.Balance.AmountCents(),
-		AvailableBalance:      account.AvailableBalance.AmountCents(),
-		OverdraftLimit:        account.OverdraftLimit.AmountCents(),
-		OverdraftRate:         account.OverdraftRate,
-		BalanceUpdatedAt:      &account.BalanceUpdatedAt,
-		Version:               account.Version,
-		CreatedAt:             account.CreatedAt,
-		UpdatedAt:             account.UpdatedAt,
+		Balance:               account.Balance().AmountCents(),
+		AvailableBalance:      account.AvailableBalance().AmountCents(),
+		OverdraftLimit:        account.OverdraftLimit().AmountCents(),
+		OverdraftRate:         account.OverdraftRate(),
+		BalanceUpdatedAt:      &balanceUpdatedAt,
+		Version:               account.Version(),
+		CreatedAt:             account.CreatedAt(),
+		UpdatedAt:             account.UpdatedAt(),
 		CreatedBy:             auditUser,
 		UpdatedBy:             auditUser,
 	}, nil
 }
 
-// toDomain converts database entity to domain model
+// toDomain converts database entity to domain model using the builder pattern.
 // Note: OverdraftEnabled is derived from OverdraftLimit > 0
-func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
+func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	// Use NewMoney constructor - errors indicate data corruption
 	balance, err := domain.NewMoney(entity.Currency, entity.Balance)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create balance from database: %w", err)
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance from database: %w", err)
 	}
 
 	availableBalance, err := domain.NewMoney(entity.Currency, entity.AvailableBalance)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create available balance from database: %w", err)
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create available balance from database: %w", err)
 	}
 
 	overdraftLimit, err := domain.NewMoney(entity.Currency, entity.OverdraftLimit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create overdraft limit from database: %w", err)
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create overdraft limit from database: %w", err)
 	}
 
 	// Derive overdraft enabled from limit > 0
@@ -451,22 +450,23 @@ func toDomain(entity *CurrentAccountEntity) (*domain.CurrentAccount, error) {
 		balanceUpdatedAt = *entity.BalanceUpdatedAt
 	}
 
-	return &domain.CurrentAccount{
-		ID:                    entity.ID,
-		AccountID:             entity.AccountID,             // Business account identifier
-		AccountIdentification: entity.AccountIdentification, // IBAN stored in account_identification
-		PartyID:               entity.PartyID.String(),
-		Balance:               balance,
-		AvailableBalance:      availableBalance,
-		Status:                domain.AccountStatus(entity.Status),
-		OverdraftLimit:        overdraftLimit,
-		OverdraftEnabled:      overdraftEnabled,
-		OverdraftRate:         entity.OverdraftRate,
-		BalanceUpdatedAt:      balanceUpdatedAt,
-		Version:               entity.Version,
-		CreatedAt:             entity.CreatedAt,
-		UpdatedAt:             entity.UpdatedAt,
-	}, nil
+	// Use builder pattern to construct immutable domain model
+	return domain.NewCurrentAccountBuilder().
+		WithID(entity.ID).
+		WithAccountID(entity.AccountID).
+		WithAccountIdentification(entity.AccountIdentification).
+		WithPartyID(entity.PartyID.String()).
+		WithBalance(balance).
+		WithAvailableBalance(availableBalance).
+		WithStatus(domain.AccountStatus(entity.Status)).
+		WithOverdraftLimit(overdraftLimit).
+		WithOverdraftEnabled(overdraftEnabled).
+		WithOverdraftRate(entity.OverdraftRate).
+		WithBalanceUpdatedAt(balanceUpdatedAt).
+		WithVersion(entity.Version).
+		WithCreatedAt(entity.CreatedAt).
+		WithUpdatedAt(entity.UpdatedAt).
+		Build(), nil
 }
 
 // isDuplicateKeyError checks if the error is a PostgreSQL unique constraint violation.

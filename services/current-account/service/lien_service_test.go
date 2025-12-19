@@ -76,7 +76,7 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	return db, ctx, cleanup
 }
 
-func createTestAccountWithBalance(t *testing.T, ctx context.Context, repo *persistence.Repository, accountID string, balanceCents int64) *domain.CurrentAccount {
+func createTestAccountWithBalance(t *testing.T, ctx context.Context, repo *persistence.Repository, accountID string, balanceCents int64) domain.CurrentAccount {
 	t.Helper()
 	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
@@ -86,7 +86,8 @@ func createTestAccountWithBalance(t *testing.T, ctx context.Context, repo *persi
 	if balanceCents > 0 {
 		depositAmount, err := domain.NewMoney("GBP", balanceCents)
 		require.NoError(t, err)
-		require.NoError(t, account.Deposit(depositAmount))
+		account, err = account.Deposit(depositAmount)
+		require.NoError(t, err)
 	}
 
 	require.NoError(t, repo.Save(ctx, account))
@@ -267,7 +268,7 @@ func TestExecuteLien_Success(t *testing.T) {
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID, lienAmount, "PO-127", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-127", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(lien))
 
@@ -299,7 +300,7 @@ func TestExecuteLien_Idempotent(t *testing.T) {
 	// Create and execute a lien
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID, lienAmount, "PO-128", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-128", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(lien))
 
@@ -350,7 +351,7 @@ func TestTerminateLien_Success(t *testing.T) {
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID, lienAmount, "PO-129", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-129", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(lien))
 
@@ -382,7 +383,7 @@ func TestTerminateLien_Idempotent(t *testing.T) {
 	// Create lien
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID, lienAmount, "PO-130", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-130", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(lien))
 
@@ -416,7 +417,7 @@ func TestRetrieveLien_Success(t *testing.T) {
 	// Create lien
 	lienAmount, err := domain.NewMoney("GBP", 25000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID, lienAmount, "PO-131", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-131", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(lien))
 
