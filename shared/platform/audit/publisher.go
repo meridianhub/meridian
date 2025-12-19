@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -299,7 +300,8 @@ func publishToKafkaWithFallback(
 			return nil
 		}
 
-		// Kafka publish failed, record metrics and fall through to outbox fallback
+		// Kafka publish failed, log error and fall through to outbox fallback
+		log.Printf("WARN: Kafka audit publish failed, using outbox fallback: %v", err)
 		RecordKafkaPublished(schemaName, operation, "failure")
 		RecordKafkaFallback(schemaName, "publish_error")
 	} else if publisher == nil {

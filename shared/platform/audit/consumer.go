@@ -186,6 +186,7 @@ func (c *Consumer) Start(topic string) error {
 				return
 			}
 			log.Printf("ERROR: Audit consumer subscription error: %v", err)
+			RecordKafkaFallback("unknown", "subscription_error")
 		}
 	}()
 
@@ -278,23 +279,24 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		return err
 	}
 
-	// Write to audit_log using the schema from the event
-	db := c.db
-	if event.SchemaName != "" {
-		// Validate schema name to prevent SQL injection
-		if !isValidSchemaName(event.SchemaName) {
-			RecordKafkaConsumed(schema, operation, "failure")
-			return fmt.Errorf("%w: %s", ErrInvalidSchemaName, event.SchemaName)
-		}
-		// Set search_path using quoted identifier for defense-in-depth
-		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(event.SchemaName)))
-		if db.Error != nil {
-			RecordKafkaConsumed(schema, operation, "failure")
-			return fmt.Errorf("failed to set search_path: %w", db.Error)
-		}
+	// Validate schema name before transaction if provided
+	if event.SchemaName != "" && !isValidSchemaName(event.SchemaName) {
+		RecordKafkaConsumed(schema, operation, "failure")
+		return fmt.Errorf("%w: %s", ErrInvalidSchemaName, event.SchemaName)
 	}
 
-	if err := db.WithContext(ctx).Create(&auditLog).Error; err != nil {
+	// Write to audit_log within a transaction to ensure SET LOCAL takes effect
+	err := c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if event.SchemaName != "" {
+			// Set search_path using quoted identifier for defense-in-depth
+			// SET LOCAL only applies within a transaction
+			if err := tx.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(event.SchemaName))).Error; err != nil {
+				return fmt.Errorf("failed to set search_path: %w", err)
+			}
+		}
+		return tx.Create(&auditLog).Error
+	})
+	if err != nil {
 		RecordKafkaConsumed(schema, operation, "failure")
 		RecordKafkaConsumeDuration(time.Since(startTime).Seconds())
 		return fmt.Errorf("failed to insert audit log: %w", err)
@@ -391,8 +393,9 @@ func (c *Consumer) ProcessOutboxFallback(ctx context.Context, schema string, bat
 		if !isValidSchemaName(schema) {
 			return 0, fmt.Errorf("%w: %s", ErrInvalidSchemaName, schema)
 		}
-		// Set search_path using quoted identifier for defense-in-depth
-		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(schema)))
+		// Set search_path for session (not LOCAL since we need it across multiple operations)
+		// This affects the session until changed or connection returned to pool
+		db = db.Exec(fmt.Sprintf("SET search_path TO %s", quoteIdentifier(schema)))
 		if db.Error != nil {
 			return 0, fmt.Errorf("failed to set search_path: %w", db.Error)
 		}
