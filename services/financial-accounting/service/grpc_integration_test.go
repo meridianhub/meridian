@@ -1010,13 +1010,7 @@ func TestListLedgerPostings_Integration_Pagination(t *testing.T) {
 	assert.Len(t, resp1.LedgerPostings, 5)
 	assert.NotEmpty(t, resp1.Pagination.NextPageToken, "should have next page token")
 
-	// Note: The repository's cursor-based pagination parsing is not yet implemented
-	// (see TODO in persistence/repository.go ListPostings). The PageToken is generated
-	// but not parsed, so the second page returns the same results as the first.
-	// This test verifies the pagination response structure is correct.
-	// Full cursor-based pagination will be implemented in a future iteration.
-
-	// Get second page - verify API accepts page token
+	// Get second page using the page token
 	resp2, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
 		Pagination: &commonv1.Pagination{
 			PageSize:  5,
@@ -1026,7 +1020,16 @@ func TestListLedgerPostings_Integration_Pagination(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, resp2)
-	assert.Len(t, resp2.LedgerPostings, 5)
+	assert.Len(t, resp2.LedgerPostings, 5, "second page should have 5 postings")
+
+	// Verify no overlap between pages - cursor pagination should return distinct sets
+	page1IDs := make(map[string]bool)
+	for _, posting := range resp1.LedgerPostings {
+		page1IDs[posting.Id] = true
+	}
+	for _, posting := range resp2.LedgerPostings {
+		assert.False(t, page1IDs[posting.Id], "pages should not have overlapping postings")
+	}
 
 	// Verify total count reflects all records
 	assert.Equal(t, int64(10), resp1.Pagination.TotalCount)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,7 +39,38 @@ var (
 	ErrFractionalCents = errors.New("amount has fractional cents that cannot be represented")
 	// ErrDuplicateIdempotencyKey is returned when a booking log with the same idempotency key already exists
 	ErrDuplicateIdempotencyKey = errors.New("booking log with this idempotency key already exists")
+	// ErrInvalidPageToken is returned when the pagination token has an invalid format
+	ErrInvalidPageToken = errors.New("invalid page token format")
 )
+
+// parseCursorToken parses a pagination token in format "timestamp_uuid".
+// Returns the timestamp and UUID, or an error if the format is invalid.
+// An empty token returns zero values with no error (indicating first page).
+func parseCursorToken(token string) (time.Time, uuid.UUID, error) {
+	if token == "" {
+		return time.Time{}, uuid.Nil, nil
+	}
+
+	parts := strings.Split(token, "_")
+	if len(parts) != 2 {
+		return time.Time{}, uuid.Nil, ErrInvalidPageToken
+	}
+
+	// Parse timestamp
+	timestampUnix, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}, uuid.Nil, fmt.Errorf("%w: invalid timestamp", ErrInvalidPageToken)
+	}
+	timestamp := time.Unix(timestampUnix, 0).UTC()
+
+	// Parse UUID
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return time.Time{}, uuid.Nil, fmt.Errorf("%w: invalid uuid", ErrInvalidPageToken)
+	}
+
+	return timestamp, id, nil
+}
 
 // LedgerRepository provides persistence operations for ledger postings
 type LedgerRepository struct {
@@ -335,14 +367,12 @@ type ListBookingLogsResult struct {
 	TotalCount    int64
 }
 
-// ListBookingLogs lists booking logs with optional filtering and pagination.
+// ListBookingLogs lists booking logs with cursor-based pagination and optional filtering.
 // The context must contain the tenant ID for schema routing.
 //
-// LIMITATION: Page token parsing is not yet implemented. Pagination currently
-// uses OFFSET-based queries which may show inconsistent results if data changes
-// between requests. This is suitable for small to medium datasets but should be
-// replaced with cursor-based pagination for production use with large datasets.
-// See TODO comments in implementation for cursor-based pagination work.
+// Pagination uses a cursor approach with created_at timestamp and id for stable,
+// consistent results even when data changes between requests. The page token format
+// is "timestamp_uuid" representing the last item from the previous page.
 func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBookingLogsParams) (*ListBookingLogsResult, error) {
 	// Set default page size if not specified
 	pageSize := params.PageSize
@@ -353,8 +383,14 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 		pageSize = MaxPageSize
 	}
 
+	// Parse cursor token upfront to fail fast on invalid tokens
+	cursorTime, cursorID, err := parseCursorToken(params.PageToken)
+	if err != nil {
+		return nil, err
+	}
+
 	var result *ListBookingLogsResult
-	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// Build base query
 		query := tx.Model(&FinancialBookingLogEntity{})
 
@@ -368,21 +404,28 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 			query = query.Where("business_unit_reference = ?", params.BusinessUnitFilter)
 		}
 
-		// Get total count
+		// Get total count (before cursor filtering for accurate total)
 		var totalCount int64
 		if err := query.Count(&totalCount).Error; err != nil {
 			return err
 		}
 
-		// Apply cursor-based pagination using created_at + id
-		// Page token format: <timestamp>_<uuid>
-		// TODO(tech-debt-cleanup#1): Implement proper cursor-based pagination
-		_ = params.PageToken // Unused for now
+		// Apply cursor-based pagination using created_at (truncated to second) + id
+		// The cursor token stores Unix timestamp (second precision). We truncate the
+		// database timestamps to second precision for comparison to ensure consistent
+		// ordering between the ORDER BY and WHERE clauses.
+		if !cursorTime.IsZero() {
+			query = query.Where(
+				"(date_trunc('second', created_at) < ?) OR (date_trunc('second', created_at) = ? AND id < ?)",
+				cursorTime, cursorTime, cursorID,
+			)
+		}
 
 		// Fetch results with limit
+		// Order by truncated timestamp to match cursor comparison
 		var entities []FinancialBookingLogEntity
 		err := query.
-			Order("created_at DESC, id DESC").
+			Order("date_trunc('second', created_at) DESC, id DESC").
 			Limit(pageSize + 1). // Fetch one extra to determine if there's a next page
 			Find(&entities).Error
 		if err != nil {
@@ -405,7 +448,7 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 		var nextPageToken string
 		if hasMore && len(entities) > 0 {
 			lastEntity := entities[len(entities)-1]
-			// Simple token format: timestamp_id
+			// Token format: timestamp_id
 			nextPageToken = fmt.Sprintf("%d_%s", lastEntity.CreatedAt.Unix(), lastEntity.ID)
 		}
 
@@ -480,14 +523,12 @@ type ListPostingsResult struct {
 	TotalCount    int64
 }
 
-// ListPostings lists ledger postings with optional filtering and pagination.
+// ListPostings lists ledger postings with cursor-based pagination and optional filtering.
 // The context must contain the tenant ID for schema routing.
 //
-// LIMITATION: Page token parsing is not yet implemented. Pagination currently
-// uses OFFSET-based queries which may show inconsistent results if data changes
-// between requests. This is suitable for small to medium datasets but should be
-// replaced with cursor-based pagination for production use with large datasets.
-// See TODO comments in implementation for cursor-based pagination work.
+// Pagination uses a cursor approach with created_at timestamp and id for stable,
+// consistent results even when data changes between requests. The page token format
+// is "timestamp_uuid" representing the last item from the previous page.
 func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostingsParams) (*ListPostingsResult, error) {
 	// Set default page size if not specified
 	pageSize := params.PageSize
@@ -498,8 +539,14 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 		pageSize = MaxPageSize
 	}
 
+	// Parse cursor token upfront to fail fast on invalid tokens
+	cursorTime, cursorID, err := parseCursorToken(params.PageToken)
+	if err != nil {
+		return nil, err
+	}
+
 	var result *ListPostingsResult
-	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		// Build base query
 		query := tx.Model(&LedgerPostingEntity{})
 
@@ -536,21 +583,28 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 			query = query.Where("status = ?", params.Status)
 		}
 
-		// Get total count
+		// Get total count (before cursor filtering for accurate total)
 		var totalCount int64
 		if err := query.Count(&totalCount).Error; err != nil {
 			return err
 		}
 
-		// Apply cursor-based pagination using created_at + id
-		// Page token format: <timestamp>_<uuid>
-		// TODO(tech-debt-cleanup#1): Implement proper cursor-based pagination
-		_ = params.PageToken // Unused for now
+		// Apply cursor-based pagination using created_at (truncated to second) + id
+		// The cursor token stores Unix timestamp (second precision). We truncate the
+		// database timestamps to second precision for comparison to ensure consistent
+		// ordering between the ORDER BY and WHERE clauses.
+		if !cursorTime.IsZero() {
+			query = query.Where(
+				"(date_trunc('second', created_at) < ?) OR (date_trunc('second', created_at) = ? AND id < ?)",
+				cursorTime, cursorTime, cursorID,
+			)
+		}
 
 		// Fetch results with limit
+		// Order by truncated timestamp to match cursor comparison
 		var entities []LedgerPostingEntity
 		err := query.
-			Order("created_at DESC, id DESC").
+			Order("date_trunc('second', created_at) DESC, id DESC").
 			Limit(pageSize + 1). // Fetch one extra to determine if there's a next page
 			Find(&entities).Error
 		if err != nil {
@@ -573,7 +627,7 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 		var nextPageToken string
 		if hasMore && len(entities) > 0 {
 			lastEntity := entities[len(entities)-1]
-			// Simple token format: timestamp_id
+			// Token format: timestamp_id
 			nextPageToken = fmt.Sprintf("%d_%s", lastEntity.CreatedAt.Unix(), lastEntity.ID)
 		}
 
