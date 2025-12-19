@@ -1,3 +1,4 @@
-h1:WGqV99o8p/phkw1OZ9h9t5s93Db44sJeLhauT+yNbOM=
+h1:BHhMHvNo1pmFZy63HIz4Ol9sbzNLWQXERN/9bFOYvnQ=
 20251216000001_initial.sql h1:QyCFEl6iIRccIm/rlDMmm0p0IrN93AlxtaHZHiWWYq0=
 20251217000001_audit_system.sql h1:yyJlrBFDysy+cDtEsb+QePFjXJSFi8OKO+di10S7tYs=
+20251219000001_fix_audit_schema_compatibility.sql h1:/OTsb9FD60STM4blwjCCwPxLmU8VFLWjbp2/T0TE3Pk=
