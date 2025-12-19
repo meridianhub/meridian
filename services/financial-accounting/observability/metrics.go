@@ -53,6 +53,9 @@ const (
 	ValidationResultUnbalanced = "unbalanced"
 )
 
+// CurrencyUnknown is used when currency cannot be determined (e.g., no postings).
+const CurrencyUnknown = "UNKNOWN"
+
 var (
 	// Operation duration metrics
 	operationDuration = promauto.NewHistogramVec(

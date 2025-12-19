@@ -837,10 +837,10 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		// Empty postings are not allowed for POSTED status
 		if len(postings) == 0 {
 			observability.RecordBalanceValidationDuration(time.Since(validationStart))
-			observability.RecordDoubleEntryValidation(observability.ValidationResultUnbalanced, "UNKNOWN")
+			observability.RecordDoubleEntryValidation(observability.ValidationResultUnbalanced, observability.CurrencyUnknown)
 			observability.LogBalanceValidationFailure(
 				bookingLogID.String(),
-				"UNKNOWN",
+				observability.CurrencyUnknown,
 				"0",
 				"0",
 				"0",

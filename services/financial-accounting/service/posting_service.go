@@ -162,7 +162,7 @@ func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID u
 
 	// Default currency if no postings
 	if currency == "" {
-		currency = "UNKNOWN"
+		currency = observability.CurrencyUnknown
 	}
 
 	balanced := debitTotal.Equal(creditTotal)

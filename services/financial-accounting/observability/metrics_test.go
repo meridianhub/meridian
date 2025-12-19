@@ -72,16 +72,15 @@ func TestRecordDoubleEntryValidation(t *testing.T) {
 	assert.Equal(t, initialBalancedUSD+1, testutil.ToFloat64(doubleEntryValidationsTotal.WithLabelValues(ValidationResultBalanced, "USD")))
 }
 
-func TestRecordBalanceValidationDuration(t *testing.T) {
+func TestRecordBalanceValidationDuration(_ *testing.T) {
 	// Record a duration - this should not panic
 	RecordBalanceValidationDuration(5 * time.Millisecond)
 
 	// For histograms, we verify the metric has been registered and doesn't panic.
 	// Actual histogram values are tested through integration tests.
-	_ = t // silence unused parameter warning
 }
 
-func TestLogBalanceValidationFailure(t *testing.T) {
+func TestLogBalanceValidationFailure(_ *testing.T) {
 	// This test verifies that LogBalanceValidationFailure doesn't panic
 	// and correctly formats the log message with all fields.
 	// In production, log output would be verified through log aggregation.
@@ -92,7 +91,6 @@ func TestLogBalanceValidationFailure(t *testing.T) {
 		"50.00",
 		"50.00",
 	)
-	_ = t // silence unused parameter warning
 }
 
 func TestValidationResultConstants(t *testing.T) {
