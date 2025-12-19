@@ -362,7 +362,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	existingPO, err := s.repo.FindByIdempotencyKey(ctx, idempotencyKey)
 	if err != nil && !errors.Is(err, persistence.ErrPaymentOrderNotFound) {
 		s.logger.Error("failed to check idempotency", "error", err)
-		s.storeIdempotencyFailure(ctx, idempKey, "failed to check idempotency")
+		// Don't cache internal errors - allow retry on recovery
 		return nil, status.Error(codes.Internal, "failed to check idempotency")
 	}
 	if existingPO != nil {
@@ -410,7 +410,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 				s.logger.Error("failed to retrieve existing payment order after idempotency conflict",
 					"error", findErr,
 					"idempotency_key", idempotencyKey)
-				s.storeIdempotencyFailure(ctx, idempKey, "failed to retrieve payment order after idempotency conflict")
+				// Don't cache internal errors - allow retry on recovery
 				return nil, status.Error(codes.Internal, "failed to retrieve payment order")
 			}
 			s.logger.Info("returning existing payment order (idempotency race)",
@@ -421,7 +421,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 			}, nil
 		}
 		s.logger.Error("failed to save payment order", "error", err)
-		s.storeIdempotencyFailure(ctx, idempKey, "failed to save payment order")
+		// Don't cache internal errors - allow retry on recovery
 		return nil, status.Error(codes.Internal, "failed to save payment order")
 	}
 
@@ -771,9 +771,11 @@ func (s *Service) handleSagaResult(ctx context.Context, po *domain.PaymentOrder,
 	// via UpdatePaymentOrder to transition to COMPLETED or FAILED
 }
 
-// storeIdempotencyFailure stores a failure result in Redis for validation errors.
-// This ensures clients receive consistent idempotent error responses on retry.
-// For transient internal errors, we don't store failure to allow retry on recovery.
+// storeIdempotencyFailure stores a failure result in Redis for deterministic errors.
+// This ensures clients receive consistent idempotent error responses on retry for
+// errors like validation failures, not-found, and failed preconditions.
+// Note: Only call this for deterministic errors. Transient errors (e.g., network issues,
+// temporary service unavailability) should NOT be cached - let them be retried normally.
 func (s *Service) storeIdempotencyFailure(ctx context.Context, key idempotency.Key, errorMsg string) {
 	result := idempotency.Result{
 		Key:         key,
@@ -970,7 +972,7 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		result, err := s.handleSettledStatus(ctx, po)
 		if err != nil {
 			operationStatus = opStatusError
-			s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("settled callback failed: %v", err))
+			// Don't cache handler errors - may contain transient failures
 			return nil, err
 		}
 		if result.isIdempotent {
@@ -982,7 +984,7 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		result, err := s.handleRejectedStatus(ctx, po, req.GatewayMessage)
 		if err != nil {
 			operationStatus = opStatusError
-			s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("rejected callback failed: %v", err))
+			// Don't cache handler errors - may contain transient failures
 			return nil, err
 		}
 		if result.isIdempotent {
@@ -993,7 +995,7 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 	case pb.GatewayStatus_GATEWAY_STATUS_PENDING:
 		if err := s.handlePendingStatus(po, req.GatewayReferenceId); err != nil {
 			operationStatus = opStatusError
-			s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("pending callback failed: %v", err))
+			// Don't cache handler errors - may contain transient failures
 			return nil, err
 		}
 		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}
@@ -1634,7 +1636,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 			s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("payment order not found: %s", req.PaymentOrderId))
 			return nil, status.Errorf(codes.NotFound, "payment order not found: %s", req.PaymentOrderId)
 		}
-		s.storeIdempotencyFailure(ctx, idempKey, "failed to retrieve payment order")
+		// Don't cache internal errors - allow retry on recovery
 		return nil, status.Error(codes.Internal, "failed to retrieve payment order")
 	}
 
@@ -1655,13 +1657,13 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 
 	// Reverse the payment order
 	if err := po.Reverse(req.ReversalReason); err != nil {
-		s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("failed to reverse payment order: %v", err))
+		// Don't cache internal errors - allow retry on recovery
 		return nil, status.Errorf(codes.Internal, "failed to reverse payment order: %v", err)
 	}
 
 	// Update in database
 	if err := s.repo.Update(ctx, po); err != nil {
-		s.storeIdempotencyFailure(ctx, idempKey, "failed to update payment order")
+		// Don't cache internal errors - allow retry on recovery
 		return nil, status.Error(codes.Internal, "failed to update payment order")
 	}
 
