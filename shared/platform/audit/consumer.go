@@ -288,6 +288,10 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		}
 		// Set search_path using quoted identifier for defense-in-depth
 		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(event.SchemaName)))
+		if db.Error != nil {
+			RecordKafkaConsumed(schema, operation, "failure")
+			return fmt.Errorf("failed to set search_path: %w", db.Error)
+		}
 	}
 
 	if err := db.WithContext(ctx).Create(&auditLog).Error; err != nil {
@@ -389,6 +393,9 @@ func (c *Consumer) ProcessOutboxFallback(ctx context.Context, schema string, bat
 		}
 		// Set search_path using quoted identifier for defense-in-depth
 		db = db.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(schema)))
+		if db.Error != nil {
+			return 0, fmt.Errorf("failed to set search_path: %w", db.Error)
+		}
 	}
 
 	// Fetch pending entry IDs without locking (just for iteration)
