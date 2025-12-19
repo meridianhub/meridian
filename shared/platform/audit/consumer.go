@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,7 +45,7 @@ func isValidSchemaName(name string) bool {
 // This provides defense-in-depth alongside schema validation.
 func quoteIdentifier(name string) string {
 	// PostgreSQL identifiers: escape double quotes by doubling them
-	return `"` + name + `"`
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // Consumer processes audit events from Kafka and writes them to the audit_log table.
