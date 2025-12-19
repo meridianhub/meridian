@@ -70,8 +70,8 @@ type ConsumerConfig struct {
 	ClientID string
 	// Topic is the Kafka topic for audit events (default: "audit.events").
 	Topic string
-	// DLQTopic is the dead letter queue topic (default: "audit.events.dlq").
-	DLQTopic string
+	// DLQTopicSuffix is appended to topic name for DLQ (default: ".dlq" -> "audit.events.dlq").
+	DLQTopicSuffix string
 	// DB is the GORM database connection for writing to audit_log.
 	DB *gorm.DB
 	// HandlerTimeout is the maximum duration for processing a single message.
@@ -96,8 +96,8 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	if config.Topic == "" {
 		config.Topic = kafka.AuditEventsTopic
 	}
-	if config.DLQTopic == "" {
-		config.DLQTopic = kafka.AuditEventsDLQTopic
+	if config.DLQTopicSuffix == "" {
+		config.DLQTopicSuffix = ".dlq" // Results in "audit.events.dlq"
 	}
 	if config.HandlerTimeout == 0 {
 		config.HandlerTimeout = 30 * time.Second
@@ -126,7 +126,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	// Create DLQ producer wrapper
 	dlqConfig := kafka.DLQConfig{
-		DLQTopicSuffix:    "", // We use explicit topic name
+		DLQTopicSuffix:    config.DLQTopicSuffix,
 		MaxRetries:        int32(config.MaxRetries),
 		RetryBackoffMs:    1000,
 		BackoffMultiplier: 2.0,
@@ -151,6 +151,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 			HandlerTimeout:   config.HandlerTimeout,
 			DLQProducer:      dlqProducer,
 			DLQConfig: &kafka.DLQConfig{
+				DLQTopicSuffix:    config.DLQTopicSuffix,
 				MaxRetries:        int32(config.MaxRetries),
 				RetryBackoffMs:    1000,
 				BackoffMultiplier: 2.0,
