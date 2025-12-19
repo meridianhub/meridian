@@ -48,8 +48,8 @@ func TestFindByID_UsesAccountID(t *testing.T) {
 	// FindByID should find by account_id (ACC-xxx), NOT account_identification (IBAN)
 	found, err := repo.FindByID(ctx, accountID)
 	require.NoError(t, err, "FindByID with account_id should succeed")
-	assert.Equal(t, accountID, found.AccountID)
-	assert.Equal(t, accountIdentification, found.AccountIdentification)
+	assert.Equal(t, accountID, found.AccountID())
+	assert.Equal(t, accountIdentification, found.AccountIdentification())
 
 	// FindByID with IBAN should NOT find the account (it's not searching that column)
 	_, err = repo.FindByID(ctx, accountIdentification)
@@ -78,7 +78,7 @@ func TestFindByIDForUpdate_UsesAccountID(t *testing.T) {
 	// FindByIDForUpdate should find by account_id
 	found, err := repo.FindByIDForUpdate(ctx, accountID)
 	require.NoError(t, err, "FindByIDForUpdate with account_id should succeed")
-	assert.Equal(t, accountID, found.AccountID)
+	assert.Equal(t, accountID, found.AccountID())
 }
 
 // TestDelete_UsesAccountID validates Delete uses the correct column.
