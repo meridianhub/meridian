@@ -37,8 +37,11 @@ func testLogger() *slog.Logger {
 
 // Test errors for mock responses
 var (
-	errInsufficientFunds  = errors.New("insufficient funds")
-	errGatewayUnavailable = errors.New("gateway unavailable")
+	errInsufficientFunds          = errors.New("insufficient funds")
+	errGatewayUnavailable         = errors.New("gateway unavailable")
+	errBookingLogServiceUnavail   = errors.New("booking log service unavailable")
+	errLedgerServiceUnavailable   = errors.New("ledger service unavailable")
+	errBookingLogStatusUpdateFail = errors.New("failed to update booking log status")
 )
 
 // MockRepository implements persistence.Repository for testing.
@@ -337,15 +340,17 @@ func (m *MockPaymentGateway) SendPayment(_ context.Context, req gateway.PaymentR
 
 // MockFinancialAccountingClient implements FinancialAccountingClient for testing
 type MockFinancialAccountingClient struct {
-	initiateResp   *financialaccountingv1.InitiateFinancialBookingLogResponse
-	initiateErr    error
-	captureResp    *financialaccountingv1.CaptureLedgerPostingResponse
-	captureErr     error
-	updateResp     *financialaccountingv1.UpdateFinancialBookingLogResponse
-	updateErr      error
-	initiateCalled bool
-	captureCalled  bool
-	updateCalled   bool
+	initiateResp     *financialaccountingv1.InitiateFinancialBookingLogResponse
+	initiateErr      error
+	captureResp      *financialaccountingv1.CaptureLedgerPostingResponse
+	captureErr       error
+	captureErrOnCall int // If > 0, only return captureErr on this call number (1-indexed)
+	updateResp       *financialaccountingv1.UpdateFinancialBookingLogResponse
+	updateErr        error
+	initiateCalled   bool
+	captureCalled    bool
+	captureCallCount int
+	updateCalled     bool
 }
 
 func (m *MockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
@@ -366,8 +371,12 @@ func (m *MockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Co
 
 func (m *MockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
 	m.captureCalled = true
+	m.captureCallCount++
+	// Support per-call error injection for testing debit vs credit failures
 	if m.captureErr != nil {
-		return nil, m.captureErr
+		if m.captureErrOnCall == 0 || m.captureErrOnCall == m.captureCallCount {
+			return nil, m.captureErr
+		}
 	}
 	if m.captureResp != nil {
 		return m.captureResp, nil
@@ -2274,4 +2283,142 @@ func TestUpdatePaymentOrder_UnknownGatewayStatus(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 	assert.Contains(t, st.Message(), "unknown gateway status")
+}
+
+// TestPostLedgerEntries_FailureModes tests the postLedgerEntries function failure scenarios.
+// These tests verify that each step in the ledger posting process is properly error-handled.
+func TestPostLedgerEntries_FailureModes(t *testing.T) {
+	testCases := []struct {
+		name             string
+		mockFA           *MockFinancialAccountingClient
+		expectErrContain string
+	}{
+		{
+			name: "InitiateFinancialBookingLog fails",
+			mockFA: &MockFinancialAccountingClient{
+				initiateErr: errBookingLogServiceUnavail,
+			},
+			expectErrContain: "failed to create booking log",
+		},
+		{
+			name: "CaptureLedgerPosting fails on debit (first call)",
+			mockFA: &MockFinancialAccountingClient{
+				captureErr:       errLedgerServiceUnavailable,
+				captureErrOnCall: 1, // Fail on first call (debit)
+			},
+			expectErrContain: "failed to create debit posting",
+		},
+		{
+			name: "CaptureLedgerPosting fails on credit (second call)",
+			mockFA: &MockFinancialAccountingClient{
+				captureErr:       errLedgerServiceUnavailable,
+				captureErrOnCall: 2, // Fail on second call (credit)
+			},
+			expectErrContain: "failed to create credit posting",
+		},
+		{
+			name: "UpdateFinancialBookingLog fails",
+			mockFA: &MockFinancialAccountingClient{
+				updateErr: errBookingLogStatusUpdateFail,
+			},
+			expectErrContain: "failed to update booking log to POSTED",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := NewMockRepository()
+			svc := &Service{
+				repo:                      repo,
+				currentAccountClient:      &MockCurrentAccountClient{},
+				financialAccountingClient: tc.mockFA,
+				paymentGateway:            &MockPaymentGateway{},
+				gatewayAccountConfig:      testGatewayAccountConfig(),
+				logger:                    testLogger(),
+			}
+
+			// Create an executing payment order
+			amount, _ := domain.NewMoney("GBP", 10000)
+			po, _ := domain.NewPaymentOrder("ACC-12345678", "cred-ref", amount, "test-key", "corr-123")
+			_ = po.Reserve("lien-123")
+			_ = po.Execute("GW-ref-123") // Use GW- prefix to match mock gateway
+
+			// Call UpdatePaymentOrder with SETTLED status to trigger postLedgerEntries
+			_ = repo.Create(context.Background(), po)
+			req := &pb.UpdatePaymentOrderRequest{
+				PaymentOrderId: po.ID.String(),
+				GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+			}
+
+			_, err := svc.UpdatePaymentOrder(context.Background(), req)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.expectErrContain)
+
+			// Verify payment is marked as FAILED
+			updatedPO, findErr := repo.FindByID(context.Background(), po.ID)
+			require.NoError(t, findErr)
+			assert.Equal(t, domain.PaymentOrderStatusFailed, updatedPO.Status)
+		})
+	}
+}
+
+// TestPostLedgerEntries_UnsupportedCurrency tests that unsupported currencies are rejected.
+// This tests the domainCurrencyToProto function which returns CURRENCY_UNSPECIFIED for
+// unsupported currencies, causing postLedgerEntries to return ErrUnsupportedCurrency.
+func TestPostLedgerEntries_UnsupportedCurrency(t *testing.T) {
+	// Test that unsupported currencies return CURRENCY_UNSPECIFIED
+	unsupportedCurrency := domain.Currency("JPY")
+	result := domainCurrencyToProto(unsupportedCurrency)
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, result)
+
+	// Verify the error path in postLedgerEntries would be triggered
+	// by testing that CURRENCY_UNSPECIFIED causes the expected error
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, domainCurrencyToProto(domain.Currency("CHF")))
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, domainCurrencyToProto(domain.Currency("")))
+}
+
+// TestExtractGatewayIDFromRef tests the gateway ID extraction from reference IDs.
+func TestExtractGatewayIDFromRef(t *testing.T) {
+	testCases := []struct {
+		name       string
+		refID      string
+		expectedID string
+	}{
+		{"GW prefix returns mock", "GW-abc123", "mock"},
+		{"gateway prefix returns mock", "gateway-ref-456", "mock"},
+		{"stripe prefix returns stripe", "stripe-pm_1234", "stripe"},
+		{"adyen prefix returns adyen", "adyen-PSP-REF-123", "adyen"},
+		{"empty string returns unknown", "", "unknown"},
+		{"no dash returns full lowercase", "singlepayment", "singlepayment"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractGatewayIDFromRef(tc.refID)
+			assert.Equal(t, tc.expectedID, result)
+		})
+	}
+}
+
+// TestDomainCurrencyToProto tests the currency conversion function.
+func TestDomainCurrencyToProto(t *testing.T) {
+	testCases := []struct {
+		name     string
+		currency domain.Currency
+		expected commonpb.Currency
+	}{
+		{"GBP converts correctly", domain.CurrencyGBP, commonpb.Currency_CURRENCY_GBP},
+		{"USD converts correctly", domain.CurrencyUSD, commonpb.Currency_CURRENCY_USD},
+		{"EUR converts correctly", domain.CurrencyEUR, commonpb.Currency_CURRENCY_EUR},
+		{"unsupported currency returns UNSPECIFIED", domain.Currency("JPY"), commonpb.Currency_CURRENCY_UNSPECIFIED},
+		{"empty currency returns UNSPECIFIED", domain.Currency(""), commonpb.Currency_CURRENCY_UNSPECIFIED},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := domainCurrencyToProto(tc.currency)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }

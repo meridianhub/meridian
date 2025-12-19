@@ -1057,6 +1057,10 @@ func (s *Service) postLedgerEntries(ctx context.Context, po *domain.PaymentOrder
 	// Convert domain currency to proto currency
 	protoCurrency := domainCurrencyToProto(po.Amount.Currency())
 	if protoCurrency == commonpb.Currency_CURRENCY_UNSPECIFIED {
+		s.logger.Warn("unsupported currency for ledger posting - payment will be marked as failed",
+			"currency", string(po.Amount.Currency()),
+			"payment_order_id", po.ID.String(),
+			"supported_currencies", "GBP, USD, EUR")
 		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, po.Amount.Currency())
 	}
 
@@ -1102,6 +1106,14 @@ func (s *Service) postLedgerEntries(ctx context.Context, po *domain.PaymentOrder
 		},
 	})
 	if err != nil {
+		// RECONCILIATION: BookingLog created but debit posting failed - requires manual cleanup
+		s.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after debit posting failure",
+			"booking_log_id", bookingLogID,
+			"booking_log_status", "PENDING",
+			"payment_order_id", po.ID.String(),
+			"failed_step", "debit_posting",
+			"debtor_account", po.DebtorAccountID,
+			"error", err.Error())
 		return "", fmt.Errorf("failed to create debit posting for account %s: %w", po.DebtorAccountID, err)
 	}
 
@@ -1124,6 +1136,16 @@ func (s *Service) postLedgerEntries(ctx context.Context, po *domain.PaymentOrder
 		},
 	})
 	if err != nil {
+		// RECONCILIATION: BookingLog has debit but no credit - unbalanced ledger requires cleanup
+		s.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after credit posting failure",
+			"booking_log_id", bookingLogID,
+			"booking_log_status", "PENDING",
+			"payment_order_id", po.ID.String(),
+			"failed_step", "credit_posting",
+			"debtor_account", po.DebtorAccountID,
+			"contra_account", contraAccountID,
+			"has_debit_posting", true,
+			"error", err.Error())
 		return "", fmt.Errorf("failed to create credit posting for account %s: %w", contraAccountID, err)
 	}
 
@@ -1139,6 +1161,18 @@ func (s *Service) postLedgerEntries(ctx context.Context, po *domain.PaymentOrder
 		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
 	})
 	if err != nil {
+		// RECONCILIATION: BookingLog has balanced entries but status update failed
+		// The ledger entries exist and are balanced - just need status update
+		s.logger.Error("RECONCILIATION_REQUIRED: booking log status update failed after successful postings",
+			"booking_log_id", bookingLogID,
+			"booking_log_status", "PENDING",
+			"target_status", "POSTED",
+			"payment_order_id", po.ID.String(),
+			"failed_step", "status_update",
+			"has_debit_posting", true,
+			"has_credit_posting", true,
+			"resolution", "manually update booking log status to POSTED",
+			"error", err.Error())
 		return "", fmt.Errorf("failed to update booking log to POSTED: %w", err)
 	}
 
@@ -1154,9 +1188,21 @@ func (s *Service) postLedgerEntries(ctx context.Context, po *domain.PaymentOrder
 }
 
 // extractGatewayIDFromRef extracts the gateway identifier from a gateway reference ID.
-// For the mock gateway, references are "GW-{uuid}" format, so we return "mock".
-// For real gateways, the prefix would indicate the provider (e.g., "stripe-{id}").
+//
+// Gateway Reference ID Format:
+// Real gateways should use the format "{gateway_id}-{unique_reference}", e.g.:
+//   - "stripe-pm_1234abcd" -> returns "stripe"
+//   - "adyen-PSP-REF-123"  -> returns "adyen"
+//
+// Mock/Test gateways use special prefixes:
+//   - "GW-{uuid}"      -> returns "mock" (mock gateway format)
+//   - "gateway-{ref}"  -> returns "mock" (test helper format)
+//
+// Returns "unknown" for empty or invalid references.
 func extractGatewayIDFromRef(gatewayRefID string) string {
+	if gatewayRefID == "" {
+		return "unknown"
+	}
 	// The mock gateway uses "GW-" prefix
 	if strings.HasPrefix(gatewayRefID, "GW-") {
 		return "mock"
@@ -1167,7 +1213,7 @@ func extractGatewayIDFromRef(gatewayRefID string) string {
 	}
 	// For other gateways, extract the prefix before the first dash
 	parts := strings.SplitN(gatewayRefID, "-", 2)
-	if len(parts) > 0 {
+	if len(parts) > 0 && parts[0] != "" {
 		return strings.ToLower(parts[0])
 	}
 	return "unknown"
