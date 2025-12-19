@@ -20,26 +20,37 @@ var (
 	ErrAccountInactive = errors.New("account is inactive")
 )
 
-// AccountClassification represents the classification of a financial account
-// in the chart of accounts.
+// AccountClassification represents the fundamental accounting classification.
+// This determines the normal balance direction for double-entry bookkeeping.
+//
+// Note: This is distinct from AccountType (in account_type.go) which represents
+// the specific type of account (NOSTRO, VOSTRO, CURRENT, etc.). An account has
+// both a Classification (determines accounting behavior) and a Type (describes
+// what the account is used for).
 type AccountClassification string
 
-// Supported account classifications for the financial accounting system.
+// Supported account classifications following standard accounting principles.
+// These are the fundamental categories that determine debit/credit behavior.
 const (
-	AccountClassificationAsset     AccountClassification = "ASSET"
+	// AccountClassificationAsset represents asset accounts.
+	// Assets have a normal debit balance - debits increase, credits decrease.
+	// Examples: cash, receivables, nostro accounts (our money at other banks).
+	AccountClassificationAsset AccountClassification = "ASSET"
+
+	// AccountClassificationLiability represents liability accounts.
+	// Liabilities have a normal credit balance - credits increase, debits decrease.
+	// Examples: payables, customer deposits, vostro accounts (their money at our bank).
 	AccountClassificationLiability AccountClassification = "LIABILITY"
-	AccountClassificationClearing  AccountClassification = "CLEARING"
-	AccountClassificationNostro    AccountClassification = "NOSTRO"
 )
 
 // IsValid checks if the account classification is valid.
 func (c AccountClassification) IsValid() bool {
 	switch c {
-	case AccountClassificationAsset, AccountClassificationLiability,
-		AccountClassificationClearing, AccountClassificationNostro:
+	case AccountClassificationAsset, AccountClassificationLiability:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // String returns the string representation of the account classification.
@@ -47,108 +58,128 @@ func (c AccountClassification) String() string {
 	return string(c)
 }
 
+// IncreasesWithDebit returns true if debit postings increase this classification's balance.
+// Asset accounts increase with debits (normal debit balance).
+func (c AccountClassification) IncreasesWithDebit() bool {
+	return c == AccountClassificationAsset
+}
+
+// IncreasesWithCredit returns true if credit postings increase this classification's balance.
+// Liability accounts increase with credits (normal credit balance).
+func (c AccountClassification) IncreasesWithCredit() bool {
+	return c == AccountClassificationLiability
+}
+
 // Account represents a financial account in the chart of accounts.
-// Used for internal accounts such as clearing accounts, nostro accounts,
-// and acquirer settlement accounts.
+// This is an immutable value type - use With* methods to create modified copies.
+//
+// Accounts are used for internal ledger entries such as clearing accounts,
+// nostro/vostro accounts, and settlement accounts.
 type Account struct {
 	ID             uuid.UUID
-	AccountCode    string // e.g., "1000" for cash accounts
+	AccountCode    string // Human-readable code, e.g., "1000" for cash, "CLR-001" for clearing
 	Name           string
 	Classification AccountClassification
 	Currency       Currency
 	IsActive       bool
 	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // NewAccount creates a new account with validation.
+// All fields are validated; returns an error if any validation fails.
 func NewAccount(
 	accountCode string,
 	name string,
 	classification AccountClassification,
 	currency Currency,
-) (*Account, error) {
+) (Account, error) {
 	if accountCode == "" {
-		return nil, ErrInvalidAccountCode
+		return Account{}, ErrInvalidAccountCode
 	}
 	if name == "" {
-		return nil, ErrInvalidAccountName
+		return Account{}, ErrInvalidAccountName
 	}
 	if !classification.IsValid() {
-		return nil, ErrInvalidAccountClassification
+		return Account{}, ErrInvalidAccountClassification
 	}
 	if !currency.IsValid() {
-		return nil, ErrInvalidAccountCurrency
+		return Account{}, ErrInvalidAccountCurrency
 	}
 
-	return &Account{
+	now := time.Now()
+	return Account{
 		ID:             uuid.New(),
 		AccountCode:    accountCode,
 		Name:           name,
 		Classification: classification,
 		Currency:       currency,
 		IsActive:       true,
-		CreatedAt:      time.Now(),
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}, nil
 }
 
-// NewClearingAccount creates a new clearing account.
-// Clearing accounts are used for temporary holding of funds during transaction processing.
-func NewClearingAccount(name string, currency Currency) (*Account, error) {
-	return NewAccount(generateAccountCode(), name, AccountClassificationClearing, currency)
+// NewClearingAccount creates a new clearing account with ASSET classification.
+// Clearing accounts are temporary holding accounts used during transaction processing.
+// They have a normal debit balance (increase with debits, decrease with credits).
+func NewClearingAccount(accountCode string, name string, currency Currency) (Account, error) {
+	return NewAccount(accountCode, name, AccountClassificationAsset, currency)
 }
 
-// NewNostroAccount creates a new nostro account.
-// Nostro accounts represent our accounts held at other banks.
-func NewNostroAccount(name string, currency Currency) (*Account, error) {
-	return NewAccount(generateAccountCode(), name, AccountClassificationNostro, currency)
+// NewNostroAccount creates a new nostro account with ASSET classification.
+// Nostro ("ours" in Latin) accounts represent our money held at other banks.
+// They are assets from our perspective - we own the funds held elsewhere.
+// They have a normal debit balance (increase with debits, decrease with credits).
+func NewNostroAccount(accountCode string, name string, currency Currency) (Account, error) {
+	return NewAccount(accountCode, name, AccountClassificationAsset, currency)
 }
 
-// NewAssetAccount creates a new asset account.
-// Asset accounts increase with debits and decrease with credits.
-func NewAssetAccount(name string, currency Currency) (*Account, error) {
-	return NewAccount(generateAccountCode(), name, AccountClassificationAsset, currency)
+// NewVostroAccount creates a new vostro account with LIABILITY classification.
+// Vostro ("yours" in Latin) accounts represent other banks' money held with us.
+// They are liabilities from our perspective - we owe the funds to them.
+// They have a normal credit balance (increase with credits, decrease with debits).
+func NewVostroAccount(accountCode string, name string, currency Currency) (Account, error) {
+	return NewAccount(accountCode, name, AccountClassificationLiability, currency)
 }
 
-// NewLiabilityAccount creates a new liability account.
-// Liability accounts increase with credits and decrease with debits.
-func NewLiabilityAccount(name string, currency Currency) (*Account, error) {
-	return NewAccount(generateAccountCode(), name, AccountClassificationLiability, currency)
+// NewAssetAccount creates a new general asset account.
+// Asset accounts have a normal debit balance (increase with debits).
+func NewAssetAccount(accountCode string, name string, currency Currency) (Account, error) {
+	return NewAccount(accountCode, name, AccountClassificationAsset, currency)
 }
 
-// CanDebit returns true if debits increase this account's balance.
-// Assets and clearing accounts increase with debits.
-func (a *Account) CanDebit() bool {
-	return a.Classification == AccountClassificationAsset ||
-		a.Classification == AccountClassificationClearing
+// NewLiabilityAccount creates a new general liability account.
+// Liability accounts have a normal credit balance (increase with credits).
+func NewLiabilityAccount(accountCode string, name string, currency Currency) (Account, error) {
+	return NewAccount(accountCode, name, AccountClassificationLiability, currency)
 }
 
-// CanCredit returns true if credits increase this account's balance.
-// Liabilities and nostro accounts increase with credits.
-func (a *Account) CanCredit() bool {
-	return a.Classification == AccountClassificationLiability ||
-		a.Classification == AccountClassificationNostro
+// IncreasesWithDebit returns true if debit postings increase this account's balance.
+// This is determined by the account's classification.
+func (a Account) IncreasesWithDebit() bool {
+	return a.Classification.IncreasesWithDebit()
 }
 
-// Deactivate marks the account as inactive.
-func (a *Account) Deactivate() {
-	a.IsActive = false
+// IncreasesWithCredit returns true if credit postings increase this account's balance.
+// This is determined by the account's classification.
+func (a Account) IncreasesWithCredit() bool {
+	return a.Classification.IncreasesWithCredit()
 }
 
-// Activate marks the account as active.
-func (a *Account) Activate() {
-	a.IsActive = true
+// WithActive returns a copy of the account with the IsActive field updated.
+// This is the immutable way to change activation status.
+func (a Account) WithActive(active bool) Account {
+	a.IsActive = active
+	a.UpdatedAt = time.Now()
+	return a
 }
 
 // ValidateForPosting checks if the account can be used for posting transactions.
-func (a *Account) ValidateForPosting() error {
+// Returns an error if the account is inactive.
+func (a Account) ValidateForPosting() error {
 	if !a.IsActive {
 		return ErrAccountInactive
 	}
 	return nil
-}
-
-// generateAccountCode generates a unique account code based on UUID.
-// In a real implementation, this might follow a specific numbering scheme.
-func generateAccountCode() string {
-	return uuid.New().String()[:8]
 }
