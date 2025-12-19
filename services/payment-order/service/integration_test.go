@@ -483,6 +483,7 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 		SagaTimeout:               30 * time.Second,
 	})
@@ -513,6 +514,7 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 	updateResp, err := svc.UpdatePaymentOrder(ctx, &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: uuid.New().String()},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, updateResp.PaymentOrder.Status)
@@ -555,6 +557,7 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -630,6 +633,7 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -645,9 +649,11 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 	require.Equal(t, domain.PaymentOrderStatusExecuting, po.Status)
 
 	// First SETTLED callback
+	idempotencyKey := uuid.New().String()
 	updateResp1, err := svc.UpdatePaymentOrder(ctx, &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: idempotencyKey},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, updateResp1.PaymentOrder.Status)
@@ -663,10 +669,11 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 
 	executeLienCalls1 := atomic.LoadInt32(&mockCA.executeLienCalls)
 
-	// Duplicate SETTLED callback (should be idempotent)
+	// Duplicate SETTLED callback with same idempotency key (should be idempotent)
 	updateResp2, err := svc.UpdatePaymentOrder(ctx, &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: idempotencyKey},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, updateResp2.PaymentOrder.Status)
@@ -700,6 +707,7 @@ func TestIntegration_InsufficientFunds_SagaFails(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -743,6 +751,7 @@ func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -790,6 +799,7 @@ func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -835,6 +845,7 @@ func TestIntegration_ConcurrentPayments_SameAccount(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -913,6 +924,7 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 		SagaTimeout:               3 * time.Second, // Short timeout for test
 	})
@@ -970,6 +982,7 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -989,6 +1002,7 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 	updateResp, err := svc.UpdatePaymentOrder(ctx, &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: uuid.New().String()},
 	})
 	require.NoError(t, err, "Payment completion should succeed even if ExecuteLien fails")
 	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, updateResp.PaymentOrder.Status)
@@ -1026,6 +1040,7 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -1116,6 +1131,7 @@ func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -1204,6 +1220,7 @@ func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -1252,6 +1269,7 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -1322,6 +1340,7 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -1432,6 +1451,7 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 		PaymentGateway:            mockGW,
 		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    logger,
 	})
 	require.NoError(t, err)
@@ -1450,6 +1470,7 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 	_, err = svc.UpdatePaymentOrder(ctx, &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: uuid.New().String()},
 	})
 	require.NoError(t, err)
 

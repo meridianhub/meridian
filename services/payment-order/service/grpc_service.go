@@ -24,6 +24,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/samber/lo"
@@ -41,6 +42,7 @@ var (
 	ErrFinancialAccountingClientNil = errors.New("financial accounting client cannot be nil")
 	ErrPaymentGatewayNil            = errors.New("payment gateway cannot be nil")
 	ErrGatewayAccountConfigNil      = errors.New("gateway account config cannot be nil")
+	ErrIdempotencyServiceNil        = errors.New("idempotency service cannot be nil")
 	ErrAmountRequired               = errors.New("amount is required")
 	ErrInvalidNanos                 = errors.New("nanos must be in range [-999999999, 999999999]")
 	ErrPaymentRejected              = errors.New("payment rejected by gateway")
@@ -139,6 +141,18 @@ const (
 	nanosRoundingOffset = 5000000
 )
 
+// Redis idempotency constants
+const (
+	// idempotencyNamespace is the Redis key namespace for payment-order idempotency
+	idempotencyNamespace = "payment-order"
+
+	// idempotencyPendingTTL is how long a pending idempotency record remains valid
+	idempotencyPendingTTL = 5 * time.Minute
+
+	// idempotencyResultTTL is how long completed results are cached
+	idempotencyResultTTL = 24 * time.Hour
+)
+
 // Service implements the PaymentOrderService gRPC service
 type Service struct {
 	pb.UnimplementedPaymentOrderServiceServer
@@ -148,6 +162,7 @@ type Service struct {
 	paymentGateway            gateway.PaymentGateway
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
+	idempotencyService        idempotency.Service
 	logger                    *slog.Logger
 	tracer                    *observability.Tracer
 	sagaTimeout               time.Duration
@@ -165,6 +180,7 @@ type Config struct {
 	PaymentGateway            gateway.PaymentGateway
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
+	IdempotencyService        idempotency.Service
 	Logger                    *slog.Logger
 	Tracer                    *observability.Tracer
 	// SagaTimeout is the maximum duration for saga orchestration.
@@ -185,12 +201,17 @@ type Config struct {
 // NewService creates a new payment order service with minimal dependencies.
 // This is primarily used for testing. For production use, prefer NewServiceWithConfig.
 // Returns ErrRepositoryNil if the repository is nil.
-func NewService(repo persistence.Repository) (*Service, error) {
+// Returns ErrIdempotencyServiceNil if idempotencyService is nil.
+func NewService(repo persistence.Repository, idempotencyService idempotency.Service) (*Service, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
 	}
+	if idempotencyService == nil {
+		return nil, ErrIdempotencyServiceNil
+	}
 	return &Service{
 		repo:                    repo,
+		idempotencyService:      idempotencyService,
 		logger:                  slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 		sagaTimeout:             DefaultSagaTimeout,
 		defaultPageSize:         DefaultPageSize,
@@ -217,6 +238,9 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 	}
 	if cfg.GatewayAccountConfig == nil {
 		return nil, ErrGatewayAccountConfigNil
+	}
+	if cfg.IdempotencyService == nil {
+		return nil, ErrIdempotencyServiceNil
 	}
 	// KafkaPublisher is optional - nil is handled gracefully by publishEvent
 
@@ -254,6 +278,7 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		paymentGateway:            cfg.PaymentGateway,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
+		idempotencyService:        cfg.IdempotencyService,
 		logger:                    logger,
 		tracer:                    cfg.Tracer,
 		sagaTimeout:               sagaTimeout,
@@ -290,6 +315,43 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	}
 	if len(idempotencyKey) > s.maxIdempotencyKeyLength {
 		return nil, status.Errorf(codes.InvalidArgument, "idempotency_key exceeds maximum length of %d", s.maxIdempotencyKeyLength)
+	}
+
+	// Check Redis idempotency FIRST (before database check) - provides distributed lock protection
+	tenantID, _ := tenant.FromContext(ctx)
+	idempKey := idempotency.Key{
+		TenantID:  string(tenantID),
+		Namespace: idempotencyNamespace,
+		Operation: "initiate",
+		EntityID:  req.DebtorAccountId, // Use account as entity scope
+		RequestID: idempotencyKey,
+	}
+
+	result, err := s.idempotencyService.Check(ctx, idempKey)
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		// If operation already processed, return cached result
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
+			var cachedResp pb.InitiatePaymentOrderResponse
+			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
+			if unmarshalErr == nil {
+				s.logger.Info("returning cached initiate result from Redis",
+					"payment_order_id", cachedResp.PaymentOrder.PaymentOrderId,
+					"idempotency_key", idempotencyKey)
+				poobservability.RecordIdempotentRequest("initiate_payment_order_redis")
+				return &cachedResp, nil
+			}
+			s.logger.Warn("failed to unmarshal cached idempotency result, falling back to database check",
+				"error", unmarshalErr)
+		} else {
+			s.logger.Error("idempotency check failed", "error", err)
+			return nil, status.Error(codes.Internal, "failed to check idempotency")
+		}
+	}
+
+	// Mark operation as pending (distributed lock to prevent concurrent duplicates)
+	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		s.logger.Error("failed to mark operation pending", "error", err)
+		return nil, status.Error(codes.Internal, "failed to acquire idempotency lock")
 	}
 
 	// Check for existing payment order with same idempotency key (idempotent).
@@ -383,8 +445,27 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	// The saga may modify po while toProto reads from it
 	responseProto := toProto(po)
 
-	// Extract tenant ID from request context to propagate to saga
-	tenantID, hasTenant := tenant.FromContext(ctx)
+	// Store successful result in Redis for future idempotency checks
+	response := &pb.InitiatePaymentOrderResponse{PaymentOrder: responseProto}
+	responseData, marshalErr := proto.Marshal(response)
+	if marshalErr == nil {
+		storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+			Key:         idempKey,
+			Status:      idempotency.StatusCompleted,
+			Data:        responseData,
+			CompletedAt: time.Now(),
+			TTL:         idempotencyResultTTL,
+		})
+		if storeErr != nil {
+			s.logger.Error("failed to store idempotency result", "error", storeErr)
+			// Continue - operation succeeded, caching is optimization
+		}
+	} else {
+		s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
+	}
+
+	// Note: tenantID already extracted at the start of the function for idempotency key
+	_, hasTenant := tenant.FromContext(ctx) // Just need hasTenant flag for saga
 
 	// Start saga orchestration asynchronously
 	// The saga runs in the background after returning the response
@@ -792,11 +873,61 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 			"result", operationStatus)
 	}()
 
+	// Get idempotency key from webhook request (required per proto)
+	var webhookIdempotencyKey string
+	if req.IdempotencyKey != nil {
+		webhookIdempotencyKey = req.IdempotencyKey.Key
+	}
+	if webhookIdempotencyKey == "" {
+		operationStatus = opStatusError
+		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required for webhook callbacks")
+	}
+
 	// Lookup payment order by ID or gateway reference ID
 	po, err := s.lookupPaymentOrder(ctx, req)
 	if err != nil {
 		operationStatus = opStatusError
 		return nil, err
+	}
+
+	// Check Redis idempotency for webhook (prevents duplicate processing)
+	tenantID, _ := tenant.FromContext(ctx)
+	idempKey := idempotency.Key{
+		TenantID:  string(tenantID),
+		Namespace: idempotencyNamespace,
+		Operation: "update",
+		EntityID:  po.ID.String(), // Use payment order ID as entity
+		RequestID: webhookIdempotencyKey,
+	}
+
+	idempResult, err := s.idempotencyService.Check(ctx, idempKey)
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		// If operation already processed, return cached result
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
+			var cachedResp pb.UpdatePaymentOrderResponse
+			unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
+			if unmarshalErr == nil {
+				s.logger.Info("returning cached update result from Redis",
+					"payment_order_id", po.ID.String(),
+					"idempotency_key", webhookIdempotencyKey)
+				operationStatus = opStatusIdempotent
+				poobservability.RecordIdempotentRequest("update_payment_order_redis")
+				return &cachedResp, nil
+			}
+			s.logger.Warn("failed to unmarshal cached idempotency result, continuing with normal processing",
+				"error", unmarshalErr)
+		} else {
+			s.logger.Error("idempotency check failed", "error", err)
+			operationStatus = opStatusError
+			return nil, status.Error(codes.Internal, "failed to check idempotency")
+		}
+	}
+
+	// Mark operation as pending (distributed lock)
+	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		s.logger.Error("failed to mark webhook operation pending", "error", err)
+		operationStatus = opStatusError
+		return nil, status.Error(codes.Internal, "failed to acquire webhook idempotency lock")
 	}
 
 	s.logger.Info("processing gateway callback",
@@ -807,6 +938,8 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		"correlation_id", po.CorrelationID)
 
 	// Process based on gateway status
+	var response *pb.UpdatePaymentOrderResponse
+
 	switch req.GatewayStatus {
 	case pb.GatewayStatus_GATEWAY_STATUS_SETTLED:
 		result, err := s.handleSettledStatus(ctx, po)
@@ -817,7 +950,7 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		if result.isIdempotent {
 			operationStatus = opStatusIdempotent
 		}
-		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}, nil
+		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}
 
 	case pb.GatewayStatus_GATEWAY_STATUS_REJECTED:
 		result, err := s.handleRejectedStatus(ctx, po, req.GatewayMessage)
@@ -828,14 +961,14 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		if result.isIdempotent {
 			operationStatus = opStatusIdempotent
 		}
-		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}, nil
+		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}
 
 	case pb.GatewayStatus_GATEWAY_STATUS_PENDING:
 		if err := s.handlePendingStatus(po, req.GatewayReferenceId); err != nil {
 			operationStatus = opStatusError
 			return nil, err
 		}
-		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
+		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}
 
 	case pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED:
 		operationStatus = opStatusError
@@ -845,6 +978,26 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		operationStatus = opStatusError
 		return nil, status.Errorf(codes.InvalidArgument, "unknown gateway status: %v", req.GatewayStatus)
 	}
+
+	// Store successful result in Redis for future idempotency checks
+	responseData, marshalErr := proto.Marshal(response)
+	if marshalErr == nil {
+		storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+			Key:         idempKey,
+			Status:      idempotency.StatusCompleted,
+			Data:        responseData,
+			CompletedAt: time.Now(),
+			TTL:         idempotencyResultTTL,
+		})
+		if storeErr != nil {
+			s.logger.Error("failed to store webhook idempotency result", "error", storeErr)
+			// Continue - operation succeeded, caching is optimization
+		}
+	} else {
+		s.logger.Error("failed to marshal webhook response for idempotency cache", "error", marshalErr)
+	}
+
+	return response, nil
 }
 
 // lookupPaymentOrder finds a payment order by ID or gateway reference ID.
@@ -1407,6 +1560,43 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		return nil, status.Errorf(codes.InvalidArgument, "invalid payment order ID: %v", err)
 	}
 
+	// Check Redis idempotency for reversal
+	// Use payment_order_id as the request ID since each payment order can only be reversed once
+	tenantID, _ := tenant.FromContext(ctx)
+	idempKey := idempotency.Key{
+		TenantID:  string(tenantID),
+		Namespace: idempotencyNamespace,
+		Operation: "reverse",
+		EntityID:  req.PaymentOrderId,
+		RequestID: req.PaymentOrderId, // Payment order ID is the natural idempotency key for reversals
+	}
+
+	idempResult, err := s.idempotencyService.Check(ctx, idempKey)
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		// If operation already processed, return cached result
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
+			var cachedResp pb.ReversePaymentOrderResponse
+			unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
+			if unmarshalErr == nil {
+				s.logger.Info("returning cached reversal result from Redis",
+					"payment_order_id", req.PaymentOrderId)
+				poobservability.RecordIdempotentRequest("reverse_payment_order_redis")
+				return &cachedResp, nil
+			}
+			s.logger.Warn("failed to unmarshal cached idempotency result, falling back to database check",
+				"error", unmarshalErr)
+		} else {
+			s.logger.Error("idempotency check failed", "error", err)
+			return nil, status.Error(codes.Internal, "failed to check idempotency")
+		}
+	}
+
+	// Mark operation as pending (distributed lock)
+	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		s.logger.Error("failed to mark reversal operation pending", "error", err)
+		return nil, status.Error(codes.Internal, "failed to acquire reversal idempotency lock")
+	}
+
 	// Retrieve payment order
 	po, err := s.repo.FindByID(ctx, poID)
 	if err != nil {
@@ -1469,7 +1659,26 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		"original_ledger_booking_id", originalLedgerBookingID,
 		"correlation_id", po.CorrelationID)
 
-	return &pb.ReversePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
+	// Store successful result in Redis for future idempotency checks
+	response := &pb.ReversePaymentOrderResponse{PaymentOrder: toProto(po)}
+	responseData, marshalErr := proto.Marshal(response)
+	if marshalErr == nil {
+		storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+			Key:         idempKey,
+			Status:      idempotency.StatusCompleted,
+			Data:        responseData,
+			CompletedAt: time.Now(),
+			TTL:         idempotencyResultTTL,
+		})
+		if storeErr != nil {
+			s.logger.Error("failed to store reversal idempotency result", "error", storeErr)
+			// Continue - operation succeeded, caching is optimization
+		}
+	} else {
+		s.logger.Error("failed to marshal reversal response for idempotency cache", "error", marshalErr)
+	}
+
+	return response, nil
 }
 
 // Helper functions
