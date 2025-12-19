@@ -158,6 +158,15 @@ func TestNewAccount(t *testing.T) {
 			wantErr:        true,
 			expectedErr:    ErrInvalidAccountClassification,
 		},
+		{
+			name:           "invalid currency",
+			accountCode:    "1000",
+			accountName:    "Test Account",
+			classification: AccountClassificationAsset,
+			currency:       Currency("INVALID"),
+			wantErr:        true,
+			expectedErr:    ErrInvalidAccountCurrency,
+		},
 	}
 
 	for _, tt := range tests {

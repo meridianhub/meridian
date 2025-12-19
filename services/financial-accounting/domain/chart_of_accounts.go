@@ -14,6 +14,8 @@ var (
 	ErrInvalidAccountCode = errors.New("account code cannot be empty")
 	// ErrInvalidAccountName is returned when account name is empty.
 	ErrInvalidAccountName = errors.New("account name cannot be empty")
+	// ErrInvalidAccountCurrency is returned when account currency is invalid.
+	ErrInvalidAccountCurrency = errors.New("invalid account currency")
 	// ErrAccountInactive is returned when attempting to use an inactive account.
 	ErrAccountInactive = errors.New("account is inactive")
 )
@@ -73,6 +75,9 @@ func NewAccount(
 	}
 	if !classification.IsValid() {
 		return nil, ErrInvalidAccountClassification
+	}
+	if !currency.IsValid() {
+		return nil, ErrInvalidAccountCurrency
 	}
 
 	return &Account{
