@@ -2,6 +2,7 @@
 package observability
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -46,6 +47,15 @@ const (
 	DirectionCredit = "credit"
 )
 
+// Balance validation result constants for metric labels.
+const (
+	ValidationResultBalanced   = "balanced"
+	ValidationResultUnbalanced = "unbalanced"
+)
+
+// CurrencyUnknown is used when currency cannot be determined (e.g., no postings).
+const CurrencyUnknown = "UNKNOWN"
+
 var (
 	// Operation duration metrics
 	operationDuration = promauto.NewHistogramVec(
@@ -89,7 +99,16 @@ var (
 			Name: "financial_accounting_double_entry_validations_total",
 			Help: "Total number of double-entry balance validations",
 		},
-		[]string{"result"},
+		[]string{"result", "currency"},
+	)
+
+	// Balance validation duration histogram (separate from generic operation duration)
+	balanceValidationDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "financial_accounting_balance_validation_duration_seconds",
+			Help:    "Duration of balance validation operations in seconds",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1},
+		},
 	)
 
 	// Error metrics
@@ -159,9 +178,27 @@ func RecordBookingLog(status string) {
 }
 
 // RecordDoubleEntryValidation records the result of a double-entry balance validation.
-// result should be "balanced" or "unbalanced".
-func RecordDoubleEntryValidation(result string) {
-	doubleEntryValidationsTotal.WithLabelValues(result).Inc()
+// result should be ValidationResultBalanced or ValidationResultUnbalanced.
+// currency should be the ISO 4217 currency code (e.g., "GBP", "USD").
+func RecordDoubleEntryValidation(result, currency string) {
+	doubleEntryValidationsTotal.WithLabelValues(result, currency).Inc()
+}
+
+// RecordBalanceValidationDuration records the duration of a balance validation operation.
+func RecordBalanceValidationDuration(duration time.Duration) {
+	balanceValidationDuration.Observe(duration.Seconds())
+}
+
+// LogBalanceValidationFailure logs a structured warning when balance validation fails.
+// This provides detailed debugging information for investigating unbalanced postings.
+func LogBalanceValidationFailure(bookingLogID, currency, debitTotal, creditTotal, imbalance string) {
+	slog.Warn("balance validation failed: unbalanced postings detected",
+		"booking_log_id", bookingLogID,
+		"currency", currency,
+		"debit_total", debitTotal,
+		"credit_total", creditTotal,
+		"imbalance", imbalance,
+	)
 }
 
 // RecordError records an error with category and operation context.
