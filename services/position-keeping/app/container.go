@@ -10,6 +10,7 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -27,6 +28,7 @@ type Container struct {
 	Tracer          *observability.Tracer
 	AuthInterceptor *auth.Interceptor
 	kafkaProducer   *kafka.ProtoProducer // internal, for cleanup
+	auditPublisher  *audit.Publisher     // internal, for cleanup
 
 	// Adapters
 	EventPublisher domain.EventPublisher
@@ -58,6 +60,8 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 	if err := container.initializeRedis(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize redis: %w", err)
 	}
+
+	container.initializeAuditPublisher()
 
 	container.initializeEventPublisher()
 
@@ -224,6 +228,39 @@ func (c *Container) initializeRedis(ctx context.Context) error {
 	return nil
 }
 
+// initializeAuditPublisher initializes the audit publisher for Kafka-based audit events.
+// Sets the global schema name and publisher for GORM hook integration.
+func (c *Container) initializeAuditPublisher() {
+	// Always set schema name for audit events (used for outbox fallback routing)
+	audit.SetSchemaName("position_keeping")
+
+	if !c.Config.Kafka.Enabled {
+		c.Logger.Info("audit publisher disabled (kafka disabled), using outbox fallback only")
+		return
+	}
+
+	// Create audit publisher
+	publisher, err := audit.NewPublisher(audit.PublisherConfig{
+		BootstrapServers: strings.Join(c.Config.Kafka.Brokers, ","),
+		Topic:            kafka.AuditEventsTopic,
+		SchemaName:       "position_keeping",
+		ClientID:         "position-keeping-audit",
+	})
+	if err != nil {
+		c.Logger.Info("audit publisher not created, using outbox fallback only",
+			"reason", err.Error())
+		return
+	}
+
+	// Set global publisher for GORM hook integration
+	audit.SetGlobalPublisher(publisher)
+	c.auditPublisher = publisher
+
+	c.Logger.Info("audit publisher initialized",
+		"topic", kafka.AuditEventsTopic,
+		"schema", "position_keeping")
+}
+
 // initializeEventPublisher initializes Kafka event publisher or no-op publisher
 func (c *Container) initializeEventPublisher() {
 	if !c.Config.Kafka.Enabled {
@@ -278,6 +315,18 @@ func (c *Container) Close(ctx context.Context) error {
 	c.Logger.Info("closing container resources...")
 
 	var errs []error
+
+	// Close audit publisher first (flush audit events before closing other resources)
+	if c.auditPublisher != nil {
+		if err := c.auditPublisher.Close(); err != nil {
+			c.Logger.Error("failed to close audit publisher", "error", err)
+			errs = append(errs, fmt.Errorf("audit publisher close: %w", err))
+		} else {
+			c.Logger.Info("audit publisher closed")
+		}
+		// Clear global publisher to prevent use after close
+		audit.SetGlobalPublisher(nil)
+	}
 
 	// Close Kafka producer (flush outstanding messages first)
 	if c.kafkaProducer != nil {

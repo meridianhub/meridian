@@ -98,7 +98,7 @@ type AuditTrailEntry struct {
 	BaseModel
 
 	// Domain Fields
-	AuditID                uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:idx_position_keeping_audit_trail_entries_audit_id" json:"audit_id"`
+	AuditEntryID           uuid.UUID      `gorm:"column:audit_id;type:uuid;not null;uniqueIndex:idx_position_keeping_audit_trail_entries_audit_id" json:"audit_id"`
 	FinancialPositionLogID uuid.UUID      `gorm:"type:uuid;not null;index:idx_position_keeping_audit_trail_entries_log_id" json:"financial_position_log_id"`
 	Timestamp              time.Time      `gorm:"type:timestamptz;not null;index:idx_position_keeping_audit_trail_entries_timestamp" json:"timestamp"`
 	UserID                 string         `gorm:"type:varchar(100);not null;index:idx_position_keeping_audit_trail_entries_user_id" json:"user_id"`
@@ -195,4 +195,84 @@ func (t *TransactionLogEntry) AfterUpdate(tx *gorm.DB) error {
 // It writes an audit outbox entry with the deleted transaction log entry data.
 func (t *TransactionLogEntry) AfterDelete(tx *gorm.DB) error {
 	return audit.RecordDelete(tx, *t)
+}
+
+// AuditID returns the record ID as a string for audit logging.
+// Implements the audit.Auditable interface.
+func (l TransactionLineage) AuditID() string {
+	return l.ID.String()
+}
+
+// AuditTableName returns the table name for audit logging.
+// Implements the audit.Auditable interface.
+func (l TransactionLineage) AuditTableName() string {
+	return l.TableName()
+}
+
+// AfterCreate is a GORM hook that runs after INSERT operations on TransactionLineage.
+// It writes an audit outbox entry with the new transaction lineage data.
+func (l *TransactionLineage) AfterCreate(tx *gorm.DB) error {
+	return audit.RecordCreate(tx, *l)
+}
+
+// BeforeUpdate is a GORM hook that runs before UPDATE operations on TransactionLineage.
+// It captures the old values BEFORE the update happens and stores them in the transaction context.
+func (l *TransactionLineage) BeforeUpdate(tx *gorm.DB) error {
+	// First, call the base model's BeforeUpdate to handle UpdatedBy
+	if err := l.BaseModel.BeforeUpdate(tx); err != nil {
+		return err
+	}
+	return audit.CaptureOldValue(tx, *l)
+}
+
+// AfterUpdate is a GORM hook that runs after UPDATE operations on TransactionLineage.
+// It retrieves the old values from context and writes an audit outbox entry.
+func (l *TransactionLineage) AfterUpdate(tx *gorm.DB) error {
+	return audit.RecordUpdate(tx, *l)
+}
+
+// AfterDelete is a GORM hook that runs after DELETE operations on TransactionLineage.
+// It writes an audit outbox entry with the deleted transaction lineage data.
+func (l *TransactionLineage) AfterDelete(tx *gorm.DB) error {
+	return audit.RecordDelete(tx, *l)
+}
+
+// AuditID returns the record ID as a string for audit logging.
+// Implements the audit.Auditable interface.
+func (a AuditTrailEntry) AuditID() string {
+	return a.ID.String()
+}
+
+// AuditTableName returns the table name for audit logging.
+// Implements the audit.Auditable interface.
+func (a AuditTrailEntry) AuditTableName() string {
+	return a.TableName()
+}
+
+// AfterCreate is a GORM hook that runs after INSERT operations on AuditTrailEntry.
+// It writes an audit outbox entry with the new audit trail entry data.
+func (a *AuditTrailEntry) AfterCreate(tx *gorm.DB) error {
+	return audit.RecordCreate(tx, *a)
+}
+
+// BeforeUpdate is a GORM hook that runs before UPDATE operations on AuditTrailEntry.
+// It captures the old values BEFORE the update happens and stores them in the transaction context.
+func (a *AuditTrailEntry) BeforeUpdate(tx *gorm.DB) error {
+	// First, call the base model's BeforeUpdate to handle UpdatedBy
+	if err := a.BaseModel.BeforeUpdate(tx); err != nil {
+		return err
+	}
+	return audit.CaptureOldValue(tx, *a)
+}
+
+// AfterUpdate is a GORM hook that runs after UPDATE operations on AuditTrailEntry.
+// It retrieves the old values from context and writes an audit outbox entry.
+func (a *AuditTrailEntry) AfterUpdate(tx *gorm.DB) error {
+	return audit.RecordUpdate(tx, *a)
+}
+
+// AfterDelete is a GORM hook that runs after DELETE operations on AuditTrailEntry.
+// It writes an audit outbox entry with the deleted audit trail entry data.
+func (a *AuditTrailEntry) AfterDelete(tx *gorm.DB) error {
+	return audit.RecordDelete(tx, *a)
 }
