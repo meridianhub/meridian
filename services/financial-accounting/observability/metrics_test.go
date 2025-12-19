@@ -73,18 +73,15 @@ func TestRecordDoubleEntryValidation(t *testing.T) {
 }
 
 func TestRecordBalanceValidationDuration(t *testing.T) {
-	t.Helper()
-
 	// Record a duration - this should not panic
 	RecordBalanceValidationDuration(5 * time.Millisecond)
 
 	// For histograms, we verify the metric has been registered and doesn't panic.
 	// Actual histogram values are tested through integration tests.
+	_ = t // silence unused parameter warning
 }
 
 func TestLogBalanceValidationFailure(t *testing.T) {
-	t.Helper()
-
 	// This test verifies that LogBalanceValidationFailure doesn't panic
 	// and correctly formats the log message with all fields.
 	// In production, log output would be verified through log aggregation.
@@ -95,6 +92,7 @@ func TestLogBalanceValidationFailure(t *testing.T) {
 		"50.00",
 		"50.00",
 	)
+	_ = t // silence unused parameter warning
 }
 
 func TestValidationResultConstants(t *testing.T) {

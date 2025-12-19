@@ -883,6 +883,9 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 				fmt.Sprintf("cannot post unbalanced booking log: debits=%s credits=%s imbalance=%s",
 					debitTotal.String(), creditTotal.String(), imbalance.String()))
 		}
+
+		// Record successful balance validation
+		observability.RecordDoubleEntryValidation(observability.ValidationResultBalanced, currency)
 	}
 
 	// Apply status update
