@@ -151,9 +151,11 @@ func (r *Repository) Save(ctx context.Context, account domain.CurrentAccount) er
 			entity.CreatedAt = existing.CreatedAt
 			entity.CreatedBy = existing.CreatedBy
 
-			// Optimistic locking: only update if version matches, then increment
+			// Optimistic locking: domain already incremented version during mutation.
+			// Check against original version (entity.Version - 1), then set to new version.
+			originalVersion := entity.Version - 1
 			updateResult := tx.Model(&CurrentAccountEntity{}).
-				Where("account_identification = ? AND version = ?", entity.AccountIdentification, entity.Version).
+				Where("account_identification = ? AND version = ?", entity.AccountIdentification, originalVersion).
 				Updates(map[string]interface{}{
 					"balance":            entity.Balance,
 					"available_balance":  entity.AvailableBalance,
@@ -161,7 +163,7 @@ func (r *Repository) Save(ctx context.Context, account domain.CurrentAccount) er
 					"overdraft_limit":    entity.OverdraftLimit,
 					"overdraft_rate":     entity.OverdraftRate,
 					"balance_updated_at": entity.BalanceUpdatedAt,
-					"version":            entity.Version + 1,
+					"version":            entity.Version,
 					"updated_at":         entity.UpdatedAt,
 					"updated_by":         entity.UpdatedBy,
 				})
