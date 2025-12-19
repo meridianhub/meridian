@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
+	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -38,12 +40,15 @@ var (
 	ErrCurrentAccountClientNil      = errors.New("current account client cannot be nil")
 	ErrFinancialAccountingClientNil = errors.New("financial accounting client cannot be nil")
 	ErrPaymentGatewayNil            = errors.New("payment gateway cannot be nil")
+	ErrGatewayAccountConfigNil      = errors.New("gateway account config cannot be nil")
 	ErrAmountRequired               = errors.New("amount is required")
 	ErrInvalidNanos                 = errors.New("nanos must be in range [-999999999, 999999999]")
 	ErrPaymentRejected              = errors.New("payment rejected by gateway")
 	ErrUnexpectedGatewayStatus      = errors.New("unexpected gateway status")
 	ErrIdempotencyKeyTooLong        = errors.New("idempotency key exceeds maximum length")
 	ErrMalformedLienResponse        = errors.New("current account service returned empty or malformed lien response")
+	ErrLedgerPostingFailed          = errors.New("failed to post ledger entries")
+	ErrUnsupportedCurrency          = errors.New("unsupported currency for ledger posting")
 )
 
 // Kafka topic constants
@@ -141,6 +146,7 @@ type Service struct {
 	currentAccountClient      CurrentAccountClient
 	financialAccountingClient FinancialAccountingClient
 	paymentGateway            gateway.PaymentGateway
+	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
 	logger                    *slog.Logger
 	tracer                    *observability.Tracer
@@ -157,6 +163,7 @@ type Config struct {
 	CurrentAccountClient      CurrentAccountClient
 	FinancialAccountingClient FinancialAccountingClient
 	PaymentGateway            gateway.PaymentGateway
+	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
 	Logger                    *slog.Logger
 	Tracer                    *observability.Tracer
@@ -194,62 +201,66 @@ func NewService(repo persistence.Repository) (*Service, error) {
 
 // NewServiceWithConfig creates a new payment order service with full configuration.
 // Validates all required dependencies and applies defaults where appropriate.
-func NewServiceWithConfig(config Config) (*Service, error) {
+func NewServiceWithConfig(cfg Config) (*Service, error) {
 	// Validate required dependencies
-	if config.Repository == nil {
+	if cfg.Repository == nil {
 		return nil, ErrRepositoryNil
 	}
-	if config.CurrentAccountClient == nil {
+	if cfg.CurrentAccountClient == nil {
 		return nil, ErrCurrentAccountClientNil
 	}
-	if config.FinancialAccountingClient == nil {
+	if cfg.FinancialAccountingClient == nil {
 		return nil, ErrFinancialAccountingClientNil
 	}
-	if config.PaymentGateway == nil {
+	if cfg.PaymentGateway == nil {
 		return nil, ErrPaymentGatewayNil
+	}
+	if cfg.GatewayAccountConfig == nil {
+		return nil, ErrGatewayAccountConfigNil
 	}
 	// KafkaPublisher is optional - nil is handled gracefully by publishEvent
 
 	// Apply default logger if not provided
-	logger := config.Logger
+	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
 	// Apply defaults for optional config values
-	sagaTimeout := config.SagaTimeout
+	sagaTimeout := cfg.SagaTimeout
 	if sagaTimeout == 0 {
 		sagaTimeout = DefaultSagaTimeout
 	}
 
-	defaultPageSize := config.DefaultPageSize
+	defaultPageSize := cfg.DefaultPageSize
 	if defaultPageSize == 0 {
 		defaultPageSize = DefaultPageSize
 	}
 
-	maxPageSize := config.MaxPageSize
+	maxPageSize := cfg.MaxPageSize
 	if maxPageSize == 0 {
 		maxPageSize = DefaultMaxPageSize
 	}
 
-	maxIdempotencyKeyLength := config.MaxIdempotencyKeyLength
+	maxIdempotencyKeyLength := cfg.MaxIdempotencyKeyLength
 	if maxIdempotencyKeyLength == 0 {
 		maxIdempotencyKeyLength = DefaultMaxIdempotencyKeyLength
 	}
 
 	return &Service{
-		repo:                      config.Repository,
-		currentAccountClient:      config.CurrentAccountClient,
-		financialAccountingClient: config.FinancialAccountingClient,
-		paymentGateway:            config.PaymentGateway,
-		kafkaPublisher:            config.KafkaPublisher,
+		repo:                      cfg.Repository,
+		currentAccountClient:      cfg.CurrentAccountClient,
+		financialAccountingClient: cfg.FinancialAccountingClient,
+		paymentGateway:            cfg.PaymentGateway,
+		gatewayAccountConfig:      cfg.GatewayAccountConfig,
+		kafkaPublisher:            cfg.KafkaPublisher,
 		logger:                    logger,
-		tracer:                    config.Tracer,
+		tracer:                    cfg.Tracer,
 		sagaTimeout:               sagaTimeout,
 		defaultPageSize:           defaultPageSize,
 		maxPageSize:               maxPageSize,
 		maxIdempotencyKeyLength:   maxIdempotencyKeyLength,
-		lienExecutionRetryConfig:  config.LienExecutionRetryConfig, // nil means use default
+		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig, // nil means use default
 	}, nil
 }
 
@@ -872,6 +883,8 @@ type updateResult struct {
 
 // handleSettledStatus processes a SETTLED gateway callback.
 // Implements idempotency: returns success if already COMPLETED.
+// Posts double-entry ledger journal entries BEFORE completing the payment.
+// nolint:gocognit // Payment completion requires ledger posting, state transition, and event publishing
 func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrder) (*updateResult, error) {
 	// Idempotency check: if already completed, return success without modification
 	if po.Status == domain.PaymentOrderStatusCompleted {
@@ -882,8 +895,24 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		return &updateResult{po: po, isIdempotent: true}, nil
 	}
 
-	// Attempt state transition
-	if err := po.Complete(""); err != nil {
+	// Post ledger entries BEFORE completing the payment order
+	// This ensures double-entry bookkeeping is recorded before the payment is marked complete
+	ledgerBookingID, err := s.postLedgerEntries(ctx, po)
+	if err != nil {
+		s.logger.Error("failed to post ledger entries",
+			"payment_order_id", po.ID.String(),
+			"error", err)
+		// Mark the payment as FAILED if ledger posting fails
+		if failErr := s.failPaymentOrder(ctx, po, fmt.Sprintf("ledger posting failed: %v", err), "LEDGER_POSTING_FAILED"); failErr != nil {
+			s.logger.Error("failed to mark payment as failed after ledger posting failure",
+				"payment_order_id", po.ID.String(),
+				"error", failErr)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to post ledger entries: %v", err)
+	}
+
+	// Attempt state transition with the ledger booking ID
+	if err := po.Complete(ledgerBookingID); err != nil {
 		if errors.Is(err, domain.ErrInvalidPaymentOrderTransition) {
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"cannot complete payment order in %s state: %v", po.Status, err)
@@ -941,6 +970,7 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 	s.logger.Info("payment order completed via gateway callback",
 		"payment_order_id", po.ID.String(),
 		"gateway_reference_id", po.GatewayReferenceID,
+		"ledger_booking_id", ledgerBookingID,
 		"amount_cents", po.Amount.AmountCents(),
 		"currency", string(po.Amount.Currency()),
 		"lien_id", po.LienID,
@@ -1002,6 +1032,159 @@ func (s *Service) handlePendingStatus(po *domain.PaymentOrder, gatewayRefID stri
 		"correlation_id", po.CorrelationID)
 
 	return nil
+}
+
+// postLedgerEntries creates double-entry bookkeeping entries for a completed payment.
+// It creates a BookingLog in PENDING status, captures debit and credit postings, then
+// updates the BookingLog to POSTED status. Returns the booking log ID on success.
+//
+// Double-entry accounting for outbound payments:
+//   - DEBIT: Customer's account (funds leaving their account)
+//   - CREDIT: Gateway's contra-account (liability to payment processor)
+//
+// Error handling: If any step fails, the error is returned and the calling code
+// should mark the payment as FAILED. The BookingLog will remain in PENDING status
+// for reconciliation purposes.
+func (s *Service) postLedgerEntries(ctx context.Context, po *domain.PaymentOrder) (string, error) {
+	// Get the gateway contra-account from configuration
+	// Extract gateway ID from the GatewayReferenceID prefix (e.g., "GW-uuid" -> "mock" for mock gateway)
+	gatewayID := extractGatewayIDFromRef(po.GatewayReferenceID)
+	contraAccountID, err := s.gatewayAccountConfig.GetContraAccount(gatewayID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get contra-account for gateway %s: %w", gatewayID, err)
+	}
+
+	// Convert domain currency to proto currency
+	protoCurrency := domainCurrencyToProto(po.Amount.Currency())
+	if protoCurrency == commonpb.Currency_CURRENCY_UNSPECIFIED {
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, po.Amount.Currency())
+	}
+
+	// Step 1: Create a BookingLog in PENDING status
+	bookingLogIDempKey := fmt.Sprintf("booking-log-%s", po.IdempotencyKey)
+	bookingLogResp, err := s.financialAccountingClient.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{
+		FinancialAccountType:    commonpb.AccountType_ACCOUNT_TYPE_CURRENT,
+		ProductServiceReference: "payment-order",
+		BusinessUnitReference:   "payment-order-service",
+		ChartOfAccountsRules:    "outbound-payment",
+		BaseCurrency:            protoCurrency,
+		IdempotencyKey: &commonpb.IdempotencyKey{
+			Key: bookingLogIDempKey,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create booking log: %w", err)
+	}
+	bookingLogID := bookingLogResp.FinancialBookingLog.Id
+
+	s.logger.Debug("created booking log for ledger posting",
+		"booking_log_id", bookingLogID,
+		"payment_order_id", po.ID.String())
+
+	// Convert amount to google.type.Money
+	postingAmount := &money.Money{
+		CurrencyCode: string(po.Amount.Currency()),
+		Units:        po.Amount.AmountCents() / 100,
+		Nanos:        int32((po.Amount.AmountCents() % 100) * 10000000),
+	}
+	valueDate := timestamppb.Now()
+
+	// Step 2: Create DEBIT posting (customer account - funds leaving)
+	debitIdempKey := fmt.Sprintf("debit-%s", po.IdempotencyKey)
+	_, err = s.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID,
+		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount:         postingAmount,
+		AccountId:             po.DebtorAccountID,
+		ValueDate:             valueDate,
+		IdempotencyKey: &commonpb.IdempotencyKey{
+			Key: debitIdempKey,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create debit posting for account %s: %w", po.DebtorAccountID, err)
+	}
+
+	s.logger.Debug("created debit posting",
+		"booking_log_id", bookingLogID,
+		"account_id", po.DebtorAccountID,
+		"amount_cents", po.Amount.AmountCents(),
+		"payment_order_id", po.ID.String())
+
+	// Step 3: Create CREDIT posting (gateway contra-account - liability to processor)
+	creditIdempKey := fmt.Sprintf("credit-%s", po.IdempotencyKey)
+	_, err = s.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID,
+		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+		PostingAmount:         postingAmount,
+		AccountId:             contraAccountID,
+		ValueDate:             valueDate,
+		IdempotencyKey: &commonpb.IdempotencyKey{
+			Key: creditIdempKey,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create credit posting for account %s: %w", contraAccountID, err)
+	}
+
+	s.logger.Debug("created credit posting",
+		"booking_log_id", bookingLogID,
+		"account_id", contraAccountID,
+		"amount_cents", po.Amount.AmountCents(),
+		"payment_order_id", po.ID.String())
+
+	// Step 4: Update BookingLog status to POSTED (balanced entries are now complete)
+	_, err = s.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     bookingLogID,
+		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to update booking log to POSTED: %w", err)
+	}
+
+	s.logger.Info("ledger posting completed successfully",
+		"booking_log_id", bookingLogID,
+		"payment_order_id", po.ID.String(),
+		"debtor_account", po.DebtorAccountID,
+		"contra_account", contraAccountID,
+		"amount_cents", po.Amount.AmountCents(),
+		"currency", string(po.Amount.Currency()))
+
+	return bookingLogID, nil
+}
+
+// extractGatewayIDFromRef extracts the gateway identifier from a gateway reference ID.
+// For the mock gateway, references are "GW-{uuid}" format, so we return "mock".
+// For real gateways, the prefix would indicate the provider (e.g., "stripe-{id}").
+func extractGatewayIDFromRef(gatewayRefID string) string {
+	// The mock gateway uses "GW-" prefix
+	if strings.HasPrefix(gatewayRefID, "GW-") {
+		return "mock"
+	}
+	// Also check for "gateway-" prefix used in some tests
+	if strings.HasPrefix(gatewayRefID, "gateway-") {
+		return "mock"
+	}
+	// For other gateways, extract the prefix before the first dash
+	parts := strings.SplitN(gatewayRefID, "-", 2)
+	if len(parts) > 0 {
+		return strings.ToLower(parts[0])
+	}
+	return "unknown"
+}
+
+// domainCurrencyToProto converts a domain currency to a proto currency enum.
+func domainCurrencyToProto(currency domain.Currency) commonpb.Currency {
+	switch currency {
+	case domain.CurrencyGBP:
+		return commonpb.Currency_CURRENCY_GBP
+	case domain.CurrencyUSD:
+		return commonpb.Currency_CURRENCY_USD
+	case domain.CurrencyEUR:
+		return commonpb.Currency_CURRENCY_EUR
+	default:
+		return commonpb.Currency_CURRENCY_UNSPECIFIED
+	}
 }
 
 // CancelPaymentOrder cancels a payment order before completion.

@@ -20,6 +20,7 @@ import (
 	webhookhttp "github.com/meridianhub/meridian/services/payment-order/adapters/http"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	payclients "github.com/meridianhub/meridian/services/payment-order/clients"
+	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/service"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
@@ -124,6 +125,12 @@ func run(logger *slog.Logger) error {
 	// Create payment gateway
 	paymentGateway := createPaymentGateway(logger)
 
+	// Load gateway account configuration
+	gatewayAccountConfig, err := createGatewayAccountConfig(logger)
+	if err != nil {
+		return fmt.Errorf("failed to load gateway account config: %w", err)
+	}
+
 	// Create Kafka producer
 	kafkaProducer, err := createKafkaProducer(logger)
 	if err != nil {
@@ -137,6 +144,7 @@ func run(logger *slog.Logger) error {
 		CurrentAccountClient:      currentAccountClient,
 		FinancialAccountingClient: financialAccountingClient,
 		PaymentGateway:            paymentGateway,
+		GatewayAccountConfig:      gatewayAccountConfig,
 		KafkaPublisher:            kafkaProducer,
 		Logger:                    logger,
 		Tracer:                    tracer,
@@ -692,4 +700,24 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 		"bypass_methods", len(interceptorConfig.BypassMethods))
 
 	return interceptor, nil
+}
+
+// createGatewayAccountConfig loads the gateway-to-account mapping configuration.
+// This configuration is required for ledger posting - it maps each payment gateway
+// to its corresponding contra-account for double-entry bookkeeping.
+//
+// Environment variables:
+//   - GATEWAY_ACCOUNT_MAPPING_FILE: Path to JSON config file (takes precedence)
+//   - GATEWAY_{ID}_ACCOUNT_ID: Contra-account UUID for gateway ID
+//   - GATEWAY_{ID}_ACCOUNT_TYPE: Account type (NOSTRO or ACQUIRER)
+func createGatewayAccountConfig(logger *slog.Logger) (*config.GatewayAccountConfig, error) {
+	cfg, err := config.LoadGatewayAccountConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load gateway account config: %w", err)
+	}
+
+	logger.Info("gateway account configuration loaded",
+		"gateway_count", len(cfg.Mappings))
+
+	return cfg, nil
 }

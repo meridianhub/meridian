@@ -21,6 +21,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
+	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -352,7 +353,15 @@ func (m *MockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Co
 	if m.initiateErr != nil {
 		return nil, m.initiateErr
 	}
-	return m.initiateResp, nil
+	if m.initiateResp != nil {
+		return m.initiateResp, nil
+	}
+	// Return a default valid response for tests that don't specify one
+	return &financialaccountingv1.InitiateFinancialBookingLogResponse{
+		FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
+			Id: "mock-booking-log-" + uuid.New().String(),
+		},
+	}, nil
 }
 
 func (m *MockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
@@ -360,7 +369,15 @@ func (m *MockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, 
 	if m.captureErr != nil {
 		return nil, m.captureErr
 	}
-	return m.captureResp, nil
+	if m.captureResp != nil {
+		return m.captureResp, nil
+	}
+	// Return a default valid response
+	return &financialaccountingv1.CaptureLedgerPostingResponse{
+		LedgerPosting: &financialaccountingv1.LedgerPosting{
+			Id: "mock-posting-" + uuid.New().String(),
+		},
+	}, nil
 }
 
 func (m *MockFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
@@ -368,7 +385,15 @@ func (m *MockFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Cont
 	if m.updateErr != nil {
 		return nil, m.updateErr
 	}
-	return m.updateResp, nil
+	if m.updateResp != nil {
+		return m.updateResp, nil
+	}
+	// Return a default valid response
+	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
+		FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
+			Id: "mock-booking-log-updated",
+		},
+	}, nil
 }
 
 func (m *MockFinancialAccountingClient) Close() error {
@@ -451,6 +476,17 @@ func TestNewServiceWithConfig(t *testing.T) {
 			},
 			wantErr: ErrPaymentGatewayNil,
 		},
+		{
+			name: "nil gateway account config returns error",
+			config: Config{
+				Repository:                NewMockRepository(),
+				CurrentAccountClient:      &MockCurrentAccountClient{},
+				FinancialAccountingClient: &MockFinancialAccountingClient{},
+				PaymentGateway:            &MockPaymentGateway{},
+				GatewayAccountConfig:      nil,
+			},
+			wantErr: ErrGatewayAccountConfigNil,
+		},
 	}
 
 	for _, tt := range tests {
@@ -463,18 +499,32 @@ func TestNewServiceWithConfig(t *testing.T) {
 
 // Test NewServiceWithConfig_Success verifies service creation with all required dependencies
 func TestNewServiceWithConfig_Success(t *testing.T) {
-	config := Config{
+	cfg := Config{
 		Repository:                NewMockRepository(),
 		CurrentAccountClient:      &MockCurrentAccountClient{},
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            &MockPaymentGateway{},
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 	}
 
-	svc, err := NewServiceWithConfig(config)
+	svc, err := NewServiceWithConfig(cfg)
 
 	require.NoError(t, err)
 	assert.NotNil(t, svc)
 	assert.NotNil(t, svc.financialAccountingClient)
+	assert.NotNil(t, svc.gatewayAccountConfig)
+}
+
+// testGatewayAccountConfig creates a test gateway account configuration.
+func testGatewayAccountConfig() *config.GatewayAccountConfig {
+	cfg, _ := config.NewGatewayAccountConfig(map[string]*config.GatewayAccountMapping{
+		"mock": {
+			GatewayID:       "mock",
+			ContraAccountID: "GATEWAY-MOCK-NOSTRO-001",
+			AccountType:     config.AccountTypeNostro,
+		},
+	})
+	return cfg
 }
 
 // Test InitiatePaymentOrder
@@ -776,9 +826,11 @@ func TestUpdatePaymentOrder_Settled(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:                 repo,
-		currentAccountClient: caClient,
-		logger:               testLogger(),
+		repo:                      repo,
+		currentAccountClient:      caClient,
+		financialAccountingClient: &MockFinancialAccountingClient{},
+		gatewayAccountConfig:      testGatewayAccountConfig(),
+		logger:                    testLogger(),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -823,9 +875,11 @@ func TestUpdatePaymentOrder_Settled_LienExecutionStatusTracking(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:                 repo,
-		currentAccountClient: caClient,
-		logger:               testLogger(),
+		repo:                      repo,
+		currentAccountClient:      caClient,
+		financialAccountingClient: &MockFinancialAccountingClient{},
+		gatewayAccountConfig:      testGatewayAccountConfig(),
+		logger:                    testLogger(),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -924,9 +978,11 @@ func TestUpdatePaymentOrder_ByGatewayReferenceID(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:                 repo,
-		currentAccountClient: caClient,
-		logger:               testLogger(),
+		repo:                      repo,
+		currentAccountClient:      caClient,
+		financialAccountingClient: &MockFinancialAccountingClient{},
+		gatewayAccountConfig:      testGatewayAccountConfig(),
+		logger:                    testLogger(),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -990,9 +1046,11 @@ func TestUpdatePaymentOrder_Idempotent_Settled(t *testing.T) {
 		executeLienResp: &currentaccountv1.ExecuteLienResponse{},
 	}
 	svc := &Service{
-		repo:                 repo,
-		currentAccountClient: caClient,
-		logger:               testLogger(),
+		repo:                      repo,
+		currentAccountClient:      caClient,
+		financialAccountingClient: &MockFinancialAccountingClient{},
+		gatewayAccountConfig:      testGatewayAccountConfig(),
+		logger:                    testLogger(),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -2128,10 +2186,12 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 		RandomizationFactor: 0.1,
 	}
 	svc := &Service{
-		repo:                     repo,
-		currentAccountClient:     caClient,
-		logger:                   testLogger(),
-		lienExecutionRetryConfig: fastRetryConfig,
+		repo:                      repo,
+		currentAccountClient:      caClient,
+		financialAccountingClient: &MockFinancialAccountingClient{},
+		gatewayAccountConfig:      testGatewayAccountConfig(),
+		logger:                    testLogger(),
+		lienExecutionRetryConfig:  fastRetryConfig,
 	}
 
 	// Create a payment order in EXECUTING state

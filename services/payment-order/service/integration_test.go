@@ -481,6 +481,7 @@ func TestIntegration_HappyPath_Initiate_Reserve_Execute_Complete(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 		SagaTimeout:               30 * time.Second,
@@ -552,6 +553,7 @@ func TestIntegration_Idempotency_SameKeyReturnsSameResult(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -626,6 +628,7 @@ func TestIntegration_DuplicateWebhook_Idempotent(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -695,6 +698,7 @@ func TestIntegration_InsufficientFunds_SagaFails(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -737,6 +741,7 @@ func TestIntegration_GatewayTimeout_CompensationReleasesLien(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -783,6 +788,7 @@ func TestIntegration_GatewayRejects_StatusFailed(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -827,6 +833,7 @@ func TestIntegration_ConcurrentPayments_SameAccount(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -904,6 +911,7 @@ func TestIntegration_NetworkTimeout_DuringExecutePhase(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 		SagaTimeout:               3 * time.Second, // Short timeout for test
@@ -960,6 +968,7 @@ func TestIntegration_PartialFailure_GatewayAcceptsLedgerFails(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -1015,6 +1024,7 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -1104,6 +1114,7 @@ func TestIntegration_InvalidInputs_ValidationErrors(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -1191,6 +1202,7 @@ func TestIntegration_RetrievePaymentOrder(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -1238,6 +1250,7 @@ func TestIntegration_CancelPaymentOrder(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -1307,6 +1320,7 @@ func TestIntegration_ListPaymentOrders_Pagination(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})
@@ -1416,6 +1430,7 @@ func TestIntegration_ReversePaymentOrder(t *testing.T) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: newMockFinancialAccountingClient(),
 		PaymentGateway:            mockGW,
+		GatewayAccountConfig:      testGatewayAccountConfig(),
 		KafkaPublisher:            nil, // Optional for tests
 		Logger:                    logger,
 	})

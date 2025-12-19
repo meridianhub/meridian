@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
+	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"google.golang.org/genproto/googleapis/type/money"
 )
@@ -20,6 +21,18 @@ import (
 // benchLogger returns a no-op logger for benchmark tests
 func benchLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// benchGatewayAccountConfig creates a gateway account config for benchmarks.
+func benchGatewayAccountConfig() *config.GatewayAccountConfig {
+	cfg, _ := config.NewGatewayAccountConfig(map[string]*config.GatewayAccountMapping{
+		"mock": {
+			GatewayID:       "mock",
+			ContraAccountID: "GATEWAY-MOCK-NOSTRO-001",
+			AccountType:     config.AccountTypeNostro,
+		},
+	})
+	return cfg
 }
 
 // BenchmarkInitiatePaymentOrder benchmarks the InitiatePaymentOrder RPC.
@@ -46,6 +59,7 @@ func BenchmarkInitiatePaymentOrder(b *testing.B) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
+		GatewayAccountConfig:      benchGatewayAccountConfig(),
 		Logger:                    benchLogger(),
 		// Use fast retry config to avoid delays in benchmarks
 		LienExecutionRetryConfig: &clients.RetryConfig{
@@ -208,6 +222,7 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
+		GatewayAccountConfig:      benchGatewayAccountConfig(),
 		Logger:                    benchLogger(),
 		LienExecutionRetryConfig: &clients.RetryConfig{
 			MaxRetries:      1,
@@ -287,6 +302,7 @@ func BenchmarkCancelPaymentOrder(b *testing.B) {
 		CurrentAccountClient:      mockCA,
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
+		GatewayAccountConfig:      benchGatewayAccountConfig(),
 		Logger:                    benchLogger(),
 	})
 	if err != nil {
