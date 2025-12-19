@@ -427,13 +427,15 @@ func (c *Consumer) ProcessOutboxFallback(ctx context.Context, schema string, bat
 			}
 			// Mark as failed outside transaction
 			errMsg := err.Error()
-			db.WithContext(ctx).Model(&AuditOutbox{}).
+			if updateErr := db.WithContext(ctx).Model(&AuditOutbox{}).
 				Where("id = ?", entryID).
 				Updates(map[string]interface{}{
 					"status":      "failed",
 					"last_error":  errMsg,
 					"retry_count": gorm.Expr("retry_count + 1"),
-				})
+				}).Error; updateErr != nil {
+				log.Printf("ERROR: Failed to mark outbox entry as failed: %v", updateErr)
+			}
 			log.Printf("ERROR: Failed to process outbox entry: %v", err)
 			continue
 		}

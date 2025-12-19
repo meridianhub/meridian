@@ -290,6 +290,6 @@ func recordAudit(tx *gorm.DB, tableName, operation, recordID string, oldValue, n
 		oldJSON,
 		newJSON,
 		changedBy,
-		globalSchemaName,
+		GetSchemaName(), // Use getter for thread-safe access
 	)
 }
