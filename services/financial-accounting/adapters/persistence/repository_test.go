@@ -73,20 +73,23 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	require.NoError(t, err)
 
 	// Create audit_outbox table for GORM hooks
+	// Note: Uses TEXT instead of JSONB for old_values/new_values for compatibility with
+	// the shared audit infrastructure which writes empty strings when values are nil.
+	// record_id is VARCHAR(50) to match the shared AuditOutbox which uses string IDs.
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-		record_id UUID NOT NULL,
-		old_values JSONB,
-		new_values JSONB,
+		record_id VARCHAR(50) NOT NULL,
+		old_values TEXT,
+		new_values TEXT,
 		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		retry_count INT NOT NULL DEFAULT 0,
 		last_error TEXT,
 		changed_by VARCHAR(100),
 		transaction_id VARCHAR(100),
-		client_ip INET,
+		client_ip VARCHAR(45),
 		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)
@@ -640,20 +643,24 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	require.NoError(t, err)
 
 	// Create audit tables
+	// Note: Uses TEXT instead of JSONB for old_values/new_values for compatibility with
+	// the shared audit infrastructure which writes empty strings when values are nil.
+	// This matches the tenant service test pattern.
+	// record_id is VARCHAR(50) to match the shared AuditOutbox which uses string IDs.
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-		record_id UUID NOT NULL,
-		old_values JSONB,
-		new_values JSONB,
+		record_id VARCHAR(50) NOT NULL,
+		old_values TEXT,
+		new_values TEXT,
 		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		retry_count INT NOT NULL DEFAULT 0,
 		last_error TEXT,
 		changed_by VARCHAR(100),
 		transaction_id VARCHAR(100),
-		client_ip INET,
+		client_ip VARCHAR(45),
 		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)
@@ -662,13 +669,13 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-		record_id UUID NOT NULL,
+		record_id VARCHAR(50) NOT NULL,
 		changed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		changed_by VARCHAR(100),
-		old_values JSONB,
-		new_values JSONB,
+		old_values TEXT,
+		new_values TEXT,
 		transaction_id VARCHAR(100),
-		client_ip INET,
+		client_ip VARCHAR(45),
 		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)
@@ -706,13 +713,13 @@ func TestAuditBookingLogCreate(t *testing.T) {
 
 	// Verify audit outbox entry was created
 	var outbox AuditOutbox
-	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID, "financial_booking_log").First(&outbox).Error
+	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID.String(), "financial_booking_log").First(&outbox).Error
 	require.NoError(t, err)
 
 	assert.Equal(t, "INSERT", outbox.Operation)
 	assert.Equal(t, "pending", outbox.Status)
-	assert.NotNil(t, outbox.NewValues)
-	assert.Nil(t, outbox.OldValues) // No old values for INSERT
+	assert.NotEmpty(t, outbox.NewValues)
+	assert.Empty(t, outbox.OldValues) // No old values for INSERT
 }
 
 // TestAuditBookingLogUpdate verifies that updating a booking log creates an audit outbox entry
@@ -743,7 +750,7 @@ func TestAuditBookingLogUpdate(t *testing.T) {
 
 	// Verify both INSERT and UPDATE audit outbox entries exist
 	var outboxEntries []AuditOutbox
-	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID, "financial_booking_log").
+	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID.String(), "financial_booking_log").
 		Order("created_at ASC").
 		Find(&outboxEntries).Error
 	require.NoError(t, err)
@@ -784,7 +791,7 @@ func TestAuditBookingLogDelete(t *testing.T) {
 
 	// Verify both INSERT and DELETE audit outbox entries exist
 	var outboxEntries []AuditOutbox
-	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID, "financial_booking_log").
+	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID.String(), "financial_booking_log").
 		Order("created_at ASC").
 		Find(&outboxEntries).Error
 	require.NoError(t, err)
@@ -792,8 +799,8 @@ func TestAuditBookingLogDelete(t *testing.T) {
 
 	// Verify DELETE entry
 	assert.Equal(t, "DELETE", outboxEntries[1].Operation)
-	assert.NotNil(t, outboxEntries[1].OldValues) // Old values for DELETE
-	assert.Nil(t, outboxEntries[1].NewValues)    // No new values for DELETE
+	assert.NotEmpty(t, outboxEntries[1].OldValues) // Old values for DELETE
+	assert.Empty(t, outboxEntries[1].NewValues)    // No new values for DELETE
 }
 
 // TestAuditLedgerPostingCreate verifies that creating a ledger posting creates an audit outbox entry
@@ -835,7 +842,7 @@ func TestAuditLedgerPostingCreate(t *testing.T) {
 
 	// Verify audit outbox entry was created for the posting
 	var outbox AuditOutbox
-	err := db.Where("record_id = ? AND table_name = ?", posting.ID, "ledger_posting").First(&outbox).Error
+	err := db.Where("record_id = ? AND table_name = ?", posting.ID.String(), "ledger_posting").First(&outbox).Error
 	require.NoError(t, err)
 
 	assert.Equal(t, "INSERT", outbox.Operation)
@@ -887,7 +894,7 @@ func TestAuditLedgerPostingUpdate(t *testing.T) {
 
 	// Verify both INSERT and UPDATE audit outbox entries exist
 	var outboxEntries []AuditOutbox
-	err := db.Where("record_id = ? AND table_name = ?", posting.ID, "ledger_posting").
+	err := db.Where("record_id = ? AND table_name = ?", posting.ID.String(), "ledger_posting").
 		Order("created_at ASC").
 		Find(&outboxEntries).Error
 	require.NoError(t, err)
@@ -922,7 +929,7 @@ func TestAuditOutboxStatusValues(t *testing.T) {
 				ID:        uuid.New(),
 				Table:     "test_table",
 				Operation: "INSERT",
-				RecordID:  uuid.New(),
+				RecordID:  uuid.New().String(),
 				Status:    tc.status,
 				CreatedAt: time.Now(),
 			}
@@ -960,7 +967,7 @@ func TestAuditChangedByDefaultsToSystem(t *testing.T) {
 
 	// Verify audit entry has "system" as changed_by
 	var outbox AuditOutbox
-	err := db.Where("record_id = ?", bookingLog.ID).First(&outbox).Error
+	err := db.Where("record_id = ?", bookingLog.ID.String()).First(&outbox).Error
 	require.NoError(t, err)
 
 	require.NotNil(t, outbox.ChangedBy)

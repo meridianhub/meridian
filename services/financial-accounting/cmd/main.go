@@ -20,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -108,6 +109,21 @@ func run(logger *slog.Logger) error {
 	defer closeDatabase(db, logger)
 
 	logger.Info("database connection established")
+
+	// Initialize audit system with Kafka publisher
+	auditPublisher, err := initAuditPublisher(logger)
+	if err != nil {
+		// Non-fatal: audit will use outbox fallback
+		logger.Warn("failed to initialize audit Kafka publisher, using outbox fallback",
+			"error", err)
+	}
+	if auditPublisher != nil {
+		defer func() {
+			if err := auditPublisher.Close(); err != nil {
+				logger.Error("failed to close audit publisher", "error", err)
+			}
+		}()
+	}
 
 	// Validate bank cash account ID is configured
 	bankCashAccountID := getEnvOrDefault("BANK_CASH_ACCOUNT_ID", "")
@@ -549,4 +565,51 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 		"bypass_methods", len(interceptorConfig.BypassMethods))
 
 	return interceptor, nil
+}
+
+// initAuditPublisher initializes the Kafka-based audit publisher.
+// Returns nil if Kafka is not configured (KAFKA_BOOTSTRAP_SERVERS is empty),
+// which causes the audit system to use outbox fallback only.
+//
+// Environment variables:
+//   - KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (e.g., "kafka:9092")
+//   - KAFKA_AUDIT_TOPIC: Topic for audit events (default: "audit.events")
+func initAuditPublisher(logger *slog.Logger) (*audit.Publisher, error) {
+	// Set schema name for audit events
+	audit.SetSchemaName("financial_accounting")
+
+	bootstrapServers := getEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers == "" {
+		logger.Info("audit Kafka publisher disabled: KAFKA_BOOTSTRAP_SERVERS not set")
+		return nil, nil //nolint:nilnil // Intentionally returns nil when Kafka is not configured
+	}
+
+	topic := getEnvOrDefault("KAFKA_AUDIT_TOPIC", "audit.events")
+
+	config := audit.PublisherConfig{
+		BootstrapServers: bootstrapServers,
+		Topic:            topic,
+		SchemaName:       "financial_accounting",
+		ClientID:         "financial-accounting-audit-publisher",
+	}
+
+	publisher, err := audit.NewPublisher(config)
+	if err != nil {
+		if errors.Is(err, audit.ErrPublisherDisabled) {
+			logger.Info("audit Kafka publisher disabled",
+				"reason", err.Error())
+			return nil, nil //nolint:nilnil // Disabled mode returns no publisher
+		}
+		return nil, fmt.Errorf("failed to create audit publisher: %w", err)
+	}
+
+	// Set global publisher for GORM hooks integration
+	audit.SetGlobalPublisher(publisher)
+
+	logger.Info("audit Kafka publisher initialized",
+		"bootstrap_servers", bootstrapServers,
+		"topic", topic,
+		"schema", "financial_accounting")
+
+	return publisher, nil
 }
