@@ -761,8 +761,8 @@ func TestAuditBookingLogUpdate(t *testing.T) {
 
 	// Verify UPDATE entry
 	assert.Equal(t, "UPDATE", outboxEntries[1].Operation)
-	assert.NotNil(t, outboxEntries[1].OldValues) // Old values for UPDATE
-	assert.NotNil(t, outboxEntries[1].NewValues) // New values for UPDATE
+	assert.NotEmpty(t, outboxEntries[1].OldValues) // Old values for UPDATE
+	assert.NotEmpty(t, outboxEntries[1].NewValues) // New values for UPDATE
 }
 
 // TestAuditBookingLogDelete verifies that deleting a booking log creates an audit outbox entry
@@ -902,8 +902,8 @@ func TestAuditLedgerPostingUpdate(t *testing.T) {
 
 	// Verify UPDATE entry
 	assert.Equal(t, "UPDATE", outboxEntries[1].Operation)
-	assert.NotNil(t, outboxEntries[1].OldValues)
-	assert.NotNil(t, outboxEntries[1].NewValues)
+	assert.NotEmpty(t, outboxEntries[1].OldValues)
+	assert.NotEmpty(t, outboxEntries[1].NewValues)
 }
 
 // TestAuditOutboxStatusValues verifies the status constraint values work correctly

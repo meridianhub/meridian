@@ -42,7 +42,10 @@ SELECT
             COALESCE(
                 (SELECT json_object_agg(key, value)
                  FROM jsonb_each(new_values::jsonb)
-                 WHERE (old_values IS NULL OR old_values = '' OR new_values::jsonb->key IS DISTINCT FROM old_values::jsonb->key)),
+                 WHERE (old_values IS NULL OR old_values = '' OR (
+                     old_values IS NOT NULL AND old_values != '' AND
+                     new_values::jsonb->key IS DISTINCT FROM old_values::jsonb->key
+                 ))),
                 '{}'::json
             )
         ELSE NULL
