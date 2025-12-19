@@ -543,8 +543,9 @@ func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
 		return nil, fmt.Errorf("failed to ping Redis: %w", err)
 	}
 
+	// Log sanitized address to avoid exposing credentials
 	logger.Info("Redis client connected",
-		"url", redisURL,
+		"addr", opt.Addr,
 		"db", redisDB,
 		"pool_size", poolSize,
 		"min_idle_conns", minIdleConns)
