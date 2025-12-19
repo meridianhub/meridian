@@ -535,3 +535,391 @@ func TestFinancialPositionLog_AuditOutbox_AllOperations(t *testing.T) {
 		Pluck("operation", &operations)
 	assert.Equal(t, []string{"INSERT", "UPDATE", "DELETE"}, operations, "Operations should be in correct order")
 }
+
+// createTestTransactionLineage creates a test TransactionLineage with required fields
+func createTestTransactionLineage(logID uuid.UUID) *TransactionLineage {
+	return &TransactionLineage{
+		FinancialPositionLogID: logID,
+		TransactionID:          uuid.New(),
+		TransactionType:        "PAYMENT",
+		ChildTransactionIDs:    []byte("[]"),
+		RelatedTransactionIDs:  []byte("[]"),
+	}
+}
+
+// createTestAuditTrailEntry creates a test AuditTrailEntry with required fields
+func createTestAuditTrailEntry(logID uuid.UUID) *AuditTrailEntry {
+	return &AuditTrailEntry{
+		AuditEntryID:           uuid.New(),
+		FinancialPositionLogID: logID,
+		Timestamp:              time.Now(),
+		UserID:                 "test-user",
+		Action:                 "CREATED",
+	}
+}
+
+// TestTransactionLineage_AuditOutbox_AtomicCommit verifies that audit outbox entry
+// is created atomically with the TransactionLineage insert.
+func TestTransactionLineage_AuditOutbox_AtomicCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db, cleanup := setupPositionKeepingTestDB(t)
+	defer cleanup()
+
+	// Migrate TransactionLineage
+	err := db.AutoMigrate(&TransactionLineage{})
+	require.NoError(t, err, "Failed to migrate TransactionLineage")
+
+	// Create prerequisite Customer, Account, and FinancialPositionLog
+	accountNumber := "GB82WEST12345698765432"
+	customer := createTestCustomer(db, t)
+	createTestAccount(db, t, customer, accountNumber)
+	log := createTestFinancialPositionLog(accountNumber)
+	err = db.Create(log).Error
+	require.NoError(t, err, "Failed to create FinancialPositionLog")
+
+	// Create TransactionLineage
+	lineage := createTestTransactionLineage(log.ID)
+	err = db.Create(lineage).Error
+	require.NoError(t, err, "Failed to create TransactionLineage")
+	assert.NotEqual(t, uuid.Nil, lineage.ID, "TransactionLineage ID should be set")
+
+	// Verify outbox entry exists
+	var outbox AuditOutbox
+	err = db.Table("audit_outbox").
+		Where("record_id = ? AND table_name = ?", lineage.ID, "transaction_lineage").
+		First(&outbox).Error
+	require.NoError(t, err, "Audit outbox entry should exist")
+
+	// Verify outbox content
+	assert.Equal(t, "transaction_lineage", outbox.Table, "Table name should be 'transaction_lineage'")
+	assert.Equal(t, "INSERT", outbox.Operation, "Operation should be 'INSERT'")
+	assert.Equal(t, "pending", outbox.Status, "Status should be 'pending'")
+	assert.NotEmpty(t, outbox.NewValues, "NewValues should contain lineage data")
+	assert.Empty(t, outbox.OldValues, "OldValues should be empty for INSERT")
+}
+
+// TestTransactionLineage_AuditOutbox_CapturesUpdate verifies that UPDATE operations
+// capture both old and new values.
+func TestTransactionLineage_AuditOutbox_CapturesUpdate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db, cleanup := setupPositionKeepingTestDB(t)
+	defer cleanup()
+
+	// Migrate TransactionLineage
+	err := db.AutoMigrate(&TransactionLineage{})
+	require.NoError(t, err, "Failed to migrate TransactionLineage")
+
+	// Create prerequisite Customer, Account, and FinancialPositionLog
+	accountNumber := "GB82WEST12345698765432"
+	customer := createTestCustomer(db, t)
+	createTestAccount(db, t, customer, accountNumber)
+	log := createTestFinancialPositionLog(accountNumber)
+	err = db.Create(log).Error
+	require.NoError(t, err, "Failed to create FinancialPositionLog")
+
+	// Create TransactionLineage
+	lineage := createTestTransactionLineage(log.ID)
+	err = db.Create(lineage).Error
+	require.NoError(t, err, "Failed to create TransactionLineage")
+
+	// Update the lineage
+	lineage.TransactionType = "REFUND"
+	err = db.Save(lineage).Error
+	require.NoError(t, err, "Failed to update TransactionLineage")
+
+	// Verify UPDATE audit
+	var updateAudit AuditOutbox
+	err = db.Table("audit_outbox").
+		Where("record_id = ? AND operation = ? AND table_name = ?", lineage.ID, "UPDATE", "transaction_lineage").
+		First(&updateAudit).Error
+	require.NoError(t, err, "UPDATE audit should exist")
+	assert.Equal(t, "UPDATE", updateAudit.Operation)
+	assert.NotEmpty(t, updateAudit.OldValues, "UPDATE should capture old values")
+	assert.NotEmpty(t, updateAudit.NewValues, "UPDATE should capture new values")
+	assert.Contains(t, updateAudit.OldValues, "PAYMENT", "Old values should contain original type")
+	assert.Contains(t, updateAudit.NewValues, "REFUND", "New values should contain updated type")
+}
+
+// TestTransactionLineage_AuditOutbox_CapturesDelete verifies that DELETE operations
+// capture the old values.
+func TestTransactionLineage_AuditOutbox_CapturesDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db, cleanup := setupPositionKeepingTestDB(t)
+	defer cleanup()
+
+	// Migrate TransactionLineage
+	err := db.AutoMigrate(&TransactionLineage{})
+	require.NoError(t, err, "Failed to migrate TransactionLineage")
+
+	// Create prerequisite Customer, Account, and FinancialPositionLog
+	accountNumber := "GB82WEST12345698765432"
+	customer := createTestCustomer(db, t)
+	createTestAccount(db, t, customer, accountNumber)
+	log := createTestFinancialPositionLog(accountNumber)
+	err = db.Create(log).Error
+	require.NoError(t, err, "Failed to create FinancialPositionLog")
+
+	// Create TransactionLineage
+	lineage := createTestTransactionLineage(log.ID)
+	err = db.Create(lineage).Error
+	require.NoError(t, err, "Failed to create TransactionLineage")
+
+	// Delete the lineage
+	err = db.Delete(lineage).Error
+	require.NoError(t, err, "Failed to delete TransactionLineage")
+
+	// Verify DELETE audit
+	var deleteAudit AuditOutbox
+	err = db.Table("audit_outbox").
+		Where("record_id = ? AND operation = ? AND table_name = ?", lineage.ID, "DELETE", "transaction_lineage").
+		First(&deleteAudit).Error
+	require.NoError(t, err, "DELETE audit should exist")
+	assert.Equal(t, "DELETE", deleteAudit.Operation)
+	assert.NotEmpty(t, deleteAudit.OldValues, "DELETE should capture old values")
+	assert.Empty(t, deleteAudit.NewValues, "DELETE should have empty new values")
+}
+
+// TestAuditTrailEntry_AuditOutbox_AtomicCommit verifies that audit outbox entry
+// is created atomically with the AuditTrailEntry insert.
+func TestAuditTrailEntry_AuditOutbox_AtomicCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db, cleanup := setupPositionKeepingTestDB(t)
+	defer cleanup()
+
+	// Migrate AuditTrailEntry
+	err := db.AutoMigrate(&AuditTrailEntry{})
+	require.NoError(t, err, "Failed to migrate AuditTrailEntry")
+
+	// Create prerequisite Customer, Account, and FinancialPositionLog
+	accountNumber := "GB82WEST12345698765432"
+	customer := createTestCustomer(db, t)
+	createTestAccount(db, t, customer, accountNumber)
+	log := createTestFinancialPositionLog(accountNumber)
+	err = db.Create(log).Error
+	require.NoError(t, err, "Failed to create FinancialPositionLog")
+
+	// Create AuditTrailEntry
+	entry := createTestAuditTrailEntry(log.ID)
+	err = db.Create(entry).Error
+	require.NoError(t, err, "Failed to create AuditTrailEntry")
+	assert.NotEqual(t, uuid.Nil, entry.ID, "AuditTrailEntry ID should be set")
+
+	// Verify outbox entry exists
+	var outbox AuditOutbox
+	err = db.Table("audit_outbox").
+		Where("record_id = ? AND table_name = ?", entry.ID, "audit_trail_entry").
+		First(&outbox).Error
+	require.NoError(t, err, "Audit outbox entry should exist")
+
+	// Verify outbox content
+	assert.Equal(t, "audit_trail_entry", outbox.Table, "Table name should be 'audit_trail_entry'")
+	assert.Equal(t, "INSERT", outbox.Operation, "Operation should be 'INSERT'")
+	assert.Equal(t, "pending", outbox.Status, "Status should be 'pending'")
+	assert.NotEmpty(t, outbox.NewValues, "NewValues should contain entry data")
+	assert.Empty(t, outbox.OldValues, "OldValues should be empty for INSERT")
+}
+
+// TestAuditTrailEntry_AuditOutbox_CapturesUpdate verifies that UPDATE operations
+// capture both old and new values.
+func TestAuditTrailEntry_AuditOutbox_CapturesUpdate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db, cleanup := setupPositionKeepingTestDB(t)
+	defer cleanup()
+
+	// Migrate AuditTrailEntry
+	err := db.AutoMigrate(&AuditTrailEntry{})
+	require.NoError(t, err, "Failed to migrate AuditTrailEntry")
+
+	// Create prerequisite Customer, Account, and FinancialPositionLog
+	accountNumber := "GB82WEST12345698765432"
+	customer := createTestCustomer(db, t)
+	createTestAccount(db, t, customer, accountNumber)
+	log := createTestFinancialPositionLog(accountNumber)
+	err = db.Create(log).Error
+	require.NoError(t, err, "Failed to create FinancialPositionLog")
+
+	// Create AuditTrailEntry
+	entry := createTestAuditTrailEntry(log.ID)
+	err = db.Create(entry).Error
+	require.NoError(t, err, "Failed to create AuditTrailEntry")
+
+	// Update the entry
+	entry.Action = "UPDATED"
+	details := "Modified status to reconciled"
+	entry.Details = &details
+	err = db.Save(entry).Error
+	require.NoError(t, err, "Failed to update AuditTrailEntry")
+
+	// Verify UPDATE audit
+	var updateAudit AuditOutbox
+	err = db.Table("audit_outbox").
+		Where("record_id = ? AND operation = ? AND table_name = ?", entry.ID, "UPDATE", "audit_trail_entry").
+		First(&updateAudit).Error
+	require.NoError(t, err, "UPDATE audit should exist")
+	assert.Equal(t, "UPDATE", updateAudit.Operation)
+	assert.NotEmpty(t, updateAudit.OldValues, "UPDATE should capture old values")
+	assert.NotEmpty(t, updateAudit.NewValues, "UPDATE should capture new values")
+	assert.Contains(t, updateAudit.OldValues, "CREATED", "Old values should contain original action")
+	assert.Contains(t, updateAudit.NewValues, "UPDATED", "New values should contain updated action")
+}
+
+// TestAuditTrailEntry_AuditOutbox_CapturesDelete verifies that DELETE operations
+// capture the old values.
+func TestAuditTrailEntry_AuditOutbox_CapturesDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db, cleanup := setupPositionKeepingTestDB(t)
+	defer cleanup()
+
+	// Migrate AuditTrailEntry
+	err := db.AutoMigrate(&AuditTrailEntry{})
+	require.NoError(t, err, "Failed to migrate AuditTrailEntry")
+
+	// Create prerequisite Customer, Account, and FinancialPositionLog
+	accountNumber := "GB82WEST12345698765432"
+	customer := createTestCustomer(db, t)
+	createTestAccount(db, t, customer, accountNumber)
+	log := createTestFinancialPositionLog(accountNumber)
+	err = db.Create(log).Error
+	require.NoError(t, err, "Failed to create FinancialPositionLog")
+
+	// Create AuditTrailEntry
+	entry := createTestAuditTrailEntry(log.ID)
+	err = db.Create(entry).Error
+	require.NoError(t, err, "Failed to create AuditTrailEntry")
+
+	// Delete the entry
+	err = db.Delete(entry).Error
+	require.NoError(t, err, "Failed to delete AuditTrailEntry")
+
+	// Verify DELETE audit
+	var deleteAudit AuditOutbox
+	err = db.Table("audit_outbox").
+		Where("record_id = ? AND operation = ? AND table_name = ?", entry.ID, "DELETE", "audit_trail_entry").
+		First(&deleteAudit).Error
+	require.NoError(t, err, "DELETE audit should exist")
+	assert.Equal(t, "DELETE", deleteAudit.Operation)
+	assert.NotEmpty(t, deleteAudit.OldValues, "DELETE should capture old values")
+	assert.Empty(t, deleteAudit.NewValues, "DELETE should have empty new values")
+}
+
+// TestTransactionLineage_AuditOutbox_AllOperations verifies that all CRUD operations
+// are captured correctly for a TransactionLineage lifecycle.
+func TestTransactionLineage_AuditOutbox_AllOperations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db, cleanup := setupPositionKeepingTestDB(t)
+	defer cleanup()
+
+	// Migrate TransactionLineage
+	err := db.AutoMigrate(&TransactionLineage{})
+	require.NoError(t, err, "Failed to migrate TransactionLineage")
+
+	// Create prerequisite Customer, Account, and FinancialPositionLog
+	accountNumber := "GB82WEST12345698765432"
+	customer := createTestCustomer(db, t)
+	createTestAccount(db, t, customer, accountNumber)
+	log := createTestFinancialPositionLog(accountNumber)
+	err = db.Create(log).Error
+	require.NoError(t, err, "Failed to create FinancialPositionLog")
+
+	// INSERT
+	lineage := createTestTransactionLineage(log.ID)
+	err = db.Create(lineage).Error
+	require.NoError(t, err, "Failed to create TransactionLineage")
+
+	// UPDATE
+	lineage.TransactionType = "REFUND"
+	err = db.Save(lineage).Error
+	require.NoError(t, err, "Failed to update TransactionLineage")
+
+	// DELETE
+	err = db.Delete(lineage).Error
+	require.NoError(t, err, "Failed to delete TransactionLineage")
+
+	// Verify total audit count for this record
+	var totalCount int64
+	db.Table("audit_outbox").
+		Where("record_id = ? AND table_name = ?", lineage.ID, "transaction_lineage").
+		Count(&totalCount)
+	assert.Equal(t, int64(3), totalCount, "Should have exactly 3 audit records (INSERT, UPDATE, DELETE)")
+
+	// Verify each operation exists
+	var operations []string
+	db.Table("audit_outbox").
+		Where("record_id = ? AND table_name = ?", lineage.ID, "transaction_lineage").
+		Order("created_at ASC").
+		Pluck("operation", &operations)
+	assert.Equal(t, []string{"INSERT", "UPDATE", "DELETE"}, operations, "Operations should be in correct order")
+}
+
+// TestAuditTrailEntry_AuditOutbox_AllOperations verifies that all CRUD operations
+// are captured correctly for an AuditTrailEntry lifecycle.
+func TestAuditTrailEntry_AuditOutbox_AllOperations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	db, cleanup := setupPositionKeepingTestDB(t)
+	defer cleanup()
+
+	// Migrate AuditTrailEntry
+	err := db.AutoMigrate(&AuditTrailEntry{})
+	require.NoError(t, err, "Failed to migrate AuditTrailEntry")
+
+	// Create prerequisite Customer, Account, and FinancialPositionLog
+	accountNumber := "GB82WEST12345698765432"
+	customer := createTestCustomer(db, t)
+	createTestAccount(db, t, customer, accountNumber)
+	log := createTestFinancialPositionLog(accountNumber)
+	err = db.Create(log).Error
+	require.NoError(t, err, "Failed to create FinancialPositionLog")
+
+	// INSERT
+	entry := createTestAuditTrailEntry(log.ID)
+	err = db.Create(entry).Error
+	require.NoError(t, err, "Failed to create AuditTrailEntry")
+
+	// UPDATE
+	entry.Action = "UPDATED"
+	err = db.Save(entry).Error
+	require.NoError(t, err, "Failed to update AuditTrailEntry")
+
+	// DELETE
+	err = db.Delete(entry).Error
+	require.NoError(t, err, "Failed to delete AuditTrailEntry")
+
+	// Verify total audit count for this record
+	var totalCount int64
+	db.Table("audit_outbox").
+		Where("record_id = ? AND table_name = ?", entry.ID, "audit_trail_entry").
+		Count(&totalCount)
+	assert.Equal(t, int64(3), totalCount, "Should have exactly 3 audit records (INSERT, UPDATE, DELETE)")
+
+	// Verify each operation exists
+	var operations []string
+	db.Table("audit_outbox").
+		Where("record_id = ? AND table_name = ?", entry.ID, "audit_trail_entry").
+		Order("created_at ASC").
+		Pluck("operation", &operations)
+	assert.Equal(t, []string{"INSERT", "UPDATE", "DELETE"}, operations, "Operations should be in correct order")
+}

@@ -61,6 +61,16 @@ var (
 		[]string{"operation", "step"},
 	)
 
+	// Inline compensation metrics - for compensations that happen within a step
+	// due to saga pattern limitations (step fails after side effects)
+	inlineCompensationFailuresTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "current_account_inline_compensation_failures_total",
+			Help: "Total number of inline compensation failures (requires manual intervention)",
+		},
+		[]string{"operation", "leg"},
+	)
+
 	sagaDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "current_account_saga_duration_seconds",
@@ -118,6 +128,13 @@ func RecordSagaFailure(operation, failedStep string) {
 // RecordSagaCompensation records a saga compensation
 func RecordSagaCompensation(operation, step string) {
 	sagaCompensationsTotal.WithLabelValues(operation, step).Inc()
+}
+
+// RecordInlineCompensationFailure records an inline compensation failure.
+// These failures indicate that a compensating entry could not be created,
+// requiring manual intervention to restore ledger integrity.
+func RecordInlineCompensationFailure(operation, leg string) {
+	inlineCompensationFailuresTotal.WithLabelValues(operation, leg).Inc()
 }
 
 // RecordSagaDuration records the duration of a saga execution

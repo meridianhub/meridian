@@ -135,6 +135,7 @@ func (s *PostingService) GetPostingsByBookingLog(ctx context.Context, bookingLog
 // ValidateDoubleEntry checks that debits equal credits for a booking log
 func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID uuid.UUID) (bool, error) {
 	timer := observability.NewOperationTimer(observability.OperationValidateDoubleEntry)
+	start := time.Now()
 
 	postings, err := s.repo.GetPostingsByBookingLogID(ctx, bookingLogID)
 	if err != nil {
@@ -144,8 +145,13 @@ func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID u
 
 	debitTotal := decimal.Zero
 	creditTotal := decimal.Zero
+	var currency string
 
 	for _, posting := range postings {
+		// Capture currency from first posting (all postings in a booking log have same currency)
+		if currency == "" {
+			currency = posting.Amount.CurrencyCode()
+		}
 		switch posting.Direction {
 		case domain.PostingDirectionDebit:
 			debitTotal = debitTotal.Add(posting.Amount.Amount())
@@ -154,14 +160,29 @@ func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID u
 		}
 	}
 
+	// Default currency if no postings
+	if currency == "" {
+		currency = observability.CurrencyUnknown
+	}
+
 	balanced := debitTotal.Equal(creditTotal)
 
-	// Record validation result
+	// Record validation duration and result
+	observability.RecordBalanceValidationDuration(time.Since(start))
 	timer.ObserveSuccess()
+
 	if balanced {
-		observability.RecordDoubleEntryValidation("balanced")
+		observability.RecordDoubleEntryValidation(observability.ValidationResultBalanced, currency)
 	} else {
-		observability.RecordDoubleEntryValidation("unbalanced")
+		imbalance := debitTotal.Sub(creditTotal)
+		observability.RecordDoubleEntryValidation(observability.ValidationResultUnbalanced, currency)
+		observability.LogBalanceValidationFailure(
+			bookingLogID.String(),
+			currency,
+			debitTotal.String(),
+			creditTotal.String(),
+			imbalance.String(),
+		)
 	}
 
 	return balanced, nil

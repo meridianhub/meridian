@@ -16,6 +16,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/service"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
@@ -362,6 +363,19 @@ func createServiceWithClients(
 	logger *slog.Logger,
 	tracer *observability.Tracer,
 ) (*service.Service, *serviceClients, error) {
+	// Load account configuration for clearing accounts
+	// This is optional - if not configured, deposits will use single-entry mode (backward compatible)
+	accountConfig, cfgErr := config.LoadAccountConfig()
+	if cfgErr != nil {
+		// Log warning but continue - double-entry is optional for backward compatibility
+		logger.Warn("account configuration not loaded, double-entry bookkeeping disabled",
+			"error", cfgErr)
+		accountConfig = nil // Explicit nil for clarity
+	} else {
+		logger.Info("account configuration loaded",
+			"deposit_clearing_account_id", accountConfig.DepositClearingAccountID)
+	}
+
 	// Create Position Keeping client with DNS-based load balancing
 	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
 		ServiceName: "position-keeping",
@@ -429,6 +443,7 @@ func createServiceWithClients(
 		resilientPosKeepingClient,
 		resilientFinAcctClient,
 		resilientPartyClient,
+		accountConfig,
 		logger,
 		tracer,
 	)
