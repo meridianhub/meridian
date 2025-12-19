@@ -828,6 +828,7 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 
 	// Enforce double-entry bookkeeping constraint when transitioning to POSTED
 	if newStatus == domain.TransactionStatusPosted {
+		validationStart := time.Now()
 		postings, err := s.repository.GetPostingsByBookingLogID(ctx, bookingLogID)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to retrieve postings for balance validation: %v", err)
@@ -835,7 +836,15 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 
 		// Empty postings are not allowed for POSTED status
 		if len(postings) == 0 {
-			observability.RecordDoubleEntryValidation("unbalanced")
+			observability.RecordBalanceValidationDuration(time.Since(validationStart))
+			observability.RecordDoubleEntryValidation(observability.ValidationResultUnbalanced, "UNKNOWN")
+			observability.LogBalanceValidationFailure(
+				bookingLogID.String(),
+				"UNKNOWN",
+				"0",
+				"0",
+				"0",
+			)
 			return nil, status.Error(codes.FailedPrecondition,
 				"cannot post booking log with no postings")
 		}
@@ -843,7 +852,12 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		// Calculate debit and credit totals
 		debitTotal := decimal.Zero
 		creditTotal := decimal.Zero
+		var currency string
 		for _, posting := range postings {
+			// Capture currency from first posting
+			if currency == "" {
+				currency = posting.Amount.CurrencyCode()
+			}
 			switch posting.Direction {
 			case domain.PostingDirectionDebit:
 				debitTotal = debitTotal.Add(posting.Amount.Amount())
@@ -852,10 +866,19 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 			}
 		}
 
+		observability.RecordBalanceValidationDuration(time.Since(validationStart))
+
 		// Validate double-entry balance
 		if !debitTotal.Equal(creditTotal) {
 			imbalance := debitTotal.Sub(creditTotal)
-			observability.RecordDoubleEntryValidation("unbalanced")
+			observability.RecordDoubleEntryValidation(observability.ValidationResultUnbalanced, currency)
+			observability.LogBalanceValidationFailure(
+				bookingLogID.String(),
+				currency,
+				debitTotal.String(),
+				creditTotal.String(),
+				imbalance.String(),
+			)
 			return nil, status.Error(codes.FailedPrecondition,
 				fmt.Sprintf("cannot post unbalanced booking log: debits=%s credits=%s imbalance=%s",
 					debitTotal.String(), creditTotal.String(), imbalance.String()))
