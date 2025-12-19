@@ -15,6 +15,7 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
+	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -144,21 +145,22 @@ func (m *mockPositionKeepingClient) Close() error {
 // Mock FinancialAccounting Client
 
 type mockFinancialAccountingClient struct {
-	captureCalls       int
-	debitCaptureCalls  int // Track debit postings specifically
-	creditCaptureCalls int // Track credit postings specifically
-	failOnCapture      bool
-	failOnDebitCapture bool // Fail specifically on debit postings
-	failOnUpdate       bool // Fail on UpdateFinancialBookingLog
-	failureError       error
-	captureResponses   []*financialaccountingv1.CaptureLedgerPostingResponse
-	compensateCalls    int
-	initiateCalls      int
-	updateCalls        int
-	retrieveLogCalls   int
-	listCalls          int
-	retrievePostCalls  int
-	lastCapturedReq    *financialaccountingv1.CaptureLedgerPostingRequest // Track last capture request
+	captureCalls        int
+	debitCaptureCalls   int // Track debit postings specifically
+	creditCaptureCalls  int // Track credit postings specifically
+	failOnCapture       bool
+	failOnDebitCapture  bool // Fail specifically on debit postings
+	failOnCreditCapture bool // Fail specifically on credit postings (after debit succeeds)
+	failOnUpdate        bool // Fail on UpdateFinancialBookingLog
+	failureError        error
+	captureResponses    []*financialaccountingv1.CaptureLedgerPostingResponse
+	compensateCalls     int
+	initiateCalls       int
+	updateCalls         int
+	retrieveLogCalls    int
+	listCalls           int
+	retrievePostCalls   int
+	lastCapturedReq     *financialaccountingv1.CaptureLedgerPostingRequest // Track last capture request
 }
 
 func (m *mockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
@@ -220,6 +222,17 @@ func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, 
 			return nil, m.failureError
 		}
 		return nil, errFinancialAccountingUnavailable
+	}
+
+	// Check for credit-specific failure (simulates credit posting failure after debit succeeds)
+	if m.failOnCreditCapture && req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_CREDIT {
+		// Only fail on non-compensation credits (original credit posting, not compensation reversals)
+		if req.IdempotencyKey == nil || len(req.IdempotencyKey.Key) < 4 || req.IdempotencyKey.Key[:4] != "COMP" {
+			if m.failureError != nil {
+				return nil, m.failureError
+			}
+			return nil, errFinancialAccountingUnavailable
+		}
 	}
 
 	if m.failOnCapture {
@@ -842,7 +855,7 @@ func TestExecuteDeposit_DoubleEntry_CreatesDualPostings(t *testing.T) {
 		repo:             repo,
 		posKeepingClient: mockPosKeeping,
 		finAcctClient:    mockFinAcct,
-		accountConfig: &AccountConfig{
+		accountConfig: &config.AccountConfig{
 			DepositClearingAccountID: "CLEARING-001",
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
@@ -890,7 +903,7 @@ func TestExecuteDeposit_DoubleEntry_SameBookingLogForBothPostings(t *testing.T) 
 		repo:             repo,
 		posKeepingClient: mockPosKeeping,
 		finAcctClient:    mockFinAcct,
-		accountConfig: &AccountConfig{
+		accountConfig: &config.AccountConfig{
 			DepositClearingAccountID: "CLEARING-002",
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
@@ -942,7 +955,7 @@ func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 		repo:             repo,
 		posKeepingClient: mockPosKeeping,
 		finAcctClient:    mockFinAcct,
-		accountConfig: &AccountConfig{
+		accountConfig: &config.AccountConfig{
 			DepositClearingAccountID: "CLEARING-003",
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
@@ -1003,7 +1016,7 @@ func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
 		repo:             repo,
 		posKeepingClient: mockPosKeeping,
 		finAcctClient:    mockFinAcct,
-		accountConfig: &AccountConfig{
+		accountConfig: &config.AccountConfig{
 			DepositClearingAccountID: "CLEARING-005",
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
@@ -1039,6 +1052,70 @@ func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
 		"Account balance should remain unchanged")
+}
+
+// TestExecuteDeposit_DoubleEntry_CreditPostingFailure verifies that when the credit
+// posting fails after debit succeeds, inline compensation creates a reversal for the debit.
+func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
+	// Setup
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	account := createTestAccount(t, ctx, repo, "ACC-DE-006")
+	originalBalance := account.Balance.AmountCents()
+
+	mockPosKeeping := &mockPositionKeepingClient{}
+
+	// Create mock that fails specifically on credit postings (after debit succeeds)
+	mockFinAcct := &mockFinancialAccountingClient{
+		failOnCreditCapture: true,
+		failureError:        errIntentionalTestFailure,
+	}
+
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPosKeeping,
+		finAcctClient:    mockFinAcct,
+		accountConfig: &config.AccountConfig{
+			DepositClearingAccountID: "CLEARING-006",
+		},
+		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	// Execute deposit
+	req := createTestDepositRequest("ACC-DE-006", 200, 0) // £200.00
+	resp, err := svc.ExecuteDeposit(ctx, req)
+
+	// Verify failure
+	require.Error(t, err, "Deposit should fail due to credit posting failure")
+	assert.Nil(t, resp, "Response should be nil on failure")
+
+	// Verify error mentions the failed step
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Error should be gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "post_ledger", "Error should mention failed step")
+	assert.Contains(t, st.Message(), "credit", "Error should mention credit failure")
+
+	// Verify debit succeeded, credit failed, and inline compensation ran
+	// Capture calls: 1 (debit success) + 1 (credit fail) + 1 (compensation credit to clear debit)
+	assert.Equal(t, 3, mockFinAcct.captureCalls, "Should have 3 capture calls total")
+	assert.Equal(t, 1, mockFinAcct.debitCaptureCalls, "Debit posting should have succeeded")
+	assert.Equal(t, 1, mockFinAcct.creditCaptureCalls, "One compensation credit should succeed")
+	assert.Equal(t, 1, mockFinAcct.compensateCalls, "Should have 1 compensation call (to reverse debit)")
+
+	// BookingLog was created but not transitioned to POSTED
+	// (inline compensation should have attempted to transition to CANCELLED)
+	assert.Equal(t, 1, mockFinAcct.initiateCalls, "BookingLog should have been created")
+	// UpdateCalls: 1 for CANCELLED transition attempt after credit fails
+	assert.GreaterOrEqual(t, mockFinAcct.updateCalls, 1, "BookingLog should have update call(s)")
+
+	// Verify account balance unchanged
+	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-006")
+	require.NoError(t, err)
+	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+		"Account balance should remain unchanged after failure and compensation")
 }
 
 // TestExecuteDeposit_SingleEntry_BackwardCompatibility verifies that deposits work
@@ -1104,7 +1181,7 @@ func TestExecuteDeposit_DoubleEntry_ClearingAccountUsedForDebit(t *testing.T) {
 		repo:             repo,
 		posKeepingClient: mockPosKeeping,
 		finAcctClient:    mockFinAcct,
-		accountConfig: &AccountConfig{
+		accountConfig: &config.AccountConfig{
 			DepositClearingAccountID: clearingAccountID,
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
