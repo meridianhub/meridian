@@ -4,6 +4,10 @@
 -- - status CHECK includes 'completed' (for successful Kafka processing)
 -- - old_values/new_values as TEXT (shared infrastructure may write empty strings)
 
+-- Drop dependent views FIRST before any column alterations
+-- This prevents errors when altering columns that views depend on
+DROP VIEW IF EXISTS change_summary;
+
 -- Add 'completed' status to the constraint (matching tenant service pattern)
 ALTER TABLE audit_outbox DROP CONSTRAINT IF EXISTS audit_outbox_status_check;
 ALTER TABLE audit_outbox ADD CONSTRAINT audit_outbox_status_check
@@ -19,16 +23,13 @@ ALTER TABLE audit_outbox ALTER COLUMN record_id TYPE VARCHAR(50) USING record_id
 ALTER TABLE audit_outbox ALTER COLUMN old_values TYPE TEXT USING old_values::TEXT;
 ALTER TABLE audit_outbox ALTER COLUMN new_values TYPE TEXT USING new_values::TEXT;
 
--- Drop the view that depends on record_id and old_values/new_values before altering
-DROP VIEW IF EXISTS change_summary;
-
 -- Alter the column types for audit_log as well
 ALTER TABLE audit_log ALTER COLUMN record_id TYPE VARCHAR(50) USING record_id::VARCHAR(50);
 ALTER TABLE audit_log ALTER COLUMN old_values TYPE TEXT USING old_values::TEXT;
 ALTER TABLE audit_log ALTER COLUMN new_values TYPE TEXT USING new_values::TEXT;
 
 -- Recreate the view using TEXT columns (parse JSON only when valid)
--- Note: Changed from jsonb_each to parsing the text as JSON only when non-empty
+-- Validates that values look like JSON objects before casting to prevent errors
 CREATE OR REPLACE VIEW change_summary AS
 SELECT
     id,
@@ -38,14 +39,19 @@ SELECT
     changed_at,
     changed_by,
     CASE
-        WHEN operation = 'UPDATE' AND new_values IS NOT NULL AND new_values != '' THEN
+        WHEN operation = 'UPDATE'
+             AND new_values IS NOT NULL
+             AND new_values != ''
+             AND new_values ~ '^{.*}$' THEN
             COALESCE(
                 (SELECT json_object_agg(key, value)
                  FROM jsonb_each(new_values::jsonb)
-                 WHERE (old_values IS NULL OR old_values = '' OR (
-                     old_values IS NOT NULL AND old_values != '' AND
-                     new_values::jsonb->key IS DISTINCT FROM old_values::jsonb->key
-                 ))),
+                 WHERE (old_values IS NULL
+                        OR old_values = ''
+                        OR NOT (old_values ~ '^{.*}$')
+                        OR (old_values ~ '^{.*}$'
+                            AND new_values::jsonb->key IS DISTINCT FROM old_values::jsonb->key
+                        ))),
                 '{}'::json
             )
         ELSE NULL
