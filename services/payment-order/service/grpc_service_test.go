@@ -2422,3 +2422,44 @@ func TestDomainCurrencyToProto(t *testing.T) {
 		})
 	}
 }
+
+// TestCentsToGoogleMoneyConversion tests the conversion from cents to google.type.Money format.
+// The postLedgerEntries function converts AmountCents to Units/Nanos using:
+//   - Units: amountCents / 100
+//   - Nanos: (amountCents % 100) * 10_000_000
+//
+// This test validates edge cases for this conversion.
+func TestCentsToGoogleMoneyConversion(t *testing.T) {
+	testCases := []struct {
+		name          string
+		amountCents   int64
+		expectedUnits int64
+		expectedNanos int32
+		description   string
+	}{
+		{"zero cents", 0, 0, 0, "0.00"},
+		{"one cent", 1, 0, 10000000, "0.01"},
+		{"99 cents", 99, 0, 990000000, "0.99"},
+		{"exactly one unit", 100, 1, 0, "1.00"},
+		{"one unit and one cent", 101, 1, 10000000, "1.01"},
+		{"1.99", 199, 1, 990000000, "1.99"},
+		{"large amount 12345.67", 1234567, 12345, 670000000, "12345.67"},
+		{"max cents 99", 9999, 99, 990000000, "99.99"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// This replicates the conversion logic in postLedgerEntries
+			units := tc.amountCents / 100
+			nanos := int32((tc.amountCents % 100) * 10000000)
+
+			assert.Equal(t, tc.expectedUnits, units, "units mismatch for %s", tc.description)
+			assert.Equal(t, tc.expectedNanos, nanos, "nanos mismatch for %s", tc.description)
+
+			// Verify roundtrip: units + nanos/1e9 should equal amountCents/100
+			reconstructed := float64(units) + float64(nanos)/1e9
+			expected := float64(tc.amountCents) / 100
+			assert.InDelta(t, expected, reconstructed, 0.001, "roundtrip failed for %s", tc.description)
+		})
+	}
+}

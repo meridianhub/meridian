@@ -1042,6 +1042,22 @@ func (s *Service) handlePendingStatus(po *domain.PaymentOrder, gatewayRefID stri
 //   - DEBIT: Customer's account (funds leaving their account)
 //   - CREDIT: Gateway's contra-account (liability to payment processor)
 //
+// Atomicity considerations:
+// This function makes 4 sequential gRPC calls to the FinancialAccounting service:
+//  1. InitiateFinancialBookingLog (creates BookingLog in PENDING)
+//  2. CaptureLedgerPosting (DEBIT entry)
+//  3. CaptureLedgerPosting (CREDIT entry)
+//  4. UpdateFinancialBookingLog (marks as POSTED)
+//
+// Partial failure scenarios (documented for operational runbooks):
+//   - Step 1 fails: No orphaned state - safe to retry
+//   - Step 2 fails: BookingLog in PENDING, no postings - needs cleanup
+//   - Step 3 fails: BookingLog in PENDING, unbalanced (debit only) - needs reversal
+//   - Step 4 fails: BookingLog in PENDING, balanced entries exist - just needs status update
+//
+// All partial failures are logged with RECONCILIATION_REQUIRED prefix and include
+// the booking_log_id for manual resolution. See runbook: docs/runbooks/ledger-reconciliation.md
+//
 // Error handling: If any step fails, the error is returned and the calling code
 // should mark the payment as FAILED. The BookingLog will remain in PENDING status
 // for reconciliation purposes.
@@ -1085,7 +1101,10 @@ func (s *Service) postLedgerEntries(ctx context.Context, po *domain.PaymentOrder
 		"booking_log_id", bookingLogID,
 		"payment_order_id", po.ID.String())
 
-	// Convert amount to google.type.Money
+	// Convert amount from cents to google.type.Money format.
+	// google.type.Money uses Units (whole currency units) + Nanos (10^-9 fraction).
+	// Example: 199 cents = 1 unit + 990,000,000 nanos = 1.99 currency units.
+	// Formula: Units = cents / 100, Nanos = (cents % 100) * 10,000,000
 	postingAmount := &money.Money{
 		CurrencyCode: string(po.Amount.Currency()),
 		Units:        po.Amount.AmountCents() / 100,
