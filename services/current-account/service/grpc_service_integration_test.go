@@ -148,6 +148,8 @@ type mockFinancialAccountingClient struct {
 	debitCaptureCalls  int // Track debit postings specifically
 	creditCaptureCalls int // Track credit postings specifically
 	failOnCapture      bool
+	failOnDebitCapture bool // Fail specifically on debit postings
+	failOnUpdate       bool // Fail on UpdateFinancialBookingLog
 	failureError       error
 	captureResponses   []*financialaccountingv1.CaptureLedgerPostingResponse
 	compensateCalls    int
@@ -173,10 +175,18 @@ func (m *mockFinancialAccountingClient) InitiateFinancialBookingLog(_ context.Co
 
 func (m *mockFinancialAccountingClient) UpdateFinancialBookingLog(_ context.Context, req *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
 	m.updateCalls++
+
+	if m.failOnUpdate {
+		if m.failureError != nil {
+			return nil, m.failureError
+		}
+		return nil, errFinancialAccountingUnavailable
+	}
+
 	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
 		FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
 			Id:        req.Id,
-			Status:    commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			Status:    req.Status,
 			CreatedAt: timestamppb.Now(),
 			UpdatedAt: timestamppb.Now(),
 		},
@@ -204,6 +214,14 @@ func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, 
 	m.captureCalls++
 	m.lastCapturedReq = req
 
+	// Check for debit-specific failure before tracking
+	if m.failOnDebitCapture && req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT {
+		if m.failureError != nil {
+			return nil, m.failureError
+		}
+		return nil, errFinancialAccountingUnavailable
+	}
+
 	if m.failOnCapture {
 		if m.failureError != nil {
 			return nil, m.failureError
@@ -211,7 +229,7 @@ func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, 
 		return nil, errFinancialAccountingUnavailable
 	}
 
-	// Track debit vs credit postings separately
+	// Track debit vs credit postings separately (only on success)
 	if req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT {
 		m.debitCaptureCalls++
 		// Only count as compensation if this is a reversal (idempotency key contains "COMP")
@@ -900,6 +918,9 @@ func TestExecuteDeposit_DoubleEntry_SameBookingLogForBothPostings(t *testing.T) 
 
 // TestExecuteDeposit_DoubleEntry_CompensatesOnFailure verifies that saga compensation
 // reverses both postings when a failure occurs after they're created.
+//
+// Scenario: UpdateFinancialBookingLog fails after both debit and credit postings succeed.
+// Expected: Compensation posts reversal entries (DEBIT to customer, CREDIT to clearing).
 func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 	// Setup
 	db, ctx, cleanup := setupIntegrationTestDB(t)
@@ -911,47 +932,113 @@ func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 
-	// Create a mock that fails on the 3rd capture call (after debit and credit, during update)
-	// Actually, let's fail on UpdateFinancialBookingLog to trigger compensation after both postings
-	captureCallCount := 0
-	updateCallCount := 0
-
-	// We need a custom mock that fails on update
-	type failingUpdateMock struct {
-		mockFinancialAccountingClient
-		updateFailCount int
+	// Create mock that fails on UpdateFinancialBookingLog (after both postings succeed)
+	mockFinAcct := &mockFinancialAccountingClient{
+		failOnUpdate: true,
+		failureError: errFinancialAccountingUnavailable,
 	}
-
-	failMock := &failingUpdateMock{
-		mockFinancialAccountingClient: mockFinancialAccountingClient{},
-		updateFailCount:               0,
-	}
-
-	// Override UpdateFinancialBookingLog to fail
-	// Since we can't easily override methods, let's use a different approach
-	// Instead, we'll create a test that verifies compensation logic is correct
-
-	// For this test, let's just verify the compensation counters work correctly
-	// when the service handles a failure after postings succeed
 
 	svc := &Service{
 		repo:             repo,
 		posKeepingClient: mockPosKeeping,
-		finAcctClient:    &failMock.mockFinancialAccountingClient,
+		finAcctClient:    mockFinAcct,
 		accountConfig: &AccountConfig{
 			DepositClearingAccountID: "CLEARING-003",
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
-	_ = svc
-	_ = captureCallCount
-	_ = updateCallCount
-	_ = originalBalance
+	// Execute deposit
+	req := createTestDepositRequest("ACC-DE-003", 100, 0) // £100.00
+	resp, err := svc.ExecuteDeposit(ctx, req)
 
-	// This test would require a more sophisticated mock that fails at a specific point
-	// For now, let's just verify the basic compensation path works
-	t.Log("Compensation test setup validated")
+	// Verify failure
+	require.Error(t, err, "Deposit should fail due to UpdateFinancialBookingLog failure")
+	assert.Nil(t, resp, "Response should be nil on failure")
+
+	// Verify error mentions the failed step
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Error should be gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "post_ledger", "Error should mention failed step")
+
+	// Verify postings were attempted (2 original postings + 2 compensation postings)
+	// Original: 1 DEBIT to clearing + 1 CREDIT to customer = 2
+	// Compensation: 1 DEBIT to customer (reverses credit) + 1 CREDIT to clearing (reverses debit) = 2
+	// Mock counts by direction: 2 DEBIT total (original + compensation), 2 CREDIT total (original + compensation)
+	assert.Equal(t, 2, mockFinAcct.debitCaptureCalls, "Should have 2 debit postings (1 original + 1 compensation)")
+	assert.Equal(t, 2, mockFinAcct.creditCaptureCalls, "Should have 2 credit postings (1 original + 1 compensation)")
+	assert.Equal(t, 2, mockFinAcct.compensateCalls, "Should have 2 compensation postings (COMP prefix)")
+	assert.Equal(t, 4, mockFinAcct.captureCalls, "Should have 4 total capture calls (2 original + 2 compensation)")
+
+	// Verify account balance unchanged (compensation should have reversed)
+	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-003")
+	require.NoError(t, err)
+	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+		"Account balance should remain unchanged after compensation")
+}
+
+// TestExecuteDeposit_DoubleEntry_DebitPostingFailure verifies behavior when the debit
+// posting to the clearing account fails.
+//
+// Expected: Credit posting is NOT attempted, no compensation needed.
+func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
+	// Setup
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	account := createTestAccount(t, ctx, repo, "ACC-DE-005")
+	originalBalance := account.Balance.AmountCents()
+
+	mockPosKeeping := &mockPositionKeepingClient{}
+
+	// Create mock that fails specifically on debit postings
+	mockFinAcct := &mockFinancialAccountingClient{
+		failOnDebitCapture: true,
+		failureError:       errFinancialAccountingUnavailable,
+	}
+
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPosKeeping,
+		finAcctClient:    mockFinAcct,
+		accountConfig: &AccountConfig{
+			DepositClearingAccountID: "CLEARING-005",
+		},
+		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	// Execute deposit
+	req := createTestDepositRequest("ACC-DE-005", 100, 0) // £100.00
+	resp, err := svc.ExecuteDeposit(ctx, req)
+
+	// Verify failure
+	require.Error(t, err, "Deposit should fail due to debit posting failure")
+	assert.Nil(t, resp, "Response should be nil on failure")
+
+	// Verify error mentions the failed step
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Error should be gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "post_ledger", "Error should mention failed step")
+	assert.Contains(t, st.Message(), "debit", "Error should mention debit failure")
+
+	// Verify only debit posting was attempted (and failed)
+	assert.Equal(t, 1, mockFinAcct.captureCalls, "Should have only 1 capture call (failed debit)")
+	assert.Equal(t, 0, mockFinAcct.debitCaptureCalls, "Should have 0 successful debit postings")
+	assert.Equal(t, 0, mockFinAcct.creditCaptureCalls, "Credit posting should NOT have been attempted")
+	assert.Equal(t, 0, mockFinAcct.compensateCalls, "No compensation needed")
+
+	// BookingLog was created but no postings succeeded
+	assert.Equal(t, 1, mockFinAcct.initiateCalls, "BookingLog should have been created")
+	assert.Equal(t, 0, mockFinAcct.updateCalls, "BookingLog should NOT have been updated to POSTED")
+
+	// Verify account balance unchanged
+	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-005")
+	require.NoError(t, err)
+	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+		"Account balance should remain unchanged")
 }
 
 // TestExecuteDeposit_SingleEntry_BackwardCompatibility verifies that deposits work

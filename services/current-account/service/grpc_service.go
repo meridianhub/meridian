@@ -648,6 +648,63 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			)
 			if err != nil {
 				caobservability.RecordExternalServiceError("financial_accounting", "update_booking_log")
+
+				// CRITICAL: If we fail here, postings have already been made but step won't be
+				// considered "complete" by saga, so saga compensation won't run. We must
+				// create compensating entries inline before returning the error.
+				s.logger.Warn("UpdateFinancialBookingLog failed, creating inline compensating entries",
+					"debit_posted", debitPosted,
+					"credit_posted", creditPosted,
+					"error", err)
+
+				// Compensate credit leg: Create DEBIT to customer account (if credit was posted)
+				if creditPosted {
+					compCreditID := fmt.Sprintf("COMP-%s-credit", transactionID)
+					_, compErr := s.finAcctClient.CaptureLedgerPosting(stepCtx,
+						&financialaccountingv1.CaptureLedgerPostingRequest{
+							FinancialBookingLogId: bookingLogID,
+							PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
+							PostingAmount:         moneyAmt.Amount,
+							AccountId:             account.AccountID,
+							ValueDate:             timestamppb.Now(),
+							IdempotencyKey:        &commonpb.IdempotencyKey{Key: compCreditID},
+						},
+					)
+					if compErr != nil {
+						s.logger.Error("failed to compensate credit posting inline",
+							"error", compErr)
+					}
+				}
+
+				// Compensate debit leg: Create CREDIT to clearing account (if debit was posted)
+				if debitPosted {
+					compDebitID := fmt.Sprintf("COMP-%s-debit", transactionID)
+					_, compErr := s.finAcctClient.CaptureLedgerPosting(stepCtx,
+						&financialaccountingv1.CaptureLedgerPostingRequest{
+							FinancialBookingLogId: bookingLogID,
+							PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+							PostingAmount:         moneyAmt.Amount,
+							AccountId:             clearingAccountID,
+							ValueDate:             timestamppb.Now(),
+							IdempotencyKey:        &commonpb.IdempotencyKey{Key: compDebitID},
+						},
+					)
+					if compErr != nil {
+						s.logger.Error("failed to compensate debit posting inline",
+							"error", compErr)
+					}
+				}
+
+				// Try to transition BookingLog to CANCELLED
+				if debitPosted || creditPosted {
+					_, _ = s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
+						&financialaccountingv1.UpdateFinancialBookingLogRequest{
+							Id:     bookingLogID,
+							Status: commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
+						},
+					)
+				}
+
 				return fmt.Errorf("failed to transition booking log to POSTED: %w", err)
 			}
 
@@ -705,7 +762,8 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			}
 
 			// Compensate debit leg: Create CREDIT to clearing account (if debit was posted)
-			if debitPosted && clearingAccountID != "" {
+			// Note: debitPosted can only be true if clearingAccountID was non-empty
+			if debitPosted {
 				compDebitTransactionID := fmt.Sprintf("COMP-%s-debit", transactionID)
 				_, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
 					&financialaccountingv1.CaptureLedgerPostingRequest{
@@ -726,6 +784,25 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 				s.logger.Info("compensated debit posting",
 					"debit_posting_id", debitPostingID,
 					"clearing_account_id", clearingAccountID)
+			}
+
+			// Transition BookingLog to CANCELLED for clean audit trail
+			if debitPosted || creditPosted {
+				_, err := s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
+					&financialaccountingv1.UpdateFinancialBookingLogRequest{
+						Id:     bookingLogID,
+						Status: commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
+					},
+				)
+				if err != nil {
+					// Log warning but don't fail compensation - the reversal postings are more important
+					s.logger.Warn("failed to transition BookingLog to CANCELLED during compensation",
+						"booking_log_id", bookingLogID,
+						"error", err)
+				} else {
+					s.logger.Info("BookingLog transitioned to CANCELLED",
+						"booking_log_id", bookingLogID)
+				}
 			}
 
 			// Record compensation
