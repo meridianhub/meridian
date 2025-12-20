@@ -71,20 +71,23 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	require.NoError(t, err)
 
 	// Create audit_outbox table for GORM hooks
+	// Note: Uses TEXT instead of JSONB for old_values/new_values for compatibility with
+	// the shared audit infrastructure which writes empty strings when values are nil.
+	// record_id is VARCHAR(50) to match the shared AuditOutbox which uses string IDs.
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-		record_id UUID NOT NULL,
-		old_values JSONB,
-		new_values JSONB,
+		record_id VARCHAR(50) NOT NULL,
+		old_values TEXT,
+		new_values TEXT,
 		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		retry_count INT NOT NULL DEFAULT 0,
 		last_error TEXT,
 		changed_by VARCHAR(100),
 		transaction_id VARCHAR(100),
-		client_ip INET,
+		client_ip VARCHAR(45),
 		user_agent TEXT
 	)`, schemaName)).Error
 	require.NoError(t, err)

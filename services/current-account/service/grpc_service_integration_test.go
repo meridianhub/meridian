@@ -331,7 +331,7 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	return db, ctx, cleanup
 }
 
-func createTestAccount(t *testing.T, ctx context.Context, repo *persistence.Repository, accountID string) *domain.CurrentAccount {
+func createTestAccount(t *testing.T, ctx context.Context, repo *persistence.Repository, accountID string) domain.CurrentAccount {
 	t.Helper()
 	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
@@ -404,7 +404,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	// Verify account persisted correctly
 	updatedAccount, err := repo.FindByID(ctx, "ACC-001")
 	require.NoError(t, err)
-	assert.Equal(t, int64(10050), updatedAccount.Balance.AmountCents(), "Balance should be £100.50 = 10050 cents")
+	assert.Equal(t, int64(10050), updatedAccount.Balance().AmountCents(), "Balance should be £100.50 = 10050 cents")
 
 	// Verify service calls
 	assert.Equal(t, 1, mockPosKeeping.initiateCalls, "PositionKeeping InitiateFinancialPositionLog should be called once")
@@ -433,7 +433,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-002")
-	originalBalance := account.Balance.AmountCents()
+	originalBalance := account.Balance().AmountCents()
 
 	// Create mock clients - PositionKeeping configured to fail on initiate
 	mockPosKeeping := &mockPositionKeepingClient{
@@ -471,7 +471,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	updatedAccount, err := repo.FindByID(ctx, "ACC-002")
 	require.NoError(t, err)
 	// Account balance should be unchanged because save_account is the final step
-	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
 		"Account balance should remain unchanged when external services fail")
 
 	// Verify service calls
@@ -502,7 +502,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-003")
-	originalBalance := account.Balance.AmountCents()
+	originalBalance := account.Balance().AmountCents()
 
 	// Create mock clients - FinancialAccounting configured to fail
 	mockPosKeeping := &mockPositionKeepingClient{}
@@ -539,7 +539,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 	// so the balance should remain unchanged
 	updatedAccount, err := repo.FindByID(ctx, "ACC-003")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
 		"Account balance should remain unchanged when external services fail")
 
 	// Verify service calls
@@ -716,7 +716,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-004")
-	originalBalance := account.Balance.AmountCents()
+	originalBalance := account.Balance().AmountCents()
 
 	// Create mock that tracks compensation
 	mockPosKeeping := &mockPositionKeepingClient{}
@@ -748,7 +748,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 	// With the fixed saga ordering, the account is never saved if external services fail
 	updatedAccount, err := repo.FindByID(ctx, "ACC-004")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
 		"Account balance should remain unchanged when external services fail")
 }
 
@@ -824,7 +824,7 @@ func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
 	// Verify account persisted
 	updatedAccount, err := repo.FindByID(ctx, "ACC-006")
 	require.NoError(t, err)
-	assert.Equal(t, int64(20000), updatedAccount.Balance.AmountCents())
+	assert.Equal(t, int64(20000), updatedAccount.Balance().AmountCents())
 }
 
 // Double-Entry Bookkeeping Tests (with AccountConfig)
@@ -941,7 +941,7 @@ func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-DE-003")
-	originalBalance := account.Balance.AmountCents()
+	originalBalance := account.Balance().AmountCents()
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 
@@ -987,7 +987,7 @@ func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 	// Verify account balance unchanged (compensation should have reversed)
 	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-003")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
 		"Account balance should remain unchanged after compensation")
 }
 
@@ -1002,7 +1002,7 @@ func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-DE-005")
-	originalBalance := account.Balance.AmountCents()
+	originalBalance := account.Balance().AmountCents()
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 
@@ -1050,7 +1050,7 @@ func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
 	// Verify account balance unchanged
 	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-005")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
 		"Account balance should remain unchanged")
 }
 
@@ -1063,7 +1063,7 @@ func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-DE-006")
-	originalBalance := account.Balance.AmountCents()
+	originalBalance := account.Balance().AmountCents()
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 
@@ -1114,7 +1114,7 @@ func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
 	// Verify account balance unchanged
 	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-006")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance.AmountCents(),
+	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
 		"Account balance should remain unchanged after failure and compensation")
 }
 
