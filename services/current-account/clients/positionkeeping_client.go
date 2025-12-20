@@ -7,6 +7,7 @@ import (
 	"time"
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
@@ -158,11 +159,11 @@ func (c *PositionKeepingGRPCClient) InitiateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
 ) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.InitiateFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -177,11 +178,11 @@ func (c *PositionKeepingGRPCClient) UpdateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
 ) (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.UpdateFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -196,11 +197,11 @@ func (c *PositionKeepingGRPCClient) RetrieveFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.RetrieveFinancialPositionLogRequest,
 ) (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.RetrieveFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -215,11 +216,11 @@ func (c *PositionKeepingGRPCClient) BulkImportTransactions(
 	ctx context.Context,
 	req *positionkeepingv1.BulkImportTransactionsRequest,
 ) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.BulkImportTransactions(ctx, req)
 	if err != nil {
@@ -234,11 +235,11 @@ func (c *PositionKeepingGRPCClient) ListFinancialPositionLogs(
 	ctx context.Context,
 	req *positionkeepingv1.ListFinancialPositionLogsRequest,
 ) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.ListFinancialPositionLogs(ctx, req)
 	if err != nil {

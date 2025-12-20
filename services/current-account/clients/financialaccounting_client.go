@@ -7,6 +7,7 @@ import (
 	"time"
 
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
@@ -158,11 +159,11 @@ func (c *FinancialAccountingGRPCClient) InitiateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.InitiateFinancialBookingLogRequest,
 ) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.InitiateFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -177,11 +178,11 @@ func (c *FinancialAccountingGRPCClient) UpdateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
 ) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.UpdateFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -196,11 +197,11 @@ func (c *FinancialAccountingGRPCClient) RetrieveFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.RetrieveFinancialBookingLogRequest,
 ) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.RetrieveFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -215,11 +216,11 @@ func (c *FinancialAccountingGRPCClient) ListFinancialBookingLogs(
 	ctx context.Context,
 	req *financialaccountingv1.ListFinancialBookingLogsRequest,
 ) (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.ListFinancialBookingLogs(ctx, req)
 	if err != nil {
@@ -234,11 +235,11 @@ func (c *FinancialAccountingGRPCClient) CaptureLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.CaptureLedgerPostingRequest,
 ) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.CaptureLedgerPosting(ctx, req)
 	if err != nil {
@@ -253,11 +254,11 @@ func (c *FinancialAccountingGRPCClient) RetrieveLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.RetrieveLedgerPostingRequest,
 ) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.RetrieveLedgerPosting(ctx, req)
 	if err != nil {

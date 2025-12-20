@@ -11,11 +11,6 @@
 //   - ResilientPositionKeepingClient - wraps PositionKeepingClient
 //   - ResilientFinancialAccountingClient - wraps FinancialAccountingClient
 //   - ResilientPartyClient - wraps PartyClient
-//
-// # Backward Compatibility
-//
-// This package re-exports types from shared/pkg/clients for backward compatibility.
-// New code should import directly from github.com/meridianhub/meridian/shared/pkg/clients.
 package clients
 
 import (
@@ -27,10 +22,6 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 )
-
-// ErrTypeAssertion is returned when a type assertion fails in executeWithResilience.
-// Re-exported from shared package for backward compatibility.
-var ErrTypeAssertion = sharedclients.ErrTypeAssertion
 
 // ResilientPositionKeepingClient wraps PositionKeepingClient with resilience patterns
 type ResilientPositionKeepingClient struct {
@@ -50,14 +41,10 @@ type ResilientPartyClient struct {
 	resilientClient *sharedclients.ResilientClient
 }
 
-// ResilientClientConfig is an alias to the shared implementation.
-// Deprecated: Import directly from github.com/meridianhub/meridian/shared/pkg/clients
-type ResilientClientConfig = sharedclients.ResilientClientConfig
-
 // NewResilientPositionKeepingClient creates a resilient wrapper around PositionKeepingClient
 func NewResilientPositionKeepingClient(
 	client PositionKeepingClient,
-	config ResilientClientConfig,
+	config sharedclients.ResilientClientConfig,
 ) *ResilientPositionKeepingClient {
 	// Apply default name if not provided
 	if config.CircuitBreakerName == "" {
@@ -73,7 +60,7 @@ func NewResilientPositionKeepingClient(
 // NewResilientFinancialAccountingClient creates a resilient wrapper around FinancialAccountingClient
 func NewResilientFinancialAccountingClient(
 	client FinancialAccountingClient,
-	config ResilientClientConfig,
+	config sharedclients.ResilientClientConfig,
 ) *ResilientFinancialAccountingClient {
 	// Apply default name if not provided
 	if config.CircuitBreakerName == "" {
@@ -89,7 +76,7 @@ func NewResilientFinancialAccountingClient(
 // NewResilientPartyClient creates a resilient wrapper around PartyClient
 func NewResilientPartyClient(
 	client PartyClient,
-	config ResilientClientConfig,
+	config sharedclients.ResilientClientConfig,
 ) *ResilientPartyClient {
 	// Apply default name if not provided
 	if config.CircuitBreakerName == "" {
