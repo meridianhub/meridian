@@ -10,11 +10,11 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"google.golang.org/genproto/googleapis/type/money"
 )
 
@@ -62,7 +62,7 @@ func BenchmarkInitiatePaymentOrder(b *testing.B) {
 		GatewayAccountConfig:      benchGatewayAccountConfig(),
 		Logger:                    benchLogger(),
 		// Use fast retry config to avoid delays in benchmarks
-		LienExecutionRetryConfig: &clients.RetryConfig{
+		LienExecutionRetryConfig: &sharedclients.RetryConfig{
 			MaxRetries:      1,
 			InitialInterval: 1,
 			MaxInterval:     1,
@@ -224,7 +224,7 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 		PaymentGateway:            mockGateway,
 		GatewayAccountConfig:      benchGatewayAccountConfig(),
 		Logger:                    benchLogger(),
-		LienExecutionRetryConfig: &clients.RetryConfig{
+		LienExecutionRetryConfig: &sharedclients.RetryConfig{
 			MaxRetries:      1,
 			InitialInterval: 1,
 			MaxInterval:     1,
