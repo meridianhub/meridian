@@ -582,39 +582,43 @@ func TestNewServiceWithClients_ValidConfig(t *testing.T) {
 		{
 			name: "missing repository",
 			config: Config{
-				Repository:                nil,
-				PositionKeepingTarget:     "localhost:50051",
-				FinancialAccountingTarget: "localhost:50052",
+				Repository:                     nil,
+				PositionKeepingServiceName:     "position-keeping",
+				PositionKeepingPort:            50053,
+				FinancialAccountingServiceName: "financial-accounting",
+				FinancialAccountingPort:        50052,
 			},
 			wantErr: true,
 			errMsg:  "repository cannot be nil",
 		},
 		{
-			name: "missing position keeping target",
+			name: "missing position keeping service name",
 			config: Config{
-				Repository:                repo,
-				PositionKeepingTarget:     "",
-				FinancialAccountingTarget: "localhost:50052",
+				Repository:                     repo,
+				PositionKeepingServiceName:     "",
+				FinancialAccountingServiceName: "financial-accounting",
+				FinancialAccountingPort:        50052,
 			},
 			wantErr: true,
-			errMsg:  "position keeping target cannot be empty",
+			errMsg:  "position keeping service name cannot be empty",
 		},
 		{
-			name: "missing financial accounting target",
+			name: "missing financial accounting service name",
 			config: Config{
-				Repository:                repo,
-				PositionKeepingTarget:     "localhost:50051",
-				FinancialAccountingTarget: "",
+				Repository:                     repo,
+				PositionKeepingServiceName:     "position-keeping",
+				PositionKeepingPort:            50053,
+				FinancialAccountingServiceName: "",
 			},
 			wantErr: true,
-			errMsg:  "financial accounting target cannot be empty",
+			errMsg:  "financial accounting service name cannot be empty",
 		},
 		{
 			name: "all fields empty",
 			config: Config{
-				Repository:                nil,
-				PositionKeepingTarget:     "",
-				FinancialAccountingTarget: "",
+				Repository:                     nil,
+				PositionKeepingServiceName:     "",
+				FinancialAccountingServiceName: "",
 			},
 			wantErr: true,
 			errMsg:  "repository cannot be nil",
@@ -639,21 +643,21 @@ func TestNewServiceWithClients_ValidConfig(t *testing.T) {
 	}
 }
 
-// Test 5: NewServiceWithClients handles missing targets
+// Test 5: NewServiceWithClients handles missing service names
 
-// TestNewServiceWithClients_MissingTargets verifies proper error handling
-// when required service targets are not provided in the configuration.
+// TestNewServiceWithClients_MissingServiceNames verifies proper error handling
+// when required service names are not provided in the configuration.
 //
 // This test validates fail-fast behavior at service initialization time,
 // preventing runtime failures when clients are actually used.
-func TestNewServiceWithClients_MissingTargets(t *testing.T) {
+func TestNewServiceWithClients_MissingServiceNames(t *testing.T) {
 	// Setup
 	db, _, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
 
-	t.Run("missing both targets", func(t *testing.T) {
+	t.Run("missing both service names", func(t *testing.T) {
 		config := Config{
 			Repository: repo,
 		}
@@ -661,33 +665,37 @@ func TestNewServiceWithClients_MissingTargets(t *testing.T) {
 		svc, err := NewServiceWithClients(config)
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "position keeping target cannot be empty")
+		assert.Contains(t, err.Error(), "position keeping service name cannot be empty")
 		assert.Nil(t, svc)
 	})
 
-	t.Run("missing financial accounting target only", func(t *testing.T) {
+	t.Run("missing financial accounting service name only", func(t *testing.T) {
 		config := Config{
-			Repository:            repo,
-			PositionKeepingTarget: "localhost:50051",
+			Repository:                 repo,
+			PositionKeepingServiceName: "position-keeping",
+			PositionKeepingPort:        50053,
 		}
 
 		svc, err := NewServiceWithClients(config)
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "financial accounting target cannot be empty")
+		assert.Contains(t, err.Error(), "financial accounting service name cannot be empty")
 		assert.Nil(t, svc)
 	})
 
 	t.Run("all required fields provided", func(t *testing.T) {
-		// This will attempt to create real gRPC clients, which will fail
-		// without real services running. We verify it passes validation.
+		// This will create gRPC clients with DNS-based load balancing.
+		// The DNS resolution happens lazily, so client creation succeeds.
 		config := Config{
-			Repository:                repo,
-			PositionKeepingTarget:     "invalid-target:50051",
-			FinancialAccountingTarget: "invalid-target:50052",
+			Repository:                     repo,
+			Namespace:                      "default",
+			PositionKeepingServiceName:     "position-keeping",
+			PositionKeepingPort:            50053,
+			FinancialAccountingServiceName: "financial-accounting",
+			FinancialAccountingPort:        50052,
 		}
 
-		// Should not return validation error, but will fail during client creation
+		// Should not return validation error - DNS resolution happens lazily
 		svc, err := NewServiceWithClients(config)
 
 		// We expect this to fail (no real service running), but NOT due to validation
