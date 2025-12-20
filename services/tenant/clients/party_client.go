@@ -17,14 +17,13 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
 // Party client errors.
 var (
-	// ErrPartyTargetRequired is returned when target address is not provided.
-	ErrPartyTargetRequired = errors.New("target address is required")
+	// ErrPartyServiceNameRequired is returned when ServiceName is not provided.
+	ErrPartyServiceNameRequired = errors.New("ServiceName is required for party client")
 	// ErrPartyRegistrationFailed is returned when party registration fails.
 	ErrPartyRegistrationFailed = errors.New("party registration failed")
 	// ErrPartyServiceUnavailable is returned when the party service is temporarily unavailable.
@@ -57,13 +56,8 @@ type PartyGRPCClient struct {
 
 // PartyClientConfig holds configuration for the Party client.
 type PartyClientConfig struct {
-	// Target is the gRPC server address (e.g., "localhost:50055" or "party-service:50055").
-	//
-	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
-	Target string
-
-	// ServiceName is the Kubernetes service name (e.g., "party-service").
-	// When specified, enables DNS-based client-side load balancing.
+	// ServiceName is the Kubernetes service name (e.g., "party").
+	// Required. Enables DNS-based client-side load balancing.
 	ServiceName string
 
 	// Namespace is the Kubernetes namespace (e.g., "default").
@@ -85,75 +79,42 @@ type PartyClientConfig struct {
 	DialOptions []grpc.DialOption
 }
 
-// NewPartyClient creates a new Party gRPC client.
+// NewPartyClient creates a new Party gRPC client using DNS-based load balancing.
 //
-// Supports two connection modes:
-//
-// 1. DNS-based load balancing (recommended for Kubernetes):
+// Example:
 //
 //	config := &PartyClientConfig{
-//	    ServiceName: "party-service",
+//	    ServiceName: "party",
 //	    Namespace:   "default",
 //	    Port:        50055,
 //	    Timeout:     30 * time.Second,
 //	}
-//
-// 2. Legacy direct connection (for backward compatibility):
-//
-//	config := &PartyClientConfig{
-//	    Target:  "party-service:50055",
-//	    Timeout: 30 * time.Second,
-//	}
 func NewPartyClient(cfg *PartyClientConfig) (*PartyGRPCClient, error) {
+	if cfg.ServiceName == "" {
+		return nil, ErrPartyServiceNameRequired
+	}
+
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
 	}
 
-	var conn *grpc.ClientConn
-	var err error
+	dialOpts := cfg.DialOptions
 
-	if cfg.ServiceName != "" {
-		dialOpts := cfg.DialOptions
+	if cfg.Tracer != nil {
+		dialOpts = append(dialOpts,
+			grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
+			grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
+		)
+	}
 
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		conn, err = platformgrpc.NewClient(context.Background(), platformgrpc.ClientConfig{
-			ServiceName: cfg.ServiceName,
-			Namespace:   cfg.Namespace,
-			Port:        cfg.Port,
-			DialOptions: dialOpts,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gRPC connection via platform factory: %w", err)
-		}
-	} else {
-		if cfg.Target == "" {
-			return nil, ErrPartyTargetRequired
-		}
-
-		dialOpts := cfg.DialOptions
-		if dialOpts == nil {
-			dialOpts = []grpc.DialOption{
-				grpc.WithTransportCredentials(insecure.NewCredentials()),
-			}
-		}
-
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		conn, err = grpc.NewClient(cfg.Target, dialOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gRPC connection to %s: %w", cfg.Target, err)
-		}
+	conn, err := platformgrpc.NewClient(context.Background(), platformgrpc.ClientConfig{
+		ServiceName: cfg.ServiceName,
+		Namespace:   cfg.Namespace,
+		Port:        cfg.Port,
+		DialOptions: dialOpts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC connection: %w", err)
 	}
 
 	return &PartyGRPCClient{

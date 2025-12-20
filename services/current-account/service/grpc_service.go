@@ -31,12 +31,12 @@ import (
 
 // Sentinel errors for consistent error handling
 var (
-	ErrRepositoryNil                  = errors.New("repository cannot be nil")
-	ErrPositionKeepingTargetEmpty     = errors.New("position keeping target cannot be empty")
-	ErrFinancialAccountingTargetEmpty = errors.New("financial accounting target cannot be empty")
-	ErrOriginalAccountStateNotFound   = errors.New("original account state not available for compensation")
-	ErrPositionLogIDNotFound          = errors.New("position log ID not available for compensation")
-	ErrLedgerPostingIDNotFound        = errors.New("ledger posting ID not available for compensation")
+	ErrRepositoryNil                       = errors.New("repository cannot be nil")
+	ErrPositionKeepingServiceNameEmpty     = errors.New("position keeping service name cannot be empty")
+	ErrFinancialAccountingServiceNameEmpty = errors.New("financial accounting service name cannot be empty")
+	ErrOriginalAccountStateNotFound        = errors.New("original account state not available for compensation")
+	ErrPositionLogIDNotFound               = errors.New("position log ID not available for compensation")
+	ErrLedgerPostingIDNotFound             = errors.New("ledger posting ID not available for compensation")
 
 	// Party validation errors (re-exported from clients package for convenience)
 	ErrPartyNotFound  = clients.ErrPartyNotFound
@@ -64,13 +64,24 @@ type Service struct {
 
 // Config contains configuration for creating a new Service with external clients
 type Config struct {
-	Repository                *persistence.Repository
-	LienRepository            *persistence.LienRepository
-	PositionKeepingTarget     string // e.g., "positionkeeping-service:50051"
-	FinancialAccountingTarget string // e.g., "financialaccounting-service:50052"
-	PartyServiceTarget        string // e.g., "party-service:50055"
-	Logger                    *slog.Logger
-	Tracer                    *observability.Tracer
+	Repository     *persistence.Repository
+	LienRepository *persistence.LienRepository
+	// Namespace is the Kubernetes namespace for service discovery (e.g., "default")
+	Namespace string
+	// PositionKeepingServiceName is the Kubernetes service name (e.g., "position-keeping")
+	PositionKeepingServiceName string
+	// PositionKeepingPort is the service port (e.g., 50053)
+	PositionKeepingPort int
+	// FinancialAccountingServiceName is the Kubernetes service name (e.g., "financial-accounting")
+	FinancialAccountingServiceName string
+	// FinancialAccountingPort is the service port (e.g., 50052)
+	FinancialAccountingPort int
+	// PartyServiceName is the Kubernetes service name (e.g., "party")
+	PartyServiceName string
+	// PartyPort is the service port (e.g., 50055)
+	PartyPort int
+	Logger    *slog.Logger
+	Tracer    *observability.Tracer
 }
 
 // NewService creates a new current account service with minimal dependencies.
@@ -128,11 +139,11 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	if config.Repository == nil {
 		return nil, ErrRepositoryNil
 	}
-	if config.PositionKeepingTarget == "" {
-		return nil, ErrPositionKeepingTargetEmpty
+	if config.PositionKeepingServiceName == "" {
+		return nil, ErrPositionKeepingServiceNameEmpty
 	}
-	if config.FinancialAccountingTarget == "" {
-		return nil, ErrFinancialAccountingTargetEmpty
+	if config.FinancialAccountingServiceName == "" {
+		return nil, ErrFinancialAccountingServiceNameEmpty
 	}
 
 	// Apply default logger if not provided
@@ -141,11 +152,13 @@ func NewServiceWithClients(config Config) (*Service, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
-	// Create Position Keeping client
+	// Create Position Keeping client with DNS-based load balancing
 	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
-		Target:  config.PositionKeepingTarget,
-		Timeout: 30 * time.Second,
-		Tracer:  config.Tracer,
+		ServiceName: config.PositionKeepingServiceName,
+		Namespace:   config.Namespace,
+		Port:        config.PositionKeepingPort,
+		Timeout:     30 * time.Second,
+		Tracer:      config.Tracer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create position keeping client: %w", err)
@@ -159,11 +172,13 @@ func NewServiceWithClients(config Config) (*Service, error) {
 		},
 	)
 
-	// Create Financial Accounting client
+	// Create Financial Accounting client with DNS-based load balancing
 	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
-		Target:  config.FinancialAccountingTarget,
-		Timeout: 30 * time.Second,
-		Tracer:  config.Tracer,
+		ServiceName: config.FinancialAccountingServiceName,
+		Namespace:   config.Namespace,
+		Port:        config.FinancialAccountingPort,
+		Timeout:     30 * time.Second,
+		Tracer:      config.Tracer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create financial accounting client: %w", err)
@@ -179,11 +194,13 @@ func NewServiceWithClients(config Config) (*Service, error) {
 
 	// Create Party client (optional - nil client provides backward compatibility)
 	var resilientPartyClient clients.PartyClient
-	if config.PartyServiceTarget != "" {
+	if config.PartyServiceName != "" {
 		partyGRPCClient, err := clients.NewPartyClient(&clients.PartyClientConfig{
-			Target:  config.PartyServiceTarget,
-			Timeout: 30 * time.Second,
-			Tracer:  config.Tracer,
+			ServiceName: config.PartyServiceName,
+			Namespace:   config.Namespace,
+			Port:        config.PartyPort,
+			Timeout:     30 * time.Second,
+			Tracer:      config.Tracer,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create party client: %w", err)

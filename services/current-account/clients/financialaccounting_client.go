@@ -10,11 +10,10 @@ import (
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
-// ErrFinancialAccountingTargetRequired is returned when target address is not provided
-var ErrFinancialAccountingTargetRequired = errors.New("target address is required")
+// ErrFinancialAccountingServiceNameRequired is returned when ServiceName is not provided
+var ErrFinancialAccountingServiceNameRequired = errors.New("ServiceName is required for financial accounting client")
 
 // FinancialAccountingGRPCClient implements FinancialAccountingClient using gRPC
 type FinancialAccountingGRPCClient struct {
@@ -26,27 +25,18 @@ type FinancialAccountingGRPCClient struct {
 
 // FinancialAccountingClientConfig holds configuration for the FinancialAccounting client
 type FinancialAccountingClientConfig struct {
-	// Target is the gRPC server address (e.g., "localhost:50052" or "financial-accounting:50052")
-	//
-	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
-	// This field is maintained for backward compatibility with tests and local development.
-	// In production, prefer ServiceName-based configuration for automatic load balancing.
-	Target string
-
-	// ServiceName is the Kubernetes service name (e.g., "financial-accounting")
-	// When specified, enables DNS-based client-side load balancing via pkg/platform/grpc.
+	// ServiceName is the Kubernetes service name (e.g., "financial-accounting").
+	// Required. Enables DNS-based client-side load balancing via pkg/platform/grpc.
 	// The client will connect to dns:///financial-accounting.<namespace>.svc.cluster.local:<port>
 	// and use round_robin load balancing across all pod IPs.
 	ServiceName string
 
 	// Namespace is the Kubernetes namespace (e.g., "default", "production")
 	// Defaults to "default" if not specified or empty.
-	// Only used when ServiceName is specified.
 	Namespace string
 
 	// Port is the service port number
 	// FinancialAccounting service uses port 50052 (configured in deployments/k8s/financial-accounting/service.yaml)
-	// Only used when ServiceName is specified.
 	Port int
 
 	// Timeout is the default timeout for RPC calls
@@ -58,15 +48,12 @@ type FinancialAccountingClientConfig struct {
 	Tracer *observability.Tracer
 
 	// DialOptions allows custom gRPC dial options
-	// When using ServiceName, these options are passed to the platform gRPC factory
 	DialOptions []grpc.DialOption
 }
 
-// NewFinancialAccountingClient creates a new FinancialAccounting gRPC client
+// NewFinancialAccountingClient creates a new FinancialAccounting gRPC client using DNS-based load balancing.
 //
-// Supports two connection modes:
-//
-// 1. DNS-based load balancing (recommended for Kubernetes):
+// Example:
 //
 //	config := &clients.FinancialAccountingClientConfig{
 //	    ServiceName: "financial-accounting",
@@ -75,74 +62,32 @@ type FinancialAccountingClientConfig struct {
 //	    Timeout:     30 * time.Second,
 //	    Tracer:      tracer,
 //	}
-//
-// 2. Legacy direct connection (for backward compatibility):
-//
-//	config := &clients.FinancialAccountingClientConfig{
-//	    Target:  "financialaccounting-service:50052",
-//	    Timeout: 30 * time.Second,
-//	    Tracer:  tracer,
-//	}
 func NewFinancialAccountingClient(cfg *FinancialAccountingClientConfig) (*FinancialAccountingGRPCClient, error) {
-	// Set default timeout if not specified
+	if cfg.ServiceName == "" {
+		return nil, ErrFinancialAccountingServiceNameRequired
+	}
+
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
 	}
 
-	var conn *grpc.ClientConn
-	var err error
+	dialOpts := cfg.DialOptions
 
-	// Use platform gRPC factory when ServiceName is provided (preferred)
-	if cfg.ServiceName != "" {
-		// Prepare dial options for platform factory
-		dialOpts := cfg.DialOptions
+	if cfg.Tracer != nil {
+		dialOpts = append(dialOpts,
+			grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
+			grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
+		)
+	}
 
-		// Add tracing interceptor if tracer is provided
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		// Use platform factory for DNS-based load balancing
-		conn, err = platformgrpc.NewClient(context.Background(), platformgrpc.ClientConfig{
-			ServiceName: cfg.ServiceName,
-			Namespace:   cfg.Namespace,
-			Port:        cfg.Port,
-			DialOptions: dialOpts,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gRPC connection via platform factory: %w", err)
-		}
-	} else {
-		// Fallback to legacy direct connection for backward compatibility
-		if cfg.Target == "" {
-			return nil, ErrFinancialAccountingTargetRequired
-		}
-
-		// Prepare dial options
-		dialOpts := cfg.DialOptions
-		if dialOpts == nil {
-			// Default: insecure credentials for service mesh communication
-			dialOpts = []grpc.DialOption{
-				grpc.WithTransportCredentials(insecure.NewCredentials()),
-			}
-		}
-
-		// Add tracing interceptor if tracer is provided
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		// Establish connection using legacy method
-		conn, err = grpc.NewClient(cfg.Target, dialOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gRPC connection to %s: %w", cfg.Target, err)
-		}
+	conn, err := platformgrpc.NewClient(context.Background(), platformgrpc.ClientConfig{
+		ServiceName: cfg.ServiceName,
+		Namespace:   cfg.Namespace,
+		Port:        cfg.Port,
+		DialOptions: dialOpts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC connection: %w", err)
 	}
 
 	return &FinancialAccountingGRPCClient{
