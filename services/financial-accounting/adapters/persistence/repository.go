@@ -43,6 +43,14 @@ var (
 	ErrInvalidPageToken = errors.New("invalid page token format")
 )
 
+// Timestamp bounds for security validation.
+// Financial records before Unix epoch (1970) or far in the future are unexpected
+// and could indicate token manipulation.
+var (
+	minValidTimestamp = int64(0)                                           // Unix epoch (1970-01-01)
+	maxValidTimestamp = time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).Unix() // Year 2100
+)
+
 // parseCursorToken parses a pagination token in format "timestamp_uuid".
 // Returns the timestamp and UUID, or an error if the format is invalid.
 // An empty token returns zero values with no error (indicating first page).
@@ -63,6 +71,12 @@ func parseCursorToken(token string) (time.Time, uuid.UUID, error) {
 	if err != nil {
 		return time.Time{}, uuid.Nil, fmt.Errorf("%w: invalid timestamp", ErrInvalidPageToken)
 	}
+
+	// Validate timestamp bounds for security - financial records should be within reasonable range
+	if timestampUnix < minValidTimestamp || timestampUnix > maxValidTimestamp {
+		return time.Time{}, uuid.Nil, fmt.Errorf("%w: timestamp out of valid range", ErrInvalidPageToken)
+	}
+
 	timestamp := time.Unix(timestampUnix, 0).UTC()
 
 	// Parse UUID
@@ -72,6 +86,29 @@ func parseCursorToken(token string) (time.Time, uuid.UUID, error) {
 	}
 
 	return timestamp, id, nil
+}
+
+// applyCursorPagination applies cursor-based pagination to a GORM query.
+// This helper reduces duplication between ListBookingLogs and ListPostings.
+//
+// The cursor uses date_trunc('second', created_at) for comparison because the
+// cursor token stores Unix timestamp (second precision). This ensures consistent
+// ordering between the ORDER BY and WHERE clauses.
+//
+// Performance note: Using date_trunc() prevents use of standard B-tree indexes
+// on created_at. For large datasets, consider either:
+//   - Creating a functional index: CREATE INDEX idx_<table>_cursor ON <table>
+//     (date_trunc('second', created_at) DESC, id DESC);
+//   - Storing millisecond-precision timestamps in tokens (e.g., "1734567890123_uuid")
+//     to avoid date_trunc entirely and use standard B-tree indexes.
+func applyCursorPagination(query *gorm.DB, cursorTime time.Time, cursorID uuid.UUID) *gorm.DB {
+	if cursorTime.IsZero() {
+		return query
+	}
+	return query.Where(
+		"(date_trunc('second', created_at) < ?) OR (date_trunc('second', created_at) = ? AND id < ?)",
+		cursorTime, cursorTime, cursorID,
+	)
 }
 
 // LedgerRepository provides persistence operations for ledger postings
@@ -412,21 +449,8 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 			return err
 		}
 
-		// Apply cursor-based pagination using created_at (truncated to second) + id
-		// The cursor token stores Unix timestamp (second precision). We truncate the
-		// database timestamps to second precision for comparison to ensure consistent
-		// ordering between the ORDER BY and WHERE clauses.
-		//
-		// Performance note: Using date_trunc() prevents use of standard B-tree indexes
-		// on created_at. For large datasets, consider creating a functional index:
-		//   CREATE INDEX idx_booking_logs_cursor ON financial_booking_logs
-		//     (date_trunc('second', created_at) DESC, id DESC);
-		if !cursorTime.IsZero() {
-			query = query.Where(
-				"(date_trunc('second', created_at) < ?) OR (date_trunc('second', created_at) = ? AND id < ?)",
-				cursorTime, cursorTime, cursorID,
-			)
-		}
+		// Apply cursor-based pagination
+		query = applyCursorPagination(query, cursorTime, cursorID)
 
 		// Fetch results with limit
 		// Order by truncated timestamp to match cursor comparison
@@ -596,21 +620,8 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 			return err
 		}
 
-		// Apply cursor-based pagination using created_at (truncated to second) + id
-		// The cursor token stores Unix timestamp (second precision). We truncate the
-		// database timestamps to second precision for comparison to ensure consistent
-		// ordering between the ORDER BY and WHERE clauses.
-		//
-		// Performance note: Using date_trunc() prevents use of standard B-tree indexes
-		// on created_at. For large datasets, consider creating a functional index:
-		//   CREATE INDEX idx_ledger_postings_cursor ON ledger_postings
-		//     (date_trunc('second', created_at) DESC, id DESC);
-		if !cursorTime.IsZero() {
-			query = query.Where(
-				"(date_trunc('second', created_at) < ?) OR (date_trunc('second', created_at) = ? AND id < ?)",
-				cursorTime, cursorTime, cursorID,
-			)
-		}
+		// Apply cursor-based pagination
+		query = applyCursorPagination(query, cursorTime, cursorID)
 
 		// Fetch results with limit
 		// Order by truncated timestamp to match cursor comparison

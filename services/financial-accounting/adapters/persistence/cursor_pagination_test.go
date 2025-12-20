@@ -152,22 +152,28 @@ func TestParseCursorToken(t *testing.T) {
 			rationale:     "Nil UUID is technically valid (though unusual)",
 		},
 
-		// Edge cases
+		// Edge cases - timestamp bounds validation
 		{
-			name:          "very large timestamp",
-			token:         "9223372036854775807_550e8400-e29b-41d4-a716-446655440000",
-			wantErr:       false,
-			wantTimestamp: 9223372036854775807, // Max int64
-			wantID:        uuid.MustParse("550e8400-e29b-41d4-a716-446655440000"),
-			rationale:     "Maximum int64 timestamp should be handled",
+			name:        "very large timestamp exceeds year 2100",
+			token:       "9223372036854775807_550e8400-e29b-41d4-a716-446655440000",
+			wantErr:     true,
+			wantErrType: ErrInvalidPageToken,
+			rationale:   "Timestamps beyond year 2100 are rejected as potential token manipulation",
 		},
 		{
-			name:          "negative timestamp",
-			token:         "-1_550e8400-e29b-41d4-a716-446655440000",
+			name:        "negative timestamp before Unix epoch",
+			token:       "-1_550e8400-e29b-41d4-a716-446655440000",
+			wantErr:     true,
+			wantErrType: ErrInvalidPageToken,
+			rationale:   "Financial records before 1970 are unexpected and rejected",
+		},
+		{
+			name:          "timestamp near year 2100 is valid",
+			token:         "4102444799_550e8400-e29b-41d4-a716-446655440000", // 2099-12-31 23:59:59 UTC
 			wantErr:       false,
-			wantTimestamp: -1, // Before Unix epoch
+			wantTimestamp: 4102444799,
 			wantID:        uuid.MustParse("550e8400-e29b-41d4-a716-446655440000"),
-			rationale:     "Negative timestamp (before 1970) is technically valid",
+			rationale:     "Timestamps just before year 2100 cutoff are valid",
 		},
 	}
 
