@@ -60,6 +60,7 @@ func BenchmarkInitiatePaymentOrder(b *testing.B) {
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
 		GatewayAccountConfig:      benchGatewayAccountConfig(),
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    benchLogger(),
 		// Use fast retry config to avoid delays in benchmarks
 		LienExecutionRetryConfig: &clients.RetryConfig{
@@ -223,6 +224,7 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
 		GatewayAccountConfig:      benchGatewayAccountConfig(),
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    benchLogger(),
 		LienExecutionRetryConfig: &clients.RetryConfig{
 			MaxRetries:      1,
@@ -303,6 +305,7 @@ func BenchmarkCancelPaymentOrder(b *testing.B) {
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
 		GatewayAccountConfig:      benchGatewayAccountConfig(),
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    benchLogger(),
 	})
 	if err != nil {
