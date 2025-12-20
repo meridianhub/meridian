@@ -120,29 +120,30 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
 		var txErr error
-		account, txErr = txRepo.FindByIDForUpdate(ctx, req.AccountId)
+		accountResult, txErr := txRepo.FindByIDForUpdate(ctx, req.AccountId)
 		if txErr != nil {
 			return txErr
 		}
+		account = &accountResult
 
 		// Validate account is active
-		if account.Status != domain.AccountStatusActive {
+		if account.Status() != domain.AccountStatusActive {
 			return errTxAccountNotActive
 		}
 
 		// Validate currency matches account
-		if lienAmount.Currency() != account.Balance.Currency() {
+		if lienAmount.Currency() != account.Balance().Currency() {
 			return errTxCurrencyMismatch
 		}
 
 		// Calculate available balance (within the lock)
-		activeLiensTotal, err := txLienRepo.SumActiveAmountByAccountID(ctx, account.ID)
+		activeLiensTotal, err := txLienRepo.SumActiveAmountByAccountID(ctx, account.ID())
 		if err != nil {
 			return fmt.Errorf("%w: %w", errTxSumLiensFailed, err)
 		}
 
 		// Available = Current Balance - Active Liens
-		availableBalance = account.Balance.AmountCents() - activeLiensTotal
+		availableBalance = account.Balance().AmountCents() - activeLiensTotal
 
 		// Check sufficient funds
 		if lienAmount.AmountCents() > availableBalance {
@@ -150,7 +151,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Create lien domain object
-		lien, err = domain.NewLien(account.ID, lienAmount, req.PaymentOrderReference, nil)
+		lien, err = domain.NewLien(account.ID(), lienAmount, req.PaymentOrderReference, nil)
 		if err != nil {
 			return fmt.Errorf("%w: %w", errTxDomainError, err)
 		}
@@ -192,13 +193,13 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 	s.logger.Info("lien created",
 		"lien_id", lien.ID.String(),
-		"account_id", account.AccountID,
+		"account_id", account.AccountID(),
 		"amount_cents", lienAmount.AmountCents(),
 		"payment_order_ref", req.PaymentOrderReference)
 
 	// Calculate new available balance after this lien
 	newAvailableBalance := availableBalance - lienAmount.AmountCents()
-	availableMoney, err := domain.NewMoney(string(account.Balance.Currency()), newAvailableBalance)
+	availableMoney, err := domain.NewMoney(string(account.Balance().Currency()), newAvailableBalance)
 	if err != nil {
 		// This should never happen if validation passed - log and return without available balance
 		s.logger.Error("failed to create available balance money", "error", err)
@@ -279,7 +280,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		}
 
 		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
-		account, txErr = txRepo.FindByUUIDForUpdate(ctx, lien.AccountID)
+		accountResult, txErr := txRepo.FindByUUIDForUpdate(ctx, lien.AccountID)
 		if txErr != nil {
 			return fmt.Errorf("%w: %w", errTxSaveAccount, txErr)
 		}
@@ -289,10 +290,12 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 			return fmt.Errorf("%w: %w", errTxExecuteFailed, err)
 		}
 
-		// Debit the account
-		if err := account.Withdraw(lien.Amount); err != nil {
+		// Debit the account (immutable: capture returned value)
+		accountResult, err := accountResult.Withdraw(lien.Amount)
+		if err != nil {
 			return fmt.Errorf("%w: %w", errTxWithdrawFailed, err)
 		}
+		account = &accountResult
 
 		// Update lien status
 		if err := txLienRepo.Update(lien); err != nil {
@@ -300,7 +303,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		}
 
 		// Save account with balance change (context carries audit user info)
-		if err := txRepo.Save(ctx, account); err != nil {
+		if err := txRepo.Save(ctx, accountResult); err != nil {
 			return fmt.Errorf("%w: %w", errTxSaveAccount, err)
 		}
 
@@ -354,14 +357,14 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	transactionID := fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8])
 	s.logger.Info("lien executed",
 		"lien_id", lien.ID.String(),
-		"account_id", account.AccountID,
+		"account_id", account.AccountID(),
 		"amount_cents", lien.Amount.AmountCents(),
 		"transaction_id", transactionID)
 
-	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance)
+	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
 	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
-		NewBalance:       toMoneyAmount(account.Balance),
+		NewBalance:       toMoneyAmount(account.Balance()),
 		AvailableBalance: toMoneyAmount(availableMoney),
 		TransactionId:    transactionID,
 	}, nil
@@ -411,7 +414,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 			s.logger.Error("failed to find account for idempotent response", "error", acctErr)
 			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
 		}
-		availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance)
+		availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
 		return &pb.TerminateLienResponse{
 			Lien:             toLienProto(lien),
 			AvailableBalance: toMoneyAmount(availableMoney),
@@ -498,7 +501,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance)
+	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
 	return &pb.TerminateLienResponse{
 		Lien:             toLienProto(lien),
 		AvailableBalance: toMoneyAmount(availableMoney),
@@ -601,10 +604,10 @@ func (s *Service) buildExecuteLienIdempotentResponse(ctx context.Context, lien *
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance)
+	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
 	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
-		NewBalance:       toMoneyAmount(account.Balance),
+		NewBalance:       toMoneyAmount(account.Balance()),
 		AvailableBalance: toMoneyAmount(availableMoney),
 		TransactionId:    fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8]),
 	}, nil
@@ -637,7 +640,7 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 		s.logger.Error("failed to retrieve account for idempotent response", "error", acctErr)
 		return &pb.InitiateLienResponse{Lien: toLienProto(existingLien)}, true, nil
 	}
-	availableMoney := s.calculateAvailableBalance(ctx, existingLien.AccountID, account.Balance)
+	availableMoney := s.calculateAvailableBalance(ctx, existingLien.AccountID, account.Balance())
 	return &pb.InitiateLienResponse{
 		Lien:             toLienProto(existingLien),
 		AvailableBalance: toMoneyAmount(availableMoney),

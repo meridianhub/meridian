@@ -90,8 +90,8 @@ func TestSaveNewAccount(t *testing.T) {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	if retrieved.AccountID != accountID {
-		t.Errorf("Expected %s, got %s", accountID, retrieved.AccountID)
+	if retrieved.AccountID() != accountID {
+		t.Errorf("Expected %s, got %s", accountID, retrieved.AccountID())
 	}
 }
 
@@ -115,7 +115,7 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 	retrieved, err := repo.FindByID(ctx, accountID)
 	require.NoError(t, err)
 
-	assert.Equal(t, int64(1), retrieved.Version, "New account should have version 1")
+	assert.Equal(t, int64(1), retrieved.Version(), "New account should have version 1")
 }
 
 func TestSaveUpdateExisting(t *testing.T) {
@@ -137,9 +137,9 @@ func TestSaveUpdateExisting(t *testing.T) {
 		t.Fatalf("Initial save failed: %v", err)
 	}
 
-	// Modify and save again
+	// Modify and save again (immutable: capture returned value)
 	depositMoney, _ := domain.NewMoney("GBP", 10000)
-	err = account.Deposit(depositMoney)
+	account, err = account.Deposit(depositMoney)
 	if err != nil {
 		t.Fatalf("Deposit failed: %v", err)
 	}
@@ -154,13 +154,13 @@ func TestSaveUpdateExisting(t *testing.T) {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	if retrieved.Balance.AmountCents() != 10000 {
-		t.Errorf("Expected balance 10000, got %d", retrieved.Balance.AmountCents())
+	if retrieved.Balance().AmountCents() != 10000 {
+		t.Errorf("Expected balance 10000, got %d", retrieved.Balance().AmountCents())
 	}
 
 	// Version should be incremented after update
-	if retrieved.Version != 2 {
-		t.Errorf("Expected version 2, got %d", retrieved.Version)
+	if retrieved.Version() != 2 {
+		t.Errorf("Expected version 2, got %d", retrieved.Version())
 	}
 }
 
@@ -200,11 +200,11 @@ func TestFindByIBAN(t *testing.T) {
 		t.Fatalf("FindByIBAN failed: %v", err)
 	}
 
-	if retrieved.AccountID != accountID {
-		t.Errorf("Expected AccountID %s, got %s", accountID, retrieved.AccountID)
+	if retrieved.AccountID() != accountID {
+		t.Errorf("Expected AccountID %s, got %s", accountID, retrieved.AccountID())
 	}
-	if retrieved.AccountIdentification != iban {
-		t.Errorf("Expected IBAN %s, got %s", iban, retrieved.AccountIdentification)
+	if retrieved.AccountIdentification() != iban {
+		t.Errorf("Expected IBAN %s, got %s", iban, retrieved.AccountIdentification())
 	}
 }
 
@@ -303,13 +303,14 @@ func TestOptimisticLocking(t *testing.T) {
 	}
 
 	// Both should have same version
-	if account2.Version != account3.Version {
-		t.Errorf("Expected same version, got %d and %d", account2.Version, account3.Version)
+	if account2.Version() != account3.Version() {
+		t.Errorf("Expected same version, got %d and %d", account2.Version(), account3.Version())
 	}
 
-	// First transaction modifies and saves successfully
+	// First transaction modifies and saves successfully (immutable: capture returned value)
 	deposit1, _ := domain.NewMoney("GBP", 5000)
-	if err := account2.Deposit(deposit1); err != nil {
+	account2, err = account2.Deposit(deposit1)
+	if err != nil {
 		t.Fatalf("Deposit failed: %v", err)
 	}
 
@@ -317,9 +318,10 @@ func TestOptimisticLocking(t *testing.T) {
 		t.Fatalf("First save failed: %v", err)
 	}
 
-	// Second transaction tries to save with stale version
+	// Second transaction tries to save with stale version (immutable: capture returned value)
 	deposit2, _ := domain.NewMoney("GBP", 10000)
-	if err := account3.Deposit(deposit2); err != nil {
+	account3, err = account3.Deposit(deposit2)
+	if err != nil {
 		t.Fatalf("Deposit failed: %v", err)
 	}
 
@@ -334,13 +336,13 @@ func TestOptimisticLocking(t *testing.T) {
 		t.Fatalf("Final FindByID failed: %v", err)
 	}
 
-	if final.Balance.AmountCents() != 5000 {
-		t.Errorf("Expected balance 5000, got %d", final.Balance.AmountCents())
+	if final.Balance().AmountCents() != 5000 {
+		t.Errorf("Expected balance 5000, got %d", final.Balance().AmountCents())
 	}
 
 	// Version should be incremented
-	if final.Version != 2 {
-		t.Errorf("Expected version 2, got %d", final.Version)
+	if final.Version() != 2 {
+		t.Errorf("Expected version 2, got %d", final.Version())
 	}
 }
 
@@ -550,7 +552,7 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 	user2 := "user-updater"
 	ctx2 := context.WithValue(ctx, auth.UserIDContextKey, user2)
 	depositMoney, _ := domain.NewMoney("GBP", 5000)
-	err = account.Deposit(depositMoney)
+	account, err = account.Deposit(depositMoney)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx2, account)
