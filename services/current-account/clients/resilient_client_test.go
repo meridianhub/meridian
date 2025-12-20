@@ -11,6 +11,7 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/clients"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -61,7 +62,7 @@ func TestNewResilientPositionKeepingClient_Success(t *testing.T) {
 	t.Parallel()
 
 	mockClient := &mockPositionKeepingClient{}
-	config := clients.ResilientClientConfig{
+	config := sharedclients.ResilientClientConfig{
 		CircuitBreakerName: "test-service",
 		MaxRequests:        1,
 		FailureThreshold:   5,
@@ -81,7 +82,7 @@ func TestNewResilientPositionKeepingClient_DefaultConfig(t *testing.T) {
 	t.Parallel()
 
 	mockClient := &mockPositionKeepingClient{}
-	config := clients.ResilientClientConfig{}
+	config := sharedclients.ResilientClientConfig{}
 
 	resilientClient := clients.NewResilientPositionKeepingClient(mockClient, config)
 
@@ -94,7 +95,7 @@ func TestNewResilientPositionKeepingClient_NilLogger(t *testing.T) {
 	t.Parallel()
 
 	mockClient := &mockPositionKeepingClient{}
-	config := clients.ResilientClientConfig{
+	config := sharedclients.ResilientClientConfig{
 		Logger: nil,
 	}
 
@@ -116,7 +117,7 @@ func TestResilientPositionKeepingClient_Close(t *testing.T) {
 		},
 	}
 
-	config := clients.ResilientClientConfig{}
+	config := sharedclients.ResilientClientConfig{}
 	resilientClient := clients.NewResilientPositionKeepingClient(mockClient, config)
 
 	err := resilientClient.Close()
@@ -135,7 +136,7 @@ func TestResilientPositionKeepingClient_Close_Error(t *testing.T) {
 		},
 	}
 
-	config := clients.ResilientClientConfig{}
+	config := sharedclients.ResilientClientConfig{}
 	resilientClient := clients.NewResilientPositionKeepingClient(mockClient, config)
 
 	err := resilientClient.Close()
@@ -148,7 +149,7 @@ func TestNewResilientFinancialAccountingClient_Success(t *testing.T) {
 	t.Parallel()
 
 	mockClient := &mockFinancialAccountingClient{}
-	config := clients.ResilientClientConfig{
+	config := sharedclients.ResilientClientConfig{
 		CircuitBreakerName: "test-fa-service",
 		MaxRequests:        1,
 		FailureThreshold:   5,
@@ -168,7 +169,7 @@ func TestNewResilientFinancialAccountingClient_DefaultConfig(t *testing.T) {
 	t.Parallel()
 
 	mockClient := &mockFinancialAccountingClient{}
-	config := clients.ResilientClientConfig{}
+	config := sharedclients.ResilientClientConfig{}
 
 	resilientClient := clients.NewResilientFinancialAccountingClient(mockClient, config)
 
@@ -188,7 +189,7 @@ func TestResilientFinancialAccountingClient_Close(t *testing.T) {
 		},
 	}
 
-	config := clients.ResilientClientConfig{}
+	config := sharedclients.ResilientClientConfig{}
 	resilientClient := clients.NewResilientFinancialAccountingClient(mockClient, config)
 
 	err := resilientClient.Close()
@@ -210,7 +211,7 @@ func TestResilientClient_CircuitBreakerIntegration(t *testing.T) {
 		},
 	}
 
-	config := clients.ResilientClientConfig{
+	config := sharedclients.ResilientClientConfig{
 		MaxRequests:      1,
 		FailureThreshold: 3, // Open after 3 failures
 		MaxRetries:       0, // No retries to test circuit breaker directly
@@ -261,7 +262,7 @@ func TestResilientClient_RetryIntegration(t *testing.T) {
 		},
 	}
 
-	config := clients.ResilientClientConfig{
+	config := sharedclients.ResilientClientConfig{
 		MaxRequests:         1,
 		FailureThreshold:    10, // High threshold so circuit breaker doesn't open
 		MaxRetries:          3,
@@ -298,7 +299,7 @@ func TestResilientClient_NonRetryableError(t *testing.T) {
 		},
 	}
 
-	config := clients.ResilientClientConfig{
+	config := sharedclients.ResilientClientConfig{
 		MaxRetries:      3,
 		InitialInterval: 10 * time.Millisecond,
 		Logger:          slog.Default(),
@@ -328,7 +329,7 @@ func TestResilientClient_ContextCancellation(t *testing.T) {
 		},
 	}
 
-	config := clients.ResilientClientConfig{
+	config := sharedclients.ResilientClientConfig{
 		MaxRetries:      3,
 		InitialInterval: 10 * time.Millisecond,
 		Logger:          slog.Default(),
@@ -362,7 +363,7 @@ func TestResilientClient_NonIdempotentOperationsNoRetry(t *testing.T) {
 			},
 		}
 
-		config := clients.ResilientClientConfig{
+		config := sharedclients.ResilientClientConfig{
 			MaxRetries:       3, // Would retry if enabled
 			FailureThreshold: 10,
 			Logger:           slog.Default(),
@@ -390,7 +391,7 @@ func TestResilientClient_NonIdempotentOperationsNoRetry(t *testing.T) {
 			},
 		}
 
-		config := clients.ResilientClientConfig{
+		config := sharedclients.ResilientClientConfig{
 			MaxRetries:       3, // Would retry if enabled
 			FailureThreshold: 10,
 			Logger:           slog.Default(),
@@ -418,7 +419,7 @@ func TestResilientClient_NonIdempotentOperationsNoRetry(t *testing.T) {
 			},
 		}
 
-		config := clients.ResilientClientConfig{
+		config := sharedclients.ResilientClientConfig{
 			MaxRetries:       3, // Would retry if enabled
 			FailureThreshold: 10,
 			Logger:           slog.Default(),

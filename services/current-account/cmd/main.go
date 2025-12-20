@@ -18,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/service"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -391,7 +392,7 @@ func createServiceWithClients(
 	// Wrap with resilience patterns (circuit breaker + retry)
 	resilientPosKeepingClient := clients.NewResilientPositionKeepingClient(
 		posKeepingGRPCClient,
-		clients.ResilientClientConfig{
+		sharedclients.ResilientClientConfig{
 			Logger: logger,
 		},
 	)
@@ -411,7 +412,7 @@ func createServiceWithClients(
 	// Wrap with resilience patterns (circuit breaker + retry)
 	resilientFinAcctClient := clients.NewResilientFinancialAccountingClient(
 		finAcctGRPCClient,
-		clients.ResilientClientConfig{
+		sharedclients.ResilientClientConfig{
 			Logger: logger,
 		},
 	)
@@ -431,7 +432,7 @@ func createServiceWithClients(
 	// Wrap with resilience patterns (circuit breaker + retry)
 	resilientPartyClient := clients.NewResilientPartyClient(
 		partyGRPCClient,
-		clients.ResilientClientConfig{
+		sharedclients.ResilientClientConfig{
 			Logger: logger,
 		},
 	)

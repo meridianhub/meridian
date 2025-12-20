@@ -7,6 +7,7 @@ import (
 	"time"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
@@ -200,11 +201,11 @@ func (c *PartyGRPCClient) ValidateParty(ctx context.Context, partyID string) err
 
 // GetParty retrieves full party details by ID
 func (c *PartyGRPCClient) GetParty(ctx context.Context, partyID string) (*partyv1.Party, error) {
-	ctx, cancel := WithTimeout(ctx, c.timeout)
+	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	ctx = PropagateCorrelationID(ctx)
-	ctx = PropagateOrganization(ctx)
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
 
 	resp, err := c.client.RetrieveParty(ctx, &partyv1.RetrievePartyRequest{
 		PartyId: partyID,
