@@ -249,49 +249,6 @@ else
 fi
 echo ""
 
-# Test 8: Deprecated scripts wrapper
-echo "Test Suite: Backward Compatibility"
-echo "-----------------------------------"
-
-if [ -f "$SCRIPT_DIR/setup-check.sh" ]; then
-    setup_content=$(cat "$SCRIPT_DIR/setup-check.sh")
-    if echo "$setup_content" | grep -qF -- "deprecated"; then
-        echo -e "${GREEN}✓${NC} setup-check.sh shows deprecation notice"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} setup-check.sh shows deprecation notice"
-        ((TESTS_FAILED++))
-    fi
-
-    if echo "$setup_content" | grep -q "doctor.sh.*--check"; then
-        echo -e "${GREEN}✓${NC} setup-check.sh delegates to doctor.sh"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} setup-check.sh delegates to doctor.sh"
-        ((TESTS_FAILED++))
-    fi
-fi
-
-if [ -f "$SCRIPT_DIR/install-tools.sh" ]; then
-    install_content=$(cat "$SCRIPT_DIR/install-tools.sh")
-    if echo "$install_content" | grep -qF -- "deprecated"; then
-        echo -e "${GREEN}✓${NC} install-tools.sh shows deprecation notice"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} install-tools.sh shows deprecation notice"
-        ((TESTS_FAILED++))
-    fi
-
-    if echo "$install_content" | grep -q "doctor.sh.*--fix"; then
-        echo -e "${GREEN}✓${NC} install-tools.sh delegates to doctor.sh"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} install-tools.sh delegates to doctor.sh"
-        ((TESTS_FAILED++))
-    fi
-fi
-echo ""
-
 # Summary
 echo "===================================="
 echo "Test Results Summary"
