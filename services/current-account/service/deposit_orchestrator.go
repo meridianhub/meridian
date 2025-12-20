@@ -114,7 +114,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 
 	// Handle saga result
 	if !result.Success {
-		sagaStatus = "failed"
+		sagaStatus = operationStatusFailed
 		caobservability.RecordSagaFailure("deposit", result.FailedStep)
 
 		o.logger.Error("deposit saga failed",
@@ -183,6 +183,10 @@ func (o *DepositOrchestrator) addLogPositionStep(
 			if err != nil {
 				caobservability.RecordExternalServiceError("position_keeping", "initiate_log")
 				return fmt.Errorf("failed to log position: %w", err)
+			}
+			if resp.Log == nil {
+				caobservability.RecordExternalServiceError("position_keeping", "initiate_log")
+				return fmt.Errorf("%w for transaction %s", ErrNilPositionLog, transactionID)
 			}
 
 			*positionLogID = resp.Log.LogId
@@ -280,6 +284,10 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 				caobservability.RecordExternalServiceError("financial_accounting", "initiate_booking_log")
 				return fmt.Errorf("failed to initiate booking log: %w", err)
 			}
+			if bookingLogResp.FinancialBookingLog == nil {
+				caobservability.RecordExternalServiceError("financial_accounting", "initiate_booking_log")
+				return fmt.Errorf("%w for transaction %s", ErrNilBookingLog, transactionID)
+			}
 			*bookingLogID = bookingLogResp.FinancialBookingLog.Id
 
 			o.logger.Info("booking log created",
@@ -303,6 +311,10 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 				if err != nil {
 					caobservability.RecordExternalServiceError("financial_accounting", "capture_debit_posting")
 					return fmt.Errorf("failed to post debit to clearing account: %w", err)
+				}
+				if debitResp.LedgerPosting == nil {
+					caobservability.RecordExternalServiceError("financial_accounting", "capture_debit_posting")
+					return fmt.Errorf("%w for transaction %s", ErrNilDebitPosting, transactionID)
 				}
 				*debitPostingID = debitResp.LedgerPosting.Id
 				*debitPosted = true
@@ -334,6 +346,14 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 					o.compensateDebitPosting(stepCtx, *bookingLogID, clearingAccountID, transactionID, moneyAmt)
 				}
 				return fmt.Errorf("failed to post credit to customer account: %w", err)
+			}
+			if creditResp.LedgerPosting == nil {
+				caobservability.RecordExternalServiceError("financial_accounting", "capture_credit_posting")
+				// Inline compensation for debit if needed
+				if *debitPosted {
+					o.compensateDebitPosting(stepCtx, *bookingLogID, clearingAccountID, transactionID, moneyAmt)
+				}
+				return fmt.Errorf("%w for transaction %s", ErrNilCreditPosting, transactionID)
 			}
 			*creditPostingID = creditResp.LedgerPosting.Id
 			*creditPosted = true

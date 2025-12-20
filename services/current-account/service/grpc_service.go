@@ -36,6 +36,12 @@ var (
 	ErrPositionLogIDNotFound          = errors.New("position log ID not available for compensation")
 	ErrLedgerPostingIDNotFound        = errors.New("ledger posting ID not available for compensation")
 
+	// Nil response errors for defensive checks
+	ErrNilPositionLog   = errors.New("position keeping returned nil log")
+	ErrNilBookingLog    = errors.New("financial accounting returned nil booking log")
+	ErrNilDebitPosting  = errors.New("financial accounting returned nil debit posting")
+	ErrNilCreditPosting = errors.New("financial accounting returned nil credit posting")
+
 	// Party validation errors (re-exported from clients package for convenience)
 	ErrPartyNotFound  = clients.ErrPartyNotFound
 	ErrPartyNotActive = clients.ErrPartyNotActive
@@ -44,6 +50,7 @@ var (
 // Operation status constants for consistency across the service
 const (
 	operationStatusSuccess         = "success"
+	operationStatusFailed          = "failed"
 	operationStatusInvalidCurrency = "invalid_currency"
 )
 
