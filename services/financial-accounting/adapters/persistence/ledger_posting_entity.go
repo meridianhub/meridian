@@ -1,12 +1,10 @@
 package persistence
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"gorm.io/gorm"
 )
 
@@ -45,73 +43,38 @@ func (LedgerPostingEntity) TableName() string {
 	return "ledger_posting"
 }
 
-// ledgerPostingOldValueKey is the context key for storing old values before UPDATE
-const ledgerPostingOldValueKey contextKey = "audit:ledger_posting_old_value"
+// AuditID returns the record ID as a string for audit logging.
+// Implements the audit.Auditable interface.
+func (e LedgerPostingEntity) AuditID() string {
+	return e.ID.String()
+}
+
+// AuditTableName returns the table name for audit logging.
+// Implements the audit.Auditable interface.
+func (e LedgerPostingEntity) AuditTableName() string {
+	return "ledger_posting"
+}
 
 // AfterCreate is a GORM hook that runs after INSERT operations.
+// Publishes audit events to Kafka with outbox fallback.
 func (e *LedgerPostingEntity) AfterCreate(tx *gorm.DB) error {
-	// Skip audit if ID is not set (defensive check for edge cases)
-	if e.ID == uuid.Nil {
-		return nil
-	}
-	return recordAudit(tx, "ledger_posting", "INSERT", e.ID, nil, e)
+	return audit.RecordCreate(tx, *e)
 }
 
 // BeforeUpdate is a GORM hook that captures old values before UPDATE.
+// Stores old values in context for AfterUpdate to use.
 func (e *LedgerPostingEntity) BeforeUpdate(tx *gorm.DB) error {
-	// Skip audit capture if ID is not set (happens when using db.Model().Update())
-	if e.ID == uuid.Nil {
-		return nil
-	}
-
-	var old LedgerPostingEntity
-	if err := tx.First(&old, e.ID).Error; err != nil {
-		return fmt.Errorf("failed to fetch old ledger posting values: %w", err)
-	}
-
-	if tx.Statement != nil && tx.Statement.Context != nil {
-		ctx := context.WithValue(tx.Statement.Context, ledgerPostingOldValueKey, &old)
-		tx.Statement.Context = ctx
-	}
-
-	return nil
+	return audit.CaptureOldValue(tx, *e)
 }
 
 // AfterUpdate is a GORM hook that runs after UPDATE operations.
+// Publishes audit events to Kafka with outbox fallback.
 func (e *LedgerPostingEntity) AfterUpdate(tx *gorm.DB) error {
-	// Skip audit if ID is not set (defensive check)
-	if e.ID == uuid.Nil {
-		return nil
-	}
-
-	var old *LedgerPostingEntity
-	if tx.Statement != nil && tx.Statement.Context != nil {
-		if oldValue := tx.Statement.Context.Value(ledgerPostingOldValueKey); oldValue != nil {
-			var ok bool
-			old, ok = oldValue.(*LedgerPostingEntity)
-			if !ok {
-				return ErrOldValueType
-			}
-		}
-	}
-
-	// Skip if old values weren't captured (happens with partial updates via db.Model().Update())
-	if old == nil {
-		slog.Warn("audit skipped: old values not captured for ledger posting update",
-			"table", "ledger_posting",
-			"record_id", e.ID,
-			"reason", "partial update via db.Model().Update() bypasses BeforeUpdate hook")
-		return nil
-	}
-
-	return recordAudit(tx, "ledger_posting", "UPDATE", e.ID, old, e)
+	return audit.RecordUpdate(tx, *e)
 }
 
 // AfterDelete is a GORM hook that runs after DELETE operations.
+// Publishes audit events to Kafka with outbox fallback.
 func (e *LedgerPostingEntity) AfterDelete(tx *gorm.DB) error {
-	// Skip audit if ID is not set (defensive check)
-	if e.ID == uuid.Nil {
-		return nil
-	}
-	return recordAudit(tx, "ledger_posting", "DELETE", e.ID, e, nil)
+	return audit.RecordDelete(tx, *e)
 }

@@ -265,7 +265,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 			"account_id", accountID)
 	}
 
-	// Create domain model
+	// Create domain model (now returns value, not pointer)
 	account, err := domain.NewCurrentAccount(
 		accountID,
 		req.AccountIdentification,
@@ -284,7 +284,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}
 
 	// Record initial balance
-	caobservability.RecordBalance(account.Balance.AmountCents(), currency)
+	caobservability.RecordBalance(account.Balance().AmountCents(), currency)
 
 	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
@@ -313,11 +313,11 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Validate currency matches account currency
-	if req.Amount.Amount.CurrencyCode != account.Balance.CurrencyCode() {
+	if req.Amount.Amount.CurrencyCode != account.Balance().CurrencyCode() {
 		operationStatus = "currency_mismatch"
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
-			account.Balance.CurrencyCode(), req.Amount.Amount.CurrencyCode)
+			account.Balance().CurrencyCode(), req.Amount.Amount.CurrencyCode)
 	}
 
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
@@ -359,8 +359,9 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 			"deposit amount must be positive, got %d cents", amount.AmountCents())
 	}
 
-	// Execute deposit on domain model
-	if err := account.Deposit(amount); err != nil {
+	// Execute deposit on domain model (returns new account, original unchanged)
+	account, err = account.Deposit(amount)
+	if err != nil {
 		operationStatus = "deposit_failed"
 		return nil, status.Errorf(codes.InvalidArgument, "deposit failed: %v", err)
 	}
@@ -371,7 +372,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// If clients are not configured, fall back to simple save (backward compatibility)
 	if s.posKeepingClient == nil || s.finAcctClient == nil {
 		s.logger.Info("executing deposit without transaction orchestration (clients not configured)",
-			"account_id", account.AccountID,
+			"account_id", account.AccountID(),
 			"transaction_id", transactionID)
 
 		if err := s.repo.Save(ctx, account); err != nil {
@@ -380,14 +381,14 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		}
 
 		// Record business metrics
-		caobservability.RecordDeposit(string(account.Balance.Currency()))
-		caobservability.RecordBalance(account.Balance.AmountCents(), string(account.Balance.Currency()))
+		caobservability.RecordDeposit(string(account.Balance().Currency()))
+		caobservability.RecordBalance(account.Balance().AmountCents(), string(account.Balance().Currency()))
 
 		return &pb.ExecuteDepositResponse{
-			AccountId:        account.AccountID,
+			AccountId:        account.AccountID(),
 			TransactionId:    transactionID,
-			NewBalance:       toMoneyAmount(account.Balance),
-			AvailableBalance: toMoneyAmount(account.AvailableBalance),
+			NewBalance:       toMoneyAmount(account.Balance()),
+			AvailableBalance: toMoneyAmount(account.AvailableBalance()),
 			Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
 		}, nil
 	}
@@ -400,14 +401,14 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Record business metrics on success
-	caobservability.RecordDeposit(string(account.Balance.Currency()))
-	caobservability.RecordBalance(account.Balance.AmountCents(), string(account.Balance.Currency()))
+	caobservability.RecordDeposit(string(account.Balance().Currency()))
+	caobservability.RecordBalance(account.Balance().AmountCents(), string(account.Balance().Currency()))
 
 	return resp, nil
 }
 
 // orchestrateDeposit orchestrates the distributed transaction using saga pattern
-func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.CurrentAccount, amount domain.Money, transactionID string) (*pb.ExecuteDepositResponse, error) {
+func (s *Service) orchestrateDeposit(ctx context.Context, account domain.CurrentAccount, amount domain.Money, transactionID string) (*pb.ExecuteDepositResponse, error) {
 	sagaStart := time.Now()
 	sagaStatus := operationStatusSuccess
 	defer func() {
@@ -434,7 +435,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 		// Action: Create position log entry
 		func(stepCtx context.Context) error {
 			s.logger.Info("executing log_position step",
-				"account_id", account.AccountID,
+				"account_id", account.AccountID(),
 				"transaction_id", transactionID)
 
 			// Propagate correlation ID
@@ -444,18 +445,18 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			// with the initial transaction entry
 			resp, err := s.posKeepingClient.InitiateFinancialPositionLog(stepCtx,
 				&positionkeepingv1.InitiateFinancialPositionLogRequest{
-					AccountId: account.AccountIdentification, // Use IBAN for FK constraint
+					AccountId: account.AccountIdentification(), // Use IBAN for FK constraint
 					InitialEntry: &positionkeepingv1.TransactionLogEntry{
 						EntryId:       uuid.New().String(),
 						TransactionId: transactionID,
-						AccountId:     account.AccountIdentification,
+						AccountId:     account.AccountIdentification(),
 						Amount:        toMoneyAmount(amount),
 						Direction:     commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
 						Timestamp:     timestamppb.Now(),
-						Description:   fmt.Sprintf("Deposit to account %s", account.AccountID),
+						Description:   fmt.Sprintf("Deposit to account %s", account.AccountID()),
 					},
 					IdempotencyKey: &commonpb.IdempotencyKey{
-						Key: fmt.Sprintf("deposit-%s-%s", account.AccountID, transactionID),
+						Key: fmt.Sprintf("deposit-%s-%s", account.AccountID(), transactionID),
 					},
 				},
 			)
@@ -505,7 +506,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 						Details:   fmt.Sprintf("Cancelled position log due to deposit saga failure for transaction %s", transactionID),
 					},
 					IdempotencyKey: &commonpb.IdempotencyKey{
-						Key: fmt.Sprintf("compensate-deposit-%s-%s", account.AccountID, transactionID),
+						Key: fmt.Sprintf("compensate-deposit-%s-%s", account.AccountID(), transactionID),
 					},
 				},
 			)
@@ -548,7 +549,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 		// Action: Create booking log and dual ledger postings (debit clearing, credit customer)
 		func(stepCtx context.Context) error {
 			s.logger.Info("executing post_ledger step",
-				"account_id", account.AccountID,
+				"account_id", account.AccountID(),
 				"clearing_account_id", clearingAccountID,
 				"transaction_id", transactionID)
 
@@ -562,7 +563,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 			bookingLogResp, err := s.finAcctClient.InitiateFinancialBookingLog(stepCtx,
 				&financialaccountingv1.InitiateFinancialBookingLogRequest{
 					FinancialAccountType:    commonpb.AccountType_ACCOUNT_TYPE_CURRENT,
-					ProductServiceReference: account.AccountID,
+					ProductServiceReference: account.AccountID(),
 					BusinessUnitReference:   "current-account-service",
 					ChartOfAccountsRules:    "DEPOSIT",
 					BaseCurrency:            commonpb.Currency_CURRENCY_GBP,
@@ -617,7 +618,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 					FinancialBookingLogId: bookingLogID,
 					PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
 					PostingAmount:         moneyAmt.Amount,
-					AccountId:             account.AccountID,
+					AccountId:             account.AccountID(),
 					ValueDate:             timestamppb.Now(),
 					IdempotencyKey: &commonpb.IdempotencyKey{
 						Key: fmt.Sprintf("%s-credit", transactionID),
@@ -682,7 +683,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 
 			s.logger.Info("credit posting to customer account completed",
 				"credit_posting_id", creditPostingID,
-				"account_id", account.AccountID,
+				"account_id", account.AccountID(),
 				"booking_log_id", bookingLogID,
 				"transaction_id", transactionID)
 
@@ -713,7 +714,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 							FinancialBookingLogId: bookingLogID,
 							PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
 							PostingAmount:         moneyAmt.Amount,
-							AccountId:             account.AccountID,
+							AccountId:             account.AccountID(),
 							ValueDate:             timestamppb.Now(),
 							IdempotencyKey:        &commonpb.IdempotencyKey{Key: compCreditID},
 						},
@@ -721,7 +722,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 					if compErr != nil {
 						s.logger.Error("failed to compensate credit posting inline",
 							"booking_log_id", bookingLogID,
-							"account_id", account.AccountID,
+							"account_id", account.AccountID(),
 							"transaction_id", transactionID,
 							"error", compErr)
 						caobservability.RecordInlineCompensationFailure("deposit", "credit")
@@ -812,7 +813,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 						FinancialBookingLogId: bookingLogID,
 						PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
 						PostingAmount:         moneyAmt.Amount,
-						AccountId:             account.AccountID,
+						AccountId:             account.AccountID(),
 						ValueDate:             timestamppb.Now(),
 						IdempotencyKey: &commonpb.IdempotencyKey{
 							Key: compCreditTransactionID,
@@ -825,7 +826,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 				}
 				s.logger.Info("compensated credit posting",
 					"credit_posting_id", creditPostingID,
-					"account_id", account.AccountID)
+					"account_id", account.AccountID())
 			}
 
 			// Compensate debit leg: Create CREDIT to clearing account (if debit was posted)
@@ -889,24 +890,24 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 		// Action: Persist the updated account balance
 		func(stepCtx context.Context) error {
 			s.logger.Info("executing save_account step",
-				"account_id", account.AccountID,
+				"account_id", account.AccountID(),
 				"transaction_id", transactionID,
-				"new_balance", account.Balance.AmountCents())
+				"new_balance", account.Balance().AmountCents())
 
 			if err := s.repo.Save(stepCtx, account); err != nil {
 				return fmt.Errorf("failed to save account: %w", err)
 			}
 
 			s.logger.Info("save_account step completed",
-				"account_id", account.AccountID,
-				"new_balance", account.Balance.AmountCents())
+				"account_id", account.AccountID(),
+				"new_balance", account.Balance().AmountCents())
 
 			return nil
 		},
 		// Compensate: No database save needed - account never persisted
 		func(_ context.Context) error {
 			s.logger.Info("compensating save_account step (no-op)",
-				"account_id", account.AccountID,
+				"account_id", account.AccountID(),
 				"reason", "external services failed before persisting balance")
 
 			// No action needed - if we reach here, it means the save failed
@@ -923,7 +924,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 
 	// Execute saga
 	s.logger.Info("executing deposit saga",
-		"account_id", account.AccountID,
+		"account_id", account.AccountID(),
 		"transaction_id", transactionID,
 		"correlation_id", correlationID,
 		"steps", saga.StepCount())
@@ -936,7 +937,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 		caobservability.RecordSagaFailure("deposit", result.FailedStep)
 
 		s.logger.Error("deposit saga failed",
-			"account_id", account.AccountID,
+			"account_id", account.AccountID(),
 			"transaction_id", transactionID,
 			"failed_step", result.FailedStep,
 			"completed_steps", result.CompletedSteps,
@@ -949,17 +950,17 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account *domain.Curren
 	}
 
 	s.logger.Info("deposit saga completed successfully",
-		"account_id", account.AccountID,
+		"account_id", account.AccountID(),
 		"transaction_id", transactionID,
 		"correlation_id", correlationID,
 		"completed_steps", result.CompletedSteps)
 
 	// Return successful response
 	return &pb.ExecuteDepositResponse{
-		AccountId:        account.AccountID,
+		AccountId:        account.AccountID(),
 		TransactionId:    transactionID,
-		NewBalance:       toMoneyAmount(account.Balance),
-		AvailableBalance: toMoneyAmount(account.AvailableBalance),
+		NewBalance:       toMoneyAmount(account.Balance()),
+		AvailableBalance: toMoneyAmount(account.AvailableBalance()),
 		Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
 	}, nil
 }
@@ -990,25 +991,25 @@ func (s *Service) RetrieveCurrentAccount(ctx context.Context, req *pb.RetrieveCu
 
 // Helper functions
 
-func toProtoFacility(account *domain.CurrentAccount) *pb.CurrentAccountFacility {
+func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 	return &pb.CurrentAccountFacility{
-		AccountId:             account.AccountID,
-		AccountIdentification: account.AccountIdentification,
-		AccountStatus:         mapStatusToProto(account.Status),
-		BaseCurrency:          mapCurrencyToProto(string(account.Balance.Currency())),
-		CreatedAt:             timestamppb.New(account.CreatedAt),
-		UpdatedAt:             timestamppb.New(account.UpdatedAt),
+		AccountId:             account.AccountID(),
+		AccountIdentification: account.AccountIdentification(),
+		AccountStatus:         mapStatusToProto(account.Status()),
+		BaseCurrency:          mapCurrencyToProto(string(account.Balance().Currency())),
+		CreatedAt:             timestamppb.New(account.CreatedAt()),
+		UpdatedAt:             timestamppb.New(account.UpdatedAt()),
 		// #nosec G115 - Version is bounded by database constraints
-		Version: int32(account.Version),
+		Version: int32(account.Version()),
 		CurrentBalance: &pb.AccountBalance{
-			CurrentBalance:   toMoneyAmount(account.Balance),
-			AvailableBalance: toMoneyAmount(account.AvailableBalance),
-			LastUpdated:      timestamppb.New(account.BalanceUpdatedAt),
+			CurrentBalance:   toMoneyAmount(account.Balance()),
+			AvailableBalance: toMoneyAmount(account.AvailableBalance()),
+			LastUpdated:      timestamppb.New(account.BalanceUpdatedAt()),
 		},
 		OverdraftLimit: &pb.OverdraftConfiguration{
-			OverdraftLimit: toMoneyAmount(account.OverdraftLimit),
-			InterestRate:   account.OverdraftRate,
-			IsEnabled:      account.OverdraftEnabled,
+			OverdraftLimit: toMoneyAmount(account.OverdraftLimit()),
+			InterestRate:   account.OverdraftRate(),
+			IsEnabled:      account.OverdraftEnabled(),
 			LastUpdated:    timestamppb.New(time.Now()),
 		},
 	}
