@@ -328,27 +328,28 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	}
 
 	result, err := s.idempotencyService.Check(ctx, idempKey)
-	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-		// If operation already processed, return cached result
-		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
-			var cachedResp pb.InitiatePaymentOrderResponse
-			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
-			if unmarshalErr == nil {
-				s.logger.Info("returning cached initiate result from Redis",
-					"payment_order_id", cachedResp.PaymentOrder.PaymentOrderId,
-					"idempotency_key", idempotencyKey)
-				poobservability.RecordIdempotentRequest("initiate_payment_order_redis")
-				return &cachedResp, nil
-			}
-			s.logger.Warn("failed to unmarshal cached idempotency result, falling back to database check",
-				"error", unmarshalErr)
-		} else {
-			s.logger.Error("idempotency check failed", "error", err)
-			return nil, status.Error(codes.Internal, "failed to check idempotency")
+	// If operation already processed, return cached result
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
+		var cachedResp pb.InitiatePaymentOrderResponse
+		unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
+		if unmarshalErr == nil {
+			s.logger.Info("returning cached initiate result from Redis",
+				"payment_order_id", cachedResp.PaymentOrder.PaymentOrderId,
+				"idempotency_key", idempotencyKey)
+			poobservability.RecordIdempotentRequest("initiate_payment_order_redis")
+			return &cachedResp, nil
 		}
+		s.logger.Warn("failed to unmarshal cached idempotency result, falling back to database check",
+			"error", unmarshalErr)
+	} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		s.logger.Error("idempotency check failed", "error", err)
+		return nil, status.Error(codes.Internal, "failed to check idempotency")
 	}
 
-	// Mark operation as pending (distributed lock to prevent concurrent duplicates)
+	// Mark operation as pending (distributed lock to prevent concurrent duplicates).
+	// Note: If this succeeds but the operation later fails with a transient error (e.g., DB unavailable),
+	// the pending lock remains until TTL expires (5 minutes). This is intentional - it prevents
+	// concurrent retry attempts from creating duplicates. The client should retry after TTL expiry.
 	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
 		s.logger.Error("failed to mark operation pending", "error", err)
 		return nil, status.Error(codes.Internal, "failed to acquire idempotency lock")
@@ -471,8 +472,8 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
 	}
 
-	// Note: tenantID already extracted at the start of the function for idempotency key
-	_, hasTenant := tenant.FromContext(ctx) // Just need hasTenant flag for saga
+	// Use tenantID from idempotency check above
+	hasTenant := tenantID != ""
 
 	// Start saga orchestration asynchronously
 	// The saga runs in the background after returning the response
@@ -928,26 +929,24 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 	}
 
 	idempResult, err := s.idempotencyService.Check(ctx, idempKey)
-	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-		// If operation already processed, return cached result
-		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
-			var cachedResp pb.UpdatePaymentOrderResponse
-			unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
-			if unmarshalErr == nil {
-				s.logger.Info("returning cached update result from Redis",
-					"payment_order_id", po.ID.String(),
-					"idempotency_key", webhookIdempotencyKey)
-				operationStatus = opStatusIdempotent
-				poobservability.RecordIdempotentRequest("update_payment_order_redis")
-				return &cachedResp, nil
-			}
-			s.logger.Warn("failed to unmarshal cached idempotency result, continuing with normal processing",
-				"error", unmarshalErr)
-		} else {
-			s.logger.Error("idempotency check failed", "error", err)
-			operationStatus = opStatusError
-			return nil, status.Error(codes.Internal, "failed to check idempotency")
+	// If operation already processed, return cached result
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
+		var cachedResp pb.UpdatePaymentOrderResponse
+		unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
+		if unmarshalErr == nil {
+			s.logger.Info("returning cached update result from Redis",
+				"payment_order_id", po.ID.String(),
+				"idempotency_key", webhookIdempotencyKey)
+			operationStatus = opStatusIdempotent
+			poobservability.RecordIdempotentRequest("update_payment_order_redis")
+			return &cachedResp, nil
 		}
+		s.logger.Warn("failed to unmarshal cached idempotency result, continuing with normal processing",
+			"error", unmarshalErr)
+	} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		s.logger.Error("idempotency check failed", "error", err)
+		operationStatus = opStatusError
+		return nil, status.Error(codes.Internal, "failed to check idempotency")
 	}
 
 	// Mark operation as pending (distributed lock)
@@ -1604,23 +1603,21 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 	}
 
 	idempResult, err := s.idempotencyService.Check(ctx, idempKey)
-	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-		// If operation already processed, return cached result
-		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
-			var cachedResp pb.ReversePaymentOrderResponse
-			unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
-			if unmarshalErr == nil {
-				s.logger.Info("returning cached reversal result from Redis",
-					"payment_order_id", req.PaymentOrderId)
-				poobservability.RecordIdempotentRequest("reverse_payment_order_redis")
-				return &cachedResp, nil
-			}
-			s.logger.Warn("failed to unmarshal cached idempotency result, falling back to database check",
-				"error", unmarshalErr)
-		} else {
-			s.logger.Error("idempotency check failed", "error", err)
-			return nil, status.Error(codes.Internal, "failed to check idempotency")
+	// If operation already processed, return cached result
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
+		var cachedResp pb.ReversePaymentOrderResponse
+		unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
+		if unmarshalErr == nil {
+			s.logger.Info("returning cached reversal result from Redis",
+				"payment_order_id", req.PaymentOrderId)
+			poobservability.RecordIdempotentRequest("reverse_payment_order_redis")
+			return &cachedResp, nil
 		}
+		s.logger.Warn("failed to unmarshal cached idempotency result, falling back to database check",
+			"error", unmarshalErr)
+	} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		s.logger.Error("idempotency check failed", "error", err)
+		return nil, status.Error(codes.Internal, "failed to check idempotency")
 	}
 
 	// Mark operation as pending (distributed lock)
