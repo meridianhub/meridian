@@ -57,15 +57,15 @@ const (
 // Service implements the CurrentAccountService gRPC service
 type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
-	repo               *persistence.Repository
-	lienRepo           *persistence.LienRepository
-	posKeepingClient   clients.PositionKeepingClient
-	finAcctClient      clients.FinancialAccountingClient
-	partyClient        clients.PartyClient
-	accountConfig      *config.AccountConfig
-	logger             *slog.Logger
-	tracer             *observability.Tracer
-	depositOrchestator *DepositOrchestrator // Handles deposit saga orchestration
+	repo                *persistence.Repository
+	lienRepo            *persistence.LienRepository
+	posKeepingClient    clients.PositionKeepingClient
+	finAcctClient       clients.FinancialAccountingClient
+	partyClient         clients.PartyClient
+	accountConfig       *config.AccountConfig
+	logger              *slog.Logger
+	tracer              *observability.Tracer
+	depositOrchestrator *DepositOrchestrator // Handles deposit saga orchestration
 }
 
 // Config contains configuration for creating a new Service with external clients
@@ -115,7 +115,7 @@ func NewServiceWithExistingClients(
 	}
 
 	// Create deposit orchestrator
-	depositOrchestator := NewDepositOrchestrator(DepositOrchestratorConfig{
+	depositOrchestrator := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:           logger,
 		Repo:             repo,
 		PosKeepingClient: posKeepingClient,
@@ -124,15 +124,15 @@ func NewServiceWithExistingClients(
 	})
 
 	return &Service{
-		repo:               repo,
-		lienRepo:           lienRepo,
-		posKeepingClient:   posKeepingClient,
-		finAcctClient:      finAcctClient,
-		partyClient:        partyClient,
-		accountConfig:      accountConfig,
-		logger:             logger,
-		tracer:             tracer,
-		depositOrchestator: depositOrchestator,
+		repo:                repo,
+		lienRepo:            lienRepo,
+		posKeepingClient:    posKeepingClient,
+		finAcctClient:       finAcctClient,
+		partyClient:         partyClient,
+		accountConfig:       accountConfig,
+		logger:              logger,
+		tracer:              tracer,
+		depositOrchestrator: depositOrchestrator,
 	}, nil
 }
 
@@ -214,7 +214,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	}
 
 	// Create deposit orchestrator
-	depositOrchestator := NewDepositOrchestrator(DepositOrchestratorConfig{
+	depositOrchestrator := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:           logger,
 		Repo:             config.Repository,
 		PosKeepingClient: resilientPosKeepingClient,
@@ -223,14 +223,14 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	})
 
 	return &Service{
-		repo:               config.Repository,
-		lienRepo:           config.LienRepository,
-		posKeepingClient:   resilientPosKeepingClient,
-		finAcctClient:      resilientFinAcctClient,
-		partyClient:        resilientPartyClient,
-		logger:             logger,
-		tracer:             config.Tracer,
-		depositOrchestator: depositOrchestator,
+		repo:                config.Repository,
+		lienRepo:            config.LienRepository,
+		posKeepingClient:    resilientPosKeepingClient,
+		finAcctClient:       resilientFinAcctClient,
+		partyClient:         resilientPartyClient,
+		logger:              logger,
+		tracer:              config.Tracer,
+		depositOrchestrator: depositOrchestrator,
 	}, nil
 }
 
@@ -420,7 +420,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Orchestrate transaction with saga pattern
-	resp, err := s.depositOrchestator.Orchestrate(ctx, account, amount, transactionID)
+	resp, err := s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID)
 	if err != nil {
 		operationStatus = "saga_failed"
 		return nil, err

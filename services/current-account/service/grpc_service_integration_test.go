@@ -391,11 +391,11 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 
 	// Create service with mocked clients
 	svc := &Service{
-		repo:               repo,
-		posKeepingClient:   mockPosKeeping,
-		finAcctClient:      mockFinAcct,
-		logger:             slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
 	// Execute deposit
@@ -456,11 +456,11 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 
 	// Create service with mocked clients
 	svc := &Service{
-		repo:               repo,
-		posKeepingClient:   mockPosKeeping,
-		finAcctClient:      mockFinAcct,
-		logger:             slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
 	// Execute deposit
@@ -526,11 +526,11 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 
 	// Create service with mocked clients
 	svc := &Service{
-		repo:               repo,
-		posKeepingClient:   mockPosKeeping,
-		finAcctClient:      mockFinAcct,
-		logger:             slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
 	// Execute deposit
@@ -741,11 +741,11 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:               repo,
-		posKeepingClient:   mockPosKeeping,
-		finAcctClient:      mockFinAcct,
-		logger:             slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
 	// Execute deposit (will fail at step 3)
@@ -784,11 +784,11 @@ func TestExecuteDeposit_WithOrchestration_ContextPropagation(t *testing.T) {
 	mockFinAcct := &mockFinancialAccountingClient{}
 
 	svc := &Service{
-		repo:               repo,
-		posKeepingClient:   mockPosKeeping,
-		finAcctClient:      mockFinAcct,
-		logger:             slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
 	// Execute deposit with context (ctx already has tenant from setup)
@@ -876,7 +876,7 @@ func TestExecuteDeposit_DoubleEntry_CreatesDualPostings(t *testing.T) {
 		finAcctClient:    mockFinAcct,
 		accountConfig:    acctConfig,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: NewDepositOrchestrator(DepositOrchestratorConfig{
+		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
 			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			Repo:             repo,
 			PosKeepingClient: mockPosKeeping,
@@ -932,7 +932,7 @@ func TestExecuteDeposit_DoubleEntry_SameBookingLogForBothPostings(t *testing.T) 
 		finAcctClient:    mockFinAcct,
 		accountConfig:    acctConfig,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: NewDepositOrchestrator(DepositOrchestratorConfig{
+		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
 			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			Repo:             repo,
 			PosKeepingClient: mockPosKeeping,
@@ -992,7 +992,7 @@ func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 		finAcctClient:    mockFinAcct,
 		accountConfig:    acctConfig,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: NewDepositOrchestrator(DepositOrchestratorConfig{
+		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
 			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			Repo:             repo,
 			PosKeepingClient: mockPosKeeping,
@@ -1061,7 +1061,7 @@ func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
 		finAcctClient:    mockFinAcct,
 		accountConfig:    acctConfig,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: NewDepositOrchestrator(DepositOrchestratorConfig{
+		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
 			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			Repo:             repo,
 			PosKeepingClient: mockPosKeeping,
@@ -1130,7 +1130,7 @@ func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
 		finAcctClient:    mockFinAcct,
 		accountConfig:    acctConfig,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: NewDepositOrchestrator(DepositOrchestratorConfig{
+		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
 			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			Repo:             repo,
 			PosKeepingClient: mockPosKeeping,
@@ -1190,12 +1190,12 @@ func TestExecuteDeposit_SingleEntry_BackwardCompatibility(t *testing.T) {
 
 	// Create service WITHOUT AccountConfig (single-entry/backward compatible mode)
 	svc := &Service{
-		repo:               repo,
-		posKeepingClient:   mockPosKeeping,
-		finAcctClient:      mockFinAcct,
-		accountConfig:      nil, // No AccountConfig - single-entry mode
-		logger:             slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		accountConfig:       nil, // No AccountConfig - single-entry mode
+		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
 	// Execute deposit
@@ -1243,7 +1243,7 @@ func TestExecuteDeposit_DoubleEntry_ClearingAccountUsedForDebit(t *testing.T) {
 		finAcctClient:    mockFinAcct,
 		accountConfig:    acctConfig,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestator: NewDepositOrchestrator(DepositOrchestratorConfig{
+		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
 			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			Repo:             repo,
 			PosKeepingClient: mockPosKeeping,
