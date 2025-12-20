@@ -88,20 +88,8 @@ jobs:
   slow-integration-tests:
     name: Slow Integration Tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: meridian_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # Note: No postgres service container needed - tests use testcontainers
+    # which manage their own ephemeral containers with proper isolation.
 
     steps:
     - name: Checkout code
@@ -127,7 +115,8 @@ jobs:
     - name: Run full test suite (including slow tests)
       env:
         SKIP_KAFKA_TESTS: "1"
-        DATABASE_URL: postgres://test:test@localhost:5432/meridian_test?sslmode=disable
+        # Note: No DATABASE_URL needed - tests that require a database
+        # use testcontainers or mock their own configuration
       run: |
         # Run WITHOUT -short flag to include all timing-sensitive tests
         # Regular CI runs with -short, but nightly runs the full suite
