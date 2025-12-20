@@ -1,7 +1,5 @@
 // Package service provides integration tests for the payment order service.
 // These tests use testcontainers to simulate a production-like environment.
-//
-//nolint:staticcheck // Uses AmountCents() for test assertions (deprecated for backward compatibility)
 package service
 
 import (
@@ -1091,7 +1089,9 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 			// Verify amount is persisted correctly
 			po, err := repo.FindByID(ctx, poID)
 			require.NoError(t, err)
-			assert.Equal(t, tc.expectedCents, po.Amount.AmountCents(),
+			amountCents, err := po.Amount.ToMinorUnits()
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedCents, amountCents,
 				"Amount should be correctly converted to cents")
 		})
 	}

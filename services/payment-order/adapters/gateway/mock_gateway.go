@@ -1,4 +1,3 @@
-//nolint:staticcheck // Uses AmountCents() for mock gateway testing logic
 package gateway
 
 import (
@@ -94,12 +93,15 @@ func (g *MockGateway) SendPayment(ctx context.Context, req PaymentRequest) (Paym
 	}
 
 	// Check for deterministic failures first (no RNG needed)
-	if g.config.DeterministicFailures && req.Amount.AmountCents()%100 == 99 {
-		return PaymentResponse{
-			GatewayReferenceID: generateGatewayReferenceID(),
-			Status:             StatusRejected,
-			Message:            "deterministic rejection: amount ends in .99",
-		}, nil
+	if g.config.DeterministicFailures {
+		amountCents := req.Amount.ToMinorUnitsUnchecked()
+		if amountCents%100 == 99 {
+			return PaymentResponse{
+				GatewayReferenceID: generateGatewayReferenceID(),
+				Status:             StatusRejected,
+				Message:            "deterministic rejection: amount ends in .99",
+			}, nil
+		}
 	}
 
 	// Batch RNG checks under a single lock for efficiency

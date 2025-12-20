@@ -1,4 +1,3 @@
-//nolint:staticcheck // Uses AmountCents() for database persistence (backward compatible)
 package persistence
 
 import (
@@ -403,6 +402,20 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 
 	balanceUpdatedAt := account.BalanceUpdatedAt()
 
+	// Convert amounts to minor units - use unchecked method for persistence
+	balanceCents, err := account.Balance().ToMinorUnits()
+	if err != nil {
+		balanceCents = account.Balance().ToMinorUnitsUnchecked()
+	}
+	availableBalanceCents, err := account.AvailableBalance().ToMinorUnits()
+	if err != nil {
+		availableBalanceCents = account.AvailableBalance().ToMinorUnitsUnchecked()
+	}
+	overdraftLimitCents, err := account.OverdraftLimit().ToMinorUnits()
+	if err != nil {
+		overdraftLimitCents = account.OverdraftLimit().ToMinorUnitsUnchecked()
+	}
+
 	return &CurrentAccountEntity{
 		ID:                    account.ID(),
 		AccountID:             account.AccountID(),             // Business account identifier
@@ -411,9 +424,9 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		Currency:              string(account.Balance().Currency()),
 		Status:                string(account.Status()),
 		PartyID:               partyUUID,
-		Balance:               account.Balance().AmountCents(),
-		AvailableBalance:      account.AvailableBalance().AmountCents(),
-		OverdraftLimit:        account.OverdraftLimit().AmountCents(),
+		Balance:               balanceCents,
+		AvailableBalance:      availableBalanceCents,
+		OverdraftLimit:        overdraftLimitCents,
 		OverdraftRate:         account.OverdraftRate(),
 		BalanceUpdatedAt:      &balanceUpdatedAt,
 		Version:               account.Version(),

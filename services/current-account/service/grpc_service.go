@@ -1,6 +1,4 @@
 // Package service implements gRPC services for the current account domain
-//
-//nolint:staticcheck // Uses AmountCents() for balance/deposit operations (deprecated for backward compatibility)
 package service
 
 import (
@@ -284,7 +282,8 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}
 
 	// Record initial balance
-	caobservability.RecordBalance(account.Balance().AmountCents(), currency)
+	initialBalanceCents, _ := account.Balance().ToMinorUnits()
+	caobservability.RecordBalance(initialBalanceCents, currency)
 
 	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
@@ -353,10 +352,11 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Validate amount is positive
-	if amount.AmountCents() <= 0 {
+	amountCents, err := amount.ToMinorUnits()
+	if err != nil || amountCents <= 0 {
 		operationStatus = "invalid_amount"
 		return nil, status.Errorf(codes.InvalidArgument,
-			"deposit amount must be positive, got %d cents", amount.AmountCents())
+			"deposit amount must be positive, got %d cents", amountCents)
 	}
 
 	// Execute deposit on domain model (returns new account, original unchanged)
@@ -382,7 +382,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 		// Record business metrics
 		caobservability.RecordDeposit(string(account.Balance().Currency()))
-		caobservability.RecordBalance(account.Balance().AmountCents(), string(account.Balance().Currency()))
+		newBalanceCents, _ := account.Balance().ToMinorUnits()
+		caobservability.RecordBalance(newBalanceCents, string(account.Balance().Currency()))
 
 		return &pb.ExecuteDepositResponse{
 			AccountId:        account.AccountID(),
@@ -402,7 +403,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 	// Record business metrics on success
 	caobservability.RecordDeposit(string(account.Balance().Currency()))
-	caobservability.RecordBalance(account.Balance().AmountCents(), string(account.Balance().Currency()))
+	finalBalanceCents, _ := account.Balance().ToMinorUnits()
+	caobservability.RecordBalance(finalBalanceCents, string(account.Balance().Currency()))
 
 	return resp, nil
 }
@@ -889,10 +891,11 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 	saga.AddStep("save_account",
 		// Action: Persist the updated account balance
 		func(stepCtx context.Context) error {
+			stepBalanceCents, _ := account.Balance().ToMinorUnits()
 			s.logger.Info("executing save_account step",
 				"account_id", account.AccountID(),
 				"transaction_id", transactionID,
-				"new_balance", account.Balance().AmountCents())
+				"new_balance", stepBalanceCents)
 
 			if err := s.repo.Save(stepCtx, account); err != nil {
 				return fmt.Errorf("failed to save account: %w", err)
@@ -900,7 +903,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 
 			s.logger.Info("save_account step completed",
 				"account_id", account.AccountID(),
-				"new_balance", account.Balance().AmountCents())
+				"new_balance", stepBalanceCents)
 
 			return nil
 		},
@@ -1016,7 +1019,11 @@ func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 }
 
 func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
-	amountCents := m.AmountCents()
+	amountCents, err := m.ToMinorUnits()
+	if err != nil {
+		// Fallback for overflow - should not happen in practice
+		amountCents = m.ToMinorUnitsUnchecked()
+	}
 	units := amountCents / 100
 	remainder := amountCents % 100
 

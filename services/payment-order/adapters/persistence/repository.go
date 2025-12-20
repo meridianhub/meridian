@@ -1,4 +1,3 @@
-//nolint:staticcheck // Uses AmountCents() for database persistence (backward compatible)
 package persistence
 
 import (
@@ -397,11 +396,19 @@ func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentO
 
 // toEntity converts domain model to database entity
 func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
+	// Convert amount to minor units - use unchecked method for persistence
+	// as domain layer ensures valid amounts; overflow would be caught earlier
+	amountCents, err := po.Amount.ToMinorUnits()
+	if err != nil {
+		// This should never happen for valid payment orders - domain validation ensures amounts are within range
+		// Use ToMinorUnitsUnchecked as fallback (same behavior as deprecated AmountCents)
+		amountCents = po.Amount.ToMinorUnitsUnchecked()
+	}
 	entity := &PaymentOrderEntity{
 		ID:                    po.ID,
 		DebtorAccountID:       po.DebtorAccountID,
 		CreditorReference:     po.CreditorReference,
-		AmountCents:           po.Amount.AmountCents(),
+		AmountCents:           amountCents,
 		Currency:              string(po.Amount.Currency()),
 		Status:                string(po.Status),
 		LienID:                po.LienID,

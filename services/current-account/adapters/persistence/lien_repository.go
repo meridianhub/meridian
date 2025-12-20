@@ -1,4 +1,3 @@
-//nolint:staticcheck // Uses AmountCents() for database persistence (backward compatible)
 package persistence
 
 import (
@@ -235,10 +234,15 @@ func (r *LienRepository) SumActiveAmountByAccountID(ctx context.Context, account
 
 // toLienEntity converts domain model to database entity
 func toLienEntity(lien *domain.Lien) *LienEntity {
+	// Convert amount to minor units - use unchecked method for persistence
+	amountCents, err := lien.Amount.ToMinorUnits()
+	if err != nil {
+		amountCents = lien.Amount.ToMinorUnitsUnchecked()
+	}
 	return &LienEntity{
 		ID:                    lien.ID,
 		AccountID:             lien.AccountID,
-		AmountCents:           lien.Amount.AmountCents(),
+		AmountCents:           amountCents,
 		Currency:              string(lien.Amount.Currency()),
 		Status:                string(lien.Status),
 		PaymentOrderReference: lien.PaymentOrderReference,
