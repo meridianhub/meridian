@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -31,12 +32,12 @@ import (
 
 // Sentinel errors for consistent error handling
 var (
-	ErrRepositoryNil                  = errors.New("repository cannot be nil")
-	ErrPositionKeepingTargetEmpty     = errors.New("position keeping target cannot be empty")
-	ErrFinancialAccountingTargetEmpty = errors.New("financial accounting target cannot be empty")
-	ErrOriginalAccountStateNotFound   = errors.New("original account state not available for compensation")
-	ErrPositionLogIDNotFound          = errors.New("position log ID not available for compensation")
-	ErrLedgerPostingIDNotFound        = errors.New("ledger posting ID not available for compensation")
+	ErrRepositoryNil                       = errors.New("repository cannot be nil")
+	ErrPositionKeepingServiceNameEmpty     = errors.New("position keeping service name cannot be empty")
+	ErrFinancialAccountingServiceNameEmpty = errors.New("financial accounting service name cannot be empty")
+	ErrOriginalAccountStateNotFound        = errors.New("original account state not available for compensation")
+	ErrPositionLogIDNotFound               = errors.New("position log ID not available for compensation")
+	ErrLedgerPostingIDNotFound             = errors.New("ledger posting ID not available for compensation")
 
 	// Party validation errors (re-exported from clients package for convenience)
 	ErrPartyNotFound  = clients.ErrPartyNotFound
@@ -64,13 +65,24 @@ type Service struct {
 
 // Config contains configuration for creating a new Service with external clients
 type Config struct {
-	Repository                *persistence.Repository
-	LienRepository            *persistence.LienRepository
-	PositionKeepingTarget     string // e.g., "positionkeeping-service:50051"
-	FinancialAccountingTarget string // e.g., "financialaccounting-service:50052"
-	PartyServiceTarget        string // e.g., "party-service:50055"
-	Logger                    *slog.Logger
-	Tracer                    *observability.Tracer
+	Repository     *persistence.Repository
+	LienRepository *persistence.LienRepository
+	// Namespace is the Kubernetes namespace for service discovery (e.g., "default")
+	Namespace string
+	// PositionKeepingServiceName is the Kubernetes service name (e.g., "position-keeping")
+	PositionKeepingServiceName string
+	// PositionKeepingPort is the service port (e.g., 50053)
+	PositionKeepingPort int
+	// FinancialAccountingServiceName is the Kubernetes service name (e.g., "financial-accounting")
+	FinancialAccountingServiceName string
+	// FinancialAccountingPort is the service port (e.g., 50052)
+	FinancialAccountingPort int
+	// PartyServiceName is the Kubernetes service name (e.g., "party")
+	PartyServiceName string
+	// PartyPort is the service port (e.g., 50055)
+	PartyPort int
+	Logger    *slog.Logger
+	Tracer    *observability.Tracer
 }
 
 // NewService creates a new current account service with minimal dependencies.
@@ -128,11 +140,11 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	if config.Repository == nil {
 		return nil, ErrRepositoryNil
 	}
-	if config.PositionKeepingTarget == "" {
-		return nil, ErrPositionKeepingTargetEmpty
+	if config.PositionKeepingServiceName == "" {
+		return nil, ErrPositionKeepingServiceNameEmpty
 	}
-	if config.FinancialAccountingTarget == "" {
-		return nil, ErrFinancialAccountingTargetEmpty
+	if config.FinancialAccountingServiceName == "" {
+		return nil, ErrFinancialAccountingServiceNameEmpty
 	}
 
 	// Apply default logger if not provided
@@ -141,11 +153,13 @@ func NewServiceWithClients(config Config) (*Service, error) {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
-	// Create Position Keeping client
+	// Create Position Keeping client with DNS-based load balancing
 	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
-		Target:  config.PositionKeepingTarget,
-		Timeout: 30 * time.Second,
-		Tracer:  config.Tracer,
+		ServiceName: config.PositionKeepingServiceName,
+		Namespace:   config.Namespace,
+		Port:        config.PositionKeepingPort,
+		Timeout:     30 * time.Second,
+		Tracer:      config.Tracer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create position keeping client: %w", err)
@@ -154,16 +168,18 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	// Wrap with resilience patterns (circuit breaker + retry)
 	resilientPosKeepingClient := clients.NewResilientPositionKeepingClient(
 		posKeepingGRPCClient,
-		clients.ResilientClientConfig{
+		sharedclients.ResilientClientConfig{
 			Logger: logger,
 		},
 	)
 
-	// Create Financial Accounting client
+	// Create Financial Accounting client with DNS-based load balancing
 	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
-		Target:  config.FinancialAccountingTarget,
-		Timeout: 30 * time.Second,
-		Tracer:  config.Tracer,
+		ServiceName: config.FinancialAccountingServiceName,
+		Namespace:   config.Namespace,
+		Port:        config.FinancialAccountingPort,
+		Timeout:     30 * time.Second,
+		Tracer:      config.Tracer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create financial accounting client: %w", err)
@@ -172,18 +188,20 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	// Wrap with resilience patterns (circuit breaker + retry)
 	resilientFinAcctClient := clients.NewResilientFinancialAccountingClient(
 		finAcctGRPCClient,
-		clients.ResilientClientConfig{
+		sharedclients.ResilientClientConfig{
 			Logger: logger,
 		},
 	)
 
 	// Create Party client (optional - nil client provides backward compatibility)
 	var resilientPartyClient clients.PartyClient
-	if config.PartyServiceTarget != "" {
+	if config.PartyServiceName != "" {
 		partyGRPCClient, err := clients.NewPartyClient(&clients.PartyClientConfig{
-			Target:  config.PartyServiceTarget,
-			Timeout: 30 * time.Second,
-			Tracer:  config.Tracer,
+			ServiceName: config.PartyServiceName,
+			Namespace:   config.Namespace,
+			Port:        config.PartyPort,
+			Timeout:     30 * time.Second,
+			Tracer:      config.Tracer,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create party client: %w", err)
@@ -191,7 +209,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 
 		resilientPartyClient = clients.NewResilientPartyClient(
 			partyGRPCClient,
-			clients.ResilientClientConfig{
+			sharedclients.ResilientClientConfig{
 				Logger: logger,
 			},
 		)
@@ -416,7 +434,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 	}()
 
 	// Extract or generate correlation ID
-	correlationID := clients.ExtractCorrelationID(ctx)
+	correlationID := sharedclients.ExtractCorrelationID(ctx)
 	if correlationID == "" {
 		correlationID = uuid.New().String()
 		s.logger.Info("generated new correlation ID", "correlation_id", correlationID)
@@ -427,7 +445,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 	}
 
 	// Create saga orchestrator
-	saga := clients.NewSagaOrchestrator(s.logger)
+	saga := sharedclients.NewSagaOrchestrator(s.logger)
 
 	// Step 1: Log position in PositionKeeping service
 	var positionLogID string
@@ -439,7 +457,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 				"transaction_id", transactionID)
 
 			// Propagate correlation ID
-			stepCtx = clients.PropagateCorrelationID(stepCtx)
+			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 
 			// Call PositionKeeping service to initiate a new financial position log
 			// with the initial transaction entry
@@ -485,7 +503,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 			}
 
 			// Propagate correlation ID
-			stepCtx = clients.PropagateCorrelationID(stepCtx)
+			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 
 			// Update the position log status to cancelled with audit entry
 			// Version is 1 since we just created the log
@@ -554,7 +572,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 				"transaction_id", transactionID)
 
 			// Propagate correlation ID
-			stepCtx = clients.PropagateCorrelationID(stepCtx)
+			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 
 			// Convert MoneyAmount to google.type.Money for the request
 			moneyAmt := toMoneyAmount(amount)
@@ -798,7 +816,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 			}
 
 			// Propagate correlation ID
-			stepCtx = clients.PropagateCorrelationID(stepCtx)
+			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 
 			// Convert MoneyAmount to google.type.Money for the request
 			moneyAmt := toMoneyAmount(amount)
