@@ -282,8 +282,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}
 
 	// Record initial balance
-	initialBalanceCents, _ := account.Balance().ToMinorUnits()
-	caobservability.RecordBalance(initialBalanceCents, currency)
+	caobservability.RecordBalance(safeMinorUnits(account.Balance()), currency)
 
 	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
@@ -387,8 +386,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 		// Record business metrics
 		caobservability.RecordDeposit(string(account.Balance().Currency()))
-		newBalanceCents, _ := account.Balance().ToMinorUnits()
-		caobservability.RecordBalance(newBalanceCents, string(account.Balance().Currency()))
+		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 		return &pb.ExecuteDepositResponse{
 			AccountId:        account.AccountID(),
@@ -408,8 +406,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 	// Record business metrics on success
 	caobservability.RecordDeposit(string(account.Balance().Currency()))
-	finalBalanceCents, _ := account.Balance().ToMinorUnits()
-	caobservability.RecordBalance(finalBalanceCents, string(account.Balance().Currency()))
+	caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 	return resp, nil
 }
@@ -896,11 +893,10 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 	saga.AddStep("save_account",
 		// Action: Persist the updated account balance
 		func(stepCtx context.Context) error {
-			stepBalanceCents, _ := account.Balance().ToMinorUnits()
 			s.logger.Info("executing save_account step",
 				"account_id", account.AccountID(),
 				"transaction_id", transactionID,
-				"new_balance", stepBalanceCents)
+				"new_balance", safeMinorUnits(account.Balance()))
 
 			if err := s.repo.Save(stepCtx, account); err != nil {
 				return fmt.Errorf("failed to save account: %w", err)
@@ -908,7 +904,7 @@ func (s *Service) orchestrateDeposit(ctx context.Context, account domain.Current
 
 			s.logger.Info("save_account step completed",
 				"account_id", account.AccountID(),
-				"new_balance", stepBalanceCents)
+				"new_balance", safeMinorUnits(account.Balance()))
 
 			return nil
 		},
@@ -1023,12 +1019,24 @@ func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 	}
 }
 
-func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
-	amountCents, err := m.ToMinorUnits()
+// safeMinorUnits converts Money to minor units (cents) with overflow protection.
+// Returns 0 if overflow occurs (should not happen in practice for valid accounts).
+// Used for logging and metrics where returning an error is not practical.
+func safeMinorUnits(m domain.Money) int64 {
+	cents, err := m.ToMinorUnits()
 	if err != nil {
-		// Fallback for overflow - should not happen in practice
-		amountCents = m.ToMinorUnitsUnchecked()
+		// This should never happen in practice - int64 max is ~92 quadrillion cents
+		// Log the anomaly for visibility, then return 0 rather than panicking
+		slog.Error("amount overflow in metrics conversion",
+			"currency", m.Currency(),
+			"error", err)
+		return 0
 	}
+	return cents
+}
+
+func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
+	amountCents := safeMinorUnits(m)
 	units := amountCents / 100
 	remainder := amountCents % 100
 

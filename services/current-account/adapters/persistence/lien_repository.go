@@ -234,15 +234,12 @@ func (r *LienRepository) SumActiveAmountByAccountID(ctx context.Context, account
 
 // toLienEntity converts domain model to database entity
 func toLienEntity(lien *domain.Lien) *LienEntity {
-	// Convert amount to minor units - use unchecked method for persistence
-	amountCents, err := lien.Amount.ToMinorUnits()
-	if err != nil {
-		amountCents = lien.Amount.ToMinorUnitsUnchecked()
-	}
+	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
+	// so overflow (>92 quadrillion cents) cannot occur for valid liens
 	return &LienEntity{
 		ID:                    lien.ID,
 		AccountID:             lien.AccountID,
-		AmountCents:           amountCents,
+		AmountCents:           lien.Amount.ToMinorUnitsUnchecked(),
 		Currency:              string(lien.Amount.Currency()),
 		Status:                string(lien.Status),
 		PaymentOrderReference: lien.PaymentOrderReference,

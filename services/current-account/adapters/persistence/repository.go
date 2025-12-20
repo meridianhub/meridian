@@ -402,20 +402,8 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 
 	balanceUpdatedAt := account.BalanceUpdatedAt()
 
-	// Convert amounts to minor units - use unchecked method for persistence
-	balanceCents, err := account.Balance().ToMinorUnits()
-	if err != nil {
-		balanceCents = account.Balance().ToMinorUnitsUnchecked()
-	}
-	availableBalanceCents, err := account.AvailableBalance().ToMinorUnits()
-	if err != nil {
-		availableBalanceCents = account.AvailableBalance().ToMinorUnitsUnchecked()
-	}
-	overdraftLimitCents, err := account.OverdraftLimit().ToMinorUnits()
-	if err != nil {
-		overdraftLimitCents = account.OverdraftLimit().ToMinorUnitsUnchecked()
-	}
-
+	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
+	// so overflow (>92 quadrillion cents) cannot occur for valid accounts
 	return &CurrentAccountEntity{
 		ID:                    account.ID(),
 		AccountID:             account.AccountID(),             // Business account identifier
@@ -424,9 +412,9 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		Currency:              string(account.Balance().Currency()),
 		Status:                string(account.Status()),
 		PartyID:               partyUUID,
-		Balance:               balanceCents,
-		AvailableBalance:      availableBalanceCents,
-		OverdraftLimit:        overdraftLimitCents,
+		Balance:               account.Balance().ToMinorUnitsUnchecked(),
+		AvailableBalance:      account.AvailableBalance().ToMinorUnitsUnchecked(),
+		OverdraftLimit:        account.OverdraftLimit().ToMinorUnitsUnchecked(),
 		OverdraftRate:         account.OverdraftRate(),
 		BalanceUpdatedAt:      &balanceUpdatedAt,
 		Version:               account.Version(),

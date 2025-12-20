@@ -93,6 +93,7 @@ func (g *MockGateway) SendPayment(ctx context.Context, req PaymentRequest) (Paym
 	}
 
 	// Check for deterministic failures first (no RNG needed)
+	// ToMinorUnitsUnchecked is acceptable here: this is mock/test code with small test values
 	if g.config.DeterministicFailures {
 		amountCents := req.Amount.ToMinorUnitsUnchecked()
 		if amountCents%100 == 99 {
