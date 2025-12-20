@@ -76,11 +76,11 @@ func TestParseCursorToken(t *testing.T) {
 			rationale:   "Token without underscore separator is malformed",
 		},
 		{
-			name:        "invalid format - multiple underscores",
+			name:        "multiple underscores - UUID part is invalid",
 			token:       "1234567890_550e8400_e29b-41d4-a716-446655440000",
 			wantErr:     true,
 			wantErrType: ErrInvalidPageToken,
-			rationale:   "Token with multiple underscores cannot be reliably parsed",
+			rationale:   "With SplitN, second part includes extra underscore making it an invalid UUID",
 		},
 		{
 			name:        "invalid format - empty timestamp",

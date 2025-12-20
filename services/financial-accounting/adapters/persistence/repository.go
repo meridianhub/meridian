@@ -51,8 +51,10 @@ func parseCursorToken(token string) (time.Time, uuid.UUID, error) {
 		return time.Time{}, uuid.Nil, nil
 	}
 
-	parts := strings.Split(token, "_")
-	if len(parts) != 2 {
+	// Use SplitN to handle edge cases where UUID might theoretically contain underscore
+	// (though standard UUIDs use hyphens). This ensures we only split on the first underscore.
+	parts := strings.SplitN(token, "_", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return time.Time{}, uuid.Nil, ErrInvalidPageToken
 	}
 
@@ -414,6 +416,11 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 		// The cursor token stores Unix timestamp (second precision). We truncate the
 		// database timestamps to second precision for comparison to ensure consistent
 		// ordering between the ORDER BY and WHERE clauses.
+		//
+		// Performance note: Using date_trunc() prevents use of standard B-tree indexes
+		// on created_at. For large datasets, consider creating a functional index:
+		//   CREATE INDEX idx_booking_logs_cursor ON financial_booking_logs
+		//     (date_trunc('second', created_at) DESC, id DESC);
 		if !cursorTime.IsZero() {
 			query = query.Where(
 				"(date_trunc('second', created_at) < ?) OR (date_trunc('second', created_at) = ? AND id < ?)",
@@ -593,6 +600,11 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 		// The cursor token stores Unix timestamp (second precision). We truncate the
 		// database timestamps to second precision for comparison to ensure consistent
 		// ordering between the ORDER BY and WHERE clauses.
+		//
+		// Performance note: Using date_trunc() prevents use of standard B-tree indexes
+		// on created_at. For large datasets, consider creating a functional index:
+		//   CREATE INDEX idx_ledger_postings_cursor ON ledger_postings
+		//     (date_trunc('second', created_at) DESC, id DESC);
 		if !cursorTime.IsZero() {
 			query = query.Where(
 				"(date_trunc('second', created_at) < ?) OR (date_trunc('second', created_at) = ? AND id < ?)",
