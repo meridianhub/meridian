@@ -1,0 +1,76 @@
+# CockroachDB - Single-node for local development
+# NOTE: This configuration is optimized for LOCAL DEVELOPMENT ONLY.
+# Production deployments require TLS/SSL, authentication, StatefulSets with replication.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cockroachdb
+  labels:
+    app: cockroachdb
+spec:
+  type: ClusterIP
+  ports:
+  - name: grpc
+    port: 26257
+    targetPort: 26257
+  - name: http
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: cockroachdb
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cockroachdb-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cockroachdb
+spec:
+  serviceName: cockroachdb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cockroachdb
+  template:
+    metadata:
+      labels:
+        app: cockroachdb
+    spec:
+      containers:
+      - name: cockroachdb
+        image: cockroachdb/cockroach:v23.1.11
+        ports:
+        - containerPort: 26257
+          name: grpc
+        - containerPort: 8080
+          name: http
+        command:
+        - /cockroach/cockroach
+        - start-single-node
+        - --insecure
+        - --store=path=/cockroach/cockroach-data
+        - --advertise-addr=cockroachdb.default.svc.cluster.local
+        volumeMounts:
+        - name: datadir
+          mountPath: /cockroach/cockroach-data
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+      volumes:
+      - name: datadir
+        persistentVolumeClaim:
+          claimName: cockroachdb-pvc

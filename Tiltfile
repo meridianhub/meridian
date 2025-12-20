@@ -86,6 +86,52 @@ db_urls = {
 }
 
 # =============================================================================
+# Helper Functions
+# =============================================================================
+
+def grpc_microservice(name, grpc_port, resource_deps=[], extra_k8s_objects=[]):
+    """
+    Define a gRPC microservice with standard build/deploy pattern.
+
+    Args:
+        name: Service name (e.g., 'current-account')
+        grpc_port: gRPC port for port_forwards (e.g., 50051)
+        resource_deps: List of dependencies beyond the defaults (e.g., ['migrate-current-account'])
+        extra_k8s_objects: Additional k8s objects to track (e.g., ['current-account:serviceaccount'])
+    """
+    # Standard build args
+    build_args = {
+        'VERSION': 'dev',
+        'COMMIT': local('git rev-parse --short HEAD'),
+        'BUILD_DATE': get_build_date(),
+    }
+
+    # Docker build
+    docker_build(
+        name,
+        context='.',
+        dockerfile='services/{}/cmd/Dockerfile'.format(name),
+        build_args=build_args,
+    )
+
+    # K8s manifests (standard pattern: secret, configmap, deployment, service)
+    k8s_yaml('services/{}/k8s/secret.yaml'.format(name))
+    k8s_yaml('services/{}/k8s/configmap.yaml'.format(name))
+    k8s_yaml('services/{}/k8s/deployment.yaml'.format(name))
+    k8s_yaml('services/{}/k8s/service.yaml'.format(name))
+
+    # K8s resource configuration
+    # All microservices depend on generate-proto
+    all_deps = ['generate-proto'] + resource_deps
+    k8s_resource(
+        name,
+        port_forwards=['{}:{}'.format(grpc_port, grpc_port)],
+        resource_deps=all_deps,
+        labels=['microservices'],
+        objects=extra_k8s_objects,
+    )
+
+# =============================================================================
 # Backing Services
 # =============================================================================
 # NOTE: These configurations are optimized for LOCAL DEVELOPMENT ONLY.
@@ -97,420 +143,16 @@ db_urls = {
 # - Resource limits appropriate for production workloads
 
 # CockroachDB - Single-node for local development
-k8s_yaml(blob('''
-apiVersion: v1
-kind: Service
-metadata:
-  name: cockroachdb
-  labels:
-    app: cockroachdb
-spec:
-  type: ClusterIP
-  ports:
-  - name: grpc
-    port: 26257
-    targetPort: 26257
-  - name: http
-    port: 8080
-    targetPort: 8080
-  selector:
-    app: cockroachdb
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: cockroachdb-pvc
-spec:
-  accessModes:
-  - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: cockroachdb
-spec:
-  serviceName: cockroachdb
-  replicas: 1
-  selector:
-    matchLabels:
-      app: cockroachdb
-  template:
-    metadata:
-      labels:
-        app: cockroachdb
-    spec:
-      containers:
-      - name: cockroachdb
-        image: cockroachdb/cockroach:v23.1.11
-        ports:
-        - containerPort: 26257
-          name: grpc
-        - containerPort: 8080
-          name: http
-        command:
-        - /cockroach/cockroach
-        - start-single-node
-        - --insecure
-        - --store=path=/cockroach/cockroach-data
-        - --advertise-addr=cockroachdb.default.svc.cluster.local
-        volumeMounts:
-        - name: datadir
-          mountPath: /cockroach/cockroach-data
-        resources:
-          requests:
-            cpu: 500m
-            memory: 1Gi
-          limits:
-            cpu: 2000m
-            memory: 4Gi
-      volumes:
-      - name: datadir
-        persistentVolumeClaim:
-          claimName: cockroachdb-pvc
-'''))
+k8s_yaml('deployments/k8s/local/cockroachdb.yaml')
 
 # Redis - Default configuration
-k8s_yaml(blob('''
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  labels:
-    app: redis
-spec:
-  type: ClusterIP
-  ports:
-  - name: redis
-    port: 6379
-    targetPort: 6379
-  selector:
-    app: redis
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-      - name: redis
-        image: redis:7-alpine
-        ports:
-        - containerPort: 6379
-          name: redis
-        command:
-        - redis-server
-        - --appendonly
-        - "yes"
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
-'''))
+k8s_yaml('deployments/k8s/local/redis.yaml')
 
-# Kafka - 3-broker cluster with KRaft mode for local development
-# KRaft (Kafka Raft) replaces Zookeeper for metadata management
-# Multi-broker setup enables testing of:
-# - Partition replication and failover
-# - Leader election
-# - Quorum consensus
-# - Production-like scenarios in local dev
-#
-# Architecture:
-# - 3 brokers (kafka-0, kafka-1, kafka-2) each acting as both broker and controller
-# - KRaft quorum across all 3 nodes for metadata consensus
-# - Replication factor 2 for topics (allows 1 broker failure)
-# - Headless service for StatefulSet pod discovery
-# - Client service exposing kafka-0 as default endpoint
-#
-# Testing Failover:
-# 1. Create topic with RF=2: kubectl exec kafka-0 -- kafka-topics --create --topic test --partitions 3 --replication-factor 2 --bootstrap-server localhost:9092
-# 2. Describe topic: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
-# 3. Kill a broker: kubectl delete pod kafka-1
-# 4. Verify leadership transfer: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
-# 5. Produce/consume messages to verify data persists
-#
-# Resource Usage: ~1.5GB RAM total (512MB per broker)
-#
-# Storage Limits (prevent disk exhaustion):
-# - 512MB per topic partition (log.retention.bytes=536870912)
-# - 128MB segment size (log.segment.bytes=134217728)
-# - 24h time-based retention
-# - Log cleanup runs every 60 seconds
-# - LZ4 compression enabled (~50% reduction)
-# - Estimated max: ~1.5GB per broker for active topics
-#
-# Resource-Constrained Development (8GB RAM machines):
-# For machines with limited RAM, you can reduce to single-broker mode by:
-# 1. Change replicas: 3 → 1
-# 2. Change KAFKA_DEFAULT_REPLICATION_FACTOR: "2" → "1"
-# 3. Change KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "2" → "1"
-# 4. Reduce memory per broker: 384Mi → 256Mi
-# This reduces Kafka memory from ~1.5GB to ~512MB
-k8s_yaml(blob('''
-apiVersion: v1
-kind: Service
-metadata:
-  name: kafka
-  labels:
-    app: kafka
-spec:
-  type: ClusterIP
-  ports:
-  - name: broker
-    port: 9092
-    targetPort: 9092
-  selector:
-    app: kafka
-    statefulset.kubernetes.io/pod-name: kafka-0
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: kafka-headless
-  labels:
-    app: kafka
-spec:
-  clusterIP: None
-  publishNotReadyAddresses: true
-  ports:
-  - name: broker
-    port: 9092
-    targetPort: 9092
-  - name: controller
-    port: 9093
-    targetPort: 9093
-  selector:
-    app: kafka
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: kafka
-spec:
-  serviceName: kafka-headless
-  replicas: 3
-  podManagementPolicy: Parallel
-  selector:
-    matchLabels:
-      app: kafka
-  template:
-    metadata:
-      labels:
-        app: kafka
-    spec:
-      containers:
-      - name: kafka
-        image: apache/kafka:3.9.1
-        ports:
-        - containerPort: 9092
-          name: broker
-        - containerPort: 9093
-          name: controller
-        env:
-        # JVM heap settings for broker memory management
-        - name: KAFKA_HEAP_OPTS
-          value: "-Xms384M -Xmx384M"
-        # Cluster ID - must be consistent across all brokers in the KRaft cluster
-        # Generated once and shared by all nodes for cluster membership
-        - name: CLUSTER_ID
-          value: "MkU3OEVBNTcwNTJENDM2Qk"
-        # Pod name used to derive node ID and configure per-pod settings
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        command:
-        - sh
-        - -c
-        - |
-          # Extract node ID from pod name (kafka-0 -> 1, kafka-1 -> 2, kafka-2 -> 3)
-          NODE_ID=$((${POD_NAME##*-} + 1))
-
-          # Define paths
-          LOG_DIRS=/tmp/kraft-combined-logs
-          CONFIG_FILE=/tmp/server-${POD_NAME}.properties
-
-          echo "Generating server.properties for node ${NODE_ID} (${POD_NAME})..."
-
-          # Generate per-pod server.properties with correct configuration
-          cat > ${CONFIG_FILE} << EOF
-          # Node Configuration
-          node.id=${NODE_ID}
-          process.roles=broker,controller
-
-          # Listeners
-          listeners=PLAINTEXT://:9092,CONTROLLER://:9093
-          advertised.listeners=PLAINTEXT://${POD_NAME}.kafka-headless:9092
-          controller.listener.names=CONTROLLER
-          listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-
-          # KRaft Quorum
-          controller.quorum.voters=1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093
-
-          # Storage
-          log.dirs=${LOG_DIRS}
-
-          # Replication
-          offsets.topic.replication.factor=2
-          transaction.state.log.replication.factor=2
-          transaction.state.log.min.isr=1
-          default.replication.factor=2
-          min.insync.replicas=1
-
-          # Auto-create topics
-          auto.create.topics.enable=true
-
-          # Performance
-          num.network.threads=3
-          num.io.threads=8
-          socket.send.buffer.bytes=102400
-          socket.receive.buffer.bytes=102400
-          socket.request.max.bytes=104857600
-
-          # Log Retention (aggressive for local dev to prevent disk exhaustion)
-          log.retention.hours=24
-          log.retention.bytes=536870912
-          log.segment.bytes=134217728
-          log.retention.check.interval.ms=60000
-          log.cleanup.policy=delete
-          log.cleaner.enable=true
-          compression.type=lz4
-          EOF
-
-          # Format KRaft storage if not already formatted
-          if [ ! -f ${LOG_DIRS}/meta.properties ]; then
-            echo "Formatting KRaft storage for node ${NODE_ID}..."
-            /opt/kafka/bin/kafka-storage.sh format \
-              -t ${CLUSTER_ID} \
-              -c ${CONFIG_FILE}
-          else
-            echo "KRaft storage already formatted for node ${NODE_ID}"
-          fi
-
-          # Start Kafka with per-pod configuration
-          echo "Starting Kafka with configuration from ${CONFIG_FILE}..."
-          exec /opt/kafka/bin/kafka-server-start.sh ${CONFIG_FILE}
-        readinessProbe:
-          tcpSocket:
-            port: 9092
-          initialDelaySeconds: 15
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-        livenessProbe:
-          tcpSocket:
-            port: 9092
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        resources:
-          requests:
-            cpu: 200m
-            memory: 384Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
-'''))
+# Kafka - 3-broker cluster with KRaft mode
+k8s_yaml('deployments/k8s/local/kafka.yaml')
 
 # Keycloak - Identity and Access Management
-# Provides OAuth 2.0 / OpenID Connect authentication for local development
-# Pre-configured with:
-# - Realm: meridian
-# - Admin user: admin/admin
-# - Client ID: meridian-service
-# - JWKS endpoint: http://keycloak:8080/realms/meridian/protocol/openid-connect/certs
-k8s_yaml(blob('''
-apiVersion: v1
-kind: Service
-metadata:
-  name: keycloak
-  labels:
-    app: keycloak
-spec:
-  type: ClusterIP
-  ports:
-  - name: http
-    port: 8080
-    targetPort: 8080
-  selector:
-    app: keycloak
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: keycloak
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: keycloak
-  template:
-    metadata:
-      labels:
-        app: keycloak
-    spec:
-      containers:
-      - name: keycloak
-        image: quay.io/keycloak/keycloak:26.0
-        args:
-        - start-dev
-        - --http-port=8080
-        ports:
-        - containerPort: 8080
-          name: http
-        env:
-        - name: KEYCLOAK_ADMIN
-          value: admin
-        - name: KEYCLOAK_ADMIN_PASSWORD
-          value: admin
-        - name: KC_HTTP_RELATIVE_PATH
-          value: /
-        - name: KC_HOSTNAME_STRICT
-          value: "false"
-        - name: KC_HOSTNAME_STRICT_HTTPS
-          value: "false"
-        - name: KC_HEALTH_ENABLED
-          value: "true"
-        readinessProbe:
-          httpGet:
-            path: /health/ready
-            port: 9000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        livenessProbe:
-          httpGet:
-            path: /health/live
-            port: 9000
-          initialDelaySeconds: 60
-          periodSeconds: 30
-          timeoutSeconds: 3
-          failureThreshold: 3
-        resources:
-          requests:
-            cpu: 200m
-            memory: 512Mi
-          limits:
-            cpu: 1000m
-            memory: 1Gi
-'''))
+k8s_yaml('deployments/k8s/local/keycloak.yaml')
 
 # =============================================================================
 # Observability Stack (Grafana, Loki, Tempo, Prometheus, Alloy)
@@ -654,197 +296,45 @@ k8s_resource(
 # =============================================================================
 
 # Current-Account Service - gRPC microservice for customer and account management
-docker_build(
-  'current-account',
-  context='.',
-  dockerfile='services/current-account/cmd/Dockerfile',
-  build_args={
-    'VERSION': 'dev',
-    'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': get_build_date(),
-  },
-)
-
-# Deploy Current-Account Kubernetes manifests
-k8s_yaml('services/current-account/k8s/secret.yaml')
-k8s_yaml('services/current-account/k8s/configmap.yaml')
-k8s_yaml('services/current-account/k8s/deployment.yaml')
-k8s_yaml('services/current-account/k8s/service.yaml')
-
-# Set resource dependencies for Current-Account
-k8s_resource(
-  'current-account',
-  port_forwards=[
-    '50051:50051',  # gRPC API
-  ],
-  resource_deps=[
-    'generate-proto',
-    'cockroachdb',
-    'migrate-current-account',
-  ],
-  labels=['microservices'],
+grpc_microservice(
+    'current-account',
+    grpc_port=50051,
+    resource_deps=['cockroachdb', 'migrate-current-account'],
 )
 
 # Financial-Accounting Service - gRPC microservice for ledger and booking operations
-docker_build(
-  'financial-accounting',
-  context='.',
-  dockerfile='services/financial-accounting/cmd/Dockerfile',
-  build_args={
-    'VERSION': 'dev',
-    'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': get_build_date(),
-  },
-)
-
-# Deploy Financial-Accounting Kubernetes manifests
-k8s_yaml('services/financial-accounting/k8s/secret.yaml')
-k8s_yaml('services/financial-accounting/k8s/configmap.yaml')
-k8s_yaml('services/financial-accounting/k8s/deployment.yaml')
-k8s_yaml('services/financial-accounting/k8s/service.yaml')
-
-# Set resource dependencies for Financial-Accounting
-k8s_resource(
-  'financial-accounting',
-  port_forwards=[
-    '50052:50052',  # gRPC API
-  ],
-  resource_deps=[
-    'generate-proto',
-    'cockroachdb',
-    'migrate-financial-accounting',  # Financial accounting has its own schema
-  ],
-  labels=['microservices'],
+grpc_microservice(
+    'financial-accounting',
+    grpc_port=50052,
+    resource_deps=['cockroachdb', 'migrate-financial-accounting'],
 )
 
 # Position-Keeping Service - gRPC microservice for transaction position management
-docker_build(
-  'position-keeping',
-  context='.',
-  dockerfile='services/position-keeping/cmd/Dockerfile',
-  build_args={
-    'VERSION': 'dev',
-    'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': get_build_date(),
-  },
-)
-
-# Deploy Position-Keeping Kubernetes manifests
-k8s_yaml('services/position-keeping/k8s/secret.yaml')
-k8s_yaml('services/position-keeping/k8s/configmap.yaml')
-k8s_yaml('services/position-keeping/k8s/deployment.yaml')
-k8s_yaml('services/position-keeping/k8s/service.yaml')
-
-# Set resource dependencies for Position-Keeping
-k8s_resource(
-  'position-keeping',
-  port_forwards=[
-    '50053:50053',  # gRPC API
-  ],
-  resource_deps=[
-    'generate-proto',
-    'cockroachdb',
-    'migrate-position-keeping',
-  ],
-  labels=['microservices'],
+grpc_microservice(
+    'position-keeping',
+    grpc_port=50053,
+    resource_deps=['cockroachdb', 'migrate-position-keeping'],
 )
 
 # Payment-Order Service - gRPC microservice for payment order management with saga orchestration
-docker_build(
-  'payment-order',
-  context='.',
-  dockerfile='services/payment-order/cmd/Dockerfile',
-  build_args={
-    'VERSION': 'dev',
-    'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': get_build_date(),
-  },
-)
-
-# Deploy Payment-Order Kubernetes manifests
-k8s_yaml('services/payment-order/k8s/secret.yaml')
-k8s_yaml('services/payment-order/k8s/configmap.yaml')
-k8s_yaml('services/payment-order/k8s/deployment.yaml')
-k8s_yaml('services/payment-order/k8s/service.yaml')
-
-# Set resource dependencies for Payment-Order
-k8s_resource(
-  'payment-order',
-  port_forwards=[
-    '50054:50054',  # gRPC API
-  ],
-  resource_deps=[
-    'generate-proto',
-    'cockroachdb',
-    'kafka-cluster',
-    'current-account',  # Depends on current-account for lien operations
-    'migrate-payment-order',
-  ],
-  labels=['microservices'],
+grpc_microservice(
+    'payment-order',
+    grpc_port=50054,
+    resource_deps=['cockroachdb', 'kafka-cluster', 'current-account', 'migrate-payment-order'],
 )
 
 # Tenant Service - gRPC microservice for platform tenant registry
-docker_build(
-  'tenant',
-  context='.',
-  dockerfile='services/tenant/cmd/Dockerfile',
-  build_args={
-    'VERSION': 'dev',
-    'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': get_build_date(),
-  },
-)
-
-# Deploy Tenant Kubernetes manifests
-k8s_yaml('services/tenant/k8s/secret.yaml')
-k8s_yaml('services/tenant/k8s/configmap.yaml')
-k8s_yaml('services/tenant/k8s/deployment.yaml')
-k8s_yaml('services/tenant/k8s/service.yaml')
-
-# Set resource dependencies for Tenant
-k8s_resource(
-  'tenant',
-  port_forwards=[
-    '50056:50056',  # gRPC API
-  ],
-  resource_deps=[
-    'generate-proto',
-    'cockroachdb',
-    'migrate-tenant',
-  ],
-  labels=['microservices'],
+grpc_microservice(
+    'tenant',
+    grpc_port=50056,
+    resource_deps=['cockroachdb', 'migrate-tenant'],
 )
 
 # Party Service - gRPC microservice for party reference data management
-docker_build(
-  'party',
-  context='.',
-  dockerfile='services/party/cmd/Dockerfile',
-  build_args={
-    'VERSION': 'dev',
-    'COMMIT': local('git rev-parse --short HEAD'),
-    'BUILD_DATE': get_build_date(),
-  },
-)
-
-# Deploy Party Kubernetes manifests
-k8s_yaml('services/party/k8s/secret.yaml')
-k8s_yaml('services/party/k8s/configmap.yaml')
-k8s_yaml('services/party/k8s/deployment.yaml')
-k8s_yaml('services/party/k8s/service.yaml')
-
-# Set resource dependencies for Party
-k8s_resource(
-  'party',
-  port_forwards=[
-    '50055:50055',  # gRPC API
-  ],
-  resource_deps=[
-    'generate-proto',
-    'cockroachdb',
-    'migrate-party',
-  ],
-  labels=['microservices'],
+grpc_microservice(
+    'party',
+    grpc_port=50055,
+    resource_deps=['cockroachdb', 'migrate-party'],
 )
 
 # =============================================================================
@@ -880,7 +370,7 @@ k8s_resource(
   pod_readiness='wait',  # Wait for all 3 pods to be ready
 )
 
-# Label standalone kafka client service (defined via blob() earlier)
+# Label standalone kafka client service (defined in kafka.yaml)
 # Groups it with messaging resources to prevent appearing as "uncategorized"
 k8s_resource(
   new_name='kafka-client-service',

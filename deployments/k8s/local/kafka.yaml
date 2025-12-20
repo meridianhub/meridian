@@ -1,0 +1,204 @@
+# Kafka - 3-broker cluster with KRaft mode for local development
+# KRaft (Kafka Raft) replaces Zookeeper for metadata management
+# Multi-broker setup enables testing of:
+# - Partition replication and failover
+# - Leader election
+# - Quorum consensus
+# - Production-like scenarios in local dev
+#
+# Architecture:
+# - 3 brokers (kafka-0, kafka-1, kafka-2) each acting as both broker and controller
+# - KRaft quorum across all 3 nodes for metadata consensus
+# - Replication factor 2 for topics (allows 1 broker failure)
+# - Headless service for StatefulSet pod discovery
+# - Client service exposing kafka-0 as default endpoint
+#
+# Testing Failover:
+# 1. Create topic with RF=2: kubectl exec kafka-0 -- kafka-topics --create --topic test --partitions 3 --replication-factor 2 --bootstrap-server localhost:9092
+# 2. Describe topic: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
+# 3. Kill a broker: kubectl delete pod kafka-1
+# 4. Verify leadership transfer: kubectl exec kafka-0 -- kafka-topics --describe --topic test --bootstrap-server localhost:9092
+# 5. Produce/consume messages to verify data persists
+#
+# Resource Usage: ~1.5GB RAM total (512MB per broker)
+#
+# Storage Limits (prevent disk exhaustion):
+# - 512MB per topic partition (log.retention.bytes=536870912)
+# - 128MB segment size (log.segment.bytes=134217728)
+# - 24h time-based retention
+# - Log cleanup runs every 60 seconds
+# - LZ4 compression enabled (~50% reduction)
+# - Estimated max: ~1.5GB per broker for active topics
+#
+# Resource-Constrained Development (8GB RAM machines):
+# For machines with limited RAM, you can reduce to single-broker mode by:
+# 1. Change replicas: 3 → 1
+# 2. Change KAFKA_DEFAULT_REPLICATION_FACTOR: "2" → "1"
+# 3. Change KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "2" → "1"
+# 4. Reduce memory per broker: 384Mi → 256Mi
+# This reduces Kafka memory from ~1.5GB to ~512MB
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+spec:
+  type: ClusterIP
+  ports:
+  - name: broker
+    port: 9092
+    targetPort: 9092
+  selector:
+    app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    app: kafka
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: broker
+    port: 9092
+    targetPort: 9092
+  - name: controller
+    port: 9093
+    targetPort: 9093
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: apache/kafka:3.9.1
+        ports:
+        - containerPort: 9092
+          name: broker
+        - containerPort: 9093
+          name: controller
+        env:
+        # JVM heap settings for broker memory management
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms384M -Xmx384M"
+        # Cluster ID - must be consistent across all brokers in the KRaft cluster
+        # Generated once and shared by all nodes for cluster membership
+        - name: CLUSTER_ID
+          value: "MkU3OEVBNTcwNTJENDM2Qk"
+        # Pod name used to derive node ID and configure per-pod settings
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - sh
+        - -c
+        - |
+          # Extract node ID from pod name (kafka-0 -> 1, kafka-1 -> 2, kafka-2 -> 3)
+          NODE_ID=$((${POD_NAME##*-} + 1))
+
+          # Define paths
+          LOG_DIRS=/tmp/kraft-combined-logs
+          CONFIG_FILE=/tmp/server-${POD_NAME}.properties
+
+          echo "Generating server.properties for node ${NODE_ID} (${POD_NAME})..."
+
+          # Generate per-pod server.properties with correct configuration
+          cat > ${CONFIG_FILE} << EOF
+          # Node Configuration
+          node.id=${NODE_ID}
+          process.roles=broker,controller
+
+          # Listeners
+          listeners=PLAINTEXT://:9092,CONTROLLER://:9093
+          advertised.listeners=PLAINTEXT://${POD_NAME}.kafka-headless:9092
+          controller.listener.names=CONTROLLER
+          listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+
+          # KRaft Quorum
+          controller.quorum.voters=1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093
+
+          # Storage
+          log.dirs=${LOG_DIRS}
+
+          # Replication
+          offsets.topic.replication.factor=2
+          transaction.state.log.replication.factor=2
+          transaction.state.log.min.isr=1
+          default.replication.factor=2
+          min.insync.replicas=1
+
+          # Auto-create topics
+          auto.create.topics.enable=true
+
+          # Performance
+          num.network.threads=3
+          num.io.threads=8
+          socket.send.buffer.bytes=102400
+          socket.receive.buffer.bytes=102400
+          socket.request.max.bytes=104857600
+
+          # Log Retention (aggressive for local dev to prevent disk exhaustion)
+          log.retention.hours=24
+          log.retention.bytes=536870912
+          log.segment.bytes=134217728
+          log.retention.check.interval.ms=60000
+          log.cleanup.policy=delete
+          log.cleaner.enable=true
+          compression.type=lz4
+          EOF
+
+          # Format KRaft storage if not already formatted
+          if [ ! -f ${LOG_DIRS}/meta.properties ]; then
+            echo "Formatting KRaft storage for node ${NODE_ID}..."
+            /opt/kafka/bin/kafka-storage.sh format \
+              -t ${CLUSTER_ID} \
+              -c ${CONFIG_FILE}
+          else
+            echo "KRaft storage already formatted for node ${NODE_ID}"
+          fi
+
+          # Start Kafka with per-pod configuration
+          echo "Starting Kafka with configuration from ${CONFIG_FILE}..."
+          exec /opt/kafka/bin/kafka-server-start.sh ${CONFIG_FILE}
+        readinessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 200m
+            memory: 384Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
