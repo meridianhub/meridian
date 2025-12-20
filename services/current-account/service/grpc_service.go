@@ -353,7 +353,12 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 	// Validate amount is positive
 	amountCents, err := amount.ToMinorUnits()
-	if err != nil || amountCents <= 0 {
+	if err != nil {
+		operationStatus = "amount_overflow"
+		return nil, status.Errorf(codes.InvalidArgument,
+			"deposit amount overflow: %v", err)
+	}
+	if amountCents <= 0 {
 		operationStatus = "invalid_amount"
 		return nil, status.Errorf(codes.InvalidArgument,
 			"deposit amount must be positive, got %d cents", amountCents)

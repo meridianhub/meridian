@@ -252,8 +252,7 @@ func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, 
 	}
 
 	// Track debit vs credit postings separately (only on success)
-	//nolint:staticcheck // QF1003 suggests switch but if-else is clearer for binary cases
-	if req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT {
+	if req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT { //nolint:staticcheck // QF1003 suggests switch but if-else is clearer for binary cases
 		m.debitCaptureCalls++
 		// Only count as compensation if this is a reversal (idempotency key contains "COMP")
 		if req.IdempotencyKey != nil && len(req.IdempotencyKey.Key) > 4 && req.IdempotencyKey.Key[:4] == "COMP" {

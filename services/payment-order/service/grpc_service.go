@@ -1574,7 +1574,10 @@ func safeMinorUnits(m domain.Money) int64 {
 	cents, err := m.ToMinorUnits()
 	if err != nil {
 		// This should never happen in practice - int64 max is ~92 quadrillion cents
-		// Log the error but return 0 rather than panicking
+		// Log the anomaly for visibility, then return 0 rather than panicking
+		slog.Error("amount overflow in metrics conversion",
+			"currency", m.Currency(),
+			"error", err)
 		return 0
 	}
 	return cents
