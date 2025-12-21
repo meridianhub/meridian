@@ -344,8 +344,13 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 	// Build idempotency key structure for Redis
 	var idempKey idempotency.Key
+	var idempotencyLockAcquired bool
 	if idempotencyKey != "" && s.idempotencyService != nil {
-		tenantID, _ := tenant.FromContext(ctx)
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			s.logger.Debug("tenant not found in context for idempotency key",
+				"account_id", req.AccountId)
+		}
 		idempKey = idempotency.Key{
 			TenantID:  string(tenantID),
 			Namespace: idempotencyNamespace,
@@ -376,9 +381,27 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 		// Mark operation as pending (distributed lock)
 		if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+			// Check if another request is already processing this operation
+			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+				s.logger.Info("operation already in progress, please retry",
+					"idempotency_key", idempotencyKey)
+				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+			}
 			s.logger.Error("failed to mark operation pending", "error", err)
-			return nil, status.Error(codes.Internal, "failed to acquire idempotency lock")
+			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
 		}
+		idempotencyLockAcquired = true
+
+		// Cleanup pending state on failure - ensures retries aren't blocked for 5 minutes
+		defer func() {
+			if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
+				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+					s.logger.Warn("failed to cleanup pending idempotency state",
+						"error", delErr,
+						"idempotency_key", idempotencyKey)
+				}
+			}
+		}()
 	}
 
 	// Retrieve account (context carries organization for multi-tenant routing)
