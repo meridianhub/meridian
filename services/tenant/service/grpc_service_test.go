@@ -11,8 +11,10 @@ import (
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -514,7 +516,7 @@ func TestService_InitiateTenant_PartyRegistrationFailure(t *testing.T) {
 // Tests for schema provisioning integration
 
 func TestService_InitiateTenant_WithProvisioningSuccess(t *testing.T) {
-	// Create mock provisioner that succeeds
+	// Create mock provisioner
 	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
 		{Name: "party", MigrationPath: "testdata/migrations"},
 		{Name: "current-account", MigrationPath: "testdata/migrations"},
@@ -534,14 +536,13 @@ func TestService_InitiateTenant_WithProvisioningSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp.Tenant)
 
-	// Tenant should be active after successful provisioning
+	// Tenant should be created with provisioning_pending status (worker will handle provisioning)
 	assert.Equal(t, "provisioned_tenant", resp.Tenant.TenantId)
-	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
-	assert.Equal(t, int32(2), resp.Tenant.Version) // Created with version 1, updated to active (version 2)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+	assert.Equal(t, int32(1), resp.Tenant.Version) // Created with version 1, no status update
 
-	// Verify provisioner was called
-	require.Len(t, mockProv.ProvisioningCalls, 1)
-	assert.Equal(t, "provisioned_tenant", mockProv.ProvisioningCalls[0].String())
+	// Verify provisioner was NOT called during InitiateTenant
+	assert.Empty(t, mockProv.ProvisioningCalls, "ProvisionSchemas should not be called during InitiateTenant - worker handles provisioning asynchronously")
 }
 
 // errProvisioningFailed is a test error for simulating provisioning failures.
@@ -564,21 +565,25 @@ func TestService_InitiateTenant_WithProvisioningFailure(t *testing.T) {
 		SettlementAsset: "GBP",
 	}
 
-	_, err := svc.InitiateTenant(ctx, req)
-	require.Error(t, err)
+	// InitiateTenant should succeed with provisioning_pending status
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Tenant)
 
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	assert.Equal(t, codes.Internal, st.Code())
-	assert.Contains(t, st.Message(), "schema provisioning failed")
+	// Tenant should be created with provisioning_pending status
+	// The worker will attempt provisioning and handle the failure
+	assert.Equal(t, "prov_fail_tenant", resp.Tenant.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
 
-	// Verify the tenant was created with provisioning_failed status
+	// Verify the tenant was persisted with provisioning_pending status
 	var entity persistence.TenantEntity
 	result := db.Where("id = ?", "prov_fail_tenant").First(&entity)
 	require.NoError(t, result.Error)
-	assert.Equal(t, "provisioning_failed", entity.Status)
-	require.NotNil(t, entity.ErrorMessage)
-	assert.Contains(t, *entity.ErrorMessage, "provisioning failed")
+	assert.Equal(t, "provisioning_pending", entity.Status)
+	assert.Nil(t, entity.ErrorMessage, "no error message yet - worker will handle provisioning failure")
+
+	// Verify provisioner was NOT called during InitiateTenant
+	assert.Empty(t, mockProv.ProvisioningCalls, "ProvisionSchemas should not be called during InitiateTenant")
 }
 
 func TestService_InitiateTenant_WithoutProvisioner(t *testing.T) {
@@ -820,4 +825,241 @@ func TestReconcileMigrations_SuccessfulReconciliation(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.Equal(t, int32(2), resp.ReconciledCount, "should have reconciled 2 active tenants")
 	assert.Empty(t, resp.Errors, "should have no errors")
+}
+
+// Tests for status conversion functions
+
+func TestService_toProtoStatus(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	tests := []struct {
+		name          string
+		domainStatus  domain.Status
+		expectedProto pb.TenantStatus
+	}{
+		{
+			name:          "provisioning_pending to proto",
+			domainStatus:  domain.StatusProvisioningPending,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING,
+		},
+		{
+			name:          "provisioning to proto",
+			domainStatus:  domain.StatusProvisioning,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_PROVISIONING,
+		},
+		{
+			name:          "provisioning_failed to proto",
+			domainStatus:  domain.StatusProvisioningFailed,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED,
+		},
+		{
+			name:          "active to proto",
+			domainStatus:  domain.StatusActive,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_ACTIVE,
+		},
+		{
+			name:          "suspended to proto",
+			domainStatus:  domain.StatusSuspended,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_SUSPENDED,
+		},
+		{
+			name:          "deprovisioned to proto",
+			domainStatus:  domain.StatusDeprovisioned,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_DEPROVISIONED,
+		},
+		{
+			name:          "unknown status to unspecified",
+			domainStatus:  domain.Status("unknown"),
+			expectedProto: pb.TenantStatus_TENANT_STATUS_UNSPECIFIED,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := svc.toProtoStatus(tt.domainStatus)
+			assert.Equal(t, tt.expectedProto, result)
+		})
+	}
+}
+
+func TestService_toDomainStatus(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	tests := []struct {
+		name           string
+		protoStatus    pb.TenantStatus
+		expectedDomain domain.Status
+		expectError    bool
+	}{
+		{
+			name:           "proto provisioning_pending to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING,
+			expectedDomain: domain.StatusProvisioningPending,
+			expectError:    false,
+		},
+		{
+			name:           "proto provisioning to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_PROVISIONING,
+			expectedDomain: domain.StatusProvisioning,
+			expectError:    false,
+		},
+		{
+			name:           "proto provisioning_failed to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED,
+			expectedDomain: domain.StatusProvisioningFailed,
+			expectError:    false,
+		},
+		{
+			name:           "proto active to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_ACTIVE,
+			expectedDomain: domain.StatusActive,
+			expectError:    false,
+		},
+		{
+			name:           "proto suspended to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_SUSPENDED,
+			expectedDomain: domain.StatusSuspended,
+			expectError:    false,
+		},
+		{
+			name:           "proto deprovisioned to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_DEPROVISIONED,
+			expectedDomain: domain.StatusDeprovisioned,
+			expectError:    false,
+		},
+		{
+			name:           "proto unspecified returns error",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_UNSPECIFIED,
+			expectedDomain: "",
+			expectError:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := svc.toDomainStatus(tt.protoStatus)
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Equal(t, ErrUnknownStatus, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedDomain, result)
+			}
+		})
+	}
+}
+
+func TestService_StatusConversionRoundtrip(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Test roundtrip: domain -> proto -> domain
+	tests := []struct {
+		name   string
+		status domain.Status
+	}{
+		{name: "provisioning_pending roundtrip", status: domain.StatusProvisioningPending},
+		{name: "provisioning roundtrip", status: domain.StatusProvisioning},
+		{name: "provisioning_failed roundtrip", status: domain.StatusProvisioningFailed},
+		{name: "active roundtrip", status: domain.StatusActive},
+		{name: "suspended roundtrip", status: domain.StatusSuspended},
+		{name: "deprovisioned roundtrip", status: domain.StatusDeprovisioned},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Convert to proto and back
+			protoStatus := svc.toProtoStatus(tt.status)
+			domainStatus, err := svc.toDomainStatus(protoStatus)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.status, domainStatus, "roundtrip conversion should preserve status")
+		})
+	}
+}
+
+// TestInitiateTenant_CreatesProvisioningStatusRecords verifies that InitiateTenant
+// creates provisioning_status records when a provisioner is configured.
+func TestInitiateTenant_CreatesProvisioningStatusRecords(t *testing.T) {
+	// Create mock provisioner with test services
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+		{Name: "current-account", MigrationPath: "/migrations/current-account"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	// Test: Create tenant with provisioner configured
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "test_org_prov_status",
+		DisplayName:     "Test Organization",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(context.Background(), req)
+	require.NoError(t, err, "InitiateTenant should succeed")
+	require.NotNil(t, resp)
+
+	// Verify tenant was created with provisioning_pending status
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+
+	// Verify provisioning status record was created
+	tenantID, err := tenant.NewTenantID("test_org_prov_status")
+	require.NoError(t, err)
+
+	status, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err, "Provisioning status should exist")
+	assert.Equal(t, provisioner.StatePending, status.State)
+	assert.Len(t, status.Services, 2, "Should have 2 service status records")
+
+	// Verify service schemas
+	assert.Equal(t, "party", status.Services[0].ServiceName)
+	assert.Equal(t, provisioner.ServiceStatePending, status.Services[0].State)
+	assert.Equal(t, "current-account", status.Services[1].ServiceName)
+	assert.Equal(t, provisioner.ServiceStatePending, status.Services[1].State)
+}
+
+// TestInitiateTenant_ProvisioningStatusIdempotent verifies that calling
+// InitiateTenant multiple times doesn't duplicate provisioning status.
+func TestInitiateTenant_ProvisioningStatusIdempotent(t *testing.T) {
+	// Create mock provisioner
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	// First call: Create tenant
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "test_org_idempotent",
+		DisplayName:     "Test Organization Idempotent",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify provisioning status was created
+	tenantID, err := tenant.NewTenantID("test_org_idempotent")
+	require.NoError(t, err)
+
+	status1, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, provisioner.StatePending, status1.State)
+
+	// Second call: Try to create same tenant again (will fail at tenant creation level)
+	// But if we manually call the helper, it should be idempotent
+	err = svc.createProvisioningStatusRecords(context.Background(), tenantID)
+	require.NoError(t, err, "Second call should be idempotent")
+
+	// Verify status hasn't changed
+	status2, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, status1.State, status2.State)
+	assert.Equal(t, status1.CreatedAt, status2.CreatedAt, "Created timestamp should not change on second call")
 }

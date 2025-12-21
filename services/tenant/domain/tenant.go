@@ -11,6 +11,8 @@ import (
 type Status string
 
 const (
+	// StatusProvisioningPending means the tenant registration is queued for async provisioning.
+	StatusProvisioningPending Status = "provisioning_pending"
 	// StatusProvisioning means the tenant is being provisioned (schemas being created).
 	StatusProvisioning Status = "provisioning"
 	// StatusProvisioningFailed means schema provisioning failed.
@@ -26,7 +28,7 @@ const (
 // IsValid returns true if the status is a valid tenant status.
 func (s Status) IsValid() bool {
 	switch s {
-	case StatusProvisioning, StatusProvisioningFailed, StatusActive, StatusSuspended, StatusDeprovisioned:
+	case StatusProvisioningPending, StatusProvisioning, StatusProvisioningFailed, StatusActive, StatusSuspended, StatusDeprovisioned:
 		return true
 	default:
 		return false
@@ -95,6 +97,7 @@ func (t *Tenant) SchemaName() string {
 
 // CanTransitionTo returns true if the tenant can transition to the given status.
 // Valid transitions:
+//   - provisioning_pending → provisioning, provisioning_failed
 //   - provisioning → active, provisioning_failed
 //   - provisioning_failed → provisioning (retry)
 //   - active → suspended, deprovisioned
@@ -106,6 +109,8 @@ func (t *Tenant) CanTransitionTo(newStatus Status) bool {
 	}
 
 	switch t.Status {
+	case StatusProvisioningPending:
+		return newStatus == StatusProvisioning || newStatus == StatusProvisioningFailed
 	case StatusProvisioning:
 		return newStatus == StatusActive || newStatus == StatusProvisioningFailed
 	case StatusProvisioningFailed:

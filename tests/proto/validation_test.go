@@ -325,10 +325,13 @@ func TestRetrieveLedgerPostingRequestValidation(t *testing.T) {
 func TestUpdateLedgerPostingRequestValidation(t *testing.T) {
 	validator := testValidator
 
-	// Valid request
+	// Valid request (includes required idempotency_key)
 	validReq := &financialaccountingv1.UpdateLedgerPostingRequest{
 		Id:     "LP-123",
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: "test-key-update-posting",
+		},
 	}
 	if err := validator.Validate(validReq); err != nil {
 		t.Errorf("valid request should pass: %v", err)
@@ -338,6 +341,9 @@ func TestUpdateLedgerPostingRequestValidation(t *testing.T) {
 	invalidReq := &financialaccountingv1.UpdateLedgerPostingRequest{
 		Id:     "",
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: "test-key-update-posting",
+		},
 	}
 	if err := validator.Validate(invalidReq); err == nil {
 		t.Error("empty id should fail validation")
@@ -347,9 +353,21 @@ func TestUpdateLedgerPostingRequestValidation(t *testing.T) {
 	invalidReq2 := &financialaccountingv1.UpdateLedgerPostingRequest{
 		Id:     "LP-123",
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: "test-key-update-posting",
+		},
 	}
 	if err := validator.Validate(invalidReq2); err == nil {
 		t.Error("UNSPECIFIED status should fail validation")
+	}
+
+	// Invalid: missing idempotency_key (required for state-machine mutations)
+	invalidReq3 := &financialaccountingv1.UpdateLedgerPostingRequest{
+		Id:     "LP-123",
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	}
+	if err := validator.Validate(invalidReq3); err == nil {
+		t.Error("missing idempotency_key should fail validation")
 	}
 }
 
@@ -394,10 +412,13 @@ func TestPostingDirectionEnumValidation(t *testing.T) {
 func TestTransactionStatusEnumValidation(t *testing.T) {
 	validator := testValidator
 
-	// Valid status
+	// Valid status (includes required idempotency_key)
 	validReq := &financialaccountingv1.UpdateLedgerPostingRequest{
 		Id:     "LP-123",
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: "test-key-status-validation",
+		},
 	}
 	if err := validator.Validate(validReq); err != nil {
 		t.Errorf("valid status should pass: %v", err)
