@@ -1113,6 +1113,57 @@ func isAlreadyExistsError(err error) bool {
 		strings.Contains(errStr, "duplicate")
 }
 
+// GetRequiredSchemas returns the list of service names that require schema provisioning.
+func (p *PostgresProvisioner) GetRequiredSchemas() []string {
+	schemas := make([]string, 0, len(p.config.Services))
+	for _, svc := range p.config.Services {
+		schemas = append(schemas, svc.Name)
+	}
+	return schemas
+}
+
+// InitializeProvisioningStatus creates an initial provisioning_status record with 'pending' state.
+// This is called during tenant creation to set up tracking records before async provisioning begins.
+// Idempotent: If a status record already exists, this is a no-op.
+func (p *PostgresProvisioner) InitializeProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	logger := p.logger.With("tenant_id", tenantID.String())
+
+	// Check if status already exists (idempotency)
+	_, err := p.getProvisioningStatusLocked(ctx, tenantID)
+	if err == nil {
+		logger.Debug("provisioning status already exists, skipping initialization")
+		return nil // Already exists, no-op
+	}
+	if !errors.Is(err, ErrProvisioningStatusNotFound) {
+		logger.Error("failed to check existing provisioning status", "error", err)
+		return fmt.Errorf("check existing status: %w", err)
+	}
+
+	// Create initial status with pending state
+	now := time.Now()
+	status := &ProvisioningStatus{
+		TenantID:  tenantID,
+		State:     StatePending,
+		Services:  p.createInitialServiceStatuses(tenantID),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := p.saveProvisioningStatus(ctx, status); err != nil {
+		logger.Error("failed to save initial provisioning status", "error", err)
+		return fmt.Errorf("save provisioning status: %w", err)
+	}
+
+	logger.Debug("provisioning status initialized",
+		"state", status.State,
+		"services_count", len(status.Services))
+
+	return nil
+}
+
 // Close closes all service database connections created by this provisioner.
 // This should be called during graceful shutdown to release database resources.
 //
