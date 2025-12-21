@@ -179,6 +179,11 @@ message InitiateTenantRequest {
 message InitiateTenantResponse {
   // tenant is the newly created tenant.
   Tenant tenant = 1 [(buf.validate.field).required = true];
+
+  // provisioning_hint provides a simplified status indicator for clients.
+  // Returns "pending" if tenant is in PROVISIONING_PENDING status, "active" otherwise.
+  // This allows clients to make UI decisions without parsing the full status enum.
+  string provisioning_hint = 2;
 }
 
 // RetrieveTenantRequest is the request to get tenant details (BIAN: Retrieve).

@@ -174,6 +174,12 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 
 	return &pb.InitiateTenantResponse{
 		Tenant: s.toProto(tenant),
+		ProvisioningHint: func() string {
+			if tenant.Status == domain.StatusProvisioningPending {
+				return "pending"
+			}
+			return "active"
+		}(),
 	}, nil
 }
 
