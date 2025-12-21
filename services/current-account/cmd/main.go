@@ -104,17 +104,21 @@ func run(logger *slog.Logger) error {
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
 
-	// Create Redis client and idempotency service
+	// Create Redis client and idempotency service (optional - graceful degradation)
+	var idempotencyService idempotency.Service
 	redisClient, err := createRedisClient(logger)
 	if err != nil {
-		return fmt.Errorf("failed to create Redis client: %w", err)
+		logger.Warn("Redis not available, idempotency protection disabled",
+			"error", err)
+	} else {
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				logger.Error("failed to close Redis client", "error", err)
+			}
+		}()
+		idempotencyService = idempotency.NewRedisService(redisClient)
+		logger.Info("idempotency protection enabled with Redis")
 	}
-	defer func() {
-		if err := redisClient.Close(); err != nil {
-			logger.Error("failed to close Redis client", "error", err)
-		}
-	}()
-	idempotencyService := idempotency.NewRedisService(redisClient)
 
 	// Get Kubernetes namespace from environment (defaults to "default")
 	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
