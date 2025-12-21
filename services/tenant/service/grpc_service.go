@@ -66,7 +66,7 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 	// Determine initial status based on whether provisioning is configured
 	initialStatus := domain.StatusActive
 	if s.provisioner != nil {
-		initialStatus = domain.StatusProvisioning
+		initialStatus = domain.StatusProvisioningPending
 	}
 
 	// Create domain tenant
