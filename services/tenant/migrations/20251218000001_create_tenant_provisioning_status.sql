@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS tenant_provisioning_status (
     completed_at TIMESTAMPTZ,
 
     -- Timestamps
+    -- Note: updated_at uses DEFAULT NOW() without a trigger, consistent with tenant_provisioning
+    -- table (see 20251216000001_initial.sql). Application layer is responsible for setting
+    -- updated_at on UPDATE operations. This avoids trigger complexity and aligns with Go's
+    -- sqlc pattern where we explicitly set all modified fields.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -67,6 +71,11 @@ CREATE INDEX IF NOT EXISTS idx_tenant_provisioning_status_status
     ON tenant_provisioning_status(status);
 CREATE INDEX IF NOT EXISTS idx_tenant_provisioning_status_service_name
     ON tenant_provisioning_status(service_name);
+
+-- Composite index for worker claiming pattern:
+-- SELECT ... WHERE status = 'pending' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+CREATE INDEX IF NOT EXISTS idx_tenant_provisioning_status_status_created_at
+    ON tenant_provisioning_status(status, created_at);
 
 -- Comments for documentation
 COMMENT ON TABLE tenant_provisioning_status IS 'Normalized per-service provisioning status. Denormalizes tenant_provisioning.service_schemas for indexed queries, worker processing, and partial failure recovery.';

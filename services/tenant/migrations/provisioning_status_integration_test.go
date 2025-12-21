@@ -54,11 +54,15 @@ func setupTestDatabase(t *testing.T) *testContext {
 	// Apply migrations
 	applyMigrations(ctx, t, db)
 
-	// Create a long-running context for test operations
+	// Cancel the setup context - it was only needed for container startup and migrations.
+	// We create a fresh background context for test operations because:
+	// 1. The setup context has a 2-minute timeout which may expire during long test runs
+	// 2. Test operations should have their own independent lifecycle
+	// 3. Container termination in cleanup() uses its own context anyway
+	cancel()
 	testCtx := context.Background()
 
 	cleanup := func() {
-		cancel()
 		db.Close()
 		if err := pgContainer.Terminate(context.Background()); err != nil {
 			t.Logf("Failed to terminate container: %v", err)
@@ -138,7 +142,9 @@ func findMigrationDir() (string, error) {
 	return "", os.ErrNotExist
 }
 
-// createTestTenant inserts a test tenant record for foreign key testing.
+// createTestTenant inserts a minimal tenant record for FK constraint testing.
+// Only required fields (id, display_name, settlement_asset, status) are set.
+// Other tenant fields (subdomain, party_id, metadata, etc.) are left as defaults.
 func createTestTenant(t *testing.T, tc *testContext, tenantID string) {
 	t.Helper()
 
@@ -226,6 +232,7 @@ func TestProvisioningStatusIndexes(t *testing.T) {
 		"idx_tenant_provisioning_status_tenant_id",
 		"idx_tenant_provisioning_status_status",
 		"idx_tenant_provisioning_status_service_name",
+		"idx_tenant_provisioning_status_status_created_at", // Composite index for worker claiming
 	}
 
 	for _, indexName := range expectedIndexes {
@@ -299,6 +306,10 @@ func TestProvisioningStatusCheckConstraint(t *testing.T) {
 		VALUES ('check_test_tenant', 'invalid_service', 'invalid_status')
 	`)
 	assert.Error(t, err, "Invalid status should fail")
+	// Note: We use string matching rather than PostgreSQL error code (23514) because:
+	// 1. The pgx driver wraps errors, making code extraction non-trivial
+	// 2. String matching on "check" is sufficient to verify the constraint type
+	// 3. The error message format is stable in PostgreSQL (violates check constraint)
 	assert.Contains(t, err.Error(), "check", "Error should mention check constraint violation")
 }
 
@@ -382,7 +393,7 @@ func TestProvisioningStatusConcurrentInserts(t *testing.T) {
 		errs = append(errs, err)
 	}
 
-	assert.Empty(t, errs, "All concurrent inserts should succeed: %v", errs)
+	require.Empty(t, errs, "All concurrent inserts should succeed")
 
 	// Verify all records were inserted
 	var count int
