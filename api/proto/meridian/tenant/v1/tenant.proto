@@ -62,6 +62,8 @@ enum TenantStatus {
   TENANT_STATUS_PROVISIONING = 4;
   // TENANT_STATUS_PROVISIONING_FAILED means schema provisioning failed.
   TENANT_STATUS_PROVISIONING_FAILED = 5;
+  // TENANT_STATUS_PROVISIONING_PENDING means the tenant registration is queued for async provisioning.
+  TENANT_STATUS_PROVISIONING_PENDING = 6;
 }
 
 // Tenant represents a platform tenant for multi-tenant infrastructure.
