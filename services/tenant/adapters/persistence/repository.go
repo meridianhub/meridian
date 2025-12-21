@@ -272,6 +272,10 @@ func toEntity(tenant *domain.Tenant) *TenantEntity {
 		entity.Subdomain = &tenant.Subdomain
 	}
 
+	if tenant.Slug != "" {
+		entity.Slug = &tenant.Slug
+	}
+
 	if tenant.PartyID != "" {
 		entity.PartyID = &tenant.PartyID
 	}
@@ -303,6 +307,10 @@ func toDomain(entity *TenantEntity) (*domain.Tenant, error) {
 
 	if entity.Subdomain != nil {
 		tenant.Subdomain = *entity.Subdomain
+	}
+
+	if entity.Slug != nil {
+		tenant.Slug = *entity.Slug
 	}
 
 	if entity.PartyID != nil {
