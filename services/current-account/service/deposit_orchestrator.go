@@ -87,7 +87,9 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) *DepositOrchestrator 
 //   - log_position fails → no compensation needed
 //
 // Thread Safety: This method is not thread-safe for concurrent calls with the same account.
-// Callers should ensure proper synchronization at the service layer.
+// Callers must use optimistic locking (version field) or database-level locking when
+// processing deposits for the same account concurrently. The repository layer enforces
+// optimistic locking via ErrVersionConflict.
 func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.CurrentAccount, amount domain.Money, transactionID string) (*pb.ExecuteDepositResponse, error) {
 	sagaStart := time.Now()
 	sagaStatus := operationStatusSuccess
