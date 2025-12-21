@@ -23,12 +23,29 @@ type PositionKeepingService struct {
 	idempotency    idempotency.Service
 }
 
-// NewPositionKeepingService creates a new PositionKeepingService.
+// NewPositionKeepingService creates a new PositionKeepingService with dependency injection.
+//
+// Dependencies:
+//   - repository: Persistence layer for financial position logs (must not be nil)
+//   - eventPublisher: Publishes domain events (must not be nil)
+//   - idempotencySvc: Ensures exactly-once processing of idempotent operations (must not be nil)
+//
+// Panics if any dependency is nil (defensive programming per ADR-0008).
 func NewPositionKeepingService(
 	repository domain.FinancialPositionLogRepository,
 	eventPublisher domain.EventPublisher,
 	idempotencySvc idempotency.Service,
 ) *PositionKeepingService {
+	if repository == nil {
+		panic("position keeping service: repository cannot be nil")
+	}
+	if eventPublisher == nil {
+		panic("position keeping service: event publisher cannot be nil")
+	}
+	if idempotencySvc == nil {
+		panic("position keeping service: idempotency service cannot be nil")
+	}
+
 	return &PositionKeepingService{
 		repository:     repository,
 		eventPublisher: eventPublisher,

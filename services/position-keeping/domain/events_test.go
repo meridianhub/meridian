@@ -244,7 +244,7 @@ func TestTransactionFailed_ToProto(t *testing.T) {
 		LogID:         logID,
 		AccountID:     "ACC-123",
 		FailureReason: "Database connection lost",
-		ErrorCode:     "DB_CONNECTION_ERROR",
+		ErrorCode:     commonv1.ErrorCode_ERROR_CODE_INTERNAL,
 		CorrelationID: "CORR-123",
 		Timestamp:     timestamp,
 		Version:       1,
@@ -259,7 +259,7 @@ func TestTransactionFailed_ToProto(t *testing.T) {
 	assert.Equal(t, logID.String(), proto.LogId)
 	assert.Equal(t, "ACC-123", proto.AccountId)
 	assert.Equal(t, "Database connection lost", proto.FailureReason)
-	assert.Equal(t, "DB_CONNECTION_ERROR", proto.ErrorCode)
+	assert.Equal(t, commonv1.ErrorCode_ERROR_CODE_INTERNAL, proto.ErrorCodeEnum)
 	assert.Equal(t, "CORR-123", proto.CorrelationId)
 	assert.Equal(t, int64(1), proto.Version)
 }

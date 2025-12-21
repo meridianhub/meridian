@@ -14,8 +14,11 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
 )
@@ -218,7 +221,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	}, nil
 }
 
-// ExecuteLien converts a reservation to an actual debit atomically
+// ExecuteLien converts a reservation to an actual debit atomically with Redis idempotency
 func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (*pb.ExecuteLienResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
@@ -237,6 +240,74 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	if err != nil {
 		operationStatus = opStatusInvalidLienID
 		return nil, status.Errorf(codes.InvalidArgument, "invalid lien ID: %v", err)
+	}
+
+	// Get idempotency key if provided
+	var idempotencyKeyStr string
+	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
+		idempotencyKeyStr = req.IdempotencyKey.Key
+	}
+
+	// Build idempotency key structure for Redis
+	var idempKey idempotency.Key
+	var idempotencyLockAcquired bool
+	if idempotencyKeyStr != "" && s.idempotencyService != nil {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			s.logger.Debug("tenant not found in context for idempotency key",
+				"lien_id", req.LienId)
+		}
+		idempKey = idempotency.Key{
+			TenantID:  string(tenantID),
+			Namespace: idempotencyNamespace,
+			Operation: "execute_lien",
+			EntityID:  req.LienId,
+			RequestID: idempotencyKeyStr,
+		}
+
+		// Check Redis for existing result
+		result, err := s.idempotencyService.Check(ctx, idempKey)
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
+			var cachedResp pb.ExecuteLienResponse
+			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
+			if unmarshalErr == nil {
+				s.logger.Info("returning cached execute lien response from Redis",
+					"lien_id", req.LienId,
+					"transaction_id", cachedResp.TransactionId,
+					"idempotency_key", idempotencyKeyStr)
+				operationStatus = opStatusIdempotent
+				return &cachedResp, nil
+			}
+			s.logger.Warn("failed to unmarshal cached idempotency result",
+				"error", unmarshalErr)
+		} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+			s.logger.Error("idempotency check failed", "error", err)
+			return nil, status.Error(codes.Internal, "failed to check idempotency")
+		}
+
+		// Mark operation as pending (distributed lock)
+		if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+			// Check if another request is already processing this operation
+			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+				s.logger.Info("operation already in progress, please retry",
+					"idempotency_key", idempotencyKeyStr)
+				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+			}
+			s.logger.Error("failed to mark operation pending", "error", err)
+			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
+		}
+		idempotencyLockAcquired = true
+
+		// Cleanup pending state on failure - ensures retries aren't blocked for 5 minutes
+		defer func() {
+			if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
+				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+					s.logger.Warn("failed to cleanup pending idempotency state",
+						"error", delErr,
+						"idempotency_key", idempotencyKeyStr)
+				}
+			}
+		}()
 	}
 
 	// First, check for idempotency without locking (read-only check)
@@ -369,12 +440,34 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		"transaction_id", transactionID)
 
 	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
-	return &pb.ExecuteLienResponse{
+	resp := &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
 		NewBalance:       toMoneyAmount(account.Balance()),
 		AvailableBalance: toMoneyAmount(availableMoney),
 		TransactionId:    transactionID,
-	}, nil
+	}
+
+	// Store successful result in Redis for future idempotency checks
+	if idempotencyKeyStr != "" && s.idempotencyService != nil {
+		responseData, marshalErr := proto.Marshal(resp)
+		if marshalErr == nil {
+			storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+				Key:         idempKey,
+				Status:      idempotency.StatusCompleted,
+				Data:        responseData,
+				CompletedAt: time.Now(),
+				TTL:         idempotencyResultTTL,
+			})
+			if storeErr != nil {
+				s.logger.Error("failed to store idempotency result", "error", storeErr)
+				// Continue - operation succeeded, caching is optimization
+			}
+		} else {
+			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
+		}
+	}
+
+	return resp, nil
 }
 
 // TerminateLien releases a reservation without executing

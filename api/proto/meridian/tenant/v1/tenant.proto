@@ -62,6 +62,8 @@ enum TenantStatus {
   TENANT_STATUS_PROVISIONING = 4;
   // TENANT_STATUS_PROVISIONING_FAILED means schema provisioning failed.
   TENANT_STATUS_PROVISIONING_FAILED = 5;
+  // TENANT_STATUS_PROVISIONING_PENDING means the tenant registration is queued for async provisioning.
+  TENANT_STATUS_PROVISIONING_PENDING = 6;
 }
 
 // Tenant represents a platform tenant for multi-tenant infrastructure.
@@ -122,6 +124,16 @@ message Tenant {
   // error_message contains details if status is PROVISIONING_FAILED.
   // Empty string for successfully provisioned tenants.
   string error_message = 11 [(buf.validate.field).string = {max_len: 2000}];
+
+  // slug is a URL-friendly identifier for the tenant (e.g., acme-bank).
+  // Must be a valid DNS label (RFC 1123): lowercase alphanumeric with hyphens,
+  // starting and ending with alphanumeric. Maximum length is 63 characters
+  // per DNS label specification. Used for subdomain construction and API routing.
+  string slug = 12 [(buf.validate.field).string = {
+    min_len: 3
+    max_len: 63
+    pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+  }];
 }
 
 // InitiateTenantRequest is the request to create a new tenant (BIAN: Initiate).
@@ -150,6 +162,17 @@ message InitiateTenantRequest {
 
   // metadata contains initial configuration for the tenant (optional).
   google.protobuf.Struct metadata = 5;
+
+  // slug is a URL-friendly identifier for the tenant (e.g., acme-bank).
+  // This field is optional and will be auto-generated from display_name if not provided.
+  // Must be a valid DNS label (RFC 1123): lowercase alphanumeric with hyphens,
+  // starting and ending with alphanumeric. Maximum length is 63 characters
+  // per DNS label specification. Used for subdomain construction and API routing.
+  string slug = 6 [(buf.validate.field).string = {
+    min_len: 3
+    max_len: 63
+    pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+  }];
 }
 
 // InitiateTenantResponse is the response after creating a tenant.

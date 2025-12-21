@@ -243,7 +243,7 @@ type TransactionFailed struct {
 	LogID         uuid.UUID
 	AccountID     string
 	FailureReason string
-	ErrorCode     string
+	ErrorCode     commonv1.ErrorCode
 	CorrelationID string
 	Timestamp     time.Time
 	Version       int64
@@ -270,7 +270,7 @@ func (e *TransactionFailed) ToProto() interface{} {
 		LogId:         e.LogID.String(),
 		AccountId:     e.AccountID,
 		FailureReason: e.FailureReason,
-		ErrorCode:     e.ErrorCode,
+		ErrorCodeEnum: e.ErrorCode,
 		CorrelationId: e.CorrelationID,
 		Timestamp:     timestamppb.New(e.Timestamp),
 		Version:       e.Version,

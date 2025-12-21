@@ -19,10 +19,13 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -34,6 +37,19 @@ const (
 	operationStatusSuccess         = "success"
 	operationStatusFailed          = "failed"
 	operationStatusInvalidCurrency = "invalid_currency"
+	opStatusIdempotent             = "idempotent"
+)
+
+// Redis idempotency constants
+const (
+	// idempotencyNamespace is the Redis key namespace for current-account idempotency
+	idempotencyNamespace = "current-account"
+
+	// idempotencyPendingTTL is how long a pending idempotency record remains valid
+	idempotencyPendingTTL = 5 * time.Minute
+
+	// idempotencyResultTTL is how long completed results are cached
+	idempotencyResultTTL = 24 * time.Hour
 )
 
 // Service implements the CurrentAccountService gRPC service
@@ -45,6 +61,7 @@ type Service struct {
 	finAcctClient       clients.FinancialAccountingClient
 	partyClient         clients.PartyClient
 	accountConfig       *config.AccountConfig
+	idempotencyService  idempotency.Service
 	logger              *slog.Logger
 	tracer              *observability.Tracer
 	depositOrchestrator *DepositOrchestrator // Handles deposit saga orchestration
@@ -85,6 +102,20 @@ func NewService(repo *persistence.Repository, lienRepo *persistence.LienReposito
 	}
 }
 
+// NewServiceWithIdempotency creates a new current account service with idempotency support.
+// This is primarily used for testing idempotency paths.
+func NewServiceWithIdempotency(repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service) *Service {
+	if repo == nil {
+		panic("repository cannot be nil")
+	}
+	return &Service{
+		repo:               repo,
+		lienRepo:           lienRepo,
+		idempotencyService: idempotencyService,
+		logger:             slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+}
+
 // NewServiceWithExistingClients creates a new service with pre-created client instances.
 // This constructor is useful when clients need to be shared with other components
 // (e.g., health checkers) to avoid creating duplicate connections.
@@ -95,6 +126,7 @@ func NewServiceWithExistingClients(
 	finAcctClient clients.FinancialAccountingClient,
 	partyClient clients.PartyClient,
 	accountConfig *config.AccountConfig,
+	idempotencyService idempotency.Service,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
 ) (*Service, error) {
@@ -123,6 +155,7 @@ func NewServiceWithExistingClients(
 		finAcctClient:       finAcctClient,
 		partyClient:         partyClient,
 		accountConfig:       accountConfig,
+		idempotencyService:  idempotencyService,
 		logger:              logger,
 		tracer:              tracer,
 		depositOrchestrator: depositOrchestrator,
@@ -318,22 +351,87 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}, nil
 }
 
-// ExecuteDeposit processes a deposit transaction.
+// ExecuteDeposit processes a deposit transaction with Redis-based idempotency protection.
 //
 // Concurrency: This method relies on optimistic locking in the repository layer
 // to handle concurrent modifications to the same account. If two requests attempt
 // to modify the same account simultaneously, one will succeed and the other will
 // receive ErrVersionConflict, which surfaces as an Internal error to the client.
-//
-// TODO(tech-debt): Consider implementing request-level idempotency or pessimistic
-// locking (FindByIDForUpdate) for high-contention accounts to provide better
-// conflict resolution and retry semantics.
+// Redis-based idempotency provides request deduplication for retried requests.
 func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
 		caobservability.RecordOperationDuration("execute_deposit", operationStatus, time.Since(start))
 	}()
+
+	// Get idempotency key if provided
+	var idempotencyKey string
+	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
+		idempotencyKey = req.IdempotencyKey.Key
+	}
+
+	// Build idempotency key structure for Redis
+	var idempKey idempotency.Key
+	var idempotencyLockAcquired bool
+	if idempotencyKey != "" && s.idempotencyService != nil {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			s.logger.Debug("tenant not found in context for idempotency key",
+				"account_id", req.AccountId)
+		}
+		idempKey = idempotency.Key{
+			TenantID:  string(tenantID),
+			Namespace: idempotencyNamespace,
+			Operation: "deposit",
+			EntityID:  req.AccountId,
+			RequestID: idempotencyKey,
+		}
+
+		// Check Redis for existing result
+		result, err := s.idempotencyService.Check(ctx, idempKey)
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
+			var cachedResp pb.ExecuteDepositResponse
+			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
+			if unmarshalErr == nil {
+				s.logger.Info("returning cached deposit response from Redis",
+					"account_id", req.AccountId,
+					"transaction_id", cachedResp.TransactionId,
+					"idempotency_key", idempotencyKey)
+				operationStatus = opStatusIdempotent
+				return &cachedResp, nil
+			}
+			s.logger.Warn("failed to unmarshal cached idempotency result",
+				"error", unmarshalErr)
+		} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+			s.logger.Error("idempotency check failed", "error", err)
+			return nil, status.Error(codes.Internal, "failed to check idempotency")
+		}
+
+		// Mark operation as pending (distributed lock)
+		if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+			// Check if another request is already processing this operation
+			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+				s.logger.Info("operation already in progress, please retry",
+					"idempotency_key", idempotencyKey)
+				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+			}
+			s.logger.Error("failed to mark operation pending", "error", err)
+			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
+		}
+		idempotencyLockAcquired = true
+
+		// Cleanup pending state on failure - ensures retries aren't blocked for 5 minutes
+		defer func() {
+			if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
+				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+					s.logger.Warn("failed to cleanup pending idempotency state",
+						"error", delErr,
+						"idempotency_key", idempotencyKey)
+				}
+			}
+		}()
+	}
 
 	// Retrieve account (context carries organization for multi-tenant routing)
 	account, err := s.repo.FindByID(ctx, req.AccountId)
@@ -409,6 +507,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// Generate transaction ID (full UUID required by position-keeping service)
 	transactionID := uuid.New().String()
 
+	var resp *pb.ExecuteDepositResponse
+
 	// If clients are not configured, fall back to simple save (backward compatibility)
 	if s.posKeepingClient == nil || s.finAcctClient == nil {
 		s.logger.Info("executing deposit without transaction orchestration (clients not configured)",
@@ -424,25 +524,45 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		caobservability.RecordDeposit(string(account.Balance().Currency()))
 		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
-		return &pb.ExecuteDepositResponse{
+		resp = &pb.ExecuteDepositResponse{
 			AccountId:        account.AccountID(),
 			TransactionId:    transactionID,
 			NewBalance:       toMoneyAmount(account.Balance()),
 			AvailableBalance: toMoneyAmount(account.AvailableBalance()),
 			Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
-		}, nil
+		}
+	} else {
+		// Orchestrate transaction with saga pattern using dedicated orchestrator
+		resp, err = s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID)
+		if err != nil {
+			operationStatus = "saga_failed"
+			return nil, err
+		}
+
+		// Record business metrics on success
+		caobservability.RecordDeposit(string(account.Balance().Currency()))
+		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 	}
 
-	// Orchestrate transaction with saga pattern
-	resp, err := s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID)
-	if err != nil {
-		operationStatus = "saga_failed"
-		return nil, err
+	// Store successful result in Redis for future idempotency checks
+	if idempotencyKey != "" && s.idempotencyService != nil {
+		responseData, marshalErr := proto.Marshal(resp)
+		if marshalErr == nil {
+			storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+				Key:         idempKey,
+				Status:      idempotency.StatusCompleted,
+				Data:        responseData,
+				CompletedAt: time.Now(),
+				TTL:         idempotencyResultTTL,
+			})
+			if storeErr != nil {
+				s.logger.Error("failed to store idempotency result", "error", storeErr)
+				// Continue - operation succeeded, caching is optimization
+			}
+		} else {
+			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
+		}
 	}
-
-	// Record business metrics on success
-	caobservability.RecordDeposit(string(account.Balance().Currency()))
-	caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 	return resp, nil
 }
