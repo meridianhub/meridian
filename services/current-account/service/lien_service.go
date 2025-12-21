@@ -197,15 +197,15 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 	}
 
-	lienAmountCents, _ := lienAmount.ToMinorUnits()
 	s.logger.Info("lien created",
 		"lien_id", lien.ID.String(),
 		"account_id", account.AccountID(),
-		"amount_cents", lienAmountCents,
+		"amount_cents", safeMinorUnits(lienAmount),
 		"payment_order_ref", req.PaymentOrderReference)
 
 	// Calculate new available balance after this lien
-	newAvailableBalance := availableBalance - lienAmountCents
+	// ToMinorUnitsUnchecked is safe here: amount was validated in transaction above (line 151)
+	newAvailableBalance := availableBalance - lienAmount.ToMinorUnitsUnchecked()
 	availableMoney, err := domain.NewMoney(string(account.Balance().Currency()), newAvailableBalance)
 	if err != nil {
 		// This should never happen if validation passed - log and return without available balance
@@ -362,11 +362,10 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	}
 
 	transactionID := fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8])
-	lienExecutedCents, _ := lien.Amount.ToMinorUnits()
 	s.logger.Info("lien executed",
 		"lien_id", lien.ID.String(),
 		"account_id", account.AccountID(),
-		"amount_cents", lienExecutedCents,
+		"amount_cents", safeMinorUnits(lien.Amount),
 		"transaction_id", transactionID)
 
 	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
