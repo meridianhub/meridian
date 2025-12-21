@@ -45,8 +45,19 @@ func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner
 	}
 }
 
+// provisioningHintFromStatus converts a tenant status to a provisioning hint string.
+// Returns "pending" for PROVISIONING_PENDING status, "active" otherwise.
+func provisioningHintFromStatus(status domain.Status) string {
+	if status == domain.StatusProvisioningPending {
+		return "pending"
+	}
+	return "active"
+}
+
 // InitiateTenant creates a new tenant in the platform registry (BIAN: Initiate).
-// If a provisioner is configured, this also provisions schemas for the tenant.
+// Returns immediately with 202 Accepted semantics (represented by successful response with PROVISIONING_PENDING status).
+// If a provisioner is configured, tenant is created with PROVISIONING_PENDING status and schema provisioning
+// happens asynchronously via background worker. If no provisioner is configured, tenant is created as ACTIVE.
 // If a Party client is configured, this also registers a corresponding Party in the
 // BIAN Party Reference Data Directory, establishing the link between platform
 // infrastructure (Tenant) and BIAN domain entities (Party.Organization).
@@ -66,7 +77,7 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 	// Determine initial status based on whether provisioning is configured
 	initialStatus := domain.StatusActive
 	if s.provisioner != nil {
-		initialStatus = domain.StatusProvisioning
+		initialStatus = domain.StatusProvisioningPending
 	}
 
 	// Create domain tenant
@@ -130,56 +141,22 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		"status", tenant.Status,
 		"party_id", tenant.PartyID)
 
-	// Provision schemas if provisioner is configured
+	// Schema provisioning will be handled asynchronously by the worker
 	if s.provisioner != nil {
-		s.logger.Info("provisioning schemas for tenant",
+		s.logger.Info("tenant created with provisioning_pending status - worker will handle provisioning",
 			"tenant_id", tenant.ID.String())
 
-		provErr := s.provisioner.ProvisionSchemas(ctx, tenant.ID)
-		if provErr != nil {
-			// Mark tenant as provisioning_failed
-			s.logger.Error("schema provisioning failed",
-				"tenant_id", tenant.ID.String(),
-				"error", provErr)
-
-			_, updateErr := s.repo.UpdateStatusWithError(ctx, tenant.ID, domain.StatusProvisioningFailed, provErr.Error(), tenant.Version)
-			if updateErr != nil {
-				s.logger.Error("failed to update tenant status after provisioning failure",
-					"tenant_id", tenant.ID.String(),
-					"error", updateErr)
-			}
-
-			// Update local tenant state for response
-			tenant.Status = domain.StatusProvisioningFailed
-			tenant.ErrorMessage = provErr.Error()
-			tenant.Version++
-
-			return nil, status.Errorf(codes.Internal, "schema provisioning failed: %v", provErr)
+		// Initialize provisioning status records (non-blocking, best-effort)
+		if err := s.createProvisioningStatusRecords(ctx, tenantID); err != nil {
+			s.logger.Warn("failed to create provisioning status records - worker will handle",
+				"tenant_id", tenantID.String(),
+				"error", err)
 		}
-
-		// Activate tenant after successful provisioning
-		updatedTenant, updateErr := s.repo.UpdateStatus(ctx, tenant.ID, domain.StatusActive, tenant.Version)
-		if updateErr != nil {
-			s.logger.Error("failed to activate tenant after provisioning",
-				"tenant_id", tenant.ID.String(),
-				"error", updateErr)
-			return nil, status.Errorf(codes.Internal, "failed to activate tenant after provisioning")
-		}
-
-		tenant = updatedTenant
-		s.logger.Info("tenant provisioned and activated",
-			"tenant_id", tenant.ID.String(),
-			"status", tenant.Status)
 	}
 
 	return &pb.InitiateTenantResponse{
-		Tenant: s.toProto(tenant),
-		ProvisioningHint: func() string {
-			if tenant.Status == domain.StatusProvisioningPending {
-				return "pending"
-			}
-			return "active"
-		}(),
+		Tenant:           s.toProto(tenant),
+		ProvisioningHint: provisioningHintFromStatus(tenant.Status),
 	}, nil
 }
 
@@ -422,4 +399,36 @@ func (s *Service) ReconcileMigrations(ctx context.Context, req *pb.ReconcileMigr
 		ReconciledCount: int32(reconciledCount),
 		Errors:          errs,
 	}, nil
+}
+
+// createProvisioningStatusRecords initializes tracking records for each schema that needs provisioning.
+// This is a best-effort operation - failure is logged but does not fail the tenant creation.
+// The async worker will handle provisioning regardless of whether these records exist.
+func (s *Service) createProvisioningStatusRecords(ctx context.Context, tenantID tenant.TenantID) error {
+	// Get the list of required schemas from the provisioner
+	schemas := s.provisioner.GetRequiredSchemas()
+	if len(schemas) == 0 {
+		s.logger.Debug("no schemas require provisioning",
+			"tenant_id", tenantID.String())
+		return nil
+	}
+
+	s.logger.Debug("creating provisioning status records",
+		"tenant_id", tenantID.String(),
+		"schema_count", len(schemas))
+
+	// Initialize provisioning status record with 'pending' state
+	// This creates the tenant_provisioning record with all service_schemas entries
+	if err := s.provisioner.InitializeProvisioningStatus(ctx, tenantID); err != nil {
+		s.logger.Error("failed to initialize provisioning status",
+			"tenant_id", tenantID.String(),
+			"error", err)
+		return err
+	}
+
+	s.logger.Debug("provisioning status records initialized",
+		"tenant_id", tenantID.String(),
+		"schemas", schemas)
+
+	return nil
 }

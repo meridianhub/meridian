@@ -203,7 +203,7 @@ message InitiateTenantRequest {
 // ### Scenario 2: Asynchronous Provisioning (provisioning_hint = "pending")
 // - Tenant registration accepted but provisioning is queued
 // - Tenant is not yet ready for use
-// - Client MUST poll GetTenantProvisioningStatus to track provisioning progress
+// - Client MUST poll RetrieveTenant to track provisioning progress
 // - Recommended polling: exponential backoff starting at 1s, max 30s interval
 //
 // Example response:
@@ -252,13 +252,13 @@ message InitiateTenantResponse {
   // provisioning_hint provides a simplified status indicator for clients.
   //
   // Possible values:
-  // - "pending": Tenant provisioning is queued/in-progress. Client MUST poll GetTenantProvisioningStatus.
+  // - "pending": Tenant provisioning is queued/in-progress. Client MUST poll RetrieveTenant.
   // - "active": Tenant is fully provisioned and ready to use. No polling needed.
   //
   // This field simplifies client logic by providing a binary decision point rather than
   // requiring clients to understand the full TenantStatus enum. Clients should use this
   // field to determine their next action:
-  // - "pending" → Poll GetTenantProvisioningStatus with exponential backoff
+  // - "pending" → Poll RetrieveTenant with exponential backoff
   // - "active" → Proceed to use tenant services immediately
   //
   // Note: This is a convenience field. The authoritative tenant status is always
