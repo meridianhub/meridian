@@ -4,19 +4,23 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
 
@@ -559,4 +563,280 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	if !strings.Contains(st.Message(), "overflow") && !strings.Contains(st.Message(), "must be positive") {
 		t.Errorf("Error should mention overflow or positivity, got: %s", st.Message())
 	}
+}
+
+// mockIdempotencyService implements idempotency.Service for testing
+type mockIdempotencyService struct {
+	mu        sync.Mutex
+	results   map[string]*idempotency.Result
+	pending   map[string]bool
+	checkErr  error
+	storeErr  error
+	deleteErr error
+}
+
+func newMockIdempotencyService() *mockIdempotencyService {
+	return &mockIdempotencyService{
+		results: make(map[string]*idempotency.Result),
+		pending: make(map[string]bool),
+	}
+}
+
+func (m *mockIdempotencyService) Check(_ context.Context, key idempotency.Key) (*idempotency.Result, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.checkErr != nil {
+		return nil, m.checkErr
+	}
+
+	keyStr := key.String()
+	if result, ok := m.results[keyStr]; ok {
+		// Match Redis behavior: return ErrOperationAlreadyProcessed for completed results
+		if result.Status == idempotency.StatusCompleted {
+			return result, idempotency.ErrOperationAlreadyProcessed
+		}
+		return result, nil
+	}
+	return nil, idempotency.ErrResultNotFound
+}
+
+func (m *mockIdempotencyService) MarkPending(_ context.Context, key idempotency.Key, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	keyStr := key.String()
+	if m.pending[keyStr] {
+		return idempotency.ErrOperationAlreadyProcessed
+	}
+	m.pending[keyStr] = true
+	return nil
+}
+
+func (m *mockIdempotencyService) StoreResult(_ context.Context, result idempotency.Result) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.storeErr != nil {
+		return m.storeErr
+	}
+
+	keyStr := result.Key.String()
+	m.results[keyStr] = &result
+	delete(m.pending, keyStr) // Clear pending when result is stored
+	return nil
+}
+
+func (m *mockIdempotencyService) Delete(_ context.Context, key idempotency.Key) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+
+	keyStr := key.String()
+	delete(m.results, keyStr)
+	delete(m.pending, keyStr)
+	return nil
+}
+
+func (m *mockIdempotencyService) Acquire(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
+	return nil // Not used in these tests
+}
+
+func (m *mockIdempotencyService) Release(_ context.Context, _ idempotency.Key, _ string) error {
+	return nil // Not used in these tests
+}
+
+func (m *mockIdempotencyService) Refresh(_ context.Context, _ idempotency.Key, _ string, _ time.Duration) error {
+	return nil // Not used in these tests
+}
+
+func (m *mockIdempotencyService) IsHeld(_ context.Context, _ idempotency.Key) (bool, error) {
+	return false, nil // Not used in these tests
+}
+
+// setResult pre-populates a cached result for testing cache hits
+func (m *mockIdempotencyService) setResult(key idempotency.Key, data []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.results[key.String()] = &idempotency.Result{
+		Key:         key,
+		Status:      idempotency.StatusCompleted,
+		Data:        data,
+		CompletedAt: time.Now(),
+	}
+}
+
+// setPending marks a key as pending for testing concurrent request rejection
+func (m *mockIdempotencyService) setPending(key idempotency.Key) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pending[key.String()] = true
+}
+
+// isPending checks if a key is in pending state
+func (m *mockIdempotencyService) isPending(key idempotency.Key) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pending[key.String()]
+}
+
+func TestExecuteDeposit_IdempotencyReturnsCachedResponse(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	mockIdemp := newMockIdempotencyService()
+	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+
+	// Create account
+	account, err := domain.NewCurrentAccount("ACC-IDEMP-001", "ACC-IDEMP-001", uuid.New().String(), "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Pre-populate cached response
+	idempKey := idempotency.Key{
+		TenantID:  svcTestTenantID,
+		Namespace: "current-account",
+		Operation: "deposit",
+		EntityID:  "ACC-IDEMP-001",
+		RequestID: "req-123",
+	}
+
+	// Create a cached deposit response
+	cachedResp := &pb.ExecuteDepositResponse{
+		AccountId:     "ACC-IDEMP-001",
+		TransactionId: "cached-tx-id",
+		Status:        pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
+		NewBalance: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 100, Nanos: 0},
+		},
+	}
+	cachedData, err := proto.Marshal(cachedResp)
+	require.NoError(t, err)
+	mockIdemp.setResult(idempKey, cachedData)
+
+	// Execute deposit with same idempotency key
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-IDEMP-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 50, Nanos: 0},
+		},
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "req-123"},
+	}
+
+	resp, err := svc.ExecuteDeposit(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, "cached-tx-id", resp.TransactionId, "should return cached transaction ID")
+	require.Equal(t, int64(100), resp.NewBalance.Amount.Units, "should return cached balance")
+}
+
+func TestExecuteDeposit_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	mockIdemp := newMockIdempotencyService()
+	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+
+	// Create account
+	account, err := domain.NewCurrentAccount("ACC-IDEMP-002", "ACC-IDEMP-002", uuid.New().String(), "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Mark operation as pending (simulating concurrent request)
+	idempKey := idempotency.Key{
+		TenantID:  svcTestTenantID,
+		Namespace: "current-account",
+		Operation: "deposit",
+		EntityID:  "ACC-IDEMP-002",
+		RequestID: "req-456",
+	}
+	mockIdemp.setPending(idempKey)
+
+	// Execute deposit with same idempotency key
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-IDEMP-002",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 50, Nanos: 0},
+		},
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "req-456"},
+	}
+
+	_, err = svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.Aborted, st.Code(), "should return Aborted for concurrent request")
+	require.Contains(t, st.Message(), "already in progress")
+}
+
+func TestExecuteDeposit_IdempotencyProceedsWithoutKey(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	mockIdemp := newMockIdempotencyService()
+	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+
+	// Create account
+	account, err := domain.NewCurrentAccount("ACC-IDEMP-003", "ACC-IDEMP-003", uuid.New().String(), "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Execute deposit without idempotency key
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-IDEMP-003",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 50, Nanos: 0},
+		},
+		// No IdempotencyKey
+	}
+
+	resp, err := svc.ExecuteDeposit(ctx, req)
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.TransactionId)
+	require.Equal(t, int64(50), resp.NewBalance.Amount.Units)
+}
+
+func TestExecuteDeposit_IdempotencyCleanupOnFailure(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	mockIdemp := newMockIdempotencyService()
+	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+
+	// Create account but with wrong currency
+	account, err := domain.NewCurrentAccount("ACC-IDEMP-004", "ACC-IDEMP-004", uuid.New().String(), "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	idempKey := idempotency.Key{
+		TenantID:  svcTestTenantID,
+		Namespace: "current-account",
+		Operation: "deposit",
+		EntityID:  "ACC-IDEMP-004",
+		RequestID: "req-789",
+	}
+
+	// Execute deposit with currency mismatch (will fail)
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-IDEMP-004",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "USD", Units: 50, Nanos: 0}, // Wrong currency
+		},
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "req-789"},
+	}
+
+	_, err = svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
+
+	// Verify pending state was cleaned up
+	require.False(t, mockIdemp.isPending(idempKey), "pending state should be cleaned up after failure")
 }
