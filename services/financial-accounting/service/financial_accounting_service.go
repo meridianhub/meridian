@@ -552,6 +552,12 @@ func (s *FinancialAccountingService) ListLedgerPostings(
 // 7. Publish domain event (LedgerPostingUpdatedEvent)
 // 8. Return updated posting
 //
+// Idempotency Note:
+// Unlike CaptureLedgerPosting where idempotency is optional (create operations
+// naturally fail on duplicate IDs), update operations REQUIRE idempotency keys
+// because state-machine transitions must be exactly-once. A duplicate update
+// could incorrectly transition an entity through multiple states.
+//
 // Error mapping:
 // - Invalid request fields -> codes.InvalidArgument
 // - Duplicate idempotency key -> codes.AlreadyExists
@@ -574,7 +580,9 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check idempotency (skip if service not configured - e.g., Redis unavailable in dev)
+	// Check idempotency - defensive nil check (constructor requires non-nil service)
+	// TODO(ledger-integrity#15): If an error occurs after MarkPending but before StoreResult,
+	// the pending marker is left orphaned until TTL expiry. Consider adding cleanup on error.
 	if s.idempotency != nil {
 		result, err := s.idempotency.Check(ctx, idempotencyKey)
 		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
@@ -589,6 +597,10 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 							"operation", "update-posting")
 						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
 					}
+					slog.Info("returning cached idempotent response",
+						"idempotency_key", req.IdempotencyKey.Key,
+						"operation", "update-posting",
+						"posting_id", req.GetId())
 					return &cachedResponse, nil
 				}
 				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
@@ -894,6 +906,12 @@ func (s *FinancialAccountingService) RetrieveFinancialBookingLog(
 // 6. Persist updated booking log
 // 7. Return updated booking log
 //
+// Idempotency Note:
+// Unlike InitiateFinancialBookingLog where idempotency is optional (create operations
+// naturally fail on duplicate IDs), update operations REQUIRE idempotency keys
+// because state-machine transitions must be exactly-once. A duplicate update
+// could incorrectly transition an entity through multiple states.
+//
 // Error mapping:
 // - Invalid request fields -> codes.InvalidArgument
 // - Duplicate idempotency key -> codes.AlreadyExists
@@ -916,7 +934,9 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check idempotency (skip if service not configured - e.g., Redis unavailable in dev)
+	// Check idempotency - defensive nil check (constructor requires non-nil service)
+	// TODO(ledger-integrity#15): If an error occurs after MarkPending but before StoreResult,
+	// the pending marker is left orphaned until TTL expiry. Consider adding cleanup on error.
 	if s.idempotency != nil {
 		result, err := s.idempotency.Check(ctx, idempotencyKey)
 		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
@@ -931,6 +951,10 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 							"operation", "update-booking-log")
 						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
 					}
+					slog.Info("returning cached idempotent response",
+						"idempotency_key", req.IdempotencyKey.Key,
+						"operation", "update-booking-log",
+						"booking_log_id", req.GetId())
 					return &cachedResponse, nil
 				}
 				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
