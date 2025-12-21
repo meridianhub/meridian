@@ -11,6 +11,7 @@ import (
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -153,10 +154,11 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 
 // mockIdempotencyService is a test double for idempotency.Service
 type mockIdempotencyService struct {
-	checkResult *idempotency.Result
-	checkErr    error
-	markErr     error
-	storeErr    error
+	checkResult  *idempotency.Result
+	checkErr     error
+	markErr      error
+	storeErr     error
+	storedResult *idempotency.Result // Captured for verification in tests
 }
 
 // Checker interface methods
@@ -171,7 +173,8 @@ func (m *mockIdempotencyService) MarkPending(_ context.Context, _ idempotency.Ke
 	return m.markErr
 }
 
-func (m *mockIdempotencyService) StoreResult(_ context.Context, _ idempotency.Result) error {
+func (m *mockIdempotencyService) StoreResult(_ context.Context, result idempotency.Result) error {
+	m.storedResult = &result
 	return m.storeErr
 }
 
@@ -1161,4 +1164,228 @@ func TestUpdateLedgerPosting_DefensiveTests(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCaptureLedgerPosting_IdempotencyResponseSerialization tests the protobuf serialization
+// and deserialization of idempotent responses per tech-debt-cleanup#2.
+func TestCaptureLedgerPosting_IdempotencyResponseSerialization(t *testing.T) {
+	validBookingLogID := uuid.New()
+	validAccountID := "ACC-123"
+	validValueDate := time.Now()
+
+	t.Run("cached response is deserialized and returned for duplicate request", func(t *testing.T) {
+		// Arrange - Create a properly serialized cached response
+		cachedPostingID := uuid.New()
+		cachedResponse := &financialaccountingv1.CaptureLedgerPostingResponse{
+			LedgerPosting: &financialaccountingv1.LedgerPosting{
+				Id:                    cachedPostingID.String(),
+				FinancialBookingLogId: validBookingLogID.String(),
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        100,
+					Nanos:        500000000,
+				},
+				AccountId: validAccountID,
+				ValueDate: timestamppb.New(validValueDate),
+				Status:    commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+				CreatedAt: timestamppb.Now(),
+			},
+		}
+
+		// Serialize the response just like the production code does
+		cachedData, err := proto.Marshal(cachedResponse)
+		require.NoError(t, err, "serialization should succeed")
+		require.NotEmpty(t, cachedData, "serialized data should not be empty")
+
+		// Set up the mock to return the cached result
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   cachedData,
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.CaptureLedgerPostingRequest{
+			FinancialBookingLogId: validBookingLogID.String(),
+			PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+			PostingAmount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        100,
+				Nanos:        500000000,
+			},
+			AccountId: validAccountID,
+			ValueDate: timestamppb.New(validValueDate),
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "duplicate-key",
+			},
+		}
+
+		// Act
+		resp, err := service.CaptureLedgerPosting(context.Background(), req)
+
+		// Assert - Should return the cached response, not an error
+		require.NoError(t, err, "should return cached response without error")
+		require.NotNil(t, resp, "response should not be nil")
+		require.NotNil(t, resp.LedgerPosting, "ledger posting should not be nil")
+		assert.Equal(t, cachedPostingID.String(), resp.LedgerPosting.Id, "should return the cached posting ID")
+		assert.Equal(t, validBookingLogID.String(), resp.LedgerPosting.FinancialBookingLogId)
+		assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_DEBIT, resp.LedgerPosting.PostingDirection)
+	})
+
+	t.Run("corrupted cached data returns AlreadyExists error", func(t *testing.T) {
+		// Arrange - Use invalid protobuf data
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   []byte("invalid-protobuf-garbage-data"),
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.CaptureLedgerPostingRequest{
+			FinancialBookingLogId: validBookingLogID.String(),
+			PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+			PostingAmount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        100,
+				Nanos:        0,
+			},
+			AccountId: validAccountID,
+			ValueDate: timestamppb.New(validValueDate),
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "corrupted-cache-key",
+			},
+		}
+
+		// Act
+		resp, err := service.CaptureLedgerPosting(context.Background(), req)
+
+		// Assert - Should return AlreadyExists error when deserialization fails
+		require.Error(t, err, "should return error for corrupted cache")
+		require.Nil(t, resp, "response should be nil")
+		st, ok := status.FromError(err)
+		require.True(t, ok, "should be a gRPC status error")
+		assert.Equal(t, codes.AlreadyExists, st.Code(), "should return AlreadyExists for corrupted cache")
+		assert.Contains(t, st.Message(), "already processed", "message should indicate duplicate processing")
+	})
+
+	t.Run("empty cached data returns AlreadyExists error", func(t *testing.T) {
+		// Arrange - Empty data but completed status
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   nil, // No cached data
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.CaptureLedgerPostingRequest{
+			FinancialBookingLogId: validBookingLogID.String(),
+			PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+			PostingAmount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        100,
+				Nanos:        0,
+			},
+			AccountId: validAccountID,
+			ValueDate: timestamppb.New(validValueDate),
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "empty-cache-key",
+			},
+		}
+
+		// Act
+		resp, err := service.CaptureLedgerPosting(context.Background(), req)
+
+		// Assert - Should return AlreadyExists error when no cached data
+		require.Error(t, err, "should return error for empty cache")
+		require.Nil(t, resp, "response should be nil")
+		st, ok := status.FromError(err)
+		require.True(t, ok, "should be a gRPC status error")
+		assert.Equal(t, codes.AlreadyExists, st.Code(), "should return AlreadyExists for empty cache")
+	})
+}
+
+// TestCaptureLedgerPosting_IdempotencySerializationRoundTrip verifies the full round-trip
+// of response serialization by using proto.Marshal and proto.Unmarshal directly.
+func TestCaptureLedgerPosting_IdempotencySerializationRoundTrip(t *testing.T) {
+	t.Run("protobuf serialization round-trip preserves all fields", func(t *testing.T) {
+		// Arrange - Create a response with all fields populated
+		postingID := uuid.New()
+		bookingLogID := uuid.New()
+		now := time.Now()
+
+		originalResponse := &financialaccountingv1.CaptureLedgerPostingResponse{
+			LedgerPosting: &financialaccountingv1.LedgerPosting{
+				Id:                    postingID.String(),
+				FinancialBookingLogId: bookingLogID.String(),
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "EUR",
+					Units:        999,
+					Nanos:        123456789,
+				},
+				AccountId:     "ACC-456",
+				ValueDate:     timestamppb.New(now),
+				Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+				PostingResult: "test-result",
+				CreatedAt:     timestamppb.New(now),
+			},
+		}
+
+		// Act - Serialize
+		data, err := proto.Marshal(originalResponse)
+		require.NoError(t, err, "serialization should succeed")
+		require.NotEmpty(t, data, "serialized data should not be empty")
+
+		// Act - Deserialize
+		var deserializedResponse financialaccountingv1.CaptureLedgerPostingResponse
+		err = proto.Unmarshal(data, &deserializedResponse)
+		require.NoError(t, err, "deserialization should succeed")
+
+		// Assert - All fields preserved
+		require.NotNil(t, deserializedResponse.LedgerPosting, "posting should not be nil")
+		assert.Equal(t, postingID.String(), deserializedResponse.LedgerPosting.Id)
+		assert.Equal(t, bookingLogID.String(), deserializedResponse.LedgerPosting.FinancialBookingLogId)
+		assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_CREDIT, deserializedResponse.LedgerPosting.PostingDirection)
+		assert.Equal(t, "EUR", deserializedResponse.LedgerPosting.PostingAmount.CurrencyCode)
+		assert.Equal(t, int64(999), deserializedResponse.LedgerPosting.PostingAmount.Units)
+		assert.Equal(t, int32(123456789), deserializedResponse.LedgerPosting.PostingAmount.Nanos)
+		assert.Equal(t, "ACC-456", deserializedResponse.LedgerPosting.AccountId)
+		assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, deserializedResponse.LedgerPosting.Status)
+		assert.Equal(t, "test-result", deserializedResponse.LedgerPosting.PostingResult)
+	})
+
+	t.Run("protobuf serialization handles empty response gracefully", func(t *testing.T) {
+		// Arrange - Empty response
+		originalResponse := &financialaccountingv1.CaptureLedgerPostingResponse{
+			LedgerPosting: &financialaccountingv1.LedgerPosting{},
+		}
+
+		// Act - Serialize
+		data, err := proto.Marshal(originalResponse)
+		require.NoError(t, err, "serialization of empty response should succeed")
+
+		// Act - Deserialize
+		var deserializedResponse financialaccountingv1.CaptureLedgerPostingResponse
+		err = proto.Unmarshal(data, &deserializedResponse)
+		require.NoError(t, err, "deserialization of empty response should succeed")
+
+		// Assert
+		assert.NotNil(t, deserializedResponse.LedgerPosting, "posting should not be nil")
+	})
 }

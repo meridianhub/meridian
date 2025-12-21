@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
@@ -161,10 +163,22 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		result, err := s.idempotency.Check(ctx, idempotencyKey)
 		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
 			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				if result != nil && result.Status == idempotency.StatusCompleted {
-					// TODO(tech-debt-cleanup#2): Deserialize cached response from result.Data
-					return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+				if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
+					// Deserialize cached response from protobuf
+					var cachedResponse financialaccountingv1.CaptureLedgerPostingResponse
+					if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
+						// Log deserialization error but fall back to generic AlreadyExists response
+						slog.Error("failed to deserialize cached idempotency response",
+							"error", unmarshalErr,
+							"idempotency_key", req.IdempotencyKey.Key,
+							"operation", "capture-posting")
+						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+					}
+					// Return cached response for idempotent behavior
+					return &cachedResponse, nil
 				}
+				// No cached data available - return generic AlreadyExists
+				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
 			}
 			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
 		}
@@ -246,17 +260,31 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
 		}
 
-		// TODO(tech-debt-cleanup#2): Serialize response to bytes for storage
-		result := idempotency.Result{
-			Key:         idempotencyKey,
-			Status:      idempotency.StatusCompleted,
-			Data:        nil, // TODO(tech-debt-cleanup#2): Serialize response
-			CompletedAt: time.Now(),
-			TTL:         ttl,
-		}
+		// Serialize response using protobuf for idempotent storage
+		responseData, marshalErr := proto.Marshal(response)
+		if marshalErr != nil {
+			// Log serialization error but don't fail the operation - response was successful
+			slog.Error("failed to serialize response for idempotency cache",
+				"error", marshalErr,
+				"idempotency_key", req.IdempotencyKey.Key,
+				"operation", "capture-posting")
+		} else {
+			result := idempotency.Result{
+				Key:         idempotencyKey,
+				Status:      idempotency.StatusCompleted,
+				Data:        responseData,
+				CompletedAt: time.Now(),
+				TTL:         ttl,
+			}
 
-		// Store result in idempotency cache (best-effort, failures are logged but don't fail request)
-		_ = s.idempotency.StoreResult(ctx, result)
+			// Store result in idempotency cache (best-effort, failures are logged but don't fail request)
+			if storeErr := s.idempotency.StoreResult(ctx, result); storeErr != nil {
+				slog.Error("failed to store idempotency result",
+					"error", storeErr,
+					"idempotency_key", req.IdempotencyKey.Key,
+					"operation", "capture-posting")
+			}
+		}
 	}
 
 	return response, nil
