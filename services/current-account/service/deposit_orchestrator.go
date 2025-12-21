@@ -71,8 +71,22 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) *DepositOrchestrator 
 }
 
 // Orchestrate executes the deposit saga with compensation on failure.
-// The saga steps (log_position, post_ledger, save_account) are executed strictly sequentially.
-// Compensation is also sequential, running in reverse order (LIFO) on failure.
+//
+// Saga Steps (executed strictly sequentially - no concurrent execution):
+//  1. log_position: Create financial position log in PositionKeeping service
+//  2. post_ledger: Create booking log and dual ledger postings in FinancialAccounting service
+//  3. save_account: Persist updated account balance to database
+//
+// The saga uses the SagaOrchestrator which ensures steps run one at a time. Domain objects
+// (account, amount) are safely shared across steps since only one step executes at a time.
+//
+// Compensation Order (LIFO - Last In, First Out):
+//   - save_account fails → compensate post_ledger (reverse postings), then log_position
+//   - post_ledger fails → compensate log_position only
+//   - log_position fails → no compensation needed
+//
+// Thread Safety: This method is not thread-safe for concurrent calls with the same account.
+// Callers should ensure proper synchronization at the service layer.
 func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.CurrentAccount, amount domain.Money, transactionID string) (*pb.ExecuteDepositResponse, error) {
 	sagaStart := time.Now()
 	sagaStatus := operationStatusSuccess

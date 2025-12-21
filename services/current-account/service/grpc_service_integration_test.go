@@ -1,4 +1,3 @@
-//nolint:staticcheck // Uses AmountCents() for test assertions (deprecated for backward compatibility)
 package service
 
 import (
@@ -35,6 +34,16 @@ var (
 	errFinancialAccountingUnavailable = errors.New("financial accounting service unavailable")
 	errIntentionalTestFailure         = errors.New("intentional failure for compensation test")
 )
+
+// balanceCents returns the balance as cents for test assertions.
+// Panics on error (should never happen in tests with valid Money).
+func balanceCents(m domain.Money) int64 {
+	cents, err := m.ToMinorUnits()
+	if err != nil {
+		panic("ToMinorUnits failed: " + err.Error())
+	}
+	return cents
+}
 
 // Mock PositionKeeping Client
 
@@ -244,7 +253,7 @@ func (m *mockFinancialAccountingClient) CaptureLedgerPosting(_ context.Context, 
 	}
 
 	// Track debit vs credit postings separately (only on success)
-	if req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT {
+	if req.PostingDirection == commonpb.PostingDirection_POSTING_DIRECTION_DEBIT { //nolint:staticcheck // QF1003 suggests switch but if-else is clearer for binary cases
 		m.debitCaptureCalls++
 		// Only count as compensation if this is a reversal (idempotency key contains "COMP")
 		if req.IdempotencyKey != nil && len(req.IdempotencyKey.Key) > 4 && req.IdempotencyKey.Key[:4] == "COMP" {
@@ -356,13 +365,25 @@ func createTestDepositRequest(accountID string, units int64, nanos int32) *pb.Ex
 	}
 }
 
+// testLogger creates a test logger for use in tests.
+// Returns the same logger instance to be shared across service and orchestrator.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stdout, nil))
+}
+
 // testDepositOrchestrator creates a DepositOrchestrator for testing with the provided dependencies.
 func testDepositOrchestrator(repo *persistence.Repository, posKeeping clients.PositionKeepingClient, finAcct clients.FinancialAccountingClient) *DepositOrchestrator {
+	return testDepositOrchestratorWithConfig(repo, posKeeping, finAcct, nil)
+}
+
+// testDepositOrchestratorWithConfig creates a DepositOrchestrator with optional AccountConfig.
+func testDepositOrchestratorWithConfig(repo *persistence.Repository, posKeeping clients.PositionKeepingClient, finAcct clients.FinancialAccountingClient, acctConfig *config.AccountConfig) *DepositOrchestrator {
 	return NewDepositOrchestrator(DepositOrchestratorConfig{
-		Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		Logger:           testLogger(),
 		Repo:             repo,
 		PosKeepingClient: posKeeping,
 		FinAcctClient:    finAcct,
+		AccountConfig:    acctConfig,
 	})
 }
 
@@ -394,7 +415,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 		repo:                repo,
 		posKeepingClient:    mockPosKeeping,
 		finAcctClient:       mockFinAcct,
-		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		logger:              testLogger(),
 		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
@@ -416,7 +437,7 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	// Verify account persisted correctly
 	updatedAccount, err := repo.FindByID(ctx, "ACC-001")
 	require.NoError(t, err)
-	assert.Equal(t, int64(10050), updatedAccount.Balance().AmountCents(), "Balance should be £100.50 = 10050 cents")
+	assert.Equal(t, int64(10050), balanceCents(updatedAccount.Balance()), "Balance should be £100.50 = 10050 cents")
 
 	// Verify service calls
 	assert.Equal(t, 1, mockPosKeeping.initiateCalls, "PositionKeeping InitiateFinancialPositionLog should be called once")
@@ -445,7 +466,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-002")
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := balanceCents(account.Balance())
 
 	// Create mock clients - PositionKeeping configured to fail on initiate
 	mockPosKeeping := &mockPositionKeepingClient{
@@ -459,7 +480,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 		repo:                repo,
 		posKeepingClient:    mockPosKeeping,
 		finAcctClient:       mockFinAcct,
-		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		logger:              testLogger(),
 		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
@@ -484,7 +505,7 @@ func TestExecuteDeposit_WithOrchestration_PositionKeepingFailure(t *testing.T) {
 	updatedAccount, err := repo.FindByID(ctx, "ACC-002")
 	require.NoError(t, err)
 	// Account balance should be unchanged because save_account is the final step
-	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
+	assert.Equal(t, originalBalance, balanceCents(updatedAccount.Balance()),
 		"Account balance should remain unchanged when external services fail")
 
 	// Verify service calls
@@ -515,7 +536,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-003")
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := balanceCents(account.Balance())
 
 	// Create mock clients - FinancialAccounting configured to fail
 	mockPosKeeping := &mockPositionKeepingClient{}
@@ -529,7 +550,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 		repo:                repo,
 		posKeepingClient:    mockPosKeeping,
 		finAcctClient:       mockFinAcct,
-		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		logger:              testLogger(),
 		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
@@ -553,7 +574,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 	// so the balance should remain unchanged
 	updatedAccount, err := repo.FindByID(ctx, "ACC-003")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
+	assert.Equal(t, originalBalance, balanceCents(updatedAccount.Balance()),
 		"Account balance should remain unchanged when external services fail")
 
 	// Verify service calls
@@ -738,7 +759,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-004")
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := balanceCents(account.Balance())
 
 	// Create mock that tracks compensation
 	mockPosKeeping := &mockPositionKeepingClient{}
@@ -752,7 +773,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 		repo:                repo,
 		posKeepingClient:    mockPosKeeping,
 		finAcctClient:       mockFinAcct,
-		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		logger:              testLogger(),
 		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
@@ -771,7 +792,7 @@ func TestExecuteDeposit_WithOrchestration_CompensationOrder(t *testing.T) {
 	// With the fixed saga ordering, the account is never saved if external services fail
 	updatedAccount, err := repo.FindByID(ctx, "ACC-004")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
+	assert.Equal(t, originalBalance, balanceCents(updatedAccount.Balance()),
 		"Account balance should remain unchanged when external services fail")
 }
 
@@ -795,7 +816,7 @@ func TestExecuteDeposit_WithOrchestration_ContextPropagation(t *testing.T) {
 		repo:                repo,
 		posKeepingClient:    mockPosKeeping,
 		finAcctClient:       mockFinAcct,
-		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		logger:              testLogger(),
 		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
@@ -848,7 +869,7 @@ func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
 	// Verify account persisted
 	updatedAccount, err := repo.FindByID(ctx, "ACC-006")
 	require.NoError(t, err)
-	assert.Equal(t, int64(20000), updatedAccount.Balance().AmountCents())
+	assert.Equal(t, int64(20000), balanceCents(updatedAccount.Balance()))
 }
 
 // Double-Entry Bookkeeping Tests (with AccountConfig)
@@ -879,18 +900,12 @@ func TestExecuteDeposit_DoubleEntry_CreatesDualPostings(t *testing.T) {
 
 	// Create service with AccountConfig (double-entry mode)
 	svc := &Service{
-		repo:             repo,
-		posKeepingClient: mockPosKeeping,
-		finAcctClient:    mockFinAcct,
-		accountConfig:    acctConfig,
-		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
-			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-			Repo:             repo,
-			PosKeepingClient: mockPosKeeping,
-			FinAcctClient:    mockFinAcct,
-			AccountConfig:    acctConfig,
-		}),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		accountConfig:       acctConfig,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestratorWithConfig(repo, mockPosKeeping, mockFinAcct, acctConfig),
 	}
 
 	// Execute deposit
@@ -935,18 +950,12 @@ func TestExecuteDeposit_DoubleEntry_SameBookingLogForBothPostings(t *testing.T) 
 
 	// Create service with AccountConfig
 	svc := &Service{
-		repo:             repo,
-		posKeepingClient: mockPosKeeping,
-		finAcctClient:    mockFinAcct,
-		accountConfig:    acctConfig,
-		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
-			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-			Repo:             repo,
-			PosKeepingClient: mockPosKeeping,
-			FinAcctClient:    mockFinAcct,
-			AccountConfig:    acctConfig,
-		}),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		accountConfig:       acctConfig,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestratorWithConfig(repo, mockPosKeeping, mockFinAcct, acctConfig),
 	}
 
 	// Execute deposit
@@ -981,7 +990,7 @@ func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-DE-003")
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := balanceCents(account.Balance())
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 
@@ -995,18 +1004,12 @@ func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:             repo,
-		posKeepingClient: mockPosKeeping,
-		finAcctClient:    mockFinAcct,
-		accountConfig:    acctConfig,
-		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
-			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-			Repo:             repo,
-			PosKeepingClient: mockPosKeeping,
-			FinAcctClient:    mockFinAcct,
-			AccountConfig:    acctConfig,
-		}),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		accountConfig:       acctConfig,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestratorWithConfig(repo, mockPosKeeping, mockFinAcct, acctConfig),
 	}
 
 	// Execute deposit
@@ -1035,7 +1038,7 @@ func TestExecuteDeposit_DoubleEntry_CompensatesOnFailure(t *testing.T) {
 	// Verify account balance unchanged (compensation should have reversed)
 	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-003")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
+	assert.Equal(t, originalBalance, balanceCents(updatedAccount.Balance()),
 		"Account balance should remain unchanged after compensation")
 }
 
@@ -1050,7 +1053,7 @@ func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-DE-005")
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := balanceCents(account.Balance())
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 
@@ -1064,18 +1067,12 @@ func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:             repo,
-		posKeepingClient: mockPosKeeping,
-		finAcctClient:    mockFinAcct,
-		accountConfig:    acctConfig,
-		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
-			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-			Repo:             repo,
-			PosKeepingClient: mockPosKeeping,
-			FinAcctClient:    mockFinAcct,
-			AccountConfig:    acctConfig,
-		}),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		accountConfig:       acctConfig,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestratorWithConfig(repo, mockPosKeeping, mockFinAcct, acctConfig),
 	}
 
 	// Execute deposit
@@ -1106,7 +1103,7 @@ func TestExecuteDeposit_DoubleEntry_DebitPostingFailure(t *testing.T) {
 	// Verify account balance unchanged
 	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-005")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
+	assert.Equal(t, originalBalance, balanceCents(updatedAccount.Balance()),
 		"Account balance should remain unchanged")
 }
 
@@ -1119,7 +1116,7 @@ func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	account := createTestAccount(t, ctx, repo, "ACC-DE-006")
-	originalBalance := account.Balance().AmountCents()
+	originalBalance := balanceCents(account.Balance())
 
 	mockPosKeeping := &mockPositionKeepingClient{}
 
@@ -1133,18 +1130,12 @@ func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:             repo,
-		posKeepingClient: mockPosKeeping,
-		finAcctClient:    mockFinAcct,
-		accountConfig:    acctConfig,
-		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
-			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-			Repo:             repo,
-			PosKeepingClient: mockPosKeeping,
-			FinAcctClient:    mockFinAcct,
-			AccountConfig:    acctConfig,
-		}),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		accountConfig:       acctConfig,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestratorWithConfig(repo, mockPosKeeping, mockFinAcct, acctConfig),
 	}
 
 	// Execute deposit
@@ -1178,7 +1169,7 @@ func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
 	// Verify account balance unchanged
 	updatedAccount, err := repo.FindByID(ctx, "ACC-DE-006")
 	require.NoError(t, err)
-	assert.Equal(t, originalBalance, updatedAccount.Balance().AmountCents(),
+	assert.Equal(t, originalBalance, balanceCents(updatedAccount.Balance()),
 		"Account balance should remain unchanged after failure and compensation")
 }
 
@@ -1202,7 +1193,7 @@ func TestExecuteDeposit_SingleEntry_BackwardCompatibility(t *testing.T) {
 		posKeepingClient:    mockPosKeeping,
 		finAcctClient:       mockFinAcct,
 		accountConfig:       nil, // No AccountConfig - single-entry mode
-		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		logger:              testLogger(),
 		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
 	}
 
@@ -1246,18 +1237,12 @@ func TestExecuteDeposit_DoubleEntry_ClearingAccountUsedForDebit(t *testing.T) {
 
 	// Create service with specific clearing account
 	svc := &Service{
-		repo:             repo,
-		posKeepingClient: mockPosKeeping,
-		finAcctClient:    mockFinAcct,
-		accountConfig:    acctConfig,
-		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		depositOrchestrator: NewDepositOrchestrator(DepositOrchestratorConfig{
-			Logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
-			Repo:             repo,
-			PosKeepingClient: mockPosKeeping,
-			FinAcctClient:    mockFinAcct,
-			AccountConfig:    acctConfig,
-		}),
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		accountConfig:       acctConfig,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestratorWithConfig(repo, mockPosKeeping, mockFinAcct, acctConfig),
 	}
 
 	// Execute deposit

@@ -60,6 +60,7 @@ func BenchmarkInitiatePaymentOrder(b *testing.B) {
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
 		GatewayAccountConfig:      benchGatewayAccountConfig(),
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    benchLogger(),
 		// Use fast retry config to avoid delays in benchmarks
 		LienExecutionRetryConfig: &sharedclients.RetryConfig{
@@ -106,7 +107,7 @@ func BenchmarkInitiatePaymentOrder(b *testing.B) {
 // This measures the read path for fetching payment order details.
 func BenchmarkRetrievePaymentOrder(b *testing.B) {
 	repo := NewMockRepository()
-	svc, err := NewService(repo)
+	svc, err := NewService(repo, NewMockIdempotencyService())
 	if err != nil {
 		b.Fatalf("failed to create service: %v", err)
 	}
@@ -156,7 +157,7 @@ func BenchmarkListPaymentOrders(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			repo := NewMockRepository()
-			svc, err := NewService(repo)
+			svc, err := NewService(repo, NewMockIdempotencyService())
 			if err != nil {
 				b.Fatalf("failed to create service: %v", err)
 			}
@@ -223,6 +224,7 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
 		GatewayAccountConfig:      benchGatewayAccountConfig(),
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    benchLogger(),
 		LienExecutionRetryConfig: &sharedclients.RetryConfig{
 			MaxRetries:      1,
@@ -303,6 +305,7 @@ func BenchmarkCancelPaymentOrder(b *testing.B) {
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            mockGateway,
 		GatewayAccountConfig:      benchGatewayAccountConfig(),
+		IdempotencyService:        NewMockIdempotencyService(),
 		Logger:                    benchLogger(),
 	})
 	if err != nil {

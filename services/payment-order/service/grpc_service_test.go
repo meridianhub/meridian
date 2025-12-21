@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests use deprecated AmountCents() for backward compatibility verification
 package service
 
 import (
@@ -22,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -270,6 +270,113 @@ func (m *MockRepository) Update(_ context.Context, po *domain.PaymentOrder) erro
 	return nil
 }
 
+// MockIdempotencyService implements idempotency.Service for testing.
+// By default, it simulates an empty cache (returns ErrResultNotFound on Check).
+type MockIdempotencyService struct {
+	mu           sync.RWMutex
+	results      map[string]*idempotency.Result
+	checkErr     error
+	storeErr     error
+	markPendErr  error
+	acquireErr   error
+	releaseErr   error
+	refreshErr   error
+	isHeldResult bool
+	isHeldErr    error
+}
+
+// NewMockIdempotencyService creates a new mock idempotency service with an empty cache.
+func NewMockIdempotencyService() *MockIdempotencyService {
+	return &MockIdempotencyService{
+		results: make(map[string]*idempotency.Result),
+	}
+}
+
+func (m *MockIdempotencyService) Check(_ context.Context, key idempotency.Key) (*idempotency.Result, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.checkErr != nil {
+		return nil, m.checkErr
+	}
+
+	result, ok := m.results[key.String()]
+	if !ok {
+		return nil, idempotency.ErrResultNotFound
+	}
+
+	// If completed, return with ErrOperationAlreadyProcessed per the interface contract
+	if result.Status == idempotency.StatusCompleted {
+		return result, idempotency.ErrOperationAlreadyProcessed
+	}
+
+	return result, nil
+}
+
+func (m *MockIdempotencyService) MarkPending(_ context.Context, key idempotency.Key, ttl time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.markPendErr != nil {
+		return m.markPendErr
+	}
+
+	m.results[key.String()] = &idempotency.Result{
+		Key:    key,
+		Status: idempotency.StatusPending,
+		TTL:    ttl,
+	}
+	return nil
+}
+
+func (m *MockIdempotencyService) StoreResult(_ context.Context, result idempotency.Result) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.storeErr != nil {
+		return m.storeErr
+	}
+
+	m.results[result.Key.String()] = &result
+	return nil
+}
+
+func (m *MockIdempotencyService) Delete(_ context.Context, key idempotency.Key) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.results, key.String())
+	return nil
+}
+
+func (m *MockIdempotencyService) Acquire(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
+	if m.acquireErr != nil {
+		return m.acquireErr
+	}
+	return nil
+}
+
+func (m *MockIdempotencyService) Release(_ context.Context, _ idempotency.Key, _ string) error {
+	if m.releaseErr != nil {
+		return m.releaseErr
+	}
+	return nil
+}
+
+func (m *MockIdempotencyService) Refresh(_ context.Context, _ idempotency.Key, _ string, _ time.Duration) error {
+	if m.refreshErr != nil {
+		return m.refreshErr
+	}
+	return nil
+}
+
+func (m *MockIdempotencyService) IsHeld(_ context.Context, _ idempotency.Key) (bool, error) {
+	if m.isHeldErr != nil {
+		return false, m.isHeldErr
+	}
+	return m.isHeldResult, nil
+}
+
 // MockCurrentAccountClient implements CurrentAccountClient for testing
 type MockCurrentAccountClient struct {
 	initiateLienResp   *currentaccountv1.InitiateLienResponse
@@ -428,19 +535,29 @@ func newInitiateRequest(idempotencyKey, debtorAccountID, creditorRef string, amo
 // Test NewService constructor
 func TestNewService(t *testing.T) {
 	repo := NewMockRepository()
-	svc, err := NewService(repo)
+	idempSvc := NewMockIdempotencyService()
+	svc, err := NewService(repo, idempSvc)
 
 	require.NoError(t, err)
 	assert.NotNil(t, svc)
 	assert.NotNil(t, svc.repo)
 	assert.NotNil(t, svc.logger)
+	assert.NotNil(t, svc.idempotencyService)
 }
 
 func TestNewService_NilRepository_ReturnsError(t *testing.T) {
-	svc, err := NewService(nil)
+	svc, err := NewService(nil, NewMockIdempotencyService())
 
 	assert.Nil(t, svc)
 	assert.ErrorIs(t, err, ErrRepositoryNil)
+}
+
+func TestNewService_NilIdempotencyService_ReturnsError(t *testing.T) {
+	repo := NewMockRepository()
+	svc, err := NewService(repo, nil)
+
+	assert.Nil(t, svc)
+	assert.ErrorIs(t, err, ErrIdempotencyServiceNil)
 }
 
 // Test NewServiceWithConfig
@@ -495,6 +612,18 @@ func TestNewServiceWithConfig(t *testing.T) {
 			},
 			wantErr: ErrGatewayAccountConfigNil,
 		},
+		{
+			name: "nil idempotency service returns error",
+			config: Config{
+				Repository:                NewMockRepository(),
+				CurrentAccountClient:      &MockCurrentAccountClient{},
+				FinancialAccountingClient: &MockFinancialAccountingClient{},
+				PaymentGateway:            &MockPaymentGateway{},
+				GatewayAccountConfig:      testGatewayAccountConfig(),
+				IdempotencyService:        nil,
+			},
+			wantErr: ErrIdempotencyServiceNil,
+		},
 	}
 
 	for _, tt := range tests {
@@ -513,6 +642,7 @@ func TestNewServiceWithConfig_Success(t *testing.T) {
 		FinancialAccountingClient: &MockFinancialAccountingClient{},
 		PaymentGateway:            &MockPaymentGateway{},
 		GatewayAccountConfig:      testGatewayAccountConfig(),
+		IdempotencyService:        NewMockIdempotencyService(),
 	}
 
 	svc, err := NewServiceWithConfig(cfg)
@@ -521,6 +651,7 @@ func TestNewServiceWithConfig_Success(t *testing.T) {
 	assert.NotNil(t, svc)
 	assert.NotNil(t, svc.financialAccountingClient)
 	assert.NotNil(t, svc.gatewayAccountConfig)
+	assert.NotNil(t, svc.idempotencyService)
 }
 
 // testGatewayAccountConfig creates a test gateway account configuration.
@@ -550,7 +681,7 @@ func testOrchestrator(repo persistence.Repository, caClient CurrentAccountClient
 // Test InitiatePaymentOrder
 func TestInitiatePaymentOrder_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := newInitiateRequest("test-key-1", "ACC-12345678", "GB82WEST12345698765432", 10000)
 
@@ -567,7 +698,7 @@ func TestInitiatePaymentOrder_Success(t *testing.T) {
 
 func TestInitiatePaymentOrder_Idempotent(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := newInitiateRequest("idempotent-key", "ACC-12345678", "GB82WEST12345698765432", 10000)
 
@@ -585,7 +716,7 @@ func TestInitiatePaymentOrder_Idempotent(t *testing.T) {
 
 func TestInitiatePaymentOrder_InvalidAmount(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Zero amount
 	req := newInitiateRequest("test-key", "ACC-12345678", "GB82WEST12345698765432", 0)
@@ -601,7 +732,7 @@ func TestInitiatePaymentOrder_InvalidAmount(t *testing.T) {
 
 func TestInitiatePaymentOrder_NegativeAmount(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Negative amount
 	req := &pb.InitiatePaymentOrderRequest{
@@ -634,7 +765,7 @@ var ErrLienServiceUnavailable = errors.New("lien service unavailable")
 func TestInitiatePaymentOrder_RepositoryError(t *testing.T) {
 	repo := NewMockRepository()
 	repo.createErr = ErrDatabaseError
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := newInitiateRequest("test-key", "ACC-12345678", "GB82WEST12345698765432", 10000)
 
@@ -649,7 +780,7 @@ func TestInitiatePaymentOrder_RepositoryError(t *testing.T) {
 // Test RetrievePaymentOrder
 func TestRetrievePaymentOrder_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create a payment order first
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -669,7 +800,7 @@ func TestRetrievePaymentOrder_Success(t *testing.T) {
 
 func TestRetrievePaymentOrder_NotFound(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := &pb.RetrievePaymentOrderRequest{
 		PaymentOrderId: uuid.New().String(),
@@ -685,7 +816,7 @@ func TestRetrievePaymentOrder_NotFound(t *testing.T) {
 
 func TestRetrievePaymentOrder_InvalidID(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := &pb.RetrievePaymentOrderRequest{
 		PaymentOrderId: "not-a-uuid",
@@ -702,7 +833,7 @@ func TestRetrievePaymentOrder_InvalidID(t *testing.T) {
 // Test CancelPaymentOrder
 func TestCancelPaymentOrder_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create a payment order in INITIATED state
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -724,7 +855,7 @@ func TestCancelPaymentOrder_Success(t *testing.T) {
 
 func TestCancelPaymentOrder_AlreadyCancelled_Idempotent(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create and cancel a payment order
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -747,7 +878,7 @@ func TestCancelPaymentOrder_AlreadyCancelled_Idempotent(t *testing.T) {
 
 func TestCancelPaymentOrder_NotCancellable(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create a payment order and move it to EXECUTING state
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -773,7 +904,7 @@ func TestCancelPaymentOrder_NotCancellable(t *testing.T) {
 
 func TestCancelPaymentOrder_MissingReason(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
@@ -808,6 +939,7 @@ func TestCancelPaymentOrder_ReleasesLien(t *testing.T) {
 	svc := &Service{
 		repo:                 repo,
 		currentAccountClient: caClient,
+		idempotencyService:   NewMockIdempotencyService(),
 		logger:               testLogger(),
 	}
 
@@ -852,6 +984,7 @@ func TestUpdatePaymentOrder_Settled(t *testing.T) {
 		currentAccountClient:      caClient,
 		financialAccountingClient: faClient,
 		gatewayAccountConfig:      gwConfig,
+		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
 		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
@@ -904,6 +1037,7 @@ func TestUpdatePaymentOrder_Settled_LienExecutionStatusTracking(t *testing.T) {
 		currentAccountClient:      caClient,
 		financialAccountingClient: faClient,
 		gatewayAccountConfig:      gwConfig,
+		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
 		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
@@ -968,6 +1102,7 @@ func TestUpdatePaymentOrder_Rejected(t *testing.T) {
 	svc := &Service{
 		repo:                 repo,
 		currentAccountClient: caClient,
+		idempotencyService:   NewMockIdempotencyService(),
 		logger:               testLogger(),
 	}
 
@@ -1010,6 +1145,7 @@ func TestUpdatePaymentOrder_ByGatewayReferenceID(t *testing.T) {
 		currentAccountClient:      caClient,
 		financialAccountingClient: faClient,
 		gatewayAccountConfig:      gwConfig,
+		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
 		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
@@ -1036,7 +1172,7 @@ func TestUpdatePaymentOrder_ByGatewayReferenceID(t *testing.T) {
 
 func TestUpdatePaymentOrder_NotFound(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: uuid.New().String(),
@@ -1054,7 +1190,7 @@ func TestUpdatePaymentOrder_NotFound(t *testing.T) {
 
 func TestUpdatePaymentOrder_MissingIdentifier(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := &pb.UpdatePaymentOrderRequest{
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
@@ -1081,6 +1217,7 @@ func TestUpdatePaymentOrder_Idempotent_Settled(t *testing.T) {
 		currentAccountClient:      caClient,
 		financialAccountingClient: faClient,
 		gatewayAccountConfig:      gwConfig,
+		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
 		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
@@ -1118,6 +1255,7 @@ func TestUpdatePaymentOrder_Idempotent_Rejected(t *testing.T) {
 	svc := &Service{
 		repo:                 repo,
 		currentAccountClient: caClient,
+		idempotencyService:   NewMockIdempotencyService(),
 		logger:               testLogger(),
 	}
 
@@ -1150,8 +1288,9 @@ func TestUpdatePaymentOrder_Idempotent_Rejected(t *testing.T) {
 func TestUpdatePaymentOrder_PendingRejectsStaleCallbacks(t *testing.T) {
 	repo := NewMockRepository()
 	svc := &Service{
-		repo:   repo,
-		logger: testLogger(),
+		repo:               repo,
+		idempotencyService: NewMockIdempotencyService(),
+		logger:             testLogger(),
 	}
 
 	// Create a payment order that has already completed
@@ -1166,6 +1305,7 @@ func TestUpdatePaymentOrder_PendingRejectsStaleCallbacks(t *testing.T) {
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_PENDING,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "pending-test-key"},
 	}
 
 	_, err := svc.UpdatePaymentOrder(context.Background(), req)
@@ -1181,7 +1321,7 @@ func TestUpdatePaymentOrder_PendingRejectsStaleCallbacks(t *testing.T) {
 // Test ListPaymentOrders
 func TestListPaymentOrders_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create some payment orders
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -1202,7 +1342,7 @@ func TestListPaymentOrders_Success(t *testing.T) {
 
 func TestListPaymentOrders_EmptyDebtorAccountID(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := &pb.ListPaymentOrdersRequest{}
 
@@ -1216,7 +1356,7 @@ func TestListPaymentOrders_EmptyDebtorAccountID(t *testing.T) {
 
 func TestListPaymentOrders_Pagination(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create 5 payment orders
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -1265,7 +1405,7 @@ func TestListPaymentOrders_Pagination(t *testing.T) {
 
 func TestListPaymentOrders_InvalidPageToken(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := &pb.ListPaymentOrdersRequest{
 		DebtorAccountId: "ACC-12345678",
@@ -1285,7 +1425,7 @@ func TestListPaymentOrders_InvalidPageToken(t *testing.T) {
 
 func TestListPaymentOrders_MalformedCursor(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Valid base64 but malformed cursor content (missing UUID)
 	req := &pb.ListPaymentOrdersRequest{
@@ -1305,7 +1445,7 @@ func TestListPaymentOrders_MalformedCursor(t *testing.T) {
 
 func TestListPaymentOrders_PageSizeExceedsMax(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create 3 payment orders
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -1336,7 +1476,7 @@ func TestListPaymentOrders_PageSizeExceedsMax(t *testing.T) {
 
 func TestListPaymentOrders_CursorBeyondResults(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create 2 payment orders
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -1377,7 +1517,7 @@ func TestListPaymentOrders_CursorBeyondResults(t *testing.T) {
 // Test ReversePaymentOrder
 func TestReversePaymentOrder_Success(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create a payment order and move it to COMPLETED state
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -1403,7 +1543,7 @@ func TestReversePaymentOrder_Success(t *testing.T) {
 
 func TestReversePaymentOrder_AlreadyReversed_Idempotent(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create a payment order that's already reversed
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -1429,7 +1569,7 @@ func TestReversePaymentOrder_AlreadyReversed_Idempotent(t *testing.T) {
 
 func TestReversePaymentOrder_NotCompleted(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create a payment order in INITIATED state (cannot be reversed)
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -1454,7 +1594,7 @@ func TestReversePaymentOrder_NotCompleted(t *testing.T) {
 
 func TestReversePaymentOrder_MissingReason(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
@@ -1481,7 +1621,7 @@ func TestReversePaymentOrder_MissingReason(t *testing.T) {
 
 func TestReversePaymentOrder_MissingReversedBy(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	amount, _ := domain.NewMoney("GBP", 10000)
 	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
@@ -1508,7 +1648,7 @@ func TestReversePaymentOrder_MissingReversedBy(t *testing.T) {
 
 func TestReversePaymentOrder_NotFound(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: uuid.New().String(),
@@ -1527,7 +1667,7 @@ func TestReversePaymentOrder_NotFound(t *testing.T) {
 
 func TestReversePaymentOrder_InvalidID(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	req := &pb.ReversePaymentOrderRequest{
 		PaymentOrderId: "not-a-uuid",
@@ -1684,7 +1824,9 @@ func TestProtoToMoney(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, tt.wantCents, got.AmountCents())
+				gotCents, err := got.ToMinorUnits()
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantCents, gotCents)
 			}
 		})
 	}
@@ -1736,6 +1878,7 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient:    caClient,
 		paymentGateway:          gwMock,
+		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             DefaultSagaTimeout,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 		orchestrator:            orchestrator,
@@ -1804,6 +1947,7 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient:    caClient,
 		paymentGateway:          gwMock,
+		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             DefaultSagaTimeout,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 		orchestrator:            orchestrator,
@@ -1870,6 +2014,7 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient:    caClient,
 		paymentGateway:          gwMock,
+		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             DefaultSagaTimeout,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 		orchestrator:            orchestrator,
@@ -1963,6 +2108,7 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient:    caClient,
 		paymentGateway:          gwMock,
+		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             100 * time.Millisecond, // Short timeout
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 		orchestrator:            orchestrator,
@@ -2001,7 +2147,7 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 // are handled correctly without data races or incorrect state.
 func TestConcurrentPaymentOrders(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	const numOrders = 10
 	var wg sync.WaitGroup
@@ -2058,7 +2204,7 @@ func TestConcurrentPaymentOrders(t *testing.T) {
 func TestConcurrentIdempotentRequests(t *testing.T) {
 	t.Skip("Flaky test - concurrent idempotency is a known issue with the in-memory mock repository")
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	const numRequests = 10
 	const idempotencyKey = "same-key-for-all"
@@ -2123,6 +2269,7 @@ func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
 		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient:    caClient,
 		paymentGateway:          gwClient,
+		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             1 * time.Second,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 		orchestrator:            orchestrator,
@@ -2187,6 +2334,7 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		currentAccountClient:    caClient,
 		paymentGateway:          gwClient,
+		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             5 * time.Second,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
 		orchestrator:            orchestrator,
@@ -2221,7 +2369,7 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 // returns an appropriate error.
 func TestUpdatePaymentOrder_UnspecifiedStatus(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create an executing payment order first
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -2241,6 +2389,7 @@ func TestUpdatePaymentOrder_UnspecifiedStatus(t *testing.T) {
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
 		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "unspecified-test-key"},
 	}
 	_, err := svc.UpdatePaymentOrder(context.Background(), req)
 
@@ -2278,6 +2427,7 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 		currentAccountClient:      caClient,
 		financialAccountingClient: faClient,
 		gatewayAccountConfig:      gwConfig,
+		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
 		lienExecutionRetryConfig:  fastRetryConfig,
 		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
@@ -2333,7 +2483,7 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 // (not SETTLED, REJECTED, or PENDING) returns an appropriate error.
 func TestUpdatePaymentOrder_UnknownGatewayStatus(t *testing.T) {
 	repo := NewMockRepository()
-	svc, _ := NewService(repo)
+	svc, _ := NewService(repo, NewMockIdempotencyService())
 
 	// Create an executing payment order
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -2355,6 +2505,7 @@ func TestUpdatePaymentOrder_UnknownGatewayStatus(t *testing.T) {
 	req := &pb.UpdatePaymentOrderRequest{
 		PaymentOrderId: po.ID.String(),
 		GatewayStatus:  pb.GatewayStatus(999), // Unknown status
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "unknown-status-test-key"},
 	}
 	_, err := svc.UpdatePaymentOrder(context.Background(), req)
 
@@ -2416,6 +2567,7 @@ func TestPostLedgerEntries_FailureModes(t *testing.T) {
 				financialAccountingClient: tc.mockFA,
 				paymentGateway:            &MockPaymentGateway{},
 				gatewayAccountConfig:      gwConfig,
+				idempotencyService:        NewMockIdempotencyService(),
 				logger:                    testLogger(),
 				orchestrator:              testOrchestrator(repo, caClient, tc.mockFA, gwConfig),
 			}
@@ -2431,6 +2583,7 @@ func TestPostLedgerEntries_FailureModes(t *testing.T) {
 			req := &pb.UpdatePaymentOrderRequest{
 				PaymentOrderId: po.ID.String(),
 				GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+				IdempotencyKey: &commonpb.IdempotencyKey{Key: uuid.New().String()},
 			}
 
 			_, err := svc.UpdatePaymentOrder(context.Background(), req)

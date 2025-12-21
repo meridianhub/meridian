@@ -1,6 +1,4 @@
 // Package service implements gRPC services for the current account domain
-//
-//nolint:staticcheck // Uses AmountCents() for balance calculations (deprecated for backward compatibility)
 package service
 
 import (
@@ -143,10 +141,18 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Available = Current Balance - Active Liens
-		availableBalance = account.Balance().AmountCents() - activeLiensTotal
+		balanceCents, err := account.Balance().ToMinorUnits()
+		if err != nil {
+			return fmt.Errorf("%w: %w", errTxDomainError, err)
+		}
+		availableBalance = balanceCents - activeLiensTotal
 
 		// Check sufficient funds
-		if lienAmount.AmountCents() > availableBalance {
+		lienCents, err := lienAmount.ToMinorUnits()
+		if err != nil {
+			return fmt.Errorf("%w: %w", errTxDomainError, err)
+		}
+		if lienCents > availableBalance {
 			return errTxInsufficientFunds
 		}
 
@@ -194,11 +200,12 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	s.logger.Info("lien created",
 		"lien_id", lien.ID.String(),
 		"account_id", account.AccountID(),
-		"amount_cents", lienAmount.AmountCents(),
+		"amount_cents", safeMinorUnits(lienAmount),
 		"payment_order_ref", req.PaymentOrderReference)
 
 	// Calculate new available balance after this lien
-	newAvailableBalance := availableBalance - lienAmount.AmountCents()
+	// ToMinorUnitsUnchecked is safe here: amount was validated in transaction above (line 151)
+	newAvailableBalance := availableBalance - lienAmount.ToMinorUnitsUnchecked()
 	availableMoney, err := domain.NewMoney(string(account.Balance().Currency()), newAvailableBalance)
 	if err != nil {
 		// This should never happen if validation passed - log and return without available balance
@@ -358,7 +365,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	s.logger.Info("lien executed",
 		"lien_id", lien.ID.String(),
 		"account_id", account.AccountID(),
-		"amount_cents", lien.Amount.AmountCents(),
+		"amount_cents", safeMinorUnits(lien.Amount),
 		"transaction_id", transactionID)
 
 	availableMoney := s.calculateAvailableBalance(ctx, lien.AccountID, account.Balance())
@@ -656,7 +663,12 @@ func (s *Service) calculateAvailableBalance(ctx context.Context, accountID uuid.
 		s.logger.Error("failed to sum active liens for response", "error", err)
 		return currentBalance // Best effort: return current balance if liens can't be summed
 	}
-	availableBalance := currentBalance.AmountCents() - activeLiensTotal
+	currentBalanceCents, err := currentBalance.ToMinorUnits()
+	if err != nil {
+		s.logger.Error("failed to convert balance to minor units", "error", err)
+		return currentBalance // Best effort
+	}
+	availableBalance := currentBalanceCents - activeLiensTotal
 	availableMoney, err := domain.NewMoney(string(currentBalance.Currency()), availableBalance)
 	if err != nil {
 		s.logger.Error("failed to create available balance for response", "error", err)

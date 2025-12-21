@@ -1,6 +1,4 @@
 // Package service implements gRPC services for the current account domain
-//
-//nolint:staticcheck // Uses AmountCents() for balance/deposit operations (deprecated for backward compatibility)
 package service
 
 import (
@@ -28,25 +26,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Sentinel errors for consistent error handling
-var (
-	ErrRepositoryNil                       = errors.New("repository cannot be nil")
-	ErrPositionKeepingServiceNameEmpty     = errors.New("position keeping service name cannot be empty")
-	ErrFinancialAccountingServiceNameEmpty = errors.New("financial accounting service name cannot be empty")
-	ErrOriginalAccountStateNotFound        = errors.New("original account state not available for compensation")
-	ErrPositionLogIDNotFound               = errors.New("position log ID not available for compensation")
-	ErrLedgerPostingIDNotFound             = errors.New("ledger posting ID not available for compensation")
-
-	// Nil response errors for defensive checks
-	ErrNilPositionLog   = errors.New("position keeping returned nil log")
-	ErrNilBookingLog    = errors.New("financial accounting returned nil booking log")
-	ErrNilDebitPosting  = errors.New("financial accounting returned nil debit posting")
-	ErrNilCreditPosting = errors.New("financial accounting returned nil credit posting")
-
-	// Party validation errors (re-exported from clients package for convenience)
-	ErrPartyNotFound  = clients.ErrPartyNotFound
-	ErrPartyNotActive = clients.ErrPartyNotActive
-)
+// Sentinel errors are defined in errors.go for better organization.
+// See errors.go for ErrRepositoryNil, ErrNilPositionLog, etc.
 
 // Operation status constants for consistency across the service
 const (
@@ -328,7 +309,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}
 
 	// Record initial balance
-	caobservability.RecordBalance(account.Balance().AmountCents(), currency)
+	caobservability.RecordBalance(safeMinorUnits(account.Balance()), currency)
 
 	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
@@ -397,10 +378,16 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	// Validate amount is positive
-	if amount.AmountCents() <= 0 {
+	amountCents, err := amount.ToMinorUnits()
+	if err != nil {
+		operationStatus = "amount_overflow"
+		return nil, status.Errorf(codes.InvalidArgument,
+			"deposit amount overflow: %v", err)
+	}
+	if amountCents <= 0 {
 		operationStatus = "invalid_amount"
 		return nil, status.Errorf(codes.InvalidArgument,
-			"deposit amount must be positive, got %d cents", amount.AmountCents())
+			"deposit amount must be positive, got %d cents", amountCents)
 	}
 
 	// Execute deposit on domain model (returns new account, original unchanged)
@@ -426,7 +413,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 		// Record business metrics
 		caobservability.RecordDeposit(string(account.Balance().Currency()))
-		caobservability.RecordBalance(account.Balance().AmountCents(), string(account.Balance().Currency()))
+		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 		return &pb.ExecuteDepositResponse{
 			AccountId:        account.AccountID(),
@@ -446,7 +433,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 	// Record business metrics on success
 	caobservability.RecordDeposit(string(account.Balance().Currency()))
-	caobservability.RecordBalance(account.Balance().AmountCents(), string(account.Balance().Currency()))
+	caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 	return resp, nil
 }
@@ -501,8 +488,24 @@ func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 	}
 }
 
+// safeMinorUnits converts Money to minor units (cents) with overflow protection.
+// Returns 0 if overflow occurs (should not happen in practice for valid accounts).
+// Used for logging and metrics where returning an error is not practical.
+func safeMinorUnits(m domain.Money) int64 {
+	cents, err := m.ToMinorUnits()
+	if err != nil {
+		// This should never happen in practice - int64 max is ~92 quadrillion cents
+		// Log the anomaly for visibility, then return 0 rather than panicking
+		slog.Error("amount overflow in metrics conversion",
+			"currency", m.Currency(),
+			"error", err)
+		return 0
+	}
+	return cents
+}
+
 func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
-	amountCents := m.AmountCents()
+	amountCents := safeMinorUnits(m)
 	units := amountCents / 100
 	remainder := amountCents % 100
 

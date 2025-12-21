@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests use deprecated AmountCents() for backward compatibility verification
 package persistence
 
 import (
@@ -154,8 +153,12 @@ func TestSaveUpdateExisting(t *testing.T) {
 		t.Fatalf("FindByID failed: %v", err)
 	}
 
-	if retrieved.Balance().AmountCents() != 10000 {
-		t.Errorf("Expected balance 10000, got %d", retrieved.Balance().AmountCents())
+	balanceCents, err := retrieved.Balance().ToMinorUnits()
+	if err != nil {
+		t.Fatalf("ToMinorUnits failed: %v", err)
+	}
+	if balanceCents != 10000 {
+		t.Errorf("Expected balance 10000, got %d", balanceCents)
 	}
 
 	// Version should be incremented after update
@@ -336,8 +339,12 @@ func TestOptimisticLocking(t *testing.T) {
 		t.Fatalf("Final FindByID failed: %v", err)
 	}
 
-	if final.Balance().AmountCents() != 5000 {
-		t.Errorf("Expected balance 5000, got %d", final.Balance().AmountCents())
+	finalBalanceCents, err := final.Balance().ToMinorUnits()
+	if err != nil {
+		t.Fatalf("ToMinorUnits failed: %v", err)
+	}
+	if finalBalanceCents != 5000 {
+		t.Errorf("Expected balance 5000, got %d", finalBalanceCents)
 	}
 
 	// Version should be incremented

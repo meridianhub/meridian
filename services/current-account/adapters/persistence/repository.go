@@ -1,4 +1,3 @@
-//nolint:staticcheck // Uses AmountCents() for database persistence (backward compatible)
 package persistence
 
 import (
@@ -403,6 +402,8 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 
 	balanceUpdatedAt := account.BalanceUpdatedAt()
 
+	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
+	// so overflow (>92 quadrillion cents) cannot occur for valid accounts
 	return &CurrentAccountEntity{
 		ID:                    account.ID(),
 		AccountID:             account.AccountID(),             // Business account identifier
@@ -411,9 +412,9 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		Currency:              string(account.Balance().Currency()),
 		Status:                string(account.Status()),
 		PartyID:               partyUUID,
-		Balance:               account.Balance().AmountCents(),
-		AvailableBalance:      account.AvailableBalance().AmountCents(),
-		OverdraftLimit:        account.OverdraftLimit().AmountCents(),
+		Balance:               account.Balance().ToMinorUnitsUnchecked(),
+		AvailableBalance:      account.AvailableBalance().ToMinorUnitsUnchecked(),
+		OverdraftLimit:        account.OverdraftLimit().ToMinorUnitsUnchecked(),
 		OverdraftRate:         account.OverdraftRate(),
 		BalanceUpdatedAt:      &balanceUpdatedAt,
 		Version:               account.Version(),
