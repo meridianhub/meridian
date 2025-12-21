@@ -323,6 +323,8 @@ func (s *Service) toProto(tenant *domain.Tenant) *pb.Tenant {
 // toProtoStatus converts domain status to protobuf status.
 func (s *Service) toProtoStatus(status domain.Status) pb.TenantStatus {
 	switch status {
+	case domain.StatusProvisioningPending:
+		return pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING
 	case domain.StatusProvisioning:
 		return pb.TenantStatus_TENANT_STATUS_PROVISIONING
 	case domain.StatusProvisioningFailed:
@@ -341,6 +343,8 @@ func (s *Service) toProtoStatus(status domain.Status) pb.TenantStatus {
 // toDomainStatus converts protobuf status to domain status.
 func (s *Service) toDomainStatus(status pb.TenantStatus) (domain.Status, error) {
 	switch status {
+	case pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING:
+		return domain.StatusProvisioningPending, nil
 	case pb.TenantStatus_TENANT_STATUS_PROVISIONING:
 		return domain.StatusProvisioning, nil
 	case pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED:
