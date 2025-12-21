@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"buf.build/go/protovalidate"
+	"github.com/google/uuid"
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
@@ -30,6 +31,21 @@ var (
 	ErrNilIdempotencyService = errors.New("idempotency service cannot be nil")
 	// ErrConcurrentProcessing is returned when another consumer is processing the same event
 	ErrConcurrentProcessing = errors.New("deposit event is being processed by another consumer")
+)
+
+// Idempotency TTL constants. These control how long results are cached in Redis.
+const (
+	// lockTTL is how long a processing lock is held before automatic expiration.
+	// This prevents deadlocks if a consumer crashes while processing.
+	lockTTL = 5 * time.Minute
+
+	// successResultTTL is how long successful results are cached.
+	// Longer TTL reduces Redis lookups for frequently retried events.
+	successResultTTL = 24 * time.Hour
+
+	// failureResultTTL is how long failed results are cached.
+	// Shorter TTL allows retries after transient failures are resolved.
+	failureResultTTL = 1 * time.Hour
 )
 
 // DepositConsumer consumes DepositEvent messages from Kafka and processes them
@@ -117,8 +133,8 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 		RequestID: event.CorrelationId,
 	}
 
-	// Check if already processed
-	result, err := dc.idempotency.Check(ctx, idempotencyKey)
+	// Check if already processed (fast path for duplicates)
+	_, err := dc.idempotency.Check(ctx, idempotencyKey)
 	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
 		// Already processed - return success (idempotent)
 		return nil
@@ -127,15 +143,37 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 		return fmt.Errorf("idempotency check failed: %w", err)
 	}
 
-	// If we found a pending result, it means another consumer might be processing
-	// Let the caller retry (return error so Kafka doesn't commit)
-	if result != nil && result.Status == idempotency.StatusPending {
-		return ErrConcurrentProcessing
+	// Generate unique token for lock ownership
+	lockToken := uuid.New().String()
+
+	// Acquire distributed lock atomically (uses SETNX - prevents race condition)
+	// MaxRetries=0 means if lock is held, return immediately with error
+	lockOpts := idempotency.LockOptions{
+		TTL:        lockTTL,
+		Token:      lockToken,
+		MaxRetries: 0,
+		RetryDelay: 0,
+	}
+	if err := dc.idempotency.Acquire(ctx, idempotencyKey, lockOpts); err != nil {
+		if errors.Is(err, idempotency.ErrLockAcquisitionFailed) {
+			return ErrConcurrentProcessing
+		}
+		return fmt.Errorf("failed to acquire lock: %w", err)
 	}
 
-	// Mark as pending to prevent concurrent processing
-	if err := dc.idempotency.MarkPending(ctx, idempotencyKey, 5*time.Minute); err != nil {
-		return fmt.Errorf("failed to mark pending: %w", err)
+	// Ensure lock is released when done (best-effort cleanup)
+	defer func() {
+		_ = dc.idempotency.Release(ctx, idempotencyKey, lockToken)
+	}()
+
+	// Re-check after acquiring lock (double-check pattern)
+	// Another consumer may have completed processing between our initial check and lock acquisition
+	_, err = dc.idempotency.Check(ctx, idempotencyKey)
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+		return nil
+	}
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		return fmt.Errorf("idempotency re-check failed: %w", err)
 	}
 
 	// Convert proto timestamp to time.Time
@@ -172,7 +210,7 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 		Data:        nil, // No response data needed for events
 		Error:       "",
 		CompletedAt: time.Now(),
-		TTL:         24 * time.Hour, // Cache for 24 hours
+		TTL:         successResultTTL,
 	}
 	if err := dc.idempotency.StoreResult(ctx, successResult); err != nil {
 		return fmt.Errorf("failed to store idempotency result: %w", err)
@@ -182,7 +220,7 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 }
 
 // storeFailureResult stores a failure result in the idempotency cache (best-effort).
-// Failed operations are cached for 1 hour to prevent retry storms.
+// Failed operations are cached for failureResultTTL to prevent retry storms.
 func (dc *DepositConsumer) storeFailureResult(ctx context.Context, key idempotency.Key, errMsg string) {
 	failureResult := idempotency.Result{
 		Key:         key,
@@ -190,7 +228,7 @@ func (dc *DepositConsumer) storeFailureResult(ctx context.Context, key idempoten
 		Data:        nil,
 		Error:       errMsg,
 		CompletedAt: time.Now(),
-		TTL:         1 * time.Hour,
+		TTL:         failureResultTTL,
 	}
 	_ = dc.idempotency.StoreResult(ctx, failureResult) // Best effort
 }

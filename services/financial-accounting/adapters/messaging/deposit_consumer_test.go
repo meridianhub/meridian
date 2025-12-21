@@ -339,7 +339,7 @@ func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 			defer cancel()
 
 			err := consumer.handleDepositEvent(testCtx, tt.event)
@@ -382,7 +382,7 @@ func TestDepositConsumer_IdempotencyCache(t *testing.T) {
 		Timestamp:     timestamppb.Now(),
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	// Should succeed without error (idempotent success)
@@ -390,19 +390,19 @@ func TestDepositConsumer_IdempotencyCache(t *testing.T) {
 	require.NoError(t, err, "handleDepositEvent should return nil for already processed events")
 }
 
-func TestDepositConsumer_IdempotencyMarkPending(t *testing.T) {
+func TestDepositConsumer_IdempotencyLockAcquisition(t *testing.T) {
 	postingService, ctx, cleanup := setupTestServices(t)
 	defer cleanup()
 
-	var markPendingCalled bool
+	var acquireCalled bool
 	var capturedKey idempotency.Key
-	var capturedTTL time.Duration
+	var capturedOpts idempotency.LockOptions
 
 	mockIdemp := newMockIdempotencyService()
-	mockIdemp.markPendingFunc = func(_ context.Context, key idempotency.Key, ttl time.Duration) error {
-		markPendingCalled = true
+	mockIdemp.acquireFunc = func(_ context.Context, key idempotency.Key, opts idempotency.LockOptions) error {
+		acquireCalled = true
 		capturedKey = key
-		capturedTTL = ttl
+		capturedOpts = opts
 		return nil
 	}
 
@@ -418,25 +418,27 @@ func TestDepositConsumer_IdempotencyMarkPending(t *testing.T) {
 	}()
 
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-PENDING",
+		AccountId:     "ACC-LOCK",
 		AmountCents:   10000,
 		Currency:      commonv1.Currency_CURRENCY_GBP,
-		CorrelationId: "deposit-pending-test",
+		CorrelationId: "deposit-lock-test",
 		ValueDate:     timestamppb.Now(),
 		Timestamp:     timestamppb.Now(),
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	_ = consumer.handleDepositEvent(testCtx, event)
 
-	assert.True(t, markPendingCalled, "MarkPending should be called")
+	assert.True(t, acquireCalled, "Acquire should be called for lock")
 	assert.Equal(t, "financial-accounting", capturedKey.Namespace)
 	assert.Equal(t, "process-deposit", capturedKey.Operation)
-	assert.Equal(t, "ACC-PENDING", capturedKey.EntityID)
-	assert.Equal(t, "deposit-pending-test", capturedKey.RequestID)
-	assert.Equal(t, 5*time.Minute, capturedTTL)
+	assert.Equal(t, "ACC-LOCK", capturedKey.EntityID)
+	assert.Equal(t, "deposit-lock-test", capturedKey.RequestID)
+	assert.Equal(t, lockTTL, capturedOpts.TTL)
+	assert.NotEmpty(t, capturedOpts.Token, "Lock token should be generated")
+	assert.Equal(t, 0, capturedOpts.MaxRetries, "Should not retry lock acquisition")
 }
 
 func TestDepositConsumer_IdempotencyStoreSuccess(t *testing.T) {
@@ -473,7 +475,7 @@ func TestDepositConsumer_IdempotencyStoreSuccess(t *testing.T) {
 		Timestamp:     timestamppb.Now(),
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	err = consumer.handleDepositEvent(testCtx, event)
@@ -497,15 +499,15 @@ func TestDepositConsumer_IdempotencyStoreFailure(t *testing.T) {
 	defer cleanup()
 
 	var checkCalled bool
-	var markPendingCalled bool
+	var acquireCalled bool
 
 	mockIdemp := newMockIdempotencyService()
 	mockIdemp.checkFunc = func(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
 		checkCalled = true
 		return nil, idempotency.ErrResultNotFound
 	}
-	mockIdemp.markPendingFunc = func(_ context.Context, _ idempotency.Key, _ time.Duration) error {
-		markPendingCalled = true
+	mockIdemp.acquireFunc = func(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
+		acquireCalled = true
 		return nil
 	}
 
@@ -530,7 +532,7 @@ func TestDepositConsumer_IdempotencyStoreFailure(t *testing.T) {
 		Timestamp:     timestamppb.Now(),
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	err = consumer.handleDepositEvent(testCtx, event)
@@ -539,7 +541,7 @@ func TestDepositConsumer_IdempotencyStoreFailure(t *testing.T) {
 
 	// Proto validation fails before idempotency check, so no idempotency calls should be made
 	assert.False(t, checkCalled, "Idempotency check should not be called when proto validation fails")
-	assert.False(t, markPendingCalled, "MarkPending should not be called when proto validation fails")
+	assert.False(t, acquireCalled, "Acquire should not be called when proto validation fails")
 }
 
 func TestDepositConsumer_IdempotencyKeyFormat(t *testing.T) {
@@ -574,7 +576,7 @@ func TestDepositConsumer_IdempotencyKeyFormat(t *testing.T) {
 		Timestamp:     timestamppb.Now(),
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	_ = consumer.handleDepositEvent(testCtx, event)
@@ -618,7 +620,7 @@ func TestDepositConsumer_IdempotencyCheckFailed(t *testing.T) {
 		Timestamp:     timestamppb.Now(),
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	err = consumer.handleDepositEvent(testCtx, event)
@@ -626,16 +628,14 @@ func TestDepositConsumer_IdempotencyCheckFailed(t *testing.T) {
 	assert.Contains(t, err.Error(), "idempotency check failed")
 }
 
-func TestDepositConsumer_PendingEventRejected(t *testing.T) {
+func TestDepositConsumer_ConcurrentProcessingRejected(t *testing.T) {
 	postingService, ctx, cleanup := setupTestServices(t)
 	defer cleanup()
 
-	// Mock idempotency service that returns a pending status
+	// Mock idempotency service that fails to acquire lock (another consumer holds it)
 	mockIdemp := newMockIdempotencyService()
-	mockIdemp.checkFunc = func(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
-		return &idempotency.Result{
-			Status: idempotency.StatusPending,
-		}, nil
+	mockIdemp.acquireFunc = func(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
+		return idempotency.ErrLockAcquisitionFailed
 	}
 
 	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
@@ -650,15 +650,15 @@ func TestDepositConsumer_PendingEventRejected(t *testing.T) {
 	}()
 
 	event := &eventsv1.DepositEvent{
-		AccountId:     "ACC-PENDING-REJECT",
+		AccountId:     "ACC-CONCURRENT-REJECT",
 		AmountCents:   10000,
 		Currency:      commonv1.Currency_CURRENCY_GBP,
-		CorrelationId: "deposit-pending-reject",
+		CorrelationId: "deposit-concurrent-reject",
 		ValueDate:     timestamppb.Now(),
 		Timestamp:     timestamppb.Now(),
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	err = consumer.handleDepositEvent(testCtx, event)
