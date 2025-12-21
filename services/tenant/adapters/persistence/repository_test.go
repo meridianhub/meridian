@@ -17,7 +17,7 @@ import (
 func setupTestDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
 
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&TenantEntity{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&TenantEntity{}, &ProvisioningStatusEntity{}})
 
 	// Create audit_outbox table (required for GORM hooks)
 	// Note: Tenant service uses string IDs (varchar(50)) for record_id
@@ -494,4 +494,174 @@ func TestAdapterMapping_EmptySlugMapsToNil(t *testing.T) {
 	backToDomain, err := toDomain(entity)
 	require.NoError(t, err)
 	assert.Equal(t, "", backToDomain.Slug)
+}
+
+func TestRepository_FindProvisioningStatusByTenantID(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant
+	tenant := newTestTenant("test_tenant")
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+
+	// Insert provisioning status records
+	now := time.Now()
+	completed := now.Add(5 * time.Minute)
+	migrationVersion := "20251216000001"
+	errorMsg := "connection timeout"
+
+	statuses := []ProvisioningStatusEntity{
+		{
+			TenantID:         tenant.ID.String(),
+			ServiceName:      "party",
+			Status:           "completed",
+			MigrationVersion: &migrationVersion,
+			StartedAt:        &now,
+			CompletedAt:      &completed,
+		},
+		{
+			TenantID:    tenant.ID.String(),
+			ServiceName: "account",
+			Status:      "in_progress",
+			StartedAt:   &now,
+		},
+		{
+			TenantID:     tenant.ID.String(),
+			ServiceName:  "transaction",
+			Status:       "failed",
+			ErrorMessage: &errorMsg,
+			StartedAt:    &now,
+			CompletedAt:  &completed,
+		},
+	}
+
+	for _, status := range statuses {
+		err := db.Create(&status).Error
+		require.NoError(t, err)
+	}
+
+	// Query provisioning status
+	results, err := repo.FindProvisioningStatusByTenantID(ctx, tenant.ID.String())
+	require.NoError(t, err)
+	assert.Len(t, results, 3)
+
+	// Verify results are ordered by service_name
+	assert.Equal(t, "account", results[0].ServiceName)
+	assert.Equal(t, "in_progress", results[0].Status)
+	assert.Nil(t, results[0].ErrorMessage)
+	assert.NotNil(t, results[0].StartedAt)
+	assert.Nil(t, results[0].CompletedAt)
+
+	assert.Equal(t, "party", results[1].ServiceName)
+	assert.Equal(t, "completed", results[1].Status)
+	assert.Equal(t, migrationVersion, results[1].MigrationVersion)
+	assert.NotNil(t, results[1].StartedAt)
+	assert.NotNil(t, results[1].CompletedAt)
+
+	assert.Equal(t, "transaction", results[2].ServiceName)
+	assert.Equal(t, "failed", results[2].Status)
+	assert.NotNil(t, results[2].ErrorMessage)
+	assert.Equal(t, errorMsg, *results[2].ErrorMessage)
+}
+
+func TestRepository_FindProvisioningStatusByTenantID_EmptyResult(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant without provisioning status records
+	tenant := newTestTenant("test_tenant")
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+
+	// Query provisioning status
+	results, err := repo.FindProvisioningStatusByTenantID(ctx, tenant.ID.String())
+	require.NoError(t, err)
+	assert.NotNil(t, results)
+	assert.Len(t, results, 0)
+}
+
+func TestRepository_FindProvisioningStatusByTenantID_VariousStatuses(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant
+	tenant := newTestTenant("test_tenant")
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+
+	// Insert records with different status values
+	statusValues := []string{"pending", "in_progress", "completed", "failed"}
+	for i, statusValue := range statusValues {
+		entity := ProvisioningStatusEntity{
+			TenantID:    tenant.ID.String(),
+			ServiceName: "service_" + string(rune('a'+i)),
+			Status:      statusValue,
+		}
+		err := db.Create(&entity).Error
+		require.NoError(t, err)
+	}
+
+	// Query and verify all statuses
+	results, err := repo.FindProvisioningStatusByTenantID(ctx, tenant.ID.String())
+	require.NoError(t, err)
+	assert.Len(t, results, 4)
+
+	// Verify each status value
+	statusMap := make(map[string]string)
+	for _, result := range results {
+		statusMap[result.ServiceName] = result.Status
+	}
+
+	assert.Equal(t, "pending", statusMap["service_a"])
+	assert.Equal(t, "in_progress", statusMap["service_b"])
+	assert.Equal(t, "completed", statusMap["service_c"])
+	assert.Equal(t, "failed", statusMap["service_d"])
+}
+
+func TestRepository_FindProvisioningStatusByTenantID_NullHandling(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant
+	tenant := newTestTenant("test_tenant")
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+
+	// Insert record with all optional fields as NULL
+	entity := ProvisioningStatusEntity{
+		TenantID:         tenant.ID.String(),
+		ServiceName:      "party",
+		Status:           "pending",
+		MigrationVersion: nil,
+		ErrorMessage:     nil,
+		StartedAt:        nil,
+		CompletedAt:      nil,
+	}
+	err = db.Create(&entity).Error
+	require.NoError(t, err)
+
+	// Query and verify null handling
+	results, err := repo.FindProvisioningStatusByTenantID(ctx, tenant.ID.String())
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+
+	assert.Equal(t, "party", results[0].ServiceName)
+	assert.Equal(t, "pending", results[0].Status)
+	assert.Equal(t, "", results[0].MigrationVersion)
+	assert.Nil(t, results[0].ErrorMessage)
+	assert.Nil(t, results[0].StartedAt)
+	assert.Nil(t, results[0].CompletedAt)
 }

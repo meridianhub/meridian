@@ -46,6 +46,27 @@ func (t TenantEntity) AuditTableName() string {
 	return t.TableName()
 }
 
+// ProvisioningStatusEntity is the database representation of per-service provisioning status.
+// Uses singular, unqualified name per database-per-service architecture.
+type ProvisioningStatusEntity struct {
+	ID               int        `gorm:"column:id;primaryKey;autoIncrement"`
+	TenantID         string     `gorm:"column:tenant_id;not null;index:idx_tenant_provisioning_status_tenant_id"`
+	ServiceName      string     `gorm:"column:service_name;not null;index:idx_tenant_provisioning_status_service_name"`
+	Status           string     `gorm:"column:status;not null;index:idx_tenant_provisioning_status_status"`
+	MigrationVersion *string    `gorm:"column:migration_version"`
+	ErrorMessage     *string    `gorm:"column:error_message"`
+	StartedAt        *time.Time `gorm:"column:started_at"`
+	CompletedAt      *time.Time `gorm:"column:completed_at"`
+	CreatedAt        time.Time  `gorm:"column:created_at;not null;autoCreateTime"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;not null;autoUpdateTime"`
+}
+
+// TableName returns the table name for GORM.
+// Uses singular, unqualified name per database-per-service architecture.
+func (ProvisioningStatusEntity) TableName() string {
+	return "tenant_provisioning_status"
+}
+
 // JSONMap is a custom type for JSONB columns.
 type JSONMap map[string]interface{}
 
