@@ -14,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -515,7 +516,7 @@ func TestService_InitiateTenant_PartyRegistrationFailure(t *testing.T) {
 // Tests for schema provisioning integration
 
 func TestService_InitiateTenant_WithProvisioningSuccess(t *testing.T) {
-	// Create mock provisioner that succeeds
+	// Create mock provisioner
 	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
 		{Name: "party", MigrationPath: "testdata/migrations"},
 		{Name: "current-account", MigrationPath: "testdata/migrations"},
@@ -535,14 +536,13 @@ func TestService_InitiateTenant_WithProvisioningSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp.Tenant)
 
-	// Tenant should be active after successful provisioning
+	// Tenant should be created with provisioning_pending status (worker will handle provisioning)
 	assert.Equal(t, "provisioned_tenant", resp.Tenant.TenantId)
-	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
-	assert.Equal(t, int32(2), resp.Tenant.Version) // Created with version 1, updated to active (version 2)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+	assert.Equal(t, int32(1), resp.Tenant.Version) // Created with version 1, no status update
 
-	// Verify provisioner was called
-	require.Len(t, mockProv.ProvisioningCalls, 1)
-	assert.Equal(t, "provisioned_tenant", mockProv.ProvisioningCalls[0].String())
+	// Verify provisioner was NOT called during InitiateTenant
+	assert.Empty(t, mockProv.ProvisioningCalls, "ProvisionSchemas should not be called during InitiateTenant - worker handles provisioning asynchronously")
 }
 
 // errProvisioningFailed is a test error for simulating provisioning failures.
@@ -565,21 +565,25 @@ func TestService_InitiateTenant_WithProvisioningFailure(t *testing.T) {
 		SettlementAsset: "GBP",
 	}
 
-	_, err := svc.InitiateTenant(ctx, req)
-	require.Error(t, err)
+	// InitiateTenant should succeed with provisioning_pending status
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Tenant)
 
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	assert.Equal(t, codes.Internal, st.Code())
-	assert.Contains(t, st.Message(), "schema provisioning failed")
+	// Tenant should be created with provisioning_pending status
+	// The worker will attempt provisioning and handle the failure
+	assert.Equal(t, "prov_fail_tenant", resp.Tenant.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
 
-	// Verify the tenant was created with provisioning_failed status
+	// Verify the tenant was persisted with provisioning_pending status
 	var entity persistence.TenantEntity
 	result := db.Where("id = ?", "prov_fail_tenant").First(&entity)
 	require.NoError(t, result.Error)
-	assert.Equal(t, "provisioning_failed", entity.Status)
-	require.NotNil(t, entity.ErrorMessage)
-	assert.Contains(t, *entity.ErrorMessage, "provisioning failed")
+	assert.Equal(t, "provisioning_pending", entity.Status)
+	assert.Nil(t, entity.ErrorMessage, "no error message yet - worker will handle provisioning failure")
+
+	// Verify provisioner was NOT called during InitiateTenant
+	assert.Empty(t, mockProv.ProvisioningCalls, "ProvisionSchemas should not be called during InitiateTenant")
 }
 
 func TestService_InitiateTenant_WithoutProvisioner(t *testing.T) {
@@ -974,4 +978,88 @@ func TestService_StatusConversionRoundtrip(t *testing.T) {
 			assert.Equal(t, tt.status, domainStatus, "roundtrip conversion should preserve status")
 		})
 	}
+}
+
+// TestInitiateTenant_CreatesProvisioningStatusRecords verifies that InitiateTenant
+// creates provisioning_status records when a provisioner is configured.
+func TestInitiateTenant_CreatesProvisioningStatusRecords(t *testing.T) {
+	// Create mock provisioner with test services
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+		{Name: "current-account", MigrationPath: "/migrations/current-account"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	// Test: Create tenant with provisioner configured
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "test_org_prov_status",
+		DisplayName:     "Test Organization",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(context.Background(), req)
+	require.NoError(t, err, "InitiateTenant should succeed")
+	require.NotNil(t, resp)
+
+	// Verify tenant was created with provisioning_pending status
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+
+	// Verify provisioning status record was created
+	tenantID, err := tenant.NewTenantID("test_org_prov_status")
+	require.NoError(t, err)
+
+	status, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err, "Provisioning status should exist")
+	assert.Equal(t, provisioner.StatePending, status.State)
+	assert.Len(t, status.Services, 2, "Should have 2 service status records")
+
+	// Verify service schemas
+	assert.Equal(t, "party", status.Services[0].ServiceName)
+	assert.Equal(t, provisioner.ServiceStatePending, status.Services[0].State)
+	assert.Equal(t, "current-account", status.Services[1].ServiceName)
+	assert.Equal(t, provisioner.ServiceStatePending, status.Services[1].State)
+}
+
+// TestInitiateTenant_ProvisioningStatusIdempotent verifies that calling
+// InitiateTenant multiple times doesn't duplicate provisioning status.
+func TestInitiateTenant_ProvisioningStatusIdempotent(t *testing.T) {
+	// Create mock provisioner
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	// First call: Create tenant
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "test_org_idempotent",
+		DisplayName:     "Test Organization Idempotent",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify provisioning status was created
+	tenantID, err := tenant.NewTenantID("test_org_idempotent")
+	require.NoError(t, err)
+
+	status1, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, provisioner.StatePending, status1.State)
+
+	// Second call: Try to create same tenant again (will fail at tenant creation level)
+	// But if we manually call the helper, it should be idempotent
+	err = svc.createProvisioningStatusRecords(context.Background(), tenantID)
+	require.NoError(t, err, "Second call should be idempotent")
+
+	// Verify status hasn't changed
+	status2, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, status1.State, status2.State)
+	assert.Equal(t, status1.CreatedAt, status2.CreatedAt, "Created timestamp should not change on second call")
 }

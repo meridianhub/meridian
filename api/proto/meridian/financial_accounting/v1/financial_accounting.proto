@@ -220,6 +220,9 @@ message UpdateFinancialBookingLogRequest {
   // If empty, the existing rules are preserved (optional update).
   // Validation: Min length is enforced only if the field is provided (service layer).
   string chart_of_accounts_rules = 3;
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
 }
 
 // UpdateFinancialBookingLogResponse returns the updated booking log.
@@ -316,6 +319,9 @@ message UpdateLedgerPostingRequest {
   // posting_result describes the outcome of the posting operation.
   // If empty, the existing result is preserved (optional update).
   string posting_result = 3 [(buf.validate.field).string = {max_len: 1000}];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
 }
 
 // UpdateLedgerPostingResponse returns the updated posting.

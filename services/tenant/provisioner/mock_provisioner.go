@@ -274,5 +274,39 @@ func (m *MockProvisioner) ReconcileMigrations(_ context.Context, tenantID *tenan
 	return count, nil
 }
 
+// GetRequiredSchemas returns the list of service names that require schema provisioning.
+func (m *MockProvisioner) GetRequiredSchemas() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	schemas := make([]string, 0, len(m.services))
+	for _, svc := range m.services {
+		schemas = append(schemas, svc.Name)
+	}
+	return schemas
+}
+
+// InitializeProvisioningStatus creates an initial provisioning_status record with 'pending' state.
+func (m *MockProvisioner) InitializeProvisioningStatus(_ context.Context, tenantID tenant.TenantID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Idempotency: if status already exists, no-op
+	if _, exists := m.statuses[tenantID.String()]; exists {
+		return nil
+	}
+
+	// Create initial status with pending state
+	m.statuses[tenantID.String()] = &ProvisioningStatus{
+		TenantID:  tenantID,
+		State:     StatePending,
+		Services:  m.createServiceStatuses(tenantID, ServiceStatePending),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	return nil
+}
+
 // Ensure MockProvisioner implements SchemaProvisioner.
 var _ SchemaProvisioner = (*MockProvisioner)(nil)
