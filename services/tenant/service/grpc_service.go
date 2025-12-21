@@ -46,7 +46,9 @@ func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner
 }
 
 // InitiateTenant creates a new tenant in the platform registry (BIAN: Initiate).
-// If a provisioner is configured, this also provisions schemas for the tenant.
+// Returns immediately with 202 Accepted semantics (represented by successful response with PROVISIONING_PENDING status).
+// If a provisioner is configured, tenant is created with PROVISIONING_PENDING status and schema provisioning
+// happens asynchronously via background worker. If no provisioner is configured, tenant is created as ACTIVE.
 // If a Party client is configured, this also registers a corresponding Party in the
 // BIAN Party Reference Data Directory, establishing the link between platform
 // infrastructure (Tenant) and BIAN domain entities (Party.Organization).
