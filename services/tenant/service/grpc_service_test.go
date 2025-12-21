@@ -11,6 +11,7 @@ import (
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -820,4 +821,157 @@ func TestReconcileMigrations_SuccessfulReconciliation(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.Equal(t, int32(2), resp.ReconciledCount, "should have reconciled 2 active tenants")
 	assert.Empty(t, resp.Errors, "should have no errors")
+}
+
+// Tests for status conversion functions
+
+func TestService_toProtoStatus(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	tests := []struct {
+		name          string
+		domainStatus  domain.Status
+		expectedProto pb.TenantStatus
+	}{
+		{
+			name:          "provisioning_pending to proto",
+			domainStatus:  domain.StatusProvisioningPending,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING,
+		},
+		{
+			name:          "provisioning to proto",
+			domainStatus:  domain.StatusProvisioning,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_PROVISIONING,
+		},
+		{
+			name:          "provisioning_failed to proto",
+			domainStatus:  domain.StatusProvisioningFailed,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED,
+		},
+		{
+			name:          "active to proto",
+			domainStatus:  domain.StatusActive,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_ACTIVE,
+		},
+		{
+			name:          "suspended to proto",
+			domainStatus:  domain.StatusSuspended,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_SUSPENDED,
+		},
+		{
+			name:          "deprovisioned to proto",
+			domainStatus:  domain.StatusDeprovisioned,
+			expectedProto: pb.TenantStatus_TENANT_STATUS_DEPROVISIONED,
+		},
+		{
+			name:          "unknown status to unspecified",
+			domainStatus:  domain.Status("unknown"),
+			expectedProto: pb.TenantStatus_TENANT_STATUS_UNSPECIFIED,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := svc.toProtoStatus(tt.domainStatus)
+			assert.Equal(t, tt.expectedProto, result)
+		})
+	}
+}
+
+func TestService_toDomainStatus(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	tests := []struct {
+		name           string
+		protoStatus    pb.TenantStatus
+		expectedDomain domain.Status
+		expectError    bool
+	}{
+		{
+			name:           "proto provisioning_pending to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING,
+			expectedDomain: domain.StatusProvisioningPending,
+			expectError:    false,
+		},
+		{
+			name:           "proto provisioning to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_PROVISIONING,
+			expectedDomain: domain.StatusProvisioning,
+			expectError:    false,
+		},
+		{
+			name:           "proto provisioning_failed to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED,
+			expectedDomain: domain.StatusProvisioningFailed,
+			expectError:    false,
+		},
+		{
+			name:           "proto active to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_ACTIVE,
+			expectedDomain: domain.StatusActive,
+			expectError:    false,
+		},
+		{
+			name:           "proto suspended to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_SUSPENDED,
+			expectedDomain: domain.StatusSuspended,
+			expectError:    false,
+		},
+		{
+			name:           "proto deprovisioned to domain",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_DEPROVISIONED,
+			expectedDomain: domain.StatusDeprovisioned,
+			expectError:    false,
+		},
+		{
+			name:           "proto unspecified returns error",
+			protoStatus:    pb.TenantStatus_TENANT_STATUS_UNSPECIFIED,
+			expectedDomain: "",
+			expectError:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := svc.toDomainStatus(tt.protoStatus)
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Equal(t, ErrUnknownStatus, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedDomain, result)
+			}
+		})
+	}
+}
+
+func TestService_StatusConversionRoundtrip(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Test roundtrip: domain -> proto -> domain
+	tests := []struct {
+		name   string
+		status domain.Status
+	}{
+		{name: "provisioning_pending roundtrip", status: domain.StatusProvisioningPending},
+		{name: "provisioning roundtrip", status: domain.StatusProvisioning},
+		{name: "provisioning_failed roundtrip", status: domain.StatusProvisioningFailed},
+		{name: "active roundtrip", status: domain.StatusActive},
+		{name: "suspended roundtrip", status: domain.StatusSuspended},
+		{name: "deprovisioned roundtrip", status: domain.StatusDeprovisioned},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Convert to proto and back
+			protoStatus := svc.toProtoStatus(tt.status)
+			domainStatus, err := svc.toDomainStatus(protoStatus)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.status, domainStatus, "roundtrip conversion should preserve status")
+		})
+	}
 }
