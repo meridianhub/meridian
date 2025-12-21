@@ -496,15 +496,15 @@ func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTe
 }
 
 // toProtoServiceStatus converts domain service provisioning status to protobuf status.
-func (s *Service) toProtoServiceStatus(status string) pb.ServiceProvisioningStatus_Status {
+func (s *Service) toProtoServiceStatus(status domain.ServiceProvisioningStatus) pb.ServiceProvisioningStatus_Status {
 	switch status {
-	case "pending":
+	case domain.ServiceStatusPending:
 		return pb.ServiceProvisioningStatus_STATUS_PENDING
-	case "in_progress":
+	case domain.ServiceStatusInProgress:
 		return pb.ServiceProvisioningStatus_STATUS_IN_PROGRESS
-	case "completed":
+	case domain.ServiceStatusCompleted:
 		return pb.ServiceProvisioningStatus_STATUS_COMPLETED
-	case "failed":
+	case domain.ServiceStatusFailed:
 		return pb.ServiceProvisioningStatus_STATUS_FAILED
 	default:
 		return pb.ServiceProvisioningStatus_STATUS_UNSPECIFIED

@@ -466,19 +466,19 @@ func TestRepository_FindProvisioningStatusByTenantID(t *testing.T) {
 
 	// Verify results are ordered by service_name
 	assert.Equal(t, "account", results[0].ServiceName)
-	assert.Equal(t, "in_progress", results[0].Status)
+	assert.Equal(t, domain.ServiceStatusInProgress, results[0].Status)
 	assert.Nil(t, results[0].ErrorMessage)
 	assert.NotNil(t, results[0].StartedAt)
 	assert.Nil(t, results[0].CompletedAt)
 
 	assert.Equal(t, "party", results[1].ServiceName)
-	assert.Equal(t, "completed", results[1].Status)
+	assert.Equal(t, domain.ServiceStatusCompleted, results[1].Status)
 	assert.Equal(t, migrationVersion, results[1].MigrationVersion)
 	assert.NotNil(t, results[1].StartedAt)
 	assert.NotNil(t, results[1].CompletedAt)
 
 	assert.Equal(t, "transaction", results[2].ServiceName)
-	assert.Equal(t, "failed", results[2].Status)
+	assert.Equal(t, domain.ServiceStatusFailed, results[2].Status)
 	assert.NotNil(t, results[2].ErrorMessage)
 	assert.Equal(t, errorMsg, *results[2].ErrorMessage)
 }
@@ -532,15 +532,15 @@ func TestRepository_FindProvisioningStatusByTenantID_VariousStatuses(t *testing.
 	assert.Len(t, results, 4)
 
 	// Verify each status value
-	statusMap := make(map[string]string)
+	statusMap := make(map[string]domain.ServiceProvisioningStatus)
 	for _, result := range results {
 		statusMap[result.ServiceName] = result.Status
 	}
 
-	assert.Equal(t, "pending", statusMap["service_a"])
-	assert.Equal(t, "in_progress", statusMap["service_b"])
-	assert.Equal(t, "completed", statusMap["service_c"])
-	assert.Equal(t, "failed", statusMap["service_d"])
+	assert.Equal(t, domain.ServiceStatusPending, statusMap["service_a"])
+	assert.Equal(t, domain.ServiceStatusInProgress, statusMap["service_b"])
+	assert.Equal(t, domain.ServiceStatusCompleted, statusMap["service_c"])
+	assert.Equal(t, domain.ServiceStatusFailed, statusMap["service_d"])
 }
 
 func TestRepository_FindProvisioningStatusByTenantID_NullHandling(t *testing.T) {

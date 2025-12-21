@@ -1286,32 +1286,32 @@ func TestService_toProtoServiceStatus(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		domainStatus  string
+		domainStatus  domain.ServiceProvisioningStatus
 		expectedProto pb.ServiceProvisioningStatus_Status
 	}{
 		{
 			name:          "pending to proto",
-			domainStatus:  "pending",
+			domainStatus:  domain.ServiceStatusPending,
 			expectedProto: pb.ServiceProvisioningStatus_STATUS_PENDING,
 		},
 		{
 			name:          "in_progress to proto",
-			domainStatus:  "in_progress",
+			domainStatus:  domain.ServiceStatusInProgress,
 			expectedProto: pb.ServiceProvisioningStatus_STATUS_IN_PROGRESS,
 		},
 		{
 			name:          "completed to proto",
-			domainStatus:  "completed",
+			domainStatus:  domain.ServiceStatusCompleted,
 			expectedProto: pb.ServiceProvisioningStatus_STATUS_COMPLETED,
 		},
 		{
 			name:          "failed to proto",
-			domainStatus:  "failed",
+			domainStatus:  domain.ServiceStatusFailed,
 			expectedProto: pb.ServiceProvisioningStatus_STATUS_FAILED,
 		},
 		{
 			name:          "unknown status to unspecified",
-			domainStatus:  "unknown",
+			domainStatus:  domain.ServiceProvisioningStatus("unknown"),
 			expectedProto: pb.ServiceProvisioningStatus_STATUS_UNSPECIFIED,
 		},
 	}
