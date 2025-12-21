@@ -43,6 +43,10 @@ type Tenant struct {
 	// Used for schema routing (org_{id} schema) and API subdomain.
 	ID tenant.TenantID
 
+	// Slug is the URL-friendly unique identifier (lowercase alphanumeric + hyphens).
+	// Used for user-facing URLs and subdomain routing.
+	Slug string
+
 	// DisplayName is the human-readable name of the tenant.
 	DisplayName string
 
