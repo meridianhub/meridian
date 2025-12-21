@@ -270,7 +270,7 @@ func (e *TransactionFailed) ToProto() interface{} {
 		LogId:         e.LogID.String(),
 		AccountId:     e.AccountID,
 		FailureReason: e.FailureReason,
-		ErrorCode:     e.ErrorCode,
+		ErrorCodeEnum: e.ErrorCode,
 		CorrelationId: e.CorrelationID,
 		Timestamp:     timestamppb.New(e.Timestamp),
 		Version:       e.Version,

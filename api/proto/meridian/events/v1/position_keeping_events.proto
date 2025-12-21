@@ -250,11 +250,8 @@ message TransactionFailedEvent {
     max_len: 500
   }];
 
-  // error_code provides a machine-readable error identifier
-  meridian.common.v1.ErrorCode error_code = 4 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
+  // error_code provides a machine-readable error identifier (deprecated, use error_code_enum)
+  string error_code = 4 [deprecated = true];
 
   // correlation_id links related events across services
   string correlation_id = 5 [(buf.validate.field).string = {
@@ -267,6 +264,12 @@ message TransactionFailedEvent {
 
   // version is the aggregate version for optimistic locking
   int64 version = 7 [(buf.validate.field).int64 = {gte: 1}];
+
+  // error_code_enum provides a machine-readable error identifier
+  meridian.common.v1.ErrorCode error_code_enum = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 // TransactionCancelledEvent represents a transaction that was cancelled.
