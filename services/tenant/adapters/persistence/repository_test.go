@@ -559,7 +559,7 @@ func TestRepository_FindProvisioningStatusByTenantID_NullHandling(t *testing.T) 
 	entity := ProvisioningStatusEntity{
 		TenantID:         tenant.ID.String(),
 		ServiceName:      "party",
-		Status:           "pending",
+		Status:           string(domain.ServiceStatusPending),
 		MigrationVersion: nil,
 		ErrorMessage:     nil,
 		StartedAt:        nil,

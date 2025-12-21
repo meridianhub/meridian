@@ -1094,7 +1094,7 @@ func TestService_GetTenantProvisioningStatus_Success(t *testing.T) {
 	err = db.Create(&persistence.ProvisioningStatusEntity{
 		TenantID:         "provisioning_status_test",
 		ServiceName:      "party",
-		Status:           "completed",
+		Status:           string(domain.ServiceStatusCompleted),
 		MigrationVersion: stringPtr("20240115_001"),
 		StartedAt:        &partyStarted,
 		CompletedAt:      &partyCompleted,
@@ -1104,7 +1104,7 @@ func TestService_GetTenantProvisioningStatus_Success(t *testing.T) {
 	err = db.Create(&persistence.ProvisioningStatusEntity{
 		TenantID:         "provisioning_status_test",
 		ServiceName:      "account",
-		Status:           "in_progress",
+		Status:           string(domain.ServiceStatusInProgress),
 		MigrationVersion: stringPtr("20240120_002"),
 		StartedAt:        &accountStarted,
 	}).Error
@@ -1113,7 +1113,7 @@ func TestService_GetTenantProvisioningStatus_Success(t *testing.T) {
 	err = db.Create(&persistence.ProvisioningStatusEntity{
 		TenantID:    "provisioning_status_test",
 		ServiceName: "transaction",
-		Status:      "pending",
+		Status:      string(domain.ServiceStatusPending),
 	}).Error
 	require.NoError(t, err)
 
@@ -1233,7 +1233,7 @@ func TestService_GetTenantProvisioningStatus_WithFailedService(t *testing.T) {
 	err = db.Create(&persistence.ProvisioningStatusEntity{
 		TenantID:     "failed_provisioning_test",
 		ServiceName:  "party",
-		Status:       "failed",
+		Status:       string(domain.ServiceStatusFailed),
 		ErrorMessage: stringPtr("Migration 003 failed: constraint violation"),
 		StartedAt:    &failedStarted,
 		CompletedAt:  &failedCompleted,
