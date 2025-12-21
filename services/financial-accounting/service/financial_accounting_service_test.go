@@ -1389,3 +1389,459 @@ func TestCaptureLedgerPosting_IdempotencySerializationRoundTrip(t *testing.T) {
 		assert.NotNil(t, deserializedResponse.LedgerPosting, "posting should not be nil")
 	})
 }
+
+// TestUpdateLedgerPosting_IdempotencyRequired tests that idempotency key is required for UpdateLedgerPosting.
+// Per task 14: Add idempotency protection to state-machine update operations.
+func TestUpdateLedgerPosting_IdempotencyRequired(t *testing.T) {
+	validPostingID := uuid.New()
+
+	tests := []struct {
+		name           string
+		idempotencyKey *commonv1.IdempotencyKey
+		wantCode       codes.Code
+		rationale      string
+	}{
+		{
+			name:           "nil idempotency key",
+			idempotencyKey: nil,
+			wantCode:       codes.InvalidArgument,
+			rationale:      "State-machine mutations require idempotency to prevent duplicate transitions",
+		},
+		{
+			name:           "empty idempotency key",
+			idempotencyKey: &commonv1.IdempotencyKey{Key: ""},
+			wantCode:       codes.InvalidArgument,
+			rationale:      "Empty key is equivalent to no key - must be rejected",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			repo := persistence.NewLedgerRepository(&gorm.DB{})
+			publisher := &mockEventPublisher{}
+			mockIdem := &mockIdempotencyService{}
+			service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+			req := &financialaccountingv1.UpdateLedgerPostingRequest{
+				Id:             validPostingID.String(),
+				Status:         commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				PostingResult:  "test",
+				IdempotencyKey: tt.idempotencyKey,
+			}
+
+			// Act
+			resp, err := service.UpdateLedgerPosting(context.Background(), req)
+
+			// Assert
+			require.Error(t, err, tt.rationale)
+			require.Nil(t, resp)
+			st, ok := status.FromError(err)
+			require.True(t, ok)
+			assert.Equal(t, tt.wantCode, st.Code(), tt.rationale)
+			assert.Contains(t, st.Message(), "idempotency_key is required")
+		})
+	}
+}
+
+// TestUpdateLedgerPosting_IdempotencyCaching tests cached response handling for UpdateLedgerPosting.
+func TestUpdateLedgerPosting_IdempotencyCaching(t *testing.T) {
+	validPostingID := uuid.New()
+	validBookingLogID := uuid.New()
+	now := time.Now()
+
+	t.Run("cached response returned for duplicate request", func(t *testing.T) {
+		// Arrange - Create cached response
+		cachedResponse := &financialaccountingv1.UpdateLedgerPostingResponse{
+			LedgerPosting: &financialaccountingv1.LedgerPosting{
+				Id:                    validPostingID.String(),
+				FinancialBookingLogId: validBookingLogID.String(),
+				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+				PostingAmount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        100,
+					Nanos:        0,
+				},
+				AccountId:     "ACC-123",
+				ValueDate:     timestamppb.New(now),
+				Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				PostingResult: "Posted successfully",
+				CreatedAt:     timestamppb.New(now),
+			},
+		}
+		cachedData, err := proto.Marshal(cachedResponse)
+		require.NoError(t, err)
+
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   cachedData,
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateLedgerPostingRequest{
+			Id:            validPostingID.String(),
+			Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			PostingResult: "Posted successfully",
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "duplicate-update-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateLedgerPosting(context.Background(), req)
+
+		// Assert
+		require.NoError(t, err, "should return cached response without error")
+		require.NotNil(t, resp)
+		assert.Equal(t, validPostingID.String(), resp.LedgerPosting.Id)
+		assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, resp.LedgerPosting.Status)
+	})
+
+	t.Run("corrupted cached data returns AlreadyExists", func(t *testing.T) {
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   []byte("invalid-protobuf-data"),
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateLedgerPostingRequest{
+			Id:            validPostingID.String(),
+			Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			PostingResult: "test",
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "corrupted-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateLedgerPosting(context.Background(), req)
+
+		// Assert
+		require.Error(t, err)
+		require.Nil(t, resp)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.AlreadyExists, st.Code())
+	})
+
+	t.Run("empty cached data returns AlreadyExists", func(t *testing.T) {
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   nil,
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateLedgerPostingRequest{
+			Id:            validPostingID.String(),
+			Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			PostingResult: "test",
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "empty-data-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateLedgerPosting(context.Background(), req)
+
+		// Assert
+		require.Error(t, err)
+		require.Nil(t, resp)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.AlreadyExists, st.Code())
+	})
+
+	t.Run("idempotency check internal error returns Internal", func(t *testing.T) {
+		mockIdem := &mockIdempotencyService{
+			checkErr: errTestRedisConnectionFailed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateLedgerPostingRequest{
+			Id:            validPostingID.String(),
+			Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			PostingResult: "test",
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "error-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateLedgerPosting(context.Background(), req)
+
+		// Assert
+		require.Error(t, err)
+		require.Nil(t, resp)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Internal, st.Code())
+	})
+
+	t.Run("mark pending failure returns Internal", func(t *testing.T) {
+		mockIdem := &mockIdempotencyService{
+			markErr: errTestCannotMarkPending,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateLedgerPostingRequest{
+			Id:            validPostingID.String(),
+			Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			PostingResult: "test",
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "pending-fail-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateLedgerPosting(context.Background(), req)
+
+		// Assert
+		require.Error(t, err)
+		require.Nil(t, resp)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Internal, st.Code())
+	})
+}
+
+// TestUpdateFinancialBookingLog_IdempotencyRequired tests that idempotency key is required for UpdateFinancialBookingLog.
+// Per task 14: Add idempotency protection to state-machine update operations.
+func TestUpdateFinancialBookingLog_IdempotencyRequired(t *testing.T) {
+	validBookingLogID := uuid.New()
+
+	tests := []struct {
+		name           string
+		idempotencyKey *commonv1.IdempotencyKey
+		wantCode       codes.Code
+		rationale      string
+	}{
+		{
+			name:           "nil idempotency key",
+			idempotencyKey: nil,
+			wantCode:       codes.InvalidArgument,
+			rationale:      "State-machine mutations require idempotency to prevent duplicate transitions",
+		},
+		{
+			name:           "empty idempotency key",
+			idempotencyKey: &commonv1.IdempotencyKey{Key: ""},
+			wantCode:       codes.InvalidArgument,
+			rationale:      "Empty key is equivalent to no key - must be rejected",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			repo := persistence.NewLedgerRepository(&gorm.DB{})
+			publisher := &mockEventPublisher{}
+			mockIdem := &mockIdempotencyService{}
+			service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+			req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+				Id:                   validBookingLogID.String(),
+				Status:               commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				ChartOfAccountsRules: "GAAP-2024",
+				IdempotencyKey:       tt.idempotencyKey,
+			}
+
+			// Act
+			resp, err := service.UpdateFinancialBookingLog(context.Background(), req)
+
+			// Assert
+			require.Error(t, err, tt.rationale)
+			require.Nil(t, resp)
+			st, ok := status.FromError(err)
+			require.True(t, ok)
+			assert.Equal(t, tt.wantCode, st.Code(), tt.rationale)
+			assert.Contains(t, st.Message(), "idempotency_key is required")
+		})
+	}
+}
+
+// TestUpdateFinancialBookingLog_IdempotencyCaching tests cached response handling for UpdateFinancialBookingLog.
+func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
+	validBookingLogID := uuid.New()
+	now := time.Now()
+
+	t.Run("cached response returned for duplicate request", func(t *testing.T) {
+		// Arrange - Create cached response
+		cachedResponse := &financialaccountingv1.UpdateFinancialBookingLogResponse{
+			FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
+				Id:                      validBookingLogID.String(),
+				FinancialAccountType:    commonv1.AccountType_ACCOUNT_TYPE_CURRENT,
+				ProductServiceReference: "DEPOSIT-001",
+				BusinessUnitReference:   "RETAIL-UK",
+				ChartOfAccountsRules:    "GAAP-2024",
+				BaseCurrency:            commonv1.Currency_CURRENCY_GBP,
+				Status:                  commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+				CreatedAt:               timestamppb.New(now),
+				UpdatedAt:               timestamppb.New(now),
+			},
+		}
+		cachedData, err := proto.Marshal(cachedResponse)
+		require.NoError(t, err)
+
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   cachedData,
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+			Id:     validBookingLogID.String(),
+			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "duplicate-update-booking-log-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateFinancialBookingLog(context.Background(), req)
+
+		// Assert
+		require.NoError(t, err, "should return cached response without error")
+		require.NotNil(t, resp)
+		assert.Equal(t, validBookingLogID.String(), resp.FinancialBookingLog.Id)
+		assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, resp.FinancialBookingLog.Status)
+	})
+
+	t.Run("corrupted cached data returns AlreadyExists", func(t *testing.T) {
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   []byte("invalid-protobuf-data"),
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+			Id:     validBookingLogID.String(),
+			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "corrupted-booking-log-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateFinancialBookingLog(context.Background(), req)
+
+		// Assert
+		require.Error(t, err)
+		require.Nil(t, resp)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.AlreadyExists, st.Code())
+	})
+
+	t.Run("empty cached data returns AlreadyExists", func(t *testing.T) {
+		mockIdem := &mockIdempotencyService{
+			checkResult: &idempotency.Result{
+				Status: idempotency.StatusCompleted,
+				Data:   nil,
+			},
+			checkErr: idempotency.ErrOperationAlreadyProcessed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+			Id:     validBookingLogID.String(),
+			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "empty-data-booking-log-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateFinancialBookingLog(context.Background(), req)
+
+		// Assert
+		require.Error(t, err)
+		require.Nil(t, resp)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.AlreadyExists, st.Code())
+	})
+
+	t.Run("idempotency check internal error returns Internal", func(t *testing.T) {
+		mockIdem := &mockIdempotencyService{
+			checkErr: errTestRedisConnectionFailed,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+			Id:     validBookingLogID.String(),
+			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "error-booking-log-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateFinancialBookingLog(context.Background(), req)
+
+		// Assert
+		require.Error(t, err)
+		require.Nil(t, resp)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Internal, st.Code())
+	})
+
+	t.Run("mark pending failure returns Internal", func(t *testing.T) {
+		mockIdem := &mockIdempotencyService{
+			markErr: errTestCannotMarkPending,
+		}
+		repo := persistence.NewLedgerRepository(&gorm.DB{})
+		publisher := &mockEventPublisher{}
+		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+
+		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+			Id:     validBookingLogID.String(),
+			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			IdempotencyKey: &commonv1.IdempotencyKey{
+				Key: "pending-fail-booking-log-key",
+			},
+		}
+
+		// Act
+		resp, err := service.UpdateFinancialBookingLog(context.Background(), req)
+
+		// Assert
+		require.Error(t, err)
+		require.Nil(t, resp)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Internal, st.Code())
+	})
+}
