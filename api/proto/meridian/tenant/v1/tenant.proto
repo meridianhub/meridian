@@ -176,14 +176,102 @@ message InitiateTenantRequest {
 }
 
 // InitiateTenantResponse is the response after creating a tenant.
+//
+// ## Async Provisioning Workflow
+//
+// Tenant provisioning may be asynchronous depending on system load and tenant configuration.
+// Clients should use the provisioning_hint field to determine the appropriate next action:
+//
+// ### Scenario 1: Synchronous Provisioning (provisioning_hint = "active")
+// - Tenant provisioning completed immediately during the API call
+// - Tenant is fully ready and operational
+// - Client can proceed to use tenant services immediately
+// - No polling required
+//
+// Example response:
+// ```json
+// {
+//   "tenant": {
+//     "tenant_id": "acme_corp",
+//     "status": "TENANT_STATUS_ACTIVE",
+//     ...
+//   },
+//   "provisioning_hint": "active"
+// }
+// ```
+//
+// ### Scenario 2: Asynchronous Provisioning (provisioning_hint = "pending")
+// - Tenant registration accepted but provisioning is queued
+// - Tenant is not yet ready for use
+// - Client MUST poll GetTenantProvisioningStatus to track provisioning progress
+// - Recommended polling: exponential backoff starting at 1s, max 30s interval
+//
+// Example response:
+// ```json
+// {
+//   "tenant": {
+//     "tenant_id": "acme_corp",
+//     "status": "TENANT_STATUS_PROVISIONING_PENDING",
+//     ...
+//   },
+//   "provisioning_hint": "pending"
+// }
+// ```
+//
+// Client polling example:
+// ```javascript
+// const response = await initiateTenant(request);
+// if (response.provisioning_hint === "pending") {
+//   let attempts = 0;
+//   while (attempts < 20) {
+//     await sleep(Math.min(1000 * Math.pow(2, attempts), 30000));
+//     const status = await getTenantProvisioningStatus(tenantId);
+//     if (status.status === "TENANT_STATUS_ACTIVE") {
+//       // Tenant ready
+//       break;
+//     }
+//     if (status.status === "TENANT_STATUS_PROVISIONING_FAILED") {
+//       // Handle error
+//       throw new Error(status.error_message);
+//     }
+//     attempts++;
+//   }
+// }
+// ```
+//
+// ### Why Async Provisioning?
+// - Database schema creation can take 5-30 seconds for complex tenants
+// - Prevents API timeouts and poor client experience
+// - Allows system to queue and batch provisioning operations
+// - Provides clear separation between tenant registration and provisioning completion
 message InitiateTenantResponse {
   // tenant is the newly created tenant.
+  // Check provisioning_hint to determine if tenant is ready or requires polling.
   Tenant tenant = 1 [(buf.validate.field).required = true];
 
   // provisioning_hint provides a simplified status indicator for clients.
-  // Returns "pending" if tenant is in PROVISIONING_PENDING status, "active" otherwise.
-  // This allows clients to make UI decisions without parsing the full status enum.
-  string provisioning_hint = 2;
+  //
+  // Possible values:
+  // - "pending": Tenant provisioning is queued/in-progress. Client MUST poll GetTenantProvisioningStatus.
+  // - "active": Tenant is fully provisioned and ready to use. No polling needed.
+  //
+  // This field simplifies client logic by providing a binary decision point rather than
+  // requiring clients to understand the full TenantStatus enum. Clients should use this
+  // field to determine their next action:
+  // - "pending" → Poll GetTenantProvisioningStatus with exponential backoff
+  // - "active" → Proceed to use tenant services immediately
+  //
+  // Note: This is a convenience field. The authoritative tenant status is always
+  // available in the tenant.status field for clients that need fine-grained control.
+  string provisioning_hint = 2 [
+    (buf.validate.field).string = {
+      in: ["pending", "active"]
+    },
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Provisioning status hint. Possible values: 'pending' (tenant provisioning queued/in-progress, client must poll), 'active' (tenant ready immediately)."
+      example: "\"active\""
+    }
+  ];
 }
 
 // RetrieveTenantRequest is the request to get tenant details (BIAN: Retrieve).
@@ -286,25 +374,71 @@ message ReconcileMigrationsResponse {
 // - Tenants map to PostgreSQL schemas (org_{id}) for data isolation.
 service TenantService {
   // InitiateTenant creates a new tenant in the platform registry (BIAN: Initiate).
+  //
+  // This operation may complete synchronously or asynchronously depending on system load.
+  // Always check the provisioning_hint field in the response to determine next steps.
   rpc InitiateTenant(InitiateTenantRequest) returns (InitiateTenantResponse) {
     option (google.api.http) = {
       post: "/v1/tenants"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create a new tenant"
+      description: "Creates a new tenant in the platform registry. Tenant provisioning may be synchronous or asynchronous. "
+                   "Check the provisioning_hint field in the response:\n\n"
+                   "- provisioning_hint=\"active\": Tenant is immediately ready for use\n"
+                   "- provisioning_hint=\"pending\": Tenant provisioning is queued. Poll RetrieveTenant to check status.\n\n"
+                   "For pending provisioning, use exponential backoff polling (1s initial, max 30s interval) until "
+                   "tenant.status becomes TENANT_STATUS_ACTIVE or TENANT_STATUS_PROVISIONING_FAILED."
       responses: {
         key: "201"
         value: {
-          description: "Tenant created successfully"
+          description: "Tenant created successfully. Check provisioning_hint to determine if polling is required."
+          examples: {
+            key: "application/json"
+            value: '{"tenant": {"tenant_id": "acme_corp", "status": "TENANT_STATUS_ACTIVE"}, "provisioning_hint": "active"}'
+          }
+        }
+      }
+      responses: {
+        key: "202"
+        value: {
+          description: "Tenant registration accepted. Provisioning is pending. Poll RetrieveTenant to track progress."
+          examples: {
+            key: "application/json"
+            value: '{"tenant": {"tenant_id": "acme_corp", "status": "TENANT_STATUS_PROVISIONING_PENDING"}, "provisioning_hint": "pending"}'
+          }
         }
       }
     };
   }
 
   // RetrieveTenant gets tenant details by ID (BIAN: Retrieve).
+  //
+  // This endpoint is used for:
+  // 1. Retrieving current tenant details
+  // 2. Polling provisioning status when InitiateTenant returns provisioning_hint="pending"
+  //
+  // When polling for provisioning completion:
+  // - Use exponential backoff (start at 1s, max 30s interval)
+  // - Check tenant.status field for current state
+  // - Stop polling when status becomes ACTIVE or PROVISIONING_FAILED
+  // - If PROVISIONING_FAILED, check tenant.error_message for details
   rpc RetrieveTenant(RetrieveTenantRequest) returns (RetrieveTenantResponse) {
     option (google.api.http) = {
       get: "/v1/tenants/{tenant_id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get tenant details"
+      description: "Retrieves tenant details by ID. Also used for polling provisioning status after async tenant creation.\n\n"
+                   "Provisioning status polling workflow:\n"
+                   "1. Call InitiateTenant and receive provisioning_hint=\"pending\"\n"
+                   "2. Poll this endpoint with exponential backoff (1s initial, max 30s)\n"
+                   "3. Check response.tenant.status:\n"
+                   "   - TENANT_STATUS_PROVISIONING_PENDING: Continue polling\n"
+                   "   - TENANT_STATUS_PROVISIONING: Continue polling\n"
+                   "   - TENANT_STATUS_ACTIVE: Provisioning complete, tenant ready\n"
+                   "   - TENANT_STATUS_PROVISIONING_FAILED: Provisioning failed, check error_message"
     };
   }
 
