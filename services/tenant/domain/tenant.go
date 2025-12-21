@@ -97,7 +97,7 @@ func (t *Tenant) SchemaName() string {
 
 // CanTransitionTo returns true if the tenant can transition to the given status.
 // Valid transitions:
-//   - provisioning_pending → provisioning
+//   - provisioning_pending → provisioning, provisioning_failed
 //   - provisioning → active, provisioning_failed
 //   - provisioning_failed → provisioning (retry)
 //   - active → suspended, deprovisioned
@@ -110,7 +110,7 @@ func (t *Tenant) CanTransitionTo(newStatus Status) bool {
 
 	switch t.Status {
 	case StatusProvisioningPending:
-		return newStatus == StatusProvisioning
+		return newStatus == StatusProvisioning || newStatus == StatusProvisioningFailed
 	case StatusProvisioning:
 		return newStatus == StatusActive || newStatus == StatusProvisioningFailed
 	case StatusProvisioningFailed:

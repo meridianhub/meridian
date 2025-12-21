@@ -79,6 +79,12 @@ func TestTenant_CanTransitionTo(t *testing.T) {
 			expectedAllowed: true,
 		},
 		{
+			name:            "provisioning_pending can transition to provisioning_failed",
+			currentStatus:   StatusProvisioningPending,
+			targetStatus:    StatusProvisioningFailed,
+			expectedAllowed: true,
+		},
+		{
 			name:            "provisioning_pending cannot transition to active",
 			currentStatus:   StatusProvisioningPending,
 			targetStatus:    StatusActive,
