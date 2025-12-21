@@ -1,6 +1,10 @@
 -- Add slug column to tenant table
 -- URL-safe slug for branded API endpoints (e.g., acme → acme.api.meridian.io)
 -- Separate from subdomain to support both legacy subdomain routing and new slug-based routing
+--
+-- atlas:txmode none
+-- CockroachDB requires statements outside transaction for partial indexes on newly added columns
+-- Without this, CockroachDB errors: "cannot create partial index on column which is not public"
 
 -- Add slug column
 ALTER TABLE tenant ADD COLUMN slug VARCHAR(63);
