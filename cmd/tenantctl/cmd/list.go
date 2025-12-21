@@ -120,6 +120,8 @@ func runList(_ *cobra.Command, _ []string) error {
 // parseStatus converts a string status to protobuf TenantStatus.
 func parseStatus(s string) (tenantv1.TenantStatus, error) {
 	switch strings.ToLower(s) {
+	case "provisioning_pending":
+		return tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, nil
 	case "active":
 		return tenantv1.TenantStatus_TENANT_STATUS_ACTIVE, nil
 	case "suspended":
@@ -135,6 +137,8 @@ func parseStatus(s string) (tenantv1.TenantStatus, error) {
 // formatStatus converts protobuf TenantStatus to a display string.
 func formatStatus(s tenantv1.TenantStatus) string {
 	switch s {
+	case tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING:
+		return "provisioning_pending"
 	case tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING:
 		return "provisioning"
 	case tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED:
