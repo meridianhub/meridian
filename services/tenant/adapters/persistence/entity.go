@@ -18,6 +18,7 @@ type TenantEntity struct {
 	DisplayName     string     `gorm:"column:display_name;not null"`
 	SettlementAsset string     `gorm:"column:settlement_asset;not null"`
 	Subdomain       *string    `gorm:"column:subdomain;uniqueIndex:idx_tenant_subdomain"`
+	Slug            *string    `gorm:"column:slug;uniqueIndex:idx_tenant_slug"`
 	Status          string     `gorm:"column:status;not null;default:provisioning"`
 	CreatedAt       time.Time  `gorm:"column:created_at;not null;autoCreateTime;index:idx_tenant_created_at,sort:desc"`
 	DeprovisionedAt *time.Time `gorm:"column:deprovisioned_at"`
