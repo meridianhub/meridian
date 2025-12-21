@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
@@ -1235,4 +1236,268 @@ func TestProvisioningHintFromStatus(t *testing.T) {
 			assert.Equal(t, tt.expectedHint, got, "provisioningHintFromStatus(%s)", tt.status)
 		})
 	}
+}
+
+// Tests for GetTenantProvisioningStatus
+
+func TestService_GetTenantProvisioningStatus_Success(t *testing.T) {
+	svc, db, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create tenant with provisioning status
+	createReq := &pb.InitiateTenantRequest{
+		TenantId:        "provisioning_status_test",
+		DisplayName:     "Provisioning Status Test",
+		SettlementAsset: "GBP",
+	}
+	_, err := svc.InitiateTenant(ctx, createReq)
+	require.NoError(t, err)
+
+	// Auto-migrate the provisioning status table
+	err = db.AutoMigrate(&persistence.ProvisioningStatusEntity{})
+	require.NoError(t, err)
+
+	// Insert test provisioning status records directly via GORM
+	partyStarted := time.Now().Add(-5 * time.Minute)
+	partyCompleted := time.Now().Add(-3 * time.Minute)
+	accountStarted := time.Now().Add(-2 * time.Minute)
+
+	err = db.Create(&persistence.ProvisioningStatusEntity{
+		TenantID:         "provisioning_status_test",
+		ServiceName:      "party",
+		Status:           "completed",
+		MigrationVersion: stringPtr("20240115_001"),
+		StartedAt:        &partyStarted,
+		CompletedAt:      &partyCompleted,
+	}).Error
+	require.NoError(t, err)
+
+	err = db.Create(&persistence.ProvisioningStatusEntity{
+		TenantID:         "provisioning_status_test",
+		ServiceName:      "account",
+		Status:           "in_progress",
+		MigrationVersion: stringPtr("20240120_002"),
+		StartedAt:        &accountStarted,
+	}).Error
+	require.NoError(t, err)
+
+	err = db.Create(&persistence.ProvisioningStatusEntity{
+		TenantID:    "provisioning_status_test",
+		ServiceName: "transaction",
+		Status:      "pending",
+	}).Error
+	require.NoError(t, err)
+
+	// Get provisioning status
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "provisioning_status_test",
+	}
+	resp, err := svc.GetTenantProvisioningStatus(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify response structure
+	assert.Equal(t, "provisioning_status_test", resp.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.OverallStatus)
+	assert.Len(t, resp.Services, 3)
+
+	// Verify service statuses are returned in alphabetical order
+	assert.Equal(t, "account", resp.Services[0].ServiceName)
+	assert.Equal(t, pb.ServiceProvisioningStatus_STATUS_IN_PROGRESS, resp.Services[0].Status)
+	assert.Equal(t, "20240120_002", resp.Services[0].MigrationVersion)
+	assert.NotNil(t, resp.Services[0].StartedAt)
+	assert.Nil(t, resp.Services[0].CompletedAt)
+
+	assert.Equal(t, "party", resp.Services[1].ServiceName)
+	assert.Equal(t, pb.ServiceProvisioningStatus_STATUS_COMPLETED, resp.Services[1].Status)
+	assert.Equal(t, "20240115_001", resp.Services[1].MigrationVersion)
+	assert.NotNil(t, resp.Services[1].StartedAt)
+	assert.NotNil(t, resp.Services[1].CompletedAt)
+
+	assert.Equal(t, "transaction", resp.Services[2].ServiceName)
+	assert.Equal(t, pb.ServiceProvisioningStatus_STATUS_PENDING, resp.Services[2].Status)
+	assert.Empty(t, resp.Services[2].MigrationVersion)
+	assert.Nil(t, resp.Services[2].StartedAt)
+	assert.Nil(t, resp.Services[2].CompletedAt)
+}
+
+func TestService_GetTenantProvisioningStatus_TenantNotFound(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "nonexistent_tenant",
+	}
+
+	_, err := svc.GetTenantProvisioningStatus(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+	assert.Contains(t, st.Message(), "nonexistent_tenant not found")
+}
+
+func TestService_GetTenantProvisioningStatus_EmptyServicesList(t *testing.T) {
+	svc, db, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create tenant
+	createReq := &pb.InitiateTenantRequest{
+		TenantId:        "empty_services_test",
+		DisplayName:     "Empty Services Test",
+		SettlementAsset: "USD",
+	}
+	_, err := svc.InitiateTenant(ctx, createReq)
+	require.NoError(t, err)
+
+	// Auto-migrate the provisioning status table but don't insert any records
+	err = db.AutoMigrate(&persistence.ProvisioningStatusEntity{})
+	require.NoError(t, err)
+
+	// Get provisioning status
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "empty_services_test",
+	}
+	resp, err := svc.GetTenantProvisioningStatus(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Should return empty services array, not an error
+	assert.Equal(t, "empty_services_test", resp.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.OverallStatus)
+	assert.Empty(t, resp.Services)
+	assert.Empty(t, resp.ErrorMessage)
+}
+
+func TestService_GetTenantProvisioningStatus_WithFailedService(t *testing.T) {
+	svc, db, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create tenant with provisioning_failed status
+	createReq := &pb.InitiateTenantRequest{
+		TenantId:        "failed_provisioning_test",
+		DisplayName:     "Failed Provisioning Test",
+		SettlementAsset: "EUR",
+	}
+	createResp, err := svc.InitiateTenant(ctx, createReq)
+	require.NoError(t, err)
+
+	// Update tenant status to provisioning_failed
+	tenantID, err := tenant.NewTenantID(createResp.Tenant.TenantId)
+	require.NoError(t, err)
+	_, err = svc.repo.UpdateStatusWithError(ctx, tenantID, domain.StatusProvisioningFailed, "Database connection timeout", int(createResp.Tenant.Version))
+	require.NoError(t, err)
+
+	// Auto-migrate provisioning status table
+	err = db.AutoMigrate(&persistence.ProvisioningStatusEntity{})
+	require.NoError(t, err)
+
+	// Insert failed service status via GORM
+	failedStarted := time.Now().Add(-5 * time.Minute)
+	failedCompleted := time.Now()
+	err = db.Create(&persistence.ProvisioningStatusEntity{
+		TenantID:     "failed_provisioning_test",
+		ServiceName:  "party",
+		Status:       "failed",
+		ErrorMessage: stringPtr("Migration 003 failed: constraint violation"),
+		StartedAt:    &failedStarted,
+		CompletedAt:  &failedCompleted,
+	}).Error
+	require.NoError(t, err)
+
+	// Get provisioning status
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "failed_provisioning_test",
+	}
+	resp, err := svc.GetTenantProvisioningStatus(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify overall status is provisioning_failed
+	assert.Equal(t, "failed_provisioning_test", resp.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED, resp.OverallStatus)
+	assert.Equal(t, "Database connection timeout", resp.ErrorMessage)
+
+	// Verify failed service details
+	require.Len(t, resp.Services, 1)
+	assert.Equal(t, "party", resp.Services[0].ServiceName)
+	assert.Equal(t, pb.ServiceProvisioningStatus_STATUS_FAILED, resp.Services[0].Status)
+	assert.Equal(t, "Migration 003 failed: constraint violation", resp.Services[0].ErrorMessage)
+	assert.NotNil(t, resp.Services[0].StartedAt)
+	assert.NotNil(t, resp.Services[0].CompletedAt)
+}
+
+func TestService_GetTenantProvisioningStatus_InvalidTenantID(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "invalid-tenant-id-with-dashes",
+	}
+
+	_, err := svc.GetTenantProvisioningStatus(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "invalid tenant ID")
+}
+
+func TestService_toProtoServiceStatus(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	tests := []struct {
+		name          string
+		domainStatus  string
+		expectedProto pb.ServiceProvisioningStatus_Status
+	}{
+		{
+			name:          "pending to proto",
+			domainStatus:  "pending",
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_PENDING,
+		},
+		{
+			name:          "in_progress to proto",
+			domainStatus:  "in_progress",
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_IN_PROGRESS,
+		},
+		{
+			name:          "completed to proto",
+			domainStatus:  "completed",
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_COMPLETED,
+		},
+		{
+			name:          "failed to proto",
+			domainStatus:  "failed",
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_FAILED,
+		},
+		{
+			name:          "unknown status to unspecified",
+			domainStatus:  "unknown",
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_UNSPECIFIED,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := svc.toProtoServiceStatus(tt.domainStatus)
+			assert.Equal(t, tt.expectedProto, result)
+		})
+	}
+}
+
+// stringPtr is a helper function to create a pointer to a string.
+func stringPtr(s string) *string {
+	return &s
 }
