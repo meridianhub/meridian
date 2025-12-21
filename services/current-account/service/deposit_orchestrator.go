@@ -109,6 +109,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 
 	// Track state for compensation
 	var positionLogID string
+	var positionLogVersion int64
 	var bookingLogID string
 	var debitPostingID string
 	var creditPostingID string
@@ -122,7 +123,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	}
 
 	// Step 1: Log position in PositionKeeping service
-	o.addLogPositionStep(saga, account, amount, transactionID, &positionLogID)
+	o.addLogPositionStep(saga, account, amount, transactionID, &positionLogID, &positionLogVersion)
 
 	// Step 2: Post to ledger in FinancialAccounting service with double-entry bookkeeping
 	o.addPostLedgerStep(saga, account, amount, transactionID, clearingAccountID,
@@ -181,6 +182,7 @@ func (o *DepositOrchestrator) addLogPositionStep(
 	amount domain.Money,
 	transactionID string,
 	positionLogID *string,
+	positionLogVersion *int64,
 ) {
 	saga.AddStep("log_position",
 		// Action: Create position log entry
@@ -218,9 +220,11 @@ func (o *DepositOrchestrator) addLogPositionStep(
 			}
 
 			*positionLogID = resp.Log.LogId
+			*positionLogVersion = resp.Log.Version
 
 			o.logger.Info("log_position step completed",
 				"position_log_id", *positionLogID,
+				"position_log_version", *positionLogVersion,
 				"transaction_id", transactionID)
 
 			return nil
@@ -229,6 +233,7 @@ func (o *DepositOrchestrator) addLogPositionStep(
 		func(stepCtx context.Context) error {
 			o.logger.Info("compensating log_position step",
 				"position_log_id", *positionLogID,
+				"position_log_version", *positionLogVersion,
 				"transaction_id", transactionID)
 
 			if *positionLogID == "" {
@@ -241,7 +246,7 @@ func (o *DepositOrchestrator) addLogPositionStep(
 			_, err := o.posKeepingClient.UpdateFinancialPositionLog(stepCtx,
 				&positionkeepingv1.UpdateFinancialPositionLogRequest{
 					LogId:   *positionLogID,
-					Version: 1,
+					Version: *positionLogVersion,
 					StatusUpdate: &positionkeepingv1.StatusTracking{
 						CurrentStatus:   commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
 						StatusUpdatedAt: timestamppb.Now(),
@@ -302,7 +307,7 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 					ProductServiceReference: account.AccountID(),
 					BusinessUnitReference:   "current-account-service",
 					ChartOfAccountsRules:    "DEPOSIT",
-					BaseCurrency:            commonpb.Currency_CURRENCY_GBP,
+					BaseCurrency:            domainCurrencyToProto(amount.Currency()),
 					IdempotencyKey: &commonpb.IdempotencyKey{
 						Key: fmt.Sprintf("booking-log-%s", transactionID),
 					},
@@ -465,11 +470,14 @@ func (o *DepositOrchestrator) compensateDebitPosting(
 		},
 	)
 	if err != nil {
-		o.logger.Error("failed to compensate debit posting",
+		// CRITICAL: Manual intervention required - ledger may be inconsistent.
+		// Alert on metric: current_account_inline_compensation_failures_total
+		o.logger.Error("CRITICAL: failed to compensate debit posting - manual ledger reconciliation required",
 			"booking_log_id", bookingLogID,
 			"clearing_account_id", clearingAccountID,
 			"transaction_id", transactionID,
-			"error", err)
+			"error", err,
+			"runbook", "docs/runbooks/saga-failure-recovery.md")
 		caobservability.RecordInlineCompensationFailure("deposit", "debit")
 	}
 
@@ -514,11 +522,14 @@ func (o *DepositOrchestrator) compensatePostingsInline(
 			},
 		)
 		if err != nil {
-			o.logger.Error("failed to compensate credit posting inline",
+			// CRITICAL: Manual intervention required - ledger may be inconsistent.
+			// Alert on metric: current_account_inline_compensation_failures_total
+			o.logger.Error("CRITICAL: failed to compensate credit posting - manual ledger reconciliation required",
 				"booking_log_id", bookingLogID,
 				"account_id", account.AccountID(),
 				"transaction_id", transactionID,
-				"error", err)
+				"error", err,
+				"runbook", "docs/runbooks/saga-failure-recovery.md")
 			caobservability.RecordInlineCompensationFailure("deposit", "credit")
 		}
 	}
@@ -537,11 +548,14 @@ func (o *DepositOrchestrator) compensatePostingsInline(
 			},
 		)
 		if err != nil {
-			o.logger.Error("failed to compensate debit posting inline",
+			// CRITICAL: Manual intervention required - ledger may be inconsistent.
+			// Alert on metric: current_account_inline_compensation_failures_total
+			o.logger.Error("CRITICAL: failed to compensate debit posting - manual ledger reconciliation required",
 				"booking_log_id", bookingLogID,
 				"clearing_account_id", clearingAccountID,
 				"transaction_id", transactionID,
-				"error", err)
+				"error", err,
+				"runbook", "docs/runbooks/saga-failure-recovery.md")
 			caobservability.RecordInlineCompensationFailure("deposit", "debit")
 		}
 	}
@@ -600,4 +614,18 @@ func (o *DepositOrchestrator) addSaveAccountStep(
 			return nil
 		},
 	)
+}
+
+// domainCurrencyToProto converts a domain currency to a proto currency enum.
+func domainCurrencyToProto(currency domain.Currency) commonpb.Currency {
+	switch currency {
+	case domain.CurrencyGBP:
+		return commonpb.Currency_CURRENCY_GBP
+	case domain.CurrencyUSD:
+		return commonpb.Currency_CURRENCY_USD
+	case domain.CurrencyEUR:
+		return commonpb.Currency_CURRENCY_EUR
+	default:
+		return commonpb.Currency_CURRENCY_UNSPECIFIED
+	}
 }
