@@ -113,6 +113,20 @@ func NewService(repo *persistence.Repository, lienRepo *persistence.LienReposito
 	}
 }
 
+// NewServiceWithIdempotency creates a new current account service with idempotency support.
+// This is primarily used for testing idempotency paths.
+func NewServiceWithIdempotency(repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service) *Service {
+	if repo == nil {
+		panic("repository cannot be nil")
+	}
+	return &Service{
+		repo:               repo,
+		lienRepo:           lienRepo,
+		idempotencyService: idempotencyService,
+		logger:             slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+}
+
 // NewServiceWithExistingClients creates a new service with pre-created client instances.
 // This constructor is useful when clients need to be shared with other components
 // (e.g., health checkers) to avoid creating duplicate connections.

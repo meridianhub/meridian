@@ -3,19 +3,23 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
 
@@ -562,4 +566,279 @@ func TestMultipleLiens_AvailableBalanceCalculation(t *testing.T) {
 	resp4, err := svc.InitiateLien(ctx, req4)
 	require.NoError(t, err)
 	require.Equal(t, int64(100), resp4.AvailableBalance.Amount.Units) // £500 - £400 = £100
+}
+
+// lienMockIdempotencyService implements idempotency.Service for testing ExecuteLien
+type lienMockIdempotencyService struct {
+	mu        sync.Mutex
+	results   map[string]*idempotency.Result
+	pending   map[string]bool
+	checkErr  error
+	storeErr  error
+	deleteErr error
+}
+
+func newLienMockIdempotencyService() *lienMockIdempotencyService {
+	return &lienMockIdempotencyService{
+		results: make(map[string]*idempotency.Result),
+		pending: make(map[string]bool),
+	}
+}
+
+func (m *lienMockIdempotencyService) Check(_ context.Context, key idempotency.Key) (*idempotency.Result, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.checkErr != nil {
+		return nil, m.checkErr
+	}
+
+	keyStr := key.String()
+	if result, ok := m.results[keyStr]; ok {
+		if result.Status == idempotency.StatusCompleted {
+			return result, idempotency.ErrOperationAlreadyProcessed
+		}
+		return result, nil
+	}
+	return nil, idempotency.ErrResultNotFound
+}
+
+func (m *lienMockIdempotencyService) MarkPending(_ context.Context, key idempotency.Key, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	keyStr := key.String()
+	if m.pending[keyStr] {
+		return idempotency.ErrOperationAlreadyProcessed
+	}
+	m.pending[keyStr] = true
+	return nil
+}
+
+func (m *lienMockIdempotencyService) StoreResult(_ context.Context, result idempotency.Result) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.storeErr != nil {
+		return m.storeErr
+	}
+
+	keyStr := result.Key.String()
+	m.results[keyStr] = &result
+	delete(m.pending, keyStr)
+	return nil
+}
+
+func (m *lienMockIdempotencyService) Delete(_ context.Context, key idempotency.Key) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+
+	keyStr := key.String()
+	delete(m.results, keyStr)
+	delete(m.pending, keyStr)
+	return nil
+}
+
+func (m *lienMockIdempotencyService) Acquire(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
+	return nil
+}
+
+func (m *lienMockIdempotencyService) Release(_ context.Context, _ idempotency.Key, _ string) error {
+	return nil
+}
+
+func (m *lienMockIdempotencyService) Refresh(_ context.Context, _ idempotency.Key, _ string, _ time.Duration) error {
+	return nil
+}
+
+func (m *lienMockIdempotencyService) IsHeld(_ context.Context, _ idempotency.Key) (bool, error) {
+	return false, nil
+}
+
+func (m *lienMockIdempotencyService) setResult(key idempotency.Key, data []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.results[key.String()] = &idempotency.Result{
+		Key:         key,
+		Status:      idempotency.StatusCompleted,
+		Data:        data,
+		CompletedAt: time.Now(),
+	}
+}
+
+func (m *lienMockIdempotencyService) setPending(key idempotency.Key) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pending[key.String()] = true
+}
+
+func (m *lienMockIdempotencyService) isPending(key idempotency.Key) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pending[key.String()]
+}
+
+func TestExecuteLien_IdempotencyReturnsCachedResponse(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	mockIdemp := newLienMockIdempotencyService()
+	svc := NewServiceWithIdempotency(repo, lienRepo, mockIdemp)
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP-001", 100000)
+
+	// Create lien for £500
+	lienAmount, err := domain.NewMoney("GBP", 50000)
+	require.NoError(t, err)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-1", nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(lien))
+
+	// Pre-populate cached response
+	idempKey := idempotency.Key{
+		TenantID:  lienSvcTestTenantID,
+		Namespace: "current-account",
+		Operation: "execute_lien",
+		EntityID:  lien.ID.String(),
+		RequestID: "lien-req-123",
+	}
+
+	cachedResp := &pb.ExecuteLienResponse{
+		Lien: &pb.Lien{
+			LienId: lien.ID.String(),
+			Status: pb.LienStatus_LIEN_STATUS_EXECUTED,
+		},
+		TransactionId: "cached-lien-tx-id",
+		NewBalance: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 500, Nanos: 0},
+		},
+	}
+	cachedData, err := proto.Marshal(cachedResp)
+	require.NoError(t, err)
+	mockIdemp.setResult(idempKey, cachedData)
+
+	// Execute lien with same idempotency key
+	req := &pb.ExecuteLienRequest{
+		LienId:         lien.ID.String(),
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "lien-req-123"},
+	}
+
+	resp, err := svc.ExecuteLien(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, "cached-lien-tx-id", resp.TransactionId, "should return cached transaction ID")
+	require.Equal(t, int64(500), resp.NewBalance.Amount.Units, "should return cached balance")
+}
+
+func TestExecuteLien_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	mockIdemp := newLienMockIdempotencyService()
+	svc := NewServiceWithIdempotency(repo, lienRepo, mockIdemp)
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP-002", 100000)
+
+	// Create lien for £500
+	lienAmount, err := domain.NewMoney("GBP", 50000)
+	require.NoError(t, err)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-2", nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(lien))
+
+	// Mark operation as pending
+	idempKey := idempotency.Key{
+		TenantID:  lienSvcTestTenantID,
+		Namespace: "current-account",
+		Operation: "execute_lien",
+		EntityID:  lien.ID.String(),
+		RequestID: "lien-req-456",
+	}
+	mockIdemp.setPending(idempKey)
+
+	// Execute lien with same idempotency key
+	req := &pb.ExecuteLienRequest{
+		LienId:         lien.ID.String(),
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "lien-req-456"},
+	}
+
+	_, err = svc.ExecuteLien(ctx, req)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.Aborted, st.Code(), "should return Aborted for concurrent request")
+	require.Contains(t, st.Message(), "already in progress")
+}
+
+func TestExecuteLien_IdempotencyProceedsWithoutKey(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	mockIdemp := newLienMockIdempotencyService()
+	svc := NewServiceWithIdempotency(repo, lienRepo, mockIdemp)
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP-003", 100000)
+
+	// Create lien for £500
+	lienAmount, err := domain.NewMoney("GBP", 50000)
+	require.NoError(t, err)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-3", nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(lien))
+
+	// Execute lien without idempotency key
+	req := &pb.ExecuteLienRequest{
+		LienId: lien.ID.String(),
+		// No IdempotencyKey
+	}
+
+	resp, err := svc.ExecuteLien(ctx, req)
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.TransactionId)
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_EXECUTED, resp.Lien.Status)
+}
+
+func TestExecuteLien_IdempotencyCleanupOnFailure(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	mockIdemp := newLienMockIdempotencyService()
+	svc := NewServiceWithIdempotency(repo, lienRepo, mockIdemp)
+
+	idempKey := idempotency.Key{
+		TenantID:  lienSvcTestTenantID,
+		Namespace: "current-account",
+		Operation: "execute_lien",
+		EntityID:  uuid.New().String(), // Non-existent lien ID
+		RequestID: "lien-req-789",
+	}
+
+	// Execute lien for non-existent lien (will fail)
+	req := &pb.ExecuteLienRequest{
+		LienId:         idempKey.EntityID,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "lien-req-789"},
+	}
+
+	_, err := svc.ExecuteLien(ctx, req)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.NotFound, st.Code())
+
+	// Verify pending state was cleaned up
+	require.False(t, mockIdemp.isPending(idempKey), "pending state should be cleaned up after failure")
 }
