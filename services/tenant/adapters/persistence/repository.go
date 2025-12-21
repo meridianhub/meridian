@@ -360,7 +360,7 @@ func toDomain(entity *TenantEntity) (*domain.Tenant, error) {
 func provisioningStatusToDomain(entity *ProvisioningStatusEntity) domain.ProvisioningStatus {
 	status := domain.ProvisioningStatus{
 		ServiceName: entity.ServiceName,
-		Status:      entity.Status,
+		Status:      domain.ServiceProvisioningStatus(entity.Status),
 		StartedAt:   entity.StartedAt,
 		CompletedAt: entity.CompletedAt,
 	}
