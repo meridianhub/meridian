@@ -46,8 +46,21 @@ type DepositOrchestratorConfig struct {
 	AccountConfig    *config.AccountConfig
 }
 
-// NewDepositOrchestrator creates a new deposit orchestrator with the given dependencies
+// NewDepositOrchestrator creates a new deposit orchestrator with the given dependencies.
+// Panics if required dependencies (Logger, Repo, PosKeepingClient, FinAcctClient) are nil.
 func NewDepositOrchestrator(cfg DepositOrchestratorConfig) *DepositOrchestrator {
+	if cfg.Logger == nil {
+		panic("deposit orchestrator: logger cannot be nil")
+	}
+	if cfg.Repo == nil {
+		panic("deposit orchestrator: repository cannot be nil")
+	}
+	if cfg.PosKeepingClient == nil {
+		panic("deposit orchestrator: position keeping client cannot be nil")
+	}
+	if cfg.FinAcctClient == nil {
+		panic("deposit orchestrator: financial accounting client cannot be nil")
+	}
 	return &DepositOrchestrator{
 		logger:           cfg.Logger,
 		repo:             cfg.Repo,

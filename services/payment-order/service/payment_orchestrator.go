@@ -60,8 +60,16 @@ type PaymentOrchestratorConfig struct {
 	LienExecutionRetryConfig  *sharedclients.RetryConfig
 }
 
-// NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies
+// NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies.
+// Panics if required dependencies (Logger, Repo) are nil. CurrentAccountClient and
+// PaymentGateway are validated at runtime in Orchestrate() with graceful error handling.
 func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) *PaymentOrchestrator {
+	if cfg.Logger == nil {
+		panic("payment orchestrator: logger cannot be nil")
+	}
+	if cfg.Repo == nil {
+		panic("payment orchestrator: repository cannot be nil")
+	}
 	return &PaymentOrchestrator{
 		logger:                    cfg.Logger,
 		repo:                      cfg.Repo,
