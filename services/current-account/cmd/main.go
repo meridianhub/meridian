@@ -19,9 +19,11 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/service"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -102,6 +104,18 @@ func run(logger *slog.Logger) error {
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
 
+	// Create Redis client and idempotency service
+	redisClient, err := createRedisClient(logger)
+	if err != nil {
+		return fmt.Errorf("failed to create Redis client: %w", err)
+	}
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			logger.Error("failed to close Redis client", "error", err)
+		}
+	}()
+	idempotencyService := idempotency.NewRedisService(redisClient)
+
 	// Get Kubernetes namespace from environment (defaults to "default")
 	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
 
@@ -117,6 +131,7 @@ func run(logger *slog.Logger) error {
 		namespace,
 		logger,
 		tracer,
+		idempotencyService,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
@@ -363,6 +378,7 @@ func createServiceWithClients(
 	namespace string,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
+	idempotencyService idempotency.Service,
 ) (*service.Service, *serviceClients, error) {
 	// Load account configuration for clearing accounts
 	// This is optional - if not configured, deposits will use single-entry mode (backward compatible)
@@ -445,6 +461,7 @@ func createServiceWithClients(
 		resilientFinAcctClient,
 		resilientPartyClient,
 		accountConfig,
+		idempotencyService,
 		logger,
 		tracer,
 	)
@@ -554,4 +571,51 @@ func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, erro
 		"bypass_methods", len(interceptorConfig.BypassMethods))
 
 	return interceptor, nil
+}
+
+// createRedisClient creates and validates a Redis client connection.
+// Environment variables:
+//   - REDIS_URL: Redis connection URL (default: redis://localhost:6379)
+//   - REDIS_PASSWORD: Redis password (optional)
+//   - REDIS_DB: Redis database number (default: 0)
+//   - REDIS_POOL_SIZE: Connection pool size (default: 10)
+//   - REDIS_MIN_IDLE_CONNS: Minimum idle connections (default: 2)
+func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
+	redisURL := getEnvOrDefault("REDIS_URL", "redis://localhost:6379")
+	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
+	redisDB := getEnvAsInt("REDIS_DB", 0)
+	poolSize := getEnvAsInt("REDIS_POOL_SIZE", 10)
+	minIdleConns := getEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
+
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid REDIS_URL: %w", err)
+	}
+
+	// Override with explicit config if set
+	if redisPassword != "" {
+		opt.Password = redisPassword
+	}
+	opt.DB = redisDB
+	opt.PoolSize = poolSize
+	opt.MinIdleConns = minIdleConns
+
+	client := redis.NewClient(opt)
+
+	// Verify connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("failed to ping Redis: %w", err)
+	}
+
+	// Log sanitized address to avoid exposing credentials
+	logger.Info("Redis client connected",
+		"addr", opt.Addr,
+		"db", redisDB,
+		"pool_size", poolSize,
+		"min_idle_conns", minIdleConns)
+
+	return client, nil
 }
