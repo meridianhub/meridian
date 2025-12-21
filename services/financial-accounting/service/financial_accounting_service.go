@@ -543,16 +543,18 @@ func (s *FinancialAccountingService) ListLedgerPostings(
 // UpdateLedgerPosting updates an existing ledger posting's status and result.
 //
 // Workflow:
-// 1. Parse and validate request fields
-// 2. Retrieve existing posting by ID
-// 3. Validate state transition rules (e.g., cannot change POSTED status)
-// 4. Apply update using domain methods (Post/Fail)
-// 5. Persist updated posting
-// 6. Publish domain event (LedgerPostingUpdatedEvent)
-// 7. Return updated posting
+// 1. Check idempotency using request's IdempotencyKey
+// 2. Parse and validate request fields
+// 3. Retrieve existing posting by ID
+// 4. Validate state transition rules (e.g., cannot change POSTED status)
+// 5. Apply update using domain methods (Post/Fail)
+// 6. Persist updated posting
+// 7. Publish domain event (LedgerPostingUpdatedEvent)
+// 8. Return updated posting
 //
 // Error mapping:
 // - Invalid request fields -> codes.InvalidArgument
+// - Duplicate idempotency key -> codes.AlreadyExists
 // - Posting not found -> codes.NotFound
 // - Invalid state transition -> codes.FailedPrecondition
 // - Internal errors -> codes.Internal
@@ -560,6 +562,46 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.UpdateLedgerPostingRequest,
 ) (*financialaccountingv1.UpdateLedgerPostingResponse, error) {
+	// Validate idempotency key is provided
+	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
+		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
+	}
+
+	idempotencyKey := idempotency.Key{
+		Namespace: "financial-accounting",
+		Operation: "update-posting",
+		EntityID:  req.GetId(),
+		RequestID: req.IdempotencyKey.Key,
+	}
+
+	// Check idempotency (skip if service not configured - e.g., Redis unavailable in dev)
+	if s.idempotency != nil {
+		result, err := s.idempotency.Check(ctx, idempotencyKey)
+		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+				if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
+					// Deserialize cached response from protobuf
+					var cachedResponse financialaccountingv1.UpdateLedgerPostingResponse
+					if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
+						slog.Error("failed to deserialize cached idempotency response",
+							"error", unmarshalErr,
+							"idempotency_key", req.IdempotencyKey.Key,
+							"operation", "update-posting")
+						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+					}
+					return &cachedResponse, nil
+				}
+				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+			}
+			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+		}
+
+		// Mark as pending to prevent concurrent processing
+		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+		}
+	}
+
 	// Parse posting ID
 	postingID, err := parseUUID(req.GetId())
 	if err != nil {
@@ -636,9 +678,43 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 	// TODO(75-async-audit#5): Implement LedgerPostingUpdatedEvent and publish it
 
 	// Convert to proto response
-	return &financialaccountingv1.UpdateLedgerPostingResponse{
+	response := &financialaccountingv1.UpdateLedgerPostingResponse{
 		LedgerPosting: toProtoLedgerPosting(posting),
-	}, nil
+	}
+
+	// Store idempotency result (only if service configured)
+	if s.idempotency != nil {
+		ttl := defaultIdempotencyTTL
+		if req.IdempotencyKey.TtlSeconds > 0 {
+			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
+		}
+
+		// Serialize response using protobuf for idempotent storage
+		responseData, marshalErr := proto.Marshal(response)
+		if marshalErr != nil {
+			slog.Error("failed to serialize response for idempotency cache",
+				"error", marshalErr,
+				"idempotency_key", req.IdempotencyKey.Key,
+				"operation", "update-posting")
+		} else {
+			result := idempotency.Result{
+				Key:         idempotencyKey,
+				Status:      idempotency.StatusCompleted,
+				Data:        responseData,
+				CompletedAt: time.Now(),
+				TTL:         ttl,
+			}
+
+			if storeErr := s.idempotency.StoreResult(ctx, result); storeErr != nil {
+				slog.Error("failed to store idempotency result",
+					"error", storeErr,
+					"idempotency_key", req.IdempotencyKey.Key,
+					"operation", "update-posting")
+			}
+		}
+	}
+
+	return response, nil
 }
 
 // isValidCurrencyCode validates that a currency code matches ISO 4217 format.
@@ -810,15 +886,17 @@ func (s *FinancialAccountingService) RetrieveFinancialBookingLog(
 // UpdateFinancialBookingLog updates an existing booking log's status and rules.
 //
 // Workflow:
-// 1. Parse and validate request fields
-// 2. Retrieve existing booking log by ID
-// 3. Validate state transition rules
-// 4. Apply updates using domain methods
-// 5. Persist updated booking log
-// 6. Return updated booking log
+// 1. Check idempotency using request's IdempotencyKey
+// 2. Parse and validate request fields
+// 3. Retrieve existing booking log by ID
+// 4. Validate state transition rules
+// 5. Apply updates using domain methods
+// 6. Persist updated booking log
+// 7. Return updated booking log
 //
 // Error mapping:
 // - Invalid request fields -> codes.InvalidArgument
+// - Duplicate idempotency key -> codes.AlreadyExists
 // - Booking log not found -> codes.NotFound
 // - Invalid state transition -> codes.FailedPrecondition
 // - Internal errors -> codes.Internal
@@ -826,6 +904,46 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
 ) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	// Validate idempotency key is provided
+	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
+		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
+	}
+
+	idempotencyKey := idempotency.Key{
+		Namespace: "financial-accounting",
+		Operation: "update-booking-log",
+		EntityID:  req.GetId(),
+		RequestID: req.IdempotencyKey.Key,
+	}
+
+	// Check idempotency (skip if service not configured - e.g., Redis unavailable in dev)
+	if s.idempotency != nil {
+		result, err := s.idempotency.Check(ctx, idempotencyKey)
+		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+				if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
+					// Deserialize cached response from protobuf
+					var cachedResponse financialaccountingv1.UpdateFinancialBookingLogResponse
+					if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
+						slog.Error("failed to deserialize cached idempotency response",
+							"error", unmarshalErr,
+							"idempotency_key", req.IdempotencyKey.Key,
+							"operation", "update-booking-log")
+						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+					}
+					return &cachedResponse, nil
+				}
+				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+			}
+			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+		}
+
+		// Mark as pending to prevent concurrent processing
+		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+		}
+	}
+
 	// Parse booking log ID
 	bookingLogID, err := parseUUID(req.GetId())
 	if err != nil {
@@ -935,9 +1053,43 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 	// TODO(75-async-audit#5): Publish FinancialBookingLogUpdatedEvent for inter-service coordination
 
 	// Convert to proto response
-	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
+	response := &financialaccountingv1.UpdateFinancialBookingLogResponse{
 		FinancialBookingLog: toProtoFinancialBookingLog(&updated),
-	}, nil
+	}
+
+	// Store idempotency result (only if service configured)
+	if s.idempotency != nil {
+		ttl := defaultIdempotencyTTL
+		if req.IdempotencyKey.TtlSeconds > 0 {
+			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
+		}
+
+		// Serialize response using protobuf for idempotent storage
+		responseData, marshalErr := proto.Marshal(response)
+		if marshalErr != nil {
+			slog.Error("failed to serialize response for idempotency cache",
+				"error", marshalErr,
+				"idempotency_key", req.IdempotencyKey.Key,
+				"operation", "update-booking-log")
+		} else {
+			result := idempotency.Result{
+				Key:         idempotencyKey,
+				Status:      idempotency.StatusCompleted,
+				Data:        responseData,
+				CompletedAt: time.Now(),
+				TTL:         ttl,
+			}
+
+			if storeErr := s.idempotency.StoreResult(ctx, result); storeErr != nil {
+				slog.Error("failed to store idempotency result",
+					"error", storeErr,
+					"idempotency_key", req.IdempotencyKey.Key,
+					"operation", "update-booking-log")
+			}
+		}
+	}
+
+	return response, nil
 }
 
 // isValidBookingLogTransition validates that a status transition is allowed.

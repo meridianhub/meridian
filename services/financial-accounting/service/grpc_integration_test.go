@@ -720,6 +720,9 @@ func TestUpdateLedgerPosting_Integration_PendingToPosted(t *testing.T) {
 		Id:            posting.ID.String(),
 		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 		PostingResult: "Successfully posted to ledger",
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	require.NoError(t, err)
@@ -758,6 +761,9 @@ func TestUpdateLedgerPosting_Integration_PendingToFailed(t *testing.T) {
 		Id:            posting.ID.String(),
 		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED,
 		PostingResult: "Insufficient funds",
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	require.NoError(t, err)
@@ -793,6 +799,9 @@ func TestUpdateLedgerPosting_Integration_InvalidTransition(t *testing.T) {
 		Id:            posting.ID.String(),
 		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED,
 		PostingResult: "Trying to fail posted",
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	require.Error(t, err)
@@ -812,6 +821,9 @@ func TestUpdateLedgerPosting_Integration_NotFound(t *testing.T) {
 		Id:            uuid.New().String(),
 		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 		PostingResult: "test",
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	require.Error(t, err)
@@ -1211,6 +1223,9 @@ func TestEndToEnd_PostingLifecycle(t *testing.T) {
 		Id:            postingID,
 		Status:        commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 		PostingResult: "Posted successfully via lifecycle test",
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, updateResp.LedgerPosting.Status)
@@ -1305,6 +1320,9 @@ func TestUpdateFinancialBookingLog_Integration_BalancedPostings_Success(t *testi
 	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     bookingLogID.String(),
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	// Should succeed with balanced postings
@@ -1334,6 +1352,9 @@ func TestUpdateFinancialBookingLog_Integration_MultipleBalancedPostings(t *testi
 	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     bookingLogID.String(),
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	// Should succeed with balanced postings
@@ -1362,6 +1383,9 @@ func TestUpdateFinancialBookingLog_Integration_UnbalancedPostings_FailedPrecondi
 	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     bookingLogID.String(),
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	// Should fail with FailedPrecondition
@@ -1393,6 +1417,9 @@ func TestUpdateFinancialBookingLog_Integration_NoPostings_FailedPrecondition(t *
 	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     bookingLogID.String(),
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	// Should fail with FailedPrecondition
@@ -1422,6 +1449,9 @@ func TestUpdateFinancialBookingLog_Integration_NonPostedTransition_SkipsValidati
 	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     bookingLogID.String(),
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	require.NoError(t, err)
@@ -1445,6 +1475,9 @@ func TestUpdateFinancialBookingLog_Integration_CancelledTransition_SkipsValidati
 	resp, err := ts.grpcClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     bookingLogID.String(),
 		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
 	})
 
 	require.NoError(t, err)
