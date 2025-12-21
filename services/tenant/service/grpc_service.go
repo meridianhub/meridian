@@ -130,46 +130,10 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		"status", tenant.Status,
 		"party_id", tenant.PartyID)
 
-	// Provision schemas if provisioner is configured
+	// Schema provisioning will be handled asynchronously by the worker
 	if s.provisioner != nil {
-		s.logger.Info("provisioning schemas for tenant",
+		s.logger.Info("tenant created with provisioning_pending status - worker will handle provisioning",
 			"tenant_id", tenant.ID.String())
-
-		provErr := s.provisioner.ProvisionSchemas(ctx, tenant.ID)
-		if provErr != nil {
-			// Mark tenant as provisioning_failed
-			s.logger.Error("schema provisioning failed",
-				"tenant_id", tenant.ID.String(),
-				"error", provErr)
-
-			_, updateErr := s.repo.UpdateStatusWithError(ctx, tenant.ID, domain.StatusProvisioningFailed, provErr.Error(), tenant.Version)
-			if updateErr != nil {
-				s.logger.Error("failed to update tenant status after provisioning failure",
-					"tenant_id", tenant.ID.String(),
-					"error", updateErr)
-			}
-
-			// Update local tenant state for response
-			tenant.Status = domain.StatusProvisioningFailed
-			tenant.ErrorMessage = provErr.Error()
-			tenant.Version++
-
-			return nil, status.Errorf(codes.Internal, "schema provisioning failed: %v", provErr)
-		}
-
-		// Activate tenant after successful provisioning
-		updatedTenant, updateErr := s.repo.UpdateStatus(ctx, tenant.ID, domain.StatusActive, tenant.Version)
-		if updateErr != nil {
-			s.logger.Error("failed to activate tenant after provisioning",
-				"tenant_id", tenant.ID.String(),
-				"error", updateErr)
-			return nil, status.Errorf(codes.Internal, "failed to activate tenant after provisioning")
-		}
-
-		tenant = updatedTenant
-		s.logger.Info("tenant provisioned and activated",
-			"tenant_id", tenant.ID.String(),
-			"status", tenant.Status)
 	}
 
 	return &pb.InitiateTenantResponse{

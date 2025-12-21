@@ -515,7 +515,7 @@ func TestService_InitiateTenant_PartyRegistrationFailure(t *testing.T) {
 // Tests for schema provisioning integration
 
 func TestService_InitiateTenant_WithProvisioningSuccess(t *testing.T) {
-	// Create mock provisioner that succeeds
+	// Create mock provisioner
 	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
 		{Name: "party", MigrationPath: "testdata/migrations"},
 		{Name: "current-account", MigrationPath: "testdata/migrations"},
@@ -535,14 +535,13 @@ func TestService_InitiateTenant_WithProvisioningSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp.Tenant)
 
-	// Tenant should be active after successful provisioning
+	// Tenant should be created with provisioning_pending status (worker will handle provisioning)
 	assert.Equal(t, "provisioned_tenant", resp.Tenant.TenantId)
-	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
-	assert.Equal(t, int32(2), resp.Tenant.Version) // Created with version 1, updated to active (version 2)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+	assert.Equal(t, int32(1), resp.Tenant.Version) // Created with version 1, no status update
 
-	// Verify provisioner was called
-	require.Len(t, mockProv.ProvisioningCalls, 1)
-	assert.Equal(t, "provisioned_tenant", mockProv.ProvisioningCalls[0].String())
+	// Verify provisioner was NOT called during InitiateTenant
+	assert.Empty(t, mockProv.ProvisioningCalls, "ProvisionSchemas should not be called during InitiateTenant - worker handles provisioning asynchronously")
 }
 
 // errProvisioningFailed is a test error for simulating provisioning failures.
@@ -565,21 +564,25 @@ func TestService_InitiateTenant_WithProvisioningFailure(t *testing.T) {
 		SettlementAsset: "GBP",
 	}
 
-	_, err := svc.InitiateTenant(ctx, req)
-	require.Error(t, err)
+	// InitiateTenant should succeed with provisioning_pending status
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Tenant)
 
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	assert.Equal(t, codes.Internal, st.Code())
-	assert.Contains(t, st.Message(), "schema provisioning failed")
+	// Tenant should be created with provisioning_pending status
+	// The worker will attempt provisioning and handle the failure
+	assert.Equal(t, "prov_fail_tenant", resp.Tenant.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
 
-	// Verify the tenant was created with provisioning_failed status
+	// Verify the tenant was persisted with provisioning_pending status
 	var entity persistence.TenantEntity
 	result := db.Where("id = ?", "prov_fail_tenant").First(&entity)
 	require.NoError(t, result.Error)
-	assert.Equal(t, "provisioning_failed", entity.Status)
-	require.NotNil(t, entity.ErrorMessage)
-	assert.Contains(t, *entity.ErrorMessage, "provisioning failed")
+	assert.Equal(t, "provisioning_pending", entity.Status)
+	assert.Nil(t, entity.ErrorMessage, "no error message yet - worker will handle provisioning failure")
+
+	// Verify provisioner was NOT called during InitiateTenant
+	assert.Empty(t, mockProv.ProvisioningCalls, "ProvisionSchemas should not be called during InitiateTenant")
 }
 
 func TestService_InitiateTenant_WithoutProvisioner(t *testing.T) {
