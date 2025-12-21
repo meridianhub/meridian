@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests use deprecated AmountCents() for backward compatibility verification
 package service
 
 import (
@@ -1660,7 +1659,9 @@ func TestProtoToMoney(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, tt.wantCents, got.AmountCents())
+				gotCents, err := got.ToMinorUnits()
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantCents, gotCents)
 			}
 		})
 	}

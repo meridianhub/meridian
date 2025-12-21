@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests use deprecated AmountCents() for backward compatibility verification
 package persistence
 
 import (
@@ -116,7 +115,9 @@ func TestPaymentOrderRepository_Create(t *testing.T) {
 	assert.Equal(t, po.ID, retrieved.ID)
 	assert.Equal(t, "acc-123", retrieved.DebtorAccountID)
 	assert.Equal(t, "creditor-ref", retrieved.CreditorReference)
-	assert.Equal(t, int64(10000), retrieved.Amount.AmountCents())
+	amountCents, err := retrieved.Amount.ToMinorUnits()
+	require.NoError(t, err)
+	assert.Equal(t, int64(10000), amountCents)
 	assert.Equal(t, domain.CurrencyGBP, retrieved.Amount.Currency())
 	assert.Equal(t, domain.PaymentOrderStatusInitiated, retrieved.Status)
 	assert.Equal(t, "idem-key-001", retrieved.IdempotencyKey)
