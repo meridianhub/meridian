@@ -574,7 +574,7 @@ func TestRepository_FindProvisioningStatusByTenantID_NullHandling(t *testing.T) 
 	assert.Len(t, results, 1)
 
 	assert.Equal(t, "party", results[0].ServiceName)
-	assert.Equal(t, "pending", results[0].Status)
+	assert.Equal(t, domain.ServiceStatusPending, results[0].Status)
 	assert.Equal(t, "", results[0].MigrationVersion)
 	assert.Nil(t, results[0].ErrorMessage)
 	assert.Nil(t, results[0].StartedAt)
