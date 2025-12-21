@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -330,7 +331,7 @@ func TestValidateSlug(t *testing.T) {
 					t.Errorf("ValidateSlug(%q) expected error containing %q, got nil", tt.slug, tt.errMsg)
 					return
 				}
-				if tt.errMsg != "" && !containsString(err.Error(), tt.errMsg) {
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("ValidateSlug(%q) error = %q, want error containing %q", tt.slug, err.Error(), tt.errMsg)
 				}
 			} else {
@@ -340,17 +341,4 @@ func TestValidateSlug(t *testing.T) {
 			}
 		})
 	}
-}
-
-// containsString checks if s contains substr (case-sensitive).
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		func() bool {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}())
 }

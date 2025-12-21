@@ -136,6 +136,26 @@ func TestRepository_Create_DuplicateSubdomain(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrSubdomainTaken), "Expected ErrSubdomainTaken, got %v", err)
 }
 
+func TestRepository_Create_DuplicateSlug(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create first tenant with slug
+	tenant1 := newTestTenant("tenant_one")
+	tenant1.Slug = "shared-slug"
+	err := repo.Create(ctx, tenant1)
+	require.NoError(t, err)
+
+	// Create second tenant with same slug
+	tenant2 := newTestTenant("tenant_two")
+	tenant2.Slug = "shared-slug"
+	err = repo.Create(ctx, tenant2)
+	assert.True(t, errors.Is(err, ErrSlugTaken), "Expected ErrSlugTaken, got %v", err)
+}
+
 func TestRepository_GetByID_NotFound(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

@@ -18,6 +18,7 @@ var (
 	ErrTenantExists    = errors.New("tenant already exists")
 	ErrVersionConflict = errors.New("version conflict: tenant was modified by another transaction")
 	ErrSubdomainTaken  = errors.New("subdomain already taken by another tenant")
+	ErrSlugTaken       = errors.New("slug already taken by another tenant")
 )
 
 // Repository provides persistence operations for tenants.
@@ -46,6 +47,9 @@ func (r *Repository) Create(ctx context.Context, tenant *domain.Tenant) error {
 
 	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
 		if isDuplicateKeyError(err) {
+			if strings.Contains(err.Error(), "slug") {
+				return ErrSlugTaken
+			}
 			if strings.Contains(err.Error(), "subdomain") {
 				return ErrSubdomainTaken
 			}
