@@ -406,7 +406,7 @@ func (o *PaymentOrchestrator) failPaymentOrder(ctx context.Context, po *domain.P
 //   - Step 4 fails: BookingLog in PENDING, balanced entries exist - just needs status update
 //
 // All partial failures are logged with RECONCILIATION_REQUIRED prefix and include
-// the booking_log_id for manual resolution. See runbook: docs/runbooks/ledger-reconciliation.md
+// the booking_log_id for manual resolution. See runbook: docs/runbooks/saga-failure-recovery.md
 //
 // Error handling: If any step fails, the error is returned and the calling code
 // should mark the payment as FAILED. The BookingLog will remain in PENDING status
