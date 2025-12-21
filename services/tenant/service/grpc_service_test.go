@@ -548,6 +548,9 @@ func TestService_InitiateTenant_WithProvisioningSuccess(t *testing.T) {
 // errProvisioningFailed is a test error for simulating provisioning failures.
 var errProvisioningFailed = errors.New("provisioning failed: database connection error")
 
+// errTestProvisioningError is a test error for simulating generic provisioning errors.
+var errTestProvisioningError = errors.New("provisioning error")
+
 func TestService_InitiateTenant_WithProvisioningFailure(t *testing.T) {
 	// Create mock provisioner that fails
 	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
@@ -972,6 +975,192 @@ func TestService_StatusConversionRoundtrip(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.status, domainStatus, "roundtrip conversion should preserve status")
+		})
+	}
+}
+
+// Tests for provisioning_hint field in InitiateTenantResponse
+
+func TestService_InitiateTenant_ProvisioningHint_AsyncMode(t *testing.T) {
+	// Create mock provisioner that succeeds (async mode)
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "testdata/migrations"},
+		{Name: "current-account", MigrationPath: "testdata/migrations"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "async_tenant",
+		DisplayName:     "Async Tenant",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Test case 1: Provisioner configured (async mode)
+	// When provisioner is configured, InitiateTenant performs sync provisioning
+	// but the hint should indicate "pending" during the provisioning phase
+	assert.NotNil(t, resp.Tenant, "response should contain tenant")
+	assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint should not be empty")
+
+	// After successful sync provisioning, tenant becomes active
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+	assert.Equal(t, "active", resp.ProvisioningHint, "hint should be 'active' after successful provisioning")
+
+	// Verify both fields are present in response
+	assert.NotNil(t, resp.Tenant)
+	assert.NotEmpty(t, resp.ProvisioningHint)
+}
+
+func TestService_InitiateTenant_ProvisioningHint_SyncMode(t *testing.T) {
+	// Service without provisioner (sync mode - tenant is active immediately)
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "sync_tenant",
+		DisplayName:     "Sync Tenant",
+		SettlementAsset: "GBP",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Test case 2: No provisioner (sync mode)
+	// Tenant should be active immediately, hint should be "active"
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+	assert.Equal(t, "active", resp.ProvisioningHint, "hint should be 'active' in sync mode")
+
+	// Verify tenant version is 1 (created directly as active)
+	assert.Equal(t, int32(1), resp.Tenant.Version)
+}
+
+func TestService_InitiateTenant_ProvisioningHint_FieldPresence(t *testing.T) {
+	// Verify provisioning_hint field is always present and never empty
+	tests := []struct {
+		name           string
+		setupFunc      func(*testing.T) (*Service, func())
+		expectedHint   string
+		expectedStatus pb.TenantStatus
+	}{
+		{
+			name: "with provisioner",
+			setupFunc: func(t *testing.T) (*Service, func()) {
+				mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+					{Name: "party", MigrationPath: "testdata/migrations"},
+				})
+				svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+				return svc, cleanup
+			},
+			expectedHint:   "active", // After successful provisioning
+			expectedStatus: pb.TenantStatus_TENANT_STATUS_ACTIVE,
+		},
+		{
+			name: "without provisioner",
+			setupFunc: func(t *testing.T) (*Service, func()) {
+				svc, _, cleanup := setupTest(t)
+				return svc, cleanup
+			},
+			expectedHint:   "active",
+			expectedStatus: pb.TenantStatus_TENANT_STATUS_ACTIVE,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, cleanup := tt.setupFunc(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			tenantID := "field_test_provisioner"
+			if tt.name == "without provisioner" {
+				tenantID = "field_test_no_prov"
+			}
+			req := &pb.InitiateTenantRequest{
+				TenantId:        tenantID,
+				DisplayName:     "Field Test",
+				SettlementAsset: "EUR",
+			}
+
+			resp, err := svc.InitiateTenant(ctx, req)
+			require.NoError(t, err)
+
+			// Test case 3: Verify field presence
+			assert.NotNil(t, resp.Tenant, "tenant field must be present")
+			assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint must not be empty string")
+			assert.Equal(t, tt.expectedHint, resp.ProvisioningHint)
+			assert.Equal(t, tt.expectedStatus, resp.Tenant.Status)
+		})
+	}
+}
+
+func TestService_InitiateTenant_ProvisioningHint_ProvisioningStates(t *testing.T) {
+	// Test provisioning_hint for different provisioning outcomes
+	tests := []struct {
+		name           string
+		tenantID       string
+		setupMock      func() *provisioner.MockProvisioner
+		expectError    bool
+		expectedHint   string
+		expectedStatus pb.TenantStatus
+	}{
+		{
+			name:     "successful provisioning",
+			tenantID: "success_tenant",
+			setupMock: func() *provisioner.MockProvisioner {
+				return provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+					{Name: "party", MigrationPath: "testdata/migrations"},
+				})
+			},
+			expectError:    false,
+			expectedHint:   "active",
+			expectedStatus: pb.TenantStatus_TENANT_STATUS_ACTIVE,
+		},
+		{
+			name:     "failed provisioning",
+			tenantID: "failed_tenant",
+			setupMock: func() *provisioner.MockProvisioner {
+				mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+					{Name: "party", MigrationPath: "testdata/migrations"},
+				})
+				mockProv.FailProvisioningFor["failed_tenant"] = errTestProvisioningError
+				return mockProv
+			},
+			expectError: true, // InitiateTenant returns error on provisioning failure
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockProv := tt.setupMock()
+			svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+			defer cleanup()
+
+			ctx := context.Background()
+			req := &pb.InitiateTenantRequest{
+				TenantId:        tt.tenantID,
+				DisplayName:     "Test Tenant",
+				SettlementAsset: "USD",
+			}
+
+			resp, err := svc.InitiateTenant(ctx, req)
+
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Nil(t, resp)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, resp)
+				assert.Equal(t, tt.expectedHint, resp.ProvisioningHint)
+				assert.Equal(t, tt.expectedStatus, resp.Tenant.Status)
+			}
 		})
 	}
 }
