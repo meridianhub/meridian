@@ -16,12 +16,12 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/proto"
@@ -45,7 +45,7 @@ type PaymentOrchestrator struct {
 	financialAccountingClient FinancialAccountingClient
 	gatewayAccountConfig      *config.GatewayAccountConfig
 	kafkaPublisher            KafkaPublisher
-	lienExecutionRetryConfig  *clients.RetryConfig
+	lienExecutionRetryConfig  *sharedclients.RetryConfig
 }
 
 // PaymentOrchestratorConfig contains dependencies for creating a PaymentOrchestrator
@@ -57,7 +57,7 @@ type PaymentOrchestratorConfig struct {
 	FinancialAccountingClient FinancialAccountingClient
 	GatewayAccountConfig      *config.GatewayAccountConfig
 	KafkaPublisher            KafkaPublisher
-	LienExecutionRetryConfig  *clients.RetryConfig
+	LienExecutionRetryConfig  *sharedclients.RetryConfig
 }
 
 // NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies
@@ -98,7 +98,7 @@ func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.Paymen
 	}
 
 	// Create saga orchestrator and track lien state for compensation
-	saga := clients.NewSagaOrchestrator(o.logger)
+	saga := sharedclients.NewSagaOrchestrator(o.logger)
 	var lienID string
 
 	// Add saga steps
@@ -111,7 +111,7 @@ func (o *PaymentOrchestrator) Orchestrate(ctx context.Context, po *domain.Paymen
 }
 
 // addReserveFundsStep adds the reserve_funds saga step that creates a lien to reserve funds.
-func (o *PaymentOrchestrator) addReserveFundsStep(saga *clients.SagaOrchestrator, po *domain.PaymentOrder, lienID *string) {
+func (o *PaymentOrchestrator) addReserveFundsStep(saga *sharedclients.SagaOrchestrator, po *domain.PaymentOrder, lienID *string) {
 	saga.AddStep("reserve_funds",
 		// Action: Create lien to reserve funds
 		func(stepCtx context.Context) error {
@@ -200,7 +200,7 @@ func (o *PaymentOrchestrator) addReserveFundsStep(saga *clients.SagaOrchestrator
 }
 
 // addSendToGatewayStep adds the send_to_gateway saga step that sends payment to the external gateway.
-func (o *PaymentOrchestrator) addSendToGatewayStep(saga *clients.SagaOrchestrator, po *domain.PaymentOrder) {
+func (o *PaymentOrchestrator) addSendToGatewayStep(saga *sharedclients.SagaOrchestrator, po *domain.PaymentOrder) {
 	saga.AddStep("send_to_gateway",
 		// Action: Send payment to gateway
 		func(stepCtx context.Context) error {
@@ -275,7 +275,7 @@ func (o *PaymentOrchestrator) processGatewayResponse(ctx context.Context, po *do
 }
 
 // handleSagaResult processes the saga execution result and handles failure scenarios.
-func (o *PaymentOrchestrator) handleSagaResult(ctx context.Context, po *domain.PaymentOrder, result clients.SagaResult) {
+func (o *PaymentOrchestrator) handleSagaResult(ctx context.Context, po *domain.PaymentOrder, result sharedclients.SagaResult) {
 	if !result.Success {
 		o.logger.Error("payment saga failed",
 			"payment_order_id", po.ID.String(),
@@ -562,7 +562,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 //
 // The method:
 // 1. Creates a context with timeout for the entire retry sequence
-// 2. Uses exponential backoff for retries with the existing clients.Retry infrastructure
+// 2. Uses exponential backoff for retries with the existing sharedclients.Retry infrastructure
 // 3. Updates the payment order's lien execution status on success or final failure
 // 4. Logs all attempts for monitoring and alerting
 //
@@ -622,7 +622,7 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 	// Use configured retry config or default
 	retryConfig := o.lienExecutionRetryConfig
 	if retryConfig == nil {
-		retryConfig = &clients.RetryConfig{
+		retryConfig = &sharedclients.RetryConfig{
 			MaxRetries:          DefaultLienExecutionMaxRetries,
 			InitialInterval:     500 * time.Millisecond,
 			MaxInterval:         30 * time.Second,
@@ -635,7 +635,7 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 	var attempts int
 
 	// Execute with retry
-	err := clients.Retry(ctx, *retryConfig, func() error {
+	err := sharedclients.Retry(ctx, *retryConfig, func() error {
 		attempts++
 		logger.Info("attempting lien execution", "attempt", attempts)
 

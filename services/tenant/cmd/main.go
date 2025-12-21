@@ -35,6 +35,9 @@ var (
 	BuildDate = "unknown"
 )
 
+// envValueTrue is the string value for enabled environment variables.
+const envValueTrue = "true"
+
 // ErrJWKSURLRequired is returned when AUTH_ENABLED is true but AUTH_JWKS_URL is not set.
 var ErrJWKSURLRequired = errors.New("AUTH_JWKS_URL is required when AUTH_ENABLED=true")
 
@@ -106,7 +109,7 @@ func run(logger *slog.Logger) error {
 	// Initialize schema provisioner (optional - skipped if SCHEMA_PROVISIONING_ENABLED is not "true")
 	var schemaProvisioner provisioner.SchemaProvisioner
 	provisioningEnabled := getEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false")
-	if provisioningEnabled == "true" {
+	if provisioningEnabled == envValueTrue {
 		config := provisioner.DefaultConfig()
 
 		// Pass platform database connection (for tenant_provisioning table).
@@ -132,14 +135,17 @@ func run(logger *slog.Logger) error {
 			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable schema provisioning")
 	}
 
-	// Initialize Party client (optional - skipped if PARTY_SERVICE_TARGET not set)
+	// Initialize Party client (optional - skipped if PARTY_SERVICE_ENABLED is not "true")
 	var partyClient clients.PartyClient
-	partyTarget := getEnvOrDefault("PARTY_SERVICE_TARGET", "")
-	if partyTarget != "" {
+	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
+	partyEnabled := getEnvOrDefault("PARTY_SERVICE_ENABLED", envValueTrue) == envValueTrue
+	if partyEnabled {
 		pc, err := clients.NewPartyClient(&clients.PartyClientConfig{
-			Target:  partyTarget,
-			Timeout: 30 * time.Second,
-			Tracer:  tracer,
+			ServiceName: "party",
+			Namespace:   namespace,
+			Port:        50055,
+			Timeout:     30 * time.Second,
+			Tracer:      tracer,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create party client: %w", err)
@@ -150,10 +156,13 @@ func run(logger *slog.Logger) error {
 				logger.Error("failed to close party client", "error", err)
 			}
 		}()
-		logger.Info("party client initialized", "target", partyTarget)
+		logger.Info("party client initialized",
+			"service_name", "party",
+			"namespace", namespace,
+			"port", 50055)
 	} else {
 		logger.Warn("party client not configured - tenant creation will not register parties",
-			"hint", "set PARTY_SERVICE_TARGET to enable party registration")
+			"hint", "set PARTY_SERVICE_ENABLED=true to enable party registration")
 	}
 
 	// Create gRPC service
@@ -173,7 +182,7 @@ func run(logger *slog.Logger) error {
 	// In production, set AUTH_JWKS_URL to enable platform-admin authentication.
 	var authInterceptor *auth.Interceptor
 	var jwksProvider *auth.JWKSProvider
-	authEnabled := getEnvOrDefault("AUTH_ENABLED", "false") == "true"
+	authEnabled := getEnvOrDefault("AUTH_ENABLED", "false") == envValueTrue
 	if authEnabled {
 		jwksURL := getEnvOrDefault("AUTH_JWKS_URL", "")
 		if jwksURL == "" {

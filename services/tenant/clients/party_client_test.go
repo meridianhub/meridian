@@ -8,14 +8,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewPartyClient_RequiresTarget(t *testing.T) {
+func TestNewPartyClient_RequiresServiceName(t *testing.T) {
 	_, err := NewPartyClient(&PartyClientConfig{})
-	assert.ErrorIs(t, err, ErrPartyTargetRequired)
+	assert.ErrorIs(t, err, ErrPartyServiceNameRequired)
 }
 
 func TestNewPartyClient_Success(t *testing.T) {
 	client, err := NewPartyClient(&PartyClientConfig{
-		Target: "localhost:50055",
+		ServiceName: "party",
+		Namespace:   "default",
+		Port:        50055,
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, client)
@@ -28,7 +30,9 @@ func TestNewPartyClient_Success(t *testing.T) {
 
 func TestNewPartyClient_DefaultTimeout(t *testing.T) {
 	client, err := NewPartyClient(&PartyClientConfig{
-		Target: "localhost:50055",
+		ServiceName: "party",
+		Namespace:   "default",
+		Port:        50055,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 30*time.Second, client.timeout)
@@ -38,18 +42,21 @@ func TestNewPartyClient_DefaultTimeout(t *testing.T) {
 func TestNewPartyClient_CustomTimeout(t *testing.T) {
 	customTimeout := 10 * time.Second
 	client, err := NewPartyClient(&PartyClientConfig{
-		Target:  "localhost:50055",
-		Timeout: customTimeout,
+		ServiceName: "party",
+		Namespace:   "default",
+		Port:        50055,
+		Timeout:     customTimeout,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, customTimeout, client.timeout)
 	_ = client.Close()
 }
 
-func TestNewPartyClient_ServiceNameMode(t *testing.T) {
+func TestNewPartyClient_DefaultNamespace(t *testing.T) {
+	// Empty namespace should default to "default" in the platform grpc client
 	client, err := NewPartyClient(&PartyClientConfig{
-		ServiceName: "party-service",
-		Namespace:   "default",
+		ServiceName: "party",
+		Namespace:   "",
 		Port:        50055,
 	})
 	require.NoError(t, err)

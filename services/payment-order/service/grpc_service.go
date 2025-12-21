@@ -17,12 +17,12 @@ import (
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/samber/lo"
@@ -153,8 +153,8 @@ type Service struct {
 	defaultPageSize           int
 	maxPageSize               int
 	maxIdempotencyKeyLength   int
-	lienExecutionRetryConfig  *clients.RetryConfig // nil means use default
-	orchestrator              *PaymentOrchestrator // Handles payment saga orchestration
+	lienExecutionRetryConfig  *sharedclients.RetryConfig // nil means use default
+	orchestrator              *PaymentOrchestrator       // Handles payment saga orchestration
 }
 
 // Config contains configuration for creating a new Service
@@ -179,7 +179,7 @@ type Config struct {
 	MaxIdempotencyKeyLength int
 	// LienExecutionRetryConfig configures retry behavior for async lien execution.
 	// If nil, default retry config is used. Primarily useful for testing.
-	LienExecutionRetryConfig *clients.RetryConfig
+	LienExecutionRetryConfig *sharedclients.RetryConfig
 }
 
 // NewService creates a new payment order service with minimal dependencies.

@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -67,7 +68,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	}()
 
 	// Extract or generate correlation ID
-	correlationID := clients.ExtractCorrelationID(ctx)
+	correlationID := sharedclients.ExtractCorrelationID(ctx)
 	if correlationID == "" {
 		correlationID = uuid.New().String()
 		o.logger.Info("generated new correlation ID", "correlation_id", correlationID)
@@ -77,7 +78,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	}
 
 	// Create saga orchestrator
-	saga := clients.NewSagaOrchestrator(o.logger)
+	saga := sharedclients.NewSagaOrchestrator(o.logger)
 
 	// Track state for compensation
 	var positionLogID string
@@ -148,7 +149,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 
 // addLogPositionStep adds the log_position saga step.
 func (o *DepositOrchestrator) addLogPositionStep(
-	saga *clients.SagaOrchestrator,
+	saga *sharedclients.SagaOrchestrator,
 	account domain.CurrentAccount,
 	amount domain.Money,
 	transactionID string,
@@ -161,7 +162,7 @@ func (o *DepositOrchestrator) addLogPositionStep(
 				"account_id", account.AccountID(),
 				"transaction_id", transactionID)
 
-			stepCtx = clients.PropagateCorrelationID(stepCtx)
+			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 
 			resp, err := o.posKeepingClient.InitiateFinancialPositionLog(stepCtx,
 				&positionkeepingv1.InitiateFinancialPositionLogRequest{
@@ -208,7 +209,7 @@ func (o *DepositOrchestrator) addLogPositionStep(
 				return ErrPositionLogIDNotFound
 			}
 
-			stepCtx = clients.PropagateCorrelationID(stepCtx)
+			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 
 			_, err := o.posKeepingClient.UpdateFinancialPositionLog(stepCtx,
 				&positionkeepingv1.UpdateFinancialPositionLogRequest{
@@ -248,7 +249,7 @@ func (o *DepositOrchestrator) addLogPositionStep(
 
 // addPostLedgerStep adds the post_ledger saga step for double-entry bookkeeping.
 func (o *DepositOrchestrator) addPostLedgerStep(
-	saga *clients.SagaOrchestrator,
+	saga *sharedclients.SagaOrchestrator,
 	account domain.CurrentAccount,
 	amount domain.Money,
 	transactionID string,
@@ -264,7 +265,7 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 				"clearing_account_id", clearingAccountID,
 				"transaction_id", transactionID)
 
-			stepCtx = clients.PropagateCorrelationID(stepCtx)
+			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 			moneyAmt := toMoneyAmount(amount)
 
 			// Step 2a: Initiate a financial booking log
@@ -399,7 +400,7 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 				return ErrLedgerPostingIDNotFound
 			}
 
-			stepCtx = clients.PropagateCorrelationID(stepCtx)
+			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 			moneyAmt := toMoneyAmount(amount)
 
 			o.compensatePostingsInline(stepCtx, account, *bookingLogID, clearingAccountID, transactionID, moneyAmt, *debitPosted, *creditPosted)
@@ -541,7 +542,7 @@ func (o *DepositOrchestrator) compensatePostingsInline(
 
 // addSaveAccountStep adds the save_account saga step.
 func (o *DepositOrchestrator) addSaveAccountStep(
-	saga *clients.SagaOrchestrator,
+	saga *sharedclients.SagaOrchestrator,
 	account domain.CurrentAccount,
 	transactionID string,
 ) {

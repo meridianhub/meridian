@@ -17,12 +17,11 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
-	"github.com/meridianhub/meridian/services/current-account/clients"
-
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -2267,7 +2266,7 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 	gwConfig := testGatewayAccountConfig()
 
 	// Use fast retry config for tests to avoid long wait times
-	fastRetryConfig := &clients.RetryConfig{
+	fastRetryConfig := &sharedclients.RetryConfig{
 		MaxRetries:          3,
 		InitialInterval:     10 * time.Millisecond,
 		MaxInterval:         50 * time.Millisecond,
