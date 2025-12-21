@@ -140,6 +140,15 @@ type SchemaProvisioner interface {
 	//   - reconciledCount: Number of tenants that had migrations applied
 	//   - errors: Per-tenant errors (reconciliation continues despite individual failures)
 	ReconcileMigrations(ctx context.Context, tenantID *tenant.TenantID) (reconciledCount int, errors []string)
+
+	// GetRequiredSchemas returns the list of service names that require schema provisioning.
+	// This is used to initialize provisioning_status records before async provisioning begins.
+	GetRequiredSchemas() []string
+
+	// InitializeProvisioningStatus creates an initial provisioning_status record with 'pending' state.
+	// This is called during tenant creation to set up tracking records before async provisioning begins.
+	// Idempotent: If a status record already exists, this is a no-op.
+	InitializeProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) error
 }
 
 // ProvisioningState represents the lifecycle state of schema provisioning.

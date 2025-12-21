@@ -14,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -977,4 +978,88 @@ func TestService_StatusConversionRoundtrip(t *testing.T) {
 			assert.Equal(t, tt.status, domainStatus, "roundtrip conversion should preserve status")
 		})
 	}
+}
+
+// TestInitiateTenant_CreatesProvisioningStatusRecords verifies that InitiateTenant
+// creates provisioning_status records when a provisioner is configured.
+func TestInitiateTenant_CreatesProvisioningStatusRecords(t *testing.T) {
+	// Create mock provisioner with test services
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+		{Name: "current-account", MigrationPath: "/migrations/current-account"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	// Test: Create tenant with provisioner configured
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "test_org_prov_status",
+		DisplayName:     "Test Organization",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(context.Background(), req)
+	require.NoError(t, err, "InitiateTenant should succeed")
+	require.NotNil(t, resp)
+
+	// Verify tenant was created with provisioning_pending status
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+
+	// Verify provisioning status record was created
+	tenantID, err := tenant.NewTenantID("test_org_prov_status")
+	require.NoError(t, err)
+
+	status, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err, "Provisioning status should exist")
+	assert.Equal(t, provisioner.StatePending, status.State)
+	assert.Len(t, status.Services, 2, "Should have 2 service status records")
+
+	// Verify service schemas
+	assert.Equal(t, "party", status.Services[0].ServiceName)
+	assert.Equal(t, provisioner.ServiceStatePending, status.Services[0].State)
+	assert.Equal(t, "current-account", status.Services[1].ServiceName)
+	assert.Equal(t, provisioner.ServiceStatePending, status.Services[1].State)
+}
+
+// TestInitiateTenant_ProvisioningStatusIdempotent verifies that calling
+// InitiateTenant multiple times doesn't duplicate provisioning status.
+func TestInitiateTenant_ProvisioningStatusIdempotent(t *testing.T) {
+	// Create mock provisioner
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "/migrations/party"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	// First call: Create tenant
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "test_org_idempotent",
+		DisplayName:     "Test Organization Idempotent",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify provisioning status was created
+	tenantID, err := tenant.NewTenantID("test_org_idempotent")
+	require.NoError(t, err)
+
+	status1, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, provisioner.StatePending, status1.State)
+
+	// Second call: Try to create same tenant again (will fail at tenant creation level)
+	// But if we manually call the helper, it should be idempotent
+	err = svc.createProvisioningStatusRecords(context.Background(), tenantID)
+	require.NoError(t, err, "Second call should be idempotent")
+
+	// Verify status hasn't changed
+	status2, err := mockProv.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, status1.State, status2.State)
+	assert.Equal(t, status1.CreatedAt, status2.CreatedAt, "Created timestamp should not change on second call")
 }

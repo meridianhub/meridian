@@ -134,6 +134,13 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 	if s.provisioner != nil {
 		s.logger.Info("tenant created with provisioning_pending status - worker will handle provisioning",
 			"tenant_id", tenant.ID.String())
+
+		// Initialize provisioning status records (non-blocking, best-effort)
+		if err := s.createProvisioningStatusRecords(ctx, tenantID); err != nil {
+			s.logger.Warn("failed to create provisioning status records - worker will handle",
+				"tenant_id", tenantID.String(),
+				"error", err)
+		}
 	}
 
 	return &pb.InitiateTenantResponse{
@@ -380,4 +387,36 @@ func (s *Service) ReconcileMigrations(ctx context.Context, req *pb.ReconcileMigr
 		ReconciledCount: int32(reconciledCount),
 		Errors:          errs,
 	}, nil
+}
+
+// createProvisioningStatusRecords initializes tracking records for each schema that needs provisioning.
+// This is a best-effort operation - failure is logged but does not fail the tenant creation.
+// The async worker will handle provisioning regardless of whether these records exist.
+func (s *Service) createProvisioningStatusRecords(ctx context.Context, tenantID tenant.TenantID) error {
+	// Get the list of required schemas from the provisioner
+	schemas := s.provisioner.GetRequiredSchemas()
+	if len(schemas) == 0 {
+		s.logger.Debug("no schemas require provisioning",
+			"tenant_id", tenantID.String())
+		return nil
+	}
+
+	s.logger.Debug("creating provisioning status records",
+		"tenant_id", tenantID.String(),
+		"schema_count", len(schemas))
+
+	// Initialize provisioning status record with 'pending' state
+	// This creates the tenant_provisioning record with all service_schemas entries
+	if err := s.provisioner.InitializeProvisioningStatus(ctx, tenantID); err != nil {
+		s.logger.Error("failed to initialize provisioning status",
+			"tenant_id", tenantID.String(),
+			"error", err)
+		return err
+	}
+
+	s.logger.Debug("provisioning status records initialized",
+		"tenant_id", tenantID.String(),
+		"schemas", schemas)
+
+	return nil
 }
