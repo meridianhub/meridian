@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ import (
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/samber/lo"
@@ -581,6 +583,10 @@ func (s *Service) storeIdempotencyFailure(ctx context.Context, key idempotency.K
 // Returns an error if the state transition or persistence fails. Callers in synchronous paths
 // (e.g., UpdatePaymentOrder) should propagate this error to clients. Callers in async paths
 // (e.g., saga orchestration) may log and swallow the error.
+//
+// Compensation logic:
+// - Reverses ledger entries if LedgerBookingID exists (defensive - normally empty on failure)
+// - Releases lien if payment was in RESERVED or EXECUTING state
 func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder, reason string, errorCode string) error {
 	// Capture original status before transitioning (for event)
 	failedAtStatus := po.Status
@@ -588,6 +594,21 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 	// Check if lien needs to be released before transitioning
 	needsLienRelease := po.RequiresLienRelease()
 	lienID := po.LienID
+	originalLedgerBookingID := po.LedgerBookingID
+
+	// Reverse ledger posting if it exists (defensive - normally empty before COMPLETED)
+	// This handles edge cases where ledger posting succeeded but state transition failed
+	if originalLedgerBookingID != "" {
+		_, err := s.reverseLedgerPosting(ctx, po, fmt.Sprintf("Payment failure: %s", reason))
+		if err != nil {
+			// Log but continue - ledger reversal failure shouldn't block payment failure
+			// The orphaned booking log will be flagged for reconciliation
+			s.logger.Error("failed to reverse ledger posting on payment failure",
+				"error", err,
+				"payment_order_id", po.ID.String(),
+				"original_ledger_booking_id", originalLedgerBookingID)
+		}
+	}
 
 	// Transition to FAILED
 	if err := po.Fail(reason, errorCode); err != nil {
@@ -639,6 +660,7 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 		"payment_order_id", po.ID.String(),
 		"reason", reason,
 		"error_code", errorCode,
+		"original_ledger_booking_id", originalLedgerBookingID,
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", po.CorrelationID)
 
@@ -1219,6 +1241,18 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 	// Store original ledger booking ID for the event
 	originalLedgerBookingID := po.LedgerBookingID
 
+	// Create compensating ledger entries if original posting exists
+	// This must happen before state transition to ensure ledger consistency
+	compensatingBookingID, err := s.reverseLedgerPosting(ctx, po, req.ReversalReason)
+	if err != nil {
+		s.logger.Error("failed to create compensating ledger entries for reversal",
+			"payment_order_id", po.ID.String(),
+			"original_ledger_booking_id", originalLedgerBookingID,
+			"error", err)
+		// Don't cache internal errors - allow retry on recovery
+		return nil, status.Errorf(codes.Internal, "failed to create compensating ledger entries: %v", err)
+	}
+
 	// Reverse the payment order
 	if err := po.Reverse(req.ReversalReason); err != nil {
 		// Don't cache internal errors - allow retry on recovery
@@ -1231,10 +1265,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		return nil, status.Error(codes.Internal, "failed to update payment order")
 	}
 
-	// Publish PaymentOrderReversed event
-	// Note: In a full implementation, this would trigger compensating ledger entries
-	// via FinancialAccounting service. For now, we publish the event for downstream
-	// consumers to handle the compensation.
+	// Publish PaymentOrderReversed event with compensating booking ID
 	s.publishEvent(ctx, TopicPaymentOrderReversed, po.ID.String(), &eventsv1.PaymentOrderReversedEvent{
 		EventId:                     uuid.New().String(),
 		PaymentOrderId:              po.ID.String(),
@@ -1243,7 +1274,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		ReversalReason:              req.ReversalReason,
 		ReversedBy:                  req.ReversedBy,
 		OriginalLedgerBookingId:     originalLedgerBookingID,
-		CompensatingLedgerBookingId: "", // Will be populated when FA service creates compensating entry
+		CompensatingLedgerBookingId: compensatingBookingID,
 		CorrelationId:               po.CorrelationID,
 		CausationId:                 po.ID.String(),
 		Timestamp:                   timestamppb.Now(),
@@ -1258,6 +1289,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		"amount_cents", safeMinorUnits(po.Amount),
 		"currency", string(po.Amount.Currency()),
 		"original_ledger_booking_id", originalLedgerBookingID,
+		"compensating_booking_id", compensatingBookingID,
 		"correlation_id", po.CorrelationID)
 
 	// Store successful result in Redis for future idempotency checks
@@ -1467,4 +1499,201 @@ func safeIntToInt32(n int) int32 {
 		return -maxInt32 - 1
 	}
 	return int32(n)
+}
+
+// reverseLedgerPosting creates reversal entries for a completed payment.
+// This is used for refunds and failed payment reversals.
+func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOrder, reason string) (string, error) {
+	// No ledger entry to reverse if LedgerBookingID is empty
+	if po.LedgerBookingID == "" {
+		s.logger.Debug("no ledger entry to reverse - payment had no ledger posting",
+			"payment_order_id", po.ID.String())
+		return "", nil
+	}
+
+	// Skip ledger reversal if financial accounting client is not configured
+	// This allows the service to operate without FA integration for testing
+	if s.financialAccountingClient == nil || s.gatewayAccountConfig == nil {
+		s.logger.Warn("skipping ledger reversal - financial accounting client not configured",
+			"payment_order_id", po.ID.String(),
+			"ledger_booking_id", po.LedgerBookingID)
+		return "", nil
+	}
+
+	// Get the gateway contra-account from configuration
+	gatewayID := extractGatewayIDFromRef(po.GatewayReferenceID)
+	contraAccountID, err := s.gatewayAccountConfig.GetContraAccount(gatewayID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get contra-account for gateway %s: %w", gatewayID, err)
+	}
+
+	// Convert domain currency to proto currency
+	protoCurrency := mappers.DomainCurrencyToProto(po.Amount.Currency())
+	if protoCurrency == commonpb.Currency_CURRENCY_UNSPECIFIED {
+		s.logger.Warn("unsupported currency for reversal posting",
+			"currency", string(po.Amount.Currency()),
+			"payment_order_id", po.ID.String())
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, po.Amount.Currency())
+	}
+
+	// Step 1: Create a BookingLog in PENDING status for the reversal
+	reversalBookingLogIDempKey := fmt.Sprintf("reversal-booking-log-%s", po.IdempotencyKey)
+	bookingLogResp, err := s.financialAccountingClient.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{
+		FinancialAccountType:    commonpb.AccountType_ACCOUNT_TYPE_CURRENT,
+		ProductServiceReference: "payment-order-reversal",
+		BusinessUnitReference:   "payment-order-service",
+		ChartOfAccountsRules:    "payment-reversal",
+		BaseCurrency:            protoCurrency,
+		IdempotencyKey: &commonpb.IdempotencyKey{
+			Key: reversalBookingLogIDempKey,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create reversal booking log: %w", err)
+	}
+	reversalBookingLogID := bookingLogResp.FinancialBookingLog.Id
+
+	s.logger.Debug("created reversal booking log",
+		"reversal_booking_log_id", reversalBookingLogID,
+		"original_booking_log_id", po.LedgerBookingID,
+		"payment_order_id", po.ID.String(),
+		"reason", reason)
+
+	// Convert amount from cents to google.type.Money format
+	amountCents, err := po.Amount.ToMinorUnits()
+	if err != nil {
+		return "", fmt.Errorf("amount overflow for reversal posting: %w", err)
+	}
+	postingAmount := &money.Money{
+		CurrencyCode: string(po.Amount.Currency()),
+		Units:        amountCents / 100,
+		Nanos:        int32((amountCents % 100) * 10000000),
+	}
+	valueDate := timestamppb.Now()
+
+	// Step 2: Create CREDIT posting (customer account - funds returning)
+	// This reverses the original DEBIT on the customer account
+	reversalCreditIdempKey := fmt.Sprintf("reversal-credit-%s", po.IdempotencyKey)
+	_, err = s.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: reversalBookingLogID,
+		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+		PostingAmount:         postingAmount,
+		AccountId:             po.DebtorAccountID,
+		ValueDate:             valueDate,
+		IdempotencyKey: &commonpb.IdempotencyKey{
+			Key: reversalCreditIdempKey,
+		},
+	})
+	if err != nil {
+		s.logger.Error("RECONCILIATION_REQUIRED: reversal booking log orphaned after credit posting failure",
+			"reversal_booking_log_id", reversalBookingLogID,
+			"original_booking_log_id", po.LedgerBookingID,
+			"booking_log_status", "PENDING",
+			"payment_order_id", po.ID.String(),
+			"failed_step", "reversal_credit_posting",
+			"debtor_account", po.DebtorAccountID,
+			"error", err.Error())
+		return "", fmt.Errorf("failed to create reversal credit posting for account %s: %w", po.DebtorAccountID, err)
+	}
+
+	s.logger.Debug("created reversal credit posting",
+		"reversal_booking_log_id", reversalBookingLogID,
+		"account_id", po.DebtorAccountID,
+		"amount_cents", amountCents,
+		"payment_order_id", po.ID.String())
+
+	// Step 3: Create DEBIT posting (gateway contra-account - reducing liability)
+	// This reverses the original CREDIT on the gateway contra-account
+	reversalDebitIdempKey := fmt.Sprintf("reversal-debit-%s", po.IdempotencyKey)
+	_, err = s.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: reversalBookingLogID,
+		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
+		PostingAmount:         postingAmount,
+		AccountId:             contraAccountID,
+		ValueDate:             valueDate,
+		IdempotencyKey: &commonpb.IdempotencyKey{
+			Key: reversalDebitIdempKey,
+		},
+	})
+	if err != nil {
+		s.logger.Error("RECONCILIATION_REQUIRED: reversal booking log orphaned after debit posting failure",
+			"reversal_booking_log_id", reversalBookingLogID,
+			"original_booking_log_id", po.LedgerBookingID,
+			"booking_log_status", "PENDING",
+			"payment_order_id", po.ID.String(),
+			"failed_step", "reversal_debit_posting",
+			"debtor_account", po.DebtorAccountID,
+			"contra_account", contraAccountID,
+			"has_credit_posting", true,
+			"error", err.Error())
+		return "", fmt.Errorf("failed to create reversal debit posting for account %s: %w", contraAccountID, err)
+	}
+
+	s.logger.Debug("created reversal debit posting",
+		"reversal_booking_log_id", reversalBookingLogID,
+		"account_id", contraAccountID,
+		"amount_cents", amountCents,
+		"payment_order_id", po.ID.String())
+
+	// Step 4: Update BookingLog status to POSTED
+	_, err = s.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     reversalBookingLogID,
+		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	})
+	if err != nil {
+		s.logger.Error("RECONCILIATION_REQUIRED: reversal booking log status update failed after successful postings",
+			"reversal_booking_log_id", reversalBookingLogID,
+			"original_booking_log_id", po.LedgerBookingID,
+			"booking_log_status", "PENDING",
+			"target_status", "POSTED",
+			"payment_order_id", po.ID.String(),
+			"failed_step", "reversal_status_update",
+			"has_credit_posting", true,
+			"has_debit_posting", true,
+			"resolution", "manually update booking log status to POSTED",
+			"error", err.Error())
+		return "", fmt.Errorf("failed to update reversal booking log to POSTED: %w", err)
+	}
+
+	s.logger.Info("reversal ledger posting completed successfully",
+		"reversal_booking_log_id", reversalBookingLogID,
+		"original_booking_log_id", po.LedgerBookingID,
+		"payment_order_id", po.ID.String(),
+		"debtor_account", po.DebtorAccountID,
+		"contra_account", contraAccountID,
+		"amount_cents", amountCents,
+		"currency", string(po.Amount.Currency()),
+		"reason", reason)
+
+	return reversalBookingLogID, nil
+}
+
+// extractGatewayIDFromRef extracts the gateway identifier from a gateway reference ID.
+//
+// Gateway Reference ID Format:
+// Real gateways should use the format "{gateway_id}-{unique_reference}", e.g.:
+//   - "stripe-pm_1234abcd" -> returns "stripe"
+//   - "adyen-PSP-REF-123"  -> returns "adyen"
+//
+// Mock/Test gateways use special prefixes:
+//   - "GW-{uuid}"      -> returns "mock" (mock gateway format)
+//   - "gateway-{ref}"  -> returns "mock" (test helper format)
+//
+// Returns "unknown" for empty or invalid references.
+func extractGatewayIDFromRef(gatewayRefID string) string {
+	if gatewayRefID == "" {
+		return "unknown"
+	}
+
+	// Detect mock/test gateway patterns
+	if strings.HasPrefix(gatewayRefID, "GW-") || strings.HasPrefix(gatewayRefID, "gateway-") {
+		return "mock"
+	}
+
+	// For other gateways, extract the prefix before the first dash
+	parts := strings.SplitN(gatewayRefID, "-", 2)
+	if len(parts) > 0 && parts[0] != "" {
+		return strings.ToLower(parts[0])
+	}
+	return "unknown"
 }

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
+	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/proto"
@@ -429,7 +429,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	}
 
 	// Convert domain currency to proto currency
-	protoCurrency := domainCurrencyToProto(po.Amount.Currency())
+	protoCurrency := mappers.DomainCurrencyToProto(po.Amount.Currency())
 	if protoCurrency == commonpb.Currency_CURRENCY_UNSPECIFIED {
 		o.logger.Warn("unsupported currency for ledger posting - payment will be marked as failed",
 			"currency", string(po.Amount.Currency()),
@@ -799,51 +799,5 @@ func (o *PaymentOrchestrator) publishEvent(ctx context.Context, topic string, ke
 		o.logger.Info("published event",
 			"topic", topic,
 			"key", key)
-	}
-}
-
-// extractGatewayIDFromRef extracts the gateway identifier from a gateway reference ID.
-//
-// Gateway Reference ID Format:
-// Real gateways should use the format "{gateway_id}-{unique_reference}", e.g.:
-//   - "stripe-pm_1234abcd" -> returns "stripe"
-//   - "adyen-PSP-REF-123"  -> returns "adyen"
-//
-// Mock/Test gateways use special prefixes:
-//   - "GW-{uuid}"      -> returns "mock" (mock gateway format)
-//   - "gateway-{ref}"  -> returns "mock" (test helper format)
-//
-// Returns "unknown" for empty or invalid references.
-func extractGatewayIDFromRef(gatewayRefID string) string {
-	if gatewayRefID == "" {
-		return "unknown"
-	}
-	// The mock gateway uses "GW-" prefix
-	if strings.HasPrefix(gatewayRefID, "GW-") {
-		return "mock"
-	}
-	// Also check for "gateway-" prefix used in some tests
-	if strings.HasPrefix(gatewayRefID, "gateway-") {
-		return "mock"
-	}
-	// For other gateways, extract the prefix before the first dash
-	parts := strings.SplitN(gatewayRefID, "-", 2)
-	if len(parts) > 0 && parts[0] != "" {
-		return strings.ToLower(parts[0])
-	}
-	return "unknown"
-}
-
-// domainCurrencyToProto converts a domain currency to a proto currency enum.
-func domainCurrencyToProto(currency domain.Currency) commonpb.Currency {
-	switch currency {
-	case domain.CurrencyGBP:
-		return commonpb.Currency_CURRENCY_GBP
-	case domain.CurrencyUSD:
-		return commonpb.Currency_CURRENCY_USD
-	case domain.CurrencyEUR:
-		return commonpb.Currency_CURRENCY_EUR
-	default:
-		return commonpb.Currency_CURRENCY_UNSPECIFIED
 	}
 }

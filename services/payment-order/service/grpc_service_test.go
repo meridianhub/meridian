@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -761,6 +762,9 @@ var ErrDatabaseError = errors.New("database error")
 
 // ErrLienServiceUnavailable is a test error for lien service failures
 var ErrLienServiceUnavailable = errors.New("lien service unavailable")
+
+// ErrFAServiceUnavailable is a test error for financial accounting service failures
+var ErrFAServiceUnavailable = errors.New("FA service unavailable")
 
 func TestInitiatePaymentOrder_RepositoryError(t *testing.T) {
 	repo := NewMockRepository()
@@ -1685,6 +1689,190 @@ func TestReversePaymentOrder_InvalidID(t *testing.T) {
 	assert.Contains(t, st.Message(), "invalid payment order ID")
 }
 
+// Test ledger reversal on ReversePaymentOrder
+func TestReversePaymentOrder_WithLedgerReversal(t *testing.T) {
+	repo := NewMockRepository()
+	faClient := &MockFinancialAccountingClient{}
+	gatewayConfig, _ := config.NewGatewayAccountConfig(map[string]*config.GatewayAccountMapping{
+		"mock": {GatewayID: "mock", ContraAccountID: "CONTRA-123", AccountType: config.AccountTypeNostro},
+	})
+
+	svc, err := NewServiceWithConfig(Config{
+		Repository:                repo,
+		CurrentAccountClient:      &MockCurrentAccountClient{},
+		FinancialAccountingClient: faClient,
+		PaymentGateway:            &MockPaymentGateway{response: gateway.PaymentResponse{Status: gateway.StatusAccepted, GatewayReferenceID: "GW-123"}},
+		GatewayAccountConfig:      gatewayConfig,
+		IdempotencyService:        NewMockIdempotencyService(),
+	})
+	require.NoError(t, err)
+
+	// Create a completed payment order with ledger booking ID
+	amount, _ := domain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("GW-ref-123")
+	_ = po.Complete("ledger-booking-123")
+	_ = repo.Create(context.Background(), po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	resp, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_REVERSED, resp.PaymentOrder.Status)
+
+	// Verify FA client was called with reversal entries
+	assert.True(t, faClient.initiateCalled, "InitiateFinancialBookingLog should be called for reversal")
+	assert.True(t, faClient.captureCalled, "CaptureLedgerPosting should be called for reversal")
+	assert.Equal(t, 2, faClient.captureCallCount, "Should capture 2 postings (credit + debit)")
+	assert.True(t, faClient.updateCalled, "UpdateFinancialBookingLog should be called to mark as POSTED")
+}
+
+// Test that reversal without LedgerBookingID skips ledger reversal
+func TestReversePaymentOrder_NoLedgerBooking_SkipsReversal(t *testing.T) {
+	repo := NewMockRepository()
+	faClient := &MockFinancialAccountingClient{}
+	gatewayConfig, _ := config.NewGatewayAccountConfig(map[string]*config.GatewayAccountMapping{
+		"mock": {GatewayID: "mock", ContraAccountID: "CONTRA-123", AccountType: config.AccountTypeNostro},
+	})
+
+	svc, err := NewServiceWithConfig(Config{
+		Repository:                repo,
+		CurrentAccountClient:      &MockCurrentAccountClient{},
+		FinancialAccountingClient: faClient,
+		PaymentGateway:            &MockPaymentGateway{response: gateway.PaymentResponse{Status: gateway.StatusAccepted, GatewayReferenceID: "GW-123"}},
+		GatewayAccountConfig:      gatewayConfig,
+		IdempotencyService:        NewMockIdempotencyService(),
+	})
+	require.NoError(t, err)
+
+	// Create a completed payment order WITHOUT ledger booking ID
+	amount, _ := domain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("GW-ref-123")
+	_ = po.Complete("") // Empty ledger booking ID
+	_ = repo.Create(context.Background(), po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	resp, err := svc.ReversePaymentOrder(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_REVERSED, resp.PaymentOrder.Status)
+
+	// Verify FA client was NOT called (no ledger entry to reverse)
+	assert.False(t, faClient.initiateCalled, "InitiateFinancialBookingLog should NOT be called when no ledger booking exists")
+	assert.False(t, faClient.captureCalled, "CaptureLedgerPosting should NOT be called when no ledger booking exists")
+}
+
+// Test reversal ledger posting failure returns error
+func TestReversePaymentOrder_LedgerReversalFailure(t *testing.T) {
+	repo := NewMockRepository()
+	faClient := &MockFinancialAccountingClient{
+		initiateErr: ErrFAServiceUnavailable,
+	}
+	gatewayConfig, _ := config.NewGatewayAccountConfig(map[string]*config.GatewayAccountMapping{
+		"mock": {GatewayID: "mock", ContraAccountID: "CONTRA-123", AccountType: config.AccountTypeNostro},
+	})
+
+	svc, err := NewServiceWithConfig(Config{
+		Repository:                repo,
+		CurrentAccountClient:      &MockCurrentAccountClient{},
+		FinancialAccountingClient: faClient,
+		PaymentGateway:            &MockPaymentGateway{response: gateway.PaymentResponse{Status: gateway.StatusAccepted, GatewayReferenceID: "GW-123"}},
+		GatewayAccountConfig:      gatewayConfig,
+		IdempotencyService:        NewMockIdempotencyService(),
+	})
+	require.NoError(t, err)
+
+	// Create a completed payment order with ledger booking ID
+	amount, _ := domain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("GW-ref-123")
+	_ = po.Complete("ledger-booking-123")
+	_ = repo.Create(context.Background(), po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	_, err = svc.ReversePaymentOrder(context.Background(), req)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to create compensating ledger entries")
+
+	// Verify payment was NOT reversed (still COMPLETED)
+	retrieved, _ := repo.FindByID(context.Background(), po.ID)
+	assert.Equal(t, domain.PaymentOrderStatusCompleted, retrieved.Status)
+}
+
+// Test reversal creates correct idempotent entries
+func TestReversePaymentOrder_LedgerReversalIdempotency(t *testing.T) {
+	repo := NewMockRepository()
+	faClient := &MockFinancialAccountingClient{}
+	gatewayConfig, _ := config.NewGatewayAccountConfig(map[string]*config.GatewayAccountMapping{
+		"mock": {GatewayID: "mock", ContraAccountID: "CONTRA-123", AccountType: config.AccountTypeNostro},
+	})
+
+	svc, err := NewServiceWithConfig(Config{
+		Repository:                repo,
+		CurrentAccountClient:      &MockCurrentAccountClient{},
+		FinancialAccountingClient: faClient,
+		PaymentGateway:            &MockPaymentGateway{response: gateway.PaymentResponse{Status: gateway.StatusAccepted, GatewayReferenceID: "GW-123"}},
+		GatewayAccountConfig:      gatewayConfig,
+		IdempotencyService:        NewMockIdempotencyService(),
+	})
+	require.NoError(t, err)
+
+	// Create a completed payment order
+	amount, _ := domain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key-123", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("GW-ref-123")
+	_ = po.Complete("ledger-booking-123")
+	_ = repo.Create(context.Background(), po)
+
+	req := &pb.ReversePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		ReversalReason: "Customer requested refund",
+		ReversedBy:     "support@example.com",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reverse-key"},
+	}
+
+	// First reversal call
+	resp1, err := svc.ReversePaymentOrder(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_REVERSED, resp1.PaymentOrder.Status)
+
+	// Second reversal call (idempotent - payment already reversed)
+	resp2, err := svc.ReversePaymentOrder(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_REVERSED, resp2.PaymentOrder.Status)
+
+	// FA client should only be called once (first reversal creates the entries,
+	// second call returns early because payment is already reversed)
+	assert.Equal(t, 1, faClient.captureCallCount/2, "FA client should only be called once for multiple reversal attempts")
+}
+
 // Test proto conversion helpers
 func TestToProto(t *testing.T) {
 	amount, _ := domain.NewMoney("GBP", 10000)
@@ -2600,18 +2788,19 @@ func TestPostLedgerEntries_FailureModes(t *testing.T) {
 }
 
 // TestPostLedgerEntries_UnsupportedCurrency tests that unsupported currencies are rejected.
-// This tests the domainCurrencyToProto function which returns CURRENCY_UNSPECIFIED for
+// This tests the mappers.DomainCurrencyToProto function which returns CURRENCY_UNSPECIFIED for
 // unsupported currencies, causing postLedgerEntries to return ErrUnsupportedCurrency.
 func TestPostLedgerEntries_UnsupportedCurrency(t *testing.T) {
 	// Test that unsupported currencies return CURRENCY_UNSPECIFIED
-	unsupportedCurrency := domain.Currency("JPY")
-	result := domainCurrencyToProto(unsupportedCurrency)
+	// Note: JPY is actually supported in the shared mapper now
+	unsupportedCurrency := domain.Currency("XYZ")
+	result := mappers.DomainCurrencyToProto(unsupportedCurrency)
 	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, result)
 
 	// Verify the error path in postLedgerEntries would be triggered
 	// by testing that CURRENCY_UNSPECIFIED causes the expected error
-	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, domainCurrencyToProto(domain.Currency("CHF")))
-	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, domainCurrencyToProto(domain.Currency("")))
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, mappers.DomainCurrencyToProto(domain.Currency("XYZ")))
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, mappers.DomainCurrencyToProto(domain.Currency("")))
 }
 
 // TestExtractGatewayIDFromRef tests the gateway ID extraction from reference IDs.
@@ -2637,7 +2826,7 @@ func TestExtractGatewayIDFromRef(t *testing.T) {
 	}
 }
 
-// TestDomainCurrencyToProto tests the currency conversion function.
+// TestDomainCurrencyToProto tests the shared currency conversion function.
 func TestDomainCurrencyToProto(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -2647,13 +2836,17 @@ func TestDomainCurrencyToProto(t *testing.T) {
 		{"GBP converts correctly", domain.CurrencyGBP, commonpb.Currency_CURRENCY_GBP},
 		{"USD converts correctly", domain.CurrencyUSD, commonpb.Currency_CURRENCY_USD},
 		{"EUR converts correctly", domain.CurrencyEUR, commonpb.Currency_CURRENCY_EUR},
-		{"unsupported currency returns UNSPECIFIED", domain.Currency("JPY"), commonpb.Currency_CURRENCY_UNSPECIFIED},
+		{"JPY converts correctly", domain.CurrencyJPY, commonpb.Currency_CURRENCY_JPY},
+		{"CHF converts correctly", domain.CurrencyCHF, commonpb.Currency_CURRENCY_CHF},
+		{"CAD converts correctly", domain.CurrencyCAD, commonpb.Currency_CURRENCY_CAD},
+		{"AUD converts correctly", domain.CurrencyAUD, commonpb.Currency_CURRENCY_AUD},
+		{"unsupported currency returns UNSPECIFIED", domain.Currency("XYZ"), commonpb.Currency_CURRENCY_UNSPECIFIED},
 		{"empty currency returns UNSPECIFIED", domain.Currency(""), commonpb.Currency_CURRENCY_UNSPECIFIED},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := domainCurrencyToProto(tc.currency)
+			result := mappers.DomainCurrencyToProto(tc.currency)
 			assert.Equal(t, tc.expected, result)
 		})
 	}

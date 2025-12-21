@@ -318,7 +318,16 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}, nil
 }
 
-// ExecuteDeposit processes a deposit transaction
+// ExecuteDeposit processes a deposit transaction.
+//
+// Concurrency: This method relies on optimistic locking in the repository layer
+// to handle concurrent modifications to the same account. If two requests attempt
+// to modify the same account simultaneously, one will succeed and the other will
+// receive ErrVersionConflict, which surfaces as an Internal error to the client.
+//
+// TODO(tech-debt): Consider implementing request-level idempotency or pessimistic
+// locking (FindByIDForUpdate) for high-contention accounts to provide better
+// conflict resolution and retry semantics.
 func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess

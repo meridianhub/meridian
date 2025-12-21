@@ -24,6 +24,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -147,9 +148,23 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("posting service initialized", "bank_cash_account_id", bankCashAccountID)
 
-	// Create idempotency service (noop for now - Redis implementation for production)
-	idempotencySvc := newNoopIdempotencyService()
-	logger.Info("idempotency service initialized (noop mode)")
+	// Create Redis client and idempotency service
+	var idempotencySvc idempotency.Service
+	redisClient, err := createRedisClient(logger)
+	if err != nil {
+		// Non-fatal: fall back to noop service for development/testing
+		logger.Warn("failed to connect to Redis, using noop idempotency service",
+			"error", err)
+		idempotencySvc = newNoopIdempotencyService()
+	} else {
+		idempotencySvc = idempotency.NewRedisService(redisClient)
+		logger.Info("idempotency service initialized with Redis")
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				logger.Error("failed to close Redis client", "error", err)
+			}
+		}()
+	}
 
 	// Create event publisher (noop for now - Kafka implementation for production)
 	eventPublisher := &noopEventPublisher{}
@@ -419,6 +434,55 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return value
+}
+
+// createRedisClient creates and validates a Redis client connection.
+// Environment variables:
+//   - REDIS_URL: Redis connection URL (default: redis://localhost:6379)
+//   - REDIS_PASSWORD: Redis password (optional)
+//   - REDIS_DB: Redis database number (default: 0)
+//   - REDIS_POOL_SIZE: Connection pool size (default: 10)
+//   - REDIS_MIN_IDLE_CONNS: Minimum idle connections (default: 2)
+func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
+	redisURL := getEnvOrDefault("REDIS_URL", "redis://localhost:6379")
+	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
+	redisDB := getEnvAsInt("REDIS_DB", 0)
+	poolSize := getEnvAsInt("REDIS_POOL_SIZE", 10)
+	minIdleConns := getEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
+
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid REDIS_URL: %w", err)
+	}
+
+	// Override with explicit config if set
+	if redisPassword != "" {
+		opt.Password = redisPassword
+	}
+	opt.DB = redisDB
+	opt.PoolSize = poolSize
+	opt.MinIdleConns = minIdleConns
+
+	client := redis.NewClient(opt)
+
+	// Verify connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		// Close client to release resources before returning error
+		_ = client.Close()
+		return nil, fmt.Errorf("failed to ping Redis: %w", err)
+	}
+
+	// Log sanitized address to avoid exposing credentials
+	logger.Info("Redis client connected",
+		"addr", opt.Addr,
+		"db", redisDB,
+		"pool_size", poolSize,
+		"min_idle_conns", minIdleConns)
+
+	return client, nil
 }
 
 // noopIdempotencyService provides a no-operation implementation of idempotency.Service.

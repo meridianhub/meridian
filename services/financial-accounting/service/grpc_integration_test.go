@@ -515,13 +515,17 @@ func TestCaptureLedgerPosting_Integration_WithIdempotencyKey(t *testing.T) {
 	resp1, err := ts.grpcClient.CaptureLedgerPosting(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp1)
+	require.NotNil(t, resp1.LedgerPosting)
+	originalPostingID := resp1.LedgerPosting.Id
 
-	// Second request with same idempotency key should fail
-	_, err = ts.grpcClient.CaptureLedgerPosting(ctx, req)
-	require.Error(t, err)
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	assert.Equal(t, codes.AlreadyExists, st.Code())
+	// Second request with same idempotency key should return cached response (idempotent)
+	resp2, err := ts.grpcClient.CaptureLedgerPosting(ctx, req)
+	require.NoError(t, err, "idempotent request should succeed with cached response")
+	require.NotNil(t, resp2)
+	require.NotNil(t, resp2.LedgerPosting)
+	assert.Equal(t, originalPostingID, resp2.LedgerPosting.Id, "should return same posting ID from cache")
+	assert.Equal(t, resp1.LedgerPosting.PostingDirection, resp2.LedgerPosting.PostingDirection)
+	assert.Equal(t, resp1.LedgerPosting.AccountId, resp2.LedgerPosting.AccountId)
 }
 
 func TestCaptureLedgerPosting_Integration_InvalidBookingLogID(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
+	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -307,7 +308,7 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 					ProductServiceReference: account.AccountID(),
 					BusinessUnitReference:   "current-account-service",
 					ChartOfAccountsRules:    "DEPOSIT",
-					BaseCurrency:            domainCurrencyToProto(amount.Currency()),
+					BaseCurrency:            mappers.DomainCurrencyToProto(amount.Currency()),
 					IdempotencyKey: &commonpb.IdempotencyKey{
 						Key: fmt.Sprintf("booking-log-%s", transactionID),
 					},
@@ -605,27 +606,19 @@ func (o *DepositOrchestrator) addSaveAccountStep(
 
 			return nil
 		},
-		// Compensate: No database save needed
+		// Compensate: No-op by design.
+		// This step is the final step in the saga. If compensation is triggered:
+		// - If save_account failed: The database write never happened, nothing to undo.
+		// - save_account is never compensated after success because it's the last step;
+		//   only steps before a failed step are compensated.
+		// The saga ordering (log_position → post_ledger → save_account) ensures external
+		// service calls complete before the local database write, so if save_account
+		// fails, the external state is compensated, not the local state.
 		func(_ context.Context) error {
-			o.logger.Info("compensating save_account step (no-op)",
+			o.logger.Info("compensating save_account step (no-op by design)",
 				"account_id", account.AccountID(),
-				"reason", "external services failed before persisting balance")
-			o.logger.Info("save_account compensation completed (no-op)")
+				"reason", "save_account failed before database write completed - nothing to undo")
 			return nil
 		},
 	)
-}
-
-// domainCurrencyToProto converts a domain currency to a proto currency enum.
-func domainCurrencyToProto(currency domain.Currency) commonpb.Currency {
-	switch currency {
-	case domain.CurrencyGBP:
-		return commonpb.Currency_CURRENCY_GBP
-	case domain.CurrencyUSD:
-		return commonpb.Currency_CURRENCY_USD
-	case domain.CurrencyEUR:
-		return commonpb.Currency_CURRENCY_EUR
-	default:
-		return commonpb.Currency_CURRENCY_UNSPECIFIED
-	}
 }
