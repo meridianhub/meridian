@@ -243,7 +243,7 @@ type TransactionFailed struct {
 	LogID         uuid.UUID
 	AccountID     string
 	FailureReason string
-	ErrorCode     string
+	ErrorCode     commonv1.ErrorCode
 	CorrelationID string
 	Timestamp     time.Time
 	Version       int64

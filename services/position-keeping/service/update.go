@@ -412,7 +412,7 @@ func (s *PositionKeepingService) publishStatusChangeEvent(
 			LogID:         log.LogID,
 			AccountID:     log.AccountID,
 			FailureReason: req.StatusUpdate.StatusReason,
-			ErrorCode:     "", // TODO(tech-debt-cleanup#3): Add to proto if needed
+			ErrorCode:     commonv1.ErrorCode_ERROR_CODE_INTERNAL,
 			CorrelationID: correlationID,
 			Timestamp:     time.Now().UTC(),
 			Version:       log.Version,
