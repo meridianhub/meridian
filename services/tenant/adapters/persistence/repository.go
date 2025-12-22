@@ -21,6 +21,9 @@ var (
 	ErrSlugTaken       = errors.New("slug already taken by another tenant")
 )
 
+// Compile-time check that Repository implements domain.TenantRepository.
+var _ domain.TenantRepository = (*Repository)(nil)
+
 // Repository provides persistence operations for tenants.
 type Repository struct {
 	db *gorm.DB
