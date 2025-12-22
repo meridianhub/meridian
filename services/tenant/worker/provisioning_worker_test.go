@@ -38,6 +38,24 @@ func testWorkerConfig(pollInterval time.Duration) Config {
 	}
 }
 
+// safeBuffer is a thread-safe wrapper around bytes.Buffer for concurrent log capture.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sb *safeBuffer) Write(p []byte) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *safeBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.String()
+}
+
 // setupTestDB creates an in-memory database with the tenant table schema.
 func setupTestDB(t *testing.T) (*gorm.DB, *persistence.Repository) {
 	// Use a unique database name per test to ensure isolation, with cache=shared so
@@ -1355,11 +1373,11 @@ func TestProcessPendingTenants_VersionConflictLogging(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.Create(ctx, tenant1))
 
-	// Capture log output
-	var logBuffer bytes.Buffer
+	// Capture log output with thread-safe buffer (processPendingTenants spawns goroutines)
+	var logBuffer safeBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	prov := &provisioner.MockProvisioner{}
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	prov := provisioner.NewMockProvisioner(nil)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Simulate a race: another worker claims the tenant between ListByStatus and UpdateStatus
@@ -1435,11 +1453,11 @@ func TestProcessPendingTenants_ConcurrentClaimSkipped(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, tenant1))
 	require.NoError(t, repo.Create(ctx, tenant2))
 
-	// Capture log output
-	var logBuffer bytes.Buffer
+	// Capture log output with thread-safe buffer (processPendingTenants spawns goroutines)
+	var logBuffer safeBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	prov := &provisioner.MockProvisioner{}
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	prov := provisioner.NewMockProvisioner(nil)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Start two workers processing concurrently
