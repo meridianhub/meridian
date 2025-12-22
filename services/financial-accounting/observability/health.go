@@ -12,6 +12,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// Health checker initialization errors
+var (
+	// ErrDatabaseNil is returned when attempting to create a health checker with a nil database
+	ErrDatabaseNil = errors.New("health checker requires non-nil database")
+)
+
 // HealthChecker implements gRPC health check protocol for FinancialAccounting service.
 // It checks the health of critical dependencies including the database.
 type HealthChecker struct {
@@ -39,9 +45,11 @@ type HealthCheckerConfig struct {
 //   - SERVING: All critical dependencies healthy (database)
 //   - NOT_SERVING: Any critical dependency down (database unreachable)
 //   - UNKNOWN: Unable to determine health (should not occur in normal operation)
-func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
+//
+// Returns an error if DB is nil.
+func NewHealthChecker(config HealthCheckerConfig) (*HealthChecker, error) {
 	if config.DB == nil {
-		panic("health checker requires non-nil database")
+		return nil, ErrDatabaseNil
 	}
 
 	// Apply defaults
@@ -67,7 +75,7 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 		logger:       config.Logger,
 		serviceName:  config.ServiceName,
 		checkTimeout: config.CheckTimeout,
-	}
+	}, nil
 }
 
 // Check implements gRPC health check protocol.

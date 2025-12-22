@@ -26,6 +26,16 @@ const (
 	defaultIdempotencyTTL = 1 * time.Hour
 )
 
+// Service initialization errors
+var (
+	// ErrRepositoryNil is returned when attempting to create a service with a nil repository
+	ErrRepositoryNil = errors.New("financial accounting service: repository cannot be nil")
+	// ErrEventPublisherNil is returned when attempting to create a service with a nil event publisher
+	ErrEventPublisherNil = errors.New("financial accounting service: event publisher cannot be nil")
+	// ErrIdempotencyServiceNil is returned when attempting to create a service with a nil idempotency service
+	ErrIdempotencyServiceNil = errors.New("financial accounting service: idempotency service cannot be nil")
+)
+
 // DomainEvent is a marker interface for all financial accounting domain events.
 // Concrete event types will be defined in domain/events.go in subsequent subtasks.
 //
@@ -99,7 +109,7 @@ type FinancialAccountingService struct {
 // default "Unimplemented" responses for all gRPC methods. Methods will be implemented incrementally
 // in subsequent subtasks (9.2, 9.3, 9.4, 9.5).
 //
-// Panics if any dependency is nil (defensive programming per ADR-0008).
+// Returns an error if any dependency is nil.
 //
 // Example usage:
 //
@@ -107,27 +117,30 @@ type FinancialAccountingService struct {
 //	publisher := messaging.NewKafkaEventPublisher(kafkaProducer)
 //	idempotencySvc := idempotency.NewRedisService(redisClient)
 //
-//	service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+//	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+//	if err != nil {
+//	    return fmt.Errorf("failed to create financial accounting service: %w", err)
+//	}
 func NewFinancialAccountingService(
 	repository *persistence.LedgerRepository,
 	eventPublisher EventPublisher,
 	idempotencySvc idempotency.Service,
-) *FinancialAccountingService {
+) (*FinancialAccountingService, error) {
 	if repository == nil {
-		panic("financial accounting service: repository cannot be nil")
+		return nil, ErrRepositoryNil
 	}
 	if eventPublisher == nil {
-		panic("financial accounting service: event publisher cannot be nil")
+		return nil, ErrEventPublisherNil
 	}
 	if idempotencySvc == nil {
-		panic("financial accounting service: idempotency service cannot be nil")
+		return nil, ErrIdempotencyServiceNil
 	}
 
 	return &FinancialAccountingService{
 		repository:     repository,
 		eventPublisher: eventPublisher,
 		idempotency:    idempotencySvc,
-	}
+	}, nil
 }
 
 // CaptureLedgerPosting creates a new ledger posting with validation and event publishing.
