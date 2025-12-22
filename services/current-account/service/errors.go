@@ -18,6 +18,7 @@ var (
 	ErrOriginalAccountStateNotFound = errors.New("original account state not available for compensation")
 	ErrPositionLogIDNotFound        = errors.New("position log ID not available for compensation")
 	ErrLedgerPostingIDNotFound      = errors.New("ledger posting ID not available for compensation")
+	ErrCompensationFailed           = errors.New("saga compensation failed")
 )
 
 // Nil response errors for defensive checks on gRPC responses.

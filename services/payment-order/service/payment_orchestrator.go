@@ -32,6 +32,7 @@ import (
 var (
 	ErrGatewayAccountConfigNotSet      = errors.New("gateway account config not configured")
 	ErrFinancialAccountingClientNotSet = errors.New("financial accounting client not configured")
+	ErrNilBookingLogResponse           = errors.New("financial accounting returned nil booking log")
 )
 
 // PaymentOrchestrator encapsulates payment saga orchestration logic.
@@ -452,6 +453,9 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create booking log: %w", err)
+	}
+	if bookingLogResp.FinancialBookingLog == nil {
+		return "", fmt.Errorf("%w: payment order %s", ErrNilBookingLogResponse, po.ID.String())
 	}
 	bookingLogID := bookingLogResp.FinancialBookingLog.Id
 

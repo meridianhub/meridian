@@ -377,17 +377,21 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 			)
 			if err != nil {
 				caobservability.RecordExternalServiceError("financial_accounting", "capture_credit_posting")
-				// Inline compensation for debit if needed
+				// Inline compensation for debit if needed - mark as compensated to prevent
+				// duplicate compensation when saga framework calls formal compensate function
 				if *debitPosted {
 					o.compensateDebitPosting(stepCtx, *bookingLogID, clearingAccountID, transactionID, moneyAmt)
+					*debitPosted = false // Already compensated inline
 				}
 				return fmt.Errorf("failed to post credit to customer account: %w", err)
 			}
 			if creditResp.LedgerPosting == nil {
 				caobservability.RecordExternalServiceError("financial_accounting", "capture_credit_posting")
-				// Inline compensation for debit if needed
+				// Inline compensation for debit if needed - mark as compensated to prevent
+				// duplicate compensation when saga framework calls formal compensate function
 				if *debitPosted {
 					o.compensateDebitPosting(stepCtx, *bookingLogID, clearingAccountID, transactionID, moneyAmt)
+					*debitPosted = false // Already compensated inline
 				}
 				return fmt.Errorf("%w for transaction %s", ErrNilCreditPosting, transactionID)
 			}
@@ -409,8 +413,13 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 			)
 			if err != nil {
 				caobservability.RecordExternalServiceError("financial_accounting", "update_booking_log")
-				// Inline compensation for both postings
-				o.compensatePostingsInline(stepCtx, account, *bookingLogID, clearingAccountID, transactionID, moneyAmt, *debitPosted, *creditPosted)
+				// Inline compensation for both postings - mark as compensated to prevent
+				// duplicate compensation when saga framework calls formal compensate function.
+				// Error is logged+metricked inside compensatePostingsInline; we're already
+				// returning an error from this step, so we intentionally ignore compensation errors.
+				_ = o.compensatePostingsInline(stepCtx, account, *bookingLogID, clearingAccountID, transactionID, moneyAmt, *debitPosted, *creditPosted)
+				*debitPosted = false  // Already compensated inline
+				*creditPosted = false // Already compensated inline
 				return fmt.Errorf("failed to transition booking log to POSTED: %w", err)
 			}
 
@@ -438,7 +447,10 @@ func (o *DepositOrchestrator) addPostLedgerStep(
 			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
 			moneyAmt := toMoneyAmount(amount)
 
-			o.compensatePostingsInline(stepCtx, account, *bookingLogID, clearingAccountID, transactionID, moneyAmt, *debitPosted, *creditPosted)
+			if err := o.compensatePostingsInline(stepCtx, account, *bookingLogID, clearingAccountID, transactionID, moneyAmt, *debitPosted, *creditPosted); err != nil {
+				// Return error to signal compensation failure to saga framework
+				return fmt.Errorf("post_ledger compensation failed: %w", err)
+			}
 
 			caobservability.RecordSagaCompensation("deposit", "post_ledger")
 
@@ -504,13 +516,17 @@ func (o *DepositOrchestrator) compensateDebitPosting(
 }
 
 // compensatePostingsInline creates compensating entries for both debit and credit postings.
+// Returns an error if any compensation operation fails, allowing the saga framework to
+// report compensation failure accurately. Individual failures are logged with CRITICAL severity.
 func (o *DepositOrchestrator) compensatePostingsInline(
 	ctx context.Context,
 	account domain.CurrentAccount,
 	bookingLogID, clearingAccountID, transactionID string,
 	moneyAmt *commonpb.MoneyAmount,
 	debitPosted, creditPosted bool,
-) {
+) error {
+	var compensationErrors []error
+
 	// Compensate credit leg: Create DEBIT to customer account
 	if creditPosted {
 		compCreditID := fmt.Sprintf("COMP-%s-credit", transactionID)
@@ -534,6 +550,7 @@ func (o *DepositOrchestrator) compensatePostingsInline(
 				"error", err,
 				"runbook", "docs/runbooks/saga-failure-recovery.md")
 			caobservability.RecordInlineCompensationFailure("deposit", "credit")
+			compensationErrors = append(compensationErrors, fmt.Errorf("credit compensation failed: %w", err))
 		}
 	}
 
@@ -560,6 +577,7 @@ func (o *DepositOrchestrator) compensatePostingsInline(
 				"error", err,
 				"runbook", "docs/runbooks/saga-failure-recovery.md")
 			caobservability.RecordInlineCompensationFailure("deposit", "debit")
+			compensationErrors = append(compensationErrors, fmt.Errorf("debit compensation failed: %w", err))
 		}
 	}
 
@@ -576,12 +594,19 @@ func (o *DepositOrchestrator) compensatePostingsInline(
 				"booking_log_id", bookingLogID,
 				"transaction_id", transactionID,
 				"error", err)
+			// Don't add to compensationErrors - booking log status is less critical than posting reversals
 		} else {
 			o.logger.Info("booking log transitioned to CANCELLED during inline compensation",
 				"booking_log_id", bookingLogID,
 				"transaction_id", transactionID)
 		}
 	}
+
+	// Return aggregated error if any compensation failed
+	if len(compensationErrors) > 0 {
+		return fmt.Errorf("%w: %d errors occurred", ErrCompensationFailed, len(compensationErrors))
+	}
+	return nil
 }
 
 // addSaveAccountStep adds the save_account saga step.
