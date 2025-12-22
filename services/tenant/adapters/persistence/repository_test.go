@@ -738,3 +738,59 @@ func TestRepository_FindProvisioningStatusByTenantID_NullHandling(t *testing.T) 
 	assert.Nil(t, results[0].StartedAt)
 	assert.Nil(t, results[0].CompletedAt)
 }
+
+func TestRepository_IsSlugAvailable_Available(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Check availability of a slug that doesn't exist
+	available, err := repo.IsSlugAvailable(ctx, "available-slug")
+	require.NoError(t, err)
+	assert.True(t, available, "Expected slug to be available")
+}
+
+func TestRepository_IsSlugAvailable_Taken(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with a slug
+	testTenant := newTestTenant("acme_bank")
+	testTenant.Slug = "taken-slug"
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	// Check availability of the taken slug
+	available, err := repo.IsSlugAvailable(ctx, "taken-slug")
+	require.NoError(t, err)
+	assert.False(t, available, "Expected slug to be taken")
+}
+
+func TestRepository_IsSlugAvailable_Integration(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with slug "test-slug"
+	testTenant := newTestTenant("test_tenant")
+	testTenant.Slug = "test-slug"
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	// Verify IsSlugAvailable("test-slug") returns false
+	available, err := repo.IsSlugAvailable(ctx, "test-slug")
+	require.NoError(t, err)
+	assert.False(t, available, "Expected 'test-slug' to be unavailable after tenant creation")
+
+	// Verify IsSlugAvailable("new-slug") returns true
+	available, err = repo.IsSlugAvailable(ctx, "new-slug")
+	require.NoError(t, err)
+	assert.True(t, available, "Expected 'new-slug' to be available")
+}

@@ -98,6 +98,22 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (*domain.Tenant
 	return toDomain(&entity)
 }
 
+// IsSlugAvailable checks if a slug is available for registration.
+// Returns true if the slug is not in use, false if it's taken or on error.
+func (r *Repository) IsSlugAvailable(ctx context.Context, slug string) (bool, error) {
+	var count int64
+	result := r.db.WithContext(ctx).
+		Model(&TenantEntity{}).
+		Where("slug = ?", slug).
+		Count(&count)
+
+	if result.Error != nil {
+		return false, result.Error
+	}
+
+	return count == 0, nil
+}
+
 // IsActive checks if a tenant exists and is active.
 // This is optimized for validation middleware - returns only what's needed.
 func (r *Repository) IsActive(ctx context.Context, id tenant.TenantID) (bool, error) {
