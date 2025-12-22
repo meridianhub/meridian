@@ -769,6 +769,10 @@ func (r *PostgresRepository) loadTransactionLogEntriesTx(ctx context.Context, tx
 		entries = append(entries, &entry)
 	}
 
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating transaction log entries: %w", err)
+	}
+
 	log.TransactionLogEntries = entries
 	return nil
 }
@@ -893,6 +897,10 @@ func (r *PostgresRepository) loadAuditTrailEntriesTx(ctx context.Context, tx pgx
 		}
 
 		entries = append(entries, &entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating audit trail entries: %w", err)
 	}
 
 	log.AuditTrail = entries
@@ -1205,6 +1213,10 @@ func (r *PostgresRepository) getLogIDMap(ctx context.Context, tx pgx.Tx, logs []
 			return nil, fmt.Errorf("failed to scan log ID mapping: %w", err)
 		}
 		idMap[logID] = dbID
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating log ID mappings: %w", err)
 	}
 
 	return idMap, nil
