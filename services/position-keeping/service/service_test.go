@@ -37,6 +37,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 		eventPub       domain.EventPublisher
 		idempotencySvc idempotency.Service
 		wantErr        bool
+		wantSentinel   error // Expected sentinel error for errors.Is() verification
 		rationale      string
 	}{
 		{
@@ -45,6 +46,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			eventPub:       domain.NewInMemoryEventPublisher(),
 			idempotencySvc: new(MockIdempotencyService),
 			wantErr:        false,
+			wantSentinel:   nil,
 			rationale:      "Standard valid initialization with all dependencies",
 		},
 		{
@@ -53,6 +55,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			eventPub:       domain.NewInMemoryEventPublisher(),
 			idempotencySvc: new(MockIdempotencyService),
 			wantErr:        true,
+			wantSentinel:   service.ErrRepositoryNil,
 			rationale:      "Repository is essential - nil would cause panic on first use",
 		},
 		{
@@ -61,6 +64,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			eventPub:       nil,
 			idempotencySvc: new(MockIdempotencyService),
 			wantErr:        true,
+			wantSentinel:   service.ErrEventPublisherNil,
 			rationale:      "Event publisher is essential - nil would cause panic when publishing events",
 		},
 		{
@@ -69,6 +73,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			eventPub:       domain.NewInMemoryEventPublisher(),
 			idempotencySvc: nil,
 			wantErr:        true,
+			wantSentinel:   service.ErrIdempotencyServiceNil,
 			rationale:      "Idempotency service is essential - nil would cause panic on idempotent operations",
 		},
 		{
@@ -77,6 +82,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			eventPub:       nil,
 			idempotencySvc: nil,
 			wantErr:        true,
+			wantSentinel:   service.ErrRepositoryNil,
 			rationale:      "Should error on first nil check (repository)",
 		},
 	}
@@ -87,6 +93,8 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			if tt.wantErr {
 				assert.Error(t, err, tt.rationale)
 				assert.Nil(t, svc, "Service should be nil when error occurs")
+				// Verify the specific sentinel error using errors.Is()
+				assert.ErrorIs(t, err, tt.wantSentinel, "Should return the expected sentinel error")
 			} else {
 				assert.NoError(t, err, tt.rationale)
 				assert.NotNil(t, svc, tt.rationale)

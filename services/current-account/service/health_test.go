@@ -42,9 +42,10 @@ func mustNewHealthChecker(t *testing.T, config HealthCheckerConfig) *HealthCheck
 
 func TestNewHealthChecker(t *testing.T) {
 	tests := []struct {
-		name    string
-		config  HealthCheckerConfig
-		wantErr bool
+		name         string
+		config       HealthCheckerConfig
+		wantErr      bool
+		wantSentinel error
 	}{
 		{
 			name: "valid configuration with all dependencies",
@@ -58,24 +59,27 @@ func TestNewHealthChecker(t *testing.T) {
 				ServiceName:                     "test-service",
 				CheckTimeout:                    3 * time.Second,
 			},
-			wantErr: false,
+			wantErr:      false,
+			wantSentinel: nil,
 		},
 		{
 			name: "valid configuration with defaults",
 			config: HealthCheckerConfig{
 				Repository: setupTestRepository(t),
 			},
-			wantErr: false,
+			wantErr:      false,
+			wantSentinel: nil,
 		},
 		{
-			name: "missing repository returns error",
+			name: "missing repository returns ErrHealthCheckerRepositoryNil",
 			config: HealthCheckerConfig{
 				PositionKeepingClient:           &mockPositionKeepingClient{},
 				PositionKeepingHealthClient:     &mockGRPCHealthClient{status: grpc_health_v1.HealthCheckResponse_SERVING},
 				FinancialAccountingClient:       &mockFinancialAccountingClient{},
 				FinancialAccountingHealthClient: &mockGRPCHealthClient{status: grpc_health_v1.HealthCheckResponse_SERVING},
 			},
-			wantErr: true,
+			wantErr:      true,
+			wantSentinel: ErrHealthCheckerRepositoryNil,
 		},
 	}
 
@@ -83,8 +87,10 @@ func TestNewHealthChecker(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			checker, err := NewHealthChecker(tt.config)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Nil(t, checker)
+				// Verify the specific sentinel error using errors.Is()
+				assert.ErrorIs(t, err, tt.wantSentinel, "Should return the expected sentinel error")
 			} else {
 				require.NoError(t, err)
 				assert.NotNil(t, checker)

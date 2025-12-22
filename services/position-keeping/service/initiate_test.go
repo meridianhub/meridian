@@ -22,10 +22,11 @@ import (
 
 // mustNewPositionKeepingService creates a service and fails the test if an error occurs.
 // Use this for tests where the service should always be created successfully.
-func mustNewPositionKeepingService(t *testing.T, repo domain.FinancialPositionLogRepository, publisher domain.EventPublisher, idempotencySvc idempotency.Service) *service.PositionKeepingService {
-	t.Helper()
+// Accepts testing.TB to work with both *testing.T and *testing.B.
+func mustNewPositionKeepingService(tb testing.TB, repo domain.FinancialPositionLogRepository, publisher domain.EventPublisher, idempotencySvc idempotency.Service) *service.PositionKeepingService {
+	tb.Helper()
 	svc, err := service.NewPositionKeepingService(repo, publisher, idempotencySvc)
-	require.NoError(t, err, "unexpected error creating service")
+	require.NoError(tb, err, "unexpected error creating service")
 	return svc
 }
 

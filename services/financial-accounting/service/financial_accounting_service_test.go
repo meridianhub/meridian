@@ -86,6 +86,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 		eventPub       EventPublisher
 		idempotencySvc idempotency.Service
 		wantErr        bool
+		wantSentinel   error // Expected sentinel error for errors.Is() verification
 		rationale      string
 	}{
 		// Happy path - covered by TestNewFinancialAccountingService
@@ -95,6 +96,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			eventPub:       &mockEventPublisher{},
 			idempotencySvc: &mockIdempotencyService{},
 			wantErr:        false,
+			wantSentinel:   nil,
 			rationale:      "Standard valid initialization with all dependencies",
 		},
 
@@ -105,6 +107,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			eventPub:       &mockEventPublisher{},
 			idempotencySvc: &mockIdempotencyService{},
 			wantErr:        true,
+			wantSentinel:   ErrRepositoryNil,
 			rationale:      "Repository is essential - nil would cause panic on first use",
 		},
 		{
@@ -113,6 +116,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			eventPub:       nil,
 			idempotencySvc: &mockIdempotencyService{},
 			wantErr:        true,
+			wantSentinel:   ErrEventPublisherNil,
 			rationale:      "Event publisher is essential - nil would cause panic when publishing events",
 		},
 		{
@@ -121,6 +125,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			eventPub:       &mockEventPublisher{},
 			idempotencySvc: nil,
 			wantErr:        true,
+			wantSentinel:   ErrIdempotencyServiceNil,
 			rationale:      "Idempotency service is essential - nil would cause panic on idempotent operations",
 		},
 
@@ -131,6 +136,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			eventPub:       nil,
 			idempotencySvc: nil,
 			wantErr:        true,
+			wantSentinel:   ErrRepositoryNil,
 			rationale:      "Should error on first nil check (repository)",
 		},
 	}
@@ -139,8 +145,10 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			service, err := NewFinancialAccountingService(tt.repository, tt.eventPub, tt.idempotencySvc)
 			if tt.wantErr {
-				assert.Error(t, err, tt.rationale)
+				require.Error(t, err, tt.rationale)
 				assert.Nil(t, service, "Service should be nil when error occurs")
+				// Verify the specific sentinel error using errors.Is()
+				assert.ErrorIs(t, err, tt.wantSentinel, "Should return the expected sentinel error")
 			} else {
 				require.NoError(t, err, tt.rationale)
 				assert.NotNil(t, service, tt.rationale)

@@ -189,8 +189,10 @@ func TestHealthChecker_ErrorOnNilDB(t *testing.T) {
 	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
 		DB: nil,
 	})
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, healthChecker)
+	// Verify the specific sentinel error using errors.Is()
+	assert.ErrorIs(t, err, ErrDatabaseNil, "Should return ErrDatabaseNil sentinel error")
 }
 
 func TestMapStatusToGRPC(t *testing.T) {

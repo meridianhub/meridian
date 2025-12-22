@@ -13,7 +13,6 @@ import (
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
-	"github.com/meridianhub/meridian/services/position-keeping/service"
 )
 
 // TestRetrieveFinancialPositionLog_Success tests successful retrieval by ID

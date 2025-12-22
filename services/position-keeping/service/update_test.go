@@ -16,7 +16,6 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
-	"github.com/meridianhub/meridian/services/position-keeping/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
