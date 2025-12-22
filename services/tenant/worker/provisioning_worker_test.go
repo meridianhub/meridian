@@ -56,13 +56,22 @@ func (sb *safeBuffer) String() string {
 	return sb.buf.String()
 }
 
-// setupTestDB creates an in-memory database with the tenant table schema.
+// setupTestDB creates a database with the tenant table schema.
+// Uses file-based temp database to ensure consistent behavior across connections.
 func setupTestDB(t *testing.T) (*gorm.DB, *persistence.Repository) {
-	// Use a unique database name per test to ensure isolation, with cache=shared so
-	// all connections within the same test share the same in-memory database.
-	// Without cache=shared, each connection to :memory: creates a separate database.
-	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
+	// Use a unique temp file per test to ensure isolation while maintaining
+	// consistency across multiple GORM connections within the same test
+	tmpFile, err := os.CreateTemp("", "testdb_*.sqlite")
+	require.NoError(t, err)
+	dbPath := tmpFile.Name()
+	tmpFile.Close()
+
+	// Clean up temp file when test completes
+	t.Cleanup(func() {
+		os.Remove(dbPath)
+	})
+
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	require.NoError(t, err)
 
 	// Configure connection pool to avoid connection issues with in-memory DB
