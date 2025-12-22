@@ -1,4 +1,5 @@
-h1:GNsj9U1iu2nUPYXs3FOcxuuuvrZDx6akGo6lQwVCZ6o=
+h1:6Ri7WBkUQ598E5Ezhe44UubIDRtpdY6BvdxawX2Nmhg=
 20251216000001_initial.sql h1:yA8X5+Vk7SqT7SAa1T4eMK0lqmRhe+Gy7Gp1uaEa+28=
 20251217000001_audit_system.sql h1:cfsms1vb2WWY+mXZDdMEC7oTRhsTgcPWEA6bFx3E8jU=
 20251220000001_add_slug.sql h1:QplLq9sQILwexISqZJB4sy5lgD4CVOfRlnEmz1opZiU=
+20251222000001_add_provisioning_pending_status.sql h1:5auPy0NXkh/YeHkJZLkPSRpjePzNdK0PzrQ+cDN1iac=
