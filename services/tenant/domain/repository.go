@@ -10,8 +10,10 @@ import (
 
 // Repository errors.
 var (
-	// ErrNotFound is returned when a tenant is not found by ID or slug.
-	// This is the domain-layer error that should be used when looking up tenants.
+	// ErrNotFound is the domain-layer error for tenant not found scenarios.
+	// Note: Persistence implementations may return their own specific errors
+	// (e.g., persistence.ErrTenantNotFound). Callers should check both or
+	// use the persistence layer errors directly when available.
 	ErrNotFound = errors.New("tenant not found")
 )
 
@@ -25,12 +27,12 @@ type TenantRepository interface {
 	Create(ctx context.Context, tenant *Tenant) error
 
 	// GetByID retrieves a Tenant by its unique identifier.
-	// Returns ErrNotFound if the tenant doesn't exist.
+	// Returns a not-found error if the tenant doesn't exist.
 	GetByID(ctx context.Context, id tenant.TenantID) (*Tenant, error)
 
 	// GetBySlug retrieves a Tenant by its URL-friendly slug identifier.
 	// Uses an indexed lookup for fast resolution.
-	// Returns ErrNotFound if no tenant with the given slug exists.
+	// Returns a not-found error if no tenant with the given slug exists.
 	GetBySlug(ctx context.Context, slug string) (*Tenant, error)
 
 	// IsSlugAvailable checks if a slug is available for registration.
@@ -40,11 +42,11 @@ type TenantRepository interface {
 
 	// IsActive checks if a tenant exists and is active.
 	// This is optimized for validation middleware - returns only what's needed.
-	// Returns ErrNotFound if the tenant doesn't exist.
+	// Returns a not-found error if the tenant doesn't exist.
 	IsActive(ctx context.Context, id tenant.TenantID) (bool, error)
 
 	// UpdateStatus changes the tenant status with optimistic locking.
-	// Returns ErrNotFound if the tenant doesn't exist.
+	// Returns a not-found error if the tenant doesn't exist.
 	// Returns a version conflict error if the tenant was modified by another transaction.
 	UpdateStatus(ctx context.Context, id tenant.TenantID, status Status, currentVersion int) (*Tenant, error)
 
