@@ -425,9 +425,38 @@ func (s *Service) createProvisioningStatusRecords(ctx context.Context, tenantID 
 
 // GetTenantProvisioningStatus retrieves detailed provisioning status for a tenant.
 // Returns per-service provisioning progress including migration versions and error details.
+//
+// This endpoint requires either:
+// - Authenticated user with tenant_id claim matching the requested tenant (tenant isolation)
+// - OR platform-admin or super-admin role (cross-tenant access)
 func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTenantProvisioningStatusRequest) (*pb.GetTenantProvisioningStatusResponse, error) {
 	s.logger.Debug("getting tenant provisioning status",
 		"tenant_id", req.TenantId)
+
+	// Authorization check - must be performed before any business logic.
+	claims, ok := auth.GetClaimsFromContext(ctx)
+	if !ok {
+		s.logger.Warn("provisioning status query attempted without authentication claims")
+		return nil, status.Error(codes.Unauthenticated, "authentication required")
+	}
+
+	// Check authorization: either tenant-scoped access OR platform admin role
+	hasAdminRole := claims.HasRole(auth.RolePlatformAdmin) || claims.HasRole(auth.RoleSuperAdmin)
+	hasTenantAccess := claims.HasTenantID() && claims.TenantID == req.TenantId
+
+	if !hasAdminRole && !hasTenantAccess {
+		s.logger.Warn("unauthorized provisioning status query attempt",
+			"user_id", claims.UserID,
+			"requested_tenant", req.TenantId,
+			"user_tenant", claims.TenantID,
+			"roles", claims.Roles)
+		return nil, status.Error(codes.PermissionDenied, "access denied: must be tenant owner or platform administrator")
+	}
+
+	s.logger.Debug("provisioning status query authorized",
+		"user_id", claims.UserID,
+		"tenant_id", req.TenantId,
+		"admin_access", hasAdminRole)
 
 	// Validate tenant ID
 	tenantID, err := tenant.NewTenantID(req.TenantId)

@@ -1071,7 +1071,12 @@ func TestService_GetTenantProvisioningStatus_Success(t *testing.T) {
 	svc, db, cleanup := setupTest(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	// Create context with platform-admin claims for cross-tenant access
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
 	// Create tenant with provisioning status
 	createReq := &pb.InitiateTenantRequest{
@@ -1154,7 +1159,13 @@ func TestService_GetTenantProvisioningStatus_TenantNotFound(t *testing.T) {
 	svc, _, cleanup := setupTest(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	// Create context with platform-admin claims
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
 	req := &pb.GetTenantProvisioningStatusRequest{
 		TenantId: "nonexistent_tenant",
 	}
@@ -1183,15 +1194,22 @@ func TestService_GetTenantProvisioningStatus_EmptyServicesList(t *testing.T) {
 	_, err := svc.InitiateTenant(ctx, createReq)
 	require.NoError(t, err)
 
+	// Create context with platform-admin claims for GetTenantProvisioningStatus
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	authCtx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
 	// Auto-migrate the provisioning status table but don't insert any records
 	err = db.AutoMigrate(&persistence.ProvisioningStatusEntity{})
 	require.NoError(t, err)
 
-	// Get provisioning status
+	// Get provisioning status using authenticated context
 	req := &pb.GetTenantProvisioningStatusRequest{
 		TenantId: "empty_services_test",
 	}
-	resp, err := svc.GetTenantProvisioningStatus(ctx, req)
+	resp, err := svc.GetTenantProvisioningStatus(authCtx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -1217,6 +1235,13 @@ func TestService_GetTenantProvisioningStatus_WithFailedService(t *testing.T) {
 	createResp, err := svc.InitiateTenant(ctx, createReq)
 	require.NoError(t, err)
 
+	// Create context with platform-admin claims for GetTenantProvisioningStatus
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	authCtx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
 	// Update tenant status to provisioning_failed
 	tenantID, err := tenant.NewTenantID(createResp.Tenant.TenantId)
 	require.NoError(t, err)
@@ -1240,11 +1265,11 @@ func TestService_GetTenantProvisioningStatus_WithFailedService(t *testing.T) {
 	}).Error
 	require.NoError(t, err)
 
-	// Get provisioning status
+	// Get provisioning status using authenticated context
 	req := &pb.GetTenantProvisioningStatusRequest{
 		TenantId: "failed_provisioning_test",
 	}
-	resp, err := svc.GetTenantProvisioningStatus(ctx, req)
+	resp, err := svc.GetTenantProvisioningStatus(authCtx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -1266,7 +1291,13 @@ func TestService_GetTenantProvisioningStatus_InvalidTenantID(t *testing.T) {
 	svc, _, cleanup := setupTest(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	// Create context with platform-admin claims
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
 	req := &pb.GetTenantProvisioningStatusRequest{
 		TenantId: "invalid-tenant-id-with-dashes",
 	}
@@ -1278,6 +1309,126 @@ func TestService_GetTenantProvisioningStatus_InvalidTenantID(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 	assert.Contains(t, st.Message(), "invalid tenant ID")
+}
+
+// Tests for GetTenantProvisioningStatus Authorization
+
+func TestGetTenantProvisioningStatus_Authorization(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	tests := []struct {
+		name         string
+		claims       *auth.Claims
+		tenantID     string
+		expectError  bool
+		expectedCode codes.Code
+		expectedMsg  string
+	}{
+		{
+			name: "platform-admin allowed",
+			claims: &auth.Claims{
+				UserID: "admin-123",
+				Roles:  []string{auth.RolePlatformAdmin},
+			},
+			tenantID:    "test_tenant",
+			expectError: false,
+		},
+		{
+			name: "super-admin allowed",
+			claims: &auth.Claims{
+				UserID: "super-123",
+				Roles:  []string{auth.RoleSuperAdmin},
+			},
+			tenantID:    "test_tenant",
+			expectError: false,
+		},
+		{
+			name: "tenant owner allowed",
+			claims: &auth.Claims{
+				UserID:   "user-123",
+				TenantID: "test_tenant",
+				Roles:    []string{"user"},
+			},
+			tenantID:    "test_tenant",
+			expectError: false,
+		},
+		{
+			name: "different tenant denied",
+			claims: &auth.Claims{
+				UserID:   "user-456",
+				TenantID: "other_tenant",
+				Roles:    []string{"user"},
+			},
+			tenantID:     "test_tenant",
+			expectError:  true,
+			expectedCode: codes.PermissionDenied,
+			expectedMsg:  "access denied",
+		},
+		{
+			name: "user without tenant denied",
+			claims: &auth.Claims{
+				UserID: "user-789",
+				Roles:  []string{"user"},
+			},
+			tenantID:     "test_tenant",
+			expectError:  true,
+			expectedCode: codes.PermissionDenied,
+			expectedMsg:  "access denied",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create context with claims
+			ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, tt.claims)
+
+			// Execute
+			resp, err := svc.GetTenantProvisioningStatus(ctx, &pb.GetTenantProvisioningStatusRequest{
+				TenantId: tt.tenantID,
+			})
+
+			// Assert
+			if tt.expectError {
+				require.Error(t, err)
+				st, ok := status.FromError(err)
+				require.True(t, ok, "error should be a gRPC status")
+				assert.Equal(t, tt.expectedCode, st.Code())
+				assert.Contains(t, st.Message(), tt.expectedMsg)
+				assert.Nil(t, resp)
+			} else {
+				// Note: Will return NotFound error since test_tenant doesn't exist,
+				// but that proves authorization passed
+				if err != nil {
+					st, ok := status.FromError(err)
+					require.True(t, ok)
+					// Should be NotFound (tenant doesn't exist), not PermissionDenied
+					assert.Equal(t, codes.NotFound, st.Code())
+				}
+			}
+		})
+	}
+}
+
+func TestGetTenantProvisioningStatus_MissingClaims(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Context without claims
+	ctx := context.Background()
+
+	// Execute
+	resp, err := svc.GetTenantProvisioningStatus(ctx, &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "test_tenant",
+	})
+
+	// Assert
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok, "error should be a gRPC status")
+	assert.Equal(t, codes.Unauthenticated, st.Code())
+	assert.Contains(t, st.Message(), "authentication required")
+	assert.Nil(t, resp)
 }
 
 func TestService_toProtoServiceStatus(t *testing.T) {

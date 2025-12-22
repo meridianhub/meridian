@@ -336,7 +336,7 @@ message GetTenantProvisioningStatusRequest {
 // GetTenantProvisioningStatusResponse contains detailed provisioning status for a tenant.
 message GetTenantProvisioningStatusResponse {
   // tenant_id is the unique identifier of the tenant.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = {min_len: 1}];
 
   // overall_status is the aggregate provisioning status across all services.
   TenantStatus overall_status = 2;
