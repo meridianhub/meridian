@@ -1091,15 +1091,15 @@ func TestService_InitiateTenant_ProvisioningHint_AsyncMode(t *testing.T) {
 	// Test case 1: Provisioner configured (async mode)
 	// Tenant is created in PROVISIONING_PENDING state, worker will provision later
 	assert.NotNil(t, resp.Tenant, "response should contain tenant")
-	assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint should not be empty")
+	assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint should not be empty") //nolint:staticcheck // testing deprecated field
 
 	// With provisioner configured, tenant stays in pending state
 	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
-	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' when provisioner is configured")
+	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' when provisioner is configured") //nolint:staticcheck // testing deprecated field
 
 	// Verify both fields are present in response
 	assert.NotNil(t, resp.Tenant)
-	assert.NotEmpty(t, resp.ProvisioningHint)
+	assert.NotEmpty(t, resp.ProvisioningHint) //nolint:staticcheck // testing deprecated field
 }
 
 func TestService_InitiateTenant_ProvisioningHint_SyncMode(t *testing.T) {
@@ -1121,7 +1121,7 @@ func TestService_InitiateTenant_ProvisioningHint_SyncMode(t *testing.T) {
 	// Test case 2: No provisioner (sync mode)
 	// Tenant should be active immediately, hint should be "active"
 	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
-	assert.Equal(t, "active", resp.ProvisioningHint, "hint should be 'active' in sync mode")
+	assert.Equal(t, "active", resp.ProvisioningHint, "hint should be 'active' in sync mode") //nolint:staticcheck // testing deprecated field
 
 	// Verify tenant version is 1 (created directly as active)
 	assert.Equal(t, int32(1), resp.Tenant.Version)
@@ -1179,8 +1179,8 @@ func TestService_InitiateTenant_ProvisioningHint_FieldPresence(t *testing.T) {
 
 			// Test case 3: Verify field presence
 			assert.NotNil(t, resp.Tenant, "tenant field must be present")
-			assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint must not be empty string")
-			assert.Equal(t, tt.expectedHint, resp.ProvisioningHint)
+			assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint must not be empty string") //nolint:staticcheck // testing deprecated field
+			assert.Equal(t, tt.expectedHint, resp.ProvisioningHint)                                 //nolint:staticcheck // testing deprecated field
 			assert.Equal(t, tt.expectedStatus, resp.Tenant.Status)
 		})
 	}
@@ -1208,7 +1208,7 @@ func TestService_InitiateTenant_ProvisioningHint_ProvisioningStates(t *testing.T
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' with provisioner")
+	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' with provisioner") //nolint:staticcheck // testing deprecated field
 	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
 }
 
