@@ -1063,3 +1063,176 @@ func TestInitiateTenant_ProvisioningStatusIdempotent(t *testing.T) {
 	assert.Equal(t, status1.State, status2.State)
 	assert.Equal(t, status1.CreatedAt, status2.CreatedAt, "Created timestamp should not change on second call")
 }
+
+// Tests for provisioning_hint field in InitiateTenantResponse
+
+func TestService_InitiateTenant_ProvisioningHint_AsyncMode(t *testing.T) {
+	// Create mock provisioner (async mode - tenant starts in PROVISIONING_PENDING)
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "testdata/migrations"},
+		{Name: "current-account", MigrationPath: "testdata/migrations"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "async_tenant",
+		DisplayName:     "Async Tenant",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Test case 1: Provisioner configured (async mode)
+	// Tenant is created in PROVISIONING_PENDING state, worker will provision later
+	assert.NotNil(t, resp.Tenant, "response should contain tenant")
+	assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint should not be empty")
+
+	// With provisioner configured, tenant stays in pending state
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' when provisioner is configured")
+
+	// Verify both fields are present in response
+	assert.NotNil(t, resp.Tenant)
+	assert.NotEmpty(t, resp.ProvisioningHint)
+}
+
+func TestService_InitiateTenant_ProvisioningHint_SyncMode(t *testing.T) {
+	// Service without provisioner (sync mode - tenant is active immediately)
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "sync_tenant",
+		DisplayName:     "Sync Tenant",
+		SettlementAsset: "GBP",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Test case 2: No provisioner (sync mode)
+	// Tenant should be active immediately, hint should be "active"
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+	assert.Equal(t, "active", resp.ProvisioningHint, "hint should be 'active' in sync mode")
+
+	// Verify tenant version is 1 (created directly as active)
+	assert.Equal(t, int32(1), resp.Tenant.Version)
+}
+
+func TestService_InitiateTenant_ProvisioningHint_FieldPresence(t *testing.T) {
+	// Verify provisioning_hint field is always present and never empty
+	tests := []struct {
+		name           string
+		setupFunc      func(*testing.T) (*Service, func())
+		expectedHint   string
+		expectedStatus pb.TenantStatus
+	}{
+		{
+			name: "with provisioner",
+			setupFunc: func(t *testing.T) (*Service, func()) {
+				mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+					{Name: "party", MigrationPath: "testdata/migrations"},
+				})
+				svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+				return svc, cleanup
+			},
+			expectedHint:   "pending", // With provisioner, tenant stays in pending
+			expectedStatus: pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING,
+		},
+		{
+			name: "without provisioner",
+			setupFunc: func(t *testing.T) (*Service, func()) {
+				svc, _, cleanup := setupTest(t)
+				return svc, cleanup
+			},
+			expectedHint:   "active",
+			expectedStatus: pb.TenantStatus_TENANT_STATUS_ACTIVE,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, cleanup := tt.setupFunc(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			tenantID := "field_test_provisioner"
+			if tt.name == "without provisioner" {
+				tenantID = "field_test_no_prov"
+			}
+			req := &pb.InitiateTenantRequest{
+				TenantId:        tenantID,
+				DisplayName:     "Field Test",
+				SettlementAsset: "EUR",
+			}
+
+			resp, err := svc.InitiateTenant(ctx, req)
+			require.NoError(t, err)
+
+			// Test case 3: Verify field presence
+			assert.NotNil(t, resp.Tenant, "tenant field must be present")
+			assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint must not be empty string")
+			assert.Equal(t, tt.expectedHint, resp.ProvisioningHint)
+			assert.Equal(t, tt.expectedStatus, resp.Tenant.Status)
+		})
+	}
+}
+
+func TestService_InitiateTenant_ProvisioningHint_ProvisioningStates(t *testing.T) {
+	// Test provisioning_hint with provisioner configured
+	// Note: With async provisioning, InitiateTenant always succeeds and returns PROVISIONING_PENDING.
+	// Actual provisioning failures are handled asynchronously by the worker.
+	mockProv := provisioner.NewMockProvisioner([]provisioner.ServiceConfig{
+		{Name: "party", MigrationPath: "testdata/migrations"},
+	})
+
+	svc, _, cleanup := setupTestWithProvisioner(t, mockProv)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "prov_state_tenant",
+		DisplayName:     "Test Tenant",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' with provisioner")
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+}
+
+// TestProvisioningHintFromStatus tests the provisioningHintFromStatus helper function
+// for all possible tenant status values.
+func TestProvisioningHintFromStatus(t *testing.T) {
+	tests := []struct {
+		status       domain.Status
+		expectedHint string
+	}{
+		// In-progress provisioning states should return "pending"
+		{domain.StatusProvisioningPending, "pending"},
+		{domain.StatusProvisioning, "pending"},
+
+		// All other states return "active" (even failed, since the hint is for client polling)
+		{domain.StatusActive, "active"},
+		{domain.StatusProvisioningFailed, "active"},
+		{domain.StatusSuspended, "active"},
+		{domain.StatusDeprovisioned, "active"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			got := provisioningHintFromStatus(tt.status)
+			assert.Equal(t, tt.expectedHint, got, "provisioningHintFromStatus(%s)", tt.status)
+		})
+	}
+}
