@@ -645,6 +645,12 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 	}
 	newStatus := fromProtoTransactionStatus(req.Status)
 
+	// Extract correlation ID from idempotency key
+	correlationID := ""
+	if req.IdempotencyKey != nil {
+		correlationID = req.IdempotencyKey.Key
+	}
+
 	// Retrieve existing posting
 	posting, err := s.repository.GetPosting(ctx, postingID)
 	if err != nil {
@@ -653,6 +659,10 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 		}
 		return nil, status.Errorf(codes.Internal, "failed to retrieve posting: %v", err)
 	}
+
+	// Capture previous state BEFORE any modifications (for LedgerPostingAmendedEvent)
+	previousAmount := posting.Amount
+	previousStatus := posting.Status
 
 	// Validate and apply state transition using domain methods
 	postingResult := req.PostingResult
@@ -705,8 +715,29 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 		return nil, status.Errorf(codes.Internal, "failed to update posting: %v", err)
 	}
 
-	// Publish domain event (placeholder - actual event will be implemented in event subtask)
-	// TODO(75-async-audit#5): Implement LedgerPostingUpdatedEvent and publish it
+	// Publish LedgerPostingAmendedEvent for inter-service coordination
+	// Event publishing is best-effort - errors are logged but don't fail the operation
+	// Note: UpdateLedgerPosting changes status, not amount. Both previous_amount and new_amount
+	// will be the same value since amount doesn't change in status transitions.
+	event := &eventsv1.LedgerPostingAmendedEvent{
+		PostingId:      posting.ID.String(),
+		BookingLogId:   posting.FinancialBookingLogID.String(),
+		PreviousAmount: toProtoMoney(previousAmount),
+		NewAmount:      toProtoMoney(posting.Amount),
+		Reason:         fmt.Sprintf("Status updated from %v to %v", previousStatus, newStatus),
+		AmendedBy:      "system", // Status transitions are system-driven
+		CorrelationId:  correlationID,
+		CausationId:    correlationID, // Request caused this event
+		Timestamp:      timestamppb.Now(),
+		Version:        1, // Increment version for optimistic locking
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish LedgerPostingAmendedEvent",
+			"error", err,
+			"posting_id", posting.ID.String(),
+			"booking_log_id", posting.FinancialBookingLogID.String(),
+			"status", newStatus)
+	}
 
 	// Convert to proto response
 	response := &financialaccountingv1.UpdateLedgerPostingResponse{
