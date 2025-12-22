@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
@@ -29,6 +30,8 @@ var (
 	ErrMissingTenantContext = errors.New("missing tenant context")
 	// ErrInvalidOperation is returned when the operation is invalid.
 	ErrInvalidOperation = errors.New("invalid operation")
+	// ErrMaxRetriesOutOfRange is returned when MaxRetries exceeds int32 bounds.
+	ErrMaxRetriesOutOfRange = errors.New("MaxRetries must be between 0 and 2147483647")
 )
 
 // AuditConsumer consumes AuditEvent messages from a single Kafka topic and writes them
@@ -88,6 +91,11 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 		config.MaxRetries = 3
 	}
 
+	// Validate MaxRetries fits in int32
+	if config.MaxRetries < 0 || config.MaxRetries > math.MaxInt32 {
+		return nil, ErrMaxRetriesOutOfRange
+	}
+
 	c := &AuditConsumer{
 		db: config.DB,
 	}
@@ -102,9 +110,11 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 	}
 
 	// Create DLQ producer wrapper
+	// Safe conversion: validated above
+	maxRetries32 := int32(config.MaxRetries)
 	dlqConfig := kafka.DLQConfig{
 		DLQTopicSuffix:    ".dlq",
-		MaxRetries:        int32(config.MaxRetries),
+		MaxRetries:        maxRetries32,
 		RetryBackoffMs:    1000,
 		BackoffMultiplier: 2.0,
 		ConsumerGroupID:   config.GroupID,
@@ -142,7 +152,7 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 			DLQProducer:      dlqProducer,
 			DLQConfig: &kafka.DLQConfig{
 				DLQTopicSuffix:    ".dlq",
-				MaxRetries:        int32(config.MaxRetries),
+				MaxRetries:        maxRetries32, // Safe conversion: validated above
 				RetryBackoffMs:    1000,
 				BackoffMultiplier: 2.0,
 			},
