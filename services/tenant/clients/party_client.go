@@ -144,13 +144,13 @@ func (c *PartyGRPCClient) RegisterParty(ctx context.Context, req *partyv1.Regist
 				return nil, fmt.Errorf("%w: %s", ErrPartyRegistrationFailed, st.Message())
 			case codes.Unavailable:
 				// Transient error - service temporarily unavailable, may be retried
-				return nil, fmt.Errorf("%w: %w", ErrPartyServiceUnavailable, err)
+				return nil, fmt.Errorf("%w: %v", ErrPartyServiceUnavailable, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 			case codes.DeadlineExceeded:
 				// Transient error - request timed out, may be retried
-				return nil, fmt.Errorf("%w: %w", ErrPartyServiceTimeout, err)
+				return nil, fmt.Errorf("%w: %v", ErrPartyServiceTimeout, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 			}
 		}
-		return nil, fmt.Errorf("%w: %w", ErrPartyRegistrationFailed, err)
+		return nil, fmt.Errorf("%w: %v", ErrPartyRegistrationFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 	}
 
 	return resp.Party, nil

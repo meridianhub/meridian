@@ -183,7 +183,7 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 				"service", svc.Name,
 				"error", err)
 			p.markProvisioningFailed(ctx, status, fmt.Sprintf("create schema in %s: %v", svc.Name, err))
-			return fmt.Errorf("%w: %s: %w", ErrSchemaCreationFailed, svc.Name, err)
+			return fmt.Errorf("%w: %s: %v", ErrSchemaCreationFailed, svc.Name, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 		logger.Debug("schema created in service database", "service", svc.Name)
 	}
@@ -292,7 +292,7 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			status.Services[i].State = ServiceStateFailed
 			status.Services[i].ErrorMessage = err.Error()
 			p.markProvisioningFailed(ctx, status, fmt.Sprintf("%s migrations failed: %v", svc.Name, err))
-			return fmt.Errorf("%w: %s: %w", ErrMigrationFailed, svc.Name, err)
+			return fmt.Errorf("%w: %s: %v", ErrMigrationFailed, svc.Name, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		logger.Debug("service migration completed", "service", svc.Name, "version", version)
@@ -371,7 +371,7 @@ func (p *PostgresProvisioner) DeprovisionSchemas(ctx context.Context, tenantID t
 
 	if err := p.saveProvisioningStatus(ctx, status); err != nil {
 		logger.Error("failed to save deprovisioned status", "error", err)
-		return fmt.Errorf("%w: %w", ErrDeprovisioningFailed, err)
+		return fmt.Errorf("%w: %v", ErrDeprovisioningFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 	}
 
 	logger.Info("schema deprovisioning completed")
@@ -418,7 +418,7 @@ func (p *PostgresProvisioner) PurgeSchemas(ctx context.Context, tenantID tenant.
 	schemaName := tenantID.SchemaName()
 	if err := p.dropSchemaInAllDBs(ctx, schemaName); err != nil {
 		logger.Error("failed to drop schemas from service databases", "error", err)
-		return fmt.Errorf("%w: %w", ErrDeprovisioningFailed, err)
+		return fmt.Errorf("%w: %v", ErrDeprovisioningFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 	}
 	logger.Debug("schemas dropped from all service databases")
 
@@ -715,7 +715,7 @@ func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("%w: %w", ErrDeprovisioningFailed, errors.Join(errs...))
+		return fmt.Errorf("%w: %v", ErrDeprovisioningFailed, errors.Join(errs...)) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 	}
 	return nil
 }
@@ -1190,7 +1190,7 @@ func (p *PostgresProvisioner) Close() error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("%w: %w", ErrCloseConnections, errors.Join(errs...))
+		return fmt.Errorf("%w: %v", ErrCloseConnections, errors.Join(errs...)) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 	}
 	return nil
 }

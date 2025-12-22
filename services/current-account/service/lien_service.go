@@ -140,20 +140,20 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		// Calculate available balance (within the lock)
 		activeLiensTotal, err := txLienRepo.SumActiveAmountByAccountID(ctx, account.ID())
 		if err != nil {
-			return fmt.Errorf("%w: %w", errTxSumLiensFailed, err)
+			return fmt.Errorf("%w: %v", errTxSumLiensFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		// Available = Current Balance - Active Liens
 		balanceCents, err := account.Balance().ToMinorUnits()
 		if err != nil {
-			return fmt.Errorf("%w: %w", errTxDomainError, err)
+			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 		availableBalance = balanceCents - activeLiensTotal
 
 		// Check sufficient funds
 		lienCents, err := lienAmount.ToMinorUnits()
 		if err != nil {
-			return fmt.Errorf("%w: %w", errTxDomainError, err)
+			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 		if lienCents > availableBalance {
 			return errTxInsufficientFunds
@@ -162,12 +162,12 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		// Create lien domain object
 		lien, err = domain.NewLien(account.ID(), lienAmount, req.PaymentOrderReference, nil)
 		if err != nil {
-			return fmt.Errorf("%w: %w", errTxDomainError, err)
+			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		// Persist lien (within the transaction)
 		if err := txLienRepo.Create(lien); err != nil {
-			return fmt.Errorf("%w: %w", errTxSaveLien, err)
+			return fmt.Errorf("%w: %v", errTxSaveLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		return nil
@@ -360,29 +360,29 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
 		accountResult, txErr := txRepo.FindByUUIDForUpdate(ctx, lien.AccountID)
 		if txErr != nil {
-			return fmt.Errorf("%w: %w", errTxSaveAccount, txErr)
+			return fmt.Errorf("%w: %v", errTxSaveAccount, txErr) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		// Execute lien (domain logic - marks status as executed)
 		if err := lien.Execute(); err != nil {
-			return fmt.Errorf("%w: %w", errTxExecuteFailed, err)
+			return fmt.Errorf("%w: %v", errTxExecuteFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		// Debit the account (immutable: capture returned value)
 		accountResult, err := accountResult.Withdraw(lien.Amount)
 		if err != nil {
-			return fmt.Errorf("%w: %w", errTxWithdrawFailed, err)
+			return fmt.Errorf("%w: %v", errTxWithdrawFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 		account = &accountResult
 
 		// Update lien status
 		if err := txLienRepo.Update(lien); err != nil {
-			return fmt.Errorf("%w: %w", errTxUpdateLien, err)
+			return fmt.Errorf("%w: %v", errTxUpdateLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		// Save account with balance change (context carries audit user info)
 		if err := txRepo.Save(ctx, accountResult); err != nil {
-			return fmt.Errorf("%w: %w", errTxSaveAccount, err)
+			return fmt.Errorf("%w: %v", errTxSaveAccount, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		return nil
@@ -550,12 +550,12 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 
 		// Terminate lien (domain logic)
 		if err := lien.Terminate(reason); err != nil {
-			return fmt.Errorf("%w: %w", errTxTerminateFailed, err)
+			return fmt.Errorf("%w: %v", errTxTerminateFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		// Update lien status
 		if err := txLienRepo.Update(lien); err != nil {
-			return fmt.Errorf("%w: %w", errTxUpdateLien, err)
+			return fmt.Errorf("%w: %v", errTxUpdateLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		return nil
