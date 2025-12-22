@@ -1,0 +1,79 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: audit-consumer-current-account
+
+namespace: meridian
+
+labels:
+- pairs:
+    app: audit-consumer
+    service: current-account
+    managed-by: kustomize
+
+resources:
+- ../../base
+
+namePrefix: current-account-
+
+# Service-specific configuration
+configMapGenerator:
+- name: audit-consumer-config
+  behavior: merge
+  literals:
+  - service_name=current-account
+  - audit_topic=audit.events.current-account
+  - kafka_group_id=audit-consumer-current-account
+  - kafka_client_id=audit-consumer-current-account
+
+# Current Account has HIGH audit volume - scale accordingly
+patches:
+# Higher replica count for high-volume service
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 5
+
+# Higher resource limits for high audit volume
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi
+
+# Higher database connection pool for high throughput
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/env/9/value
+      value: "50"
+
+# Higher HPA limits for peak load
+- target:
+    kind: HorizontalPodAutoscaler
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 5
+    - op: replace
+      path: /spec/maxReplicas
+      value: 20
+
+images:
+- name: audit-consumer
+  newTag: current-account-v1.0.0

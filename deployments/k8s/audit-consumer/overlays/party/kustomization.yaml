@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: audit-consumer-party
+
+namespace: meridian
+
+labels:
+- pairs:
+    app: audit-consumer
+    service: party
+    managed-by: kustomize
+
+resources:
+- ../../base
+
+namePrefix: party-
+
+# Service-specific configuration
+configMapGenerator:
+- name: audit-consumer-config
+  behavior: merge
+  literals:
+  - service_name=party
+  - audit_topic=audit.events.party
+  - kafka_group_id=audit-consumer-party
+  - kafka_client_id=audit-consumer-party
+
+# Party service has LOWER audit volume - conservative scaling
+patches:
+# Lower replica count
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 2
+
+# Standard resource limits
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+# Standard HPA limits
+- target:
+    kind: HorizontalPodAutoscaler
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 2
+    - op: replace
+      path: /spec/maxReplicas
+      value: 8
+
+images:
+- name: audit-consumer
+  newTag: party-v1.0.0

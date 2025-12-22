@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: audit-consumer-financial-accounting
+
+namespace: meridian
+
+labels:
+- pairs:
+    app: audit-consumer
+    service: financial-accounting
+    managed-by: kustomize
+
+resources:
+- ../../base
+
+namePrefix: financial-accounting-
+
+# Service-specific configuration
+configMapGenerator:
+- name: audit-consumer-config
+  behavior: merge
+  literals:
+  - service_name=financial-accounting
+  - audit_topic=audit.events.financial-accounting
+  - kafka_group_id=audit-consumer-financial-accounting
+  - kafka_client_id=audit-consumer-financial-accounting
+
+# Financial Accounting has LOWER audit volume - conservative scaling
+patches:
+# Lower replica count for lower-volume service
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 2
+
+# Standard resource limits
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+# Standard HPA limits
+- target:
+    kind: HorizontalPodAutoscaler
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 2
+    - op: replace
+      path: /spec/maxReplicas
+      value: 8
+
+images:
+- name: audit-consumer
+  newTag: financial-accounting-v1.0.0

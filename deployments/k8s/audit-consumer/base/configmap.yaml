@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audit-consumer-config
+  labels:
+    app: audit-consumer
+    component: audit
+data:
+  # Service-specific values - must be overridden in overlays
+  service_name: "REPLACE_ME"
+  audit_topic: "REPLACE_ME"
+  kafka_group_id: "REPLACE_ME"
+  kafka_client_id: "REPLACE_ME"
+
+  # Shared Kafka configuration
+  kafka_bootstrap_servers: "kafka:9092"
+
+  # Observability configuration
+  log_level: "info"
+  log_format: "json"
+  metrics_enabled: "true"
+  metrics_path: "/metrics"
+  health_check_path: "/health"
+  readiness_check_path: "/health/ready"
+  liveness_check_path: "/health/live"
+  startup_check_path: "/health/startup"
