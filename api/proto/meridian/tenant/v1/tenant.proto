@@ -166,12 +166,12 @@ message InitiateTenantRequest {
   // slug is a URL-friendly identifier for the tenant (e.g., acme-bank).
   // This field is optional and will be auto-generated from display_name if not provided.
   // Must be a valid DNS label (RFC 1123): lowercase alphanumeric with hyphens,
-  // starting and ending with alphanumeric. Maximum length is 63 characters
-  // per DNS label specification. Used for subdomain construction and API routing.
+  // starting and ending with alphanumeric. When provided, minimum 3 characters.
+  // Maximum length is 63 characters per DNS label specification.
+  // Used for subdomain construction and API routing.
   string slug = 6 [(buf.validate.field).string = {
-    min_len: 3
     max_len: 63
-    pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+    pattern: "^([a-z0-9]([a-z0-9-]*[a-z0-9])?)?$"
   }];
 }
 
