@@ -94,8 +94,12 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 	for i, result := range results {
 		if result.Success {
 			successCount++
-			successfulLogs = append(successfulLogs, logs[i])
-			logIDs = append(logIDs, logs[i].LogID)
+			// Defensive nil check: logs[i] should always be non-nil when result.Success is true,
+			// but we guard against potential race conditions or future code changes
+			if logs[i] != nil {
+				successfulLogs = append(successfulLogs, logs[i])
+				logIDs = append(logIDs, logs[i].LogID)
+			}
 		} else {
 			failureCount++
 		}
@@ -234,7 +238,9 @@ func (s *PositionKeepingService) processBatchRequests(
 			}
 
 			mu.Lock()
-			logs[index] = log
+			if log != nil {
+				logs[index] = log
+			}
 			results[index] = result
 			mu.Unlock()
 		}(i, req)
