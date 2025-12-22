@@ -28,8 +28,17 @@ func testErr(msg string) error {
 
 // setupTestDB creates an in-memory database with the tenant table schema.
 func setupTestDB(t *testing.T) (*gorm.DB, *persistence.Repository) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	// Use a unique database name per test to ensure isolation, with cache=shared so
+	// all connections within the same test share the same in-memory database.
+	// Without cache=shared, each connection to :memory: creates a separate database.
+	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
 	require.NoError(t, err)
+
+	// Configure connection pool to avoid connection issues with in-memory DB
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1) // Single connection to ensure consistency
 
 	// Create tenant table
 	err = db.Exec(`
@@ -330,8 +339,10 @@ func TestProcessPendingTenants_Success(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, tenant2))
 	require.NoError(t, repo.Create(ctx, tenant3))
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with a proper mock that doesn't panic
+	prov := &ControlledMockProvisioner{
+		failureSequence: []error{nil, nil, nil}, // Success for all 3 tenants
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
 	require.NoError(t, err)
@@ -339,24 +350,24 @@ func TestProcessPendingTenants_Success(t *testing.T) {
 	// Execute
 	worker.processPendingTenants(ctx)
 
-	// Give goroutines a moment to spawn
-	time.Sleep(50 * time.Millisecond)
+	// Wait for goroutines to complete provisioning
+	worker.wg.Wait()
 
-	// Verify all tenants were claimed (status updated to PROVISIONING)
+	// Verify all tenants were successfully provisioned (status updated to ACTIVE)
 	updated1, err := repo.GetByID(ctx, tenant1.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated1.Status)
-	assert.Equal(t, 2, updated1.Version)
+	assert.Equal(t, domain.StatusActive, updated1.Status)
+	assert.Equal(t, 3, updated1.Version) // Initial 1 -> Provisioning 2 -> Active 3
 
 	updated2, err := repo.GetByID(ctx, tenant2.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated2.Status)
-	assert.Equal(t, 2, updated2.Version)
+	assert.Equal(t, domain.StatusActive, updated2.Status)
+	assert.Equal(t, 3, updated2.Version)
 
 	updated3, err := repo.GetByID(ctx, tenant3.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated3.Status)
-	assert.Equal(t, 2, updated3.Version)
+	assert.Equal(t, domain.StatusActive, updated3.Status)
+	assert.Equal(t, 3, updated3.Version)
 }
 
 func TestProcessPendingTenants_VersionConflict(t *testing.T) {
@@ -397,8 +408,10 @@ func TestProcessPendingTenants_VersionConflict(t *testing.T) {
 	_, err := repo.UpdateStatus(ctx, tenant2.ID, domain.StatusProvisioning, 1)
 	require.NoError(t, err)
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with a proper mock that doesn't panic
+	prov := &ControlledMockProvisioner{
+		failureSequence: []error{nil, nil}, // Success for tenant1 and tenant3
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
 	require.NoError(t, err)
@@ -406,12 +419,13 @@ func TestProcessPendingTenants_VersionConflict(t *testing.T) {
 	// Execute - should skip tenant2 (already claimed) and process tenant1 and tenant3
 	worker.processPendingTenants(ctx)
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for goroutines to complete provisioning
+	worker.wg.Wait()
 
-	// Verify tenant1 and tenant3 were claimed
+	// Verify tenant1 and tenant3 were successfully provisioned (ACTIVE)
 	updated1, err := repo.GetByID(ctx, tenant1.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated1.Status)
+	assert.Equal(t, domain.StatusActive, updated1.Status)
 
 	// Tenant2 should still be in PROVISIONING status (already claimed by another worker)
 	updated2, err := repo.GetByID(ctx, tenant2.ID)
@@ -420,7 +434,7 @@ func TestProcessPendingTenants_VersionConflict(t *testing.T) {
 
 	updated3, err := repo.GetByID(ctx, tenant3.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated3.Status)
+	assert.Equal(t, domain.StatusActive, updated3.Status)
 }
 
 func TestProcessPendingTenants_ListByStatusError(t *testing.T) {
@@ -486,8 +500,10 @@ func TestProcessPendingTenants_GoroutinesSpawned(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, tenant1))
 	require.NoError(t, repo.Create(ctx, tenant2))
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with a proper mock that doesn't panic
+	prov := &ControlledMockProvisioner{
+		failureSequence: []error{nil, nil}, // Success for both tenants
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
 	require.NoError(t, err)
@@ -495,18 +511,21 @@ func TestProcessPendingTenants_GoroutinesSpawned(t *testing.T) {
 	// Execute
 	worker.processPendingTenants(ctx)
 
-	// Give goroutines a moment to spawn
-	time.Sleep(50 * time.Millisecond)
+	// Wait for goroutines to complete provisioning
+	worker.wg.Wait()
 
-	// Verify both tenants were claimed (status updated to PROVISIONING)
-	// This indirectly verifies goroutines were spawned for successfully claimed tenants
+	// Verify both tenants were successfully provisioned (ACTIVE)
+	// This verifies goroutines were spawned and completed for successfully claimed tenants
 	updated1, err := repo.GetByID(ctx, tenant1.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated1.Status)
+	assert.Equal(t, domain.StatusActive, updated1.Status)
 
 	updated2, err := repo.GetByID(ctx, tenant2.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated2.Status)
+	assert.Equal(t, domain.StatusActive, updated2.Status)
+
+	// Verify both tenants were provisioned (call count = 2)
+	assert.Equal(t, 2, prov.GetCallCount())
 }
 
 func TestProvisionTenantWithRetry_NoPanic(t *testing.T) {
