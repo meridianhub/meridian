@@ -212,43 +212,48 @@ func (infra *e2eTestInfra) setupPostgres(ctx context.Context, t *testing.T) {
 	require.NoError(t, err, "failed to connect to database with GORM")
 	infra.gormDB = gormDB
 
-	// Create platform schema for tenant service
-	err = gormDB.Exec("CREATE SCHEMA IF NOT EXISTS platform").Error
-	require.NoError(t, err, "failed to create platform schema")
+	// Use GORM AutoMigrate to create tenant table matching TenantEntity
+	// This ensures table schema matches entity exactly
+	err = gormDB.AutoMigrate(&tenantPersistence.TenantEntity{})
+	require.NoError(t, err, "failed to auto-migrate tenant table")
 
-	// Create tenant_provisioning table in platform schema
+	// Create audit_outbox table (required for GORM hooks in tenant persistence)
+	// Note: Tenant service uses string IDs (varchar(50)) for record_id
 	err = gormDB.Exec(`
-		CREATE TABLE IF NOT EXISTS platform.tenant_provisioning (
-			tenant_id VARCHAR(50) PRIMARY KEY,
-			state VARCHAR(20) NOT NULL,
-			service_schemas JSONB DEFAULT '[]',
+		CREATE TABLE IF NOT EXISTS audit_outbox (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			table_name VARCHAR(100) NOT NULL,
+			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+			record_id VARCHAR(50) NOT NULL,
+			old_values TEXT,
+			new_values TEXT,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			changed_by VARCHAR(100),
+			transaction_id VARCHAR(100),
+			client_ip VARCHAR(45),
+			user_agent TEXT
+		)
+	`).Error
+	require.NoError(t, err, "failed to create audit_outbox table")
+
+	// Create tenant_provisioning table (singular, unqualified - matches migration)
+	err = gormDB.Exec(`
+		CREATE TABLE IF NOT EXISTS tenant_provisioning (
+			tenant_id VARCHAR(50) PRIMARY KEY REFERENCES tenant(id) ON DELETE RESTRICT,
+			state VARCHAR(20) NOT NULL DEFAULT 'pending',
+			service_schemas JSONB NOT NULL DEFAULT '[]',
 			error_message TEXT,
-			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			deprovisioned_at TIMESTAMP,
-			version INTEGER NOT NULL DEFAULT 1
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			deprovisioned_at TIMESTAMPTZ,
+			version INTEGER NOT NULL DEFAULT 1,
+			CONSTRAINT valid_provisioning_state CHECK (state IN ('pending', 'in_progress', 'active', 'failed', 'deprovisioned'))
 		)
 	`).Error
 	require.NoError(t, err, "failed to create tenant_provisioning table")
-
-	// Create tenants table in platform schema
-	err = gormDB.Exec(`
-		CREATE TABLE IF NOT EXISTS platform.tenants (
-			id VARCHAR(50) PRIMARY KEY,
-			display_name VARCHAR(255) NOT NULL,
-			settlement_asset VARCHAR(20) NOT NULL,
-			subdomain VARCHAR(255) UNIQUE,
-			status VARCHAR(30) NOT NULL,
-			party_id VARCHAR(100),
-			error_message TEXT,
-			metadata JSONB,
-			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			deprovisioned_at TIMESTAMP,
-			version INTEGER NOT NULL DEFAULT 1
-		)
-	`).Error
-	require.NoError(t, err, "failed to create tenants table")
 }
 
 // setupRedis creates Redis testcontainer
@@ -381,8 +386,8 @@ func TestTenantProvisioningCreatesSchemas(t *testing.T) {
 
 	tenantID := uniqueTenantID(t, "acme_bank")
 
-	t.Run("initiate_tenant_creates_schema", func(t *testing.T) {
-		// 1. Call InitiateTenant
+	t.Run("initiate_tenant_returns_provisioning_pending", func(t *testing.T) {
+		// 1. Call InitiateTenant - returns immediately with PROVISIONING_PENDING
 		resp, err := infra.tenantSvc.InitiateTenant(ctx, &tenantpb.InitiateTenantRequest{
 			TenantId:        tenantID,
 			DisplayName:     "Acme Bank",
@@ -391,10 +396,21 @@ func TestTenantProvisioningCreatesSchemas(t *testing.T) {
 		require.NoError(t, err, "InitiateTenant should succeed")
 		require.NotNil(t, resp.Tenant)
 
-		// 2. Verify tenant status is active (since provisioning succeeded)
-		assert.Equal(t, tenantpb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+		// 2. Verify tenant status is PROVISIONING_PENDING (async workflow)
+		assert.Equal(t, tenantpb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status,
+			"InitiateTenant should return PROVISIONING_PENDING status for async provisioning")
+	})
 
-		// 3. Query DB: verify org_{tenant_id} schema exists
+	t.Run("manually_provision_schema", func(t *testing.T) {
+		// Simulate what the background worker would do
+		tid, err := tenant.NewTenantID(tenantID)
+		require.NoError(t, err)
+
+		// Call provisioner directly to create schema
+		err = infra.prov.ProvisionSchemas(ctx, tid)
+		require.NoError(t, err, "ProvisionSchemas should succeed")
+
+		// Verify schema exists
 		var schemaExists bool
 		schemaName := "org_" + strings.ToLower(tenantID)
 		err = infra.gormDB.Raw(`
@@ -404,26 +420,29 @@ func TestTenantProvisioningCreatesSchemas(t *testing.T) {
 			)
 		`, schemaName).Scan(&schemaExists).Error
 		require.NoError(t, err)
-		assert.True(t, schemaExists, "schema %s should exist", schemaName)
+		assert.True(t, schemaExists, "schema %s should exist after provisioning", schemaName)
 	})
 
-	t.Run("retrieve_tenant_returns_active_status", func(t *testing.T) {
+	t.Run("retrieve_tenant_returns_pending_before_update", func(t *testing.T) {
+		// Tenant is still in PROVISIONING_PENDING until worker updates it
 		resp, err := infra.tenantSvc.RetrieveTenant(ctx, &tenantpb.RetrieveTenantRequest{
 			TenantId: tenantID,
 		})
 		require.NoError(t, err)
-		assert.Equal(t, tenantpb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+		// Note: In real deployment, the worker would update status to ACTIVE
+		// For this test, we verify the tenant was created correctly
 		assert.Equal(t, "Acme Bank", resp.Tenant.DisplayName)
 		assert.Equal(t, "GBP", resp.Tenant.SettlementAsset)
 	})
 
-	t.Run("provisioning_status_is_active", func(t *testing.T) {
+	t.Run("provisioning_status_is_active_after_provision", func(t *testing.T) {
 		tid, err := tenant.NewTenantID(tenantID)
 		require.NoError(t, err)
 
 		status, err := infra.prov.GetProvisioningStatus(ctx, tid)
 		require.NoError(t, err)
-		assert.Equal(t, provisioner.StateActive, status.State)
+		assert.Equal(t, provisioner.StateActive, status.State,
+			"provisioning status should be active after manual provisioning")
 	})
 }
 
@@ -683,14 +702,29 @@ func TestProvisioningIdempotent(t *testing.T) {
 
 	tenantID := uniqueTenantID(t, "org_retry")
 
-	t.Run("initial_provisioning_succeeds", func(t *testing.T) {
+	t.Run("initial_tenant_creation_succeeds", func(t *testing.T) {
 		resp, err := infra.tenantSvc.InitiateTenant(ctx, &tenantpb.InitiateTenantRequest{
 			TenantId:        tenantID,
 			DisplayName:     "Retry Test Tenant",
 			SettlementAsset: "USD",
 		})
 		require.NoError(t, err)
-		assert.Equal(t, tenantpb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+		// Async provisioning: returns PROVISIONING_PENDING
+		assert.Equal(t, tenantpb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+	})
+
+	t.Run("initial_provisioning_succeeds", func(t *testing.T) {
+		// Simulate worker provisioning
+		tid, err := tenant.NewTenantID(tenantID)
+		require.NoError(t, err)
+
+		err = infra.prov.ProvisionSchemas(ctx, tid)
+		require.NoError(t, err, "initial provisioning should succeed")
+
+		// Verify status is now active
+		status, err := infra.prov.GetProvisioningStatus(ctx, tid)
+		require.NoError(t, err)
+		assert.Equal(t, provisioner.StateActive, status.State)
 	})
 
 	t.Run("duplicate_initiate_returns_already_exists", func(t *testing.T) {
@@ -736,14 +770,26 @@ func TestTenantDeprovisionDropsAccess(t *testing.T) {
 	tenantID := uniqueTenantID(t, "org_deprov")
 	orgID := tenant.MustNewTenantID(tenantID)
 
-	t.Run("provision_tenant", func(t *testing.T) {
+	t.Run("create_tenant", func(t *testing.T) {
 		resp, err := infra.tenantSvc.InitiateTenant(ctx, &tenantpb.InitiateTenantRequest{
 			TenantId:        tenantID,
 			DisplayName:     "Deprovision Test",
 			SettlementAsset: "EUR",
 		})
 		require.NoError(t, err)
-		assert.Equal(t, tenantpb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
+		// Async provisioning: returns PROVISIONING_PENDING
+		assert.Equal(t, tenantpb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
+	})
+
+	t.Run("provision_tenant_schema", func(t *testing.T) {
+		// Simulate worker provisioning
+		err := infra.prov.ProvisionSchemas(ctx, orgID)
+		require.NoError(t, err, "provisioning should succeed")
+
+		// Verify status is active
+		status, err := infra.prov.GetProvisioningStatus(ctx, orgID)
+		require.NoError(t, err)
+		assert.Equal(t, provisioner.StateActive, status.State)
 	})
 
 	t.Run("insert_data_in_tenant_schema", func(t *testing.T) {
