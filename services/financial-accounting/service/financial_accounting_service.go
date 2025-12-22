@@ -890,7 +890,28 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to save booking log: %v", err)
 	}
 
-	// TODO(75-async-audit#5): Publish FinancialBookingLogInitiatedEvent for inter-service coordination
+	// Publish FinancialBookingLogInitiatedEvent for inter-service coordination
+	// Event publishing is best-effort - errors are logged but don't fail the operation
+	correlationID := ""
+	if req.IdempotencyKey != nil {
+		correlationID = req.IdempotencyKey.Key
+	}
+	event := &eventsv1.FinancialBookingLogInitiatedEvent{
+		BookingLogId:            bookingLog.ID.String(),
+		FinancialAccountType:    toProtoAccountType(bookingLog.FinancialAccountType),
+		ProductServiceReference: bookingLog.ProductServiceReference,
+		BusinessUnitReference:   bookingLog.BusinessUnitReference,
+		BaseCurrency:            toProtoCurrency(bookingLog.BaseCurrency),
+		CorrelationId:           correlationID,
+		CausationId:             correlationID, // Request caused this event
+		Timestamp:               timestamppb.Now(),
+		Version:                 1, // Initial version for newly created booking log
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish FinancialBookingLogInitiatedEvent",
+			"error", err,
+			"booking_log_id", bookingLog.ID.String())
+	}
 
 	// Store idempotency result (only if service configured)
 	if s.idempotency != nil {
