@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/services/tenant/worker"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -141,7 +142,7 @@ func run(logger *slog.Logger) error {
 	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
 	partyEnabled := getEnvOrDefault("PARTY_SERVICE_ENABLED", envValueTrue) == envValueTrue
 	if partyEnabled {
-		pc, err := clients.NewPartyClient(&clients.PartyClientConfig{
+		pc, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
 			ServiceName: "party",
 			Namespace:   namespace,
 			Port:        50055,

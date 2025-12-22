@@ -228,7 +228,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	// Create Party client (optional - nil client provides backward compatibility)
 	var resilientPartyClient clients.PartyClient
 	if config.PartyServiceName != "" {
-		partyGRPCClient, err := clients.NewPartyClient(&clients.PartyClientConfig{
+		partyGRPCClient, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
 			ServiceName: config.PartyServiceName,
 			Namespace:   config.Namespace,
 			Port:        config.PartyPort,
