@@ -14,6 +14,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/services/tenant/observability"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
@@ -128,6 +129,9 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 
 	w.logger.Info("found pending tenants", "count", len(tenants))
 
+	// Record queue depth before processing
+	observability.SetProvisioningQueueDepth(len(tenants))
+
 	// Process each tenant with optimistic locking
 	for _, tenant := range tenants {
 		// Attempt to claim the tenant by updating its status to PROVISIONING
@@ -172,9 +176,22 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 	// Ensure we decrement the WaitGroup when this goroutine completes
 	defer w.wg.Done()
 
+	// Start timing the provisioning operation
+	start := time.Now()
+	var status string
+
+	// Defer metric recording to ensure it happens even on panic
+	defer func() {
+		if status == "" {
+			status = observability.StatusError // Default to error if status not set
+		}
+		observability.RecordProvisioningDuration(tenantID.String(), status, time.Since(start))
+	}()
+
 	// Panic recovery to prevent a single tenant provisioning failure from crashing the worker
 	defer func() {
 		if r := recover(); r != nil {
+			status = observability.StatusError
 			w.logger.Error("panic during tenant provisioning",
 				"tenant_id", tenantID,
 				"panic", r)
@@ -190,6 +207,7 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 	}
 
 	// Mark as failed
+	status = observability.StatusError
 	w.markTenantAsFailed(ctx, tenantID, lastErr, attempts)
 }
 
@@ -219,6 +237,9 @@ func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, t
 				"error", err)
 			break // Permanent error, don't retry
 		}
+
+		// Record retry attempt for observability
+		observability.IncrementRetryAttempt()
 
 		if cancelled := w.waitWithBackoff(ctx, tenantID, attempt, lastErr); cancelled {
 			return 0, nil // Context cancelled, don't mark as failed
