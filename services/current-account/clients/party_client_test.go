@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/current-account/clients"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,7 +15,7 @@ import (
 func TestNewPartyClient_RequiresServiceName(t *testing.T) {
 	t.Parallel()
 
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		Namespace: "default",
 		Port:      50055,
 		Timeout:   10 * time.Second,
@@ -22,7 +23,7 @@ func TestNewPartyClient_RequiresServiceName(t *testing.T) {
 
 	client, err := clients.NewPartyClient(cfg)
 
-	assert.ErrorIs(t, err, clients.ErrPartyServiceNameRequired)
+	assert.ErrorIs(t, err, sharedclients.ErrPartyServiceNameRequired)
 	assert.Nil(t, client)
 }
 
@@ -30,7 +31,7 @@ func TestNewPartyClient_RequiresServiceName(t *testing.T) {
 func TestNewPartyClient_Success(t *testing.T) {
 	t.Parallel()
 
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "default",
 		Port:        50055,
@@ -48,7 +49,7 @@ func TestNewPartyClient_Success(t *testing.T) {
 func TestNewPartyClient_DefaultTimeout(t *testing.T) {
 	t.Parallel()
 
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "default",
 		Port:        50055,
@@ -67,7 +68,7 @@ func TestNewPartyClient_CustomTimeout(t *testing.T) {
 	t.Parallel()
 
 	customTimeout := 5 * time.Minute
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "default",
 		Port:        50055,
@@ -86,7 +87,7 @@ func TestNewPartyClient_WithTracer(t *testing.T) {
 	t.Parallel()
 
 	tracer := &observability.Tracer{}
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "default",
 		Port:        50055,
@@ -105,7 +106,7 @@ func TestNewPartyClient_WithTracer(t *testing.T) {
 func TestNewPartyClient_DefaultNamespace(t *testing.T) {
 	t.Parallel()
 
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "", // Should default to "default"
 		Port:        50055,
@@ -123,7 +124,7 @@ func TestNewPartyClient_DefaultNamespace(t *testing.T) {
 func TestNewPartyClient_CustomNamespace(t *testing.T) {
 	t.Parallel()
 
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "production",
 		Port:        50055,
@@ -141,7 +142,7 @@ func TestNewPartyClient_CustomNamespace(t *testing.T) {
 func TestPartyClient_Close_Success(t *testing.T) {
 	t.Parallel()
 
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "default",
 		Port:        50055,
@@ -161,7 +162,7 @@ func TestPartyClient_Close_Success(t *testing.T) {
 func TestPartyClient_Close_Multiple(t *testing.T) {
 	t.Parallel()
 
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "default",
 		Port:        50055,
@@ -185,7 +186,7 @@ func TestPartyClient_Close_Multiple(t *testing.T) {
 func TestNewPartyClient_NilTracer(t *testing.T) {
 	t.Parallel()
 
-	cfg := &clients.PartyClientConfig{
+	cfg := &sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   "default",
 		Port:        50055,

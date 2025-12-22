@@ -438,7 +438,7 @@ func createServiceWithClients(
 	)
 
 	// Create Party client with DNS-based load balancing
-	partyGRPCClient, err := clients.NewPartyClient(&clients.PartyClientConfig{
+	partyGRPCClient, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   namespace,
 		Port:        50055, // Party service port (see services/party/k8s/service.yaml)
