@@ -663,3 +663,61 @@ func TestInitiateFinancialPositionLogBatch_ContextCancellation(t *testing.T) {
 	mockRepo.AssertNotCalled(t, "CreateBatch")
 	mockIdempotency.AssertNotCalled(t, "StoreResult")
 }
+
+// TestInitiateFinancialPositionLogBatch_NilPointerRegressionOnValidationFailure is a regression test
+// for a bug where nil logs were stored in the logs slice when validation failed, which could
+// lead to nil pointer panics when accessing logs[i] in the downstream success counting loop.
+// This test specifically verifies that mixed valid/invalid batches don't cause panics.
+func TestInitiateFinancialPositionLogBatch_NilPointerRegressionOnValidationFailure(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+
+	// Create a batch with alternating valid and invalid entries to maximize
+	// the chance of triggering race conditions in the parallel processing
+	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
+		Requests: []*positionkeepingv1.BatchInitiateRequest{
+			{AccountId: ""},       // Invalid - empty account ID (logs[0] = nil)
+			{AccountId: "ACC001"}, // Valid
+			{AccountId: ""},       // Invalid - empty account ID (logs[2] = nil)
+			{AccountId: "ACC002"}, // Valid
+			{AccountId: ""},       // Invalid - empty account ID (logs[4] = nil)
+			{AccountId: "ACC003"}, // Valid
+			{AccountId: ""},       // Invalid - empty account ID (logs[6] = nil)
+		},
+	}
+
+	// Act - This should NOT panic even though some logs[i] will be nil
+	// Previously this would panic at: logIDs = append(logIDs, logs[i].LogID)
+	resp, err := svc.InitiateFinancialPositionLogBatch(ctx, req)
+
+	// Assert
+	require.NoError(t, err, "Partial failures should not return error")
+	require.NotNil(t, resp, "Response should not be nil")
+
+	// Verify counts match expectations
+	assert.Equal(t, int32(7), resp.TotalCount)
+	assert.Equal(t, int32(3), resp.SuccessCount, "Should have 3 successful entries")
+	assert.Equal(t, int32(4), resp.FailureCount, "Should have 4 failed entries")
+
+	// Verify individual results are correctly marked
+	for i, result := range resp.Results {
+		switch i {
+		case 0, 2, 4, 6: // Invalid entries
+			assert.False(t, result.Success, "Entry %d should have failed", i)
+			assert.Contains(t, result.ErrorMessage, "account_id is required")
+			assert.Nil(t, result.Log, "Failed entry %d should have no log", i)
+		case 1, 3, 5: // Valid entries
+			assert.True(t, result.Success, "Entry %d should be successful", i)
+			assert.NotNil(t, result.Log, "Successful entry %d should have a log", i)
+			assert.Empty(t, result.ErrorMessage, "Successful entry %d should have no error", i)
+		}
+	}
+
+	// No database calls should be made when there are validation failures
+	mockRepo.AssertNotCalled(t, "CreateBatch")
+}
