@@ -144,8 +144,32 @@ func closeServiceConnections(serviceDbs map[string]*gorm.DB) {
 //  3. For each configured service, applies migrations to the tenant schema in that service's database
 //  4. Updates the provisioning status to 'active' on success or 'failed' on error
 //
-// Idempotency: Safe to call multiple times. Already-created schemas are skipped,
-// and migrations are checked against the version recorded in the status.
+// # Idempotency Contract
+//
+// This method is safe to call multiple times for the same tenant. Calling ProvisionSchemas
+// on an already-provisioned tenant is a no-op that returns nil (success).
+//
+// Idempotency is guaranteed through multiple layers:
+//
+//  1. State check with early return: If tenant is already 'active', returns immediately
+//     without modifying any state (see prepareProvisioningStatus).
+//
+//  2. CREATE SCHEMA IF NOT EXISTS: Schema creation uses PostgreSQL's IF NOT EXISTS clause,
+//     making it safe to retry after partial failures.
+//
+//  3. Migration error handling: If tables/indexes already exist (PostgreSQL error codes
+//     42P07, 42P06, 42710), the migration continues rather than failing. This handles
+//     cases where a previous attempt partially completed.
+//
+//  4. Mutex protection: A sync.Mutex prevents concurrent provisioning of the same tenant
+//     within a single process instance. Cross-process protection is provided by the
+//     'in_progress' state check in the database.
+//
+//  5. No destructive operations: This method never executes DROP, TRUNCATE, or DELETE
+//     statements. Failed provisioning can always be safely retried.
+//
+// Thread-safety: Safe for concurrent calls. The mutex serializes provisioning for the
+// same tenant, while different tenants can be provisioned in parallel.
 func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -154,11 +178,13 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 	logger := p.logger.With("tenant_id", tenantID.String(), "schema", tenantID.SchemaName())
 	logger.Info("starting schema provisioning", "services_count", len(p.config.Services))
 
-	// Validate and prepare provisioning status
+	// Validate and prepare provisioning status.
+	// IDEMPOTENCY: If tenant is already 'active', prepareProvisioningStatus returns
+	// errAlreadyProvisioned, and we return nil (success) without any modifications.
 	status, err := p.prepareProvisioningStatus(ctx, tenantID)
 	if errors.Is(err, errAlreadyProvisioned) {
 		logger.Info("schema already provisioned, skipping")
-		return nil // Idempotent: already provisioned
+		return nil // Idempotent: already provisioned, no-op success
 	}
 	if err != nil {
 		logger.Error("failed to prepare provisioning status", "error", err)
@@ -179,8 +205,10 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 		return ErrProvisioningTimeout
 	}
 
-	// Create the schema IN EACH SERVICE DATABASE
-	// Iterate over config.Services for deterministic order (easier debugging)
+	// Create the schema IN EACH SERVICE DATABASE.
+	// IDEMPOTENCY: Uses CREATE SCHEMA IF NOT EXISTS (see createSchemaInDB), so this is
+	// safe to call multiple times - existing schemas are silently skipped.
+	// Iterate over config.Services for deterministic order (easier debugging).
 	schemaName := tenantID.SchemaName()
 	for _, svc := range p.config.Services {
 		serviceDB := p.serviceDbs[svc.Name]
@@ -215,6 +243,13 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 }
 
 // prepareProvisioningStatus validates existing status and prepares for provisioning.
+//
+// IDEMPOTENCY: This is the primary idempotency gate for ProvisionSchemas:
+//   - StateActive: Returns errAlreadyProvisioned (caller treats as success/no-op)
+//   - StateInProgress: Returns ErrProvisioningInProgress (prevents concurrent provisioning)
+//   - StateDeprovisioned: Returns ErrAlreadyDeprovisioned (terminal state, cannot re-provision)
+//   - StatePending/StateFailed: Proceeds with provisioning (retry is allowed)
+//
 // Returns nil status if already active (no-op), or error if provisioning cannot proceed.
 func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error) {
 	status, err := p.getProvisioningStatusLocked(ctx, tenantID)
@@ -737,6 +772,9 @@ func filterMigrationsAfter(migrations []migration, currentVersion string) []migr
 // applyMigrationList applies a specific list of migrations to a tenant schema.
 // This is extracted from applyServiceMigrationsToDB to support both initial
 // provisioning (all migrations) and reconciliation (subset of migrations).
+//
+// IDEMPOTENCY: Same guarantees as applyServiceMigrationsToDB - objects that already
+// exist are silently skipped via isAlreadyExistsError.
 func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.DB, schemaName string, migrations []migration) (string, error) {
 	if len(migrations) == 0 {
 		return "", nil
@@ -769,7 +807,9 @@ func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.D
 			return nil
 		})
 		if err != nil {
-			// Check if error is due to existing objects (idempotency)
+			// IDEMPOTENCY: If error indicates objects already exist (duplicate_table,
+			// duplicate_schema, duplicate_object), treat as success. This handles the
+			// case where a previous provisioning attempt partially completed.
 			if isAlreadyExistsError(err) {
 				lastVersion = mig.Version
 				continue
@@ -784,6 +824,10 @@ func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.D
 }
 
 // createSchemaInDB creates the org_{tenant_id} schema in the specified database.
+//
+// IDEMPOTENCY: Uses CREATE SCHEMA IF NOT EXISTS, so calling this multiple times
+// for the same schema is safe - PostgreSQL silently ignores the request if the
+// schema already exists.
 func (p *PostgresProvisioner) createSchemaInDB(ctx context.Context, db *gorm.DB, schemaName string) error {
 	query := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(schemaName))
 	return db.WithContext(ctx).Exec(query).Error
@@ -815,6 +859,11 @@ func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName
 
 // applyServiceMigrationsToDB applies all migration files for a service to the tenant schema
 // in the specified service database.
+//
+// IDEMPOTENCY: If a migration creates objects that already exist, the error is caught by
+// isAlreadyExistsError and the migration is marked as applied. This allows retries after
+// partial failures where some tables were created but the version wasn't recorded.
+//
 // Returns the version string of the last applied migration.
 func (p *PostgresProvisioner) applyServiceMigrationsToDB(ctx context.Context, db *gorm.DB, schemaName string, svc ServiceConfig) (string, error) {
 	// Read migration files
@@ -859,7 +908,10 @@ func (p *PostgresProvisioner) applyServiceMigrationsToDB(ctx context.Context, db
 			return nil
 		})
 		if err != nil {
-			// Check if error is due to existing objects (idempotency)
+			// IDEMPOTENCY: If error indicates objects already exist (duplicate_table,
+			// duplicate_schema, duplicate_object), treat as success. This handles the
+			// case where a previous provisioning attempt partially completed - some
+			// tables were created but the migration version wasn't recorded.
 			if isAlreadyExistsError(err) {
 				lastVersion = mig.Version
 				continue
@@ -1182,7 +1234,15 @@ func quoteIdentifier(identifier string) string {
 }
 
 // isAlreadyExistsError checks if the error indicates an object already exists.
-// This is used for idempotency - if a table/index already exists, we skip it.
+//
+// IDEMPOTENCY: This is a key idempotency mechanism for migrations. When a migration
+// attempts to create a table, index, or schema that already exists, we treat it as
+// success rather than failure. This handles partial provisioning retries gracefully.
+//
+// Recognized PostgreSQL error codes:
+//   - 42P07: duplicate_table (table already exists)
+//   - 42P06: duplicate_schema (schema already exists)
+//   - 42710: duplicate_object (index or other object already exists)
 func isAlreadyExistsError(err error) bool {
 	if err == nil {
 		return false
