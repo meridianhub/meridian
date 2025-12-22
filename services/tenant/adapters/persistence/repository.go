@@ -21,6 +21,9 @@ var (
 	ErrSlugTaken       = errors.New("slug already taken by another tenant")
 )
 
+// Compile-time check that Repository implements domain.TenantRepository.
+var _ domain.TenantRepository = (*Repository)(nil)
+
 // Repository provides persistence operations for tenants.
 type Repository struct {
 	db *gorm.DB
@@ -79,6 +82,58 @@ func (r *Repository) GetByID(ctx context.Context, id tenant.TenantID) (*domain.T
 	}
 
 	return toDomain(&entity)
+}
+
+// GetBySlug retrieves a tenant by its URL-friendly slug identifier.
+// Uses the idx_tenant_slug index for fast lookups.
+// Returns ErrTenantNotFound for empty slugs (fail-fast).
+// Slug lookup is case-insensitive: input is normalized to lowercase before querying.
+func (r *Repository) GetBySlug(ctx context.Context, slug string) (*domain.Tenant, error) {
+	if slug == "" {
+		return nil, ErrTenantNotFound
+	}
+
+	// Normalize to lowercase since slugs are stored lowercase
+	slug = strings.ToLower(slug)
+
+	var entity TenantEntity
+	result := r.db.WithContext(ctx).Where("slug = ?", slug).First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrTenantNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toDomain(&entity)
+}
+
+// IsSlugAvailable checks if a slug is available for registration.
+// Returns true if the slug is not in use, false if it's taken.
+// Returns an error only if the database query fails.
+// Returns false for empty slugs (invalid input).
+// Slug lookup is case-insensitive: input is normalized to lowercase before querying.
+func (r *Repository) IsSlugAvailable(ctx context.Context, slug string) (bool, error) {
+	if slug == "" {
+		return false, nil
+	}
+
+	// Normalize to lowercase since slugs are stored lowercase
+	slug = strings.ToLower(slug)
+
+	var count int64
+	result := r.db.WithContext(ctx).
+		Model(&TenantEntity{}).
+		Where("slug = ?", slug).
+		Count(&count)
+
+	if result.Error != nil {
+		return false, result.Error
+	}
+
+	return count == 0, nil
 }
 
 // IsActive checks if a tenant exists and is active.

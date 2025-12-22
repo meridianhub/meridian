@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -166,6 +167,91 @@ func TestRepository_GetByID_NotFound(t *testing.T) {
 	tenantID, _ := tenant.NewTenantID("nonexistent_tenant")
 	_, err := repo.GetByID(ctx, tenantID)
 	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound, got %v", err)
+}
+
+func TestRepository_GetBySlug(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with slug
+	testTenant := newTestTenant("acme_bank")
+	testTenant.Slug = "acme-bank"
+	testTenant.DisplayName = "ACME Bank"
+	testTenant.SettlementAsset = "USD"
+
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	// Retrieve by slug
+	retrieved, err := repo.GetBySlug(ctx, "acme-bank")
+	require.NoError(t, err)
+	assert.Equal(t, testTenant.ID.String(), retrieved.ID.String())
+	assert.Equal(t, "acme-bank", retrieved.Slug)
+	assert.Equal(t, "ACME Bank", retrieved.DisplayName)
+	assert.Equal(t, "USD", retrieved.SettlementAsset)
+	assert.Equal(t, domain.StatusActive, retrieved.Status)
+}
+
+func TestRepository_GetBySlug_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	_, err := repo.GetBySlug(ctx, "nonexistent-slug")
+	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound, got %v", err)
+}
+
+func TestRepository_GetBySlug_EmptyString(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Empty slug should return ErrTenantNotFound immediately (fail-fast)
+	_, err := repo.GetBySlug(ctx, "")
+	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound for empty slug, got %v", err)
+}
+
+func TestRepository_GetBySlug_ReturnsAllFields(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with all fields populated
+	testTenant := newTestTenant("full_tenant")
+	testTenant.Slug = "full-tenant-slug"
+	testTenant.Subdomain = "full-tenant.demo.meridian.io"
+	testTenant.DisplayName = "Full Tenant Inc."
+	testTenant.SettlementAsset = "EUR"
+	testTenant.Metadata = map[string]interface{}{
+		"tier":     "enterprise",
+		"features": []interface{}{"batch", "multi-currency"},
+	}
+
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	// Retrieve by slug and verify all fields
+	retrieved, err := repo.GetBySlug(ctx, "full-tenant-slug")
+	require.NoError(t, err)
+
+	assert.Equal(t, testTenant.ID.String(), retrieved.ID.String())
+	assert.Equal(t, "full-tenant-slug", retrieved.Slug)
+	assert.Equal(t, "full-tenant.demo.meridian.io", retrieved.Subdomain)
+	assert.Equal(t, "Full Tenant Inc.", retrieved.DisplayName)
+	assert.Equal(t, "EUR", retrieved.SettlementAsset)
+	assert.Equal(t, domain.StatusActive, retrieved.Status)
+	assert.Equal(t, "enterprise", retrieved.Metadata["tier"])
+	assert.NotZero(t, retrieved.CreatedAt)
+	assert.Equal(t, 1, retrieved.Version)
 }
 
 func TestRepository_IsActive(t *testing.T) {
@@ -664,4 +750,173 @@ func TestRepository_FindProvisioningStatusByTenantID_NullHandling(t *testing.T) 
 	assert.Nil(t, results[0].ErrorMessage)
 	assert.Nil(t, results[0].StartedAt)
 	assert.Nil(t, results[0].CompletedAt)
+}
+
+func TestRepository_IsSlugAvailable_Available(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Check availability of a slug that doesn't exist
+	available, err := repo.IsSlugAvailable(ctx, "available-slug")
+	require.NoError(t, err)
+	assert.True(t, available, "Expected slug to be available")
+}
+
+func TestRepository_IsSlugAvailable_Taken(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with a slug
+	testTenant := newTestTenant("acme_bank")
+	testTenant.Slug = "taken-slug"
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	// Check availability of the taken slug
+	available, err := repo.IsSlugAvailable(ctx, "taken-slug")
+	require.NoError(t, err)
+	assert.False(t, available, "Expected slug to be taken")
+}
+
+func TestRepository_IsSlugAvailable_Integration(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with slug "test-slug"
+	testTenant := newTestTenant("test_tenant")
+	testTenant.Slug = "test-slug"
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	// Verify IsSlugAvailable("test-slug") returns false
+	available, err := repo.IsSlugAvailable(ctx, "test-slug")
+	require.NoError(t, err)
+	assert.False(t, available, "Expected 'test-slug' to be unavailable after tenant creation")
+
+	// Verify IsSlugAvailable("new-slug") returns true
+	available, err = repo.IsSlugAvailable(ctx, "new-slug")
+	require.NoError(t, err)
+	assert.True(t, available, "Expected 'new-slug' to be available")
+}
+
+func TestRepository_IsSlugAvailable_EmptyString(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Empty slug is invalid input, should return false (not available)
+	available, err := repo.IsSlugAvailable(ctx, "")
+	require.NoError(t, err)
+	assert.False(t, available, "Expected empty slug to be unavailable (invalid input)")
+}
+
+func TestRepository_SlugLookup_CaseInsensitive(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with lowercase slug (as stored in DB)
+	testTenant := newTestTenant("acme_bank")
+	testTenant.Slug = "acme-bank"
+	testTenant.DisplayName = "ACME Bank"
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name     string
+		slugCase string
+	}{
+		{"uppercase", "ACME-BANK"},
+		{"mixedcase", "Acme-Bank"},
+		{"alternating", "AcMe-BaNk"},
+		{"lowercase", "acme-bank"},
+	}
+
+	for _, tc := range testCases {
+		t.Run("GetBySlug_"+tc.name, func(t *testing.T) {
+			retrieved, err := repo.GetBySlug(ctx, tc.slugCase)
+			require.NoError(t, err, "GetBySlug(%q) should find tenant", tc.slugCase)
+			assert.Equal(t, testTenant.ID.String(), retrieved.ID.String())
+			assert.Equal(t, "acme-bank", retrieved.Slug)
+			assert.Equal(t, "ACME Bank", retrieved.DisplayName)
+		})
+
+		t.Run("IsSlugAvailable_"+tc.name, func(t *testing.T) {
+			available, err := repo.IsSlugAvailable(ctx, tc.slugCase)
+			require.NoError(t, err, "IsSlugAvailable(%q) should succeed", tc.slugCase)
+			assert.False(t, available, "IsSlugAvailable(%q) should return false (slug taken)", tc.slugCase)
+		})
+	}
+}
+
+// TestRepository_GetBySlug_UsesIndex verifies that slug lookups use the idx_tenant_slug
+// index for O(log n) performance rather than O(n) sequential scan.
+//
+// PostgreSQL query planner behavior:
+// - With < ~100 rows: May prefer Seq Scan due to overhead of index access
+// - With sufficient rows: Uses Index Scan on idx_tenant_slug
+// - The partial index (WHERE slug IS NOT NULL) is optimal for slug lookups
+//
+// This test creates enough rows to trigger index usage and verifies via EXPLAIN.
+func TestRepository_GetBySlug_UsesIndex(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create partial index matching the migration
+	// GORM AutoMigrate creates a basic unique index, but we need the partial index
+	// that matches production behavior for accurate query plan testing
+	err := db.Exec(`
+		DROP INDEX IF EXISTS idx_tenant_slug;
+		CREATE UNIQUE INDEX idx_tenant_slug ON tenant(slug) WHERE slug IS NOT NULL;
+	`).Error
+	require.NoError(t, err, "Failed to create partial index")
+
+	// Insert enough tenants to make index usage preferable
+	// PostgreSQL typically prefers indexes over sequential scans when:
+	// 1. Table has many rows (reduces full scan cost)
+	// 2. Query selectivity is high (few rows match)
+	const numTenants = 200
+	for i := 0; i < numTenants; i++ {
+		testTenant := newTestTenant(fmt.Sprintf("tenant_%03d", i))
+		testTenant.Slug = fmt.Sprintf("slug-%03d", i)
+		err := db.WithContext(ctx).Create(toEntity(testTenant)).Error
+		require.NoError(t, err, "Failed to create tenant %d", i)
+	}
+
+	// Run EXPLAIN on the GetBySlug query pattern
+	var explainResult []struct {
+		QueryPlan string `gorm:"column:QUERY PLAN"`
+	}
+	err = db.Raw("EXPLAIN SELECT * FROM tenant WHERE slug = ?", "slug-100").Scan(&explainResult).Error
+	require.NoError(t, err, "EXPLAIN query failed")
+
+	// Combine query plan lines for analysis
+	var queryPlan string
+	for _, row := range explainResult {
+		queryPlan += row.QueryPlan + "\n"
+	}
+
+	// Verify index is used (not a sequential scan)
+	// PostgreSQL will show "Index Scan using idx_tenant_slug" or similar
+	assert.Contains(t, queryPlan, "Index",
+		"Expected query plan to use Index Scan, got:\n%s", queryPlan)
+	assert.NotContains(t, queryPlan, "Seq Scan",
+		"Query plan should not use Seq Scan, got:\n%s", queryPlan)
+
+	t.Logf("Query plan for GetBySlug:\n%s", queryPlan)
 }
