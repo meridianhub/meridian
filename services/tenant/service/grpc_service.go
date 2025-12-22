@@ -85,9 +85,17 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		initialStatus = domain.StatusProvisioningPending
 	}
 
+	// Validate slug if provided
+	if req.Slug != "" {
+		if err := domain.ValidateSlug(req.Slug); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid slug: %v", err)
+		}
+	}
+
 	// Create domain tenant
 	tenant := &domain.Tenant{
 		ID:              tenantID,
+		Slug:            req.Slug,
 		DisplayName:     req.DisplayName,
 		SettlementAsset: req.SettlementAsset,
 		Subdomain:       req.Subdomain,
@@ -132,6 +140,9 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		}
 		if errors.Is(err, persistence.ErrSubdomainTaken) {
 			return nil, status.Errorf(codes.AlreadyExists, "subdomain %s is already taken", req.Subdomain)
+		}
+		if errors.Is(err, persistence.ErrSlugTaken) {
+			return nil, status.Errorf(codes.AlreadyExists, "slug %s is already taken", req.Slug)
 		}
 		s.logger.Error("failed to create tenant",
 			"tenant_id", req.TenantId,
@@ -285,6 +296,7 @@ func (s *Service) ListTenants(ctx context.Context, req *pb.ListTenantsRequest) (
 func (s *Service) toProto(tenant *domain.Tenant) *pb.Tenant {
 	proto := &pb.Tenant{
 		TenantId:        tenant.ID.String(),
+		Slug:            tenant.Slug,
 		DisplayName:     tenant.DisplayName,
 		SettlementAsset: tenant.SettlementAsset,
 		Subdomain:       tenant.Subdomain,
