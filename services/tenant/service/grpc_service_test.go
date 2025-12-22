@@ -1210,3 +1210,29 @@ func TestService_InitiateTenant_ProvisioningHint_ProvisioningStates(t *testing.T
 	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' with provisioner")
 	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
 }
+
+// TestProvisioningHintFromStatus tests the provisioningHintFromStatus helper function
+// for all possible tenant status values.
+func TestProvisioningHintFromStatus(t *testing.T) {
+	tests := []struct {
+		status       domain.Status
+		expectedHint string
+	}{
+		// In-progress provisioning states should return "pending"
+		{domain.StatusProvisioningPending, "pending"},
+		{domain.StatusProvisioning, "pending"},
+
+		// All other states return "active" (even failed, since the hint is for client polling)
+		{domain.StatusActive, "active"},
+		{domain.StatusProvisioningFailed, "active"},
+		{domain.StatusSuspended, "active"},
+		{domain.StatusDeprovisioned, "active"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			got := provisioningHintFromStatus(tt.status)
+			assert.Equal(t, tt.expectedHint, got, "provisioningHintFromStatus(%s)", tt.status)
+		})
+	}
+}

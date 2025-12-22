@@ -384,8 +384,8 @@ service TenantService {
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Create a new tenant"
-      description: "Creates a new tenant in the platform registry. Tenant provisioning may be synchronous or asynchronous. "
-                   "Check the provisioning_hint field in the response:\n\n"
+      description: "Creates a new tenant in the platform registry. Returns HTTP 201 for both sync and async flows.\n\n"
+                   "**IMPORTANT**: Check the provisioning_hint field (not HTTP status) to determine next steps:\n\n"
                    "- provisioning_hint=\"active\": Tenant is immediately ready for use\n"
                    "- provisioning_hint=\"pending\": Tenant provisioning is queued. Poll RetrieveTenant to check status.\n\n"
                    "For pending provisioning, use exponential backoff polling (1s initial, max 30s interval) until "
@@ -393,17 +393,8 @@ service TenantService {
       responses: {
         key: "201"
         value: {
-          description: "Tenant created successfully. Check provisioning_hint to determine if polling is required."
-          examples: {
-            key: "application/json"
-            value: '{"tenant": {"tenant_id": "acme_corp", "status": "TENANT_STATUS_ACTIVE"}, "provisioning_hint": "active"}'
-          }
-        }
-      }
-      responses: {
-        key: "202"
-        value: {
-          description: "Tenant registration accepted. Provisioning is pending. Poll RetrieveTenant to track progress."
+          description: "Tenant created. Check provisioning_hint field to determine if additional polling is required. "
+                       "Both sync (active) and async (pending) flows return 201."
           examples: {
             key: "application/json"
             value: '{"tenant": {"tenant_id": "acme_corp", "status": "TENANT_STATUS_PROVISIONING_PENDING"}, "provisioning_hint": "pending"}'
