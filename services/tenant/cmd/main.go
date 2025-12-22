@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -94,6 +95,48 @@ func run(logger *slog.Logger) error {
 		"environment", tracerConfig.Environment,
 		"otlp_endpoint", tracerConfig.OTLPEndpoint,
 		"sampling_rate", tracerConfig.SamplingRate)
+
+	// Start metrics server with /metrics and /healthz endpoints
+	metricsPort := getEnvOrDefault("METRICS_PORT", "9090")
+	metricsAddr := fmt.Sprintf(":%s", metricsPort)
+
+	// Create context for metrics server lifecycle
+	metricsCtx, cancelMetrics := context.WithCancel(ctx)
+	defer cancelMetrics()
+
+	// Start metrics server with /metrics and /healthz endpoints
+	metricsServerErrors := make(chan error, 1)
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		})
+
+		server := &http.Server{
+			Addr:              metricsAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+
+		// Graceful shutdown
+		go func() {
+			<-metricsCtx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck // Intentionally using fresh context for shutdown grace period
+				logger.Error("failed to shutdown metrics server", "error", err)
+			}
+		}()
+
+		logger.Info("starting metrics server", "address", metricsAddr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			metricsServerErrors <- fmt.Errorf("metrics server failed: %w", err)
+		}
+	}()
+
+	logger.Info("metrics server started", "address", metricsAddr)
 
 	// Initialize database connection
 	db, err := initDatabase(logger)
@@ -347,7 +390,9 @@ func run(logger *slog.Logger) error {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		return fmt.Errorf("gRPC server error: %w", err)
+	case err := <-metricsServerErrors:
+		return fmt.Errorf("metrics server error: %w", err)
 	}
 
 	// Graceful shutdown
