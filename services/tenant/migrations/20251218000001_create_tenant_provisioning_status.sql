@@ -79,11 +79,19 @@ CREATE TABLE IF NOT EXISTS tenant_provisioning_status (
     -- table (see 20251216000001_initial.sql). Application layer is responsible for setting
     -- updated_at on UPDATE operations. This avoids trigger complexity and aligns with Go's
     -- sqlc pattern where we explicitly set all modified fields.
+    -- Application layer: ProvisioningService in postgres_provisioner.go sets updated_at
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Each tenant can only have one status per service
-    UNIQUE(tenant_id, service_name)
+    UNIQUE(tenant_id, service_name),
+
+    -- Data integrity constraint: completed status must have migration_version
+    -- This ensures we always know which migration version was applied when provisioning completes
+    CONSTRAINT migration_version_required_when_completed CHECK (
+        (status = 'completed' AND migration_version IS NOT NULL) OR
+        status != 'completed'
+    )
 );
 
 -- Indexes for efficient queries

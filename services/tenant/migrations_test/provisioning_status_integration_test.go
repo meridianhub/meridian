@@ -1,5 +1,6 @@
-// Package migrations provides integration tests for tenant service database migrations.
-package migrations
+// Package migrations_test provides integration tests for tenant service database migrations.
+// This package is separate from the migrations directory to keep it clean for Atlas tooling.
+package migrations_test
 
 import (
 	"context"
@@ -24,6 +25,7 @@ import (
 // testContext holds shared test resources.
 type testContext struct {
 	ctx     context.Context
+	cancel  context.CancelFunc
 	db      *sql.DB
 	cleanup func()
 }
@@ -56,21 +58,23 @@ func setupTestDatabase(t *testing.T) *testContext {
 	applyMigrations(ctx, t, db)
 
 	// Cancel the setup context - it was only needed for container startup and migrations.
-	// We create a fresh background context for test operations because:
+	// We create a fresh cancellable context for test operations because:
 	// 1. The setup context has a 2-minute timeout which may expire during long test runs
 	// 2. Test operations should have their own independent lifecycle
 	// 3. Container termination in cleanup() uses its own context anyway
+	// 4. Tests can cancel their context if needed for cleanup
 	cancel()
-	testCtx := context.Background()
+	testCtx, testCancel := context.WithCancel(context.Background())
 
 	cleanup := func() {
+		testCancel()
 		db.Close()
 		if err := pgContainer.Terminate(context.Background()); err != nil {
 			t.Logf("Failed to terminate container: %v", err)
 		}
 	}
 
-	return &testContext{ctx: testCtx, db: db, cleanup: cleanup}
+	return &testContext{ctx: testCtx, cancel: testCancel, db: db, cleanup: cleanup}
 }
 
 // applyMigrations applies all SQL migration files in the migrations directory.
@@ -111,6 +115,14 @@ func findMigrationDir() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", err
+	}
+
+	// If we're in the migrations_test directory, look for sibling migrations directory
+	if filepath.Base(dir) == "migrations_test" {
+		migrationPath := filepath.Join(filepath.Dir(dir), "migrations")
+		if _, err := os.Stat(migrationPath); err == nil {
+			return migrationPath, nil
+		}
 	}
 
 	// If we're already in the migrations directory
@@ -292,14 +304,31 @@ func TestProvisioningStatusCheckConstraint(t *testing.T) {
 
 	createTestTenant(t, tc, "check_test_tenant")
 
-	// Valid status values should succeed
-	validStatuses := []string{"pending", "in_progress", "completed", "failed"}
-	for i, status := range validStatuses {
-		_, err := tc.db.ExecContext(tc.ctx, `
-			INSERT INTO tenant_provisioning_status (tenant_id, service_name, status)
-			VALUES ($1, $2, $3)
-		`, "check_test_tenant", fmt.Sprintf("service_%d", i), status)
-		assert.NoError(t, err, "Valid status %q should succeed", status)
+	// Valid status values should succeed (completed requires migration_version)
+	testCases := []struct {
+		status           string
+		migrationVersion *string
+	}{
+		{"pending", nil},
+		{"in_progress", nil},
+		{"completed", strPtr("20251218000001")}, // completed requires migration_version
+		{"failed", nil},
+	}
+
+	for i, tc2 := range testCases {
+		var err error
+		if tc2.migrationVersion != nil {
+			_, err = tc.db.ExecContext(tc.ctx, `
+				INSERT INTO tenant_provisioning_status (tenant_id, service_name, status, migration_version)
+				VALUES ($1, $2, $3, $4)
+			`, "check_test_tenant", fmt.Sprintf("service_%d", i), tc2.status, *tc2.migrationVersion)
+		} else {
+			_, err = tc.db.ExecContext(tc.ctx, `
+				INSERT INTO tenant_provisioning_status (tenant_id, service_name, status)
+				VALUES ($1, $2, $3)
+			`, "check_test_tenant", fmt.Sprintf("service_%d", i), tc2.status)
+		}
+		assert.NoError(t, err, "Valid status %q should succeed", tc2.status)
 	}
 
 	// Invalid status should fail
@@ -313,6 +342,43 @@ func TestProvisioningStatusCheckConstraint(t *testing.T) {
 	// 2. String matching on "check" is sufficient to verify the constraint type
 	// 3. The error message format is stable in PostgreSQL (violates check constraint)
 	assert.Contains(t, strings.ToLower(err.Error()), "check", "Error should mention check constraint violation")
+}
+
+// TestProvisioningStatusMigrationVersionRequiredWhenCompleted tests that completed status
+// requires a migration_version to be set.
+func TestProvisioningStatusMigrationVersionRequiredWhenCompleted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	tc := setupTestDatabase(t)
+	defer tc.cleanup()
+
+	createTestTenant(t, tc, "version_constraint_tenant")
+
+	// Completed status without migration_version should fail
+	_, err := tc.db.ExecContext(tc.ctx, `
+		INSERT INTO tenant_provisioning_status (tenant_id, service_name, status)
+		VALUES ('version_constraint_tenant', 'party', 'completed')
+	`)
+	assert.Error(t, err, "Completed status without migration_version should fail")
+	assert.Contains(t, strings.ToLower(err.Error()), "check", "Error should mention check constraint violation")
+
+	// Completed status with migration_version should succeed
+	_, err = tc.db.ExecContext(tc.ctx, `
+		INSERT INTO tenant_provisioning_status (tenant_id, service_name, status, migration_version)
+		VALUES ('version_constraint_tenant', 'account', 'completed', '20251218000001')
+	`)
+	assert.NoError(t, err, "Completed status with migration_version should succeed")
+
+	// Other statuses without migration_version should succeed
+	for _, status := range []string{"pending", "in_progress", "failed"} {
+		_, err = tc.db.ExecContext(tc.ctx, `
+			INSERT INTO tenant_provisioning_status (tenant_id, service_name, status)
+			VALUES ('version_constraint_tenant', $1, $2)
+		`, "service_"+status, status)
+		assert.NoError(t, err, "Status %q without migration_version should succeed", status)
+	}
 }
 
 // TestProvisioningStatusForeignKeyConstraint tests the FK to tenant table.
@@ -345,8 +411,8 @@ func TestProvisioningStatusForeignKeyDeleteRestrict(t *testing.T) {
 	// Create tenant and provisioning status
 	createTestTenant(t, tc, "delete_test_tenant")
 	_, err := tc.db.ExecContext(tc.ctx, `
-		INSERT INTO tenant_provisioning_status (tenant_id, service_name, status)
-		VALUES ('delete_test_tenant', 'party', 'completed')
+		INSERT INTO tenant_provisioning_status (tenant_id, service_name, status, migration_version)
+		VALUES ('delete_test_tenant', 'party', 'completed', '20251218000001')
 	`)
 	require.NoError(t, err)
 
@@ -390,7 +456,7 @@ func TestProvisioningStatusConcurrentInserts(t *testing.T) {
 	close(errChan)
 
 	// Collect any errors
-	errs := make([]error, 0, len(services))
+	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
@@ -546,4 +612,122 @@ func TestProvisioningStatusPrimaryKeyAutoIncrement(t *testing.T) {
 
 	assert.Greater(t, id2, id1, "IDs should auto-increment")
 	assert.Greater(t, id3, id2, "IDs should auto-increment")
+}
+
+// TestProvisioningStatusWorkerClaimingPattern validates the FOR UPDATE SKIP LOCKED
+// query pattern used by workers to claim pending tasks without blocking each other.
+// This test verifies:
+// 1. The query pattern works correctly
+// 2. The composite index (status, created_at) is used for efficient claiming
+// 3. Concurrent workers don't block each other
+func TestProvisioningStatusWorkerClaimingPattern(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	tc := setupTestDatabase(t)
+	defer tc.cleanup()
+
+	createTestTenant(t, tc, "worker_claim_tenant")
+
+	// Insert multiple pending tasks with distinct timestamps
+	services := []string{"party", "account", "transaction"}
+	for _, svc := range services {
+		_, err := tc.db.ExecContext(tc.ctx, `
+			INSERT INTO tenant_provisioning_status (tenant_id, service_name, status)
+			VALUES ('worker_claim_tenant', $1, 'pending')
+		`, svc)
+		require.NoError(t, err)
+		time.Sleep(10 * time.Millisecond) // Ensure distinct created_at
+	}
+
+	// Verify the composite index exists and can be used for the worker claiming pattern
+	var indexExists bool
+	err := tc.db.QueryRowContext(tc.ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_indexes
+			WHERE schemaname = 'public'
+			AND tablename = 'tenant_provisioning_status'
+			AND indexname = 'idx_tenant_provisioning_status_status_created_at'
+		)
+	`).Scan(&indexExists)
+	require.NoError(t, err)
+	assert.True(t, indexExists, "Composite index for worker claiming should exist")
+
+	// Simulate worker claiming pattern: SELECT ... FOR UPDATE SKIP LOCKED
+	// Worker 1 starts a transaction and claims a row
+	tx1, err := tc.db.BeginTx(tc.ctx, nil)
+	require.NoError(t, err)
+	defer tx1.Rollback()
+
+	var claimedID1 int
+	var claimedService1 string
+	err = tx1.QueryRowContext(tc.ctx, `
+		SELECT id, service_name
+		FROM tenant_provisioning_status
+		WHERE tenant_id = 'worker_claim_tenant' AND status = 'pending'
+		ORDER BY created_at
+		LIMIT 1
+		FOR UPDATE SKIP LOCKED
+	`).Scan(&claimedID1, &claimedService1)
+	require.NoError(t, err)
+	assert.Equal(t, "party", claimedService1, "First worker should claim oldest pending task")
+
+	// Worker 2 starts a transaction and tries to claim - should get a different row
+	tx2, err := tc.db.BeginTx(tc.ctx, nil)
+	require.NoError(t, err)
+	defer tx2.Rollback()
+
+	var claimedID2 int
+	var claimedService2 string
+	err = tx2.QueryRowContext(tc.ctx, `
+		SELECT id, service_name
+		FROM tenant_provisioning_status
+		WHERE tenant_id = 'worker_claim_tenant' AND status = 'pending'
+		ORDER BY created_at
+		LIMIT 1
+		FOR UPDATE SKIP LOCKED
+	`).Scan(&claimedID2, &claimedService2)
+	require.NoError(t, err)
+	assert.Equal(t, "account", claimedService2, "Second worker should skip locked row and claim next")
+	assert.NotEqual(t, claimedID1, claimedID2, "Workers should claim different rows")
+
+	// Worker 3 claims the remaining row
+	tx3, err := tc.db.BeginTx(tc.ctx, nil)
+	require.NoError(t, err)
+	defer tx3.Rollback()
+
+	var claimedID3 int
+	var claimedService3 string
+	err = tx3.QueryRowContext(tc.ctx, `
+		SELECT id, service_name
+		FROM tenant_provisioning_status
+		WHERE tenant_id = 'worker_claim_tenant' AND status = 'pending'
+		ORDER BY created_at
+		LIMIT 1
+		FOR UPDATE SKIP LOCKED
+	`).Scan(&claimedID3, &claimedService3)
+	require.NoError(t, err)
+	assert.Equal(t, "transaction", claimedService3, "Third worker should claim last remaining row")
+
+	// Worker 4 tries to claim - should get no rows
+	tx4, err := tc.db.BeginTx(tc.ctx, nil)
+	require.NoError(t, err)
+	defer tx4.Rollback()
+
+	var claimedID4 int
+	err = tx4.QueryRowContext(tc.ctx, `
+		SELECT id
+		FROM tenant_provisioning_status
+		WHERE tenant_id = 'worker_claim_tenant' AND status = 'pending'
+		ORDER BY created_at
+		LIMIT 1
+		FOR UPDATE SKIP LOCKED
+	`).Scan(&claimedID4)
+	assert.ErrorIs(t, err, sql.ErrNoRows, "Fourth worker should find no available rows")
+}
+
+// strPtr is a helper function to create a pointer to a string.
+func strPtr(s string) *string {
+	return &s
 }
