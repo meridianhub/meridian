@@ -2,6 +2,9 @@
 package domain
 
 import (
+	"errors"
+	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -42,6 +45,12 @@ type Tenant struct {
 	// ID is the unique identifier (alphanumeric + underscore, 1-50 chars).
 	// Used for schema routing (org_{id} schema) and API subdomain.
 	ID tenant.TenantID
+
+	// Slug is the URL-friendly unique identifier (lowercase alphanumeric + hyphens, 3-63 chars).
+	// Used for branded API endpoints (e.g., acme.meridian.app) where the slug becomes part of the DNS name.
+	// This is distinct from Subdomain which is used for tenant isolation and routing in multi-tenant deployments.
+	// Slug is customer-facing and branding-focused; Subdomain is infrastructure-focused.
+	Slug string
 
 	// DisplayName is the human-readable name of the tenant.
 	DisplayName string
@@ -124,4 +133,90 @@ func (t *Tenant) CanTransitionTo(newStatus Status) bool {
 	default:
 		return false
 	}
+}
+
+var (
+	// slugPattern enforces lowercase alphanumeric with hyphens, no leading/trailing hyphens.
+	// Regex breakdown: ^[a-z0-9] (start char) + [a-z0-9-]* (middle, 0+ chars) + [a-z0-9]$ (end char)
+	// This technically allows 2-character slugs (start + end with empty middle) but ValidateSlug
+	// enforces a strict 3-character minimum via explicit length check before the regex.
+	slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+
+	// reservedSlugs contains system-reserved slugs that cannot be used for tenants.
+	// These are common infrastructure subdomains that must remain available for platform services.
+	reservedSlugs = map[string]bool{
+		"api":        true,
+		"health":     true,
+		"admin":      true,
+		"www":        true,
+		"status":     true,
+		"docs":       true,
+		"internal":   true,
+		"system":     true,
+		"platform":   true,
+		"app":        true,
+		"mail":       true,
+		"cdn":        true,
+		"auth":       true,
+		"graphql":    true,
+		"ws":         true,
+		"websocket":  true,
+		"static":     true,
+		"assets":     true,
+		"login":      true,
+		"logout":     true,
+		"webhook":    true,
+		"webhooks":   true,
+		"metrics":    true,
+		"prometheus": true,
+		"ftp":        true,
+		"smtp":       true,
+		"imap":       true,
+		"test":       true,
+		"staging":    true,
+		"dev":        true,
+		"prod":       true,
+	}
+
+	// ErrSlugTooShort is returned when a slug is shorter than the minimum required length.
+	ErrSlugTooShort = errors.New("slug must be at least 3 characters long")
+	// ErrSlugTooLong is returned when a slug exceeds the maximum allowed length.
+	ErrSlugTooLong = errors.New("slug must be at most 63 characters long")
+	// ErrSlugInvalidFormat is returned when a slug contains invalid characters or format.
+	ErrSlugInvalidFormat = errors.New("slug must contain only lowercase alphanumeric characters and hyphens, and cannot start or end with a hyphen")
+	// ErrSlugReserved is returned when a slug matches a system-reserved word.
+	ErrSlugReserved = errors.New("slug is reserved and cannot be used")
+)
+
+// ValidateSlug validates a tenant slug according to platform constraints.
+// Returns nil for empty slug (optional field).
+// Validation rules:
+//   - Length: 3-63 characters
+//   - Format: lowercase alphanumeric with hyphens, no leading/trailing hyphens
+//   - Reserved words: api, health, admin, www, status, docs, internal, system, platform
+func ValidateSlug(slug string) error {
+	// Empty slug is valid (optional field)
+	if slug == "" {
+		return nil
+	}
+
+	// Check length constraints
+	if len(slug) < 3 {
+		return fmt.Errorf("%w, got %d", ErrSlugTooShort, len(slug))
+	}
+	if len(slug) > 63 {
+		return fmt.Errorf("%w, got %d", ErrSlugTooLong, len(slug))
+	}
+
+	// Check format with regex
+	if !slugPattern.MatchString(slug) {
+		return ErrSlugInvalidFormat
+	}
+
+	// Check reserved words
+	if reservedSlugs[slug] {
+		return fmt.Errorf("%w: '%s'", ErrSlugReserved, slug)
+	}
+
+	return nil
 }
