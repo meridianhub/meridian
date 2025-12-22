@@ -455,8 +455,8 @@ func TestProvisioningStatusConcurrentInserts(t *testing.T) {
 	wg.Wait()
 	close(errChan)
 
-	// Collect any errors
-	var errs []error
+	// Collect any errors (pre-allocate with channel buffer size as capacity hint)
+	errs := make([]error, 0, len(services))
 	for err := range errChan {
 		errs = append(errs, err)
 	}
