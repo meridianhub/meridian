@@ -30,17 +30,20 @@ type Service struct {
 	repo        *persistence.Repository
 	provisioner provisioner.SchemaProvisioner
 	partyClient clients.PartyClient
+	slugCache   *SlugCache
 	logger      *slog.Logger
 }
 
 // NewService creates a new TenantService.
 // The provisioner parameter is optional; if nil, schema provisioning is skipped during tenant creation.
 // The partyClient parameter is optional; if nil, party registration is skipped during tenant creation.
-func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner, partyClient clients.PartyClient, logger *slog.Logger) *Service {
+// The slugCache parameter is optional; if nil, slug caching is disabled.
+func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner, partyClient clients.PartyClient, slugCache *SlugCache, logger *slog.Logger) *Service {
 	return &Service{
 		repo:        repo,
 		provisioner: prov,
 		partyClient: partyClient,
+		slugCache:   slugCache,
 		logger:      logger,
 	}
 }
