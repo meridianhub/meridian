@@ -821,6 +821,47 @@ func TestRepository_IsSlugAvailable_EmptyString(t *testing.T) {
 	assert.False(t, available, "Expected empty slug to be unavailable (invalid input)")
 }
 
+func TestRepository_SlugLookup_CaseInsensitive(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with lowercase slug (as stored in DB)
+	testTenant := newTestTenant("acme_bank")
+	testTenant.Slug = "acme-bank"
+	testTenant.DisplayName = "ACME Bank"
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name     string
+		slugCase string
+	}{
+		{"uppercase", "ACME-BANK"},
+		{"mixedcase", "Acme-Bank"},
+		{"alternating", "AcMe-BaNk"},
+		{"lowercase", "acme-bank"},
+	}
+
+	for _, tc := range testCases {
+		t.Run("GetBySlug_"+tc.name, func(t *testing.T) {
+			retrieved, err := repo.GetBySlug(ctx, tc.slugCase)
+			require.NoError(t, err, "GetBySlug(%q) should find tenant", tc.slugCase)
+			assert.Equal(t, testTenant.ID.String(), retrieved.ID.String())
+			assert.Equal(t, "acme-bank", retrieved.Slug)
+			assert.Equal(t, "ACME Bank", retrieved.DisplayName)
+		})
+
+		t.Run("IsSlugAvailable_"+tc.name, func(t *testing.T) {
+			available, err := repo.IsSlugAvailable(ctx, tc.slugCase)
+			require.NoError(t, err, "IsSlugAvailable(%q) should succeed", tc.slugCase)
+			assert.False(t, available, "IsSlugAvailable(%q) should return false (slug taken)", tc.slugCase)
+		})
+	}
+}
+
 // TestRepository_GetBySlug_UsesIndex verifies that slug lookups use the idx_tenant_slug
 // index for O(log n) performance rather than O(n) sequential scan.
 //

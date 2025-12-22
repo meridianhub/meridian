@@ -87,10 +87,14 @@ func (r *Repository) GetByID(ctx context.Context, id tenant.TenantID) (*domain.T
 // GetBySlug retrieves a tenant by its URL-friendly slug identifier.
 // Uses the idx_tenant_slug index for fast lookups.
 // Returns ErrTenantNotFound for empty slugs (fail-fast).
+// Slug lookup is case-insensitive: input is normalized to lowercase before querying.
 func (r *Repository) GetBySlug(ctx context.Context, slug string) (*domain.Tenant, error) {
 	if slug == "" {
 		return nil, ErrTenantNotFound
 	}
+
+	// Normalize to lowercase since slugs are stored lowercase
+	slug = strings.ToLower(slug)
 
 	var entity TenantEntity
 	result := r.db.WithContext(ctx).Where("slug = ?", slug).First(&entity)
@@ -110,10 +114,14 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (*domain.Tenant
 // Returns true if the slug is not in use, false if it's taken.
 // Returns an error only if the database query fails.
 // Returns false for empty slugs (invalid input).
+// Slug lookup is case-insensitive: input is normalized to lowercase before querying.
 func (r *Repository) IsSlugAvailable(ctx context.Context, slug string) (bool, error) {
 	if slug == "" {
 		return false, nil
 	}
+
+	// Normalize to lowercase since slugs are stored lowercase
+	slug = strings.ToLower(slug)
 
 	var count int64
 	result := r.db.WithContext(ctx).
