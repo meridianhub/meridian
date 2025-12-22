@@ -11,8 +11,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
@@ -37,22 +39,20 @@ var (
 )
 
 // DomainEvent is a marker interface for all financial accounting domain events.
-// Concrete event types will be defined in domain/events.go in subsequent subtasks.
+// In practice, events are protobuf messages from eventsv1 package.
+// The interface uses proto.Message for maximum compatibility with protobuf events.
 //
-// Event types to be implemented (subtask 9.2+):
-//   - LedgerPostingCapturedEvent
-//   - LedgerPostingAmendedEvent
-//   - LedgerPostingPostedEvent
-//   - LedgerPostingRejectedEvent
-//   - FinancialBookingLogInitiatedEvent
-//   - FinancialBookingLogUpdatedEvent
-//   - FinancialBookingLogPostedEvent
-//   - FinancialBookingLogClosedEvent
-//   - BalanceValidationFailedEvent
-type DomainEvent interface {
-	// EventType returns the type identifier for this event
-	EventType() string
-}
+// Event types (protobuf-based):
+//   - eventsv1.LedgerPostingCapturedEvent
+//   - eventsv1.LedgerPostingAmendedEvent
+//   - eventsv1.LedgerPostingPostedEvent
+//   - eventsv1.LedgerPostingRejectedEvent
+//   - eventsv1.FinancialBookingLogInitiatedEvent
+//   - eventsv1.FinancialBookingLogUpdatedEvent
+//   - eventsv1.FinancialBookingLogPostedEvent
+//   - eventsv1.FinancialBookingLogClosedEvent
+//   - eventsv1.BalanceValidationFailedEvent
+type DomainEvent = proto.Message
 
 // EventPublisher defines the interface for publishing domain events to the messaging infrastructure.
 // Events are published to Kafka following ADR-0004 (Event Schema Evolution Strategy).
@@ -258,8 +258,27 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		return nil, status.Errorf(codes.Internal, "failed to save posting: %v", err)
 	}
 
-	// TODO(75-async-audit#5): Implement LedgerPostingCapturedEvent and publish it
-	// Will use Kafka audit events with outbox pattern for guaranteed delivery
+	// Publish LedgerPostingCapturedEvent for inter-service coordination
+	// Event publishing is best-effort - errors are logged but don't fail the operation
+	event := &eventsv1.LedgerPostingCapturedEvent{
+		PostingId:        posting.ID.String(),
+		BookingLogId:     posting.FinancialBookingLogID.String(),
+		PostingDirection: toProtoPostingDirection(posting.Direction),
+		PostingAmount:    toProtoMoney(posting.Amount),
+		AccountId:        posting.AccountID,
+		ValueDate:        timestamppb.New(posting.ValueDate),
+		Status:           toProtoTransactionStatus(posting.Status),
+		CorrelationId:    correlationID,
+		CausationId:      correlationID, // Request caused this event
+		Timestamp:        timestamppb.Now(),
+		Version:          1, // Initial version for newly created posting
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish LedgerPostingCapturedEvent",
+			"error", err,
+			"posting_id", posting.ID.String(),
+			"booking_log_id", posting.FinancialBookingLogID.String())
+	}
 
 	// Convert to proto response
 	response := &financialaccountingv1.CaptureLedgerPostingResponse{
@@ -639,6 +658,12 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 	}
 	newStatus := fromProtoTransactionStatus(req.Status)
 
+	// Extract correlation ID from idempotency key
+	correlationID := ""
+	if req.IdempotencyKey != nil {
+		correlationID = req.IdempotencyKey.Key
+	}
+
 	// Retrieve existing posting
 	posting, err := s.repository.GetPosting(ctx, postingID)
 	if err != nil {
@@ -647,6 +672,10 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 		}
 		return nil, status.Errorf(codes.Internal, "failed to retrieve posting: %v", err)
 	}
+
+	// Capture previous state BEFORE any modifications (for LedgerPostingAmendedEvent)
+	previousAmount := posting.Amount
+	previousStatus := posting.Status
 
 	// Validate and apply state transition using domain methods
 	postingResult := req.PostingResult
@@ -699,8 +728,29 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 		return nil, status.Errorf(codes.Internal, "failed to update posting: %v", err)
 	}
 
-	// Publish domain event (placeholder - actual event will be implemented in event subtask)
-	// TODO(75-async-audit#5): Implement LedgerPostingUpdatedEvent and publish it
+	// Publish LedgerPostingAmendedEvent for inter-service coordination
+	// Event publishing is best-effort - errors are logged but don't fail the operation
+	// Note: UpdateLedgerPosting changes status, not amount. Both previous_amount and new_amount
+	// will be the same value since amount doesn't change in status transitions.
+	event := &eventsv1.LedgerPostingAmendedEvent{
+		PostingId:      posting.ID.String(),
+		BookingLogId:   posting.FinancialBookingLogID.String(),
+		PreviousAmount: toProtoMoney(previousAmount),
+		NewAmount:      toProtoMoney(posting.Amount),
+		Reason:         fmt.Sprintf("Status updated from %v to %v", previousStatus, newStatus),
+		AmendedBy:      "system", // Status transitions are system-driven
+		CorrelationId:  correlationID,
+		CausationId:    correlationID, // Request caused this event
+		Timestamp:      timestamppb.Now(),
+		Version:        1, // Increment version for optimistic locking
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish LedgerPostingAmendedEvent",
+			"error", err,
+			"posting_id", posting.ID.String(),
+			"booking_log_id", posting.FinancialBookingLogID.String(),
+			"status", newStatus)
+	}
 
 	// Convert to proto response
 	response := &financialaccountingv1.UpdateLedgerPostingResponse{
@@ -853,7 +903,28 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to save booking log: %v", err)
 	}
 
-	// TODO(75-async-audit#5): Publish FinancialBookingLogInitiatedEvent for inter-service coordination
+	// Publish FinancialBookingLogInitiatedEvent for inter-service coordination
+	// Event publishing is best-effort - errors are logged but don't fail the operation
+	correlationID := ""
+	if req.IdempotencyKey != nil {
+		correlationID = req.IdempotencyKey.Key
+	}
+	event := &eventsv1.FinancialBookingLogInitiatedEvent{
+		BookingLogId:            bookingLog.ID.String(),
+		FinancialAccountType:    toProtoAccountType(bookingLog.FinancialAccountType),
+		ProductServiceReference: bookingLog.ProductServiceReference,
+		BusinessUnitReference:   bookingLog.BusinessUnitReference,
+		BaseCurrency:            toProtoCurrency(bookingLog.BaseCurrency),
+		CorrelationId:           correlationID,
+		CausationId:             correlationID, // Request caused this event
+		Timestamp:               timestamppb.Now(),
+		Version:                 1, // Initial version for newly created booking log
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish FinancialBookingLogInitiatedEvent",
+			"error", err,
+			"booking_log_id", bookingLog.ID.String())
+	}
 
 	// Store idempotency result (only if service configured)
 	if s.idempotency != nil {
@@ -1002,6 +1073,9 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to retrieve booking log: %v", err)
 	}
 
+	// Capture previous status BEFORE update for event publishing
+	previousStatus := bookingLog.Status
+
 	// Validate state transition using the state machine
 	// This handles all valid transitions including POSTED -> REVERSED for reversals
 	if !isValidBookingLogTransition(bookingLog.Status, newStatus) {
@@ -1087,7 +1161,32 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to update booking log: %v", err)
 	}
 
-	// TODO(75-async-audit#5): Publish FinancialBookingLogUpdatedEvent for inter-service coordination
+	// Publish FinancialBookingLogUpdatedEvent for inter-service coordination
+	// Event publishing is best-effort - errors are logged but don't fail the operation
+	correlationID := ""
+	if req.IdempotencyKey != nil {
+		correlationID = req.IdempotencyKey.Key
+	}
+	event := &eventsv1.FinancialBookingLogUpdatedEvent{
+		BookingLogId:         bookingLogID.String(),
+		Status:               toProtoTransactionStatus(newStatus),
+		PreviousStatus:       toProtoTransactionStatus(previousStatus),
+		ChartOfAccountsRules: updated.ChartOfAccountsRules,
+		Reason:               fmt.Sprintf("Status updated from %s to %s", previousStatus, newStatus),
+		UpdatedBy:            "system", // TODO: Extract from auth context when available
+		CorrelationId:        correlationID,
+		CausationId:          correlationID, // Request caused this event
+		Timestamp:            timestamppb.Now(),
+		Version:              1, // Version tracking would need to be added to domain model
+	}
+
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish FinancialBookingLogUpdatedEvent",
+			"error", err,
+			"booking_log_id", bookingLogID.String(),
+			"previous_status", previousStatus,
+			"new_status", newStatus)
+	}
 
 	// Convert to proto response
 	response := &financialaccountingv1.UpdateFinancialBookingLogResponse{
