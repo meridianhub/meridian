@@ -4,6 +4,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"math/rand"
@@ -28,12 +29,13 @@ type ProvisioningWorker struct {
 	wg           sync.WaitGroup // Tracks in-flight provisioning goroutines
 }
 
-// Errors returned by NewProvisioningWorker.
+// Errors returned by NewProvisioningWorker and provisioning operations.
 var (
-	ErrNilRepository       = errors.New("repository cannot be nil")
-	ErrNilProvisioner      = errors.New("provisioner cannot be nil")
-	ErrNilLogger           = errors.New("logger cannot be nil")
-	ErrInvalidPollInterval = errors.New("pollInterval must be greater than zero")
+	ErrNilRepository        = errors.New("repository cannot be nil")
+	ErrNilProvisioner       = errors.New("provisioner cannot be nil")
+	ErrNilLogger            = errors.New("logger cannot be nil")
+	ErrInvalidPollInterval  = errors.New("pollInterval must be greater than zero")
+	ErrPanicDuringProvision = errors.New("panic during provisioning")
 )
 
 // NewProvisioningWorker creates a new ProvisioningWorker.
@@ -176,49 +178,54 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 			w.logger.Error("panic during tenant provisioning",
 				"tenant_id", tenantID,
 				"panic", r)
+			// Mark tenant as failed to prevent it from being stuck in PROVISIONING status
+			panicErr := fmt.Errorf("%w: %v", ErrPanicDuringProvision, r)
+			w.markTenantAsFailed(ctx, tenantID, panicErr, 1)
 		}
 	}()
 
-	lastErr := w.executeProvisioningWithRetry(ctx, tenantID)
+	attempts, lastErr := w.executeProvisioningWithRetry(ctx, tenantID)
 	if lastErr == nil {
 		return // Success
 	}
 
 	// Mark as failed
-	w.markTenantAsFailed(ctx, tenantID, lastErr)
+	w.markTenantAsFailed(ctx, tenantID, lastErr, attempts)
 }
 
 // executeProvisioningWithRetry performs the provisioning with retry loop.
-// Returns nil on success, or the last error on failure.
-func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, tenantID tenant.TenantID) error {
+// Returns attempt count and nil on success, or attempt count and error on failure.
+func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, tenantID tenant.TenantID) (int, error) {
 	var lastErr error
+	var attempts int
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		if cancelled := w.checkContextCancellation(ctx, tenantID, attempt+1); cancelled {
-			return nil // Context cancelled, don't mark as failed
+		attempts = attempt + 1
+		if cancelled := w.checkContextCancellation(ctx, tenantID, attempts); cancelled {
+			return 0, nil // Context cancelled, don't mark as failed
 		}
 
 		err := w.provisioner.ProvisionSchemas(ctx, tenantID)
 		if err == nil {
-			w.markTenantAsActive(ctx, tenantID, attempt+1)
-			return nil
+			w.markTenantAsActive(ctx, tenantID, attempts)
+			return 0, nil
 		}
 
 		lastErr = err
 		if !isRetryableError(err) {
 			w.logger.Error("provisioning failed with non-retryable error",
 				"tenant_id", tenantID,
-				"attempt", attempt+1,
+				"attempt", attempts,
 				"error", err)
 			break // Permanent error, don't retry
 		}
 
-		if cancelled := w.waitWithBackoff(ctx, tenantID, attempt); cancelled {
-			return nil // Context cancelled, don't mark as failed
+		if cancelled := w.waitWithBackoff(ctx, tenantID, attempt, lastErr); cancelled {
+			return 0, nil // Context cancelled, don't mark as failed
 		}
 	}
 
-	return lastErr
+	return attempts, lastErr
 }
 
 // checkContextCancellation checks if context is cancelled and logs appropriately.
@@ -260,7 +267,7 @@ func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID te
 }
 
 // markTenantAsFailed updates tenant status to provisioning_failed with error details.
-func (w *ProvisioningWorker) markTenantAsFailed(ctx context.Context, tenantID tenant.TenantID, lastErr error) {
+func (w *ProvisioningWorker) markTenantAsFailed(ctx context.Context, tenantID tenant.TenantID, lastErr error, attempts int) {
 	tenant, getErr := w.repo.GetByID(ctx, tenantID)
 	if getErr != nil {
 		w.logger.Error("failed to get tenant for failure update",
@@ -279,20 +286,20 @@ func (w *ProvisioningWorker) markTenantAsFailed(ctx context.Context, tenantID te
 
 	w.logger.Error("provisioning failed after retries",
 		"tenant_id", tenantID,
-		"attempts", maxRetries,
+		"attempts", attempts,
 		"error", lastErr)
 }
 
 // waitWithBackoff waits for the calculated backoff duration with context cancellation support.
 // Returns true if cancelled, false otherwise.
-func (w *ProvisioningWorker) waitWithBackoff(ctx context.Context, tenantID tenant.TenantID, attempt int) bool {
+func (w *ProvisioningWorker) waitWithBackoff(ctx context.Context, tenantID tenant.TenantID, attempt int, err error) bool {
 	delay := calculateBackoffDelay(attempt)
 
 	w.logger.Warn("provisioning failed, retrying",
 		"tenant_id", tenantID,
 		"attempt", attempt+1,
 		"delay", delay,
-		"error", "retryable error")
+		"error", err)
 
 	select {
 	case <-ctx.Done():
@@ -307,13 +314,15 @@ func (w *ProvisioningWorker) waitWithBackoff(ctx context.Context, tenantID tenan
 }
 
 // calculateBackoffDelay calculates exponential backoff delay with jitter.
+// The delay is capped at maxDelay (including jitter) to ensure predictable maximum wait times.
 func calculateBackoffDelay(attempt int) time.Duration {
 	delay := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
+	jitter := time.Duration(rand.Int63n(int64(delay / 4))) // Add jitter (up to 25% of delay)
+	delay = delay + jitter
 	if delay > maxDelay {
 		delay = maxDelay
 	}
-	jitter := time.Duration(rand.Int63n(int64(delay / 4))) // Add jitter (up to 25% of delay)
-	return delay + jitter
+	return delay
 }
 
 // retryablePatterns are substrings in error messages that indicate transient errors
