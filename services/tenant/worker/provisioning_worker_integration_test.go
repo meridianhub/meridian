@@ -256,31 +256,31 @@ func TestConcurrentProvisioningWithOptimisticLocking(t *testing.T) {
 	// Create counting mock provisioner
 	countingProvisioner := NewCountingMockProvisioner()
 
-	// Capture log output to verify which workers claim vs skip
-	var logBuffer bytes.Buffer
+	// Capture log output to verify which workers claim vs skip (safeBuffer for thread safety)
+	var logBuffer safeBuffer
 	testLogger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// Number of concurrent workers to test
 	const numWorkers = 10
 
+	// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
+	workers := make([]*ProvisioningWorker, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, testLogger)
+		require.NoError(t, err)
+		workers[i] = worker
+	}
+
 	var wg sync.WaitGroup
 
 	// Start multiple workers concurrently
-	for i := 0; i < numWorkers; i++ {
+	for _, worker := range workers {
 		wg.Add(1)
-		go func() {
+		go func(w *ProvisioningWorker) {
 			defer wg.Done()
-
-			// Each worker gets its own ProvisioningWorker instance (simulating multiple pods)
-			worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, testLogger)
-			require.NoError(t, err)
-
-			// Call processPendingTenants directly
-			worker.processPendingTenants(tc.ctx)
-
-			// Wait for any spawned goroutines
-			worker.wg.Wait()
-		}()
+			w.processPendingTenants(tc.ctx)
+			w.wg.Wait()
+		}(worker)
 	}
 
 	// Wait for all workers to complete
@@ -352,20 +352,24 @@ func TestConcurrentProvisioningStressTest(t *testing.T) {
 			// Counting provisioner for this iteration
 			countingProvisioner := NewCountingMockProvisioner()
 
+			// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
+			workers := make([]*ProvisioningWorker, numWorkers)
+			for i := 0; i < numWorkers; i++ {
+				worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, silentLogger)
+				require.NoError(t, err)
+				workers[i] = worker
+			}
+
 			var wg sync.WaitGroup
 
 			// Start multiple workers concurrently
-			for i := 0; i < numWorkers; i++ {
+			for _, worker := range workers {
 				wg.Add(1)
-				go func() {
+				go func(w *ProvisioningWorker) {
 					defer wg.Done()
-
-					worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, silentLogger)
-					require.NoError(t, err)
-
-					worker.processPendingTenants(tc.ctx)
-					worker.wg.Wait()
-				}()
+					w.processPendingTenants(tc.ctx)
+					w.wg.Wait()
+				}(worker)
 			}
 
 			wg.Wait()
@@ -531,26 +535,30 @@ func TestRaceDetection(t *testing.T) {
 
 	// Create many workers that will all try to claim the same tenant simultaneously
 	const numWorkers = 50
+
+	// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
+	workers := make([]*ProvisioningWorker, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, silentLogger)
+		require.NoError(t, err)
+		workers[i] = worker
+	}
+
 	var wg sync.WaitGroup
 
 	// Use a barrier to ensure all workers start at exactly the same time
 	barrier := make(chan struct{})
 
-	for i := 0; i < numWorkers; i++ {
+	for _, worker := range workers {
 		wg.Add(1)
-		go func() {
+		go func(w *ProvisioningWorker) {
 			defer wg.Done()
-
-			worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, silentLogger)
-			require.NoError(t, err)
-
 			// Wait for barrier
 			<-barrier
-
 			// All workers start processing at the same time
-			worker.processPendingTenants(tc.ctx)
-			worker.wg.Wait()
-		}()
+			w.processPendingTenants(tc.ctx)
+			w.wg.Wait()
+		}(worker)
 	}
 
 	// Release all workers simultaneously
