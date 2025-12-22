@@ -58,9 +58,10 @@ func TestIncrementRetryAttempt(t *testing.T) {
 func TestProvisioningDurationHistogramBuckets(t *testing.T) {
 	provisioningDuration.Reset()
 
-	// Test that buckets are correctly defined (1, 2, 4, 8, ..., 1024 seconds)
-	expectedBuckets := []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}
-	actualBuckets := prometheus.ExponentialBuckets(1, 2, 11)
+	// Test that buckets are correctly defined (0.5, 1, 2, 4, 8, ..., 1024 seconds)
+	// Starting at 0.5s to capture fast provisioning operations
+	expectedBuckets := []float64{0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}
+	actualBuckets := prometheus.ExponentialBuckets(0.5, 2, 12)
 
 	if len(actualBuckets) != len(expectedBuckets) {
 		t.Errorf("Expected %d buckets, got %d", len(expectedBuckets), len(actualBuckets))

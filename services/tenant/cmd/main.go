@@ -106,6 +106,7 @@ func run(logger *slog.Logger) error {
 
 	// Start metrics server with /metrics and /healthz endpoints
 	metricsServerErrors := make(chan error, 1)
+	metricsReady := make(chan struct{})
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
@@ -131,12 +132,30 @@ func run(logger *slog.Logger) error {
 		}()
 
 		logger.Info("starting metrics server", "address", metricsAddr)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+
+		// Create listener first to ensure port binding before signaling ready
+		listener, err := (&net.ListenConfig{}).Listen(metricsCtx, "tcp", metricsAddr) //nolint:contextcheck // Using metricsCtx for lifecycle management
+		if err != nil {
+			metricsServerErrors <- fmt.Errorf("metrics server failed to bind: %w", err)
+			return
+		}
+
+		// Signal that server is ready (port bound successfully)
+		close(metricsReady)
+		logger.Info("metrics server started", "address", metricsAddr)
+
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			metricsServerErrors <- fmt.Errorf("metrics server failed: %w", err)
 		}
 	}()
 
-	logger.Info("metrics server started", "address", metricsAddr)
+	// Wait for metrics server to be ready or fail
+	select {
+	case <-metricsReady:
+		// Server successfully bound to port
+	case err := <-metricsServerErrors:
+		return fmt.Errorf("metrics server startup failed: %w", err)
+	}
 
 	// Initialize database connection
 	db, err := initDatabase(logger)
