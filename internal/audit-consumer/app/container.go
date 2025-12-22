@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/internal/audit-consumer/adapters/messaging"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -19,7 +19,7 @@ type Container struct {
 	DB *gorm.DB
 
 	// Audit consumer
-	AuditConsumer *audit.Consumer
+	AuditConsumer *messaging.AuditConsumer
 }
 
 // ContainerCloseError is returned when multiple errors occur during container close.
@@ -92,20 +92,20 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 	return nil
 }
 
-// initializeAuditConsumer initializes the Kafka audit consumer with tenant audit writer.
+// initializeAuditConsumer initializes the Kafka audit consumer for single-topic consumption.
 func (c *Container) initializeAuditConsumer() error {
 	// Create audit consumer configuration
-	consumerConfig := audit.ConsumerConfig{
+	consumerConfig := messaging.ConsumerConfig{
 		BootstrapServers: c.Config.Kafka.BootstrapServers,
+		Topic:            c.Config.Kafka.Topic,
 		GroupID:          c.Config.Kafka.GroupID,
 		ClientID:         c.Config.Kafka.ClientID,
-		Topic:            c.Config.Kafka.Topic,
 		DB:               c.DB,
 		HandlerTimeout:   c.Config.Kafka.HandlerTimeout,
 		MaxRetries:       c.Config.Kafka.MaxRetries,
 	}
 
-	consumer, err := audit.NewConsumer(consumerConfig)
+	consumer, err := messaging.NewAuditConsumer(consumerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create audit consumer: %w", err)
 	}
