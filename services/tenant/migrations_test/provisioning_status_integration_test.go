@@ -24,10 +24,9 @@ import (
 
 // testContext holds shared test resources.
 type testContext struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	db      *sql.DB
-	cleanup func()
+	ctx    context.Context
+	cancel context.CancelFunc
+	db     *sql.DB
 }
 
 // setupTestDatabase creates a PostgreSQL testcontainer and applies all migrations.
@@ -61,20 +60,21 @@ func setupTestDatabase(t *testing.T) *testContext {
 	// We create a fresh cancellable context for test operations because:
 	// 1. The setup context has a 2-minute timeout which may expire during long test runs
 	// 2. Test operations should have their own independent lifecycle
-	// 3. Container termination in cleanup() uses its own context anyway
+	// 3. Container termination in cleanup uses its own context anyway
 	// 4. Tests can cancel their context if needed for cleanup
 	cancel()
 	testCtx, testCancel := context.WithCancel(context.Background())
 
-	cleanup := func() {
+	// Register cleanup with t.Cleanup for automatic teardown (idiomatic Go testing pattern)
+	t.Cleanup(func() {
 		testCancel()
 		db.Close()
 		if err := pgContainer.Terminate(context.Background()); err != nil {
 			t.Logf("Failed to terminate container: %v", err)
 		}
-	}
+	})
 
-	return &testContext{ctx: testCtx, cancel: testCancel, db: db, cleanup: cleanup}
+	return &testContext{ctx: testCtx, cancel: testCancel, db: db}
 }
 
 // applyMigrations applies all SQL migration files in the migrations directory.
@@ -175,7 +175,6 @@ func TestProvisioningStatusTableExists(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	var tableName string
 	err := tc.db.QueryRowContext(tc.ctx, `
@@ -194,7 +193,6 @@ func TestProvisioningStatusTableColumns(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	expectedColumns := map[string]string{
 		"id":                "integer",
@@ -240,13 +238,13 @@ func TestProvisioningStatusIndexes(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	expectedIndexes := []string{
 		"idx_tenant_provisioning_status_tenant_id",
 		"idx_tenant_provisioning_status_status",
 		"idx_tenant_provisioning_status_service_name",
 		"idx_tenant_provisioning_status_status_created_at", // Composite index for worker claiming
+		"idx_tenant_provisioning_status_tenant_status",     // Composite index for tenant+status queries
 	}
 
 	for _, indexName := range expectedIndexes {
@@ -272,7 +270,6 @@ func TestProvisioningStatusUniqueConstraint(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	// Create a test tenant
 	createTestTenant(t, tc, "unique_test_tenant")
@@ -300,7 +297,6 @@ func TestProvisioningStatusCheckConstraint(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	createTestTenant(t, tc, "check_test_tenant")
 
@@ -352,7 +348,6 @@ func TestProvisioningStatusMigrationVersionRequiredWhenCompleted(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	createTestTenant(t, tc, "version_constraint_tenant")
 
@@ -388,7 +383,6 @@ func TestProvisioningStatusForeignKeyConstraint(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	// Try to insert with non-existent tenant_id
 	_, err := tc.db.ExecContext(tc.ctx, `
@@ -406,7 +400,6 @@ func TestProvisioningStatusForeignKeyDeleteRestrict(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	// Create tenant and provisioning status
 	createTestTenant(t, tc, "delete_test_tenant")
@@ -430,7 +423,6 @@ func TestProvisioningStatusConcurrentInserts(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	createTestTenant(t, tc, "concurrent_test_tenant")
 
@@ -480,7 +472,6 @@ func TestProvisioningStatusInsertAndUpdate(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	createTestTenant(t, tc, "crud_test_tenant")
 
@@ -525,7 +516,6 @@ func TestProvisioningStatusErrorMessage(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	createTestTenant(t, tc, "error_test_tenant")
 
@@ -554,7 +544,6 @@ func TestProvisioningStatusDefaultTimestamps(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	createTestTenant(t, tc, "timestamp_test_tenant")
 	beforeInsert := time.Now().Add(-time.Second) // Buffer for timing
@@ -583,7 +572,6 @@ func TestProvisioningStatusPrimaryKeyAutoIncrement(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	createTestTenant(t, tc, "autoincrement_test_tenant")
 
@@ -626,19 +614,25 @@ func TestProvisioningStatusWorkerClaimingPattern(t *testing.T) {
 	}
 
 	tc := setupTestDatabase(t)
-	defer tc.cleanup()
 
 	createTestTenant(t, tc, "worker_claim_tenant")
 
-	// Insert multiple pending tasks with distinct timestamps
-	services := []string{"party", "account", "transaction"}
+	// Insert multiple pending tasks with explicit timestamps to ensure deterministic ordering
+	// Using explicit created_at values avoids timing-dependent test flakiness in slow CI environments
+	services := []struct {
+		name   string
+		offset string // SQL interval to subtract from NOW()
+	}{
+		{"party", "3 seconds"},
+		{"account", "2 seconds"},
+		{"transaction", "1 second"},
+	}
 	for _, svc := range services {
 		_, err := tc.db.ExecContext(tc.ctx, `
-			INSERT INTO tenant_provisioning_status (tenant_id, service_name, status)
-			VALUES ('worker_claim_tenant', $1, 'pending')
-		`, svc)
+			INSERT INTO tenant_provisioning_status (tenant_id, service_name, status, created_at)
+			VALUES ('worker_claim_tenant', $1, 'pending', NOW() - INTERVAL '`+svc.offset+`')
+		`, svc.name)
 		require.NoError(t, err)
-		time.Sleep(10 * time.Millisecond) // Ensure distinct created_at
 	}
 
 	// Verify the composite index exists and can be used for the worker claiming pattern

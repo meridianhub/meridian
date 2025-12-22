@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS tenant_provisioning_status (
     status VARCHAR(50) NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
 
     -- Migration version applied (e.g., '20251216000001')
+    -- Expected format matches Atlas migration filenames (e.g., '20251218000001')
+    -- or service-specific version strings depending on the service's migration system
     migration_version VARCHAR(255),
 
     -- Error details if status = 'failed'
@@ -106,6 +108,11 @@ CREATE INDEX IF NOT EXISTS idx_tenant_provisioning_status_service_name
 -- SELECT ... WHERE status = 'pending' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
 CREATE INDEX IF NOT EXISTS idx_tenant_provisioning_status_status_created_at
     ON tenant_provisioning_status(status, created_at);
+
+-- Composite index for tenant+status queries:
+-- SELECT ... WHERE tenant_id = $1 AND status = 'pending'
+CREATE INDEX IF NOT EXISTS idx_tenant_provisioning_status_tenant_status
+    ON tenant_provisioning_status(tenant_id, status);
 
 -- Comments for documentation
 COMMENT ON TABLE tenant_provisioning_status IS 'Normalized per-service provisioning status. Denormalizes tenant_provisioning.service_schemas for indexed queries, worker processing, and partial failure recovery.';
