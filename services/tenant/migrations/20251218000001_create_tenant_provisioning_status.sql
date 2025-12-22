@@ -2,6 +2,11 @@
 -- Normalized per-service tracking for async tenant provisioning
 -- Uses unqualified table names (relies on database-per-service architecture)
 --
+-- MIGRATION ORDERING NOTE:
+-- This migration (20251218) was intentionally inserted between existing migrations
+-- (20251217 audit_system and 20251220 add_slug). Atlas handles non-sequential
+-- timestamp insertion correctly as long as the sum file is regenerated.
+--
 -- PURPOSE:
 -- This table denormalizes the per-service provisioning data that was previously stored
 -- only in tenant_provisioning.service_schemas (JSONB). While service_schemas contains
@@ -33,6 +38,13 @@ CREATE TABLE IF NOT EXISTS tenant_provisioning_status (
 
     -- Foreign key to tenant table
     -- ON DELETE RESTRICT: Cannot delete tenant while provisioning records exist (audit trail)
+    --
+    -- FK DESIGN CHOICE: References tenant(id) directly, not tenant_provisioning(tenant_id).
+    -- This is intentional because:
+    --   1. tenant_provisioning_status records may exist before tenant_provisioning is created
+    --      (e.g., during initial provisioning setup before the overall status record exists)
+    --   2. Simpler FK chain: tenant_provisioning_status → tenant (vs → tenant_provisioning → tenant)
+    --   3. The application layer (ProvisioningService) ensures consistency between both tables
     tenant_id VARCHAR(50) NOT NULL REFERENCES tenant(id) ON DELETE RESTRICT,
 
     -- Service being provisioned (e.g., 'party', 'account', 'transaction')
@@ -40,6 +52,13 @@ CREATE TABLE IF NOT EXISTS tenant_provisioning_status (
 
     -- Provisioning status for this service
     -- Values: 'pending', 'in_progress', 'completed', 'failed'
+    --
+    -- STATUS VALUES NOTE: These differ from tenant_provisioning.state which uses:
+    --   'pending', 'in_progress', 'active', 'failed', 'deprovisioned'
+    -- The difference is intentional:
+    --   - This table tracks per-service migration status: 'completed' = service migration done
+    --   - tenant_provisioning tracks overall tenant lifecycle: 'active' = tenant fully provisioned
+    --   - 'deprovisioned' doesn't apply here (individual services aren't deprovisioned separately)
     status VARCHAR(50) NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
 
     -- Migration version applied (e.g., '20251216000001')
@@ -47,6 +66,9 @@ CREATE TABLE IF NOT EXISTS tenant_provisioning_status (
 
     -- Error details if status = 'failed'
     error_message TEXT,
+
+    -- Retry tracking for worker processing patterns (exponential backoff, circuit breaker)
+    retry_count INTEGER NOT NULL DEFAULT 0,
 
     -- Timing metadata
     started_at TIMESTAMPTZ,
@@ -85,5 +107,6 @@ COMMENT ON COLUMN tenant_provisioning_status.service_name IS 'Name of the servic
 COMMENT ON COLUMN tenant_provisioning_status.status IS 'Provisioning status: pending → in_progress → completed/failed';
 COMMENT ON COLUMN tenant_provisioning_status.migration_version IS 'Database migration version applied for this service';
 COMMENT ON COLUMN tenant_provisioning_status.error_message IS 'Error details when status is failed';
+COMMENT ON COLUMN tenant_provisioning_status.retry_count IS 'Number of retry attempts for exponential backoff and circuit breaker patterns';
 COMMENT ON COLUMN tenant_provisioning_status.started_at IS 'When provisioning started for this service';
 COMMENT ON COLUMN tenant_provisioning_status.completed_at IS 'When provisioning completed (success or failure)';

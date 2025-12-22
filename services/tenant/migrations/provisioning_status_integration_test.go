@@ -4,6 +4,7 @@ package migrations
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -190,6 +191,7 @@ func TestProvisioningStatusTableColumns(t *testing.T) {
 		"status":            "character varying",
 		"migration_version": "character varying",
 		"error_message":     "text",
+		"retry_count":       "integer",
 		"started_at":        "timestamp with time zone",
 		"completed_at":      "timestamp with time zone",
 		"created_at":        "timestamp with time zone",
@@ -276,7 +278,7 @@ func TestProvisioningStatusUniqueConstraint(t *testing.T) {
 		VALUES ('unique_test_tenant', 'party', 'in_progress')
 	`)
 	assert.Error(t, err, "Duplicate (tenant_id, service_name) should fail")
-	assert.Contains(t, err.Error(), "unique", "Error should mention unique constraint violation")
+	assert.Contains(t, strings.ToLower(err.Error()), "unique", "Error should mention unique constraint violation")
 }
 
 // TestProvisioningStatusCheckConstraint tests the CHECK constraint on status column.
@@ -296,7 +298,7 @@ func TestProvisioningStatusCheckConstraint(t *testing.T) {
 		_, err := tc.db.ExecContext(tc.ctx, `
 			INSERT INTO tenant_provisioning_status (tenant_id, service_name, status)
 			VALUES ($1, $2, $3)
-		`, "check_test_tenant", "service_"+string(rune('a'+i)), status)
+		`, "check_test_tenant", fmt.Sprintf("service_%d", i), status)
 		assert.NoError(t, err, "Valid status %q should succeed", status)
 	}
 
@@ -310,7 +312,7 @@ func TestProvisioningStatusCheckConstraint(t *testing.T) {
 	// 1. The pgx driver wraps errors, making code extraction non-trivial
 	// 2. String matching on "check" is sufficient to verify the constraint type
 	// 3. The error message format is stable in PostgreSQL (violates check constraint)
-	assert.Contains(t, err.Error(), "check", "Error should mention check constraint violation")
+	assert.Contains(t, strings.ToLower(err.Error()), "check", "Error should mention check constraint violation")
 }
 
 // TestProvisioningStatusForeignKeyConstraint tests the FK to tenant table.
@@ -328,7 +330,7 @@ func TestProvisioningStatusForeignKeyConstraint(t *testing.T) {
 		VALUES ('nonexistent_tenant', 'party', 'pending')
 	`)
 	assert.Error(t, err, "Insert with non-existent tenant_id should fail")
-	assert.Contains(t, err.Error(), "foreign key", "Error should mention foreign key violation")
+	assert.Contains(t, strings.ToLower(err.Error()), "foreign key", "Error should mention foreign key violation")
 }
 
 // TestProvisioningStatusForeignKeyDeleteRestrict tests ON DELETE RESTRICT behavior.
@@ -351,7 +353,7 @@ func TestProvisioningStatusForeignKeyDeleteRestrict(t *testing.T) {
 	// Try to delete the tenant - should fail due to ON DELETE RESTRICT
 	_, err = tc.db.ExecContext(tc.ctx, `DELETE FROM tenant WHERE id = 'delete_test_tenant'`)
 	assert.Error(t, err, "Deleting tenant with provisioning status should fail")
-	assert.Contains(t, err.Error(), "foreign key", "Error should mention foreign key constraint")
+	assert.Contains(t, strings.ToLower(err.Error()), "foreign key", "Error should mention foreign key constraint")
 }
 
 // TestProvisioningStatusConcurrentInserts tests that concurrent inserts with
