@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
@@ -21,6 +22,7 @@ type ProvisioningWorker struct {
 	pollInterval time.Duration
 	logger       *slog.Logger
 	done         chan struct{}
+	wg           sync.WaitGroup // Tracks in-flight provisioning goroutines
 }
 
 // Errors returned by NewProvisioningWorker.
@@ -86,6 +88,7 @@ func (w *ProvisioningWorker) Start(ctx context.Context) {
 }
 
 // Stop signals the worker to shut down gracefully.
+// It waits for all in-flight provisioning goroutines to complete.
 // It is safe to call Stop multiple times.
 func (w *ProvisioningWorker) Stop() {
 	select {
@@ -94,6 +97,11 @@ func (w *ProvisioningWorker) Stop() {
 	default:
 		close(w.done)
 	}
+
+	// Wait for all in-flight provisioning goroutines to complete
+	w.logger.Info("waiting for in-flight provisioning to complete")
+	w.wg.Wait()
+	w.logger.Info("all provisioning goroutines completed")
 }
 
 // processPendingTenants queries for tenants in PROVISIONING_PENDING status
@@ -133,6 +141,9 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 			"tenant_id", tenant.ID,
 			"schema", tenant.SchemaName())
 
+		// Track the goroutine in the WaitGroup
+		w.wg.Add(1)
+
 		// Spawn provisioning in background with detached context
 		// We use context.WithoutCancel to prevent parent cancellation from stopping provisioning
 		go w.provisionTenantWithRetry(context.WithoutCancel(ctx), tenant.ID)
@@ -140,8 +151,28 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 }
 
 // provisionTenantWithRetry provisions a tenant's schema with retry logic.
-// This is a stub implementation - will be completed in subtask 70.4.
+// It includes panic recovery to prevent crashes and proper goroutine lifecycle management.
+// This is a stub implementation - actual retry logic and provisioning will be completed in task 71.
 func (w *ProvisioningWorker) provisionTenantWithRetry(_ context.Context, tenantID tenant.TenantID) {
+	// Ensure we decrement the WaitGroup when this goroutine completes
+	defer w.wg.Done()
+
+	// Panic recovery to prevent a single tenant provisioning failure from crashing the worker
+	defer func() {
+		if r := recover(); r != nil {
+			w.logger.Error("panic during tenant provisioning",
+				"tenant_id", tenantID,
+				"panic", r)
+		}
+	}()
+
 	w.logger.Info("provisioning tenant (stub)", "tenant_id", tenantID)
-	// TODO: implement in subtask 70.4
+
+	// TODO(task-71): Implement actual provisioning logic with retry mechanism
+	// This stub will be expanded to:
+	// 1. Call w.provisioner.ProvisionSchema(ctx, tenantID) with the context parameter
+	// 2. Implement exponential backoff retry logic
+	// 3. Update tenant status to ACTIVE on success
+	// 4. Update tenant status to PROVISIONING_FAILED on final failure
+	// 5. Store error details in tenant.ErrorMessage field
 }
