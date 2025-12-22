@@ -23,7 +23,7 @@ var (
 			Help:    "Duration of tenant provisioning operations in seconds",
 			Buckets: prometheus.ExponentialBuckets(1, 2, 11), // 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
 		},
-		[]string{"tenant_id", "status"},
+		[]string{"status"},
 	)
 
 	// Gauge for tracking number of pending tenants in provisioning queue
@@ -43,21 +43,19 @@ var (
 		[]string{"service_name"},
 	)
 
-	// Counter for provisioning retry attempts
-	provisioningRetries = promauto.NewCounterVec(
+	// Counter for provisioning retry attempts aggregated across all tenants
+	provisioningRetries = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "tenant_provisioning_retries_total",
-			Help: "Total number of provisioning retry attempts by tenant",
+			Help: "Total number of provisioning retry attempts across all tenants",
 		},
-		[]string{"tenant_id"},
 	)
 )
 
 // RecordProvisioningDuration records the duration of a tenant provisioning operation.
-// tenantID should be the tenant's unique identifier.
 // status should be StatusSuccess or StatusError.
-func RecordProvisioningDuration(tenantID, status string, duration time.Duration) {
-	provisioningDuration.WithLabelValues(tenantID, status).Observe(duration.Seconds())
+func RecordProvisioningDuration(status string, duration time.Duration) {
+	provisioningDuration.WithLabelValues(status).Observe(duration.Seconds())
 }
 
 // SetProvisioningQueueDepth sets the current depth of the provisioning queue.
@@ -72,8 +70,7 @@ func IncrementServiceFailure(serviceName string) {
 	serviceProvisioningFailures.WithLabelValues(serviceName).Inc()
 }
 
-// IncrementRetryAttempt increments the retry counter for a tenant provisioning operation.
-// tenantID should be the tenant's unique identifier.
-func IncrementRetryAttempt(tenantID string) {
-	provisioningRetries.WithLabelValues(tenantID).Inc()
+// IncrementRetryAttempt increments the retry counter for tenant provisioning operations.
+func IncrementRetryAttempt() {
+	provisioningRetries.Inc()
 }

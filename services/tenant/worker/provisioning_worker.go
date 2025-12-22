@@ -185,7 +185,7 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 		if status == "" {
 			status = observability.StatusError // Default to error if status not set
 		}
-		observability.RecordProvisioningDuration(tenantID.String(), status, time.Since(start))
+		observability.RecordProvisioningDuration(status, time.Since(start))
 	}()
 
 	// Panic recovery to prevent a single tenant provisioning failure from crashing the worker

@@ -11,7 +11,7 @@ import (
 func TestRecordProvisioningDuration(t *testing.T) {
 	provisioningDuration.Reset()
 
-	RecordProvisioningDuration("tenant-123", StatusSuccess, 5*time.Second)
+	RecordProvisioningDuration(StatusSuccess, 5*time.Second)
 
 	count := testutil.CollectAndCount(provisioningDuration)
 	if count == 0 {
@@ -46,9 +46,8 @@ func TestIncrementServiceFailure(t *testing.T) {
 }
 
 func TestIncrementRetryAttempt(t *testing.T) {
-	provisioningRetries.Reset()
-
-	IncrementRetryAttempt("tenant-456")
+	// Note: Counter doesn't have Reset(), but we can still verify it increments
+	IncrementRetryAttempt()
 
 	count := testutil.CollectAndCount(provisioningRetries)
 	if count == 0 {
@@ -123,7 +122,7 @@ func TestHelperFunctionsUpdateCorrectMetrics(t *testing.T) {
 		{
 			name: "RecordProvisioningDuration_updates_histogram",
 			metricFunc: func() {
-				RecordProvisioningDuration("tenant-789", StatusError, 30*time.Second)
+				RecordProvisioningDuration(StatusError, 30*time.Second)
 			},
 			metric: provisioningDuration,
 		},
@@ -137,7 +136,7 @@ func TestHelperFunctionsUpdateCorrectMetrics(t *testing.T) {
 		{
 			name: "IncrementRetryAttempt_updates_counter",
 			metricFunc: func() {
-				IncrementRetryAttempt("tenant-999")
+				IncrementRetryAttempt()
 			},
 			metric: provisioningRetries,
 		},
@@ -161,7 +160,7 @@ func TestHelperFunctionsUpdateCorrectMetrics(t *testing.T) {
 
 func TestCounterIncrementsAreAtomic(t *testing.T) {
 	serviceProvisioningFailures.Reset()
-	provisioningRetries.Reset()
+	// Note: provisioningRetries is a Counter (not CounterVec) and doesn't have Reset()
 
 	// Simulate concurrent increments
 	done := make(chan bool)
@@ -183,7 +182,7 @@ func TestCounterIncrementsAreAtomic(t *testing.T) {
 	// Test retry counter
 	for i := 0; i < iterations; i++ {
 		go func() {
-			IncrementRetryAttempt("tenant-concurrent")
+			IncrementRetryAttempt()
 			done <- true
 		}()
 	}
@@ -208,8 +207,8 @@ func TestCounterIncrementsAreAtomic(t *testing.T) {
 func TestProvisioningDurationWithDifferentStatuses(t *testing.T) {
 	provisioningDuration.Reset()
 
-	RecordProvisioningDuration("tenant-success", StatusSuccess, 10*time.Second)
-	RecordProvisioningDuration("tenant-error", StatusError, 5*time.Second)
+	RecordProvisioningDuration(StatusSuccess, 10*time.Second)
+	RecordProvisioningDuration(StatusError, 5*time.Second)
 
 	count := testutil.CollectAndCount(provisioningDuration)
 	if count == 0 {

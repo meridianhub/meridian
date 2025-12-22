@@ -182,10 +182,10 @@ The service exposes Prometheus metrics on port 9090:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `tenant_provisioning_duration_seconds` | Histogram | tenant_id, status | Duration of tenant provisioning operations |
+| `tenant_provisioning_duration_seconds` | Histogram | status | Duration of tenant provisioning operations |
 | `tenant_provisioning_queue_depth` | Gauge | - | Number of pending tenants in provisioning queue |
 | `tenant_service_provisioning_failures_total` | Counter | service_name | Service-specific provisioning failures |
-| `tenant_provisioning_retries_total` | Counter | tenant_id | Provisioning retry attempts per tenant |
+| `tenant_provisioning_retries_total` | Counter | - | Provisioning retry attempts across all tenants |
 
 **Prometheus Scrape Configuration:**
 
