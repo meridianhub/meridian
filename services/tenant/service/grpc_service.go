@@ -30,17 +30,20 @@ type Service struct {
 	repo        *persistence.Repository
 	provisioner provisioner.SchemaProvisioner
 	partyClient clients.PartyClient
+	slugCache   *SlugCache
 	logger      *slog.Logger
 }
 
 // NewService creates a new TenantService.
 // The provisioner parameter is optional; if nil, schema provisioning is skipped during tenant creation.
 // The partyClient parameter is optional; if nil, party registration is skipped during tenant creation.
-func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner, partyClient clients.PartyClient, logger *slog.Logger) *Service {
+// The slugCache parameter is optional; if nil, slug caching is disabled.
+func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner, partyClient clients.PartyClient, slugCache *SlugCache, logger *slog.Logger) *Service {
 	return &Service{
 		repo:        repo,
 		provisioner: prov,
 		partyClient: partyClient,
+		slugCache:   slugCache,
 		logger:      logger,
 	}
 }
@@ -157,6 +160,18 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		"status", tenant.Status,
 		"party_id", tenant.PartyID)
 
+	// Pre-populate cache for newly created tenant (best-effort)
+	// This optimizes the first slug lookup after tenant creation
+	if s.slugCache != nil && tenant.Slug != "" {
+		if err := s.slugCache.Set(ctx, tenant.Slug, tenant.ID); err != nil {
+			s.logger.Warn("failed to pre-populate slug cache for new tenant",
+				"tenant_id", tenant.ID.String(),
+				"slug", tenant.Slug,
+				"error", err)
+			// Don't fail tenant creation if cache population fails
+		}
+	}
+
 	// Schema provisioning will be handled asynchronously by the worker
 	if s.provisioner != nil {
 		s.logger.Info("tenant created with provisioning_pending status - worker will handle provisioning",
@@ -199,6 +214,87 @@ func (s *Service) RetrieveTenant(ctx context.Context, req *pb.RetrieveTenantRequ
 	return &pb.RetrieveTenantResponse{
 		Tenant: s.toProto(tenant),
 	}, nil
+}
+
+// GetBySlug retrieves a tenant by its URL-friendly slug with cache-first lookup.
+// This method is used internally by middleware/routing layers for tenant resolution.
+// Performance characteristics:
+//   - Cache hit: ~1ms (Redis roundtrip)
+//   - Cache miss: ~5-10ms (PostgreSQL query + cache population)
+//   - Cache TTL: 5 minutes (configurable in SlugCache)
+//
+// Error handling:
+//   - Cache failures are logged but don't fail the request (degrades gracefully to DB)
+//   - Returns ErrTenantNotFound if slug doesn't exist in database
+func (s *Service) GetBySlug(ctx context.Context, slug string) (*domain.Tenant, error) {
+	// Cache-first lookup (if cache is configured)
+	if s.slugCache != nil {
+		cachedTenantID, err := s.slugCache.Get(ctx, slug)
+		if err != nil {
+			// Cache read failure - log and continue to DB lookup
+			s.logger.Warn("slug cache read failed, falling back to database",
+				"slug", slug,
+				"error", err)
+		} else if cachedTenantID != "" {
+			// Cache hit - retrieve full tenant by ID
+			tenant, err := s.repo.GetByID(ctx, cachedTenantID)
+			if err != nil {
+				if errors.Is(err, persistence.ErrTenantNotFound) {
+					// Stale cache entry - invalidate and fall through to DB lookup
+					s.logger.Warn("stale cache entry detected, invalidating",
+						"slug", slug,
+						"cached_tenant_id", cachedTenantID)
+					if invErr := s.slugCache.Invalidate(ctx, slug); invErr != nil {
+						s.logger.Error("failed to invalidate stale cache entry",
+							"slug", slug,
+							"error", invErr)
+					}
+				} else {
+					// DB error on cache hit - return error
+					s.logger.Error("failed to retrieve tenant by cached ID",
+						"slug", slug,
+						"tenant_id", cachedTenantID,
+						"error", err)
+					return nil, err
+				}
+			} else {
+				// Cache hit with successful DB lookup
+				s.logger.Debug("slug cache hit",
+					"slug", slug,
+					"tenant_id", cachedTenantID)
+				return tenant, nil
+			}
+		}
+	}
+
+	// Cache miss or cache disabled - query database
+	tenant, err := s.repo.GetBySlug(ctx, slug)
+	if err != nil {
+		if errors.Is(err, persistence.ErrTenantNotFound) {
+			return nil, err
+		}
+		s.logger.Error("failed to retrieve tenant by slug",
+			"slug", slug,
+			"error", err)
+		return nil, err
+	}
+
+	// Populate cache on successful DB lookup (best-effort)
+	if s.slugCache != nil {
+		if err := s.slugCache.Set(ctx, slug, tenant.ID); err != nil {
+			s.logger.Error("failed to populate slug cache after DB lookup",
+				"slug", slug,
+				"tenant_id", tenant.ID,
+				"error", err)
+			// Don't fail the request - cache population is best-effort
+		} else {
+			s.logger.Debug("populated slug cache after DB lookup",
+				"slug", slug,
+				"tenant_id", tenant.ID)
+		}
+	}
+
+	return tenant, nil
 }
 
 // UpdateTenantStatus changes the lifecycle status of a tenant (BIAN: Update).
@@ -253,6 +349,22 @@ func (s *Service) UpdateTenantStatus(ctx context.Context, req *pb.UpdateTenantSt
 		"tenant_id", tenant.ID.String(),
 		"old_status", currentTenant.Status,
 		"new_status", tenant.Status)
+
+	// Invalidate cache on deprovisioning (tenant becoming inactive)
+	// Deprovisioned tenants should not be served from cache
+	if s.slugCache != nil && tenant.Status == domain.StatusDeprovisioned && currentTenant.Slug != "" {
+		if err := s.slugCache.Invalidate(ctx, currentTenant.Slug); err != nil {
+			s.logger.Error("failed to invalidate slug cache after deprovisioning",
+				"tenant_id", tenant.ID.String(),
+				"slug", currentTenant.Slug,
+				"error", err)
+			// Don't fail the status update if cache invalidation fails
+		} else {
+			s.logger.Debug("invalidated slug cache after deprovisioning",
+				"tenant_id", tenant.ID.String(),
+				"slug", currentTenant.Slug)
+		}
+	}
 
 	return &pb.UpdateTenantStatusResponse{
 		Tenant: s.toProto(tenant),
