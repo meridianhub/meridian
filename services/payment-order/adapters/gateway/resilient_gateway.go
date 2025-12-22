@@ -173,7 +173,7 @@ func (r *ResilientPaymentGateway) SendPayment(ctx context.Context, req PaymentRe
 					"payment_order_id", req.PaymentOrderID.String(),
 					"attempt", attempt,
 				)
-				return backoff.Permanent(fmt.Errorf("%w: %w", ErrCircuitOpen, err))
+				return backoff.Permanent(fmt.Errorf("%w: %v", ErrCircuitOpen, err)) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 			}
 
 			// Check if we've exhausted retries
