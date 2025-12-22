@@ -137,27 +137,38 @@ func (t *Tenant) CanTransitionTo(newStatus Status) bool {
 
 var (
 	// slugPattern enforces lowercase alphanumeric with hyphens, no leading/trailing hyphens.
-	// Note: This regex allows 2-character slugs technically (start + end char with empty middle),
-	// but ValidateSlug enforces a minimum of 3 characters via explicit length check.
+	// Regex breakdown: ^[a-z0-9] (start char) + [a-z0-9-]* (middle, 0+ chars) + [a-z0-9]$ (end char)
+	// This technically allows 2-character slugs (start + end with empty middle) but ValidateSlug
+	// enforces a strict 3-character minimum via explicit length check before the regex.
 	slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 
 	// reservedSlugs contains system-reserved slugs that cannot be used for tenants.
 	// These are common infrastructure subdomains that must remain available for platform services.
 	reservedSlugs = map[string]bool{
-		"api":      true,
-		"health":   true,
-		"admin":    true,
-		"www":      true,
-		"status":   true,
-		"docs":     true,
-		"internal": true,
-		"system":   true,
-		"platform": true,
-		"app":      true,
-		"mail":     true,
-		"cdn":      true,
-		"auth":     true,
-		"graphql":  true,
+		"api":        true,
+		"health":     true,
+		"admin":      true,
+		"www":        true,
+		"status":     true,
+		"docs":       true,
+		"internal":   true,
+		"system":     true,
+		"platform":   true,
+		"app":        true,
+		"mail":       true,
+		"cdn":        true,
+		"auth":       true,
+		"graphql":    true,
+		"ws":         true,
+		"websocket":  true,
+		"static":     true,
+		"assets":     true,
+		"login":      true,
+		"logout":     true,
+		"webhook":    true,
+		"webhooks":   true,
+		"metrics":    true,
+		"prometheus": true,
 	}
 
 	// ErrSlugTooShort is returned when a slug is shorter than the minimum required length.

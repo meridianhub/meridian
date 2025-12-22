@@ -357,6 +357,21 @@ func TestValidateSlug(t *testing.T) {
 			errMsg:  "is reserved and cannot be used",
 		},
 
+		// Edge cases - uppercase reserved words fail regex check first (not ErrSlugReserved)
+		// This documents the validation order: length → format (regex) → reserved words
+		{
+			name:    "uppercase reserved word fails format check",
+			slug:    "API",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "mixed case reserved word fails format check",
+			slug:    "Admin",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+
 		// Edge cases - single character with hyphen
 		{
 			name:    "single hyphen",
