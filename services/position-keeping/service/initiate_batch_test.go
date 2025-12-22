@@ -18,6 +18,7 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/services/position-keeping/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
@@ -674,7 +675,8 @@ func TestInitiateFinancialPositionLogBatch_NilPointerRegressionOnValidationFailu
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	require.NoError(t, err)
 
 	// Create a batch with alternating valid and invalid entries to maximize
 	// the chance of triggering race conditions in the parallel processing
