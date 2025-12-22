@@ -124,6 +124,7 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 
 	if len(tenants) == 0 {
 		w.logger.Debug("no pending tenants found")
+		observability.SetProvisioningQueueDepth(0)
 		return
 	}
 
@@ -157,6 +158,11 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 		// We use context.WithoutCancel to prevent parent cancellation from stopping provisioning
 		go w.provisionTenantWithRetry(context.WithoutCancel(ctx), tenant.ID)
 	}
+
+	// Reset queue depth after processing - all found tenants have been claimed and moved
+	// to PROVISIONING status, so they're no longer in the pending queue.
+	// The next poll cycle will update the depth with any new pending tenants.
+	observability.SetProvisioningQueueDepth(0)
 }
 
 // Retry configuration constants for provisioning with exponential backoff.
@@ -203,6 +209,7 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 
 	attempts, lastErr := w.executeProvisioningWithRetry(ctx, tenantID)
 	if lastErr == nil {
+		status = observability.StatusSuccess
 		return // Success
 	}
 

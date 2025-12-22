@@ -106,7 +106,6 @@ func run(logger *slog.Logger) error {
 	metricsCtx, cancelMetrics := context.WithCancel(ctx)
 	defer cancelMetrics()
 
-	// Start metrics server with /metrics and /healthz endpoints
 	metricsServerErrors := make(chan error, 1)
 	metricsReady := make(chan struct{})
 	go func() {
@@ -121,6 +120,9 @@ func run(logger *slog.Logger) error {
 			Addr:              metricsAddr,
 			Handler:           mux,
 			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		}
 
 		// Graceful shutdown

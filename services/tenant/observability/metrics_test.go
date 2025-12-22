@@ -233,16 +233,22 @@ func TestMultipleServiceFailures(t *testing.T) {
 
 func TestQueueDepthChanges(t *testing.T) {
 	SetProvisioningQueueDepth(0)
+
+	// Set to 5 and verify
 	SetProvisioningQueueDepth(5)
+	if got := testutil.ToFloat64(provisioningQueueDepth); got != 5 {
+		t.Errorf("Expected queue depth 5, got %v", got)
+	}
+
+	// Set to 10 and verify
 	SetProvisioningQueueDepth(10)
+	if got := testutil.ToFloat64(provisioningQueueDepth); got != 10 {
+		t.Errorf("Expected queue depth 10, got %v", got)
+	}
+
+	// Set back to 0 and verify
 	SetProvisioningQueueDepth(0)
-
-	// Verify gauge can be read
-	ch := make(chan prometheus.Metric, 1)
-	provisioningQueueDepth.Collect(ch)
-	metric := <-ch
-
-	if metric == nil {
-		t.Error("Expected queue depth gauge to track changes")
+	if got := testutil.ToFloat64(provisioningQueueDepth); got != 0 {
+		t.Errorf("Expected queue depth 0, got %v", got)
 	}
 }
