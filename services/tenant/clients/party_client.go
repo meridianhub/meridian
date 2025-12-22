@@ -1,29 +1,19 @@
 // Package clients provides gRPC client wrappers for external service communication.
-//
-// TODO(223-shared-client-patterns): The PartyClient implementation shares significant code with
-// services/current-account/clients/party_client.go. Extract shared connection setup logic
-// to shared/pkg/clients. See GitHub issue #223 for the full extraction plan.
 package clients
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
-	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
-	"github.com/meridianhub/meridian/shared/platform/observability"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 // Party client errors.
 var (
-	// ErrPartyServiceNameRequired is returned when ServiceName is not provided.
-	ErrPartyServiceNameRequired = errors.New("ServiceName is required for party client")
 	// ErrPartyRegistrationFailed is returned when party registration fails.
 	ErrPartyRegistrationFailed = errors.New("party registration failed")
 	// ErrPartyServiceUnavailable is returned when the party service is temporarily unavailable.
@@ -47,93 +37,41 @@ type PartyClient interface {
 }
 
 // PartyGRPCClient implements PartyClient using gRPC.
+//
+// This client embeds the shared BasePartyClient for connection management
+// and adds tenant-specific error handling for party registration operations.
 type PartyGRPCClient struct {
-	conn    *grpc.ClientConn
-	client  partyv1.PartyServiceClient
-	tracer  *observability.Tracer
-	timeout time.Duration
-}
-
-// PartyClientConfig holds configuration for the Party client.
-type PartyClientConfig struct {
-	// ServiceName is the Kubernetes service name (e.g., "party").
-	// Required. Enables DNS-based client-side load balancing.
-	ServiceName string
-
-	// Namespace is the Kubernetes namespace (e.g., "default").
-	// Defaults to "default" if not specified.
-	Namespace string
-
-	// Port is the service port number.
-	// Party service uses port 50055.
-	Port int
-
-	// Timeout is the default timeout for RPC calls.
-	// Defaults to 30 seconds if not specified.
-	Timeout time.Duration
-
-	// Tracer is an optional observability tracer for distributed tracing.
-	Tracer *observability.Tracer
-
-	// DialOptions allows custom gRPC dial options.
-	DialOptions []grpc.DialOption
+	*sharedclients.BasePartyClient
 }
 
 // NewPartyClient creates a new Party gRPC client using DNS-based load balancing.
 //
 // Example:
 //
-//	config := &PartyClientConfig{
+//	config := &sharedclients.PartyClientConfig{
 //	    ServiceName: "party",
 //	    Namespace:   "default",
 //	    Port:        50055,
 //	    Timeout:     30 * time.Second,
 //	}
-func NewPartyClient(cfg *PartyClientConfig) (*PartyGRPCClient, error) {
-	if cfg.ServiceName == "" {
-		return nil, ErrPartyServiceNameRequired
-	}
-
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 30 * time.Second
-	}
-
-	dialOpts := cfg.DialOptions
-
-	if cfg.Tracer != nil {
-		dialOpts = append(dialOpts,
-			grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-			grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-		)
-	}
-
-	conn, err := platformgrpc.NewClient(context.Background(), platformgrpc.ClientConfig{
-		ServiceName: cfg.ServiceName,
-		Namespace:   cfg.Namespace,
-		Port:        cfg.Port,
-		DialOptions: dialOpts,
-	})
+//	client, err := clients.NewPartyClient(config)
+func NewPartyClient(cfg *sharedclients.PartyClientConfig) (*PartyGRPCClient, error) {
+	base, err := sharedclients.NewBasePartyClient(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create gRPC connection: %w", err)
+		return nil, err
 	}
 
 	return &PartyGRPCClient{
-		conn:    conn,
-		client:  partyv1.NewPartyServiceClient(conn),
-		tracer:  cfg.Tracer,
-		timeout: cfg.Timeout,
+		BasePartyClient: base,
 	}, nil
 }
 
 // RegisterParty creates a new party in the Party Reference Data Directory.
 func (c *PartyGRPCClient) RegisterParty(ctx context.Context, req *partyv1.RegisterPartyRequest) (*partyv1.Party, error) {
-	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
+	ctx, cancel := c.PrepareContext(ctx)
 	defer cancel()
 
-	ctx = sharedclients.PropagateCorrelationID(ctx)
-	ctx = sharedclients.PropagateOrganization(ctx)
-
-	resp, err := c.client.RegisterParty(ctx, req)
+	resp, err := c.Client().RegisterParty(ctx, req)
 	if err != nil {
 		st, ok := status.FromError(err)
 		if ok {
@@ -154,14 +92,4 @@ func (c *PartyGRPCClient) RegisterParty(ctx context.Context, req *partyv1.Regist
 	}
 
 	return resp.Party, nil
-}
-
-// Close terminates the gRPC connection.
-func (c *PartyGRPCClient) Close() error {
-	if c.conn != nil {
-		if err := c.conn.Close(); err != nil {
-			return fmt.Errorf("failed to close party client connection: %w", err)
-		}
-	}
-	return nil
 }
