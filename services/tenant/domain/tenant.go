@@ -220,3 +220,49 @@ func ValidateSlug(slug string) error {
 
 	return nil
 }
+
+// ServiceProvisioningStatus represents the provisioning state values for a service.
+type ServiceProvisioningStatus string
+
+const (
+	// ServiceStatusPending means the service schema provisioning is queued.
+	ServiceStatusPending ServiceProvisioningStatus = "pending"
+	// ServiceStatusInProgress means the service schema is being provisioned.
+	ServiceStatusInProgress ServiceProvisioningStatus = "in_progress"
+	// ServiceStatusCompleted means the service schema provisioning completed successfully.
+	ServiceStatusCompleted ServiceProvisioningStatus = "completed"
+	// ServiceStatusFailed means the service schema provisioning failed.
+	ServiceStatusFailed ServiceProvisioningStatus = "failed"
+)
+
+// IsValid returns true if the service provisioning status is valid.
+func (s ServiceProvisioningStatus) IsValid() bool {
+	switch s {
+	case ServiceStatusPending, ServiceStatusInProgress, ServiceStatusCompleted, ServiceStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// ProvisioningStatus represents the provisioning state of a single service for a tenant.
+// This tracks per-service migration progress during async tenant provisioning.
+type ProvisioningStatus struct {
+	// ServiceName is the name of the service (e.g., "party", "account", "transaction").
+	ServiceName string
+
+	// Status is the provisioning state (pending, in_progress, completed, failed).
+	Status ServiceProvisioningStatus
+
+	// MigrationVersion is the database migration version applied (e.g., "20251216000001").
+	MigrationVersion string
+
+	// ErrorMessage contains error details if Status is "failed".
+	ErrorMessage *string
+
+	// StartedAt is when provisioning started for this service.
+	StartedAt *time.Time
+
+	// CompletedAt is when provisioning completed (success or failure).
+	CompletedAt *time.Time
+}

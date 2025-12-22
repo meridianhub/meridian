@@ -449,3 +449,120 @@ func (s *Service) createProvisioningStatusRecords(ctx context.Context, tenantID 
 
 	return nil
 }
+
+// GetTenantProvisioningStatus retrieves detailed provisioning status for a tenant.
+// Returns per-service provisioning progress including migration versions and error details.
+//
+// This endpoint requires either:
+// - Authenticated user with tenant_id claim matching the requested tenant (tenant isolation)
+// - OR platform-admin or super-admin role (cross-tenant access)
+func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTenantProvisioningStatusRequest) (*pb.GetTenantProvisioningStatusResponse, error) {
+	s.logger.Debug("getting tenant provisioning status",
+		"tenant_id", req.TenantId)
+
+	// Authorization check - must be performed before any business logic.
+	claims, ok := auth.GetClaimsFromContext(ctx)
+	if !ok {
+		s.logger.Warn("provisioning status query attempted without authentication claims")
+		return nil, status.Error(codes.Unauthenticated, "authentication required")
+	}
+
+	// Check authorization: either tenant-scoped access OR platform admin role
+	hasAdminRole := claims.HasRole(auth.RolePlatformAdmin) || claims.HasRole(auth.RoleSuperAdmin)
+	hasTenantAccess := claims.HasTenantID() && claims.TenantID == req.TenantId
+
+	if !hasAdminRole && !hasTenantAccess {
+		s.logger.Warn("unauthorized provisioning status query attempt",
+			"user_id", claims.UserID,
+			"requested_tenant", req.TenantId,
+			"user_tenant", claims.TenantID,
+			"roles", claims.Roles)
+		return nil, status.Error(codes.PermissionDenied, "access denied: must be tenant owner or platform administrator")
+	}
+
+	s.logger.Debug("provisioning status query authorized",
+		"user_id", claims.UserID,
+		"tenant_id", req.TenantId,
+		"admin_access", hasAdminRole)
+
+	// Validate tenant ID
+	tenantID, err := tenant.NewTenantID(req.TenantId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid tenant ID: %v", err)
+	}
+
+	// Retrieve tenant to get overall status
+	tenant, err := s.repo.GetByID(ctx, tenantID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrTenantNotFound) {
+			return nil, status.Errorf(codes.NotFound, "tenant %s not found", req.TenantId)
+		}
+		s.logger.Error("failed to retrieve tenant for provisioning status",
+			"tenant_id", req.TenantId,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve tenant")
+	}
+
+	// Query tenant_provisioning_status table for all service records
+	provisioningStatuses, err := s.repo.FindProvisioningStatusByTenantID(ctx, req.TenantId)
+	if err != nil {
+		s.logger.Error("failed to retrieve provisioning status records",
+			"tenant_id", req.TenantId,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve provisioning status")
+	}
+
+	// Build ServiceProvisioningStatus slice from database results
+	serviceStatuses := make([]*pb.ServiceProvisioningStatus, 0, len(provisioningStatuses))
+	for _, ps := range provisioningStatuses {
+		serviceStatus := &pb.ServiceProvisioningStatus{
+			ServiceName:      ps.ServiceName,
+			Status:           s.toProtoServiceStatus(ps.Status),
+			MigrationVersion: ps.MigrationVersion,
+		}
+
+		// Set optional error_message
+		if ps.ErrorMessage != nil {
+			serviceStatus.ErrorMessage = *ps.ErrorMessage
+		}
+
+		// Set optional timestamps
+		if ps.StartedAt != nil {
+			serviceStatus.StartedAt = timestamppb.New(*ps.StartedAt)
+		}
+		if ps.CompletedAt != nil {
+			serviceStatus.CompletedAt = timestamppb.New(*ps.CompletedAt)
+		}
+
+		serviceStatuses = append(serviceStatuses, serviceStatus)
+	}
+
+	s.logger.Debug("tenant provisioning status retrieved",
+		"tenant_id", req.TenantId,
+		"overall_status", tenant.Status,
+		"service_count", len(serviceStatuses))
+
+	// Construct response
+	return &pb.GetTenantProvisioningStatusResponse{
+		TenantId:      req.TenantId,
+		OverallStatus: s.toProtoStatus(tenant.Status),
+		Services:      serviceStatuses,
+		ErrorMessage:  tenant.ErrorMessage,
+	}, nil
+}
+
+// toProtoServiceStatus converts domain service provisioning status to protobuf status.
+func (s *Service) toProtoServiceStatus(status domain.ServiceProvisioningStatus) pb.ServiceProvisioningStatus_Status {
+	switch status {
+	case domain.ServiceStatusPending:
+		return pb.ServiceProvisioningStatus_STATUS_PENDING
+	case domain.ServiceStatusInProgress:
+		return pb.ServiceProvisioningStatus_STATUS_IN_PROGRESS
+	case domain.ServiceStatusCompleted:
+		return pb.ServiceProvisioningStatus_STATUS_COMPLETED
+	case domain.ServiceStatusFailed:
+		return pb.ServiceProvisioningStatus_STATUS_FAILED
+	default:
+		return pb.ServiceProvisioningStatus_STATUS_UNSPECIFIED
+	}
+}

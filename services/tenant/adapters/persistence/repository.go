@@ -253,6 +253,34 @@ func (r *Repository) GetAll(ctx context.Context) ([]*domain.Tenant, error) {
 	return tenants, nil
 }
 
+// FindProvisioningStatusByTenantID retrieves all per-service provisioning status records for a tenant.
+// Returns an empty slice if no provisioning status records exist (not an error).
+func (r *Repository) FindProvisioningStatusByTenantID(ctx context.Context, tenantID string) ([]domain.ProvisioningStatus, error) {
+	var entities []ProvisioningStatusEntity
+	result := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Order("service_name").
+		Find(&entities)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	// Empty result is not an error - tenant may not have any provisioning status records yet
+	if len(entities) == 0 {
+		return []domain.ProvisioningStatus{}, nil
+	}
+
+	// Convert entities to domain models
+	statuses := make([]domain.ProvisioningStatus, 0, len(entities))
+	for i := range entities {
+		status := provisioningStatusToDomain(&entities[i])
+		statuses = append(statuses, status)
+	}
+
+	return statuses, nil
+}
+
 // Ping checks database connectivity.
 func (r *Repository) Ping(ctx context.Context) error {
 	var result int
@@ -326,6 +354,27 @@ func toDomain(entity *TenantEntity) (*domain.Tenant, error) {
 	}
 
 	return tenant, nil
+}
+
+// provisioningStatusToDomain converts database entity to domain model.
+func provisioningStatusToDomain(entity *ProvisioningStatusEntity) domain.ProvisioningStatus {
+	status := domain.ProvisioningStatus{
+		ServiceName: entity.ServiceName,
+		Status:      domain.ServiceProvisioningStatus(entity.Status),
+		StartedAt:   entity.StartedAt,
+		CompletedAt: entity.CompletedAt,
+	}
+
+	// Handle optional fields
+	if entity.MigrationVersion != nil {
+		status.MigrationVersion = *entity.MigrationVersion
+	}
+
+	if entity.ErrorMessage != nil {
+		status.ErrorMessage = entity.ErrorMessage
+	}
+
+	return status
 }
 
 // isDuplicateKeyError checks if the error is a PostgreSQL unique constraint violation.

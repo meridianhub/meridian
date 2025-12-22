@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
@@ -1090,15 +1091,15 @@ func TestService_InitiateTenant_ProvisioningHint_AsyncMode(t *testing.T) {
 	// Test case 1: Provisioner configured (async mode)
 	// Tenant is created in PROVISIONING_PENDING state, worker will provision later
 	assert.NotNil(t, resp.Tenant, "response should contain tenant")
-	assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint should not be empty")
+	assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint should not be empty") //nolint:staticcheck // testing deprecated field
 
 	// With provisioner configured, tenant stays in pending state
 	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
-	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' when provisioner is configured")
+	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' when provisioner is configured") //nolint:staticcheck // testing deprecated field
 
 	// Verify both fields are present in response
 	assert.NotNil(t, resp.Tenant)
-	assert.NotEmpty(t, resp.ProvisioningHint)
+	assert.NotEmpty(t, resp.ProvisioningHint) //nolint:staticcheck // testing deprecated field
 }
 
 func TestService_InitiateTenant_ProvisioningHint_SyncMode(t *testing.T) {
@@ -1120,7 +1121,7 @@ func TestService_InitiateTenant_ProvisioningHint_SyncMode(t *testing.T) {
 	// Test case 2: No provisioner (sync mode)
 	// Tenant should be active immediately, hint should be "active"
 	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.Tenant.Status)
-	assert.Equal(t, "active", resp.ProvisioningHint, "hint should be 'active' in sync mode")
+	assert.Equal(t, "active", resp.ProvisioningHint, "hint should be 'active' in sync mode") //nolint:staticcheck // testing deprecated field
 
 	// Verify tenant version is 1 (created directly as active)
 	assert.Equal(t, int32(1), resp.Tenant.Version)
@@ -1178,8 +1179,8 @@ func TestService_InitiateTenant_ProvisioningHint_FieldPresence(t *testing.T) {
 
 			// Test case 3: Verify field presence
 			assert.NotNil(t, resp.Tenant, "tenant field must be present")
-			assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint must not be empty string")
-			assert.Equal(t, tt.expectedHint, resp.ProvisioningHint)
+			assert.NotEmpty(t, resp.ProvisioningHint, "provisioning_hint must not be empty string") //nolint:staticcheck // testing deprecated field
+			assert.Equal(t, tt.expectedHint, resp.ProvisioningHint)                                 //nolint:staticcheck // testing deprecated field
 			assert.Equal(t, tt.expectedStatus, resp.Tenant.Status)
 		})
 	}
@@ -1207,7 +1208,7 @@ func TestService_InitiateTenant_ProvisioningHint_ProvisioningStates(t *testing.T
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' with provisioner")
+	assert.Equal(t, "pending", resp.ProvisioningHint, "hint should be 'pending' with provisioner") //nolint:staticcheck // testing deprecated field
 	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status)
 }
 
@@ -1235,4 +1236,419 @@ func TestProvisioningHintFromStatus(t *testing.T) {
 			assert.Equal(t, tt.expectedHint, got, "provisioningHintFromStatus(%s)", tt.status)
 		})
 	}
+}
+
+// Tests for GetTenantProvisioningStatus
+
+func TestService_GetTenantProvisioningStatus_Success(t *testing.T) {
+	svc, db, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create context with platform-admin claims for cross-tenant access
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// Create tenant with provisioning status
+	createReq := &pb.InitiateTenantRequest{
+		TenantId:        "provisioning_status_test",
+		DisplayName:     "Provisioning Status Test",
+		SettlementAsset: "GBP",
+	}
+	_, err := svc.InitiateTenant(ctx, createReq)
+	require.NoError(t, err)
+
+	// Auto-migrate the provisioning status table
+	err = db.AutoMigrate(&persistence.ProvisioningStatusEntity{})
+	require.NoError(t, err)
+
+	// Insert test provisioning status records directly via GORM
+	partyStarted := time.Now().Add(-5 * time.Minute)
+	partyCompleted := time.Now().Add(-3 * time.Minute)
+	accountStarted := time.Now().Add(-2 * time.Minute)
+
+	err = db.Create(&persistence.ProvisioningStatusEntity{
+		TenantID:         "provisioning_status_test",
+		ServiceName:      "party",
+		Status:           string(domain.ServiceStatusCompleted),
+		MigrationVersion: stringPtr("20240115_001"),
+		StartedAt:        &partyStarted,
+		CompletedAt:      &partyCompleted,
+	}).Error
+	require.NoError(t, err)
+
+	err = db.Create(&persistence.ProvisioningStatusEntity{
+		TenantID:         "provisioning_status_test",
+		ServiceName:      "account",
+		Status:           string(domain.ServiceStatusInProgress),
+		MigrationVersion: stringPtr("20240120_002"),
+		StartedAt:        &accountStarted,
+	}).Error
+	require.NoError(t, err)
+
+	err = db.Create(&persistence.ProvisioningStatusEntity{
+		TenantID:    "provisioning_status_test",
+		ServiceName: "transaction",
+		Status:      string(domain.ServiceStatusPending),
+	}).Error
+	require.NoError(t, err)
+
+	// Get provisioning status
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "provisioning_status_test",
+	}
+	resp, err := svc.GetTenantProvisioningStatus(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify response structure
+	assert.Equal(t, "provisioning_status_test", resp.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.OverallStatus)
+	assert.Len(t, resp.Services, 3)
+
+	// Verify service statuses are returned in alphabetical order
+	assert.Equal(t, "account", resp.Services[0].ServiceName)
+	assert.Equal(t, pb.ServiceProvisioningStatus_STATUS_IN_PROGRESS, resp.Services[0].Status)
+	assert.Equal(t, "20240120_002", resp.Services[0].MigrationVersion)
+	assert.NotNil(t, resp.Services[0].StartedAt)
+	assert.Nil(t, resp.Services[0].CompletedAt)
+
+	assert.Equal(t, "party", resp.Services[1].ServiceName)
+	assert.Equal(t, pb.ServiceProvisioningStatus_STATUS_COMPLETED, resp.Services[1].Status)
+	assert.Equal(t, "20240115_001", resp.Services[1].MigrationVersion)
+	assert.NotNil(t, resp.Services[1].StartedAt)
+	assert.NotNil(t, resp.Services[1].CompletedAt)
+
+	assert.Equal(t, "transaction", resp.Services[2].ServiceName)
+	assert.Equal(t, pb.ServiceProvisioningStatus_STATUS_PENDING, resp.Services[2].Status)
+	assert.Empty(t, resp.Services[2].MigrationVersion)
+	assert.Nil(t, resp.Services[2].StartedAt)
+	assert.Nil(t, resp.Services[2].CompletedAt)
+}
+
+func TestService_GetTenantProvisioningStatus_TenantNotFound(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create context with platform-admin claims
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "nonexistent_tenant",
+	}
+
+	_, err := svc.GetTenantProvisioningStatus(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+	assert.Contains(t, st.Message(), "nonexistent_tenant not found")
+}
+
+func TestService_GetTenantProvisioningStatus_EmptyServicesList(t *testing.T) {
+	svc, db, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create tenant
+	createReq := &pb.InitiateTenantRequest{
+		TenantId:        "empty_services_test",
+		DisplayName:     "Empty Services Test",
+		SettlementAsset: "USD",
+	}
+	_, err := svc.InitiateTenant(ctx, createReq)
+	require.NoError(t, err)
+
+	// Create context with platform-admin claims for GetTenantProvisioningStatus
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	authCtx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// Auto-migrate the provisioning status table but don't insert any records
+	err = db.AutoMigrate(&persistence.ProvisioningStatusEntity{})
+	require.NoError(t, err)
+
+	// Get provisioning status using authenticated context
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "empty_services_test",
+	}
+	resp, err := svc.GetTenantProvisioningStatus(authCtx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Should return empty services array, not an error
+	assert.Equal(t, "empty_services_test", resp.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, resp.OverallStatus)
+	assert.Empty(t, resp.Services)
+	assert.Empty(t, resp.ErrorMessage)
+}
+
+func TestService_GetTenantProvisioningStatus_WithFailedService(t *testing.T) {
+	svc, db, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create tenant with provisioning_failed status
+	createReq := &pb.InitiateTenantRequest{
+		TenantId:        "failed_provisioning_test",
+		DisplayName:     "Failed Provisioning Test",
+		SettlementAsset: "EUR",
+	}
+	createResp, err := svc.InitiateTenant(ctx, createReq)
+	require.NoError(t, err)
+
+	// Create context with platform-admin claims for GetTenantProvisioningStatus
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	authCtx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// Update tenant status to provisioning_failed
+	tenantID, err := tenant.NewTenantID(createResp.Tenant.TenantId)
+	require.NoError(t, err)
+	_, err = svc.repo.UpdateStatusWithError(ctx, tenantID, domain.StatusProvisioningFailed, "Database connection timeout", int(createResp.Tenant.Version))
+	require.NoError(t, err)
+
+	// Auto-migrate provisioning status table
+	err = db.AutoMigrate(&persistence.ProvisioningStatusEntity{})
+	require.NoError(t, err)
+
+	// Insert failed service status via GORM
+	failedStarted := time.Now().Add(-5 * time.Minute)
+	failedCompleted := time.Now()
+	err = db.Create(&persistence.ProvisioningStatusEntity{
+		TenantID:     "failed_provisioning_test",
+		ServiceName:  "party",
+		Status:       string(domain.ServiceStatusFailed),
+		ErrorMessage: stringPtr("Migration 003 failed: constraint violation"),
+		StartedAt:    &failedStarted,
+		CompletedAt:  &failedCompleted,
+	}).Error
+	require.NoError(t, err)
+
+	// Get provisioning status using authenticated context
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "failed_provisioning_test",
+	}
+	resp, err := svc.GetTenantProvisioningStatus(authCtx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify overall status is provisioning_failed
+	assert.Equal(t, "failed_provisioning_test", resp.TenantId)
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED, resp.OverallStatus)
+	assert.Equal(t, "Database connection timeout", resp.ErrorMessage)
+
+	// Verify failed service details
+	require.Len(t, resp.Services, 1)
+	assert.Equal(t, "party", resp.Services[0].ServiceName)
+	assert.Equal(t, pb.ServiceProvisioningStatus_STATUS_FAILED, resp.Services[0].Status)
+	assert.Equal(t, "Migration 003 failed: constraint violation", resp.Services[0].ErrorMessage)
+	assert.NotNil(t, resp.Services[0].StartedAt)
+	assert.NotNil(t, resp.Services[0].CompletedAt)
+}
+
+func TestService_GetTenantProvisioningStatus_InvalidTenantID(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create context with platform-admin claims
+	claims := &auth.Claims{
+		UserID: "admin-123",
+		Roles:  []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	req := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "invalid-tenant-id-with-dashes",
+	}
+
+	_, err := svc.GetTenantProvisioningStatus(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "invalid tenant ID")
+}
+
+// Tests for GetTenantProvisioningStatus Authorization
+
+func TestGetTenantProvisioningStatus_Authorization(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	tests := []struct {
+		name         string
+		claims       *auth.Claims
+		tenantID     string
+		expectError  bool
+		expectedCode codes.Code
+		expectedMsg  string
+	}{
+		{
+			name: "platform-admin allowed",
+			claims: &auth.Claims{
+				UserID: "admin-123",
+				Roles:  []string{auth.RolePlatformAdmin},
+			},
+			tenantID:    "test_tenant",
+			expectError: false,
+		},
+		{
+			name: "super-admin allowed",
+			claims: &auth.Claims{
+				UserID: "super-123",
+				Roles:  []string{auth.RoleSuperAdmin},
+			},
+			tenantID:    "test_tenant",
+			expectError: false,
+		},
+		{
+			name: "tenant owner allowed",
+			claims: &auth.Claims{
+				UserID:   "user-123",
+				TenantID: "test_tenant",
+				Roles:    []string{"user"},
+			},
+			tenantID:    "test_tenant",
+			expectError: false,
+		},
+		{
+			name: "different tenant denied",
+			claims: &auth.Claims{
+				UserID:   "user-456",
+				TenantID: "other_tenant",
+				Roles:    []string{"user"},
+			},
+			tenantID:     "test_tenant",
+			expectError:  true,
+			expectedCode: codes.PermissionDenied,
+			expectedMsg:  "access denied",
+		},
+		{
+			name: "user without tenant denied",
+			claims: &auth.Claims{
+				UserID: "user-789",
+				Roles:  []string{"user"},
+			},
+			tenantID:     "test_tenant",
+			expectError:  true,
+			expectedCode: codes.PermissionDenied,
+			expectedMsg:  "access denied",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create context with claims
+			ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, tt.claims)
+
+			// Execute
+			resp, err := svc.GetTenantProvisioningStatus(ctx, &pb.GetTenantProvisioningStatusRequest{
+				TenantId: tt.tenantID,
+			})
+
+			// Assert
+			if tt.expectError {
+				require.Error(t, err)
+				st, ok := status.FromError(err)
+				require.True(t, ok, "error should be a gRPC status")
+				assert.Equal(t, tt.expectedCode, st.Code())
+				assert.Contains(t, st.Message(), tt.expectedMsg)
+				assert.Nil(t, resp)
+			} else {
+				// Note: Will return NotFound error since test_tenant doesn't exist,
+				// but that proves authorization passed
+				if err != nil {
+					st, ok := status.FromError(err)
+					require.True(t, ok)
+					// Should be NotFound (tenant doesn't exist), not PermissionDenied
+					assert.Equal(t, codes.NotFound, st.Code())
+				}
+			}
+		})
+	}
+}
+
+func TestGetTenantProvisioningStatus_MissingClaims(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	// Context without claims
+	ctx := context.Background()
+
+	// Execute
+	resp, err := svc.GetTenantProvisioningStatus(ctx, &pb.GetTenantProvisioningStatusRequest{
+		TenantId: "test_tenant",
+	})
+
+	// Assert
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok, "error should be a gRPC status")
+	assert.Equal(t, codes.Unauthenticated, st.Code())
+	assert.Contains(t, st.Message(), "authentication required")
+	assert.Nil(t, resp)
+}
+
+func TestService_toProtoServiceStatus(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	tests := []struct {
+		name          string
+		domainStatus  domain.ServiceProvisioningStatus
+		expectedProto pb.ServiceProvisioningStatus_Status
+	}{
+		{
+			name:          "pending to proto",
+			domainStatus:  domain.ServiceStatusPending,
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_PENDING,
+		},
+		{
+			name:          "in_progress to proto",
+			domainStatus:  domain.ServiceStatusInProgress,
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_IN_PROGRESS,
+		},
+		{
+			name:          "completed to proto",
+			domainStatus:  domain.ServiceStatusCompleted,
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_COMPLETED,
+		},
+		{
+			name:          "failed to proto",
+			domainStatus:  domain.ServiceStatusFailed,
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_FAILED,
+		},
+		{
+			name:          "unknown status to unspecified",
+			domainStatus:  domain.ServiceProvisioningStatus("unknown"),
+			expectedProto: pb.ServiceProvisioningStatus_STATUS_UNSPECIFIED,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := svc.toProtoServiceStatus(tt.domainStatus)
+			assert.Equal(t, tt.expectedProto, result)
+		})
+	}
+}
+
+// stringPtr is a helper function to create a pointer to a string.
+func stringPtr(s string) *string {
+	return &s
 }

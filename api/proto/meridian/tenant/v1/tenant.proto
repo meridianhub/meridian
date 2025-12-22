@@ -256,23 +256,26 @@ message InitiateTenantResponse {
   // provisioning_hint provides a simplified status indicator for clients.
   //
   // Possible values:
-  // - "pending": Tenant provisioning is queued/in-progress. Client MUST poll RetrieveTenant.
+  // - "pending": Tenant provisioning is queued/in-progress. Client should poll GetTenantProvisioningStatus.
   // - "active": Tenant is fully provisioned and ready to use. No polling needed.
   //
   // This field simplifies client logic by providing a binary decision point rather than
   // requiring clients to understand the full TenantStatus enum. Clients should use this
   // field to determine their next action:
-  // - "pending" → Poll RetrieveTenant with exponential backoff
+  // - "pending" → Poll GetTenantProvisioningStatus for detailed per-service status
   // - "active" → Proceed to use tenant services immediately
   //
-  // Note: This is a convenience field. The authoritative tenant status is always
-  // available in the tenant.status field for clients that need fine-grained control.
+  // Note: This is a convenience field. For detailed per-service provisioning status,
+  // use the GetTenantProvisioningStatus RPC instead.
+  //
+  // Deprecated: Use GetTenantProvisioningStatus RPC for detailed provisioning status.
   string provisioning_hint = 2 [
+    deprecated = true,
     (buf.validate.field).string = {
       in: ["pending", "active"]
     },
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Provisioning status hint. Possible values: 'pending' (tenant provisioning queued/in-progress, client must poll), 'active' (tenant ready immediately)."
+      description: "DEPRECATED: Use GetTenantProvisioningStatus RPC instead. Provisioning status hint. Possible values: 'pending' (tenant provisioning queued/in-progress), 'active' (tenant ready immediately)."
       example: "\"active\""
     }
   ];
@@ -367,6 +370,72 @@ message ReconcileMigrationsResponse {
 
   // errors contains per-tenant error messages (reconciliation continues despite failures).
   repeated string errors = 2;
+}
+
+// ServiceProvisioningStatus represents the provisioning state of a single service for a tenant.
+message ServiceProvisioningStatus {
+  // service_name is the name of the service (e.g., "customer", "transaction", "party").
+  string service_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // Status defines the provisioning state of this service.
+  enum Status {
+    // STATUS_UNSPECIFIED means the status is unknown.
+    STATUS_UNSPECIFIED = 0;
+    // STATUS_PENDING means provisioning has not started yet.
+    STATUS_PENDING = 1;
+    // STATUS_IN_PROGRESS means provisioning is currently running.
+    STATUS_IN_PROGRESS = 2;
+    // STATUS_COMPLETED means provisioning completed successfully.
+    STATUS_COMPLETED = 3;
+    // STATUS_FAILED means provisioning failed with an error.
+    STATUS_FAILED = 4;
+  }
+
+  // status is the current provisioning state of this service.
+  Status status = 2 [(buf.validate.field).enum = {defined_only: true}];
+
+  // migration_version is the current migration version applied (e.g., "20240115_001").
+  // Empty if no migrations have been applied yet.
+  string migration_version = 3 [(buf.validate.field).string = {max_len: 100}];
+
+  // error_message contains error details if status is FAILED.
+  // Empty for successful provisioning.
+  string error_message = 4 [(buf.validate.field).string = {max_len: 2000}];
+
+  // started_at is when provisioning started for this service.
+  google.protobuf.Timestamp started_at = 5;
+
+  // completed_at is when provisioning completed (success or failure).
+  google.protobuf.Timestamp completed_at = 6;
+}
+
+// GetTenantProvisioningStatusRequest is the request to query detailed provisioning status.
+message GetTenantProvisioningStatusRequest {
+  // tenant_id is the unique identifier of the tenant.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^[a-zA-Z0-9_]+$"
+  }];
+}
+
+// GetTenantProvisioningStatusResponse contains detailed provisioning status for a tenant.
+message GetTenantProvisioningStatusResponse {
+  // tenant_id is the unique identifier of the tenant.
+  string tenant_id = 1 [(buf.validate.field).string = {min_len: 1}];
+
+  // overall_status is the aggregate provisioning status across all services.
+  TenantStatus overall_status = 2;
+
+  // services contains per-service provisioning progress.
+  repeated ServiceProvisioningStatus services = 3;
+
+  // error_message contains overall error details if provisioning failed.
+  // Empty for successful or in-progress provisioning.
+  string error_message = 4 [(buf.validate.field).string = {max_len: 2000}];
 }
 
 // TenantService provides platform tenant lifecycle management.
@@ -464,6 +533,18 @@ service TenantService {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Reconcile migrations for tenant schemas"
       description: "Applies new migrations to existing tenant schemas. Safe to call multiple times."
+    };
+  }
+
+  // GetTenantProvisioningStatus retrieves detailed provisioning status for a tenant.
+  // Returns per-service provisioning progress including migration versions and error details.
+  rpc GetTenantProvisioningStatus(GetTenantProvisioningStatusRequest) returns (GetTenantProvisioningStatusResponse) {
+    option (google.api.http) = {
+      get: "/v1/tenants/{tenant_id}/provisioning-status"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get detailed provisioning status"
+      description: "Returns per-service provisioning progress for a tenant including migration versions and errors."
     };
   }
 }
