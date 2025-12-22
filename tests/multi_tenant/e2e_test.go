@@ -297,7 +297,7 @@ func (infra *e2eTestInfra) setupServices(t *testing.T) {
 
 	// Create tenant repository and service
 	tenantRepo := tenantPersistence.NewRepository(infra.gormDB)
-	infra.tenantSvc = tenantService.NewService(tenantRepo, prov, nil, infra.logger)
+	infra.tenantSvc = tenantService.NewService(tenantRepo, prov, nil, nil, infra.logger)
 
 	// Party service is created per-tenant with tenant-scoped database
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -167,8 +168,29 @@ func run(logger *slog.Logger) error {
 			"hint", "set PARTY_SERVICE_ENABLED=true to enable party registration")
 	}
 
+	// Initialize Redis client and slug cache (optional - skipped if REDIS_ENABLED is not "true")
+	var slugCache *service.SlugCache
+	redisEnabled := getEnvOrDefault("REDIS_ENABLED", envValueTrue) == envValueTrue
+	if redisEnabled {
+		redisClient, err := createRedisClient(logger)
+		if err != nil {
+			return fmt.Errorf("failed to create Redis client: %w", err)
+		}
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				logger.Error("failed to close Redis client", "error", err)
+			}
+		}()
+
+		slugCache = service.NewSlugCache(redisClient)
+		logger.Info("slug cache initialized with Redis backend")
+	} else {
+		logger.Warn("Redis not enabled - slug caching disabled",
+			"hint", "set REDIS_ENABLED=true to enable slug caching")
+	}
+
 	// Create gRPC service
-	tenantService := service.NewService(repo, schemaProvisioner, partyClient, logger)
+	tenantService := service.NewService(repo, schemaProvisioner, partyClient, slugCache, logger)
 
 	// Create cached registry for validation middleware
 	cachedRegistry := service.NewCachedRegistry(repo, service.CachedRegistryConfig{
@@ -484,4 +506,44 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return value
+}
+
+// createRedisClient creates and initializes a Redis client from environment configuration.
+func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
+	redisURL := getEnvOrDefault("REDIS_URL", "redis://localhost:6379")
+	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
+	redisDB := getEnvAsInt("REDIS_DB", 0)
+	poolSize := getEnvAsInt("REDIS_POOL_SIZE", 10)
+	minIdleConns := getEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
+
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid REDIS_URL: %w", err)
+	}
+
+	// Override with explicit config if set
+	if redisPassword != "" {
+		opt.Password = redisPassword
+	}
+	opt.DB = redisDB
+	opt.PoolSize = poolSize
+	opt.MinIdleConns = minIdleConns
+
+	client := redis.NewClient(opt)
+
+	// Verify connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	logger.Info("Redis client connected",
+		"url", redisURL,
+		"db", redisDB,
+		"pool_size", poolSize,
+		"min_idle_conns", minIdleConns)
+
+	return client, nil
 }

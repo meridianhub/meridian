@@ -58,8 +58,8 @@ func setupTest(t *testing.T) (*Service, *gorm.DB, func()) {
 	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	// Pass nil for provisioner and partyClient - skipped in basic tests
-	svc := NewService(repo, nil, nil, logger)
+	// Pass nil for provisioner, partyClient, and slugCache - skipped in basic tests
+	svc := NewService(repo, nil, nil, nil, logger)
 	return svc, db, cleanup
 }
 
@@ -436,7 +436,7 @@ func setupTestWithPartyClient(t *testing.T, partyClient *mockPartyClient) (*Serv
 	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	svc := NewService(repo, nil, partyClient, logger)
+	svc := NewService(repo, nil, partyClient, nil, logger)
 	return svc, db, cleanup
 }
 
@@ -446,7 +446,7 @@ func setupTestWithProvisioner(t *testing.T, mockProv *provisioner.MockProvisione
 	createAuditOutboxTable(t, db)
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	svc := NewService(repo, mockProv, nil, logger)
+	svc := NewService(repo, mockProv, nil, nil, logger)
 	return svc, db, cleanup
 }
 
@@ -617,7 +617,7 @@ func TestReconcileMigrations_Authorization(t *testing.T) {
 	})
 
 	// Create service with mock provisioner
-	svc := NewService(nil, mockProvisioner, nil, slog.Default())
+	svc := NewService(nil, mockProvisioner, nil, nil, slog.Default())
 
 	tests := []struct {
 		name         string
@@ -723,7 +723,7 @@ func TestReconcileMigrations_MissingClaims(t *testing.T) {
 	})
 
 	// Create service with mock provisioner
-	svc := NewService(nil, mockProvisioner, nil, slog.Default())
+	svc := NewService(nil, mockProvisioner, nil, nil, slog.Default())
 
 	// Context without claims
 	ctx := context.Background()
@@ -742,7 +742,7 @@ func TestReconcileMigrations_MissingClaims(t *testing.T) {
 
 func TestReconcileMigrations_NoProvisioner(t *testing.T) {
 	// Create service without provisioner
-	svc := NewService(nil, nil, nil, slog.Default())
+	svc := NewService(nil, nil, nil, nil, slog.Default())
 
 	// Create context with valid claims
 	claims := &auth.Claims{
@@ -769,7 +769,7 @@ func TestReconcileMigrations_AuthorizationBeforeProvisioner(t *testing.T) {
 	// revealing any details about system configuration.
 
 	// Create service WITHOUT provisioner (nil)
-	svc := NewService(nil, nil, nil, slog.Default())
+	svc := NewService(nil, nil, nil, nil, slog.Default())
 
 	// Create context with unauthorized claims
 	claims := &auth.Claims{
@@ -809,7 +809,7 @@ func TestReconcileMigrations_SuccessfulReconciliation(t *testing.T) {
 	})
 
 	// Create service with mock provisioner
-	svc := NewService(nil, mockProvisioner, nil, slog.Default())
+	svc := NewService(nil, mockProvisioner, nil, nil, slog.Default())
 
 	// Create context with platform-admin claims
 	claims := &auth.Claims{
