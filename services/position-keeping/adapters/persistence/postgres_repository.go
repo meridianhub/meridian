@@ -769,6 +769,10 @@ func (r *PostgresRepository) loadTransactionLogEntriesTx(ctx context.Context, tx
 		entries = append(entries, &entry)
 	}
 
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating transaction log entries: %w", err)
+	}
+
 	log.TransactionLogEntries = entries
 	return nil
 }
@@ -848,6 +852,10 @@ func (r *PostgresRepository) getExistingAuditIDs(ctx context.Context, tx pgx.Tx,
 		existingIDs[auditID] = struct{}{}
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating existing audit IDs: %w", err)
+	}
+
 	return existingIDs, nil
 }
 
@@ -893,6 +901,10 @@ func (r *PostgresRepository) loadAuditTrailEntriesTx(ctx context.Context, tx pgx
 		}
 
 		entries = append(entries, &entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating audit trail entries: %w", err)
 	}
 
 	log.AuditTrail = entries
@@ -965,6 +977,10 @@ func (r *PostgresRepository) loadTransactionLogEntriesBatchTx(ctx context.Contex
 		if log, ok := dbIDToLog[financialPosLogID]; ok {
 			log.TransactionLogEntries = append(log.TransactionLogEntries, &entry)
 		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating transaction log entries batch: %w", err)
 	}
 
 	return nil
@@ -1044,6 +1060,10 @@ func (r *PostgresRepository) loadTransactionLineageBatchTx(ctx context.Context, 
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating transaction lineage batch: %w", err)
+	}
+
 	return nil
 }
 
@@ -1106,6 +1126,10 @@ func (r *PostgresRepository) loadAuditTrailEntriesBatchTx(ctx context.Context, t
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating audit trail entries batch: %w", err)
+	}
+
 	return nil
 }
 
@@ -1150,6 +1174,10 @@ func (r *PostgresRepository) scanLogsTx(ctx context.Context, tx pgx.Tx, rows pgx
 		logs = append(logs, &log)
 		dbIDToLog[dbID] = &log
 		dbIDs = append(dbIDs, dbID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating financial position logs: %w", err)
 	}
 
 	// If no logs were found, return early
@@ -1205,6 +1233,10 @@ func (r *PostgresRepository) getLogIDMap(ctx context.Context, tx pgx.Tx, logs []
 			return nil, fmt.Errorf("failed to scan log ID mapping: %w", err)
 		}
 		idMap[logID] = dbID
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating log ID mappings: %w", err)
 	}
 
 	return idMap, nil
