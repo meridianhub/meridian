@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -128,6 +129,278 @@ func TestTenant_CanTransitionTo(t *testing.T) {
 			if result != tt.expectedAllowed {
 				t.Errorf("Tenant with status %q transitioning to %q: got %v, expected %v",
 					tt.currentStatus, tt.targetStatus, result, tt.expectedAllowed)
+			}
+		})
+	}
+}
+
+func TestValidateSlug(t *testing.T) {
+	tests := []struct {
+		name    string
+		slug    string
+		wantErr bool
+		errMsg  string
+	}{
+		// Valid slugs
+		{
+			name:    "valid simple slug",
+			slug:    "acme",
+			wantErr: false,
+		},
+		{
+			name:    "valid slug with numbers",
+			slug:    "bank-123",
+			wantErr: false,
+		},
+		{
+			name:    "valid slug with multiple hyphens",
+			slug:    "my-org",
+			wantErr: false,
+		},
+		{
+			name:    "valid slug all lowercase",
+			slug:    "testcompany",
+			wantErr: false,
+		},
+		{
+			name:    "valid slug with numbers at start",
+			slug:    "123bank",
+			wantErr: false,
+		},
+		{
+			name:    "valid slug minimum length",
+			slug:    "abc",
+			wantErr: false,
+		},
+		{
+			name:    "valid slug maximum length",
+			slug:    "a123456789012345678901234567890123456789012345678901234567890ab",
+			wantErr: false,
+		},
+		{
+			name:    "empty slug is valid",
+			slug:    "",
+			wantErr: false,
+		},
+
+		// Invalid formats
+		{
+			name:    "uppercase letters",
+			slug:    "ACME",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "mixed case",
+			slug:    "AcMeBaNk",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "leading hyphen",
+			slug:    "-start",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "trailing hyphen",
+			slug:    "end-",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "special characters",
+			slug:    "special!",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "underscores",
+			slug:    "with_underscore",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "spaces",
+			slug:    "with space",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "dots",
+			slug:    "with.dot",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "unicode characters - accented",
+			slug:    "café",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "unicode characters - japanese",
+			slug:    "日本",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "unicode characters - emoji",
+			slug:    "test🚀",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+
+		// Edge cases - length
+		{
+			name:    "too short - 2 chars",
+			slug:    "ab",
+			wantErr: true,
+			errMsg:  "must be at least 3 characters long",
+		},
+		{
+			name:    "too short - 1 char",
+			slug:    "a",
+			wantErr: true,
+			errMsg:  "must be at least 3 characters long",
+		},
+		{
+			name:    "too long - 64 chars",
+			slug:    "a1234567890123456789012345678901234567890123456789012345678901234",
+			wantErr: true,
+			errMsg:  "must be at most 63 characters long",
+		},
+
+		// Reserved words
+		{
+			name:    "reserved - api",
+			slug:    "api",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - admin",
+			slug:    "admin",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - www",
+			slug:    "www",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - health",
+			slug:    "health",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - status",
+			slug:    "status",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - docs",
+			slug:    "docs",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - internal",
+			slug:    "internal",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - system",
+			slug:    "system",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - platform",
+			slug:    "platform",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - app",
+			slug:    "app",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - mail",
+			slug:    "mail",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - cdn",
+			slug:    "cdn",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - auth",
+			slug:    "auth",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - graphql",
+			slug:    "graphql",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+
+		// Edge cases - uppercase reserved words fail regex check first (not ErrSlugReserved)
+		// This documents the validation order: length → format (regex) → reserved words
+		{
+			name:    "uppercase reserved word fails format check",
+			slug:    "API",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "mixed case reserved word fails format check",
+			slug:    "Admin",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+
+		// Edge cases - single character with hyphen
+		{
+			name:    "single hyphen",
+			slug:    "-",
+			wantErr: true,
+			errMsg:  "must be at least 3 characters long",
+		},
+		{
+			name:    "double hyphen",
+			slug:    "a--b",
+			wantErr: false, // Multiple consecutive hyphens are allowed
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSlug(tt.slug)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ValidateSlug(%q) expected error containing %q, got nil", tt.slug, tt.errMsg)
+					return
+				}
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateSlug(%q) error = %q, want error containing %q", tt.slug, err.Error(), tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ValidateSlug(%q) unexpected error: %v", tt.slug, err)
+				}
 			}
 		})
 	}

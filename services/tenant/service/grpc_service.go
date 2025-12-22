@@ -45,6 +45,20 @@ func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner
 	}
 }
 
+// provisioningHintFromStatus converts a tenant status to a provisioning hint string.
+// Returns "pending" for any in-progress provisioning status (PROVISIONING_PENDING or PROVISIONING),
+// "active" otherwise. This provides a simple binary decision point for clients.
+func provisioningHintFromStatus(status domain.Status) string {
+	switch status {
+	case domain.StatusProvisioningPending, domain.StatusProvisioning:
+		return "pending"
+	case domain.StatusProvisioningFailed, domain.StatusActive, domain.StatusSuspended, domain.StatusDeprovisioned:
+		return "active"
+	}
+	// Unreachable for valid statuses, but return "active" as safe default
+	return "active"
+}
+
 // InitiateTenant creates a new tenant in the platform registry (BIAN: Initiate).
 // Returns immediately with 202 Accepted semantics (represented by successful response with PROVISIONING_PENDING status).
 // If a provisioner is configured, tenant is created with PROVISIONING_PENDING status and schema provisioning
@@ -71,9 +85,17 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		initialStatus = domain.StatusProvisioningPending
 	}
 
+	// Validate slug if provided
+	if req.Slug != "" {
+		if err := domain.ValidateSlug(req.Slug); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid slug: %v", err)
+		}
+	}
+
 	// Create domain tenant
 	tenant := &domain.Tenant{
 		ID:              tenantID,
+		Slug:            req.Slug,
 		DisplayName:     req.DisplayName,
 		SettlementAsset: req.SettlementAsset,
 		Subdomain:       req.Subdomain,
@@ -119,6 +141,9 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		if errors.Is(err, persistence.ErrSubdomainTaken) {
 			return nil, status.Errorf(codes.AlreadyExists, "subdomain %s is already taken", req.Subdomain)
 		}
+		if errors.Is(err, persistence.ErrSlugTaken) {
+			return nil, status.Errorf(codes.AlreadyExists, "slug %s is already taken", req.Slug)
+		}
 		s.logger.Error("failed to create tenant",
 			"tenant_id", req.TenantId,
 			"error", err)
@@ -146,7 +171,8 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 	}
 
 	return &pb.InitiateTenantResponse{
-		Tenant: s.toProto(tenant),
+		Tenant:           s.toProto(tenant),
+		ProvisioningHint: provisioningHintFromStatus(tenant.Status),
 	}, nil
 }
 
@@ -270,6 +296,7 @@ func (s *Service) ListTenants(ctx context.Context, req *pb.ListTenantsRequest) (
 func (s *Service) toProto(tenant *domain.Tenant) *pb.Tenant {
 	proto := &pb.Tenant{
 		TenantId:        tenant.ID.String(),
+		Slug:            tenant.Slug,
 		DisplayName:     tenant.DisplayName,
 		SettlementAsset: tenant.SettlementAsset,
 		Subdomain:       tenant.Subdomain,

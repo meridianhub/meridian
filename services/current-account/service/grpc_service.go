@@ -13,8 +13,6 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
-	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
-	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/current-account/config"
@@ -31,23 +29,13 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Sentinel errors for consistent error handling
-var (
-	ErrRepositoryNil                       = errors.New("repository cannot be nil")
-	ErrPositionKeepingServiceNameEmpty     = errors.New("position keeping service name cannot be empty")
-	ErrFinancialAccountingServiceNameEmpty = errors.New("financial accounting service name cannot be empty")
-	ErrOriginalAccountStateNotFound        = errors.New("original account state not available for compensation")
-	ErrPositionLogIDNotFound               = errors.New("position log ID not available for compensation")
-	ErrLedgerPostingIDNotFound             = errors.New("ledger posting ID not available for compensation")
-
-	// Party validation errors (re-exported from clients package for convenience)
-	ErrPartyNotFound  = clients.ErrPartyNotFound
-	ErrPartyNotActive = clients.ErrPartyNotActive
-)
+// Sentinel errors are defined in errors.go for better organization.
+// See errors.go for ErrRepositoryNil, ErrNilPositionLog, etc.
 
 // Operation status constants for consistency across the service
 const (
 	operationStatusSuccess         = "success"
+	operationStatusFailed          = "failed"
 	operationStatusInvalidCurrency = "invalid_currency"
 	opStatusIdempotent             = "idempotent"
 )
@@ -67,15 +55,16 @@ const (
 // Service implements the CurrentAccountService gRPC service
 type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
-	repo               *persistence.Repository
-	lienRepo           *persistence.LienRepository
-	posKeepingClient   clients.PositionKeepingClient
-	finAcctClient      clients.FinancialAccountingClient
-	partyClient        clients.PartyClient
-	accountConfig      *config.AccountConfig
-	idempotencyService idempotency.Service
-	logger             *slog.Logger
-	tracer             *observability.Tracer
+	repo                *persistence.Repository
+	lienRepo            *persistence.LienRepository
+	posKeepingClient    clients.PositionKeepingClient
+	finAcctClient       clients.FinancialAccountingClient
+	partyClient         clients.PartyClient
+	accountConfig       *config.AccountConfig
+	idempotencyService  idempotency.Service
+	logger              *slog.Logger
+	tracer              *observability.Tracer
+	depositOrchestrator *DepositOrchestrator // Handles deposit saga orchestration
 }
 
 // Config contains configuration for creating a new Service with external clients
@@ -150,16 +139,26 @@ func NewServiceWithExistingClients(
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
+	// Create deposit orchestrator
+	depositOrchestrator := NewDepositOrchestrator(DepositOrchestratorConfig{
+		Logger:           logger,
+		Repo:             repo,
+		PosKeepingClient: posKeepingClient,
+		FinAcctClient:    finAcctClient,
+		AccountConfig:    accountConfig,
+	})
+
 	return &Service{
-		repo:               repo,
-		lienRepo:           lienRepo,
-		posKeepingClient:   posKeepingClient,
-		finAcctClient:      finAcctClient,
-		partyClient:        partyClient,
-		accountConfig:      accountConfig,
-		idempotencyService: idempotencyService,
-		logger:             logger,
-		tracer:             tracer,
+		repo:                repo,
+		lienRepo:            lienRepo,
+		posKeepingClient:    posKeepingClient,
+		finAcctClient:       finAcctClient,
+		partyClient:         partyClient,
+		accountConfig:       accountConfig,
+		idempotencyService:  idempotencyService,
+		logger:              logger,
+		tracer:              tracer,
+		depositOrchestrator: depositOrchestrator,
 	}, nil
 }
 
@@ -246,14 +245,24 @@ func NewServiceWithClients(config Config) (*Service, error) {
 		)
 	}
 
+	// Create deposit orchestrator
+	depositOrchestrator := NewDepositOrchestrator(DepositOrchestratorConfig{
+		Logger:           logger,
+		Repo:             config.Repository,
+		PosKeepingClient: resilientPosKeepingClient,
+		FinAcctClient:    resilientFinAcctClient,
+		AccountConfig:    nil, // Not passed in Config - will use defaults
+	})
+
 	return &Service{
-		repo:             config.Repository,
-		lienRepo:         config.LienRepository,
-		posKeepingClient: resilientPosKeepingClient,
-		finAcctClient:    resilientFinAcctClient,
-		partyClient:      resilientPartyClient,
-		logger:           logger,
-		tracer:           config.Tracer,
+		repo:                config.Repository,
+		lienRepo:            config.LienRepository,
+		posKeepingClient:    resilientPosKeepingClient,
+		finAcctClient:       resilientFinAcctClient,
+		partyClient:         resilientPartyClient,
+		logger:              logger,
+		tracer:              config.Tracer,
+		depositOrchestrator: depositOrchestrator,
 	}, nil
 }
 
@@ -342,7 +351,13 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	}, nil
 }
 
-// ExecuteDeposit processes a deposit transaction with Redis-based idempotency protection
+// ExecuteDeposit processes a deposit transaction with Redis-based idempotency protection.
+//
+// Concurrency: This method relies on optimistic locking in the repository layer
+// to handle concurrent modifications to the same account. If two requests attempt
+// to modify the same account simultaneously, one will succeed and the other will
+// receive ErrVersionConflict, which surfaces as an Internal error to the client.
+// Redis-based idempotency provides request deduplication for retried requests.
 func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequest) (*pb.ExecuteDepositResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
@@ -517,8 +532,8 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 			Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
 		}
 	} else {
-		// Orchestrate transaction with saga pattern
-		resp, err = s.orchestrateDeposit(ctx, account, amount, transactionID)
+		// Orchestrate transaction with saga pattern using dedicated orchestrator
+		resp, err = s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID)
 		if err != nil {
 			operationStatus = "saga_failed"
 			return nil, err
@@ -550,564 +565,6 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	}
 
 	return resp, nil
-}
-
-// orchestrateDeposit orchestrates the distributed transaction using saga pattern
-func (s *Service) orchestrateDeposit(ctx context.Context, account domain.CurrentAccount, amount domain.Money, transactionID string) (*pb.ExecuteDepositResponse, error) {
-	sagaStart := time.Now()
-	sagaStatus := operationStatusSuccess
-	defer func() {
-		caobservability.RecordSagaDuration("deposit", sagaStatus, time.Since(sagaStart))
-	}()
-
-	// Extract or generate correlation ID
-	correlationID := sharedclients.ExtractCorrelationID(ctx)
-	if correlationID == "" {
-		correlationID = uuid.New().String()
-		s.logger.Info("generated new correlation ID", "correlation_id", correlationID)
-		// Add the generated correlation ID to the context so it can be propagated
-		ctx = observability.WithCorrelationID(ctx, correlationID)
-	} else {
-		s.logger.Info("using existing correlation ID", "correlation_id", correlationID)
-	}
-
-	// Create saga orchestrator
-	saga := sharedclients.NewSagaOrchestrator(s.logger)
-
-	// Step 1: Log position in PositionKeeping service
-	var positionLogID string
-	saga.AddStep("log_position",
-		// Action: Create position log entry
-		func(stepCtx context.Context) error {
-			s.logger.Info("executing log_position step",
-				"account_id", account.AccountID(),
-				"transaction_id", transactionID)
-
-			// Propagate correlation ID
-			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
-
-			// Call PositionKeeping service to initiate a new financial position log
-			// with the initial transaction entry
-			resp, err := s.posKeepingClient.InitiateFinancialPositionLog(stepCtx,
-				&positionkeepingv1.InitiateFinancialPositionLogRequest{
-					AccountId: account.AccountIdentification(), // Use IBAN for FK constraint
-					InitialEntry: &positionkeepingv1.TransactionLogEntry{
-						EntryId:       uuid.New().String(),
-						TransactionId: transactionID,
-						AccountId:     account.AccountIdentification(),
-						Amount:        toMoneyAmount(amount),
-						Direction:     commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-						Timestamp:     timestamppb.Now(),
-						Description:   fmt.Sprintf("Deposit to account %s", account.AccountID()),
-					},
-					IdempotencyKey: &commonpb.IdempotencyKey{
-						Key: fmt.Sprintf("deposit-%s-%s", account.AccountID(), transactionID),
-					},
-				},
-			)
-			if err != nil {
-				caobservability.RecordExternalServiceError("position_keeping", "initiate_log")
-				return fmt.Errorf("failed to log position: %w", err)
-			}
-
-			positionLogID = resp.Log.LogId
-
-			s.logger.Info("log_position step completed",
-				"position_log_id", positionLogID,
-				"transaction_id", transactionID)
-
-			return nil
-		},
-		// Compensate: Mark position log as cancelled
-		func(stepCtx context.Context) error {
-			s.logger.Info("compensating log_position step",
-				"position_log_id", positionLogID,
-				"transaction_id", transactionID)
-
-			if positionLogID == "" {
-				s.logger.Warn("cannot compensate log_position: position log ID not captured")
-				return ErrPositionLogIDNotFound
-			}
-
-			// Propagate correlation ID
-			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
-
-			// Update the position log status to cancelled with audit entry
-			// Version is 1 since we just created the log
-			_, err := s.posKeepingClient.UpdateFinancialPositionLog(stepCtx,
-				&positionkeepingv1.UpdateFinancialPositionLogRequest{
-					LogId:   positionLogID,
-					Version: 1, // Newly created log starts at version 1
-					StatusUpdate: &positionkeepingv1.StatusTracking{
-						CurrentStatus:   commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
-						StatusUpdatedAt: timestamppb.Now(),
-						StatusReason:    fmt.Sprintf("Saga compensation for failed deposit transaction %s", transactionID),
-					},
-					AuditEntry: &positionkeepingv1.AuditTrailEntry{
-						AuditId:   uuid.New().String(),
-						Timestamp: timestamppb.Now(),
-						UserId:    "system",
-						Action:    "saga_compensation",
-						Details:   fmt.Sprintf("Cancelled position log due to deposit saga failure for transaction %s", transactionID),
-					},
-					IdempotencyKey: &commonpb.IdempotencyKey{
-						Key: fmt.Sprintf("compensate-deposit-%s-%s", account.AccountID(), transactionID),
-					},
-				},
-			)
-			if err != nil {
-				caobservability.RecordExternalServiceError("position_keeping", "compensate_log")
-				return fmt.Errorf("failed to compensate position log: %w", err)
-			}
-
-			// Record compensation
-			caobservability.RecordSagaCompensation("deposit", "log_position")
-
-			s.logger.Info("log_position compensation completed",
-				"position_log_id", positionLogID)
-
-			return nil
-		},
-	)
-
-	// Step 2: Post to ledger in FinancialAccounting service with double-entry bookkeeping
-	// Creates a BookingLog, posts DEBIT to clearing account, posts CREDIT to customer account,
-	// then transitions BookingLog to POSTED (triggering balance validation).
-	// These variables are intentionally declared outside the saga step closures to allow
-	// data sharing between the action and compensation functions. When a closure captures
-	// a variable (e.g., bookingLogID), both the action and compensation closures reference
-	// the same memory location, allowing the action to set values that the compensation
-	// can later read if rollback is needed.
-	var debitPostingID string
-	var creditPostingID string
-	var bookingLogID string
-	var debitPosted bool  // Track whether debit leg was successfully posted
-	var creditPosted bool // Track whether credit leg was successfully posted
-
-	// Get clearing account ID from config (required for double-entry bookkeeping)
-	var clearingAccountID string
-	if s.accountConfig != nil {
-		clearingAccountID = s.accountConfig.DepositClearingAccountID
-	}
-
-	saga.AddStep("post_ledger",
-		// Action: Create booking log and dual ledger postings (debit clearing, credit customer)
-		func(stepCtx context.Context) error {
-			s.logger.Info("executing post_ledger step",
-				"account_id", account.AccountID(),
-				"clearing_account_id", clearingAccountID,
-				"transaction_id", transactionID)
-
-			// Propagate correlation ID
-			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
-
-			// Convert MoneyAmount to google.type.Money for the request
-			moneyAmt := toMoneyAmount(amount)
-
-			// Step 2a: Initiate a financial booking log
-			bookingLogResp, err := s.finAcctClient.InitiateFinancialBookingLog(stepCtx,
-				&financialaccountingv1.InitiateFinancialBookingLogRequest{
-					FinancialAccountType:    commonpb.AccountType_ACCOUNT_TYPE_CURRENT,
-					ProductServiceReference: account.AccountID(),
-					BusinessUnitReference:   "current-account-service",
-					ChartOfAccountsRules:    "DEPOSIT",
-					BaseCurrency:            commonpb.Currency_CURRENCY_GBP,
-					IdempotencyKey: &commonpb.IdempotencyKey{
-						Key: fmt.Sprintf("booking-log-%s", transactionID),
-					},
-				},
-			)
-			if err != nil {
-				caobservability.RecordExternalServiceError("financial_accounting", "initiate_booking_log")
-				return fmt.Errorf("failed to initiate booking log: %w", err)
-			}
-			bookingLogID = bookingLogResp.FinancialBookingLog.Id
-
-			s.logger.Info("booking log created",
-				"booking_log_id", bookingLogID,
-				"transaction_id", transactionID)
-
-			// Step 2b: Post DEBIT to clearing account (funds received from external source)
-			// This represents the bank receiving funds that will be credited to the customer.
-			// Only post debit leg if clearing account is configured (double-entry mode).
-			if clearingAccountID != "" {
-				debitResp, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
-					&financialaccountingv1.CaptureLedgerPostingRequest{
-						FinancialBookingLogId: bookingLogID,
-						PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-						PostingAmount:         moneyAmt.Amount,
-						AccountId:             clearingAccountID,
-						ValueDate:             timestamppb.Now(),
-						IdempotencyKey: &commonpb.IdempotencyKey{
-							Key: fmt.Sprintf("%s-debit", transactionID),
-						},
-					},
-				)
-				if err != nil {
-					caobservability.RecordExternalServiceError("financial_accounting", "capture_debit_posting")
-					return fmt.Errorf("failed to post debit to clearing account: %w", err)
-				}
-				debitPostingID = debitResp.LedgerPosting.Id
-				debitPosted = true
-
-				s.logger.Info("debit posting to clearing account completed",
-					"debit_posting_id", debitPostingID,
-					"clearing_account_id", clearingAccountID,
-					"booking_log_id", bookingLogID,
-					"transaction_id", transactionID)
-			}
-
-			// Step 2c: Post CREDIT to customer account (customer balance increased)
-			creditResp, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
-				&financialaccountingv1.CaptureLedgerPostingRequest{
-					FinancialBookingLogId: bookingLogID,
-					PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-					PostingAmount:         moneyAmt.Amount,
-					AccountId:             account.AccountID(),
-					ValueDate:             timestamppb.Now(),
-					IdempotencyKey: &commonpb.IdempotencyKey{
-						Key: fmt.Sprintf("%s-credit", transactionID),
-					},
-				},
-			)
-			if err != nil {
-				caobservability.RecordExternalServiceError("financial_accounting", "capture_credit_posting")
-
-				// CRITICAL: If debit was posted but credit fails, we must compensate the debit inline.
-				// The saga won't consider this step complete, so saga compensation won't run.
-				if debitPosted {
-					s.logger.Warn("credit posting failed after debit succeeded, creating inline compensation",
-						"clearing_account_id", clearingAccountID,
-						"transaction_id", transactionID,
-						"error", err)
-
-					// Compensate debit: Create CREDIT to clearing account
-					compDebitID := fmt.Sprintf("COMP-%s-debit", transactionID)
-					_, compErr := s.finAcctClient.CaptureLedgerPosting(stepCtx,
-						&financialaccountingv1.CaptureLedgerPostingRequest{
-							FinancialBookingLogId: bookingLogID,
-							PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-							PostingAmount:         moneyAmt.Amount,
-							AccountId:             clearingAccountID,
-							ValueDate:             timestamppb.Now(),
-							IdempotencyKey:        &commonpb.IdempotencyKey{Key: compDebitID},
-						},
-					)
-					if compErr != nil {
-						s.logger.Error("failed to compensate debit posting after credit failure",
-							"booking_log_id", bookingLogID,
-							"clearing_account_id", clearingAccountID,
-							"transaction_id", transactionID,
-							"error", compErr)
-						caobservability.RecordInlineCompensationFailure("deposit", "debit")
-					}
-
-					// Try to transition BookingLog to CANCELLED
-					_, cancelErr := s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
-						&financialaccountingv1.UpdateFinancialBookingLogRequest{
-							Id:     bookingLogID,
-							Status: commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
-						},
-					)
-					if cancelErr != nil {
-						s.logger.Warn("failed to transition booking log to CANCELLED after credit failure",
-							"booking_log_id", bookingLogID,
-							"transaction_id", transactionID,
-							"error", cancelErr)
-					} else {
-						s.logger.Info("booking log transitioned to CANCELLED after credit failure",
-							"booking_log_id", bookingLogID,
-							"transaction_id", transactionID)
-					}
-				}
-
-				return fmt.Errorf("failed to post credit to customer account: %w", err)
-			}
-			creditPostingID = creditResp.LedgerPosting.Id
-			creditPosted = true
-
-			s.logger.Info("credit posting to customer account completed",
-				"credit_posting_id", creditPostingID,
-				"account_id", account.AccountID(),
-				"booking_log_id", bookingLogID,
-				"transaction_id", transactionID)
-
-			// Step 2d: Transition BookingLog to POSTED (triggers balance validation in FinancialAccounting)
-			// This validates that debit amount == credit amount for the booking log.
-			_, err = s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
-				&financialaccountingv1.UpdateFinancialBookingLogRequest{
-					Id:     bookingLogID,
-					Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
-				},
-			)
-			if err != nil {
-				caobservability.RecordExternalServiceError("financial_accounting", "update_booking_log")
-
-				// CRITICAL: If we fail here, postings have already been made but step won't be
-				// considered "complete" by saga, so saga compensation won't run. We must
-				// create compensating entries inline before returning the error.
-				s.logger.Warn("UpdateFinancialBookingLog failed, creating inline compensating entries",
-					"debit_posted", debitPosted,
-					"credit_posted", creditPosted,
-					"error", err)
-
-				// Compensate credit leg: Create DEBIT to customer account (if credit was posted)
-				if creditPosted {
-					compCreditID := fmt.Sprintf("COMP-%s-credit", transactionID)
-					_, compErr := s.finAcctClient.CaptureLedgerPosting(stepCtx,
-						&financialaccountingv1.CaptureLedgerPostingRequest{
-							FinancialBookingLogId: bookingLogID,
-							PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-							PostingAmount:         moneyAmt.Amount,
-							AccountId:             account.AccountID(),
-							ValueDate:             timestamppb.Now(),
-							IdempotencyKey:        &commonpb.IdempotencyKey{Key: compCreditID},
-						},
-					)
-					if compErr != nil {
-						s.logger.Error("failed to compensate credit posting inline",
-							"booking_log_id", bookingLogID,
-							"account_id", account.AccountID(),
-							"transaction_id", transactionID,
-							"error", compErr)
-						caobservability.RecordInlineCompensationFailure("deposit", "credit")
-					}
-				}
-
-				// Compensate debit leg: Create CREDIT to clearing account (if debit was posted)
-				if debitPosted {
-					compDebitID := fmt.Sprintf("COMP-%s-debit", transactionID)
-					_, compErr := s.finAcctClient.CaptureLedgerPosting(stepCtx,
-						&financialaccountingv1.CaptureLedgerPostingRequest{
-							FinancialBookingLogId: bookingLogID,
-							PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-							PostingAmount:         moneyAmt.Amount,
-							AccountId:             clearingAccountID,
-							ValueDate:             timestamppb.Now(),
-							IdempotencyKey:        &commonpb.IdempotencyKey{Key: compDebitID},
-						},
-					)
-					if compErr != nil {
-						s.logger.Error("failed to compensate debit posting inline",
-							"booking_log_id", bookingLogID,
-							"clearing_account_id", clearingAccountID,
-							"transaction_id", transactionID,
-							"error", compErr)
-						caobservability.RecordInlineCompensationFailure("deposit", "debit")
-					}
-				}
-
-				// Try to transition BookingLog to CANCELLED
-				if debitPosted || creditPosted {
-					_, cancelErr := s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
-						&financialaccountingv1.UpdateFinancialBookingLogRequest{
-							Id:     bookingLogID,
-							Status: commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
-						},
-					)
-					if cancelErr != nil {
-						// Log but don't fail - the compensating entries are more important
-						s.logger.Warn("failed to transition booking log to CANCELLED during inline compensation",
-							"booking_log_id", bookingLogID,
-							"transaction_id", transactionID,
-							"error", cancelErr)
-					} else {
-						s.logger.Info("booking log transitioned to CANCELLED during inline compensation",
-							"booking_log_id", bookingLogID,
-							"transaction_id", transactionID)
-					}
-				}
-
-				return fmt.Errorf("failed to transition booking log to POSTED: %w", err)
-			}
-
-			s.logger.Info("post_ledger step completed",
-				"debit_posting_id", debitPostingID,
-				"credit_posting_id", creditPostingID,
-				"booking_log_id", bookingLogID,
-				"transaction_id", transactionID)
-
-			return nil
-		},
-		// Compensate: Reverse both ledger postings
-		func(stepCtx context.Context) error {
-			s.logger.Info("compensating post_ledger step",
-				"debit_posting_id", debitPostingID,
-				"credit_posting_id", creditPostingID,
-				"booking_log_id", bookingLogID,
-				"transaction_id", transactionID)
-
-			if bookingLogID == "" {
-				s.logger.Warn("cannot compensate post_ledger: booking log ID not captured")
-				return ErrLedgerPostingIDNotFound
-			}
-
-			// Propagate correlation ID
-			stepCtx = sharedclients.PropagateCorrelationID(stepCtx)
-
-			// Convert MoneyAmount to google.type.Money for the request
-			moneyAmt := toMoneyAmount(amount)
-
-			// Compensation reverses in opposite order: first reverse credit, then debit
-
-			// Compensate credit leg: Create DEBIT to customer account (if credit was posted)
-			if creditPosted {
-				compCreditTransactionID := fmt.Sprintf("COMP-%s-credit", transactionID)
-				_, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
-					&financialaccountingv1.CaptureLedgerPostingRequest{
-						FinancialBookingLogId: bookingLogID,
-						PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-						PostingAmount:         moneyAmt.Amount,
-						AccountId:             account.AccountID(),
-						ValueDate:             timestamppb.Now(),
-						IdempotencyKey: &commonpb.IdempotencyKey{
-							Key: compCreditTransactionID,
-						},
-					},
-				)
-				if err != nil {
-					caobservability.RecordExternalServiceError("financial_accounting", "compensate_credit_posting")
-					return fmt.Errorf("failed to compensate credit posting: %w", err)
-				}
-				s.logger.Info("compensated credit posting",
-					"credit_posting_id", creditPostingID,
-					"account_id", account.AccountID())
-			}
-
-			// Compensate debit leg: Create CREDIT to clearing account (if debit was posted)
-			// Note: debitPosted can only be true if clearingAccountID was non-empty
-			if debitPosted {
-				compDebitTransactionID := fmt.Sprintf("COMP-%s-debit", transactionID)
-				_, err := s.finAcctClient.CaptureLedgerPosting(stepCtx,
-					&financialaccountingv1.CaptureLedgerPostingRequest{
-						FinancialBookingLogId: bookingLogID,
-						PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-						PostingAmount:         moneyAmt.Amount,
-						AccountId:             clearingAccountID,
-						ValueDate:             timestamppb.Now(),
-						IdempotencyKey: &commonpb.IdempotencyKey{
-							Key: compDebitTransactionID,
-						},
-					},
-				)
-				if err != nil {
-					caobservability.RecordExternalServiceError("financial_accounting", "compensate_debit_posting")
-					return fmt.Errorf("failed to compensate debit posting: %w", err)
-				}
-				s.logger.Info("compensated debit posting",
-					"debit_posting_id", debitPostingID,
-					"clearing_account_id", clearingAccountID)
-			}
-
-			// Transition BookingLog to CANCELLED for clean audit trail
-			if debitPosted || creditPosted {
-				_, err := s.finAcctClient.UpdateFinancialBookingLog(stepCtx,
-					&financialaccountingv1.UpdateFinancialBookingLogRequest{
-						Id:     bookingLogID,
-						Status: commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
-					},
-				)
-				if err != nil {
-					// Log warning but don't fail compensation - the reversal postings are more important
-					s.logger.Warn("failed to transition BookingLog to CANCELLED during compensation",
-						"booking_log_id", bookingLogID,
-						"error", err)
-				} else {
-					s.logger.Info("BookingLog transitioned to CANCELLED",
-						"booking_log_id", bookingLogID)
-				}
-			}
-
-			// Record compensation
-			caobservability.RecordSagaCompensation("deposit", "post_ledger")
-
-			s.logger.Info("post_ledger compensation completed",
-				"debit_posting_id", debitPostingID,
-				"credit_posting_id", creditPostingID,
-				"booking_log_id", bookingLogID)
-
-			return nil
-		},
-	)
-
-	// Step 3: Save account to database (only after external services succeed)
-	saga.AddStep("save_account",
-		// Action: Persist the updated account balance
-		func(stepCtx context.Context) error {
-			s.logger.Info("executing save_account step",
-				"account_id", account.AccountID(),
-				"transaction_id", transactionID,
-				"new_balance", safeMinorUnits(account.Balance()))
-
-			if err := s.repo.Save(stepCtx, account); err != nil {
-				return fmt.Errorf("failed to save account: %w", err)
-			}
-
-			s.logger.Info("save_account step completed",
-				"account_id", account.AccountID(),
-				"new_balance", safeMinorUnits(account.Balance()))
-
-			return nil
-		},
-		// Compensate: No database save needed - account never persisted
-		func(_ context.Context) error {
-			s.logger.Info("compensating save_account step (no-op)",
-				"account_id", account.AccountID(),
-				"reason", "external services failed before persisting balance")
-
-			// No action needed - if we reach here, it means the save failed
-			// or we're rolling back before the save completed. The account
-			// in memory has the updated balance, but it was never persisted,
-			// so there's nothing to rollback in the database.
-			// The external services (position log and ledger) will be
-			// compensated by their respective compensation actions.
-
-			s.logger.Info("save_account compensation completed (no-op)")
-			return nil
-		},
-	)
-
-	// Execute saga
-	s.logger.Info("executing deposit saga",
-		"account_id", account.AccountID(),
-		"transaction_id", transactionID,
-		"correlation_id", correlationID,
-		"steps", saga.StepCount())
-
-	result := saga.Execute(ctx)
-
-	// Handle saga result
-	if !result.Success {
-		sagaStatus = "failed"
-		caobservability.RecordSagaFailure("deposit", result.FailedStep)
-
-		s.logger.Error("deposit saga failed",
-			"account_id", account.AccountID(),
-			"transaction_id", transactionID,
-			"failed_step", result.FailedStep,
-			"completed_steps", result.CompletedSteps,
-			"compensated_steps", result.CompensatedSteps,
-			"error", result.Error)
-
-		return nil, status.Errorf(codes.Internal,
-			"deposit transaction failed at step %s: %v (compensated %d/%d steps)",
-			result.FailedStep, result.Error, result.CompensatedSteps, result.CompletedSteps)
-	}
-
-	s.logger.Info("deposit saga completed successfully",
-		"account_id", account.AccountID(),
-		"transaction_id", transactionID,
-		"correlation_id", correlationID,
-		"completed_steps", result.CompletedSteps)
-
-	// Return successful response
-	return &pb.ExecuteDepositResponse{
-		AccountId:        account.AccountID(),
-		TransactionId:    transactionID,
-		NewBalance:       toMoneyAmount(account.Balance()),
-		AvailableBalance: toMoneyAmount(account.AvailableBalance()),
-		Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
-	}, nil
 }
 
 // RetrieveCurrentAccount gets current account details

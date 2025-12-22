@@ -136,6 +136,26 @@ func TestRepository_Create_DuplicateSubdomain(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrSubdomainTaken), "Expected ErrSubdomainTaken, got %v", err)
 }
 
+func TestRepository_Create_DuplicateSlug(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create first tenant with slug
+	tenant1 := newTestTenant("tenant_one")
+	tenant1.Slug = "shared-slug"
+	err := repo.Create(ctx, tenant1)
+	require.NoError(t, err)
+
+	// Create second tenant with same slug
+	tenant2 := newTestTenant("tenant_two")
+	tenant2.Slug = "shared-slug"
+	err = repo.Create(ctx, tenant2)
+	assert.True(t, errors.Is(err, ErrSlugTaken), "Expected ErrSlugTaken, got %v", err)
+}
+
 func TestRepository_GetByID_NotFound(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -409,6 +429,71 @@ func TestRepository_Create_WithMetadata(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "enterprise", retrieved.Metadata["tier"])
 	assert.Equal(t, float64(10000), retrieved.Metadata["max_accounts"])
+}
+
+func TestRepository_Create_WithSlug(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+	tenant := newTestTenant("acme_bank")
+	tenant.Slug = "acme-bank"
+
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+
+	// Verify slug was saved
+	retrieved, err := repo.GetByID(ctx, tenant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "acme-bank", retrieved.Slug)
+}
+
+func TestRepository_Create_WithoutSlug(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+	tenant := newTestTenant("acme_bank")
+	tenant.Slug = "" // Explicitly empty
+
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+
+	// Verify slug is empty
+	retrieved, err := repo.GetByID(ctx, tenant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "", retrieved.Slug)
+}
+
+func TestAdapterMapping_SlugRoundTrip(t *testing.T) {
+	// Test toEntity with non-empty slug
+	domainTenant := newTestTenant("test_tenant")
+	domainTenant.Slug = "test-slug"
+
+	entity := toEntity(domainTenant)
+	require.NotNil(t, entity.Slug, "entity.Slug should not be nil for non-empty domain.Slug")
+	assert.Equal(t, "test-slug", *entity.Slug)
+
+	// Test toDomain with non-nil slug
+	backToDomain, err := toDomain(entity)
+	require.NoError(t, err)
+	assert.Equal(t, "test-slug", backToDomain.Slug)
+}
+
+func TestAdapterMapping_EmptySlugMapsToNil(t *testing.T) {
+	// Test toEntity with empty slug
+	domainTenant := newTestTenant("test_tenant")
+	domainTenant.Slug = ""
+
+	entity := toEntity(domainTenant)
+	assert.Nil(t, entity.Slug, "entity.Slug should be nil for empty domain.Slug")
+
+	// Test toDomain with nil slug
+	backToDomain, err := toDomain(entity)
+	require.NoError(t, err)
+	assert.Equal(t, "", backToDomain.Slug)
 }
 
 func TestRepository_FindProvisioningStatusByTenantID(t *testing.T) {

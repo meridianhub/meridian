@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -666,6 +667,18 @@ func testGatewayAccountConfig() *config.GatewayAccountConfig {
 	return cfg
 }
 
+// testOrchestrator creates a PaymentOrchestrator with the provided dependencies for testing.
+// This helper ensures tests that directly construct Service{} also get an orchestrator.
+func testOrchestrator(repo persistence.Repository, caClient CurrentAccountClient, faClient FinancialAccountingClient, gwConfig *config.GatewayAccountConfig) *PaymentOrchestrator {
+	return NewPaymentOrchestrator(PaymentOrchestratorConfig{
+		Logger:                    testLogger(),
+		Repo:                      repo,
+		CurrentAccountClient:      caClient,
+		FinancialAccountingClient: faClient,
+		GatewayAccountConfig:      gwConfig,
+	})
+}
+
 // Test InitiatePaymentOrder
 func TestInitiatePaymentOrder_Success(t *testing.T) {
 	repo := NewMockRepository()
@@ -967,14 +980,17 @@ func TestUpdatePaymentOrder_Settled(t *testing.T) {
 		},
 		executeLienDone: executeLienDone,
 	}
+	faClient := &MockFinancialAccountingClient{}
+	gwConfig := testGatewayAccountConfig()
 
 	svc := &Service{
 		repo:                      repo,
 		currentAccountClient:      caClient,
-		financialAccountingClient: &MockFinancialAccountingClient{},
-		gatewayAccountConfig:      testGatewayAccountConfig(),
+		financialAccountingClient: faClient,
+		gatewayAccountConfig:      gwConfig,
 		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
+		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -1017,14 +1033,17 @@ func TestUpdatePaymentOrder_Settled_LienExecutionStatusTracking(t *testing.T) {
 		},
 		executeLienDone: executeLienDone,
 	}
+	faClient := &MockFinancialAccountingClient{}
+	gwConfig := testGatewayAccountConfig()
 
 	svc := &Service{
 		repo:                      repo,
 		currentAccountClient:      caClient,
-		financialAccountingClient: &MockFinancialAccountingClient{},
-		gatewayAccountConfig:      testGatewayAccountConfig(),
+		financialAccountingClient: faClient,
+		gatewayAccountConfig:      gwConfig,
 		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
+		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -1122,14 +1141,17 @@ func TestUpdatePaymentOrder_ByGatewayReferenceID(t *testing.T) {
 			},
 		},
 	}
+	faClient := &MockFinancialAccountingClient{}
+	gwConfig := testGatewayAccountConfig()
 
 	svc := &Service{
 		repo:                      repo,
 		currentAccountClient:      caClient,
-		financialAccountingClient: &MockFinancialAccountingClient{},
-		gatewayAccountConfig:      testGatewayAccountConfig(),
+		financialAccountingClient: faClient,
+		gatewayAccountConfig:      gwConfig,
 		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
+		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -1192,13 +1214,16 @@ func TestUpdatePaymentOrder_Idempotent_Settled(t *testing.T) {
 	caClient := &MockCurrentAccountClient{
 		executeLienResp: &currentaccountv1.ExecuteLienResponse{},
 	}
+	faClient := &MockFinancialAccountingClient{}
+	gwConfig := testGatewayAccountConfig()
 	svc := &Service{
 		repo:                      repo,
 		currentAccountClient:      caClient,
-		financialAccountingClient: &MockFinancialAccountingClient{},
-		gatewayAccountConfig:      testGatewayAccountConfig(),
+		financialAccountingClient: faClient,
+		gatewayAccountConfig:      gwConfig,
 		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
+		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -2027,6 +2052,14 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 		},
 	}
 
+	// Create orchestrator with all dependencies
+	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                 repo,
+		CurrentAccountClient: caClient,
+		PaymentGateway:       gwMock,
+	})
+
 	// Create service with all dependencies configured
 	svc := &Service{
 		repo:                    repo,
@@ -2036,6 +2069,7 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             DefaultSagaTimeout,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+		orchestrator:            orchestrator,
 		// kafkaProducer is nil - events won't be published but saga still runs
 	}
 
@@ -2088,6 +2122,14 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 	// Gateway mock won't be called since lien fails first
 	gwMock := &MockPaymentGateway{}
 
+	// Create orchestrator with dependencies
+	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                 repo,
+		CurrentAccountClient: caClient,
+		PaymentGateway:       gwMock,
+	})
+
 	svc := &Service{
 		repo:                    repo,
 		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
@@ -2096,6 +2138,7 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             DefaultSagaTimeout,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+		orchestrator:            orchestrator,
 	}
 
 	ctx := context.Background()
@@ -2146,6 +2189,14 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 		err: errGatewayUnavailable,
 	}
 
+	// Create orchestrator with dependencies
+	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                 repo,
+		CurrentAccountClient: caClient,
+		PaymentGateway:       gwMock,
+	})
+
 	svc := &Service{
 		repo:                    repo,
 		logger:                  slog.New(slog.NewJSONHandler(io.Discard, nil)),
@@ -2154,6 +2205,7 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             DefaultSagaTimeout,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+		orchestrator:            orchestrator,
 	}
 
 	ctx := context.Background()
@@ -2230,6 +2282,14 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 
 	gwMock := &MockPaymentGateway{}
 
+	// Create orchestrator with dependencies
+	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                 repo,
+		CurrentAccountClient: caClient,
+		PaymentGateway:       gwMock,
+	})
+
 	// Configure very short saga timeout to trigger timeout
 	svc := &Service{
 		repo:                    repo,
@@ -2239,6 +2299,7 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             100 * time.Millisecond, // Short timeout
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+		orchestrator:            orchestrator,
 	}
 
 	ctx := context.Background()
@@ -2382,6 +2443,14 @@ func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
 	}
 	gwClient := &MockPaymentGateway{}
 
+	// Create orchestrator with dependencies
+	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                 repo,
+		CurrentAccountClient: caClient,
+		PaymentGateway:       gwClient,
+	})
+
 	// Create service directly to avoid kafka producer requirement
 	svc := &Service{
 		repo:                    repo,
@@ -2391,6 +2460,7 @@ func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
 		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             1 * time.Second,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+		orchestrator:            orchestrator,
 		// kafkaProducer is nil - events won't be published but saga still runs
 	}
 
@@ -2438,6 +2508,14 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 		},
 	}
 
+	// Create orchestrator with dependencies
+	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Repo:                 repo,
+		CurrentAccountClient: caClient,
+		PaymentGateway:       gwClient,
+	})
+
 	// Create service directly to avoid kafka producer requirement
 	svc := &Service{
 		repo:                    repo,
@@ -2447,6 +2525,7 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 		idempotencyService:      NewMockIdempotencyService(),
 		sagaTimeout:             5 * time.Second,
 		maxIdempotencyKeyLength: DefaultMaxIdempotencyKeyLength,
+		orchestrator:            orchestrator,
 		// kafkaProducer is nil - events won't be published but saga still runs
 	}
 
@@ -2520,6 +2599,8 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 		executeLienErr:  ErrLienServiceUnavailable,
 		executeLienDone: executeLienDone,
 	}
+	faClient := &MockFinancialAccountingClient{}
+	gwConfig := testGatewayAccountConfig()
 
 	// Use fast retry config for tests to avoid long wait times
 	fastRetryConfig := &sharedclients.RetryConfig{
@@ -2532,11 +2613,12 @@ func TestUpdatePaymentOrder_LienExecutionFailure(t *testing.T) {
 	svc := &Service{
 		repo:                      repo,
 		currentAccountClient:      caClient,
-		financialAccountingClient: &MockFinancialAccountingClient{},
-		gatewayAccountConfig:      testGatewayAccountConfig(),
+		financialAccountingClient: faClient,
+		gatewayAccountConfig:      gwConfig,
 		idempotencyService:        NewMockIdempotencyService(),
 		logger:                    testLogger(),
 		lienExecutionRetryConfig:  fastRetryConfig,
+		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
 	}
 
 	// Create a payment order in EXECUTING state
@@ -2665,14 +2747,17 @@ func TestPostLedgerEntries_FailureModes(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := NewMockRepository()
+			caClient := &MockCurrentAccountClient{}
+			gwConfig := testGatewayAccountConfig()
 			svc := &Service{
 				repo:                      repo,
-				currentAccountClient:      &MockCurrentAccountClient{},
+				currentAccountClient:      caClient,
 				financialAccountingClient: tc.mockFA,
 				paymentGateway:            &MockPaymentGateway{},
-				gatewayAccountConfig:      testGatewayAccountConfig(),
+				gatewayAccountConfig:      gwConfig,
 				idempotencyService:        NewMockIdempotencyService(),
 				logger:                    testLogger(),
+				orchestrator:              testOrchestrator(repo, caClient, tc.mockFA, gwConfig),
 			}
 
 			// Create an executing payment order
@@ -2703,18 +2788,19 @@ func TestPostLedgerEntries_FailureModes(t *testing.T) {
 }
 
 // TestPostLedgerEntries_UnsupportedCurrency tests that unsupported currencies are rejected.
-// This tests the domainCurrencyToProto function which returns CURRENCY_UNSPECIFIED for
+// This tests the mappers.DomainCurrencyToProto function which returns CURRENCY_UNSPECIFIED for
 // unsupported currencies, causing postLedgerEntries to return ErrUnsupportedCurrency.
 func TestPostLedgerEntries_UnsupportedCurrency(t *testing.T) {
 	// Test that unsupported currencies return CURRENCY_UNSPECIFIED
-	unsupportedCurrency := domain.Currency("JPY")
-	result := domainCurrencyToProto(unsupportedCurrency)
+	// Note: JPY is actually supported in the shared mapper now
+	unsupportedCurrency := domain.Currency("XYZ")
+	result := mappers.DomainCurrencyToProto(unsupportedCurrency)
 	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, result)
 
 	// Verify the error path in postLedgerEntries would be triggered
 	// by testing that CURRENCY_UNSPECIFIED causes the expected error
-	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, domainCurrencyToProto(domain.Currency("CHF")))
-	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, domainCurrencyToProto(domain.Currency("")))
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, mappers.DomainCurrencyToProto(domain.Currency("XYZ")))
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, mappers.DomainCurrencyToProto(domain.Currency("")))
 }
 
 // TestExtractGatewayIDFromRef tests the gateway ID extraction from reference IDs.
@@ -2740,7 +2826,7 @@ func TestExtractGatewayIDFromRef(t *testing.T) {
 	}
 }
 
-// TestDomainCurrencyToProto tests the currency conversion function.
+// TestDomainCurrencyToProto tests the shared currency conversion function.
 func TestDomainCurrencyToProto(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -2750,13 +2836,17 @@ func TestDomainCurrencyToProto(t *testing.T) {
 		{"GBP converts correctly", domain.CurrencyGBP, commonpb.Currency_CURRENCY_GBP},
 		{"USD converts correctly", domain.CurrencyUSD, commonpb.Currency_CURRENCY_USD},
 		{"EUR converts correctly", domain.CurrencyEUR, commonpb.Currency_CURRENCY_EUR},
-		{"unsupported currency returns UNSPECIFIED", domain.Currency("JPY"), commonpb.Currency_CURRENCY_UNSPECIFIED},
+		{"JPY converts correctly", domain.CurrencyJPY, commonpb.Currency_CURRENCY_JPY},
+		{"CHF converts correctly", domain.CurrencyCHF, commonpb.Currency_CURRENCY_CHF},
+		{"CAD converts correctly", domain.CurrencyCAD, commonpb.Currency_CURRENCY_CAD},
+		{"AUD converts correctly", domain.CurrencyAUD, commonpb.Currency_CURRENCY_AUD},
+		{"unsupported currency returns UNSPECIFIED", domain.Currency("XYZ"), commonpb.Currency_CURRENCY_UNSPECIFIED},
 		{"empty currency returns UNSPECIFIED", domain.Currency(""), commonpb.Currency_CURRENCY_UNSPECIFIED},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := domainCurrencyToProto(tc.currency)
+			result := mappers.DomainCurrencyToProto(tc.currency)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
