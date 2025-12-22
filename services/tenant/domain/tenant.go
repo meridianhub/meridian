@@ -46,8 +46,10 @@ type Tenant struct {
 	// Used for schema routing (org_{id} schema) and API subdomain.
 	ID tenant.TenantID
 
-	// Slug is the URL-friendly unique identifier (lowercase alphanumeric + hyphens).
-	// Used for user-facing URLs and subdomain routing.
+	// Slug is the URL-friendly unique identifier (lowercase alphanumeric + hyphens, 3-63 chars).
+	// Used for branded API endpoints (e.g., acme.meridian.app) where the slug becomes part of the DNS name.
+	// This is distinct from Subdomain which is used for tenant isolation and routing in multi-tenant deployments.
+	// Slug is customer-facing and branding-focused; Subdomain is infrastructure-focused.
 	Slug string
 
 	// DisplayName is the human-readable name of the tenant.
@@ -135,9 +137,12 @@ func (t *Tenant) CanTransitionTo(newStatus Status) bool {
 
 var (
 	// slugPattern enforces lowercase alphanumeric with hyphens, no leading/trailing hyphens.
+	// Note: This regex allows 2-character slugs technically (start + end char with empty middle),
+	// but ValidateSlug enforces a minimum of 3 characters via explicit length check.
 	slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 
 	// reservedSlugs contains system-reserved slugs that cannot be used for tenants.
+	// These are common infrastructure subdomains that must remain available for platform services.
 	reservedSlugs = map[string]bool{
 		"api":      true,
 		"health":   true,
@@ -148,6 +153,11 @@ var (
 		"internal": true,
 		"system":   true,
 		"platform": true,
+		"app":      true,
+		"mail":     true,
+		"cdn":      true,
+		"auth":     true,
+		"graphql":  true,
 	}
 
 	// ErrSlugTooShort is returned when a slug is shorter than the minimum required length.

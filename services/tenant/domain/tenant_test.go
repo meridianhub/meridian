@@ -232,6 +232,24 @@ func TestValidateSlug(t *testing.T) {
 			wantErr: true,
 			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
 		},
+		{
+			name:    "unicode characters - accented",
+			slug:    "café",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "unicode characters - japanese",
+			slug:    "日本",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:    "unicode characters - emoji",
+			slug:    "test🚀",
+			wantErr: true,
+			errMsg:  "must contain only lowercase alphanumeric characters and hyphens",
+		},
 
 		// Edge cases - length
 		{
@@ -305,6 +323,36 @@ func TestValidateSlug(t *testing.T) {
 		{
 			name:    "reserved - platform",
 			slug:    "platform",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - app",
+			slug:    "app",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - mail",
+			slug:    "mail",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - cdn",
+			slug:    "cdn",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - auth",
+			slug:    "auth",
+			wantErr: true,
+			errMsg:  "is reserved and cannot be used",
+		},
+		{
+			name:    "reserved - graphql",
+			slug:    "graphql",
 			wantErr: true,
 			errMsg:  "is reserved and cannot be used",
 		},
