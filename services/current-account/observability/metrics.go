@@ -133,6 +133,15 @@ func RecordSagaCompensation(operation, step string) {
 // RecordInlineCompensationFailure records an inline compensation failure.
 // These failures indicate that a compensating entry could not be created,
 // requiring manual intervention to restore ledger integrity.
+//
+// ALERTING: This metric MUST have a Prometheus alert configured:
+//
+//	alert: InlineCompensationFailure
+//	expr: increase(current_account_inline_compensation_failures_total[5m]) > 0
+//	severity: critical
+//	runbook: docs/runbooks/saga-failure-recovery.md
+//
+// See docs/runbooks/saga-failure-recovery.md for remediation steps.
 func RecordInlineCompensationFailure(operation, leg string) {
 	inlineCompensationFailuresTotal.WithLabelValues(operation, leg).Inc()
 }
