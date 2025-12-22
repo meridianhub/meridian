@@ -4,6 +4,7 @@ package app
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -178,18 +179,28 @@ func getEnvOrDefault(key, defaultValue string) string {
 }
 
 // getEnvAsInt returns the environment variable value as int or default.
+// For values that will be converted to int32, ensures they fit within int32 bounds.
 func getEnvAsInt(key string, defaultValue int) int {
 	valueStr := os.Getenv(key)
 	if valueStr == "" {
 		return defaultValue
 	}
 
-	value, err := strconv.Atoi(valueStr)
+	// Parse as int64 first to check bounds before converting to int
+	value64, err := strconv.ParseInt(valueStr, 10, 64)
 	if err != nil {
 		log.Printf("WARNING: Invalid integer format for %s=%q, using default value %d: %v", key, valueStr, defaultValue, err)
 		return defaultValue
 	}
-	return value
+
+	// For architecture-independent safety, ensure value fits in int32
+	// This prevents issues when converting to int32 in downstream code
+	if value64 < math.MinInt32 || value64 > math.MaxInt32 {
+		log.Printf("WARNING: Value for %s=%d exceeds int32 bounds, using default value %d", key, value64, defaultValue)
+		return defaultValue
+	}
+
+	return int(value64)
 }
 
 // getEnvAsDuration returns the environment variable value as duration or default.
