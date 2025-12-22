@@ -148,9 +148,18 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 	// Process each tenant with optimistic locking
 	for _, tenant := range tenants {
 		// Attempt to claim the tenant by updating its status to PROVISIONING
+		// This uses version-based optimistic locking to prevent concurrent processing
 		_, err := w.repo.UpdateStatus(ctx, tenant.ID, domain.StatusProvisioning, tenant.Version)
 		if err != nil {
-			// Version conflict or other error - log and continue to next tenant
+			// Check if this is a version conflict (another worker claimed it first)
+			if errors.Is(err, persistence.ErrVersionConflict) {
+				// Expected during concurrent operation - debug level logging
+				w.logger.Debug("tenant already claimed by another worker",
+					"tenant_id", tenant.ID,
+					"expected_version", tenant.Version)
+				continue
+			}
+			// Unexpected error - warn level logging
 			w.logger.Warn("failed to claim tenant for provisioning",
 				"tenant_id", tenant.ID,
 				"version", tenant.Version,

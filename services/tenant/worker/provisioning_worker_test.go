@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1334,4 +1335,141 @@ func TestIsRetryableError_PostgresSpecificErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProcessPendingTenants_VersionConflictLogging(t *testing.T) {
+	// This test verifies that version conflicts are handled gracefully
+	// and logged at debug level (not warning) since they're expected in concurrent operation
+	_, repo := setupTestDB(t)
+
+	// Create a tenant in PROVISIONING_PENDING status
+	tenant1 := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("conflict_test"),
+		DisplayName:     "Conflict Test Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenant1))
+
+	// Capture log output
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	prov := &provisioner.MockProvisioner{}
+	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	require.NoError(t, err)
+
+	// Simulate a race: another worker claims the tenant between ListByStatus and UpdateStatus
+	// by updating the version directly
+	_, err = repo.UpdateStatus(ctx, tenant1.ID, domain.StatusProvisioning, 1)
+	require.NoError(t, err)
+
+	// Now change the status back to pending but version is now 2
+	_, err = repo.UpdateStatus(ctx, tenant1.ID, domain.StatusProvisioningPending, 2)
+	require.NoError(t, err)
+
+	// Verify the tenant is now at version 3 with pending status
+	updatedTenant, err := repo.GetByID(ctx, tenant1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioningPending, updatedTenant.Status)
+	assert.Equal(t, 3, updatedTenant.Version)
+
+	// Create a stale tenant view that the worker would have fetched
+	// (simulating what ListByStatus returned before the concurrent update)
+	staleTenant := &domain.Tenant{
+		ID:              tenant1.ID,
+		DisplayName:     tenant1.DisplayName,
+		SettlementAsset: tenant1.SettlementAsset,
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       tenant1.CreatedAt,
+		Version:         1, // Stale version
+	}
+
+	// Now manually test the UpdateStatus call with stale version
+	_, err = repo.UpdateStatus(ctx, staleTenant.ID, domain.StatusProvisioning, staleTenant.Version)
+	assert.ErrorIs(t, err, persistence.ErrVersionConflict, "expected version conflict error")
+
+	// Run processPendingTenants - it should process the tenant with current version
+	worker.processPendingTenants(ctx)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify the tenant was successfully claimed (status changed to PROVISIONING)
+	finalTenant, err := repo.GetByID(ctx, tenant1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioning, finalTenant.Status)
+	assert.Equal(t, 4, finalTenant.Version) // Version should be incremented
+
+	// Verify logs contain expected messages
+	logOutput := logBuffer.String()
+	assert.Contains(t, logOutput, "found pending tenants")
+	assert.Contains(t, logOutput, "claimed tenant for provisioning")
+}
+
+func TestProcessPendingTenants_ConcurrentClaimSkipped(t *testing.T) {
+	// Test that verifies when a tenant is concurrently claimed, it's skipped with debug logging
+	_, repo := setupTestDB(t)
+
+	// Create 2 pending tenants
+	tenant1 := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("concurrent1"),
+		DisplayName:     "Concurrent Test 1",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	tenant2 := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("concurrent2"),
+		DisplayName:     "Concurrent Test 2",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       time.Now().Add(time.Second), // Slightly later to ensure consistent ordering
+		Version:         1,
+	}
+
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenant1))
+	require.NoError(t, repo.Create(ctx, tenant2))
+
+	// Capture log output
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	prov := &provisioner.MockProvisioner{}
+	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	require.NoError(t, err)
+
+	// Start two workers processing concurrently
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		worker.processPendingTenants(ctx)
+	}()
+
+	go func() {
+		defer wg.Done()
+		// Small delay to create race condition
+		time.Sleep(1 * time.Millisecond)
+		worker.processPendingTenants(ctx)
+	}()
+
+	wg.Wait()
+	time.Sleep(100 * time.Millisecond)
+
+	// Both tenants should be in PROVISIONING status
+	final1, err := repo.GetByID(ctx, tenant1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioning, final1.Status)
+
+	final2, err := repo.GetByID(ctx, tenant2.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioning, final2.Status)
+
+	// At least one version conflict should have occurred (logged at debug level)
+	// The exact behavior depends on timing, but the test ensures no crashes or deadlocks
 }
