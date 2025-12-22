@@ -29,19 +29,39 @@ var (
 )
 
 // setupRoutes configures HTTP routes for the server.
-func setupRoutes(mux *http.ServeMux) {
-	// Health check endpoints
+func setupRoutes(mux *http.ServeMux, container *app.Container) {
+	// Liveness probe - checks if the application is alive
 	mux.HandleFunc("/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, "alive")
 	})
 
-	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, _ *http.Request) {
+	// Readiness probe - checks if the application is ready to serve traffic
+	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		healthy, dbErr, kafkaErr := container.HealthChecker.CheckAll(ctx)
+
+		if !healthy {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprintf(w, "not ready: db=%v, kafka=%v\n", dbErr, kafkaErr)
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, "ready")
 	})
 
-	mux.HandleFunc("/health/startup", func(w http.ResponseWriter, _ *http.Request) {
+	// Startup probe - checks if the application has started
+	mux.HandleFunc("/health/startup", func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		healthy, dbErr, kafkaErr := container.HealthChecker.CheckAll(ctx)
+
+		if !healthy {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprintf(w, "not started: db=%v, kafka=%v\n", dbErr, kafkaErr)
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, "started")
 	})
@@ -101,8 +121,8 @@ func main() {
 	}
 	logger.Info("audit consumer started", "topic", config.Kafka.Topic)
 
-	// Setup HTTP routes
-	setupRoutes(http.DefaultServeMux)
+	// Setup HTTP routes with health checks
+	setupRoutes(http.DefaultServeMux, container)
 
 	// Create server with proper timeouts
 	server := createServer(config.Service.Port)

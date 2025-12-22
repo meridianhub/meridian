@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/meridianhub/meridian/internal/audit-consumer/adapters/messaging"
+	"github.com/meridianhub/meridian/internal/audit-consumer/observability"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -16,10 +18,14 @@ type Container struct {
 	Logger *slog.Logger
 
 	// Infrastructure
-	DB *gorm.DB
+	DB        *gorm.DB
+	dbWrapper *dbWrapper
 
 	// Audit consumer
 	AuditConsumer *messaging.AuditConsumer
+
+	// Observability
+	HealthChecker *observability.HealthChecker
 }
 
 // ContainerCloseError is returned when multiple errors occur during container close.
@@ -38,6 +44,9 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 		Logger: logger,
 	}
 
+	// Initialize service name for metrics
+	observability.SetServiceName(config.Service.Name)
+
 	// Initialize dependencies in order
 	if err := container.initializeDatabase(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
@@ -47,6 +56,12 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 		// Clean up already initialized resources
 		_ = container.Close(ctx)
 		return nil, fmt.Errorf("failed to initialize audit consumer: %w", err)
+	}
+
+	if err := container.initializeObservability(); err != nil {
+		// Clean up already initialized resources
+		_ = container.Close(ctx)
+		return nil, fmt.Errorf("failed to initialize observability: %w", err)
 	}
 
 	logger.Info("dependency container initialized successfully")
@@ -83,6 +98,13 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 	}
 
 	c.DB = gormDB
+
+	// Create database wrapper for health checks and metrics
+	c.dbWrapper = &dbWrapper{db: sqlDB}
+
+	// Start periodic connection pool stats collection
+	go c.collectDBPoolStats()
+
 	c.Logger.Info("database connection initialized",
 		"max_open_conns", c.Config.Database.MaxOpenConns,
 		"max_idle_conns", c.Config.Database.MaxIdleConns,
@@ -118,6 +140,50 @@ func (c *Container) initializeAuditConsumer() error {
 		"service_name", c.Config.Service.Name)
 
 	return nil
+}
+
+// initializeObservability initializes health checks and monitoring.
+func (c *Container) initializeObservability() error {
+	// Create health checker with DB and Kafka status
+	c.HealthChecker = observability.NewHealthChecker(c.dbWrapper, c.AuditConsumer)
+
+	c.Logger.Info("observability initialized",
+		"service_name", observability.GetServiceName())
+
+	return nil
+}
+
+// collectDBPoolStats periodically collects database connection pool statistics.
+func (c *Container) collectDBPoolStats() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	var lastWaitCount int64
+	var lastWaitDuration time.Duration
+
+	for range ticker.C {
+		if c.dbWrapper == nil {
+			return
+		}
+
+		stats := c.dbWrapper.Stats()
+
+		// Calculate deltas for counter metrics
+		waitCountDelta := stats.WaitCount - lastWaitCount
+		waitDurationDelta := stats.WaitDuration - lastWaitDuration
+
+		// Record metrics
+		observability.RecordDBConnectionPoolStats(
+			stats.InUse,
+			stats.Idle,
+			waitCountDelta,
+			waitDurationDelta,
+		)
+
+		// Update last values for next iteration
+		lastWaitCount = stats.WaitCount
+		lastWaitDuration = stats.WaitDuration
+	}
 }
 
 // Close gracefully closes all resources in the container.

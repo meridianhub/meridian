@@ -9,6 +9,7 @@ import (
 	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
+	"github.com/meridianhub/meridian/internal/audit-consumer/observability"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
@@ -36,6 +37,7 @@ type AuditConsumer struct {
 	consumer    *kafka.ProtoConsumer
 	db          *gorm.DB
 	dlqProducer *kafka.DLQProducer
+	running     bool
 }
 
 // ConsumerConfig contains configuration for creating an audit Kafka consumer.
@@ -160,15 +162,19 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 // handleAuditEvent processes a single audit event and writes it to the audit_log table.
 // The tenant ID is extracted from the Kafka message header and used to scope the database write.
 func (c *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.AuditEvent) error {
+	start := time.Now()
+
 	// Extract tenant ID from context (already injected by ProtoConsumer)
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
+		observability.RecordEventFailed("unknown", "unknown", "missing_tenant_context")
 		return ErrMissingTenantContext
 	}
 
 	// Convert protobuf operation to string
 	operation := protoToOperation(event.Operation)
 	if operation == "" {
+		observability.RecordEventFailed(string(tenantID), "unknown", "invalid_operation")
 		return fmt.Errorf("%w: %v", ErrInvalidOperation, event.Operation)
 	}
 
@@ -202,17 +208,24 @@ func (c *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Aud
 
 	// Check for context cancellation before expensive DB operation
 	if err := ctx.Err(); err != nil {
+		observability.RecordEventFailed(string(tenantID), operation, "context_cancelled")
 		return err
 	}
 
 	// Write to audit_log table (tenant-scoped via tenant_id column)
 	// GORM uses table name "audit_logs" by convention
 	if err := c.db.WithContext(ctx).Table("audit_logs").Create(auditLog).Error; err != nil {
+		observability.RecordEventFailed(string(tenantID), operation, "db_write_failed")
 		return fmt.Errorf("failed to insert audit log: %w", err)
 	}
 
-	log.Printf("DEBUG: Processed audit event: tenant=%s table=%s operation=%s record=%s",
-		tenantID, event.TableName, operation, event.RecordId)
+	// Record successful processing metrics
+	duration := time.Since(start)
+	observability.RecordEventProcessed(string(tenantID), operation)
+	observability.RecordTenantAuditWriteDuration(string(tenantID), duration)
+
+	log.Printf("DEBUG: Processed audit event: tenant=%s table=%s operation=%s record=%s duration=%v",
+		tenantID, event.TableName, operation, event.RecordId, duration)
 
 	return nil
 }
@@ -249,6 +262,9 @@ func (c *AuditConsumer) Start(topic string) error {
 		return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
 	}
 
+	c.running = true
+	observability.RecordKafkaHealth(true)
+
 	return nil
 }
 
@@ -256,10 +272,18 @@ func (c *AuditConsumer) Start(topic string) error {
 // Waits for in-flight messages to complete before shutting down.
 func (c *AuditConsumer) Stop() {
 	log.Printf("INFO: Stopping audit consumer...")
+	c.running = false
+	observability.RecordKafkaHealth(false)
 	if c.consumer != nil {
 		c.consumer.Stop()
 	}
 	log.Printf("INFO: Audit consumer stopped")
+}
+
+// IsRunning returns true if the consumer is currently running.
+// This method is used by health checks.
+func (c *AuditConsumer) IsRunning() bool {
+	return c.running
 }
 
 // Close stops the consumer and releases resources.
