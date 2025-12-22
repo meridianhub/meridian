@@ -77,11 +77,8 @@ func runStatus(_ *cobra.Command, args []string) error {
 
 		for _, svc := range resp.Services {
 			errMsg := svc.ErrorMessage
-			if len(errMsg) > 50 {
-				runes := []rune(errMsg)
-				if len(runes) > 50 {
-					errMsg = string(runes[:47]) + "..."
-				}
+			if runes := []rune(errMsg); len(runes) > 50 {
+				errMsg = string(runes[:47]) + "..."
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 				svc.ServiceName,
