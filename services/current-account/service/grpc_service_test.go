@@ -24,6 +24,22 @@ import (
 	"gorm.io/gorm"
 )
 
+// mustNewService creates a Service and fails the test if an error occurs.
+func mustNewService(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository) *Service {
+	t.Helper()
+	svc, err := NewService(repo, lienRepo)
+	require.NoError(t, err, "unexpected error creating service")
+	return svc
+}
+
+// mustNewServiceWithIdempotency creates a Service with idempotency and fails the test if an error occurs.
+func mustNewServiceWithIdempotency(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service) *Service {
+	t.Helper()
+	svc, err := NewServiceWithIdempotency(repo, lienRepo, idempotencyService)
+	require.NoError(t, err, "unexpected error creating service")
+	return svc
+}
+
 // mustNewMoney is a test helper that creates Money or panics
 func mustNewMoney(currency string, amountCents int64) domain.Money {
 	m, err := domain.NewMoney(currency, amountCents)
@@ -76,7 +92,7 @@ func TestInitiateCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
@@ -111,7 +127,7 @@ func TestExecuteDeposit(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -166,7 +182,7 @@ func TestExecuteDepositAccountNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	req := &pb.ExecuteDepositRequest{
 		AccountId: "ACC-NONEXISTENT",
@@ -199,7 +215,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -240,7 +256,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -277,7 +293,7 @@ func TestRetrieveCurrentAccountNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	req := &pb.RetrieveCurrentAccountRequest{
 		AccountId: "ACC-NONEXISTENT",
@@ -326,7 +342,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create GBP account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -371,7 +387,7 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
@@ -465,7 +481,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -530,7 +546,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -689,7 +705,7 @@ func TestExecuteDeposit_IdempotencyReturnsCachedResponse(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-001", "ACC-IDEMP-001", uuid.New().String(), "GBP")
@@ -739,7 +755,7 @@ func TestExecuteDeposit_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-002", "ACC-IDEMP-002", uuid.New().String(), "GBP")
@@ -779,7 +795,7 @@ func TestExecuteDeposit_IdempotencyProceedsWithoutKey(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-003", "ACC-IDEMP-003", uuid.New().String(), "GBP")
@@ -807,7 +823,7 @@ func TestExecuteDeposit_IdempotencyCleanupOnFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account but with wrong currency
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-004", "ACC-IDEMP-004", uuid.New().String(), "GBP")

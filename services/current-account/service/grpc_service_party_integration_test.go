@@ -432,7 +432,7 @@ func TestInitiateCurrentAccount_WithoutPartyClient_BackwardCompatibility(t *test
 	repo := persistence.NewRepository(db)
 
 	// Create service WITHOUT party client (backward compatibility mode)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Execute account creation with valid UUID party ID
 	partyID := newTestPartyID()

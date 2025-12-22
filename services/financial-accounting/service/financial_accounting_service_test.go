@@ -51,9 +51,10 @@ func TestNewFinancialAccountingService(t *testing.T) {
 	idempotencySvc := &mockIdempotencyService{}
 
 	// Act
-	service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
 
 	// Assert
+	require.NoError(t, err, "Should create service without error")
 	assert.NotNil(t, service, "Service should not be nil")
 	assert.NotNil(t, service.repository, "Repository should be injected")
 	assert.NotNil(t, service.eventPublisher, "Event publisher should be injected")
@@ -61,14 +62,15 @@ func TestNewFinancialAccountingService(t *testing.T) {
 }
 
 // TestFinancialAccountingService_ImplementsInterface verifies the service implements the gRPC interface.
-func TestFinancialAccountingService_ImplementsInterface(_ *testing.T) {
+func TestFinancialAccountingService_ImplementsInterface(t *testing.T) {
 	// Arrange
 	repo := persistence.NewLedgerRepository(&gorm.DB{})
 	publisher := &mockEventPublisher{}
 	idempotencySvc := &mockIdempotencyService{}
 
 	// Act
-	service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	require.NoError(t, err)
 
 	// Assert - compile-time check that service implements the interface
 	var _ financialaccountingv1.FinancialAccountingServiceServer = service
@@ -83,7 +85,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 		repository     *persistence.LedgerRepository
 		eventPub       EventPublisher
 		idempotencySvc idempotency.Service
-		shouldPanic    bool
+		wantErr        bool
 		rationale      string
 	}{
 		// Happy path - covered by TestNewFinancialAccountingService
@@ -92,7 +94,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
 			eventPub:       &mockEventPublisher{},
 			idempotencySvc: &mockIdempotencyService{},
-			shouldPanic:    false,
+			wantErr:        false,
 			rationale:      "Standard valid initialization with all dependencies",
 		},
 
@@ -102,7 +104,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			repository:     nil,
 			eventPub:       &mockEventPublisher{},
 			idempotencySvc: &mockIdempotencyService{},
-			shouldPanic:    true,
+			wantErr:        true,
 			rationale:      "Repository is essential - nil would cause panic on first use",
 		},
 		{
@@ -110,7 +112,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
 			eventPub:       nil,
 			idempotencySvc: &mockIdempotencyService{},
-			shouldPanic:    true,
+			wantErr:        true,
 			rationale:      "Event publisher is essential - nil would cause panic when publishing events",
 		},
 		{
@@ -118,7 +120,7 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
 			eventPub:       &mockEventPublisher{},
 			idempotencySvc: nil,
-			shouldPanic:    true,
+			wantErr:        true,
 			rationale:      "Idempotency service is essential - nil would cause panic on idempotent operations",
 		},
 
@@ -128,28 +130,35 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 			repository:     nil,
 			eventPub:       nil,
 			idempotencySvc: nil,
-			shouldPanic:    true,
-			rationale:      "Should panic on first nil check (repository)",
+			wantErr:        true,
+			rationale:      "Should error on first nil check (repository)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.shouldPanic {
-				assert.Panics(t, func() {
-					NewFinancialAccountingService(tt.repository, tt.eventPub, tt.idempotencySvc)
-				}, tt.rationale)
+			service, err := NewFinancialAccountingService(tt.repository, tt.eventPub, tt.idempotencySvc)
+			if tt.wantErr {
+				assert.Error(t, err, tt.rationale)
+				assert.Nil(t, service, "Service should be nil when error occurs")
 			} else {
-				assert.NotPanics(t, func() {
-					service := NewFinancialAccountingService(tt.repository, tt.eventPub, tt.idempotencySvc)
-					assert.NotNil(t, service, tt.rationale)
-					assert.NotNil(t, service.repository, "Repository should be injected")
-					assert.NotNil(t, service.eventPublisher, "Event publisher should be injected")
-					assert.NotNil(t, service.idempotency, "Idempotency service should be injected")
-				}, tt.rationale)
+				require.NoError(t, err, tt.rationale)
+				assert.NotNil(t, service, tt.rationale)
+				assert.NotNil(t, service.repository, "Repository should be injected")
+				assert.NotNil(t, service.eventPublisher, "Event publisher should be injected")
+				assert.NotNil(t, service.idempotency, "Idempotency service should be injected")
 			}
 		})
 	}
+}
+
+// mustNewFinancialAccountingService creates a service and fails the test if an error occurs.
+// Use this for tests where the service should always be created successfully.
+func mustNewFinancialAccountingService(t *testing.T, repo *persistence.LedgerRepository, publisher EventPublisher, idempotencySvc idempotency.Service) *FinancialAccountingService {
+	t.Helper()
+	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	require.NoError(t, err, "unexpected error creating service")
+	return service
 }
 
 // mockIdempotencyService is a test double for idempotency.Service
@@ -1209,7 +1218,7 @@ func TestCaptureLedgerPosting_IdempotencyResponseSerialization(t *testing.T) {
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
 
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.CaptureLedgerPostingRequest{
 			FinancialBookingLogId: validBookingLogID.String(),
@@ -1250,7 +1259,7 @@ func TestCaptureLedgerPosting_IdempotencyResponseSerialization(t *testing.T) {
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
 
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.CaptureLedgerPostingRequest{
 			FinancialBookingLogId: validBookingLogID.String(),
@@ -1291,7 +1300,7 @@ func TestCaptureLedgerPosting_IdempotencyResponseSerialization(t *testing.T) {
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
 
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.CaptureLedgerPostingRequest{
 			FinancialBookingLogId: validBookingLogID.String(),
@@ -1421,7 +1430,7 @@ func TestUpdateLedgerPosting_IdempotencyRequired(t *testing.T) {
 			repo := persistence.NewLedgerRepository(&gorm.DB{})
 			publisher := &mockEventPublisher{}
 			mockIdem := &mockIdempotencyService{}
-			service := NewFinancialAccountingService(repo, publisher, mockIdem)
+			service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 			req := &financialaccountingv1.UpdateLedgerPostingRequest{
 				Id:             validPostingID.String(),
@@ -1481,7 +1490,7 @@ func TestUpdateLedgerPosting_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateLedgerPostingRequest{
 			Id:            validPostingID.String(),
@@ -1512,7 +1521,7 @@ func TestUpdateLedgerPosting_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateLedgerPostingRequest{
 			Id:            validPostingID.String(),
@@ -1544,7 +1553,7 @@ func TestUpdateLedgerPosting_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateLedgerPostingRequest{
 			Id:            validPostingID.String(),
@@ -1572,7 +1581,7 @@ func TestUpdateLedgerPosting_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateLedgerPostingRequest{
 			Id:            validPostingID.String(),
@@ -1600,7 +1609,7 @@ func TestUpdateLedgerPosting_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateLedgerPostingRequest{
 			Id:            validPostingID.String(),
@@ -1654,7 +1663,7 @@ func TestUpdateFinancialBookingLog_IdempotencyRequired(t *testing.T) {
 			repo := persistence.NewLedgerRepository(&gorm.DB{})
 			publisher := &mockEventPublisher{}
 			mockIdem := &mockIdempotencyService{}
-			service := NewFinancialAccountingService(repo, publisher, mockIdem)
+			service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 			req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
 				Id:                   validBookingLogID.String(),
@@ -1709,7 +1718,7 @@ func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
 			Id:     validBookingLogID.String(),
@@ -1739,7 +1748,7 @@ func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
 			Id:     validBookingLogID.String(),
@@ -1770,7 +1779,7 @@ func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
 			Id:     validBookingLogID.String(),
@@ -1797,7 +1806,7 @@ func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
 			Id:     validBookingLogID.String(),
@@ -1824,7 +1833,7 @@ func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
 		}
 		repo := persistence.NewLedgerRepository(&gorm.DB{})
 		publisher := &mockEventPublisher{}
-		service := NewFinancialAccountingService(repo, publisher, mockIdem)
+		service := mustNewFinancialAccountingService(t, repo, publisher, mockIdem)
 
 		req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
 			Id:     validBookingLogID.String(),

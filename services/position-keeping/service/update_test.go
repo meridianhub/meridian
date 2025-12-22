@@ -31,7 +31,7 @@ func TestUpdateFinancialPositionLog_AddNewEntry(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	logID := uuid.New()
 	accountID := testAccountID
@@ -120,7 +120,7 @@ func TestUpdateFinancialPositionLog_UpdateStatus(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	logID := uuid.New()
 	accountID := testAccountID
@@ -179,7 +179,7 @@ func TestUpdateFinancialPositionLog_VersionConflict(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	logID := uuid.New()
 	accountID := testAccountID
@@ -231,7 +231,7 @@ func TestUpdateFinancialPositionLog_LogNotFound(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	logID := uuid.New()
 
@@ -270,7 +270,7 @@ func TestUpdateFinancialPositionLog_InvalidLogID(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.UpdateFinancialPositionLogRequest{
 		LogId: "invalid-uuid",
@@ -301,7 +301,7 @@ func TestUpdateFinancialPositionLog_MissingAuditEntry(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	logID := uuid.New()
 	existingLog := &domain.FinancialPositionLog{

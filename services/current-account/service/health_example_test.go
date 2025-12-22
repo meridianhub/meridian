@@ -25,7 +25,7 @@ func ExampleHealthChecker() {
 	var finAcctClient clients.FinancialAccountingClient
 
 	// Create health checker
-	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
+	healthChecker, err := service.NewHealthChecker(service.HealthCheckerConfig{
 		Repository:                repo,
 		PositionKeepingClient:     posKeepingClient,
 		FinancialAccountingClient: finAcctClient,
@@ -33,6 +33,9 @@ func ExampleHealthChecker() {
 		ServiceName:               "current-account",
 		CheckTimeout:              5 * time.Second,
 	})
+	if err != nil {
+		log.Fatalf("Failed to create health checker: %v", err)
+	}
 
 	// Register health checker with gRPC server
 	grpcServer := grpc.NewServer()

@@ -1011,7 +1011,10 @@ func callToProtoFinancialPositionLog(log *domain.FinancialPositionLog) *position
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	if err != nil {
+		return nil
+	}
 
 	// Call RetrieveFinancialPositionLog which will convert using our adapter functions
 	resp, err := svc.RetrieveFinancialPositionLog(context.Background(), &positionkeepingv1.RetrieveFinancialPositionLogRequest{

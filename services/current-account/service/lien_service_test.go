@@ -104,7 +104,7 @@ func TestInitiateLien_Success(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account with £1000 balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-001", 100000) // 100000 cents = £1000
@@ -138,7 +138,7 @@ func TestInitiateLien_InsufficientFunds(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account with £100 balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-002", 10000) // £100
@@ -169,7 +169,7 @@ func TestInitiateLien_AccountNotFound(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	req := &pb.InitiateLienRequest{
 		AccountId: "NON-EXISTENT-ACC",
@@ -196,7 +196,7 @@ func TestInitiateLien_CurrencyMismatch(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create GBP account
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-003", 100000)
@@ -227,7 +227,7 @@ func TestInitiateLien_Idempotent(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account with £1000 balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP", 100000)
@@ -264,7 +264,7 @@ func TestExecuteLien_Success(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-004", 100000)
@@ -296,7 +296,7 @@ func TestExecuteLien_Idempotent(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-005", 100000)
@@ -328,7 +328,7 @@ func TestExecuteLien_NotFound(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	req := &pb.ExecuteLienRequest{
 		LienId: uuid.New().String(),
@@ -347,7 +347,7 @@ func TestTerminateLien_Success(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-006", 100000)
@@ -379,7 +379,7 @@ func TestTerminateLien_Idempotent(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-007", 100000)
@@ -413,7 +413,7 @@ func TestRetrieveLien_Success(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-008", 100000)
@@ -443,7 +443,7 @@ func TestRetrieveLien_NotFound(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	req := &pb.RetrieveLienRequest{
 		LienId: uuid.New().String(),
@@ -461,7 +461,7 @@ func TestLienOperations_LienRepoNotConfigured(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil) // No lien repo
+	svc := mustNewService(t, repo, nil) // No lien repo
 
 	t.Run("InitiateLien", func(t *testing.T) {
 		req := &pb.InitiateLienRequest{
@@ -512,7 +512,7 @@ func TestMultipleLiens_AvailableBalanceCalculation(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := NewService(repo, lienRepo)
+	svc := mustNewService(t, repo, lienRepo)
 
 	// Create account with £1000 balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-MULTI", 100000)
@@ -689,7 +689,7 @@ func TestExecuteLien_IdempotencyReturnsCachedResponse(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
 	mockIdemp := newLienMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, lienRepo, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, lienRepo, mockIdemp)
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP-001", 100000)
@@ -743,7 +743,7 @@ func TestExecuteLien_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
 	mockIdemp := newLienMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, lienRepo, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, lienRepo, mockIdemp)
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP-002", 100000)
@@ -786,7 +786,7 @@ func TestExecuteLien_IdempotencyProceedsWithoutKey(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
 	mockIdemp := newLienMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, lienRepo, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, lienRepo, mockIdemp)
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP-003", 100000)
@@ -817,7 +817,7 @@ func TestExecuteLien_IdempotencyCleanupOnFailure(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
 	mockIdemp := newLienMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, lienRepo, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, lienRepo, mockIdemp)
 
 	idempKey := idempotency.Key{
 		TenantID:  lienSvcTestTenantID,

@@ -324,7 +324,10 @@ func TestListLedgerPostings_DefensiveTests(t *testing.T) {
 			publisher := &mockEventPublisher{}
 			idempotencySvc := &mockIdempotencyService{}
 
-			service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			service, svcErr := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			if svcErr != nil {
+				t.Fatalf("failed to create service: %v", svcErr)
+			}
 
 			// Act
 			resp, err := service.ListLedgerPostings(ctx, tt.request)
@@ -402,7 +405,10 @@ func TestListLedgerPostings_MultipleFilters(t *testing.T) {
 	repo := persistence.NewLedgerRepository(db)
 	publisher := &mockEventPublisher{}
 	idempotencySvc := &mockIdempotencyService{}
-	service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 
 	req := &financialaccountingv1.ListLedgerPostingsRequest{
 		Pagination:            &commonv1.Pagination{PageSize: 50},

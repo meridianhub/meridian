@@ -171,7 +171,10 @@ func run(logger *slog.Logger) error {
 	logger.Info("event publisher initialized (noop mode)")
 
 	// Create Financial Accounting service
-	financialAccountingSvc := service.NewFinancialAccountingService(ledgerRepo, eventPublisher, idempotencySvc)
+	financialAccountingSvc, err := service.NewFinancialAccountingService(ledgerRepo, eventPublisher, idempotencySvc)
+	if err != nil {
+		return fmt.Errorf("failed to create financial accounting service: %w", err)
+	}
 
 	logger.Info("financial accounting service initialized")
 	_ = postingService // Available for internal use
@@ -216,12 +219,15 @@ func run(logger *slog.Logger) error {
 	financialaccountingv1.RegisterFinancialAccountingServiceServer(grpcServer, financialAccountingSvc)
 
 	// Register health check service with database connectivity check
-	healthChecker := serviceobs.NewHealthChecker(serviceobs.HealthCheckerConfig{
+	healthChecker, err := serviceobs.NewHealthChecker(serviceobs.HealthCheckerConfig{
 		DB:           db,
 		Logger:       logger,
 		ServiceName:  "financial-accounting",
 		CheckTimeout: 5 * time.Second,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create health checker: %w", err)
+	}
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 
 	// Register reflection service for debugging

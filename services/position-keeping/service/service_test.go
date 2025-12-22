@@ -17,8 +17,10 @@ func TestNewPositionKeepingService(t *testing.T) {
 		publisher := domain.NewInMemoryEventPublisher()
 		idempotencySvc := new(MockIdempotencyService)
 
-		svc := service.NewPositionKeepingService(repo, publisher, idempotencySvc)
-
+		svc, err := service.NewPositionKeepingService(repo, publisher, idempotencySvc)
+		if err != nil {
+			t.Fatalf("Expected no error, got: %v", err)
+		}
 		if svc == nil {
 			t.Fatal("Expected non-nil service")
 		}
@@ -34,7 +36,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 		repository     domain.FinancialPositionLogRepository
 		eventPub       domain.EventPublisher
 		idempotencySvc idempotency.Service
-		shouldPanic    bool
+		wantErr        bool
 		rationale      string
 	}{
 		{
@@ -42,7 +44,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			repository:     new(MockRepository),
 			eventPub:       domain.NewInMemoryEventPublisher(),
 			idempotencySvc: new(MockIdempotencyService),
-			shouldPanic:    false,
+			wantErr:        false,
 			rationale:      "Standard valid initialization with all dependencies",
 		},
 		{
@@ -50,7 +52,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			repository:     nil,
 			eventPub:       domain.NewInMemoryEventPublisher(),
 			idempotencySvc: new(MockIdempotencyService),
-			shouldPanic:    true,
+			wantErr:        true,
 			rationale:      "Repository is essential - nil would cause panic on first use",
 		},
 		{
@@ -58,7 +60,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			repository:     new(MockRepository),
 			eventPub:       nil,
 			idempotencySvc: new(MockIdempotencyService),
-			shouldPanic:    true,
+			wantErr:        true,
 			rationale:      "Event publisher is essential - nil would cause panic when publishing events",
 		},
 		{
@@ -66,7 +68,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			repository:     new(MockRepository),
 			eventPub:       domain.NewInMemoryEventPublisher(),
 			idempotencySvc: nil,
-			shouldPanic:    true,
+			wantErr:        true,
 			rationale:      "Idempotency service is essential - nil would cause panic on idempotent operations",
 		},
 		{
@@ -74,34 +76,35 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			repository:     nil,
 			eventPub:       nil,
 			idempotencySvc: nil,
-			shouldPanic:    true,
-			rationale:      "Should panic on first nil check (repository)",
+			wantErr:        true,
+			rationale:      "Should error on first nil check (repository)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.shouldPanic {
-				assert.Panics(t, func() {
-					service.NewPositionKeepingService(tt.repository, tt.eventPub, tt.idempotencySvc)
-				}, tt.rationale)
+			svc, err := service.NewPositionKeepingService(tt.repository, tt.eventPub, tt.idempotencySvc)
+			if tt.wantErr {
+				assert.Error(t, err, tt.rationale)
+				assert.Nil(t, svc, "Service should be nil when error occurs")
 			} else {
-				assert.NotPanics(t, func() {
-					svc := service.NewPositionKeepingService(tt.repository, tt.eventPub, tt.idempotencySvc)
-					assert.NotNil(t, svc, tt.rationale)
-				}, tt.rationale)
+				assert.NoError(t, err, tt.rationale)
+				assert.NotNil(t, svc, tt.rationale)
 			}
 		})
 	}
 }
 
 func TestServiceImplementsGRPCInterface(t *testing.T) {
-	t.Run("service implements PositionKeepingServiceServer", func(_ *testing.T) {
+	t.Run("service implements PositionKeepingServiceServer", func(t *testing.T) {
 		repo := new(MockRepository)
 		publisher := domain.NewInMemoryEventPublisher()
 		idempotencySvc := new(MockIdempotencyService)
 
-		svc := service.NewPositionKeepingService(repo, publisher, idempotencySvc)
+		svc, err := service.NewPositionKeepingService(repo, publisher, idempotencySvc)
+		if err != nil {
+			t.Fatalf("unexpected error creating service: %v", err)
+		}
 
 		// This will fail to compile if service doesn't implement the interface
 		var _ positionkeepingv1.PositionKeepingServiceServer = svc
