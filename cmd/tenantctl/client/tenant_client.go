@@ -123,6 +123,13 @@ func (c *TenantClient) ListTenants(ctx context.Context, req *tenantv1.ListTenant
 	return c.client.ListTenants(ctx, req)
 }
 
+// GetTenantProvisioningStatus retrieves detailed provisioning status for a tenant.
+func (c *TenantClient) GetTenantProvisioningStatus(ctx context.Context, req *tenantv1.GetTenantProvisioningStatusRequest) (*tenantv1.GetTenantProvisioningStatusResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	return c.client.GetTenantProvisioningStatus(ctx, req)
+}
+
 // Close closes the underlying gRPC connection.
 func (c *TenantClient) Close() error {
 	if c.conn != nil {
