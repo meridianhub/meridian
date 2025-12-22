@@ -1422,13 +1422,16 @@ func TestProcessPendingTenants_VersionConflictLogging(t *testing.T) {
 	// Run processPendingTenants - it should process the tenant with current version
 	worker.processPendingTenants(ctx)
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the background provisioning goroutine to complete
+	time.Sleep(100 * time.Millisecond)
 
-	// Verify the tenant was successfully claimed (status changed to PROVISIONING)
+	// Verify the tenant was successfully provisioned (status changed to ACTIVE)
+	// Flow: PROVISIONING_PENDING -> PROVISIONING (claim) -> ACTIVE (after successful ProvisionSchemas)
 	finalTenant, err := repo.GetByID(ctx, tenant1.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, finalTenant.Status)
-	assert.Equal(t, 4, finalTenant.Version) // Version should be incremented
+	assert.Equal(t, domain.StatusActive, finalTenant.Status)
+	// Version progression: 1 (create) -> 2 (simulate claim) -> 3 (back to pending) -> 4 (real claim) -> 5 (mark active)
+	assert.Equal(t, 5, finalTenant.Version)
 
 	// Verify logs contain expected messages
 	logOutput := logBuffer.String()
@@ -1486,17 +1489,19 @@ func TestProcessPendingTenants_ConcurrentClaimSkipped(t *testing.T) {
 	}()
 
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond)
+	// Wait for background provisioning goroutines to complete
+	time.Sleep(200 * time.Millisecond)
 
-	// Both tenants should be in PROVISIONING status
+	// Both tenants should be ACTIVE after successful provisioning
+	// (They go through PROVISIONING_PENDING -> PROVISIONING -> ACTIVE)
 	final1, err := repo.GetByID(ctx, tenant1.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, final1.Status)
+	assert.Equal(t, domain.StatusActive, final1.Status)
 
 	final2, err := repo.GetByID(ctx, tenant2.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, final2.Status)
+	assert.Equal(t, domain.StatusActive, final2.Status)
 
-	// At least one version conflict should have occurred (logged at debug level)
+	// At least one version conflict may have occurred (logged at debug level)
 	// The exact behavior depends on timing, but the test ensures no crashes or deadlocks
 }
