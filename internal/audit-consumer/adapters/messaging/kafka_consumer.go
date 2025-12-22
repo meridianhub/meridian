@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
@@ -40,6 +41,7 @@ type AuditConsumer struct {
 	consumer    *kafka.ProtoConsumer
 	db          *gorm.DB
 	dlqProducer *kafka.DLQProducer
+	mu          sync.RWMutex
 	running     bool
 }
 
@@ -272,7 +274,9 @@ func (c *AuditConsumer) Start(topic string) error {
 		return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
 	}
 
+	c.mu.Lock()
 	c.running = true
+	c.mu.Unlock()
 	observability.RecordKafkaHealth(true)
 
 	return nil
@@ -282,7 +286,9 @@ func (c *AuditConsumer) Start(topic string) error {
 // Waits for in-flight messages to complete before shutting down.
 func (c *AuditConsumer) Stop() {
 	log.Printf("INFO: Stopping audit consumer...")
+	c.mu.Lock()
 	c.running = false
+	c.mu.Unlock()
 	observability.RecordKafkaHealth(false)
 	if c.consumer != nil {
 		c.consumer.Stop()
@@ -293,6 +299,8 @@ func (c *AuditConsumer) Stop() {
 // IsRunning returns true if the consumer is currently running.
 // This method is used by health checks.
 func (c *AuditConsumer) IsRunning() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.running
 }
 

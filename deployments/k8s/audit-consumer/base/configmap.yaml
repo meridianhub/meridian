@@ -15,6 +15,9 @@ data:
   # Shared Kafka configuration
   kafka_bootstrap_servers: "kafka:9092"
 
+  # Database tuning - can be overridden in overlays
+  db_max_open_conns: "25"
+
   # Observability configuration
   log_level: "info"
   log_format: "json"

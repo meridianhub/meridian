@@ -19,6 +19,9 @@ var (
 	serviceName = "unknown"
 
 	// eventsProcessedTotal counts audit events successfully processed per tenant.
+	// WARNING: tenant_id label has high cardinality risk. Monitor the number of unique
+	// tenant_id values in production. Consider using recording rules or histograms if
+	// cardinality exceeds 1000 tenants.
 	eventsProcessedTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "meridian",
@@ -30,6 +33,9 @@ var (
 	)
 
 	// eventsFailedTotal counts audit events that failed processing per tenant.
+	// WARNING: tenant_id label has high cardinality risk. Monitor the number of unique
+	// tenant_id values in production. Consider using recording rules or histograms if
+	// cardinality exceeds 1000 tenants.
 	eventsFailedTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "meridian",
@@ -41,6 +47,9 @@ var (
 	)
 
 	// tenantAuditWriteDuration tracks the latency of writing audit logs to tenant schemas.
+	// WARNING: tenant_id label has high cardinality risk. Monitor the number of unique
+	// tenant_id values in production. Consider using recording rules or histograms if
+	// cardinality exceeds 1000 tenants.
 	tenantAuditWriteDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "meridian",

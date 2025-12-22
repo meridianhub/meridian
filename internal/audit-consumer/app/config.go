@@ -3,6 +3,7 @@ package app
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"time"
@@ -38,6 +39,8 @@ type DatabaseConfig struct {
 	ConnMaxLifetime time.Duration
 	// ConnMaxIdleTime is the maximum time a connection may be idle before being closed
 	ConnMaxIdleTime time.Duration
+	// PoolStatsInterval is the interval for collecting connection pool statistics
+	PoolStatsInterval time.Duration
 }
 
 // KafkaConfig holds Kafka consumer configuration.
@@ -98,11 +101,12 @@ func loadServiceConfig() ServiceConfig {
 // loadDatabaseConfig loads database configuration from environment variables.
 func loadDatabaseConfig() DatabaseConfig {
 	return DatabaseConfig{
-		URL:             os.Getenv("DATABASE_URL"), // Required - no default to avoid hardcoded credentials
-		MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 25),
-		MaxIdleConns:    getEnvAsInt("DB_MAX_IDLE_CONNS", 5),
-		ConnMaxLifetime: getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
-		ConnMaxIdleTime: getEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute),
+		URL:               os.Getenv("DATABASE_URL"), // Required - no default to avoid hardcoded credentials
+		MaxOpenConns:      getEnvAsInt("DB_MAX_OPEN_CONNS", 25),
+		MaxIdleConns:      getEnvAsInt("DB_MAX_IDLE_CONNS", 5),
+		ConnMaxLifetime:   getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
+		ConnMaxIdleTime:   getEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute),
+		PoolStatsInterval: getEnvAsDuration("DB_POOL_STATS_INTERVAL", 10*time.Second),
 	}
 }
 
@@ -182,6 +186,7 @@ func getEnvAsInt(key string, defaultValue int) int {
 
 	value, err := strconv.Atoi(valueStr)
 	if err != nil {
+		log.Printf("WARNING: Invalid integer format for %s=%q, using default value %d: %v", key, valueStr, defaultValue, err)
 		return defaultValue
 	}
 	return value

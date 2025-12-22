@@ -26,6 +26,9 @@ type Container struct {
 
 	// Observability
 	HealthChecker *observability.HealthChecker
+
+	// Shutdown coordination
+	done chan struct{}
 }
 
 // ContainerCloseError is returned when multiple errors occur during container close.
@@ -42,6 +45,7 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 	container := &Container{
 		Config: config,
 		Logger: logger,
+		done:   make(chan struct{}),
 	}
 
 	// Initialize service name for metrics
@@ -155,40 +159,49 @@ func (c *Container) initializeObservability() error {
 
 // collectDBPoolStats periodically collects database connection pool statistics.
 func (c *Container) collectDBPoolStats() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(c.Config.Database.PoolStatsInterval)
 	defer ticker.Stop()
 
 	var lastWaitCount int64
 	var lastWaitDuration time.Duration
 
-	for range ticker.C {
-		if c.dbWrapper == nil {
+	for {
+		select {
+		case <-c.done:
+			c.Logger.Info("stopping DB pool stats collection")
 			return
+		case <-ticker.C:
+			if c.dbWrapper == nil {
+				return
+			}
+
+			stats := c.dbWrapper.Stats()
+
+			// Calculate deltas for counter metrics
+			waitCountDelta := stats.WaitCount - lastWaitCount
+			waitDurationDelta := stats.WaitDuration - lastWaitDuration
+
+			// Record metrics
+			observability.RecordDBConnectionPoolStats(
+				stats.InUse,
+				stats.Idle,
+				waitCountDelta,
+				waitDurationDelta,
+			)
+
+			// Update last values for next iteration
+			lastWaitCount = stats.WaitCount
+			lastWaitDuration = stats.WaitDuration
 		}
-
-		stats := c.dbWrapper.Stats()
-
-		// Calculate deltas for counter metrics
-		waitCountDelta := stats.WaitCount - lastWaitCount
-		waitDurationDelta := stats.WaitDuration - lastWaitDuration
-
-		// Record metrics
-		observability.RecordDBConnectionPoolStats(
-			stats.InUse,
-			stats.Idle,
-			waitCountDelta,
-			waitDurationDelta,
-		)
-
-		// Update last values for next iteration
-		lastWaitCount = stats.WaitCount
-		lastWaitDuration = stats.WaitDuration
 	}
 }
 
 // Close gracefully closes all resources in the container.
 func (c *Container) Close(_ context.Context) error {
 	c.Logger.Info("closing container resources...")
+
+	// Signal goroutines to stop
+	close(c.done)
 
 	var errs []error
 

@@ -26,6 +26,7 @@ configMapGenerator:
   - audit_topic=audit.events.current-account
   - kafka_group_id=audit-consumer-current-account
   - kafka_client_id=audit-consumer-current-account
+  - db_max_open_conns=50
 
 # Current Account has HIGH audit volume - scale accordingly
 patches:
@@ -52,15 +53,6 @@ patches:
         limits:
           cpu: 1000m
           memory: 1Gi
-
-# Higher database connection pool for high throughput
-- target:
-    kind: Deployment
-    name: audit-consumer
-  patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/env/9/value
-      value: "50"
 
 # Higher HPA limits for peak load
 - target:

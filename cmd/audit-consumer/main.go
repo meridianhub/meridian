@@ -122,10 +122,12 @@ func main() {
 	logger.Info("audit consumer started", "topic", config.Kafka.Topic)
 
 	// Setup HTTP routes with health checks
-	setupRoutes(http.DefaultServeMux, container)
+	mux := http.NewServeMux()
+	setupRoutes(mux, container)
 
 	// Create server with proper timeouts
 	server := createServer(config.Service.Port)
+	server.Handler = mux
 
 	// Start server in background
 	go func() {
