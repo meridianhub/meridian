@@ -14,7 +14,6 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
-	"github.com/meridianhub/meridian/services/position-keeping/service"
 )
 
 // TestListFinancialPositionLogs_ByAccountID tests filtering by account ID
@@ -25,7 +24,7 @@ func TestListFinancialPositionLogs_ByAccountID(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	accountID := "ACC-12345"
 	now := time.Now().UTC()
@@ -87,7 +86,7 @@ func TestListFinancialPositionLogs_ByStatus(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	status := domain.TransactionStatusPending
 	now := time.Now().UTC()
@@ -138,7 +137,7 @@ func TestListFinancialPositionLogs_Pagination(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	now := time.Now().UTC()
 	expectedLogs := []*domain.FinancialPositionLog{
@@ -185,7 +184,7 @@ func TestListFinancialPositionLogs_DateRange(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	fromDate := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	// ToDate is start of next day (exclusive upper bound)
@@ -241,7 +240,7 @@ func TestListFinancialPositionLogs_EmptyResults(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	// Setup mock to return empty results
 	mockRepo.On("List", ctx, domain.PositionLogFilter{
@@ -301,7 +300,7 @@ func TestListFinancialPositionLogs_InvalidPagination(t *testing.T) {
 			mockEventPublisher := domain.NewInMemoryEventPublisher()
 			mockIdempotency := new(MockIdempotencyService)
 
-			svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+			svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 			req := &positionkeepingv1.ListFinancialPositionLogsRequest{
 				Pagination: &commonv1.Pagination{
@@ -333,7 +332,7 @@ func TestListFinancialPositionLogs_InvalidDateRange(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.ListFinancialPositionLogsRequest{
 		DateRange: &commonv1.DateRange{
@@ -367,7 +366,7 @@ func TestListFinancialPositionLogs_RepositoryError(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	// Setup mock to return error
 	mockRepo.On("List", ctx, domain.PositionLogFilter{

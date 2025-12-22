@@ -110,7 +110,10 @@ func TestRetrieveLedgerPosting_DefensiveTests(t *testing.T) {
 			publisher := &mockEventPublisher{}
 			idempotencySvc := &mockIdempotencyService{}
 
-			service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			if err != nil {
+				t.Fatalf("failed to create service: %v", err)
+			}
 
 			req := &financialaccountingv1.RetrieveLedgerPostingRequest{
 				Id: tt.requestID,
@@ -261,7 +264,10 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 			publisher := &mockEventPublisher{}
 			idempotencySvc := &mockIdempotencyService{}
 
-			service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			if err != nil {
+				t.Fatalf("failed to create service: %v", err)
+			}
 
 			req := &financialaccountingv1.RetrieveLedgerPostingRequest{
 				Id: postingID.String(),

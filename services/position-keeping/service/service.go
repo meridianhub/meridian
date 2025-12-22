@@ -15,6 +15,16 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
+// Service initialization errors
+var (
+	// ErrRepositoryNil is returned when attempting to create a service with a nil repository
+	ErrRepositoryNil = errors.New("position keeping service: repository cannot be nil")
+	// ErrEventPublisherNil is returned when attempting to create a service with a nil event publisher
+	ErrEventPublisherNil = errors.New("position keeping service: event publisher cannot be nil")
+	// ErrIdempotencyServiceNil is returned when attempting to create a service with a nil idempotency service
+	ErrIdempotencyServiceNil = errors.New("position keeping service: idempotency service cannot be nil")
+)
+
 // PositionKeepingService implements the gRPC service for Position Keeping operations.
 type PositionKeepingService struct {
 	positionkeepingv1.UnimplementedPositionKeepingServiceServer
@@ -30,27 +40,27 @@ type PositionKeepingService struct {
 //   - eventPublisher: Publishes domain events (must not be nil)
 //   - idempotencySvc: Ensures exactly-once processing of idempotent operations (must not be nil)
 //
-// Panics if any dependency is nil (defensive programming per ADR-0008).
+// Returns an error if any dependency is nil.
 func NewPositionKeepingService(
 	repository domain.FinancialPositionLogRepository,
 	eventPublisher domain.EventPublisher,
 	idempotencySvc idempotency.Service,
-) *PositionKeepingService {
+) (*PositionKeepingService, error) {
 	if repository == nil {
-		panic("position keeping service: repository cannot be nil")
+		return nil, ErrRepositoryNil
 	}
 	if eventPublisher == nil {
-		panic("position keeping service: event publisher cannot be nil")
+		return nil, ErrEventPublisherNil
 	}
 	if idempotencySvc == nil {
-		panic("position keeping service: idempotency service cannot be nil")
+		return nil, ErrIdempotencyServiceNil
 	}
 
 	return &PositionKeepingService{
 		repository:     repository,
 		eventPublisher: eventPublisher,
 		idempotency:    idempotencySvc,
-	}
+	}, nil
 }
 
 // RetrieveFinancialPositionLog retrieves a financial position log by ID.

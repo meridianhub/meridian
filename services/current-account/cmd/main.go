@@ -184,7 +184,7 @@ func run(logger *slog.Logger) error {
 
 	// Register health check service with dependency checking
 	// Health clients bypass the circuit breaker used for business operations
-	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
+	healthChecker, err := service.NewHealthChecker(service.HealthCheckerConfig{
 		Repository:                      repo,
 		PositionKeepingClient:           svcClients.positionKeeping,
 		PositionKeepingHealthClient:     svcClients.positionKeepingHealth,
@@ -194,6 +194,9 @@ func run(logger *slog.Logger) error {
 		ServiceName:                     "current-account",
 		CheckTimeout:                    5 * time.Second,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create health checker: %w", err)
+	}
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 
 	// Register reflection service for debugging

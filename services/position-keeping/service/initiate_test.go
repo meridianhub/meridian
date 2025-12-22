@@ -20,6 +20,16 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
+// mustNewPositionKeepingService creates a service and fails the test if an error occurs.
+// Use this for tests where the service should always be created successfully.
+// Accepts testing.TB to work with both *testing.T and *testing.B.
+func mustNewPositionKeepingService(tb testing.TB, repo domain.FinancialPositionLogRepository, publisher domain.EventPublisher, idempotencySvc idempotency.Service) *service.PositionKeepingService {
+	tb.Helper()
+	svc, err := service.NewPositionKeepingService(repo, publisher, idempotencySvc)
+	require.NoError(tb, err, "unexpected error creating service")
+	return svc
+}
+
 // MockRepository is a mock implementation of FinancialPositionLogRepository
 type MockRepository struct {
 	mock.Mock
@@ -127,7 +137,7 @@ func TestInitiateFinancialPositionLog_Success(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
 		AccountId: "test-account-123",
@@ -198,7 +208,7 @@ func TestInitiateFinancialPositionLog_IdempotencyCheck(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	idempotencyKey := uuid.NewString()
 	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
@@ -301,7 +311,7 @@ func TestInitiateFinancialPositionLog_ValidationErrors(t *testing.T) {
 			mockEventPublisher := domain.NewInMemoryEventPublisher()
 			mockIdempotency := new(MockIdempotencyService)
 
-			svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+			svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 			// Act
 			resp, err := svc.InitiateFinancialPositionLog(ctx, tt.req)
@@ -325,7 +335,7 @@ func TestInitiateFinancialPositionLog_RepositoryError(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
 		AccountId: "test-account-123",
@@ -372,7 +382,7 @@ func TestInitiateFinancialPositionLog_MarkPendingError(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
 		AccountId: "test-account-123",
@@ -411,7 +421,7 @@ func TestInitiateFinancialPositionLog_StoreResultError(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
 		AccountId: "test-account-123",

@@ -177,7 +177,10 @@ func TestListFinancialBookingLogs_DefensiveTests(t *testing.T) {
 			publisher := &mockEventPublisher{}
 			idempotencySvc := &mockIdempotencyService{}
 
-			service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			service, svcErr := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			if svcErr != nil {
+				t.Fatalf("failed to create service: %v", svcErr)
+			}
 
 			// Act
 			resp, err := service.ListFinancialBookingLogs(ctx, tt.request)
@@ -274,7 +277,10 @@ func TestListFinancialBookingLogs_PaginationBehavior(t *testing.T) {
 			repo := persistence.NewLedgerRepository(db)
 			publisher := &mockEventPublisher{}
 			idempotencySvc := &mockIdempotencyService{}
-			service := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			service, svcErr := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			if svcErr != nil {
+				t.Fatalf("failed to create service: %v", svcErr)
+			}
 
 			req := &financialaccountingv1.ListFinancialBookingLogsRequest{
 				Pagination: &commonv1.Pagination{PageSize: tt.pageSize},

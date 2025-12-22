@@ -24,6 +24,151 @@ import (
 	"gorm.io/gorm"
 )
 
+// mustNewService creates a Service and fails the test if an error occurs.
+func mustNewService(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository) *Service {
+	t.Helper()
+	svc, err := NewService(repo, lienRepo)
+	require.NoError(t, err, "unexpected error creating service")
+	return svc
+}
+
+// mustNewServiceWithIdempotency creates a Service with idempotency and fails the test if an error occurs.
+func mustNewServiceWithIdempotency(t *testing.T, repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service) *Service {
+	t.Helper()
+	svc, err := NewServiceWithIdempotency(repo, lienRepo, idempotencyService)
+	require.NoError(t, err, "unexpected error creating service")
+	return svc
+}
+
+// TestNewService_DefensiveTests verifies nil dependency validation for NewService.
+// Per ADR-0008: Constructors must validate dependencies and return errors instead of panicking.
+func TestNewService_DefensiveTests(t *testing.T) {
+	db, _, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	validRepo := persistence.NewRepository(db)
+	validLienRepo := persistence.NewLienRepository(db)
+
+	tests := []struct {
+		name         string
+		repo         *persistence.Repository
+		lienRepo     *persistence.LienRepository
+		wantErr      bool
+		wantSentinel error
+		rationale    string
+	}{
+		{
+			name:         "valid dependencies - both repos provided",
+			repo:         validRepo,
+			lienRepo:     validLienRepo,
+			wantErr:      false,
+			wantSentinel: nil,
+			rationale:    "Valid initialization with all dependencies",
+		},
+		{
+			name:         "valid dependencies - lienRepo is optional",
+			repo:         validRepo,
+			lienRepo:     nil,
+			wantErr:      false,
+			wantSentinel: nil,
+			rationale:    "LienRepo is optional for NewService",
+		},
+		{
+			name:         "nil repository returns ErrRepositoryNil",
+			repo:         nil,
+			lienRepo:     validLienRepo,
+			wantErr:      true,
+			wantSentinel: ErrRepositoryNil,
+			rationale:    "Repository is essential - nil would cause panic on first use",
+		},
+		{
+			name:         "all nil returns ErrRepositoryNil",
+			repo:         nil,
+			lienRepo:     nil,
+			wantErr:      true,
+			wantSentinel: ErrRepositoryNil,
+			rationale:    "Should error on first nil check (repository)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, err := NewService(tt.repo, tt.lienRepo)
+			if tt.wantErr {
+				require.Error(t, err, tt.rationale)
+				require.Nil(t, svc, "Service should be nil when error occurs")
+				require.ErrorIs(t, err, tt.wantSentinel, "Should return the expected sentinel error")
+			} else {
+				require.NoError(t, err, tt.rationale)
+				require.NotNil(t, svc, tt.rationale)
+			}
+		})
+	}
+}
+
+// TestNewServiceWithIdempotency_DefensiveTests verifies nil dependency validation.
+// Note: IdempotencyService is optional in current-account (unlike financial-accounting/position-keeping).
+func TestNewServiceWithIdempotency_DefensiveTests(t *testing.T) {
+	db, _, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	validRepo := persistence.NewRepository(db)
+	validLienRepo := persistence.NewLienRepository(db)
+	mockIdemp := &mockIdempotencyService{}
+
+	tests := []struct {
+		name               string
+		repo               *persistence.Repository
+		lienRepo           *persistence.LienRepository
+		idempotencyService idempotency.Service
+		wantErr            bool
+		wantSentinel       error
+		rationale          string
+	}{
+		{
+			name:               "valid dependencies - all provided",
+			repo:               validRepo,
+			lienRepo:           validLienRepo,
+			idempotencyService: mockIdemp,
+			wantErr:            false,
+			wantSentinel:       nil,
+			rationale:          "Valid initialization with all dependencies",
+		},
+		{
+			name:               "valid - idempotency is optional",
+			repo:               validRepo,
+			lienRepo:           nil,
+			idempotencyService: nil,
+			wantErr:            false,
+			wantSentinel:       nil,
+			rationale:          "IdempotencyService is optional in current-account",
+		},
+		{
+			name:               "nil repository returns ErrRepositoryNil",
+			repo:               nil,
+			lienRepo:           validLienRepo,
+			idempotencyService: mockIdemp,
+			wantErr:            true,
+			wantSentinel:       ErrRepositoryNil,
+			rationale:          "Repository is essential - nil would cause panic on first use",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, err := NewServiceWithIdempotency(tt.repo, tt.lienRepo, tt.idempotencyService)
+			if tt.wantErr {
+				require.Error(t, err, tt.rationale)
+				require.Nil(t, svc, "Service should be nil when error occurs")
+				require.ErrorIs(t, err, tt.wantSentinel, "Should return the expected sentinel error")
+			} else {
+				require.NoError(t, err, tt.rationale)
+				require.NotNil(t, svc, tt.rationale)
+			}
+		})
+	}
+}
+
 // mustNewMoney is a test helper that creates Money or panics
 func mustNewMoney(currency string, amountCents int64) domain.Money {
 	m, err := domain.NewMoney(currency, amountCents)
@@ -76,7 +221,7 @@ func TestInitiateCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
@@ -111,7 +256,7 @@ func TestExecuteDeposit(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -166,7 +311,7 @@ func TestExecuteDepositAccountNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	req := &pb.ExecuteDepositRequest{
 		AccountId: "ACC-NONEXISTENT",
@@ -199,7 +344,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -240,7 +385,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -277,7 +422,7 @@ func TestRetrieveCurrentAccountNotFound(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	req := &pb.RetrieveCurrentAccountRequest{
 		AccountId: "ACC-NONEXISTENT",
@@ -326,7 +471,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create GBP account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -371,7 +516,7 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	req := &pb.InitiateCurrentAccountRequest{
 		AccountIdentification: "GB82WEST12345698765432",
@@ -465,7 +610,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -530,7 +675,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -689,7 +834,7 @@ func TestExecuteDeposit_IdempotencyReturnsCachedResponse(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-001", "ACC-IDEMP-001", uuid.New().String(), "GBP")
@@ -739,7 +884,7 @@ func TestExecuteDeposit_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-002", "ACC-IDEMP-002", uuid.New().String(), "GBP")
@@ -779,7 +924,7 @@ func TestExecuteDeposit_IdempotencyProceedsWithoutKey(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-003", "ACC-IDEMP-003", uuid.New().String(), "GBP")
@@ -807,7 +952,7 @@ func TestExecuteDeposit_IdempotencyCleanupOnFailure(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	mockIdemp := newMockIdempotencyService()
-	svc := NewServiceWithIdempotency(repo, nil, mockIdemp)
+	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account but with wrong currency
 	account, err := domain.NewCurrentAccount("ACC-IDEMP-004", "ACC-IDEMP-004", uuid.New().String(), "GBP")

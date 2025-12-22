@@ -81,10 +81,11 @@ func TestHealthChecker_Check_Healthy(t *testing.T) {
 	gormDB, mock := setupMockDB(t)
 	mock.ExpectPing()
 
-	healthChecker := NewHealthChecker(HealthCheckerConfig{
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
 		DB:           gormDB,
 		CheckTimeout: 5 * time.Second,
 	})
+	require.NoError(t, err)
 
 	resp, err := healthChecker.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{})
 
@@ -98,10 +99,11 @@ func TestHealthChecker_Check_Unhealthy(t *testing.T) {
 	gormDB, mock := setupMockDB(t)
 	mock.ExpectPing().WillReturnError(assert.AnError)
 
-	healthChecker := NewHealthChecker(HealthCheckerConfig{
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
 		DB:           gormDB,
 		CheckTimeout: 5 * time.Second,
 	})
+	require.NoError(t, err)
 
 	resp, err := healthChecker.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{})
 
@@ -115,10 +117,11 @@ func TestHealthChecker_Check_SpecificService(t *testing.T) {
 	gormDB, mock := setupMockDB(t)
 	mock.ExpectPing()
 
-	healthChecker := NewHealthChecker(HealthCheckerConfig{
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
 		DB:          gormDB,
 		ServiceName: "financial-accounting",
 	})
+	require.NoError(t, err)
 
 	// Check with explicit service name
 	resp, err := healthChecker.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{
@@ -135,9 +138,10 @@ func TestHealthChecker_Check_SpecificComponent(t *testing.T) {
 	gormDB, mock := setupMockDB(t)
 	mock.ExpectPing()
 
-	healthChecker := NewHealthChecker(HealthCheckerConfig{
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
 		DB: gormDB,
 	})
+	require.NoError(t, err)
 
 	// Check database component specifically
 	resp, err := healthChecker.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{
@@ -153,9 +157,10 @@ func TestHealthChecker_Check_SpecificComponent(t *testing.T) {
 func TestHealthChecker_Check_UnknownService(t *testing.T) {
 	gormDB, _ := setupMockDB(t)
 
-	healthChecker := NewHealthChecker(HealthCheckerConfig{
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
 		DB: gormDB,
 	})
+	require.NoError(t, err)
 
 	// Check unknown service
 	resp, err := healthChecker.Check(context.Background(), &grpc_health_v1.HealthCheckRequest{
@@ -169,9 +174,10 @@ func TestHealthChecker_Check_UnknownService(t *testing.T) {
 func TestHealthChecker_DefaultConfig(t *testing.T) {
 	gormDB, _ := setupMockDB(t)
 
-	healthChecker := NewHealthChecker(HealthCheckerConfig{
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
 		DB: gormDB,
 	})
+	require.NoError(t, err)
 
 	assert.Equal(t, "financial-accounting", healthChecker.serviceName)
 	assert.Equal(t, 5*time.Second, healthChecker.checkTimeout)
@@ -179,19 +185,22 @@ func TestHealthChecker_DefaultConfig(t *testing.T) {
 	assert.NotNil(t, healthChecker.aggregator)
 }
 
-func TestHealthChecker_PanicOnNilDB(t *testing.T) {
-	assert.Panics(t, func() {
-		NewHealthChecker(HealthCheckerConfig{
-			DB: nil,
-		})
+func TestHealthChecker_ErrorOnNilDB(t *testing.T) {
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
+		DB: nil,
 	})
+	require.Error(t, err)
+	assert.Nil(t, healthChecker)
+	// Verify the specific sentinel error using errors.Is()
+	assert.ErrorIs(t, err, ErrDatabaseNil, "Should return ErrDatabaseNil sentinel error")
 }
 
 func TestMapStatusToGRPC(t *testing.T) {
 	gormDB, _ := setupMockDB(t)
-	healthChecker := NewHealthChecker(HealthCheckerConfig{
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
 		DB: gormDB,
 	})
+	require.NoError(t, err)
 
 	tests := []struct {
 		status   health.Status

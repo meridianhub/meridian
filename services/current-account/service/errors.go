@@ -11,6 +11,8 @@ var (
 	ErrRepositoryNil                       = errors.New("repository cannot be nil")
 	ErrPositionKeepingServiceNameEmpty     = errors.New("position keeping service name cannot be empty")
 	ErrFinancialAccountingServiceNameEmpty = errors.New("financial accounting service name cannot be empty")
+	// ErrHealthCheckerRepositoryNil is returned when attempting to create a health checker with a nil repository
+	ErrHealthCheckerRepositoryNil = errors.New("health checker requires non-nil repository")
 )
 
 // Saga orchestration errors for compensation and state tracking

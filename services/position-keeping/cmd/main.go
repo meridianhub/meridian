@@ -131,11 +131,14 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create gRPC service
-	positionKeepingService := service.NewPositionKeepingService(
+	positionKeepingService, err := service.NewPositionKeepingService(
 		container.PositionLogRepository,
 		container.EventPublisher,
 		idempotencySvc,
 	)
+	if err != nil {
+		return fmt.Errorf("failed to create position keeping service: %w", err)
+	}
 
 	logger.Info("position keeping service initialized")
 

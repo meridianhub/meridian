@@ -13,7 +13,6 @@ import (
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
-	"github.com/meridianhub/meridian/services/position-keeping/service"
 )
 
 // TestRetrieveFinancialPositionLog_Success tests successful retrieval by ID
@@ -24,7 +23,7 @@ func TestRetrieveFinancialPositionLog_Success(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	logID := uuid.New()
 	now := time.Now().UTC()
@@ -65,7 +64,7 @@ func TestRetrieveFinancialPositionLog_NotFound(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	logID := uuid.New()
 	mockRepo.On("FindByID", ctx, logID).Return(nil, domain.ErrNotFound)
@@ -97,7 +96,7 @@ func TestRetrieveFinancialPositionLog_InvalidID(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.RetrieveFinancialPositionLogRequest{
 		LogId: "not-a-valid-uuid",
@@ -126,7 +125,7 @@ func TestRetrieveFinancialPositionLog_EmptyID(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.RetrieveFinancialPositionLogRequest{
 		LogId: "",
@@ -154,7 +153,7 @@ func TestRetrieveFinancialPositionLog_RepositoryError(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	logID := uuid.New()
 	mockRepo.On("FindByID", ctx, logID).Return(nil, assert.AnError)

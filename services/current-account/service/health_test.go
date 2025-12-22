@@ -32,11 +32,20 @@ func setupTestRepository(t *testing.T) *persistence.Repository {
 	return persistence.NewRepository(db)
 }
 
+// mustNewHealthChecker creates a HealthChecker and fails the test if an error occurs.
+func mustNewHealthChecker(t *testing.T, config HealthCheckerConfig) *HealthChecker {
+	t.Helper()
+	checker, err := NewHealthChecker(config)
+	require.NoError(t, err, "unexpected error creating health checker")
+	return checker
+}
+
 func TestNewHealthChecker(t *testing.T) {
 	tests := []struct {
-		name      string
-		config    HealthCheckerConfig
-		wantPanic bool
+		name         string
+		config       HealthCheckerConfig
+		wantErr      bool
+		wantSentinel error
 	}{
 		{
 			name: "valid configuration with all dependencies",
@@ -50,46 +59,49 @@ func TestNewHealthChecker(t *testing.T) {
 				ServiceName:                     "test-service",
 				CheckTimeout:                    3 * time.Second,
 			},
-			wantPanic: false,
+			wantErr:      false,
+			wantSentinel: nil,
 		},
 		{
 			name: "valid configuration with defaults",
 			config: HealthCheckerConfig{
 				Repository: setupTestRepository(t),
 			},
-			wantPanic: false,
+			wantErr:      false,
+			wantSentinel: nil,
 		},
 		{
-			name: "missing repository panics",
+			name: "missing repository returns ErrHealthCheckerRepositoryNil",
 			config: HealthCheckerConfig{
 				PositionKeepingClient:           &mockPositionKeepingClient{},
 				PositionKeepingHealthClient:     &mockGRPCHealthClient{status: grpc_health_v1.HealthCheckResponse_SERVING},
 				FinancialAccountingClient:       &mockFinancialAccountingClient{},
 				FinancialAccountingHealthClient: &mockGRPCHealthClient{status: grpc_health_v1.HealthCheckResponse_SERVING},
 			},
-			wantPanic: true,
+			wantErr:      true,
+			wantSentinel: ErrHealthCheckerRepositoryNil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.wantPanic {
-				assert.Panics(t, func() {
-					NewHealthChecker(tt.config)
-				})
+			checker, err := NewHealthChecker(tt.config)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, checker)
+				// Verify the specific sentinel error using errors.Is()
+				assert.ErrorIs(t, err, tt.wantSentinel, "Should return the expected sentinel error")
 			} else {
-				assert.NotPanics(t, func() {
-					checker := NewHealthChecker(tt.config)
-					assert.NotNil(t, checker)
+				require.NoError(t, err)
+				assert.NotNil(t, checker)
 
-					// Verify defaults applied
-					if tt.config.ServiceName == "" {
-						assert.Equal(t, "current-account", checker.serviceName)
-					}
-					if tt.config.CheckTimeout == 0 {
-						assert.Equal(t, 5*time.Second, checker.checkTimeout)
-					}
-				})
+				// Verify defaults applied
+				if tt.config.ServiceName == "" {
+					assert.Equal(t, "current-account", checker.serviceName)
+				}
+				if tt.config.CheckTimeout == 0 {
+					assert.Equal(t, 5*time.Second, checker.checkTimeout)
+				}
 			}
 		})
 	}
@@ -110,7 +122,7 @@ func TestHealthChecker_Check_AllHealthy(t *testing.T) {
 		status: grpc_health_v1.HealthCheckResponse_SERVING,
 	}
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository:                      repo,
 		PositionKeepingClient:           posClient,
 		PositionKeepingHealthClient:     posHealthClient,
@@ -134,7 +146,7 @@ func TestHealthChecker_Check_AllHealthy(t *testing.T) {
 func TestHealthChecker_Check_DatabaseOnly(t *testing.T) {
 	repo := setupTestRepository(t)
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository: repo,
 		Logger:     slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
@@ -168,7 +180,7 @@ func TestHealthChecker_Check_ExternalServiceDegraded(t *testing.T) {
 	// We need to add listError fields to the existing mocks
 	// For now, the test will pass because the mocks don't fail by default
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository:                repo,
 		PositionKeepingClient:     posClient,
 		FinancialAccountingClient: finClient,
@@ -189,7 +201,7 @@ func TestHealthChecker_Check_ExternalServiceDegraded(t *testing.T) {
 func TestHealthChecker_Check_WrongService(t *testing.T) {
 	repo := setupTestRepository(t)
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository: repo,
 		Logger:     slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
@@ -206,7 +218,7 @@ func TestHealthChecker_Check_WrongService(t *testing.T) {
 func TestHealthChecker_Check_EmptyServiceName(t *testing.T) {
 	repo := setupTestRepository(t)
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository: repo,
 		Logger:     slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
@@ -230,7 +242,7 @@ func TestHealthChecker_Check_ComponentSpecificDatabase(t *testing.T) {
 		failOnCapture: false,
 	}
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository:                repo,
 		PositionKeepingClient:     posClient,
 		FinancialAccountingClient: finClient,
@@ -264,7 +276,7 @@ func TestHealthChecker_Check_ComponentSpecificPositionKeeping(t *testing.T) {
 		status: grpc_health_v1.HealthCheckResponse_SERVING,
 	}
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository:                      repo,
 		PositionKeepingClient:           posClient,
 		PositionKeepingHealthClient:     posHealthClient,
@@ -300,7 +312,7 @@ func TestHealthChecker_Check_ComponentSpecificFinancialAccounting(t *testing.T) 
 		status: grpc_health_v1.HealthCheckResponse_SERVING,
 	}
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository:                      repo,
 		PositionKeepingClient:           posClient,
 		PositionKeepingHealthClient:     posHealthClient,
@@ -324,7 +336,7 @@ func TestHealthChecker_Check_ComponentSpecificFinancialAccounting(t *testing.T) 
 func TestHealthChecker_Check_ComponentNotFound(t *testing.T) {
 	repo := setupTestRepository(t)
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository: repo,
 		Logger:     slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	})
@@ -431,7 +443,7 @@ func TestFinancialAccountingHealthChecker_Healthy(t *testing.T) {
 func TestHealthChecker_Watch(t *testing.T) {
 	repo := setupTestRepository(t)
 
-	checker := NewHealthChecker(HealthCheckerConfig{
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
 		Repository:   repo,
 		Logger:       slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 		CheckTimeout: 100 * time.Millisecond, // Short timeout for test

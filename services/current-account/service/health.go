@@ -49,9 +49,11 @@ type HealthCheckerConfig struct {
 // - SERVING: All critical dependencies healthy (database)
 // - NOT_SERVING: Any critical dependency down (database unreachable)
 // - UNKNOWN: Unable to determine health (should not occur in normal operation)
-func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
+//
+// Returns an error if Repository is nil.
+func NewHealthChecker(config HealthCheckerConfig) (*HealthChecker, error) {
 	if config.Repository == nil {
-		panic("health checker requires non-nil repository")
+		return nil, ErrHealthCheckerRepositoryNil
 	}
 
 	// Apply defaults
@@ -95,7 +97,7 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 		aggregator:       aggregator,
 		serviceName:      config.ServiceName,
 		checkTimeout:     config.CheckTimeout,
-	}
+	}, nil
 }
 
 // Check implements gRPC health check protocol.

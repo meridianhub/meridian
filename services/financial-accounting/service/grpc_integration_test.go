@@ -149,7 +149,8 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 	}
 
 	// Create the financial accounting service
-	service := NewFinancialAccountingService(repo, eventPublisher, idempotencySvc)
+	service, err := NewFinancialAccountingService(repo, eventPublisher, idempotencySvc)
+	require.NoError(t, err, "Failed to create financial accounting service")
 
 	// Create gRPC server with tenant interceptor
 	grpcServer := grpc.NewServer(

@@ -91,29 +91,31 @@ type Config struct {
 
 // NewService creates a new current account service with minimal dependencies.
 // This is primarily used for testing. For production use, prefer NewServiceWithClients.
-func NewService(repo *persistence.Repository, lienRepo *persistence.LienRepository) *Service {
+// Returns an error if repository is nil.
+func NewService(repo *persistence.Repository, lienRepo *persistence.LienRepository) (*Service, error) {
 	if repo == nil {
-		panic("repository cannot be nil")
+		return nil, ErrRepositoryNil
 	}
 	return &Service{
 		repo:     repo,
 		lienRepo: lienRepo,
 		logger:   slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-	}
+	}, nil
 }
 
 // NewServiceWithIdempotency creates a new current account service with idempotency support.
 // This is primarily used for testing idempotency paths.
-func NewServiceWithIdempotency(repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service) *Service {
+// Returns an error if repository is nil.
+func NewServiceWithIdempotency(repo *persistence.Repository, lienRepo *persistence.LienRepository, idempotencyService idempotency.Service) (*Service, error) {
 	if repo == nil {
-		panic("repository cannot be nil")
+		return nil, ErrRepositoryNil
 	}
 	return &Service{
 		repo:               repo,
 		lienRepo:           lienRepo,
 		idempotencyService: idempotencyService,
 		logger:             slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-	}
+	}, nil
 }
 
 // NewServiceWithExistingClients creates a new service with pre-created client instances.

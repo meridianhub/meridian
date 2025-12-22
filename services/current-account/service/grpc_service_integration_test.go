@@ -850,7 +850,7 @@ func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
 	_ = createTestAccount(t, ctx, repo, "ACC-006")
 
 	// Create service WITHOUT clients (backward compatibility mode)
-	svc := NewService(repo, nil)
+	svc := mustNewService(t, repo, nil)
 
 	// Execute deposit
 	req := createTestDepositRequest("ACC-006", 200, 0) // £200.00

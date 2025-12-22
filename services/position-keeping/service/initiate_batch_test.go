@@ -35,7 +35,7 @@ func TestInitiateFinancialPositionLogBatch_Success(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
 		Requests: []*positionkeepingv1.BatchInitiateRequest{
@@ -83,7 +83,7 @@ func TestInitiateFinancialPositionLogBatch_WithInitialEntry(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
 		Requests: []*positionkeepingv1.BatchInitiateRequest{
@@ -160,7 +160,7 @@ func TestInitiateFinancialPositionLogBatch_EmptyRequest(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
 		Requests: []*positionkeepingv1.BatchInitiateRequest{},
@@ -187,7 +187,7 @@ func TestInitiateFinancialPositionLogBatch_ExceedsMaxSize(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	// Create 10,001 requests (exceeds max of 10,000)
 	requests := make([]*positionkeepingv1.BatchInitiateRequest, 10001)
@@ -222,7 +222,7 @@ func TestInitiateFinancialPositionLogBatch_PartialValidationFailures(t *testing.
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
 		Requests: []*positionkeepingv1.BatchInitiateRequest{
@@ -260,7 +260,7 @@ func TestInitiateFinancialPositionLogBatch_Idempotency(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	batchID := uuid.NewString()
 	idempotencyKey := uuid.NewString()
@@ -317,7 +317,7 @@ func TestInitiateFinancialPositionLogBatch_LargeBatch(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	// Create 1,000 requests
 	requests := make([]*positionkeepingv1.BatchInitiateRequest, 1000)
@@ -356,7 +356,7 @@ func TestInitiateFinancialPositionLogBatch_CustomBatchID(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	customBatchID := uuid.NewString()
 	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
@@ -389,7 +389,7 @@ func TestInitiateFinancialPositionLogBatch_InvalidBatchID(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
 		Requests: []*positionkeepingv1.BatchInitiateRequest{
@@ -419,7 +419,7 @@ func TestInitiateFinancialPositionLogBatch_IdempotencyRequiresBatchID(t *testing
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	req := &positionkeepingv1.InitiateFinancialPositionLogBatchRequest{
 		Requests: []*positionkeepingv1.BatchInitiateRequest{
@@ -456,7 +456,7 @@ func TestInitiateFinancialPositionLogBatch_ConcurrentBatches(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	// Mock CreateBatch to be concurrent-safe
 	mockRepo.On("CreateBatch", mock.Anything, mock.AnythingOfType("[]*domain.FinancialPositionLog")).
@@ -495,7 +495,7 @@ func BenchmarkInitiateFinancialPositionLogBatch_SmallBatch(b *testing.B) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(b, mockRepo, mockEventPublisher, mockIdempotency)
 
 	mockRepo.On("CreateBatch", ctx, mock.Anything).Return(nil)
 
@@ -522,7 +522,7 @@ func BenchmarkInitiateFinancialPositionLogBatch_MediumBatch(b *testing.B) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(b, mockRepo, mockEventPublisher, mockIdempotency)
 
 	mockRepo.On("CreateBatch", ctx, mock.Anything).Return(nil)
 
@@ -549,7 +549,7 @@ func BenchmarkInitiateFinancialPositionLogBatch_LargeBatch(b *testing.B) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(b, mockRepo, mockEventPublisher, mockIdempotency)
 
 	mockRepo.On("CreateBatch", ctx, mock.Anything).Return(nil)
 
@@ -577,7 +577,7 @@ func TestInitiateFinancialPositionLogBatch_DatabaseFailureWithIdempotencyCleanup
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	batchID := uuid.New()
 	idempotencyKey := uuid.NewString()
@@ -634,7 +634,7 @@ func TestInitiateFinancialPositionLogBatch_ContextCancellation(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
 
 	// Create a context that's already cancelled
 	ctx, cancel := context.WithCancel(context.Background())
@@ -675,7 +675,8 @@ func TestInitiateFinancialPositionLogBatch_NilPointerRegressionOnValidationFailu
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	require.NoError(t, err)
 
 	// Create a batch with alternating valid and invalid entries to maximize
 	// the chance of triggering race conditions in the parallel processing
