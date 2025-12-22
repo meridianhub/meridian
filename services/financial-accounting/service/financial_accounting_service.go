@@ -11,8 +11,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
@@ -27,22 +29,20 @@ const (
 )
 
 // DomainEvent is a marker interface for all financial accounting domain events.
-// Concrete event types will be defined in domain/events.go in subsequent subtasks.
+// In practice, events are protobuf messages from eventsv1 package.
+// The interface uses proto.Message for maximum compatibility with protobuf events.
 //
-// Event types to be implemented (subtask 9.2+):
-//   - LedgerPostingCapturedEvent
-//   - LedgerPostingAmendedEvent
-//   - LedgerPostingPostedEvent
-//   - LedgerPostingRejectedEvent
-//   - FinancialBookingLogInitiatedEvent
-//   - FinancialBookingLogUpdatedEvent
-//   - FinancialBookingLogPostedEvent
-//   - FinancialBookingLogClosedEvent
-//   - BalanceValidationFailedEvent
-type DomainEvent interface {
-	// EventType returns the type identifier for this event
-	EventType() string
-}
+// Event types (protobuf-based):
+//   - eventsv1.LedgerPostingCapturedEvent
+//   - eventsv1.LedgerPostingAmendedEvent
+//   - eventsv1.LedgerPostingPostedEvent
+//   - eventsv1.LedgerPostingRejectedEvent
+//   - eventsv1.FinancialBookingLogInitiatedEvent
+//   - eventsv1.FinancialBookingLogUpdatedEvent
+//   - eventsv1.FinancialBookingLogPostedEvent
+//   - eventsv1.FinancialBookingLogClosedEvent
+//   - eventsv1.BalanceValidationFailedEvent
+type DomainEvent = proto.Message
 
 // EventPublisher defines the interface for publishing domain events to the messaging infrastructure.
 // Events are published to Kafka following ADR-0004 (Event Schema Evolution Strategy).
@@ -245,8 +245,27 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		return nil, status.Errorf(codes.Internal, "failed to save posting: %v", err)
 	}
 
-	// TODO(75-async-audit#5): Implement LedgerPostingCapturedEvent and publish it
-	// Will use Kafka audit events with outbox pattern for guaranteed delivery
+	// Publish LedgerPostingCapturedEvent for inter-service coordination
+	// Event publishing is best-effort - errors are logged but don't fail the operation
+	event := &eventsv1.LedgerPostingCapturedEvent{
+		PostingId:        posting.ID.String(),
+		BookingLogId:     posting.FinancialBookingLogID.String(),
+		PostingDirection: toProtoPostingDirection(posting.Direction),
+		PostingAmount:    toProtoMoney(posting.Amount),
+		AccountId:        posting.AccountID,
+		ValueDate:        timestamppb.New(posting.ValueDate),
+		Status:           toProtoTransactionStatus(posting.Status),
+		CorrelationId:    correlationID,
+		CausationId:      correlationID, // Request caused this event
+		Timestamp:        timestamppb.Now(),
+		Version:          1, // Initial version for newly created posting
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish LedgerPostingCapturedEvent",
+			"error", err,
+			"posting_id", posting.ID.String(),
+			"booking_log_id", posting.FinancialBookingLogID.String())
+	}
 
 	// Convert to proto response
 	response := &financialaccountingv1.CaptureLedgerPostingResponse{
