@@ -169,6 +169,13 @@ var (
 		"webhooks":   true,
 		"metrics":    true,
 		"prometheus": true,
+		"ftp":        true,
+		"smtp":       true,
+		"imap":       true,
+		"test":       true,
+		"staging":    true,
+		"dev":        true,
+		"prod":       true,
 	}
 
 	// ErrSlugTooShort is returned when a slug is shorter than the minimum required length.
