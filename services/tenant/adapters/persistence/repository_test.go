@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -793,4 +794,63 @@ func TestRepository_IsSlugAvailable_Integration(t *testing.T) {
 	available, err = repo.IsSlugAvailable(ctx, "new-slug")
 	require.NoError(t, err)
 	assert.True(t, available, "Expected 'new-slug' to be available")
+}
+
+// TestRepository_GetBySlug_UsesIndex verifies that slug lookups use the idx_tenant_slug
+// index for O(log n) performance rather than O(n) sequential scan.
+//
+// PostgreSQL query planner behavior:
+// - With < ~100 rows: May prefer Seq Scan due to overhead of index access
+// - With sufficient rows: Uses Index Scan on idx_tenant_slug
+// - The partial index (WHERE slug IS NOT NULL) is optimal for slug lookups
+//
+// This test creates enough rows to trigger index usage and verifies via EXPLAIN.
+func TestRepository_GetBySlug_UsesIndex(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create partial index matching the migration
+	// GORM AutoMigrate creates a basic unique index, but we need the partial index
+	// that matches production behavior for accurate query plan testing
+	err := db.Exec(`
+		DROP INDEX IF EXISTS idx_tenant_slug;
+		CREATE UNIQUE INDEX idx_tenant_slug ON tenant(slug) WHERE slug IS NOT NULL;
+	`).Error
+	require.NoError(t, err, "Failed to create partial index")
+
+	// Insert enough tenants to make index usage preferable
+	// PostgreSQL typically prefers indexes over sequential scans when:
+	// 1. Table has many rows (reduces full scan cost)
+	// 2. Query selectivity is high (few rows match)
+	const numTenants = 200
+	for i := 0; i < numTenants; i++ {
+		testTenant := newTestTenant(fmt.Sprintf("tenant_%03d", i))
+		testTenant.Slug = fmt.Sprintf("slug-%03d", i)
+		err := db.WithContext(ctx).Create(toEntity(testTenant)).Error
+		require.NoError(t, err, "Failed to create tenant %d", i)
+	}
+
+	// Run EXPLAIN on the GetBySlug query pattern
+	var explainResult []struct {
+		QueryPlan string `gorm:"column:QUERY PLAN"`
+	}
+	err = db.Raw("EXPLAIN SELECT * FROM tenant WHERE slug = ?", "slug-100").Scan(&explainResult).Error
+	require.NoError(t, err, "EXPLAIN query failed")
+
+	// Combine query plan lines for analysis
+	var queryPlan string
+	for _, row := range explainResult {
+		queryPlan += row.QueryPlan + "\n"
+	}
+
+	// Verify index is used (not a sequential scan)
+	// PostgreSQL will show "Index Scan using idx_tenant_slug" or similar
+	assert.Contains(t, queryPlan, "Index",
+		"Expected query plan to use Index Scan, got:\n%s", queryPlan)
+	assert.NotContains(t, queryPlan, "Seq Scan",
+		"Query plan should not use Seq Scan, got:\n%s", queryPlan)
+
+	t.Logf("Query plan for GetBySlug:\n%s", queryPlan)
 }
