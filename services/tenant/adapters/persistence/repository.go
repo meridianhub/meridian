@@ -81,6 +81,23 @@ func (r *Repository) GetByID(ctx context.Context, id tenant.TenantID) (*domain.T
 	return toDomain(&entity)
 }
 
+// GetBySlug retrieves a tenant by its URL-friendly slug identifier.
+// Uses the idx_tenant_slug index for fast lookups.
+func (r *Repository) GetBySlug(ctx context.Context, slug string) (*domain.Tenant, error) {
+	var entity TenantEntity
+	result := r.db.WithContext(ctx).Where("slug = ?", slug).First(&entity)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, ErrTenantNotFound
+	}
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return toDomain(&entity)
+}
+
 // IsActive checks if a tenant exists and is active.
 // This is optimized for validation middleware - returns only what's needed.
 func (r *Repository) IsActive(ctx context.Context, id tenant.TenantID) (bool, error) {

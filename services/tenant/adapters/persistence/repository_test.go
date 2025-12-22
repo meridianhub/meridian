@@ -168,6 +168,79 @@ func TestRepository_GetByID_NotFound(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound, got %v", err)
 }
 
+func TestRepository_GetBySlug(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with slug
+	testTenant := newTestTenant("acme_bank")
+	testTenant.Slug = "acme-bank"
+	testTenant.DisplayName = "ACME Bank"
+	testTenant.SettlementAsset = "USD"
+
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	// Retrieve by slug
+	retrieved, err := repo.GetBySlug(ctx, "acme-bank")
+	require.NoError(t, err)
+	assert.Equal(t, testTenant.ID.String(), retrieved.ID.String())
+	assert.Equal(t, "acme-bank", retrieved.Slug)
+	assert.Equal(t, "ACME Bank", retrieved.DisplayName)
+	assert.Equal(t, "USD", retrieved.SettlementAsset)
+	assert.Equal(t, domain.StatusActive, retrieved.Status)
+}
+
+func TestRepository_GetBySlug_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	_, err := repo.GetBySlug(ctx, "nonexistent-slug")
+	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound, got %v", err)
+}
+
+func TestRepository_GetBySlug_ReturnsAllFields(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenant with all fields populated
+	testTenant := newTestTenant("full_tenant")
+	testTenant.Slug = "full-tenant-slug"
+	testTenant.Subdomain = "full-tenant.demo.meridian.io"
+	testTenant.DisplayName = "Full Tenant Inc."
+	testTenant.SettlementAsset = "EUR"
+	testTenant.Metadata = map[string]interface{}{
+		"tier":     "enterprise",
+		"features": []interface{}{"batch", "multi-currency"},
+	}
+
+	err := repo.Create(ctx, testTenant)
+	require.NoError(t, err)
+
+	// Retrieve by slug and verify all fields
+	retrieved, err := repo.GetBySlug(ctx, "full-tenant-slug")
+	require.NoError(t, err)
+
+	assert.Equal(t, testTenant.ID.String(), retrieved.ID.String())
+	assert.Equal(t, "full-tenant-slug", retrieved.Slug)
+	assert.Equal(t, "full-tenant.demo.meridian.io", retrieved.Subdomain)
+	assert.Equal(t, "Full Tenant Inc.", retrieved.DisplayName)
+	assert.Equal(t, "EUR", retrieved.SettlementAsset)
+	assert.Equal(t, domain.StatusActive, retrieved.Status)
+	assert.Equal(t, "enterprise", retrieved.Metadata["tier"])
+	assert.NotZero(t, retrieved.CreatedAt)
+	assert.Equal(t, 1, retrieved.Version)
+}
+
 func TestRepository_IsActive(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
