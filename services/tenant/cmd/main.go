@@ -18,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/services/tenant/service"
+	"github.com/meridianhub/meridian/services/tenant/worker"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -178,6 +179,31 @@ func run(logger *slog.Logger) error {
 	logger.Info("cached tenant registry started",
 		"refresh_interval", "60s")
 
+	// Initialize provisioning worker (only if schema provisioning is enabled)
+	var provisioningWorker *worker.ProvisioningWorker
+	if provisioningEnabled == envValueTrue && schemaProvisioner != nil {
+		pollInterval := getEnvAsDuration("PROVISIONING_POLL_INTERVAL", 30*time.Second)
+		var err error
+		provisioningWorker, err = worker.NewProvisioningWorker(
+			repo,
+			schemaProvisioner,
+			pollInterval,
+			logger,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create provisioning worker: %w", err)
+		}
+
+		// Start worker in background goroutine
+		go provisioningWorker.Start(ctx)
+
+		logger.Info("provisioning worker started",
+			"poll_interval", pollInterval)
+	} else {
+		logger.Info("provisioning worker disabled",
+			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
+	}
+
 	// Initialize authentication (optional - disabled by default for development)
 	// In production, set AUTH_JWKS_URL to enable platform-admin authentication.
 	var authInterceptor *auth.Interceptor
@@ -330,6 +356,13 @@ func run(logger *slog.Logger) error {
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Stop provisioning worker first if it's running
+	if provisioningWorker != nil {
+		logger.Info("stopping provisioning worker...")
+		provisioningWorker.Stop()
+		logger.Info("provisioning worker stopped")
+	}
 
 	// Gracefully stop gRPC server
 	stopped := make(chan struct{})
