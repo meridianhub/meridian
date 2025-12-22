@@ -1060,6 +1060,9 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to retrieve booking log: %v", err)
 	}
 
+	// Capture previous status BEFORE update for event publishing
+	previousStatus := bookingLog.Status
+
 	// Validate state transition using the state machine
 	// This handles all valid transitions including POSTED -> REVERSED for reversals
 	if !isValidBookingLogTransition(bookingLog.Status, newStatus) {
@@ -1145,7 +1148,32 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to update booking log: %v", err)
 	}
 
-	// TODO(75-async-audit#5): Publish FinancialBookingLogUpdatedEvent for inter-service coordination
+	// Publish FinancialBookingLogUpdatedEvent for inter-service coordination
+	// Event publishing is best-effort - errors are logged but don't fail the operation
+	correlationID := ""
+	if req.IdempotencyKey != nil {
+		correlationID = req.IdempotencyKey.Key
+	}
+	event := &eventsv1.FinancialBookingLogUpdatedEvent{
+		BookingLogId:         bookingLogID.String(),
+		Status:               toProtoTransactionStatus(newStatus),
+		PreviousStatus:       toProtoTransactionStatus(previousStatus),
+		ChartOfAccountsRules: updated.ChartOfAccountsRules,
+		Reason:               fmt.Sprintf("Status updated from %s to %s", previousStatus, newStatus),
+		UpdatedBy:            "system", // TODO: Extract from auth context when available
+		CorrelationId:        correlationID,
+		CausationId:          correlationID, // Request caused this event
+		Timestamp:            timestamppb.Now(),
+		Version:              1, // Version tracking would need to be added to domain model
+	}
+
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish FinancialBookingLogUpdatedEvent",
+			"error", err,
+			"booking_log_id", bookingLogID.String(),
+			"previous_status", previousStatus,
+			"new_status", newStatus)
+	}
 
 	// Convert to proto response
 	response := &financialaccountingv1.UpdateFinancialBookingLogResponse{
