@@ -86,7 +86,12 @@ func (r *Repository) GetByID(ctx context.Context, id tenant.TenantID) (*domain.T
 
 // GetBySlug retrieves a tenant by its URL-friendly slug identifier.
 // Uses the idx_tenant_slug index for fast lookups.
+// Returns ErrTenantNotFound for empty slugs (fail-fast).
 func (r *Repository) GetBySlug(ctx context.Context, slug string) (*domain.Tenant, error) {
+	if slug == "" {
+		return nil, ErrTenantNotFound
+	}
+
 	var entity TenantEntity
 	result := r.db.WithContext(ctx).Where("slug = ?", slug).First(&entity)
 
@@ -102,8 +107,14 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (*domain.Tenant
 }
 
 // IsSlugAvailable checks if a slug is available for registration.
-// Returns true if the slug is not in use, false if it's taken or on error.
+// Returns true if the slug is not in use, false if it's taken.
+// Returns an error only if the database query fails.
+// Returns false for empty slugs (invalid input).
 func (r *Repository) IsSlugAvailable(ctx context.Context, slug string) (bool, error) {
+	if slug == "" {
+		return false, nil
+	}
+
 	var count int64
 	result := r.db.WithContext(ctx).
 		Model(&TenantEntity{}).

@@ -206,6 +206,18 @@ func TestRepository_GetBySlug_NotFound(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound, got %v", err)
 }
 
+func TestRepository_GetBySlug_EmptyString(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Empty slug should return ErrTenantNotFound immediately (fail-fast)
+	_, err := repo.GetBySlug(ctx, "")
+	assert.True(t, errors.Is(err, ErrTenantNotFound), "Expected ErrTenantNotFound for empty slug, got %v", err)
+}
+
 func TestRepository_GetBySlug_ReturnsAllFields(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -794,6 +806,19 @@ func TestRepository_IsSlugAvailable_Integration(t *testing.T) {
 	available, err = repo.IsSlugAvailable(ctx, "new-slug")
 	require.NoError(t, err)
 	assert.True(t, available, "Expected 'new-slug' to be available")
+}
+
+func TestRepository_IsSlugAvailable_EmptyString(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Empty slug is invalid input, should return false (not available)
+	available, err := repo.IsSlugAvailable(ctx, "")
+	require.NoError(t, err)
+	assert.False(t, available, "Expected empty slug to be unavailable (invalid input)")
 }
 
 // TestRepository_GetBySlug_UsesIndex verifies that slug lookups use the idx_tenant_slug
