@@ -183,6 +183,41 @@ func (r *Repository) UpdateStatusWithError(ctx context.Context, id tenant.Tenant
 	return r.GetByID(ctx, id)
 }
 
+// ListByStatus returns up to limit tenants with the given status.
+// Used by the provisioning worker to fetch pending tenants.
+// Returns empty slice if no tenants found (not an error).
+func (r *Repository) ListByStatus(ctx context.Context, status domain.Status, limit int) ([]*domain.Tenant, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	var entities []TenantEntity
+	result := r.db.WithContext(ctx).
+		Where("status = ?", status).
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&entities)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	// Convert to domain models
+	tenants := make([]*domain.Tenant, 0, len(entities))
+	for i := range entities {
+		tenant, err := toDomain(&entities[i])
+		if err != nil {
+			return nil, err
+		}
+		tenants = append(tenants, tenant)
+	}
+
+	return tenants, nil
+}
+
 // List returns tenants with optional status filter (BIAN: Control).
 func (r *Repository) List(ctx context.Context, statusFilter *domain.Status, pageSize int, pageToken string) ([]*domain.Tenant, string, error) {
 	if pageSize <= 0 {

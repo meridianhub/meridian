@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // ProvisioningWorker polls for tenants in PROVISIONING_PENDING status
@@ -95,9 +97,51 @@ func (w *ProvisioningWorker) Stop() {
 }
 
 // processPendingTenants queries for tenants in PROVISIONING_PENDING status
-// and triggers provisioning for each one.
-// This is a stub implementation - will be completed in subtask 70.3.
-func (w *ProvisioningWorker) processPendingTenants(_ context.Context) {
+// and triggers provisioning for each one using optimistic locking.
+func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 	w.logger.Debug("checking for pending tenants to provision")
-	// TODO: implement in subtask 70.3
+
+	// Fetch up to 10 pending tenants
+	tenants, err := w.repo.ListByStatus(ctx, domain.StatusProvisioningPending, 10)
+	if err != nil {
+		w.logger.Error("failed to list pending tenants", "error", err)
+		return
+	}
+
+	if len(tenants) == 0 {
+		w.logger.Debug("no pending tenants found")
+		return
+	}
+
+	w.logger.Info("found pending tenants", "count", len(tenants))
+
+	// Process each tenant with optimistic locking
+	for _, tenant := range tenants {
+		// Attempt to claim the tenant by updating its status to PROVISIONING
+		_, err := w.repo.UpdateStatus(ctx, tenant.ID, domain.StatusProvisioning, tenant.Version)
+		if err != nil {
+			// Version conflict or other error - log and continue to next tenant
+			w.logger.Warn("failed to claim tenant for provisioning",
+				"tenant_id", tenant.ID,
+				"version", tenant.Version,
+				"error", err)
+			continue
+		}
+
+		// Successfully claimed - spawn goroutine to provision
+		w.logger.Info("claimed tenant for provisioning",
+			"tenant_id", tenant.ID,
+			"schema", tenant.SchemaName())
+
+		// Spawn provisioning in background with detached context
+		// We use context.WithoutCancel to prevent parent cancellation from stopping provisioning
+		go w.provisionTenantWithRetry(context.WithoutCancel(ctx), tenant.ID)
+	}
+}
+
+// provisionTenantWithRetry provisions a tenant's schema with retry logic.
+// This is a stub implementation - will be completed in subtask 70.4.
+func (w *ProvisioningWorker) provisionTenantWithRetry(_ context.Context, tenantID tenant.TenantID) {
+	w.logger.Info("provisioning tenant (stub)", "tenant_id", tenantID)
+	// TODO: implement in subtask 70.4
 }
