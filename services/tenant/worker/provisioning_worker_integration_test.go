@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -263,8 +264,6 @@ func TestConcurrentProvisioningWithOptimisticLocking(t *testing.T) {
 	const numWorkers = 10
 
 	var wg sync.WaitGroup
-	var claimedCount atomic.Int32
-	var conflictCount atomic.Int32
 
 	// Start multiple workers concurrently
 	for i := 0; i < numWorkers; i++ {
@@ -306,7 +305,6 @@ func TestConcurrentProvisioningWithOptimisticLocking(t *testing.T) {
 	conflictLogCount := strings.Count(logOutput, "tenant already claimed by another worker")
 
 	t.Logf("Workers that claimed: %d, Workers that got conflicts: %d", claimedLogCount, conflictLogCount)
-	t.Logf("Total log counts: claimed=%d, conflict=%d", claimedCount.Load(), conflictCount.Load())
 
 	// Exactly one worker should have claimed the tenant
 	assert.Equal(t, 1, claimedLogCount, "Exactly one worker should claim the tenant")
@@ -333,7 +331,7 @@ func TestConcurrentProvisioningStressTest(t *testing.T) {
 	const numWorkers = 10
 
 	for iteration := 0; iteration < numIterations; iteration++ {
-		t.Run("", func(t *testing.T) {
+		t.Run(fmt.Sprintf("iteration_%d", iteration), func(t *testing.T) {
 			// Create a unique tenant for this iteration
 			tenantID := tenant.MustNewTenantID("stress_test_tenant_" + strings.ReplaceAll(time.Now().Format("20060102150405.000000000"), ".", ""))
 			testTenant := &domain.Tenant{
