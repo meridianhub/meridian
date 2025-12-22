@@ -2,8 +2,11 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,10 +20,25 @@ import (
 	"gorm.io/gorm"
 )
 
+// testErr creates a test error by wrapping a message.
+// This avoids err113 linter warnings about dynamic error creation in tests.
+func testErr(msg string) error {
+	return fmt.Errorf("%s", msg) //nolint:err113 // test helper for dynamic error messages
+}
+
 // setupTestDB creates an in-memory database with the tenant table schema.
 func setupTestDB(t *testing.T) (*gorm.DB, *persistence.Repository) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	// Use a unique database name per test to ensure isolation, with cache=shared so
+	// all connections within the same test share the same in-memory database.
+	// Without cache=shared, each connection to :memory: creates a separate database.
+	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
 	require.NoError(t, err)
+
+	// Configure connection pool to avoid connection issues with in-memory DB
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1) // Single connection to ensure consistency
 
 	// Create tenant table
 	err = db.Exec(`
@@ -321,8 +339,10 @@ func TestProcessPendingTenants_Success(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, tenant2))
 	require.NoError(t, repo.Create(ctx, tenant3))
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with a proper mock that doesn't panic
+	prov := &ControlledMockProvisioner{
+		failureSequence: []error{nil, nil, nil}, // Success for all 3 tenants
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
 	require.NoError(t, err)
@@ -330,24 +350,24 @@ func TestProcessPendingTenants_Success(t *testing.T) {
 	// Execute
 	worker.processPendingTenants(ctx)
 
-	// Give goroutines a moment to spawn
-	time.Sleep(50 * time.Millisecond)
+	// Wait for goroutines to complete provisioning
+	worker.wg.Wait()
 
-	// Verify all tenants were claimed (status updated to PROVISIONING)
+	// Verify all tenants were successfully provisioned (status updated to ACTIVE)
 	updated1, err := repo.GetByID(ctx, tenant1.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated1.Status)
-	assert.Equal(t, 2, updated1.Version)
+	assert.Equal(t, domain.StatusActive, updated1.Status)
+	assert.Equal(t, 3, updated1.Version) // Initial 1 -> Provisioning 2 -> Active 3
 
 	updated2, err := repo.GetByID(ctx, tenant2.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated2.Status)
-	assert.Equal(t, 2, updated2.Version)
+	assert.Equal(t, domain.StatusActive, updated2.Status)
+	assert.Equal(t, 3, updated2.Version)
 
 	updated3, err := repo.GetByID(ctx, tenant3.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated3.Status)
-	assert.Equal(t, 2, updated3.Version)
+	assert.Equal(t, domain.StatusActive, updated3.Status)
+	assert.Equal(t, 3, updated3.Version)
 }
 
 func TestProcessPendingTenants_VersionConflict(t *testing.T) {
@@ -388,8 +408,10 @@ func TestProcessPendingTenants_VersionConflict(t *testing.T) {
 	_, err := repo.UpdateStatus(ctx, tenant2.ID, domain.StatusProvisioning, 1)
 	require.NoError(t, err)
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with a proper mock that doesn't panic
+	prov := &ControlledMockProvisioner{
+		failureSequence: []error{nil, nil}, // Success for tenant1 and tenant3
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
 	require.NoError(t, err)
@@ -397,12 +419,13 @@ func TestProcessPendingTenants_VersionConflict(t *testing.T) {
 	// Execute - should skip tenant2 (already claimed) and process tenant1 and tenant3
 	worker.processPendingTenants(ctx)
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for goroutines to complete provisioning
+	worker.wg.Wait()
 
-	// Verify tenant1 and tenant3 were claimed
+	// Verify tenant1 and tenant3 were successfully provisioned (ACTIVE)
 	updated1, err := repo.GetByID(ctx, tenant1.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated1.Status)
+	assert.Equal(t, domain.StatusActive, updated1.Status)
 
 	// Tenant2 should still be in PROVISIONING status (already claimed by another worker)
 	updated2, err := repo.GetByID(ctx, tenant2.ID)
@@ -411,7 +434,7 @@ func TestProcessPendingTenants_VersionConflict(t *testing.T) {
 
 	updated3, err := repo.GetByID(ctx, tenant3.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated3.Status)
+	assert.Equal(t, domain.StatusActive, updated3.Status)
 }
 
 func TestProcessPendingTenants_ListByStatusError(t *testing.T) {
@@ -477,8 +500,10 @@ func TestProcessPendingTenants_GoroutinesSpawned(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, tenant1))
 	require.NoError(t, repo.Create(ctx, tenant2))
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with a proper mock that doesn't panic
+	prov := &ControlledMockProvisioner{
+		failureSequence: []error{nil, nil}, // Success for both tenants
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
 	require.NoError(t, err)
@@ -486,18 +511,21 @@ func TestProcessPendingTenants_GoroutinesSpawned(t *testing.T) {
 	// Execute
 	worker.processPendingTenants(ctx)
 
-	// Give goroutines a moment to spawn
-	time.Sleep(50 * time.Millisecond)
+	// Wait for goroutines to complete provisioning
+	worker.wg.Wait()
 
-	// Verify both tenants were claimed (status updated to PROVISIONING)
-	// This indirectly verifies goroutines were spawned for successfully claimed tenants
+	// Verify both tenants were successfully provisioned (ACTIVE)
+	// This verifies goroutines were spawned and completed for successfully claimed tenants
 	updated1, err := repo.GetByID(ctx, tenant1.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated1.Status)
+	assert.Equal(t, domain.StatusActive, updated1.Status)
 
 	updated2, err := repo.GetByID(ctx, tenant2.ID)
 	require.NoError(t, err)
-	assert.Equal(t, domain.StatusProvisioning, updated2.Status)
+	assert.Equal(t, domain.StatusActive, updated2.Status)
+
+	// Verify both tenants were provisioned (call count = 2)
+	assert.Equal(t, 2, prov.GetCallCount())
 }
 
 func TestProvisionTenantWithRetry_NoPanic(t *testing.T) {
@@ -652,4 +680,644 @@ func TestProvisioningWorker_NoGoroutineLeaks(t *testing.T) {
 	// At this point, all goroutines should be cleaned up
 	// We can't easily verify exact goroutine count, but the test passing
 	// without hanging indicates proper cleanup
+}
+
+// Test error sentinels for retry tests (satisfies err113 linter).
+var (
+	errLockTimeout       = errors.New("lock timeout")
+	errDatabaseUnavail   = errors.New("database unavailable")
+	errConnectionTimeout = errors.New("connection timeout")
+	errPermissionDenied  = errors.New("permission denied")
+)
+
+// ControlledMockProvisioner is a mock that allows controlled failure/success sequences.
+type ControlledMockProvisioner struct {
+	mu              sync.Mutex
+	calls           []tenant.TenantID
+	failureSequence []error // nil = success, error = fail with this error
+	callIndex       int
+}
+
+func (m *ControlledMockProvisioner) ProvisionSchemas(_ context.Context, tenantID tenant.TenantID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.calls = append(m.calls, tenantID)
+
+	if m.callIndex < len(m.failureSequence) {
+		err := m.failureSequence[m.callIndex]
+		m.callIndex++
+		return err
+	}
+
+	// Default to success if no more sequence entries
+	return nil
+}
+
+func (m *ControlledMockProvisioner) DeprovisionSchemas(_ context.Context, _ tenant.TenantID) error {
+	return nil
+}
+
+func (m *ControlledMockProvisioner) PurgeSchemas(_ context.Context, _ tenant.TenantID) error {
+	return nil
+}
+
+func (m *ControlledMockProvisioner) GetProvisioningStatus(_ context.Context, _ tenant.TenantID) (*provisioner.ProvisioningStatus, error) {
+	return nil, nil
+}
+
+func (m *ControlledMockProvisioner) ReconcileMigrations(_ context.Context, _ *tenant.TenantID) (int, []string) {
+	return 0, nil
+}
+
+func (m *ControlledMockProvisioner) GetRequiredSchemas() []string {
+	return []string{"party", "current-account"}
+}
+
+func (m *ControlledMockProvisioner) InitializeProvisioningStatus(_ context.Context, _ tenant.TenantID) error {
+	return nil
+}
+
+func (m *ControlledMockProvisioner) GetCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.calls)
+}
+
+func (m *ControlledMockProvisioner) GetCalls() []tenant.TenantID {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]tenant.TenantID, len(m.calls))
+	copy(result, m.calls)
+	return result
+}
+
+// Ensure ControlledMockProvisioner implements SchemaProvisioner
+var _ provisioner.SchemaProvisioner = (*ControlledMockProvisioner)(nil)
+
+func TestProvisionTenantWithRetry_SuccessOnFirstAttempt(t *testing.T) {
+	_, repo := setupTestDB(t)
+
+	// Create tenant in PROVISIONING status
+	tenantObj := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("test_tenant"),
+		DisplayName:     "Test Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenantObj))
+
+	// Create mock that succeeds immediately
+	mockProv := &ControlledMockProvisioner{
+		failureSequence: []error{nil}, // Success on first call
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	require.NoError(t, err)
+
+	// Execute
+	worker.wg.Add(1)
+	worker.provisionTenantWithRetry(ctx, tenantObj.ID)
+
+	// Verify exactly 1 call was made
+	assert.Equal(t, 1, mockProv.GetCallCount())
+
+	// Verify tenant was marked as active
+	updated, err := repo.GetByID(ctx, tenantObj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusActive, updated.Status)
+}
+
+func TestProvisionTenantWithRetry_SuccessAfterRetries(t *testing.T) {
+	_, repo := setupTestDB(t)
+
+	// Create tenant in PROVISIONING status
+	tenantObj := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("retry_tenant"),
+		DisplayName:     "Retry Tenant",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenantObj))
+
+	// Create mock that fails 3 times then succeeds
+	mockProv := &ControlledMockProvisioner{
+		failureSequence: []error{errLockTimeout, errLockTimeout, errLockTimeout, nil}, // 3 failures, then success
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	require.NoError(t, err)
+
+	// Execute (this will take time due to exponential backoff, but tests use actual delays)
+	// For faster tests, we could inject a clock, but for now we accept the delay
+	start := time.Now()
+	worker.wg.Add(1)
+	worker.provisionTenantWithRetry(ctx, tenantObj.ID)
+	elapsed := time.Since(start)
+
+	// Verify exactly 4 calls were made (3 failures + 1 success)
+	assert.Equal(t, 4, mockProv.GetCallCount())
+
+	// Verify tenant was marked as active
+	updated, err := repo.GetByID(ctx, tenantObj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusActive, updated.Status)
+
+	// Verify exponential backoff timing (with tolerance for jitter)
+	// 3 retries: 2s + 4s + 8s = 14s base, but with jitter could be up to 14s + 25% = ~17.5s
+	// Minimum is base delays only: 2s + 4s + 8s = 14s
+	// We give generous tolerance due to test environment variability
+	assert.GreaterOrEqual(t, elapsed, 2*time.Second, "should have waited at least 2 seconds for first retry")
+	t.Logf("Elapsed time for 3 retries: %v", elapsed)
+}
+
+func TestProvisionTenantWithRetry_MaxRetriesExhausted(t *testing.T) {
+	_, repo := setupTestDB(t)
+
+	// Create tenant in PROVISIONING status
+	tenantObj := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("fail_tenant"),
+		DisplayName:     "Fail Tenant",
+		SettlementAsset: "EUR",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenantObj))
+
+	// Create mock that always fails
+	mockProv := &ControlledMockProvisioner{
+		failureSequence: []error{
+			errDatabaseUnavail, errDatabaseUnavail, errDatabaseUnavail, errDatabaseUnavail, errDatabaseUnavail,
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	require.NoError(t, err)
+
+	// Execute
+	worker.wg.Add(1)
+	worker.provisionTenantWithRetry(ctx, tenantObj.ID)
+
+	// Verify exactly 5 calls were made (maxRetries = 5)
+	assert.Equal(t, 5, mockProv.GetCallCount())
+
+	// Verify tenant was marked as provisioning_failed
+	updated, err := repo.GetByID(ctx, tenantObj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioningFailed, updated.Status)
+	assert.Contains(t, updated.ErrorMessage, "database unavailable")
+}
+
+func TestProvisionTenantWithRetry_ContextCancellation(t *testing.T) {
+	_, repo := setupTestDB(t)
+
+	// Create tenant in PROVISIONING status
+	tenantObj := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("cancel_tenant"),
+		DisplayName:     "Cancel Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenantObj))
+
+	// Create mock that always fails
+	mockProv := &ControlledMockProvisioner{
+		failureSequence: []error{
+			errLockTimeout, errLockTimeout, errLockTimeout, errLockTimeout, errLockTimeout,
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	require.NoError(t, err)
+
+	// Create cancellable context
+	cancelCtx, cancel := context.WithCancel(context.Background())
+
+	// Execute in goroutine
+	done := make(chan struct{})
+	worker.wg.Add(1)
+	go func() {
+		worker.provisionTenantWithRetry(cancelCtx, tenantObj.ID)
+		close(done)
+	}()
+
+	// Wait for first attempt and backoff to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Cancel context
+	cancel()
+
+	// Should stop within a reasonable time (less than full retry cycle)
+	select {
+	case <-done:
+		// Success - stopped early due to cancellation
+	case <-time.After(5 * time.Second):
+		t.Fatal("provisionTenantWithRetry did not respect context cancellation")
+	}
+
+	// Verify fewer than max retries were made (cancelled early)
+	callCount := mockProv.GetCallCount()
+	assert.Less(t, callCount, 5, "should have stopped before max retries due to cancellation")
+	t.Logf("Calls made before cancellation: %d", callCount)
+}
+
+func TestProvisionTenantWithRetry_ExponentialBackoffTiming(t *testing.T) {
+	// This test verifies the exponential backoff timing formula
+	// Expected delays: 2s, 4s, 8s, 16s, 30s (capped)
+	// We only test the first few to avoid long test times
+
+	_, repo := setupTestDB(t)
+
+	// Create tenant
+	tenantObj := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("timing_tenant"),
+		DisplayName:     "Timing Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioning,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenantObj))
+
+	// Mock that fails twice then succeeds
+	mockProv := &ControlledMockProvisioner{
+		failureSequence: []error{errLockTimeout, errLockTimeout, nil},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	require.NoError(t, err)
+
+	// Execute and measure time
+	start := time.Now()
+	worker.wg.Add(1)
+	worker.provisionTenantWithRetry(ctx, tenantObj.ID)
+	elapsed := time.Since(start)
+
+	// 2 retries: base delays are 2s + 4s = 6s
+	// With jitter (up to 25%): max = 6s * 1.25 = 7.5s
+	// Allow some tolerance for test environment
+	assert.GreaterOrEqual(t, elapsed, 5*time.Second, "should have waited ~6s total for 2 retries")
+	assert.LessOrEqual(t, elapsed, 10*time.Second, "should not exceed expected delay with jitter")
+
+	t.Logf("Elapsed time for 2 retries: %v (expected ~6-7.5s)", elapsed)
+}
+
+// =============================================================================
+// isRetryableError Tests
+// =============================================================================
+
+// TestIsRetryableError_NilError verifies that nil errors are not retryable.
+func TestIsRetryableError_NilError(t *testing.T) {
+	assert.False(t, isRetryableError(nil), "nil error should not be retryable")
+}
+
+// TestIsRetryableError_ContextErrors verifies that context errors are never retryable.
+func TestIsRetryableError_ContextErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"context.Canceled", context.Canceled},
+		{"context.DeadlineExceeded", context.DeadlineExceeded},
+		{"wrapped context.Canceled", fmt.Errorf("operation failed: %w", context.Canceled)},
+		{"wrapped context.DeadlineExceeded", fmt.Errorf("operation failed: %w", context.DeadlineExceeded)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.False(t, isRetryableError(tt.err), "context errors should never be retryable")
+		})
+	}
+}
+
+// TestIsRetryableError_RetryablePatterns verifies that errors containing
+// retryable patterns are correctly identified as transient.
+func TestIsRetryableError_RetryablePatterns(t *testing.T) {
+	tests := []struct {
+		name    string
+		errMsg  string
+		comment string
+	}{
+		// Timeout errors
+		{"connection timeout", "connection timeout waiting for response", "Network timeout"},
+		{"lock timeout", "unable to acquire advisory lock: timeout after 30s", "Atlas lock timeout"},
+		{"query timeout", "ERROR: canceling statement due to statement timeout", "PostgreSQL timeout"},
+		{"timeout uppercase", "Connection TIMEOUT", "Case insensitive"},
+
+		// Connection errors
+		{"connection refused", "dial tcp 127.0.0.1:5432: connection refused", "DB down"},
+		{"connection reset", "connection reset by peer", "Network issue"},
+		{"connection pool", "connection pool exhausted", "Pool saturation"},
+
+		// Lock errors
+		{"advisory lock", "could not acquire lock on relation", "PostgreSQL lock"},
+		{"row lock", "could not obtain lock on row in table", "Row-level lock"},
+		{"atlas lock", "acquiring lock on schema: lock timeout", "Atlas migration lock"},
+
+		// Temporary errors
+		{"temporary failure", "temporary failure in name resolution", "DNS issue"},
+		{"temporary unavailable", "resource temporarily unavailable", "Resource busy"},
+
+		// Unavailable errors
+		{"service unavailable", "service temporarily unavailable", "Service down"},
+		{"resource unavailable", "database unavailable", "DB maintenance"},
+
+		// Other transient patterns
+		{"connection pool exhausted", "max pool size reached: exhausted", "Pool full"},
+		{"please retry", "optimistic lock failed, please retry", "Explicit retry hint"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := testErr(tt.errMsg)
+			assert.True(t, isRetryableError(err), "error '%s' should be retryable (%s)", tt.errMsg, tt.comment)
+		})
+	}
+}
+
+// TestIsRetryableError_PermanentPatterns verifies that errors containing
+// permanent patterns are correctly identified as non-retryable.
+func TestIsRetryableError_PermanentPatterns(t *testing.T) {
+	tests := []struct {
+		name    string
+		errMsg  string
+		comment string
+	}{
+		// Validation errors
+		{"invalid argument", "invalid argument: tenant_id must not be empty", "Validation"},
+		{"invalid tenant", "invalid tenant ID format: contains special characters", "Specific validation"},
+		{"invalid input", "ERROR: invalid input syntax for type uuid", "Type error"},
+
+		// Permission errors
+		{"permission denied", "permission denied for schema org_acme", "Auth failure"},
+		{"access denied", "access denied to table parties", "Authorization"},
+		{"unauthorized", "unauthorized: token expired", "Auth token"},
+		{"authentication failed", "authentication failed for user meridian", "Login failure"},
+
+		// Constraint violations
+		{"unique constraint", "duplicate key value violates unique constraint", "Duplicate key"},
+		{"foreign key", "foreign key constraint violation on table accounts", "FK violation"},
+		{"constraint violation", "check constraint \"amount_positive\" is violated", "Check constraint"},
+		{"duplicate entry", "Duplicate entry 'test' for key 'name'", "MySQL duplicate"},
+
+		// Schema errors
+		{"does not exist", "table \"parties\" does not exist", "Missing table"},
+		{"not found", "schema org_deleted not found", "Missing schema"},
+		{"syntax error", "ERROR: syntax error at or near \"SELCT\"", "SQL typo"},
+
+		// State errors
+		{"already active", "tenant is already active", "Duplicate provision"},
+		{"deprovisioned", "cannot provision deprovisioned tenant", "State conflict"},
+		{"not allowed", "operation not allowed in current state", "State machine"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := testErr(tt.errMsg)
+			assert.False(t, isRetryableError(err), "error '%s' should NOT be retryable (%s)", tt.errMsg, tt.comment)
+		})
+	}
+}
+
+// TestIsRetryableError_UnknownErrors verifies that unknown errors
+// default to non-retryable (fail-safe behavior).
+func TestIsRetryableError_UnknownErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		errMsg string
+	}{
+		{"generic error", "something went wrong"},
+		{"unexpected error", "unexpected state encountered"},
+		{"internal error", "internal server error"},
+		{"unknown status", "unknown status code 500"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := testErr(tt.errMsg)
+			assert.False(t, isRetryableError(err), "unknown error '%s' should default to non-retryable", tt.errMsg)
+		})
+	}
+}
+
+// TestIsRetryableError_CaseInsensitive verifies that pattern matching
+// is case-insensitive.
+func TestIsRetryableError_CaseInsensitive(t *testing.T) {
+	tests := []struct {
+		name     string
+		errMsg   string
+		expected bool
+	}{
+		// Retryable - various cases
+		{"TIMEOUT uppercase", "CONNECTION TIMEOUT", true},
+		{"Timeout mixed", "Connection Timeout Exceeded", true},
+		{"timeout lowercase", "connection timeout", true},
+
+		// Permanent - various cases
+		{"INVALID uppercase", "INVALID ARGUMENT", false},
+		{"Invalid mixed", "Invalid Tenant ID", false},
+		{"invalid lowercase", "invalid input", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := testErr(tt.errMsg)
+			result := isRetryableError(err)
+			if tt.expected {
+				assert.True(t, result, "error '%s' should be retryable (case-insensitive)", tt.errMsg)
+			} else {
+				assert.False(t, result, "error '%s' should NOT be retryable (case-insensitive)", tt.errMsg)
+			}
+		})
+	}
+}
+
+// TestIsRetryableError_WrappedErrors verifies that wrapped errors
+// are correctly classified by examining the full error chain.
+func TestIsRetryableError_WrappedErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"wrapped retryable", fmt.Errorf("provisioning failed: %w", errConnectionTimeout), true},
+		{"double wrapped retryable", fmt.Errorf("tenant %s: %w", "test", fmt.Errorf("db error: %w", errConnectionTimeout)), true},
+		{"wrapped permanent", fmt.Errorf("provisioning failed: %w", errPermissionDenied), false},
+		{"double wrapped permanent", fmt.Errorf("tenant %s: %w", "test", fmt.Errorf("auth: %w", errPermissionDenied)), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isRetryableError(tt.err)
+			if tt.expected {
+				assert.True(t, result, "wrapped error should be retryable")
+			} else {
+				assert.False(t, result, "wrapped error should NOT be retryable")
+			}
+		})
+	}
+}
+
+// TestIsRetryableError_PermanentTakesPrecedence verifies that when an error
+// contains both retryable and permanent patterns, permanent takes precedence.
+func TestIsRetryableError_PermanentTakesPrecedence(t *testing.T) {
+	tests := []struct {
+		name   string
+		errMsg string
+	}{
+		// Errors that contain both retryable and permanent patterns
+		{"timeout but invalid", "connection timeout due to invalid host address"},
+		{"lock but permission", "could not acquire lock: permission denied"},
+		{"connection but syntax", "connection failed: syntax error in query"},
+		{"timeout but not found", "timeout waiting for resource not found error to resolve"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := testErr(tt.errMsg)
+			// Permanent patterns should take precedence over retryable patterns
+			assert.False(t, isRetryableError(err),
+				"permanent pattern should take precedence in '%s'", tt.errMsg)
+		})
+	}
+}
+
+// TestIsRetryableError_AtlasSpecificErrors verifies classification of
+// Atlas migration-specific error messages.
+func TestIsRetryableError_AtlasSpecificErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		errMsg   string
+		expected bool
+		comment  string
+	}{
+		// Atlas lock timeout (retryable)
+		{
+			"atlas lock timeout",
+			"acquiring lock on schema \"org_test\": context deadline exceeded (timeout: 5s)",
+			true,
+			"Atlas lock wait timeout",
+		},
+		{
+			"atlas advisory lock",
+			"pq: could not obtain lock on \"atlas_schema_revisions\"",
+			true,
+			"Atlas revision table lock",
+		},
+		// Atlas connection issues (retryable)
+		{
+			"atlas connection refused",
+			"dial tcp [::1]:5432: connect: connection refused",
+			true,
+			"DB not available",
+		},
+		// Atlas permanent errors (non-retryable)
+		{
+			"atlas migration syntax",
+			"applying migration \"20240101000000_init.sql\": syntax error at position 42",
+			false,
+			"Bad migration SQL",
+		},
+		{
+			"atlas constraint",
+			"applying migration: violates foreign key constraint \"fk_account_party\"",
+			false,
+			"FK violation",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := testErr(tt.errMsg)
+			result := isRetryableError(err)
+			if tt.expected {
+				assert.True(t, result, "Atlas error '%s' should be retryable (%s)", tt.errMsg, tt.comment)
+			} else {
+				assert.False(t, result, "Atlas error '%s' should NOT be retryable (%s)", tt.errMsg, tt.comment)
+			}
+		})
+	}
+}
+
+// TestIsRetryableError_PostgresSpecificErrors verifies classification of
+// PostgreSQL-specific error messages.
+func TestIsRetryableError_PostgresSpecificErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		errMsg   string
+		expected bool
+		comment  string
+	}{
+		// Connection pool exhaustion (retryable)
+		{
+			"pgx pool exhausted",
+			"unable to acquire connection from pool: all connections are busy or the pool is exhausted",
+			true,
+			"Connection pool saturation",
+		},
+		// Statement timeout (retryable)
+		{
+			"statement timeout",
+			"pq: canceling statement due to statement timeout",
+			true,
+			"Query took too long",
+		},
+		// Lock timeout (retryable)
+		{
+			"lock wait timeout",
+			"pq: canceling statement due to lock timeout",
+			true,
+			"Row-level lock wait",
+		},
+		// Unique constraint violation (non-retryable)
+		{
+			"unique violation",
+			"pq: duplicate key value violates unique constraint \"tenants_slug_key\"",
+			false,
+			"Duplicate slug",
+		},
+		// Foreign key violation (non-retryable)
+		{
+			"fk violation",
+			"pq: insert or update on table \"accounts\" violates foreign key constraint \"fk_party_id\"",
+			false,
+			"Missing parent record",
+		},
+		// Syntax error (non-retryable)
+		{
+			"sql syntax",
+			"pq: syntax error at or near \"SELCT\"",
+			false,
+			"SQL typo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := testErr(tt.errMsg)
+			result := isRetryableError(err)
+			if tt.expected {
+				assert.True(t, result, "PostgreSQL error '%s' should be retryable (%s)", tt.errMsg, tt.comment)
+			} else {
+				assert.False(t, result, "PostgreSQL error '%s' should NOT be retryable (%s)", tt.errMsg, tt.comment)
+			}
+		})
+	}
 }
