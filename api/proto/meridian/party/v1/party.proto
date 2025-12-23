@@ -4,6 +4,7 @@ package meridian.party.v1;
 
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
@@ -81,6 +82,36 @@ enum ExternalReferenceType {
   EXTERNAL_REFERENCE_TYPE_LEI = 3;
   // EXTERNAL_REFERENCE_TYPE_TAX_ID is a tax identification number.
   EXTERNAL_REFERENCE_TYPE_TAX_ID = 4;
+}
+
+// ControlAction defines the lifecycle control actions for party management.
+enum ControlAction {
+  // CONTROL_ACTION_UNSPECIFIED means the action is unknown.
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  // CONTROL_ACTION_RESTRICT limits party access (e.g., pending KYC review).
+  CONTROL_ACTION_RESTRICT = 1;
+  // CONTROL_ACTION_SUSPEND temporarily disables party operations.
+  CONTROL_ACTION_SUSPEND = 2;
+  // CONTROL_ACTION_ACTIVATE re-enables party operations.
+  CONTROL_ACTION_ACTIVATE = 3;
+  // CONTROL_ACTION_TERMINATE permanently ends the party relationship.
+  CONTROL_ACTION_TERMINATE = 4;
+}
+
+// RelationshipType defines the type of association between parties.
+enum RelationshipType {
+  // RELATIONSHIP_TYPE_UNSPECIFIED means the relationship type is unknown.
+  RELATIONSHIP_TYPE_UNSPECIFIED = 0;
+  // RELATIONSHIP_TYPE_SUBSIDIARY is a parent-subsidiary relationship.
+  RELATIONSHIP_TYPE_SUBSIDIARY = 1;
+  // RELATIONSHIP_TYPE_AFFILIATE is an affiliated entity relationship.
+  RELATIONSHIP_TYPE_AFFILIATE = 2;
+  // RELATIONSHIP_TYPE_GUARANTOR is a guarantor relationship.
+  RELATIONSHIP_TYPE_GUARANTOR = 3;
+  // RELATIONSHIP_TYPE_BENEFICIAL_OWNER is a beneficial ownership relationship.
+  RELATIONSHIP_TYPE_BENEFICIAL_OWNER = 4;
+  // RELATIONSHIP_TYPE_AUTHORIZED_SIGNATORY is an authorized signatory relationship.
+  RELATIONSHIP_TYPE_AUTHORIZED_SIGNATORY = 5;
 }
 
 // Party represents a legal entity in the BIAN Party Reference Data Directory.
@@ -176,6 +207,418 @@ message RetrievePartyResponse {
   Party party = 1 [(buf.validate.field).required = true];
 }
 
+// UpdatePartyRequest is the request to update party details (BIAN UpCR).
+message UpdatePartyRequest {
+  // party_id is the unique identifier of the party to update.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // update_mask specifies which fields to update (partial update support).
+  google.protobuf.FieldMask update_mask = 2;
+
+  // legal_name is the updated official registered name (optional).
+  string legal_name = 3 [(buf.validate.field).string = {max_len: 255}];
+
+  // display_name is the updated display name (optional).
+  string display_name = 4 [(buf.validate.field).string = {max_len: 100}];
+
+  // external_reference is the updated external identifier (optional).
+  string external_reference = 5 [(buf.validate.field).string = {max_len: 100}];
+
+  // external_reference_type is the updated reference type (optional).
+  ExternalReferenceType external_reference_type = 6 [(buf.validate.field).enum = {defined_only: true}];
+
+  // version is for optimistic locking.
+  int32 version = 7 [(buf.validate.field).int32 = {gte: 0}];
+}
+
+// UpdatePartyResponse is the response after updating a party.
+message UpdatePartyResponse {
+  // party is the updated party.
+  Party party = 1 [(buf.validate.field).required = true];
+}
+
+// ControlPartyRequest is the request to control party lifecycle (BIAN CoCR).
+message ControlPartyRequest {
+  // party_id is the unique identifier of the party to control.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // control_action is the lifecycle action to perform.
+  ControlAction control_action = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+
+  // reason is an explanation for the control action (for audit trail).
+  string reason = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // actor_id identifies who is performing the control action.
+  string actor_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// ControlPartyResponse is the response after controlling a party.
+message ControlPartyResponse {
+  // party is the updated party with new status.
+  Party party = 1 [(buf.validate.field).required = true];
+
+  // action_timestamp is when the control action was executed.
+  google.protobuf.Timestamp action_timestamp = 2 [(buf.validate.field).required = true];
+}
+
+// --- Business Qualifier: Reference ---
+
+// UpdateReferenceRequest is the request to update party reference data (BQ).
+message UpdateReferenceRequest {
+  // party_id is the unique identifier of the party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // government_id is the government-issued identifier.
+  string government_id = 2 [(buf.validate.field).string = {max_len: 100}];
+
+  // tax_reference is the tax identification number.
+  string tax_reference = 3 [(buf.validate.field).string = {max_len: 100}];
+
+  // issuing_authority is the entity that issued the reference.
+  string issuing_authority = 4 [(buf.validate.field).string = {max_len: 255}];
+
+  // expiry_date is when the reference expires (YYYY-MM-DD format).
+  string expiry_date = 5 [(buf.validate.field).string = {pattern: "^\\d{4}-\\d{2}-\\d{2}$"}];
+}
+
+// UpdateReferenceResponse is the response after updating reference data.
+message UpdateReferenceResponse {
+  // party_id is the party identifier.
+  string party_id = 1;
+
+  // government_id is the updated government identifier.
+  string government_id = 2;
+
+  // tax_reference is the updated tax reference.
+  string tax_reference = 3;
+
+  // issuing_authority is the updated issuing authority.
+  string issuing_authority = 4;
+
+  // expiry_date is the updated expiry date.
+  string expiry_date = 5;
+
+  // updated_at is when the reference was last updated.
+  google.protobuf.Timestamp updated_at = 6 [(buf.validate.field).required = true];
+}
+
+// RetrieveReferenceRequest is the request to retrieve party reference data.
+message RetrieveReferenceRequest {
+  // party_id is the unique identifier of the party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrieveReferenceResponse is the response containing reference data.
+message RetrieveReferenceResponse {
+  // party_id is the party identifier.
+  string party_id = 1;
+
+  // government_id is the government-issued identifier.
+  string government_id = 2;
+
+  // tax_reference is the tax identification number.
+  string tax_reference = 3;
+
+  // issuing_authority is the entity that issued the reference.
+  string issuing_authority = 4;
+
+  // expiry_date is when the reference expires.
+  string expiry_date = 5;
+
+  // updated_at is when the reference was last updated.
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+// --- Business Qualifier: Associations ---
+
+// RegisterAssociationsRequest is the request to register a party association (BQ).
+message RegisterAssociationsRequest {
+  // party_id is the unique identifier of the primary party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // related_party_id is the identifier of the related party.
+  string related_party_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // relationship_type is the type of relationship.
+  RelationshipType relationship_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+}
+
+// RegisterAssociationsResponse is the response after registering an association.
+message RegisterAssociationsResponse {
+  // association_id is the unique identifier for this association.
+  string association_id = 1;
+
+  // party_id is the primary party identifier.
+  string party_id = 2;
+
+  // related_party_id is the related party identifier.
+  string related_party_id = 3;
+
+  // relationship_type is the type of relationship.
+  RelationshipType relationship_type = 4;
+
+  // created_at is when the association was created.
+  google.protobuf.Timestamp created_at = 5 [(buf.validate.field).required = true];
+}
+
+// UpdateAssociationsRequest is the request to update a party association.
+message UpdateAssociationsRequest {
+  // association_id is the unique identifier of the association to update.
+  string association_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // relationship_type is the updated relationship type.
+  RelationshipType relationship_type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// UpdateAssociationsResponse is the response after updating an association.
+message UpdateAssociationsResponse {
+  // association_id is the association identifier.
+  string association_id = 1;
+
+  // party_id is the primary party identifier.
+  string party_id = 2;
+
+  // related_party_id is the related party identifier.
+  string related_party_id = 3;
+
+  // relationship_type is the updated relationship type.
+  RelationshipType relationship_type = 4;
+
+  // updated_at is when the association was last updated.
+  google.protobuf.Timestamp updated_at = 5 [(buf.validate.field).required = true];
+}
+
+// RetrieveAssociationsRequest is the request to retrieve party associations.
+message RetrieveAssociationsRequest {
+  // party_id is the unique identifier of the party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrieveAssociationsResponse is the response containing party associations.
+message RetrieveAssociationsResponse {
+  // party_id is the party identifier.
+  string party_id = 1;
+
+  // associations is the list of party associations.
+  repeated Association associations = 2;
+}
+
+// Association represents a relationship between two parties.
+message Association {
+  // association_id is the unique identifier for this association.
+  string association_id = 1;
+
+  // related_party_id is the identifier of the related party.
+  string related_party_id = 2;
+
+  // relationship_type is the type of relationship.
+  RelationshipType relationship_type = 3;
+
+  // created_at is when the association was created.
+  google.protobuf.Timestamp created_at = 4;
+
+  // updated_at is when the association was last updated.
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// --- Business Qualifier: Demographics ---
+
+// ExchangeDemographicsRequest is the request to verify demographics data (BQ).
+message ExchangeDemographicsRequest {
+  // party_id is the unique identifier of the party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // verification_data is the demographics data to verify.
+  string verification_data = 2 [(buf.validate.field).string = {max_len: 1000}];
+}
+
+// ExchangeDemographicsResponse is the response after demographics verification.
+message ExchangeDemographicsResponse {
+  // party_id is the party identifier.
+  string party_id = 1;
+
+  // verification_status is the result of verification.
+  string verification_status = 2;
+
+  // verification_timestamp is when verification occurred.
+  google.protobuf.Timestamp verification_timestamp = 3 [(buf.validate.field).required = true];
+}
+
+// UpdateDemographicsRequest is the request to update demographics data.
+message UpdateDemographicsRequest {
+  // party_id is the unique identifier of the party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // socio_economic_data is socio-economic classification data.
+  string socio_economic_data = 2 [(buf.validate.field).string = {max_len: 500}];
+
+  // employment_history is employment information.
+  string employment_history = 3 [(buf.validate.field).string = {max_len: 1000}];
+}
+
+// UpdateDemographicsResponse is the response after updating demographics.
+message UpdateDemographicsResponse {
+  // party_id is the party identifier.
+  string party_id = 1;
+
+  // socio_economic_data is the updated socio-economic data.
+  string socio_economic_data = 2;
+
+  // employment_history is the updated employment history.
+  string employment_history = 3;
+
+  // updated_at is when demographics were last updated.
+  google.protobuf.Timestamp updated_at = 4 [(buf.validate.field).required = true];
+}
+
+// RetrieveDemographicsRequest is the request to retrieve demographics data.
+message RetrieveDemographicsRequest {
+  // party_id is the unique identifier of the party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrieveDemographicsResponse is the response containing demographics data.
+message RetrieveDemographicsResponse {
+  // party_id is the party identifier.
+  string party_id = 1;
+
+  // socio_economic_data is the socio-economic classification.
+  string socio_economic_data = 2;
+
+  // employment_history is employment information.
+  string employment_history = 3;
+
+  // updated_at is when demographics were last updated.
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// --- Business Qualifier: BankRelations ---
+
+// UpdateBankRelationsRequest is the request to update bank relationship data (BQ).
+message UpdateBankRelationsRequest {
+  // party_id is the unique identifier of the party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // account_officer_id is the assigned account officer identifier.
+  string account_officer_id = 2 [(buf.validate.field).string = {max_len: 100}];
+
+  // relationship_manager_id is the assigned relationship manager identifier.
+  string relationship_manager_id = 3 [(buf.validate.field).string = {max_len: 100}];
+
+  // assigned_branch is the primary branch for this party.
+  string assigned_branch = 4 [(buf.validate.field).string = {max_len: 100}];
+}
+
+// UpdateBankRelationsResponse is the response after updating bank relations.
+message UpdateBankRelationsResponse {
+  // party_id is the party identifier.
+  string party_id = 1;
+
+  // account_officer_id is the updated account officer identifier.
+  string account_officer_id = 2;
+
+  // relationship_manager_id is the updated relationship manager identifier.
+  string relationship_manager_id = 3;
+
+  // assigned_branch is the updated assigned branch.
+  string assigned_branch = 4;
+
+  // updated_at is when bank relations were last updated.
+  google.protobuf.Timestamp updated_at = 5 [(buf.validate.field).required = true];
+}
+
+// RetrieveBankRelationsRequest is the request to retrieve bank relationship data.
+message RetrieveBankRelationsRequest {
+  // party_id is the unique identifier of the party.
+  string party_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrieveBankRelationsResponse is the response containing bank relationship data.
+message RetrieveBankRelationsResponse {
+  // party_id is the party identifier.
+  string party_id = 1;
+
+  // account_officer_id is the assigned account officer identifier.
+  string account_officer_id = 2;
+
+  // relationship_manager_id is the assigned relationship manager identifier.
+  string relationship_manager_id = 3;
+
+  // assigned_branch is the primary branch for this party.
+  string assigned_branch = 4;
+
+  // updated_at is when bank relations were last updated.
+  google.protobuf.Timestamp updated_at = 5;
+}
+
 // PartyService provides BIAN-compliant party reference data management.
 //
 // Design Notes:
@@ -203,6 +646,114 @@ service PartyService {
   rpc RetrieveParty(RetrievePartyRequest) returns (RetrievePartyResponse) {
     option (google.api.http) = {
       get: "/v1/parties/{party_id}"
+    };
+  }
+
+  // UpdateParty updates party details (BIAN UpCR).
+  rpc UpdateParty(UpdatePartyRequest) returns (UpdatePartyResponse) {
+    option (google.api.http) = {
+      patch: "/v1/parties/{party_id}"
+      body: "*"
+    };
+  }
+
+  // ControlParty manages party lifecycle (BIAN CoCR).
+  rpc ControlParty(ControlPartyRequest) returns (ControlPartyResponse) {
+    option (google.api.http) = {
+      post: "/v1/parties/{party_id}/control"
+      body: "*"
+    };
+  }
+
+  // --- Business Qualifier: Reference Operations ---
+
+  // UpdateReference updates party reference data.
+  rpc UpdateReference(UpdateReferenceRequest) returns (UpdateReferenceResponse) {
+    option (google.api.http) = {
+      patch: "/v1/parties/{party_id}/reference"
+      body: "*"
+    };
+  }
+
+  // RetrieveReference gets party reference data.
+  rpc RetrieveReference(RetrieveReferenceRequest) returns (RetrieveReferenceResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{party_id}/reference"
+    };
+  }
+
+  // --- Business Qualifier: Associations Operations ---
+
+  // RegisterAssociations creates a party association.
+  rpc RegisterAssociations(RegisterAssociationsRequest) returns (RegisterAssociationsResponse) {
+    option (google.api.http) = {
+      post: "/v1/parties/{party_id}/associations"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Association registered successfully"
+        }
+      }
+    };
+  }
+
+  // UpdateAssociations updates a party association.
+  rpc UpdateAssociations(UpdateAssociationsRequest) returns (UpdateAssociationsResponse) {
+    option (google.api.http) = {
+      patch: "/v1/parties/associations/{association_id}"
+      body: "*"
+    };
+  }
+
+  // RetrieveAssociations gets party associations.
+  rpc RetrieveAssociations(RetrieveAssociationsRequest) returns (RetrieveAssociationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{party_id}/associations"
+    };
+  }
+
+  // --- Business Qualifier: Demographics Operations ---
+
+  // ExchangeDemographics verifies party demographics data.
+  rpc ExchangeDemographics(ExchangeDemographicsRequest) returns (ExchangeDemographicsResponse) {
+    option (google.api.http) = {
+      post: "/v1/parties/{party_id}/demographics/verify"
+      body: "*"
+    };
+  }
+
+  // UpdateDemographics updates party demographics data.
+  rpc UpdateDemographics(UpdateDemographicsRequest) returns (UpdateDemographicsResponse) {
+    option (google.api.http) = {
+      patch: "/v1/parties/{party_id}/demographics"
+      body: "*"
+    };
+  }
+
+  // RetrieveDemographics gets party demographics data.
+  rpc RetrieveDemographics(RetrieveDemographicsRequest) returns (RetrieveDemographicsResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{party_id}/demographics"
+    };
+  }
+
+  // --- Business Qualifier: BankRelations Operations ---
+
+  // UpdateBankRelations updates party bank relationship data.
+  rpc UpdateBankRelations(UpdateBankRelationsRequest) returns (UpdateBankRelationsResponse) {
+    option (google.api.http) = {
+      patch: "/v1/parties/{party_id}/bank-relations"
+      body: "*"
+    };
+  }
+
+  // RetrieveBankRelations gets party bank relationship data.
+  rpc RetrieveBankRelations(RetrieveBankRelationsRequest) returns (RetrieveBankRelationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/parties/{party_id}/bank-relations"
     };
   }
 }
