@@ -11,7 +11,6 @@ import (
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
-	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -52,8 +51,8 @@ type TenantResolverMiddleware struct {
 // NewTenantResolverMiddleware creates a new tenant resolver middleware.
 // All parameters are required and validated.
 func NewTenantResolverMiddleware(
-	slugCache *service.SlugCache,
-	tenantRepo *persistence.Repository,
+	slugCache slugCache,
+	tenantRepo tenantRepository,
 	baseDomain string,
 	logger *slog.Logger,
 ) (*TenantResolverMiddleware, error) {
@@ -78,56 +77,58 @@ func NewTenantResolverMiddleware(
 	}, nil
 }
 
-// ServeHTTP implements the middleware logic for tenant resolution.
+// Handler returns an http.Handler that performs tenant resolution.
 // This method will extract the tenant slug from the Host header,
 // resolve it to a tenant ID, and inject it into the request context.
-func (m *TenantResolverMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	ctx := r.Context()
+func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
 
-	// Step 1: Extract slug from Host header
-	slug := m.extractSlug(r.Host)
-	if slug == "" {
-		m.logger.Warn("invalid subdomain in request",
-			slog.String("host", r.Host),
-		)
-		http.Error(w, "Invalid subdomain", http.StatusNotFound)
-		return
-	}
+		// Step 1: Extract slug from Host header
+		slug := m.extractSlug(r.Host)
+		if slug == "" {
+			m.logger.Warn("invalid subdomain in request",
+				slog.String("host", r.Host),
+			)
+			http.Error(w, "Invalid subdomain", http.StatusNotFound)
+			return
+		}
 
-	// Step 2: Resolve tenant ID (cache-first with DB fallback)
-	startTime := time.Now()
-	tenantID, err := m.resolveTenant(ctx, slug)
-	resolutionTimeMs := time.Since(startTime).Milliseconds()
+		// Step 2: Resolve tenant ID (cache-first with DB fallback)
+		startTime := time.Now()
+		tenantID, err := m.resolveTenant(ctx, slug)
+		resolutionTimeMs := time.Since(startTime).Milliseconds()
 
-	if err != nil {
-		// Log resolution failure with structured fields
-		m.logger.Warn("tenant resolution failed",
+		if err != nil {
+			// Log resolution failure with structured fields
+			m.logger.Warn("tenant resolution failed",
+				slog.String("tenant_slug", slug),
+				slog.String("error", err.Error()),
+				slog.Int64("resolution_time_ms", resolutionTimeMs),
+			)
+			http.Error(w, "Tenant not found", http.StatusNotFound)
+			return
+		}
+
+		// Step 3: Log successful resolution
+		m.logger.Debug("tenant resolved successfully",
 			slog.String("tenant_slug", slug),
-			slog.String("error", err.Error()),
+			slog.String("tenant_id", tenantID.String()),
 			slog.Int64("resolution_time_ms", resolutionTimeMs),
 		)
-		http.Error(w, "Tenant not found", http.StatusNotFound)
-		return
-	}
 
-	// Step 3: Log successful resolution
-	m.logger.Debug("tenant resolved successfully",
-		slog.String("tenant_slug", slug),
-		slog.String("tenant_id", tenantID.String()),
-		slog.Int64("resolution_time_ms", resolutionTimeMs),
-	)
+		// Step 4: Inject tenant ID into request header
+		r.Header.Set(tenant.TenantIDKey, string(tenantID))
 
-	// Step 4: Inject tenant ID into request header
-	r.Header.Set(tenant.TenantIDKey, string(tenantID))
+		// Step 5: Add tenant to context
+		ctx = tenant.WithTenant(ctx, tenantID)
 
-	// Step 5: Add tenant to context
-	ctx = tenant.WithTenant(ctx, tenantID)
+		// Step 6: Update request with new context
+		r = r.WithContext(ctx)
 
-	// Step 6: Update request with new context
-	r = r.WithContext(ctx)
-
-	// Step 7: Call next handler
-	next(w, r)
+		// Step 7: Call next handler
+		next.ServeHTTP(w, r)
+	})
 }
 
 // extractSlug extracts the subdomain slug from a Host header value.
@@ -197,25 +198,29 @@ func (m *TenantResolverMiddleware) extractSlug(host string) string {
 //
 // Resolution flow:
 // 1. Check slug cache for tenant ID (fast path)
-// 2. On cache miss, query database for tenant by slug
-// 3. Populate cache with DB result (best-effort, errors logged but not returned)
-// 4. Return tenant ID
+// 2. On cache read failure, log warning and fall through to database lookup
+// 3. On cache miss, query database for tenant by slug
+// 4. Populate cache with DB result (best-effort, errors logged but not returned)
+// 5. Return tenant ID
 //
 // Returns persistence.ErrTenantNotFound if tenant doesn't exist in database.
-// Returns wrapped errors for cache read failures or database errors.
+// Returns wrapped errors for database errors.
 func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug string) (tenant.TenantID, error) {
-	// Step 1: Try cache first
+	// Step 1: Try cache first (best-effort)
 	tenantID, err := m.slugCache.Get(ctx, slug)
 	if err != nil {
-		return "", fmt.Errorf("failed to get tenant from cache: %w", err)
-	}
-
-	// Cache hit - return immediately
-	if !tenantID.IsEmpty() {
+		// Log cache read failure but don't fail the request
+		// Fall through to database lookup for resilience
+		m.logger.Warn("cache read failed, falling back to database",
+			slog.String("slug", slug),
+			slog.String("error", err.Error()),
+		)
+	} else if !tenantID.IsEmpty() {
+		// Cache hit - return immediately
 		return tenantID, nil
 	}
 
-	// Step 2: Cache miss - query database
+	// Step 2: Cache miss or error - query database
 	tenantEntity, err := m.tenantRepo.GetBySlug(ctx, slug)
 	if err != nil {
 		// Propagate not-found error directly for proper HTTP status code handling

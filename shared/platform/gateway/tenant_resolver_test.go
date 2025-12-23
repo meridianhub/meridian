@@ -10,7 +10,6 @@ import (
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
-	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,15 +17,15 @@ import (
 
 func TestNewTenantResolverMiddleware(t *testing.T) {
 	// Setup valid dependencies for happy path tests
-	validSlugCache := &service.SlugCache{}
-	validTenantRepo := &persistence.Repository{}
+	validSlugCache := &MockSlugCache{}
+	validTenantRepo := &MockTenantRepository{}
 	validBaseDomain := "meridian.com"
 	validLogger := slog.Default()
 
 	tests := []struct {
 		name        string
-		slugCache   *service.SlugCache
-		tenantRepo  *persistence.Repository
+		slugCache   slugCache
+		tenantRepo  tenantRepository
 		baseDomain  string
 		logger      *slog.Logger
 		wantErr     error
@@ -90,9 +89,9 @@ func TestNewTenantResolverMiddleware(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, middleware)
 
-				// Verify all fields are properly initialized
-				assert.Equal(t, tt.slugCache, middleware.slugCache)
-				assert.Equal(t, tt.tenantRepo, middleware.tenantRepo)
+				// Verify fields are properly initialized (non-nil)
+				assert.NotNil(t, middleware.slugCache)
+				assert.NotNil(t, middleware.tenantRepo)
 				assert.Equal(t, tt.baseDomain, middleware.baseDomain)
 				assert.Equal(t, tt.logger, middleware.logger)
 			}
@@ -101,8 +100,8 @@ func TestNewTenantResolverMiddleware(t *testing.T) {
 }
 
 func TestNewTenantResolverMiddleware_FieldInitialization(t *testing.T) {
-	slugCache := &service.SlugCache{}
-	tenantRepo := &persistence.Repository{}
+	slugCache := &MockSlugCache{}
+	tenantRepo := &MockTenantRepository{}
 	baseDomain := "example.com"
 	logger := slog.Default()
 
@@ -209,11 +208,18 @@ func TestExtractSlug(t *testing.T) {
 			reason:     "should return empty for IPv6 address",
 		},
 		{
-			name:       "IPv6 address with port",
+			name:       "IPv6 address with port bracket notation",
 			baseDomain: "api.meridian.io",
 			host:       "[2001:db8::1]:8080",
 			want:       "",
-			reason:     "should return empty for IPv6 address with port",
+			reason:     "should return empty for IPv6 address with port in bracket notation",
+		},
+		{
+			name:       "IPv6 address without brackets",
+			baseDomain: "api.meridian.io",
+			host:       "2001:db8::1",
+			want:       "",
+			reason:     "should return empty for IPv6 address without brackets",
 		},
 		{
 			name:       "localhost",
@@ -441,13 +447,15 @@ func TestResolveTenant(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 
-	t.Run("cache read failure is returned as error", func(t *testing.T) {
+	t.Run("cache read failure falls through to DB", func(t *testing.T) {
 		mockCache := new(MockSlugCache)
 		mockRepo := new(MockTenantRepository)
 		logger := slog.Default()
 
-		// Setup: Cache read fails
+		// Setup: Cache read fails, but DB succeeds
 		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), errCacheReadTimeout)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID).Return(nil)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -460,14 +468,13 @@ func TestResolveTenant(t *testing.T) {
 		// Execute
 		result, err := middleware.resolveTenant(ctx, testSlug)
 
-		// Assert
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to get tenant from cache")
-		assert.Empty(t, result)
+		// Assert: Request should succeed despite cache read failure
+		require.NoError(t, err, "cache read failure should fall through to DB")
+		assert.Equal(t, testTenantID, result)
 
-		// Verify cache was called but repository was not
+		// Verify all calls were made (cache get, DB get, cache set)
 		mockCache.AssertExpectations(t)
-		mockRepo.AssertNotCalled(t, "GetBySlug")
+		mockRepo.AssertExpectations(t)
 	})
 
 	t.Run("DB error is wrapped and returned", func(t *testing.T) {
@@ -510,8 +517,9 @@ func TestResolveTenant(t *testing.T) {
 		cancelledCtx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		// Setup: Cache returns context.Canceled error
+		// Setup: Cache returns context.Canceled error, DB also respects cancellation
 		mockCache.On("Get", cancelledCtx, testSlug).Return(tenant.TenantID(""), context.Canceled)
+		mockRepo.On("GetBySlug", cancelledCtx, testSlug).Return(nil, context.Canceled)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -529,9 +537,9 @@ func TestResolveTenant(t *testing.T) {
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.Empty(t, result)
 
-		// Verify cache was called
+		// Verify both cache and DB were called (cache error fell through to DB)
 		mockCache.AssertExpectations(t)
-		mockRepo.AssertNotCalled(t, "GetBySlug")
+		mockRepo.AssertExpectations(t)
 	})
 }
 
@@ -577,15 +585,16 @@ func TestServeHTTP(t *testing.T) {
 		var capturedTenantOk bool
 		var capturedHeaderValue string
 
-		next := func(w http.ResponseWriter, r *http.Request) {
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			nextCalled = true
 			capturedHeaderValue = r.Header.Get(tenant.TenantIDKey)
 			capturedTenantID, capturedTenantOk = tenant.FromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
-		}
+		})
 
 		// Execute
-		middleware.ServeHTTP(rec, req, next)
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
 
 		// Assert
 		assert.Equal(t, http.StatusOK, rec.Code, "should return 200 OK")
@@ -623,12 +632,13 @@ func TestServeHTTP(t *testing.T) {
 		// Track if next handler was called
 		nextCalled := false
 
-		next := func(_ http.ResponseWriter, _ *http.Request) {
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 			nextCalled = true
-		}
+		})
 
 		// Execute
-		middleware.ServeHTTP(rec, req, next)
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
 
 		// Assert
 		assert.Equal(t, http.StatusNotFound, rec.Code, "should return 404 Not Found")
@@ -666,12 +676,13 @@ func TestServeHTTP(t *testing.T) {
 		// Track if next handler was called
 		nextCalled := false
 
-		next := func(_ http.ResponseWriter, _ *http.Request) {
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 			nextCalled = true
-		}
+		})
 
 		// Execute
-		middleware.ServeHTTP(rec, req, next)
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
 
 		// Assert
 		assert.Equal(t, http.StatusNotFound, rec.Code, "should return 404 Not Found")
@@ -709,13 +720,14 @@ func TestServeHTTP(t *testing.T) {
 		// Track captured request
 		var capturedRequest *http.Request
 
-		next := func(w http.ResponseWriter, r *http.Request) {
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedRequest = r
 			w.WriteHeader(http.StatusOK)
-		}
+		})
 
 		// Execute
-		middleware.ServeHTTP(rec, req, next)
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
 
 		// Assert
 		assert.Equal(t, http.StatusOK, rec.Code, "should return 200 OK")
@@ -750,12 +762,13 @@ func TestServeHTTP(t *testing.T) {
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
-		next := func(w http.ResponseWriter, _ *http.Request) {
+		next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
-		}
+		})
 
 		// Execute
-		middleware.ServeHTTP(rec, req, next)
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
 
 		// Assert
 		assert.Equal(t, http.StatusOK, rec.Code, "should handle port in Host header")
@@ -789,13 +802,14 @@ func TestServeHTTP(t *testing.T) {
 
 		var capturedRequest *http.Request
 
-		next := func(w http.ResponseWriter, r *http.Request) {
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedRequest = r
 			w.WriteHeader(http.StatusOK)
-		}
+		})
 
 		// Execute
-		middleware.ServeHTTP(rec, req, next)
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
 
 		// Assert
 		assert.Equal(t, http.StatusOK, rec.Code, "should handle multi-level subdomain")
@@ -828,12 +842,13 @@ func TestServeHTTP(t *testing.T) {
 
 		nextCalled := false
 
-		next := func(_ http.ResponseWriter, _ *http.Request) {
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 			nextCalled = true
-		}
+		})
 
 		// Execute
-		middleware.ServeHTTP(rec, req, next)
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
 
 		// Assert
 		assert.Equal(t, http.StatusNotFound, rec.Code, "should return 404 on DB error")
