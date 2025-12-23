@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
@@ -393,7 +392,7 @@ func TestResolveTenant(t *testing.T) {
 
 		// Setup: Cache miss, DB returns not found
 		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
-		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, persistence.ErrTenantNotFound)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, ErrTenantNotFound)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -408,7 +407,7 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert
 		require.Error(t, err)
-		assert.ErrorIs(t, err, persistence.ErrTenantNotFound)
+		assert.ErrorIs(t, err, ErrTenantNotFound)
 		assert.Empty(t, result)
 
 		// Verify calls
@@ -658,7 +657,7 @@ func TestServeHTTP(t *testing.T) {
 
 		// Setup: Cache miss, DB returns not found
 		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
-		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, persistence.ErrTenantNotFound)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, ErrTenantNotFound)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{

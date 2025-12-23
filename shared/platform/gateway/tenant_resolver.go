@@ -1,4 +1,12 @@
 // Package gateway provides HTTP middleware for API gateway functionality.
+//
+// Example usage:
+//
+//	resolver, err := NewTenantResolverMiddleware(cache, repo, "api.meridian.io", logger)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	handler := resolver.Handler(appHandler)
 package gateway
 
 import (
@@ -6,10 +14,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
-	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
@@ -21,6 +29,9 @@ var (
 	ErrEmptyBaseDomain = errors.New("base domain cannot be empty")
 	ErrNilLogger       = errors.New("logger cannot be nil")
 )
+
+// ErrTenantNotFound is returned when a tenant cannot be found by slug.
+var ErrTenantNotFound = errors.New("tenant not found")
 
 // slugCache defines the caching interface for slug-to-tenant-ID mappings.
 type slugCache interface {
@@ -152,39 +163,31 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 //   - "invalid.com" → "" (wrong domain)
 //   - "192.168.1.1" → "" (IP address)
 //   - "localhost" → ""
-func (m *TenantResolverMiddleware) extractSlug(host string) string {
-	if host == "" {
+func (m *TenantResolverMiddleware) extractSlug(hostHeader string) string {
+	if hostHeader == "" {
 		return ""
 	}
 
-	// Strip port if present
-	hostWithoutPort := host
-	if colonIndex := len(host) - 1; colonIndex >= 0 {
-		for i := len(host) - 1; i >= 0; i-- {
-			if host[i] == ':' {
-				hostWithoutPort = host[:i]
-				break
-			}
-			// Stop if we hit a non-digit character before finding ':'
-			if host[i] < '0' || host[i] > '9' {
-				break
-			}
-		}
+	// Use net.SplitHostPort for robust port handling (IPv6-safe)
+	host := hostHeader
+	if h, _, err := net.SplitHostPort(hostHeader); err == nil {
+		host = h
 	}
+	// Note: SplitHostPort returns error for hosts without ports, which is fine
 
 	// Validate host ends with ".<baseDomain>"
 	expectedSuffix := "." + m.baseDomain
-	if len(hostWithoutPort) <= len(expectedSuffix) {
+	if len(host) <= len(expectedSuffix) {
 		return ""
 	}
 
 	// Check if host ends with the expected suffix
-	if hostWithoutPort[len(hostWithoutPort)-len(expectedSuffix):] != expectedSuffix {
+	if host[len(host)-len(expectedSuffix):] != expectedSuffix {
 		return ""
 	}
 
 	// Extract slug by removing the base domain suffix
-	slug := hostWithoutPort[:len(hostWithoutPort)-len(expectedSuffix)]
+	slug := host[:len(host)-len(expectedSuffix)]
 
 	// Return empty string if there's no subdomain (slug would be empty)
 	if slug == "" {
@@ -203,9 +206,13 @@ func (m *TenantResolverMiddleware) extractSlug(host string) string {
 // 4. Populate cache with DB result (best-effort, errors logged but not returned)
 // 5. Return tenant ID
 //
-// Returns persistence.ErrTenantNotFound if tenant doesn't exist in database.
+// Returns ErrTenantNotFound if tenant doesn't exist in database.
 // Returns wrapped errors for database errors.
 func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug string) (tenant.TenantID, error) {
+	if slug == "" {
+		return "", ErrTenantNotFound // fast-fail for empty slug
+	}
+
 	// Step 1: Try cache first (best-effort)
 	tenantID, err := m.slugCache.Get(ctx, slug)
 	if err != nil {
@@ -224,8 +231,8 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 	tenantEntity, err := m.tenantRepo.GetBySlug(ctx, slug)
 	if err != nil {
 		// Propagate not-found error directly for proper HTTP status code handling
-		if errors.Is(err, persistence.ErrTenantNotFound) {
-			return "", persistence.ErrTenantNotFound
+		if errors.Is(err, ErrTenantNotFound) {
+			return "", ErrTenantNotFound
 		}
 		return "", fmt.Errorf("failed to get tenant from database: %w", err)
 	}
