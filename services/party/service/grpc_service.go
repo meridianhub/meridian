@@ -52,6 +52,7 @@ type Repository interface {
 	FindDemographic(ctx context.Context, partyID uuid.UUID) (*persistence.PartyDemographicEntity, error)
 
 	SaveReference(ctx context.Context, partyID uuid.UUID, refType, refValue, issuingAuthority, expiryDate string) error
+	SaveReferences(ctx context.Context, partyID uuid.UUID, refs []persistence.ReferenceInput) error
 	FindReferences(ctx context.Context, partyID uuid.UUID) ([]persistence.PartyReferenceEntity, error)
 
 	SaveBankRelation(ctx context.Context, partyID uuid.UUID, accountOfficerID, relationshipManagerID, assignedBranch string) error
@@ -268,7 +269,7 @@ func partyStatusToProto(status domain.PartyStatus) pb.PartyStatus {
 	case domain.PartyStatusRestricted:
 		return pb.PartyStatus_PARTY_STATUS_RESTRICTED
 	case domain.PartyStatusSuspended:
-		return pb.PartyStatus_PARTY_STATUS_RESTRICTED // Map to RESTRICTED for now
+		return pb.PartyStatus_PARTY_STATUS_SUSPENDED
 	case domain.PartyStatusTerminated:
 		return pb.PartyStatus_PARTY_STATUS_TERMINATED
 	default:
@@ -319,8 +320,8 @@ func (s *Service) UpdateParty(ctx context.Context, req *pb.UpdatePartyRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
 	}
 
-	// Load existing party
-	party, err := s.repo.FindByID(ctx, partyID)
+	// Load existing party with pessimistic lock for consistent read-modify-write
+	party, err := s.repo.FindByIDForUpdate(ctx, partyID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPartyNotFound) {
 			s.logger.Warn("party not found", "party_id", req.PartyId)
@@ -330,7 +331,7 @@ func (s *Service) UpdateParty(ctx context.Context, req *pb.UpdatePartyRequest) (
 		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
 	}
 
-	// Verify version for optimistic locking
+	// Verify version for optimistic locking (defense in depth)
 	// #nosec G115 - Version is bounded by database constraints
 	if req.Version > 0 && party.Version() != int64(req.Version) {
 		s.logger.Warn("version conflict", "party_id", req.PartyId, "expected", req.Version, "actual", party.Version())
@@ -475,19 +476,28 @@ func (s *Service) UpdateReference(ctx context.Context, req *pb.UpdateReferenceRe
 		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
 	}
 
-	// Save government ID reference if provided
+	// Collect references to save in a single transaction
+	var refs []persistence.ReferenceInput
 	if req.GovernmentId != "" {
-		if err := s.repo.SaveReference(ctx, partyID, "GOVERNMENT_ID", req.GovernmentId, req.IssuingAuthority, req.ExpiryDate); err != nil {
-			s.logger.Error("failed to save government ID reference", "party_id", req.PartyId, "error", err)
-			return nil, status.Errorf(codes.Internal, "failed to save reference: %v", err)
-		}
+		refs = append(refs, persistence.ReferenceInput{
+			RefType:          "GOVERNMENT_ID",
+			RefValue:         req.GovernmentId,
+			IssuingAuthority: req.IssuingAuthority,
+			ExpiryDate:       req.ExpiryDate,
+		})
+	}
+	if req.TaxReference != "" {
+		refs = append(refs, persistence.ReferenceInput{
+			RefType:  "TAX_REFERENCE",
+			RefValue: req.TaxReference,
+		})
 	}
 
-	// Save tax reference if provided
-	if req.TaxReference != "" {
-		if err := s.repo.SaveReference(ctx, partyID, "TAX_REFERENCE", req.TaxReference, "", ""); err != nil {
-			s.logger.Error("failed to save tax reference", "party_id", req.PartyId, "error", err)
-			return nil, status.Errorf(codes.Internal, "failed to save reference: %v", err)
+	// Save all references in a single transaction
+	if len(refs) > 0 {
+		if err := s.repo.SaveReferences(ctx, partyID, refs); err != nil {
+			s.logger.Error("failed to save references", "party_id", req.PartyId, "error", err)
+			return nil, status.Errorf(codes.Internal, "failed to save references: %v", err)
 		}
 	}
 
@@ -549,6 +559,16 @@ func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAsso
 	relatedPartyID, err := uuid.Parse(req.RelatedPartyId)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid related party ID format: %v", err)
+	}
+
+	// Verify both parties exist
+	if _, err := s.repo.FindByID(ctx, partyID); err != nil {
+		s.logger.Error("party not found for association", "party_id", req.PartyId, "error", err)
+		return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
+	}
+	if _, err := s.repo.FindByID(ctx, relatedPartyID); err != nil {
+		s.logger.Error("related party not found for association", "related_party_id", req.RelatedPartyId, "error", err)
+		return nil, status.Errorf(codes.NotFound, "related party not found: %s", req.RelatedPartyId)
 	}
 
 	// Check for circular association
@@ -797,18 +817,16 @@ func (s *Service) RetrieveBankRelations(ctx context.Context, req *pb.RetrieveBan
 // protoToRelationshipType converts proto RelationshipType to domain string
 func protoToRelationshipType(rt pb.RelationshipType) string {
 	switch rt {
-	case pb.RelationshipType_RELATIONSHIP_TYPE_UNSPECIFIED:
-		return "UNSPECIFIED"
-	case pb.RelationshipType_RELATIONSHIP_TYPE_SUBSIDIARY:
-		return "SUBSIDIARY"
-	case pb.RelationshipType_RELATIONSHIP_TYPE_AFFILIATE:
-		return "AFFILIATE"
+	case pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE:
+		return string(domain.RelationshipTypeSpouse)
+	case pb.RelationshipType_RELATIONSHIP_TYPE_DEPENDENT:
+		return string(domain.RelationshipTypeDependent)
+	case pb.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER:
+		return string(domain.RelationshipTypeBusinessPartner)
 	case pb.RelationshipType_RELATIONSHIP_TYPE_GUARANTOR:
-		return "GUARANTOR"
+		return string(domain.RelationshipTypeGuarantor)
 	case pb.RelationshipType_RELATIONSHIP_TYPE_BENEFICIAL_OWNER:
-		return "BENEFICIAL_OWNER"
-	case pb.RelationshipType_RELATIONSHIP_TYPE_AUTHORIZED_SIGNATORY:
-		return "AUTHORIZED_SIGNATORY"
+		return string(domain.RelationshipTypeBeneficialOwner)
 	default:
 		return "UNSPECIFIED"
 	}
@@ -817,16 +835,16 @@ func protoToRelationshipType(rt pb.RelationshipType) string {
 // relationshipTypeToProto converts domain string to proto RelationshipType
 func relationshipTypeToProto(rt string) pb.RelationshipType {
 	switch rt {
-	case "SUBSIDIARY":
-		return pb.RelationshipType_RELATIONSHIP_TYPE_SUBSIDIARY
-	case "AFFILIATE":
-		return pb.RelationshipType_RELATIONSHIP_TYPE_AFFILIATE
-	case "GUARANTOR":
+	case string(domain.RelationshipTypeSpouse):
+		return pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE
+	case string(domain.RelationshipTypeDependent):
+		return pb.RelationshipType_RELATIONSHIP_TYPE_DEPENDENT
+	case string(domain.RelationshipTypeBusinessPartner):
+		return pb.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER
+	case string(domain.RelationshipTypeGuarantor):
 		return pb.RelationshipType_RELATIONSHIP_TYPE_GUARANTOR
-	case "BENEFICIAL_OWNER":
+	case string(domain.RelationshipTypeBeneficialOwner):
 		return pb.RelationshipType_RELATIONSHIP_TYPE_BENEFICIAL_OWNER
-	case "AUTHORIZED_SIGNATORY":
-		return pb.RelationshipType_RELATIONSHIP_TYPE_AUTHORIZED_SIGNATORY
 	default:
 		return pb.RelationshipType_RELATIONSHIP_TYPE_UNSPECIFIED
 	}

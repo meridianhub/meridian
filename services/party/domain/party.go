@@ -329,9 +329,11 @@ func (p *Party) Version() int64 {
 	return p.version
 }
 
-// Associations returns the party's associations
+// Associations returns a copy of the party's associations to prevent external mutation.
 func (p *Party) Associations() []PartyAssociation {
-	return p.associations
+	result := make([]PartyAssociation, len(p.associations))
+	copy(result, p.associations)
+	return result
 }
 
 // Demographics returns the party's demographic data

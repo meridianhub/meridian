@@ -66,8 +66,10 @@ enum PartyStatus {
   PARTY_STATUS_ACTIVE = 1;
   // PARTY_STATUS_RESTRICTED means the party has limited access (e.g., pending KYC review).
   PARTY_STATUS_RESTRICTED = 2;
+  // PARTY_STATUS_SUSPENDED means the party is temporarily suspended (e.g., compliance investigation).
+  PARTY_STATUS_SUSPENDED = 3;
   // PARTY_STATUS_TERMINATED means the party relationship has ended.
-  PARTY_STATUS_TERMINATED = 3;
+  PARTY_STATUS_TERMINATED = 4;
 }
 
 // ExternalReferenceType defines the type of external identifier for a party.
@@ -102,20 +104,27 @@ enum ControlAction {
 enum RelationshipType {
   // RELATIONSHIP_TYPE_UNSPECIFIED means the relationship type is unknown.
   RELATIONSHIP_TYPE_UNSPECIFIED = 0;
-  // RELATIONSHIP_TYPE_SUBSIDIARY is a parent-subsidiary relationship.
-  RELATIONSHIP_TYPE_SUBSIDIARY = 1;
-  // RELATIONSHIP_TYPE_AFFILIATE is an affiliated entity relationship.
-  RELATIONSHIP_TYPE_AFFILIATE = 2;
+  // RELATIONSHIP_TYPE_SPOUSE is a spousal relationship (for individuals).
+  RELATIONSHIP_TYPE_SPOUSE = 1;
+  // RELATIONSHIP_TYPE_DEPENDENT is a dependent relationship (for individuals).
+  RELATIONSHIP_TYPE_DEPENDENT = 2;
+  // RELATIONSHIP_TYPE_BUSINESS_PARTNER is a business partnership relationship.
+  RELATIONSHIP_TYPE_BUSINESS_PARTNER = 3;
   // RELATIONSHIP_TYPE_GUARANTOR is a guarantor relationship.
-  RELATIONSHIP_TYPE_GUARANTOR = 3;
+  RELATIONSHIP_TYPE_GUARANTOR = 4;
   // RELATIONSHIP_TYPE_BENEFICIAL_OWNER is a beneficial ownership relationship.
-  RELATIONSHIP_TYPE_BENEFICIAL_OWNER = 4;
-  // RELATIONSHIP_TYPE_AUTHORIZED_SIGNATORY is an authorized signatory relationship.
-  RELATIONSHIP_TYPE_AUTHORIZED_SIGNATORY = 5;
+  RELATIONSHIP_TYPE_BENEFICIAL_OWNER = 5;
 }
 
 // Party represents a legal entity in the BIAN Party Reference Data Directory.
 // A party can be a person (natural) or organization (legal entity).
+//
+// NOTE: Business Qualifier data (Reference, Associations, Demographics, BankRelations)
+// is NOT included in Party responses. Use the dedicated BQ retrieval operations:
+// - RetrieveReference: Get reference data (employment, income, etc.)
+// - RetrieveAssociations: Get party relationships (spouse, dependents, etc.)
+// - RetrieveDemographics: Get demographic data (date of birth, nationality, etc.)
+// - RetrieveBankRelation: Get bank relationship details (customer since, segment, etc.)
 message Party {
   // party_id is the unique identifier for this party (alphanumeric with hyphens/underscores).
   string party_id = 1 [(buf.validate.field).string = {
@@ -208,6 +217,9 @@ message RetrievePartyResponse {
 }
 
 // UpdatePartyRequest is the request to update party details (BIAN UpCR).
+// When update_mask is provided, only the specified fields are updated.
+// When update_mask is empty or not provided, only display_name is updated.
+// Supported update_mask paths: "display_name".
 message UpdatePartyRequest {
   // party_id is the unique identifier of the party to update.
   string party_id = 1 [(buf.validate.field).string = {
@@ -217,6 +229,7 @@ message UpdatePartyRequest {
   }];
 
   // update_mask specifies which fields to update (partial update support).
+  // Supported paths: "display_name". Other fields are reserved for future use.
   google.protobuf.FieldMask update_mask = 2;
 
   // legal_name is the updated official registered name (optional).

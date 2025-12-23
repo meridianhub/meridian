@@ -456,7 +456,7 @@ func TestConcurrency_RegisterAssociationsSameRelatedParty(t *testing.T) {
 			assocReq := &pb.RegisterAssociationsRequest{
 				PartyId:          party.PartyId,
 				RelatedPartyId:   relatedParty.PartyId,
-				RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SUBSIDIARY,
+				RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE,
 			}
 			_, err := svc.RegisterAssociations(ctx, assocReq)
 			results <- err
@@ -661,7 +661,7 @@ func TestWorkflow_MultipleAssociationsForParty(t *testing.T) {
 	assoc1Req := &pb.RegisterAssociationsRequest{
 		PartyId:          primaryParty.PartyId,
 		RelatedPartyId:   subsidiary1.PartyId,
-		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SUBSIDIARY,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE,
 	}
 	_, err := svc.RegisterAssociations(ctx, assoc1Req)
 	require.NoError(t, err)
@@ -669,7 +669,7 @@ func TestWorkflow_MultipleAssociationsForParty(t *testing.T) {
 	assoc2Req := &pb.RegisterAssociationsRequest{
 		PartyId:          primaryParty.PartyId,
 		RelatedPartyId:   subsidiary2.PartyId,
-		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SUBSIDIARY,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE,
 	}
 	_, err = svc.RegisterAssociations(ctx, assoc2Req)
 	require.NoError(t, err)
@@ -691,7 +691,7 @@ func TestWorkflow_MultipleAssociationsForParty(t *testing.T) {
 	subsidiaryCount := 0
 	guarantorCount := 0
 	for _, assoc := range retrieveResp.Associations {
-		if assoc.RelationshipType == pb.RelationshipType_RELATIONSHIP_TYPE_SUBSIDIARY {
+		if assoc.RelationshipType == pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE {
 			subsidiaryCount++
 		}
 		if assoc.RelationshipType == pb.RelationshipType_RELATIONSHIP_TYPE_GUARANTOR {
@@ -744,7 +744,7 @@ func TestWorkflow_ControlPartyStateTransitions(t *testing.T) {
 	}
 	suspendResp, err := svc.ControlParty(ctx, suspendReq)
 	require.NoError(t, err)
-	assert.Equal(t, pb.PartyStatus_PARTY_STATUS_RESTRICTED, suspendResp.Party.Status)
+	assert.Equal(t, pb.PartyStatus_PARTY_STATUS_SUSPENDED, suspendResp.Party.Status)
 
 	// Transition: RESTRICTED → TERMINATED
 	terminateReq := &pb.ControlPartyRequest{

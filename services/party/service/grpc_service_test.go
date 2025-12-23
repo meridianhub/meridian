@@ -115,6 +115,10 @@ func (m *mockRepository) SaveReference(_ context.Context, _ uuid.UUID, _, _, _, 
 	return nil
 }
 
+func (m *mockRepository) SaveReferences(_ context.Context, _ uuid.UUID, _ []persistence.ReferenceInput) error {
+	return nil
+}
+
 func (m *mockRepository) FindReferences(_ context.Context, _ uuid.UUID) ([]persistence.PartyReferenceEntity, error) {
 	return []persistence.PartyReferenceEntity{}, nil
 }

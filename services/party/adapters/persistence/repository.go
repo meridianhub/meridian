@@ -502,44 +502,81 @@ func (r *Repository) SaveDemographic(ctx context.Context, partyID uuid.UUID, soc
 	})
 }
 
-// FindDemographic retrieves demographic data for a party
+// FindDemographic retrieves demographic data for a party.
+// Returns (nil, nil) if no demographic data exists for the party.
 func (r *Repository) FindDemographic(ctx context.Context, partyID uuid.UUID) (*PartyDemographicEntity, error) {
 	var demographic PartyDemographicEntity
+	var found bool
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		result := tx.Where("party_id = ?", partyID).First(&demographic)
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			found = false
 			return nil // Not an error, just no demographic data
 		}
-		return result.Error
+		if result.Error != nil {
+			return result.Error
+		}
+		found = true
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	if !found {
+		return nil, nil
+	}
 	return &demographic, nil
+}
+
+// ReferenceInput represents input for saving a reference.
+type ReferenceInput struct {
+	RefType          string
+	RefValue         string
+	IssuingAuthority string
+	ExpiryDate       string
 }
 
 // SaveReference saves party reference data
 func (r *Repository) SaveReference(ctx context.Context, partyID uuid.UUID, refType, refValue, issuingAuthority, expiryDate string) error {
-	entity := &PartyReferenceEntity{
-		ID:             uuid.New(),
-		PartyID:        partyID,
-		ReferenceType:  refType,
-		ReferenceValue: refValue,
-		CreatedAt:      time.Now(),
-	}
+	return r.SaveReferences(ctx, partyID, []ReferenceInput{{
+		RefType:          refType,
+		RefValue:         refValue,
+		IssuingAuthority: issuingAuthority,
+		ExpiryDate:       expiryDate,
+	}})
+}
 
-	if issuingAuthority != "" {
-		entity.IssuingAuthority = &issuingAuthority
-	}
-	if expiryDate != "" {
-		parsedDate, err := time.Parse("2006-01-02", expiryDate)
-		if err == nil {
-			entity.ExpiryDate = &parsedDate
-		}
+// SaveReferences saves multiple party references in a single transaction.
+func (r *Repository) SaveReferences(ctx context.Context, partyID uuid.UUID, refs []ReferenceInput) error {
+	if len(refs) == 0 {
+		return nil
 	}
 
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Create(entity).Error
+		for _, ref := range refs {
+			entity := &PartyReferenceEntity{
+				ID:             uuid.New(),
+				PartyID:        partyID,
+				ReferenceType:  ref.RefType,
+				ReferenceValue: ref.RefValue,
+				CreatedAt:      time.Now(),
+			}
+
+			if ref.IssuingAuthority != "" {
+				entity.IssuingAuthority = &ref.IssuingAuthority
+			}
+			if ref.ExpiryDate != "" {
+				parsedDate, err := time.Parse("2006-01-02", ref.ExpiryDate)
+				if err == nil {
+					entity.ExpiryDate = &parsedDate
+				}
+			}
+
+			if err := tx.Create(entity).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -595,18 +632,28 @@ func (r *Repository) SaveBankRelation(ctx context.Context, partyID uuid.UUID, ac
 	})
 }
 
-// FindBankRelation retrieves bank relationship data for a party
+// FindBankRelation retrieves bank relationship data for a party.
+// Returns (nil, nil) if no bank relation data exists for the party.
 func (r *Repository) FindBankRelation(ctx context.Context, partyID uuid.UUID) (*PartyBankRelationEntity, error) {
 	var bankRelation PartyBankRelationEntity
+	var found bool
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		result := tx.Where("party_id = ?", partyID).First(&bankRelation)
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			found = false
 			return nil // Not an error, just no bank relation data
 		}
-		return result.Error
+		if result.Error != nil {
+			return result.Error
+		}
+		found = true
+		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !found {
+		return nil, nil
 	}
 	return &bankRelation, nil
 }
