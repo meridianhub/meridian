@@ -269,6 +269,12 @@ const (
 
 	// ServiceStateFailed indicates migration failed for this service.
 	ServiceStateFailed ServiceProvisioningState = "failed"
+
+	// ServiceStateCircuitOpen indicates the circuit breaker is open for this service.
+	// The service was skipped during provisioning because the circuit breaker
+	// detected too many recent failures. Provisioning will be retried automatically
+	// after the circuit breaker timeout period (default: 5 minutes).
+	ServiceStateCircuitOpen ServiceProvisioningState = "circuit_open"
 )
 
 // ServiceConfig defines a service that needs schema provisioning.

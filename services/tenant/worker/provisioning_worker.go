@@ -14,6 +14,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/services/tenant/observability"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
@@ -21,12 +22,16 @@ import (
 // ProvisioningWorker polls for tenants in PROVISIONING_PENDING status
 // and triggers schema provisioning for them.
 type ProvisioningWorker struct {
-	repo         *persistence.Repository
-	provisioner  provisioner.SchemaProvisioner
-	pollInterval time.Duration
-	logger       *slog.Logger
-	done         chan struct{}
-	wg           sync.WaitGroup // Tracks in-flight provisioning goroutines
+	repo           *persistence.Repository
+	provisioner    provisioner.SchemaProvisioner
+	pollInterval   time.Duration
+	maxRetries     int
+	retryBaseDelay time.Duration
+	retryMaxDelay  time.Duration
+	maxConcurrent  int
+	logger         *slog.Logger
+	done           chan struct{}
+	wg             sync.WaitGroup // Tracks in-flight provisioning goroutines
 }
 
 // Errors returned by NewProvisioningWorker and provisioning operations.
@@ -38,13 +43,22 @@ var (
 	ErrPanicDuringProvision = errors.New("panic during provisioning")
 )
 
+// Config holds configuration for worker behavior.
+type Config struct {
+	PollInterval   time.Duration
+	MaxRetries     int
+	RetryBaseDelay time.Duration
+	RetryMaxDelay  time.Duration
+	MaxConcurrent  int
+}
+
 // NewProvisioningWorker creates a new ProvisioningWorker.
 // All dependencies (repo, provisioner, logger) must be non-nil.
-// pollInterval must be greater than zero.
+// config.PollInterval must be greater than zero.
 func NewProvisioningWorker(
 	repo *persistence.Repository,
 	provisioner provisioner.SchemaProvisioner,
-	pollInterval time.Duration,
+	config Config,
 	logger *slog.Logger,
 ) (*ProvisioningWorker, error) {
 	if repo == nil {
@@ -56,16 +70,20 @@ func NewProvisioningWorker(
 	if logger == nil {
 		return nil, ErrNilLogger
 	}
-	if pollInterval <= 0 {
+	if config.PollInterval <= 0 {
 		return nil, ErrInvalidPollInterval
 	}
 
 	return &ProvisioningWorker{
-		repo:         repo,
-		provisioner:  provisioner,
-		pollInterval: pollInterval,
-		logger:       logger,
-		done:         make(chan struct{}),
+		repo:           repo,
+		provisioner:    provisioner,
+		pollInterval:   config.PollInterval,
+		maxRetries:     config.MaxRetries,
+		retryBaseDelay: config.RetryBaseDelay,
+		retryMaxDelay:  config.RetryMaxDelay,
+		maxConcurrent:  config.MaxConcurrent,
+		logger:         logger,
+		done:           make(chan struct{}),
 	}, nil
 }
 
@@ -114,8 +132,8 @@ func (w *ProvisioningWorker) Stop() {
 func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 	w.logger.Debug("checking for pending tenants to provision")
 
-	// Fetch up to 10 pending tenants
-	tenants, err := w.repo.ListByStatus(ctx, domain.StatusProvisioningPending, 10)
+	// Fetch up to maxConcurrent pending tenants
+	tenants, err := w.repo.ListByStatus(ctx, domain.StatusProvisioningPending, w.maxConcurrent)
 	if err != nil {
 		w.logger.Error("failed to list pending tenants", "error", err)
 		return
@@ -123,17 +141,29 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 
 	if len(tenants) == 0 {
 		w.logger.Debug("no pending tenants found")
+		observability.SetProvisioningQueueDepth(0)
 		return
 	}
 
 	w.logger.Info("found pending tenants", "count", len(tenants))
+
+	// Record queue depth before processing
+	observability.SetProvisioningQueueDepth(len(tenants))
 
 	// Process each tenant with optimistic locking
 	for _, tenant := range tenants {
 		// Attempt to claim the tenant by updating its status to PROVISIONING
 		_, err := w.repo.UpdateStatus(ctx, tenant.ID, domain.StatusProvisioning, tenant.Version)
 		if err != nil {
-			// Version conflict or other error - log and continue to next tenant
+			// Check if this is a version conflict (another worker claimed it first)
+			if errors.Is(err, persistence.ErrVersionConflict) {
+				// Expected during concurrent operation - debug level logging
+				w.logger.Debug("tenant already claimed by another worker",
+					"tenant_id", tenant.ID,
+					"expected_version", tenant.Version)
+				continue
+			}
+			// Unexpected error - warn level logging
 			w.logger.Warn("failed to claim tenant for provisioning",
 				"tenant_id", tenant.ID,
 				"version", tenant.Version,
@@ -153,9 +183,16 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 		// We use context.WithoutCancel to prevent parent cancellation from stopping provisioning
 		go w.provisionTenantWithRetry(context.WithoutCancel(ctx), tenant.ID)
 	}
+
+	// Note: We intentionally do NOT reset queue depth to 0 here.
+	// The next poll cycle will set the accurate count of PROVISIONING_PENDING tenants.
+	// Resetting to 0 could cause misleading dashboard values if this function
+	// is called again before all goroutines complete.
 }
 
 // Retry configuration constants for provisioning with exponential backoff.
+// These constants are deprecated in favor of WorkerConfig fields.
+// They remain for backwards compatibility with existing tests.
 const (
 	maxRetries = 5
 	baseDelay  = 2 * time.Second
@@ -172,9 +209,22 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 	// Ensure we decrement the WaitGroup when this goroutine completes
 	defer w.wg.Done()
 
+	// Start timing the provisioning operation
+	start := time.Now()
+	var status string
+
+	// Defer metric recording to ensure it happens even on panic
+	defer func() {
+		if status == "" {
+			status = observability.StatusError // Default to error if status not set
+		}
+		observability.RecordProvisioningDuration(status, time.Since(start))
+	}()
+
 	// Panic recovery to prevent a single tenant provisioning failure from crashing the worker
 	defer func() {
 		if r := recover(); r != nil {
+			status = observability.StatusError
 			w.logger.Error("panic during tenant provisioning",
 				"tenant_id", tenantID,
 				"panic", r)
@@ -186,10 +236,12 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 
 	attempts, lastErr := w.executeProvisioningWithRetry(ctx, tenantID)
 	if lastErr == nil {
+		status = observability.StatusSuccess
 		return // Success
 	}
 
 	// Mark as failed
+	status = observability.StatusError
 	w.markTenantAsFailed(ctx, tenantID, lastErr, attempts)
 }
 
@@ -199,7 +251,7 @@ func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, t
 	var lastErr error
 	var attempts int
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := 0; attempt < w.maxRetries; attempt++ {
 		attempts = attempt + 1
 		if cancelled := w.checkContextCancellation(ctx, tenantID, attempts); cancelled {
 			return 0, nil // Context cancelled, don't mark as failed
@@ -218,6 +270,11 @@ func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, t
 				"attempt", attempts,
 				"error", err)
 			break // Permanent error, don't retry
+		}
+
+		// Record retry attempt for observability (starting from second attempt)
+		if attempt > 0 {
+			observability.IncrementRetryAttempt()
 		}
 
 		if cancelled := w.waitWithBackoff(ctx, tenantID, attempt, lastErr); cancelled {
@@ -267,6 +324,9 @@ func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID te
 }
 
 // markTenantAsFailed updates tenant status to provisioning_failed with error details.
+// TODO: When service-specific provisioning is implemented, call observability.IncrementServiceFailure(serviceName)
+// here based on which service (database, kafka, etc.) caused the failure. Currently, the provisioner
+// returns generic errors without service attribution.
 func (w *ProvisioningWorker) markTenantAsFailed(ctx context.Context, tenantID tenant.TenantID, lastErr error, attempts int) {
 	tenant, getErr := w.repo.GetByID(ctx, tenantID)
 	if getErr != nil {
@@ -293,7 +353,7 @@ func (w *ProvisioningWorker) markTenantAsFailed(ctx context.Context, tenantID te
 // waitWithBackoff waits for the calculated backoff duration with context cancellation support.
 // Returns true if cancelled, false otherwise.
 func (w *ProvisioningWorker) waitWithBackoff(ctx context.Context, tenantID tenant.TenantID, attempt int, err error) bool {
-	delay := calculateBackoffDelay(attempt)
+	delay := w.calculateBackoffDelay(attempt)
 
 	w.logger.Warn("provisioning failed, retrying",
 		"tenant_id", tenantID,
@@ -314,13 +374,13 @@ func (w *ProvisioningWorker) waitWithBackoff(ctx context.Context, tenantID tenan
 }
 
 // calculateBackoffDelay calculates exponential backoff delay with jitter.
-// The delay is capped at maxDelay (including jitter) to ensure predictable maximum wait times.
-func calculateBackoffDelay(attempt int) time.Duration {
-	delay := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
+// The delay is capped at w.retryMaxDelay (including jitter) to ensure predictable maximum wait times.
+func (w *ProvisioningWorker) calculateBackoffDelay(attempt int) time.Duration {
+	delay := time.Duration(float64(w.retryBaseDelay) * math.Pow(2, float64(attempt)))
 	jitter := time.Duration(rand.Int63n(int64(delay / 4))) // Add jitter (up to 25% of delay)
 	delay = delay + jitter
-	if delay > maxDelay {
-		delay = maxDelay
+	if delay > w.retryMaxDelay {
+		delay = w.retryMaxDelay
 	}
 	return delay
 }

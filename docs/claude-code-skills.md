@@ -29,6 +29,7 @@ For detailed information about creating and using skills, see [docs/skills/READM
 - Schema evolution with protobuf
 - Kustomize deployments
 - Security scanning
+- Testing standards (await, testcontainers, defensive testing)
 - [See complete list](skills/README.md)
 
 **Runbooks** (in `docs/runbooks/`):

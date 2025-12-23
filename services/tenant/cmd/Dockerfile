@@ -67,6 +67,9 @@ USER nonroot:nonroot
 # Expose gRPC port
 EXPOSE 50056
 
+# Expose metrics port for Prometheus scraping
+EXPOSE 9090
+
 # Note: Health checks handled by gRPC health check service
 
 # Run the binary

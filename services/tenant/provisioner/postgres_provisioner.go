@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/sony/gobreaker/v2"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -40,6 +41,10 @@ type PostgresProvisioner struct {
 	// serviceDbs holds database connections indexed by service name.
 	// Each service has its own database where org_{tenant_id} schemas are created.
 	serviceDbs map[string]*gorm.DB
+
+	// circuitBreakers manages per-service circuit breakers to prevent repeated
+	// provisioning attempts when a specific service database is consistently failing.
+	circuitBreakers *ServiceCircuitBreakers
 
 	config *Config
 	logger *slog.Logger
@@ -74,10 +79,11 @@ func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvi
 	}
 
 	return &PostgresProvisioner{
-		platformDB: platformDB,
-		serviceDbs: serviceDbs,
-		config:     config,
-		logger:     slog.Default().With("component", "provisioner"),
+		platformDB:      platformDB,
+		serviceDbs:      serviceDbs,
+		circuitBreakers: NewServiceCircuitBreakers(),
+		config:          config,
+		logger:          slog.Default().With("component", "provisioner"),
 	}, nil
 }
 
@@ -138,8 +144,32 @@ func closeServiceConnections(serviceDbs map[string]*gorm.DB) {
 //  3. For each configured service, applies migrations to the tenant schema in that service's database
 //  4. Updates the provisioning status to 'active' on success or 'failed' on error
 //
-// Idempotency: Safe to call multiple times. Already-created schemas are skipped,
-// and migrations are checked against the version recorded in the status.
+// # Idempotency Contract
+//
+// This method is safe to call multiple times for the same tenant. Calling ProvisionSchemas
+// on an already-provisioned tenant is a no-op that returns nil (success).
+//
+// Idempotency is guaranteed through multiple layers:
+//
+//  1. State check with early return: If tenant is already 'active', returns immediately
+//     without modifying any state (see prepareProvisioningStatus).
+//
+//  2. CREATE SCHEMA IF NOT EXISTS: Schema creation uses PostgreSQL's IF NOT EXISTS clause,
+//     making it safe to retry after partial failures.
+//
+//  3. Migration error handling: If tables/indexes already exist (PostgreSQL error codes
+//     42P07, 42P06, 42710), the migration continues rather than failing. This handles
+//     cases where a previous attempt partially completed.
+//
+//  4. Mutex protection: A sync.Mutex prevents concurrent provisioning of the same tenant
+//     within a single process instance. Cross-process protection is provided by the
+//     'in_progress' state check in the database.
+//
+//  5. No destructive operations: This method never executes DROP, TRUNCATE, or DELETE
+//     statements. Failed provisioning can always be safely retried.
+//
+// Thread-safety: Safe for concurrent calls. The mutex serializes provisioning for the
+// same tenant, while different tenants can be provisioned in parallel.
 func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -148,11 +178,13 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 	logger := p.logger.With("tenant_id", tenantID.String(), "schema", tenantID.SchemaName())
 	logger.Info("starting schema provisioning", "services_count", len(p.config.Services))
 
-	// Validate and prepare provisioning status
+	// Validate and prepare provisioning status.
+	// IDEMPOTENCY: If tenant is already 'active', prepareProvisioningStatus returns
+	// errAlreadyProvisioned, and we return nil (success) without any modifications.
 	status, err := p.prepareProvisioningStatus(ctx, tenantID)
 	if errors.Is(err, errAlreadyProvisioned) {
 		logger.Info("schema already provisioned, skipping")
-		return nil // Idempotent: already provisioned
+		return nil // Idempotent: already provisioned, no-op success
 	}
 	if err != nil {
 		logger.Error("failed to prepare provisioning status", "error", err)
@@ -173,8 +205,10 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 		return ErrProvisioningTimeout
 	}
 
-	// Create the schema IN EACH SERVICE DATABASE
-	// Iterate over config.Services for deterministic order (easier debugging)
+	// Create the schema IN EACH SERVICE DATABASE.
+	// IDEMPOTENCY: Uses CREATE SCHEMA IF NOT EXISTS (see createSchemaInDB), so this is
+	// safe to call multiple times - existing schemas are silently skipped.
+	// Iterate over config.Services for deterministic order (easier debugging).
 	schemaName := tenantID.SchemaName()
 	for _, svc := range p.config.Services {
 		serviceDB := p.serviceDbs[svc.Name]
@@ -209,6 +243,13 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 }
 
 // prepareProvisioningStatus validates existing status and prepares for provisioning.
+//
+// IDEMPOTENCY: This is the primary idempotency gate for ProvisionSchemas:
+//   - StateActive: Returns errAlreadyProvisioned (caller treats as success/no-op)
+//   - StateInProgress: Returns ErrProvisioningInProgress (prevents concurrent provisioning)
+//   - StateDeprovisioned: Returns ErrAlreadyDeprovisioned (terminal state, cannot re-provision)
+//   - StatePending/StateFailed: Proceeds with provisioning (retry is allowed)
+//
 // Returns nil status if already active (no-op), or error if provisioning cannot proceed.
 func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error) {
 	status, err := p.getProvisioningStatusLocked(ctx, tenantID)
@@ -255,8 +296,11 @@ func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, ten
 
 // provisionAllServices applies migrations for each configured service.
 // Each service's migrations are applied to that service's dedicated database.
+// Circuit breaker protection is applied per-service to prevent repeated failures.
 func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *ProvisioningStatus, schemaName string) error {
 	logger := p.logger.With("tenant_id", status.TenantID.String(), "schema", schemaName)
+
+	var skippedServices []string
 
 	for i, svc := range p.config.Services {
 		if ctx.Err() != nil {
@@ -285,8 +329,37 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			logger.Warn("failed to save intermediate status", "error", err, "service", svc.Name)
 		}
 
-		// Apply migrations TO SERVICE DATABASE
-		version, err := p.applyServiceMigrationsToDB(ctx, serviceDB, schemaName, svc)
+		// Apply migrations through circuit breaker
+		breaker := p.circuitBreakers.GetBreaker(svc.Name)
+		version, err := p.applyMigrationsWithCircuitBreaker(ctx, breaker, serviceDB, schemaName, svc, logger)
+
+		// Handle circuit breaker specific errors
+		if errors.Is(err, gobreaker.ErrOpenState) {
+			retryAfter := time.Now().Add(BreakerTimeout)
+			logger.Warn("circuit breaker open, skipping service",
+				"service", svc.Name,
+				"breaker_state", "open",
+				"retry_after", retryAfter.Format(time.RFC3339))
+			status.Services[i].State = ServiceStateCircuitOpen
+			status.Services[i].ErrorMessage = fmt.Sprintf(
+				"circuit breaker open for %s: too many recent failures. Retry after %s",
+				svc.Name, retryAfter.Format(time.RFC3339))
+			skippedServices = append(skippedServices, svc.Name)
+			continue // Skip this service but continue with others
+		}
+		if errors.Is(err, gobreaker.ErrTooManyRequests) {
+			logger.Info("circuit breaker half-open, too many test requests",
+				"service", svc.Name,
+				"breaker_state", "half-open",
+				"max_requests", BreakerMaxRequests)
+			status.Services[i].State = ServiceStateCircuitOpen
+			status.Services[i].ErrorMessage = fmt.Sprintf(
+				"circuit breaker half-open for %s: max test requests (%d) exceeded. Waiting for test results",
+				svc.Name, BreakerMaxRequests)
+			skippedServices = append(skippedServices, svc.Name)
+			continue // Skip this service but continue with others
+		}
+
 		if err != nil {
 			logger.Error("service migration failed", "service", svc.Name, "error", err)
 			status.Services[i].State = ServiceStateFailed
@@ -303,7 +376,62 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			logger.Warn("failed to save migration status", "error", err, "service", svc.Name)
 		}
 	}
+
+	// If any services were skipped due to circuit breaker, mark as partial failure
+	if len(skippedServices) > 0 {
+		errMsg := fmt.Sprintf("services skipped due to circuit breaker: %v", skippedServices)
+		logger.Warn("partial provisioning completed", "skipped_services", skippedServices)
+		p.markProvisioningFailed(ctx, status, errMsg)
+		return fmt.Errorf("%w: %s", ErrCircuitBreakerOpen, strings.Join(skippedServices, ", "))
+	}
+
 	return nil
+}
+
+// applyMigrationsWithCircuitBreaker wraps the migration execution with circuit breaker protection.
+// Returns the migration version on success, or an error (which may be circuit breaker errors).
+//
+// Circuit breaker state logging is handled by the caller (provisionAllServices) at appropriate
+// log levels: WARN for open state, INFO for half-open. On success after half-open, this function
+// logs at INFO level to indicate the circuit has closed.
+func (p *PostgresProvisioner) applyMigrationsWithCircuitBreaker(
+	ctx context.Context,
+	breaker *gobreaker.CircuitBreaker[any],
+	db *gorm.DB,
+	schemaName string,
+	svc ServiceConfig,
+	logger *slog.Logger,
+) (string, error) {
+	// Track if we're in half-open state before execution (to log transition to closed)
+	stateBefore := breaker.State()
+
+	result, err := breaker.Execute(func() (any, error) {
+		version, migErr := p.applyServiceMigrationsToDB(ctx, db, schemaName, svc)
+		if migErr != nil {
+			return nil, migErr
+		}
+		return version, nil
+	})
+	if err != nil {
+		// Circuit breaker errors are logged by the caller at appropriate levels
+		return "", err
+	}
+
+	// Log successful execution that transitioned circuit from half-open to closed
+	stateAfter := breaker.State()
+	if stateBefore == gobreaker.StateHalfOpen && stateAfter == gobreaker.StateClosed {
+		logger.Info("circuit breaker closed after successful execution",
+			"service", svc.Name,
+			"previous_state", "half-open",
+			"new_state", "closed")
+	}
+
+	// Type assert the result
+	version, ok := result.(string)
+	if !ok {
+		return "", nil // Empty version is valid
+	}
+	return version, nil
 }
 
 // maskDatabaseURL redacts password from connection string for logging.
@@ -644,6 +772,9 @@ func filterMigrationsAfter(migrations []migration, currentVersion string) []migr
 // applyMigrationList applies a specific list of migrations to a tenant schema.
 // This is extracted from applyServiceMigrationsToDB to support both initial
 // provisioning (all migrations) and reconciliation (subset of migrations).
+//
+// IDEMPOTENCY: Same guarantees as applyServiceMigrationsToDB - objects that already
+// exist are silently skipped via isAlreadyExistsError.
 func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.DB, schemaName string, migrations []migration) (string, error) {
 	if len(migrations) == 0 {
 		return "", nil
@@ -676,7 +807,9 @@ func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.D
 			return nil
 		})
 		if err != nil {
-			// Check if error is due to existing objects (idempotency)
+			// IDEMPOTENCY: If error indicates objects already exist (duplicate_table,
+			// duplicate_schema, duplicate_object), treat as success. This handles the
+			// case where a previous provisioning attempt partially completed.
 			if isAlreadyExistsError(err) {
 				lastVersion = mig.Version
 				continue
@@ -691,6 +824,10 @@ func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.D
 }
 
 // createSchemaInDB creates the org_{tenant_id} schema in the specified database.
+//
+// IDEMPOTENCY: Uses CREATE SCHEMA IF NOT EXISTS, so calling this multiple times
+// for the same schema is safe - PostgreSQL silently ignores the request if the
+// schema already exists.
 func (p *PostgresProvisioner) createSchemaInDB(ctx context.Context, db *gorm.DB, schemaName string) error {
 	query := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(schemaName))
 	return db.WithContext(ctx).Exec(query).Error
@@ -722,6 +859,11 @@ func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName
 
 // applyServiceMigrationsToDB applies all migration files for a service to the tenant schema
 // in the specified service database.
+//
+// IDEMPOTENCY: If a migration creates objects that already exist, the error is caught by
+// isAlreadyExistsError and the migration is marked as applied. This allows retries after
+// partial failures where some tables were created but the version wasn't recorded.
+//
 // Returns the version string of the last applied migration.
 func (p *PostgresProvisioner) applyServiceMigrationsToDB(ctx context.Context, db *gorm.DB, schemaName string, svc ServiceConfig) (string, error) {
 	// Read migration files
@@ -766,7 +908,10 @@ func (p *PostgresProvisioner) applyServiceMigrationsToDB(ctx context.Context, db
 			return nil
 		})
 		if err != nil {
-			// Check if error is due to existing objects (idempotency)
+			// IDEMPOTENCY: If error indicates objects already exist (duplicate_table,
+			// duplicate_schema, duplicate_object), treat as success. This handles the
+			// case where a previous provisioning attempt partially completed - some
+			// tables were created but the migration version wasn't recorded.
 			if isAlreadyExistsError(err) {
 				lastVersion = mig.Version
 				continue
@@ -1089,7 +1234,15 @@ func quoteIdentifier(identifier string) string {
 }
 
 // isAlreadyExistsError checks if the error indicates an object already exists.
-// This is used for idempotency - if a table/index already exists, we skip it.
+//
+// IDEMPOTENCY: This is a key idempotency mechanism for migrations. When a migration
+// attempts to create a table, index, or schema that already exists, we treat it as
+// success rather than failure. This handles partial provisioning retries gracefully.
+//
+// Recognized PostgreSQL error codes:
+//   - 42P07: duplicate_table (table already exists)
+//   - 42P06: duplicate_schema (schema already exists)
+//   - 42710: duplicate_object (index or other object already exists)
 func isAlreadyExistsError(err error) bool {
 	if err == nil {
 		return false
@@ -1193,6 +1346,24 @@ func (p *PostgresProvisioner) Close() error {
 		return fmt.Errorf("%w: %v", ErrCloseConnections, errors.Join(errs...)) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 	}
 	return nil
+}
+
+// GetCircuitBreakerStates returns the current state of all service circuit breakers.
+// This method is useful for monitoring dashboards and health checks to observe:
+//   - Which services have open circuit breakers
+//   - Request counts and failure statistics
+//   - When services are in half-open state (testing recovery)
+//
+// Returns a slice of CircuitBreakerState, one for each service that has been accessed.
+// Services that have never been provisioned will not have a circuit breaker entry.
+func (p *PostgresProvisioner) GetCircuitBreakerStates() []CircuitBreakerState {
+	return p.circuitBreakers.GetAllCircuitBreakerStates()
+}
+
+// GetCircuitBreakerState returns the current state of the circuit breaker for a specific service.
+// Returns nil if the service has never been accessed (no circuit breaker exists).
+func (p *PostgresProvisioner) GetCircuitBreakerState(serviceName string) *CircuitBreakerState {
+	return p.circuitBreakers.GetCircuitBreakerState(serviceName)
 }
 
 // Ensure PostgresProvisioner implements SchemaProvisioner.

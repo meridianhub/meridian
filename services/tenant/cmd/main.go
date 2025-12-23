@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -38,11 +40,55 @@ var (
 	BuildDate = "unknown"
 )
 
+// ErrMetricsServerStartupTimeout is returned when the metrics server fails to start within the timeout.
+var ErrMetricsServerStartupTimeout = errors.New("metrics server startup timed out")
+
 // envValueTrue is the string value for enabled environment variables.
 const envValueTrue = "true"
 
-// ErrJWKSURLRequired is returned when AUTH_ENABLED is true but AUTH_JWKS_URL is not set.
-var ErrJWKSURLRequired = errors.New("AUTH_JWKS_URL is required when AUTH_ENABLED=true")
+// Errors returned during configuration and startup.
+var (
+	ErrJWKSURLRequired        = errors.New("AUTH_JWKS_URL is required when AUTH_ENABLED=true")
+	ErrInvalidPollInterval    = errors.New("poll interval must be >= 1s")
+	ErrInvalidMaxRetries      = errors.New("max retries must be >= 0 and <= 20")
+	ErrInvalidRetryBaseDelay  = errors.New("retry base delay must be > 0")
+	ErrInvalidRetryMaxDelay   = errors.New("retry max delay must be > 0")
+	ErrInvalidRetryDelayRange = errors.New("retry base delay must be < retry max delay")
+	ErrInvalidMaxConcurrent   = errors.New("max concurrent must be >= 1 and <= 100")
+)
+
+// WorkerConfig holds configuration for the provisioning worker behavior.
+type WorkerConfig struct {
+	PollInterval   time.Duration
+	MaxRetries     int
+	RetryBaseDelay time.Duration
+	RetryMaxDelay  time.Duration
+	MaxConcurrent  int
+}
+
+// Validate checks if the WorkerConfig has valid values.
+// Returns an error if any configuration value is invalid.
+func (c WorkerConfig) Validate() error {
+	if c.PollInterval < 1*time.Second {
+		return fmt.Errorf("%w: got %s", ErrInvalidPollInterval, c.PollInterval)
+	}
+	if c.MaxRetries < 0 || c.MaxRetries > 20 {
+		return fmt.Errorf("%w: got %d", ErrInvalidMaxRetries, c.MaxRetries)
+	}
+	if c.RetryBaseDelay <= 0 {
+		return fmt.Errorf("%w: got %s", ErrInvalidRetryBaseDelay, c.RetryBaseDelay)
+	}
+	if c.RetryMaxDelay <= 0 {
+		return fmt.Errorf("%w: got %s", ErrInvalidRetryMaxDelay, c.RetryMaxDelay)
+	}
+	if c.RetryBaseDelay >= c.RetryMaxDelay {
+		return fmt.Errorf("%w: base=%s, max=%s", ErrInvalidRetryDelayRange, c.RetryBaseDelay, c.RetryMaxDelay)
+	}
+	if c.MaxConcurrent < 1 || c.MaxConcurrent > 100 {
+		return fmt.Errorf("%w: got %d", ErrInvalidMaxConcurrent, c.MaxConcurrent)
+	}
+	return nil
+}
 
 func main() {
 	// Initialize structured logging
@@ -96,6 +142,71 @@ func run(logger *slog.Logger) error {
 		"environment", tracerConfig.Environment,
 		"otlp_endpoint", tracerConfig.OTLPEndpoint,
 		"sampling_rate", tracerConfig.SamplingRate)
+
+	// Start metrics server with /metrics and /healthz endpoints
+	metricsPort := getEnvOrDefault("METRICS_PORT", "9090")
+	metricsAddr := fmt.Sprintf(":%s", metricsPort)
+
+	// Create context for metrics server lifecycle
+	metricsCtx, cancelMetrics := context.WithCancel(ctx)
+	defer cancelMetrics()
+
+	metricsServerErrors := make(chan error, 1)
+	metricsReady := make(chan struct{})
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		})
+
+		server := &http.Server{
+			Addr:              metricsAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+
+		// Graceful shutdown
+		go func() {
+			<-metricsCtx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck // Intentionally using fresh context for shutdown grace period
+				logger.Error("failed to shutdown metrics server", "error", err)
+			}
+		}()
+
+		logger.Info("starting metrics server", "address", metricsAddr)
+
+		// Create listener first to ensure port binding before signaling ready
+		listener, err := (&net.ListenConfig{}).Listen(metricsCtx, "tcp", metricsAddr) //nolint:contextcheck // Using metricsCtx for lifecycle management
+		if err != nil {
+			metricsServerErrors <- fmt.Errorf("metrics server failed to bind: %w", err)
+			return
+		}
+
+		// Signal that server is ready (port bound successfully)
+		close(metricsReady)
+		logger.Info("metrics server started", "address", metricsAddr)
+
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			metricsServerErrors <- fmt.Errorf("metrics server failed: %w", err)
+		}
+	}()
+
+	// Wait for metrics server to be ready or fail (with timeout)
+	select {
+	case <-metricsReady:
+		// Server successfully bound to port
+	case err := <-metricsServerErrors:
+		return fmt.Errorf("metrics server startup failed: %w", err)
+	case <-time.After(10 * time.Second):
+		return ErrMetricsServerStartupTimeout
+	}
 
 	// Initialize database connection
 	db, err := initDatabase(logger)
@@ -205,12 +316,21 @@ func run(logger *slog.Logger) error {
 	// Initialize provisioning worker (only if schema provisioning is enabled)
 	var provisioningWorker *worker.ProvisioningWorker
 	if provisioningEnabled == envValueTrue && schemaProvisioner != nil {
-		pollInterval := getEnvAsDuration("PROVISIONING_POLL_INTERVAL", 30*time.Second)
-		var err error
+		config, err := loadWorkerConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load worker configuration: %w", err)
+		}
+
 		provisioningWorker, err = worker.NewProvisioningWorker(
 			repo,
 			schemaProvisioner,
-			pollInterval,
+			worker.Config{
+				PollInterval:   config.PollInterval,
+				MaxRetries:     config.MaxRetries,
+				RetryBaseDelay: config.RetryBaseDelay,
+				RetryMaxDelay:  config.RetryMaxDelay,
+				MaxConcurrent:  config.MaxConcurrent,
+			},
 			logger,
 		)
 		if err != nil {
@@ -220,8 +340,7 @@ func run(logger *slog.Logger) error {
 		// Start worker in background goroutine
 		go provisioningWorker.Start(ctx)
 
-		logger.Info("provisioning worker started",
-			"poll_interval", pollInterval)
+		logger.Info("provisioning worker started")
 	} else {
 		logger.Info("provisioning worker disabled",
 			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
@@ -370,7 +489,9 @@ func run(logger *slog.Logger) error {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		return fmt.Errorf("gRPC server error: %w", err)
+	case err := <-metricsServerErrors:
+		return fmt.Errorf("metrics server error: %w", err)
 	}
 
 	// Graceful shutdown
@@ -506,6 +627,86 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return value
+}
+
+// getEnvDuration returns the environment variable value as duration or default with logging.
+// Logs a warning via slog.Warn when falling back to default value.
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := time.ParseDuration(valueStr)
+	if err != nil {
+		slog.Warn("invalid duration environment variable, using default",
+			"key", key,
+			"value", valueStr,
+			"error", err,
+			"default", defaultValue)
+		return defaultValue
+	}
+	return value
+}
+
+// getEnvInt returns the environment variable value as int or default with logging.
+// Logs a warning via slog.Warn when falling back to default value.
+func getEnvInt(key string, defaultValue int) int {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		slog.Warn("invalid int environment variable, using default",
+			"key", key,
+			"value", valueStr,
+			"error", err,
+			"default", defaultValue)
+		return defaultValue
+	}
+	return value
+}
+
+// loadWorkerConfig loads worker configuration from environment variables with defaults.
+// It validates the configuration and returns an error if any value is invalid.
+func loadWorkerConfig() (WorkerConfig, error) {
+	config := WorkerConfig{
+		PollInterval:   getEnvDuration("PROVISIONING_WORKER_POLL_INTERVAL", 10*time.Second),
+		MaxRetries:     getEnvInt("PROVISIONING_MAX_RETRIES", 5),
+		RetryBaseDelay: getEnvDuration("PROVISIONING_RETRY_BASE_DELAY", 2*time.Second),
+		RetryMaxDelay:  getEnvDuration("PROVISIONING_RETRY_MAX_DELAY", 30*time.Second),
+		MaxConcurrent:  getEnvInt("PROVISIONING_MAX_CONCURRENT", 5),
+	}
+
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return WorkerConfig{}, fmt.Errorf("invalid worker configuration: %w", err)
+	}
+
+	// Log loaded configuration with sources
+	slog.Info("worker configuration loaded",
+		"poll_interval", config.PollInterval,
+		"poll_interval_source", getConfigSource("PROVISIONING_WORKER_POLL_INTERVAL"),
+		"max_retries", config.MaxRetries,
+		"max_retries_source", getConfigSource("PROVISIONING_MAX_RETRIES"),
+		"retry_base_delay", config.RetryBaseDelay,
+		"retry_base_delay_source", getConfigSource("PROVISIONING_RETRY_BASE_DELAY"),
+		"retry_max_delay", config.RetryMaxDelay,
+		"retry_max_delay_source", getConfigSource("PROVISIONING_RETRY_MAX_DELAY"),
+		"max_concurrent", config.MaxConcurrent,
+		"max_concurrent_source", getConfigSource("PROVISIONING_MAX_CONCURRENT"))
+
+	return config, nil
+}
+
+// getConfigSource returns "env" if the environment variable is set, "default" otherwise.
+func getConfigSource(key string) string {
+	if os.Getenv(key) != "" {
+		return "env"
+	}
+	return "default"
 }
 
 // createRedisClient creates and initializes a Redis client from environment configuration.

@@ -38,6 +38,9 @@ spec:
         - name: grpc
           containerPort: 50056
           protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: tenant-config
@@ -63,6 +66,24 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        # Worker configuration for tenant provisioning
+        # Duration format: Valid Go duration strings (e.g., "10s", "1m", "500ms")
+        - name: PROVISIONING_WORKER_POLL_INTERVAL
+          value: "10s"
+        # Maximum number of retry attempts for failed provisioning operations
+        - name: PROVISIONING_MAX_RETRIES
+          value: "5"
+        # Initial delay before first retry (exponential backoff base)
+        # Duration format: Valid Go duration strings (e.g., "2s", "500ms")
+        - name: PROVISIONING_RETRY_BASE_DELAY
+          value: "2s"
+        # Maximum delay between retry attempts (exponential backoff cap)
+        # Duration format: Valid Go duration strings (e.g., "30s", "1m")
+        - name: PROVISIONING_RETRY_MAX_DELAY
+          value: "30s"
+        # Maximum number of concurrent tenant provisioning operations
+        - name: PROVISIONING_MAX_CONCURRENT
+          value: "5"
         resources:
           requests:
             cpu: 50m

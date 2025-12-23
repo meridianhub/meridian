@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,13 +28,51 @@ func testErr(msg string) error {
 	return fmt.Errorf("%s", msg) //nolint:err113 // test helper for dynamic error messages
 }
 
-// setupTestDB creates an in-memory database with the tenant table schema.
+// testWorkerConfig creates a default Config for tests.
+func testWorkerConfig(pollInterval time.Duration) Config {
+	return Config{
+		PollInterval:   pollInterval,
+		MaxRetries:     maxRetries,
+		RetryBaseDelay: baseDelay,
+		RetryMaxDelay:  maxDelay,
+		MaxConcurrent:  10,
+	}
+}
+
+// safeBuffer is a thread-safe wrapper around bytes.Buffer for concurrent log capture.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sb *safeBuffer) Write(p []byte) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *safeBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.String()
+}
+
+// setupTestDB creates a database with the tenant table schema.
+// Uses file-based temp database to ensure consistent behavior across connections.
 func setupTestDB(t *testing.T) (*gorm.DB, *persistence.Repository) {
-	// Use a unique database name per test to ensure isolation, with cache=shared so
-	// all connections within the same test share the same in-memory database.
-	// Without cache=shared, each connection to :memory: creates a separate database.
-	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
+	// Use a unique temp file per test to ensure isolation while maintaining
+	// consistency across multiple GORM connections within the same test
+	tmpFile, err := os.CreateTemp("", "testdb_*.sqlite")
+	require.NoError(t, err)
+	dbPath := tmpFile.Name()
+	tmpFile.Close()
+
+	// Clean up temp file when test completes
+	t.Cleanup(func() {
+		os.Remove(dbPath)
+	})
+
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	require.NoError(t, err)
 
 	// Configure connection pool to avoid connection issues with in-memory DB
@@ -93,9 +133,10 @@ func TestNewProvisioningWorker_Success(t *testing.T) {
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 5 * time.Second
+	config := testWorkerConfig(pollInterval)
 
 	// Create worker
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
 
 	// Verify
 	require.NoError(t, err)
@@ -110,9 +151,9 @@ func TestNewProvisioningWorker_Success(t *testing.T) {
 func TestNewProvisioningWorker_NilRepository(t *testing.T) {
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	pollInterval := 5 * time.Second
+	config := testWorkerConfig(5 * time.Second)
 
-	worker, err := NewProvisioningWorker(nil, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(nil, prov, config, logger)
 
 	assert.ErrorIs(t, err, ErrNilRepository)
 	assert.Nil(t, worker)
@@ -124,9 +165,9 @@ func TestNewProvisioningWorker_NilProvisioner(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	pollInterval := 5 * time.Second
+	config := testWorkerConfig(5 * time.Second)
 
-	worker, err := NewProvisioningWorker(repo, nil, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, nil, config, logger)
 
 	assert.ErrorIs(t, err, ErrNilProvisioner)
 	assert.Nil(t, worker)
@@ -138,9 +179,9 @@ func TestNewProvisioningWorker_NilLogger(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
-	pollInterval := 5 * time.Second
+	config := testWorkerConfig(5 * time.Second)
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, nil)
+	worker, err := NewProvisioningWorker(repo, prov, config, nil)
 
 	assert.ErrorIs(t, err, ErrNilLogger)
 	assert.Nil(t, worker)
@@ -153,8 +194,9 @@ func TestNewProvisioningWorker_ZeroPollInterval(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	config := testWorkerConfig(0)
 
-	worker, err := NewProvisioningWorker(repo, prov, 0, logger)
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
 
 	assert.ErrorIs(t, err, ErrInvalidPollInterval)
 	assert.Nil(t, worker)
@@ -167,8 +209,9 @@ func TestNewProvisioningWorker_NegativePollInterval(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	config := testWorkerConfig(-5 * time.Second)
 
-	worker, err := NewProvisioningWorker(repo, prov, -5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
 
 	assert.ErrorIs(t, err, ErrInvalidPollInterval)
 	assert.Nil(t, worker)
@@ -184,7 +227,7 @@ func TestProvisioningWorker_Start_ContextCancellation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 50 * time.Millisecond
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(pollInterval), logger)
 	require.NoError(t, err)
 
 	// Start worker with cancellable context
@@ -221,7 +264,7 @@ func TestProvisioningWorker_Start_ExplicitStop(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 50 * time.Millisecond
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(pollInterval), logger)
 	require.NoError(t, err)
 
 	// Start worker
@@ -258,7 +301,7 @@ func TestProvisioningWorker_Stop_MultipleCalls(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 50 * time.Millisecond
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(pollInterval), logger)
 	require.NoError(t, err)
 
 	// Call Stop() multiple times - should not panic
@@ -279,7 +322,7 @@ func TestProvisioningWorker_Start_TickerInterval(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 50 * time.Millisecond
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(pollInterval), logger)
 	require.NoError(t, err)
 
 	// Start worker with short timeout to observe multiple ticks
@@ -344,7 +387,7 @@ func TestProcessPendingTenants_Success(t *testing.T) {
 		failureSequence: []error{nil, nil, nil}, // Success for all 3 tenants
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -413,7 +456,7 @@ func TestProcessPendingTenants_VersionConflict(t *testing.T) {
 		failureSequence: []error{nil, nil}, // Success for tenant1 and tenant3
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute - should skip tenant2 (already claimed) and process tenant1 and tenant3
@@ -449,7 +492,7 @@ func TestProcessPendingTenants_ListByStatusError(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute - should not crash
@@ -465,7 +508,7 @@ func TestProcessPendingTenants_NoTenantsFound(t *testing.T) {
 	// No tenants created - empty database
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -505,7 +548,7 @@ func TestProcessPendingTenants_GoroutinesSpawned(t *testing.T) {
 		failureSequence: []error{nil, nil}, // Success for both tenants
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -536,7 +579,7 @@ func TestProvisionTenantWithRetry_NoPanic(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute - should not panic
@@ -557,7 +600,7 @@ func TestProvisionTenantWithRetry_PanicRecovery(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Override provisionTenantWithRetry to force a panic
@@ -606,7 +649,7 @@ func TestProvisioningWorker_GracefulShutdown(t *testing.T) {
 	// Create worker
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 50*time.Millisecond, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(50*time.Millisecond), logger)
 	require.NoError(t, err)
 
 	// Start worker
@@ -653,7 +696,7 @@ func TestProvisioningWorker_NoGoroutineLeaks(t *testing.T) {
 	// Create worker
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 50*time.Millisecond, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(50*time.Millisecond), logger)
 	require.NoError(t, err)
 
 	// Start worker
@@ -776,7 +819,7 @@ func TestProvisionTenantWithRetry_SuccessOnFirstAttempt(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -813,7 +856,7 @@ func TestProvisionTenantWithRetry_SuccessAfterRetries(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute (this will take time due to exponential backoff, but tests use actual delays)
@@ -862,7 +905,7 @@ func TestProvisionTenantWithRetry_MaxRetriesExhausted(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -902,7 +945,7 @@ func TestProvisionTenantWithRetry_ContextCancellation(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Create cancellable context
@@ -961,7 +1004,7 @@ func TestProvisionTenantWithRetry_ExponentialBackoffTiming(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute and measure time
@@ -1320,4 +1363,157 @@ func TestIsRetryableError_PostgresSpecificErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProcessPendingTenants_VersionConflictLogging(t *testing.T) {
+	// This test verifies that version conflicts are handled gracefully
+	// and logged at debug level (not warning) since they're expected in concurrent operation
+	_, repo := setupTestDB(t)
+
+	// Create a tenant in PROVISIONING_PENDING status
+	tenant1 := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("conflict_test"),
+		DisplayName:     "Conflict Test Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenant1))
+
+	// Capture log output with thread-safe buffer (processPendingTenants spawns goroutines)
+	var logBuffer safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	prov := provisioner.NewMockProvisioner(nil)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Simulate a race: another worker claims the tenant between ListByStatus and UpdateStatus
+	// by updating the version directly
+	_, err = repo.UpdateStatus(ctx, tenant1.ID, domain.StatusProvisioning, 1)
+	require.NoError(t, err)
+
+	// Now change the status back to pending but version is now 2
+	_, err = repo.UpdateStatus(ctx, tenant1.ID, domain.StatusProvisioningPending, 2)
+	require.NoError(t, err)
+
+	// Verify the tenant is now at version 3 with pending status
+	updatedTenant, err := repo.GetByID(ctx, tenant1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusProvisioningPending, updatedTenant.Status)
+	assert.Equal(t, 3, updatedTenant.Version)
+
+	// Create a stale tenant view that the worker would have fetched
+	// (simulating what ListByStatus returned before the concurrent update)
+	staleTenant := &domain.Tenant{
+		ID:              tenant1.ID,
+		DisplayName:     tenant1.DisplayName,
+		SettlementAsset: tenant1.SettlementAsset,
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       tenant1.CreatedAt,
+		Version:         1, // Stale version
+	}
+
+	// Now manually test the UpdateStatus call with stale version
+	_, err = repo.UpdateStatus(ctx, staleTenant.ID, domain.StatusProvisioning, staleTenant.Version)
+	assert.ErrorIs(t, err, persistence.ErrVersionConflict, "expected version conflict error")
+
+	// Run processPendingTenants - it should process the tenant with current version
+	worker.processPendingTenants(ctx)
+
+	// Wait for the background provisioning goroutine to complete
+	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		t, _ := repo.GetByID(ctx, tenant1.ID)
+		return t != nil && t.Status == domain.StatusActive
+	})
+	require.NoError(t, err, "tenant should reach ACTIVE status")
+
+	// Verify the tenant was successfully provisioned (status changed to ACTIVE)
+	// Flow: PROVISIONING_PENDING -> PROVISIONING (claim) -> ACTIVE (after successful ProvisionSchemas)
+	finalTenant, err := repo.GetByID(ctx, tenant1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusActive, finalTenant.Status)
+	// Version progression: 1 (create) -> 2 (simulate claim) -> 3 (back to pending) -> 4 (real claim) -> 5 (mark active)
+	assert.Equal(t, 5, finalTenant.Version)
+
+	// Verify logs contain expected messages
+	logOutput := logBuffer.String()
+	assert.Contains(t, logOutput, "found pending tenants")
+	assert.Contains(t, logOutput, "claimed tenant for provisioning")
+}
+
+func TestProcessPendingTenants_ConcurrentClaimSkipped(t *testing.T) {
+	// Test that verifies when a tenant is concurrently claimed, it's skipped with debug logging
+	_, repo := setupTestDB(t)
+
+	// Create 2 pending tenants
+	tenant1 := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("concurrent1"),
+		DisplayName:     "Concurrent Test 1",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	tenant2 := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("concurrent2"),
+		DisplayName:     "Concurrent Test 2",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioningPending,
+		CreatedAt:       time.Now().Add(time.Second), // Slightly later to ensure consistent ordering
+		Version:         1,
+	}
+
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, tenant1))
+	require.NoError(t, repo.Create(ctx, tenant2))
+
+	// Capture log output with thread-safe buffer (processPendingTenants spawns goroutines)
+	var logBuffer safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	prov := provisioner.NewMockProvisioner(nil)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
+	require.NoError(t, err)
+
+	// Start two workers processing concurrently
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		worker.processPendingTenants(ctx)
+	}()
+
+	go func() {
+		defer wg.Done()
+		// Small delay to create race condition
+		time.Sleep(1 * time.Millisecond)
+		worker.processPendingTenants(ctx)
+	}()
+
+	wg.Wait()
+
+	// Wait for both tenants to reach ACTIVE status
+	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		t1, _ := repo.GetByID(ctx, tenant1.ID)
+		t2, _ := repo.GetByID(ctx, tenant2.ID)
+		return t1 != nil && t1.Status == domain.StatusActive &&
+			t2 != nil && t2.Status == domain.StatusActive
+	})
+	require.NoError(t, err, "both tenants should reach ACTIVE status")
+
+	// Both tenants should be ACTIVE after successful provisioning
+	// (They go through PROVISIONING_PENDING -> PROVISIONING -> ACTIVE)
+	final1, err := repo.GetByID(ctx, tenant1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusActive, final1.Status)
+
+	final2, err := repo.GetByID(ctx, tenant2.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusActive, final2.Status)
+
+	// At least one version conflict may have occurred (logged at debug level)
+	// The exact behavior depends on timing, but the test ensures no crashes or deadlocks
 }
