@@ -182,6 +182,7 @@ func TestLoadWorkerConfig(t *testing.T) {
 		name    string
 		envVars map[string]string
 		want    WorkerConfig
+		wantErr bool
 	}{
 		{
 			name:    "returns all defaults when no env vars set",
@@ -193,6 +194,7 @@ func TestLoadWorkerConfig(t *testing.T) {
 				RetryMaxDelay:  30 * time.Second,
 				MaxConcurrent:  5,
 			},
+			wantErr: false,
 		},
 		{
 			name: "returns custom values when env vars set",
@@ -210,6 +212,7 @@ func TestLoadWorkerConfig(t *testing.T) {
 				RetryMaxDelay:  60 * time.Second,
 				MaxConcurrent:  20,
 			},
+			wantErr: false,
 		},
 		{
 			name: "returns defaults for invalid values",
@@ -224,6 +227,7 @@ func TestLoadWorkerConfig(t *testing.T) {
 				RetryMaxDelay:  30 * time.Second,
 				MaxConcurrent:  5,
 			},
+			wantErr: false,
 		},
 		{
 			name: "returns partial custom values with defaults",
@@ -238,6 +242,29 @@ func TestLoadWorkerConfig(t *testing.T) {
 				RetryMaxDelay:  30 * time.Second,
 				MaxConcurrent:  5,
 			},
+			wantErr: false,
+		},
+		{
+			name: "returns error for invalid poll interval",
+			envVars: map[string]string{
+				"PROVISIONING_WORKER_POLL_INTERVAL": "500ms",
+			},
+			wantErr: true,
+		},
+		{
+			name: "returns error for invalid max retries",
+			envVars: map[string]string{
+				"PROVISIONING_MAX_RETRIES": "25",
+			},
+			wantErr: true,
+		},
+		{
+			name: "returns error when retry base delay >= retry max delay",
+			envVars: map[string]string{
+				"PROVISIONING_RETRY_BASE_DELAY": "40s",
+				"PROVISIONING_RETRY_MAX_DELAY":  "30s",
+			},
+			wantErr: true,
 		},
 	}
 
@@ -255,7 +282,21 @@ func TestLoadWorkerConfig(t *testing.T) {
 				t.Setenv(key, value)
 			}
 
-			got := loadWorkerConfig()
+			got, err := loadWorkerConfig()
+
+			// Check error expectation
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("loadWorkerConfig() expected error, got nil")
+				}
+				return
+			}
+
+			// No error expected
+			if err != nil {
+				t.Errorf("loadWorkerConfig() unexpected error: %v", err)
+				return
+			}
 
 			// Compare each field
 			if got.PollInterval != tt.want.PollInterval {
@@ -272,6 +313,207 @@ func TestLoadWorkerConfig(t *testing.T) {
 			}
 			if got.MaxConcurrent != tt.want.MaxConcurrent {
 				t.Errorf("loadWorkerConfig().MaxConcurrent = %d, want %d", got.MaxConcurrent, tt.want.MaxConcurrent)
+			}
+		})
+	}
+}
+
+func TestWorkerConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  WorkerConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid configuration",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: false,
+		},
+		{
+			name: "poll interval too small",
+			config: WorkerConfig{
+				PollInterval:   500 * time.Millisecond,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: true,
+			errMsg:  "poll interval must be >= 1s",
+		},
+		{
+			name: "poll interval exactly 1s (boundary)",
+			config: WorkerConfig{
+				PollInterval:   1 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: false,
+		},
+		{
+			name: "max retries negative",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     -1,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: true,
+			errMsg:  "max retries must be >= 0",
+		},
+		{
+			name: "max retries zero (boundary)",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     0,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: false,
+		},
+		{
+			name: "max retries too high",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     21,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: true,
+			errMsg:  "max retries must be >= 0 and <= 20",
+		},
+		{
+			name: "max retries exactly 20 (boundary)",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     20,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: false,
+		},
+		{
+			name: "retry base delay zero",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 0,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: true,
+			errMsg:  "retry base delay must be > 0",
+		},
+		{
+			name: "retry max delay zero",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  0,
+				MaxConcurrent:  10,
+			},
+			wantErr: true,
+			errMsg:  "retry max delay must be > 0",
+		},
+		{
+			name: "retry base delay >= retry max delay (equal)",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 30 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: true,
+			errMsg:  "retry base delay",
+		},
+		{
+			name: "retry base delay > retry max delay",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 40 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  10,
+			},
+			wantErr: true,
+			errMsg:  "retry base delay",
+		},
+		{
+			name: "max concurrent zero",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  0,
+			},
+			wantErr: true,
+			errMsg:  "max concurrent must be >= 1",
+		},
+		{
+			name: "max concurrent exactly 1 (boundary)",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  1,
+			},
+			wantErr: false,
+		},
+		{
+			name: "max concurrent too high",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  101,
+			},
+			wantErr: true,
+			errMsg:  "max concurrent must be >= 1 and <= 100",
+		},
+		{
+			name: "max concurrent exactly 100 (boundary)",
+			config: WorkerConfig{
+				PollInterval:   5 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  100,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error, got nil")
+				} else if tt.errMsg != "" && !bytes.Contains([]byte(err.Error()), []byte(tt.errMsg)) {
+					t.Errorf("Validate() error = %v, want substring %q", err, tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Validate() unexpected error: %v", err)
+				}
 			}
 		})
 	}
