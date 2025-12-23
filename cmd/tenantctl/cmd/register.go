@@ -4,12 +4,46 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// slugReplacementPattern matches any character that is not lowercase alphanumeric or hyphen.
+var slugReplacementPattern = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// consecutiveHyphensPattern matches multiple consecutive hyphens.
+var consecutiveHyphensPattern = regexp.MustCompile(`-+`)
+
+// generateSlugFromName converts a display name to a URL-safe slug following DNS subdomain rules.
+// It converts to lowercase, replaces non-alphanumeric characters (except hyphens) with a single hyphen,
+// collapses consecutive hyphens, trims leading/trailing hyphens, and truncates to 63 characters if needed.
+func generateSlugFromName(name string) string {
+	// Convert to lowercase
+	slug := strings.ToLower(name)
+
+	// Replace any sequence of non-alphanumeric characters (except hyphens) with a single hyphen
+	slug = slugReplacementPattern.ReplaceAllString(slug, "-")
+
+	// Collapse consecutive hyphens into a single hyphen
+	slug = consecutiveHyphensPattern.ReplaceAllString(slug, "-")
+
+	// Trim leading and trailing hyphens
+	slug = strings.Trim(slug, "-")
+
+	// Truncate to 63 characters if needed (DNS subdomain limit)
+	if len(slug) > 63 {
+		slug = slug[:63]
+		// Ensure we don't end with a hyphen after truncation
+		slug = strings.TrimRight(slug, "-")
+	}
+
+	return slug
+}
 
 var (
 	registerID              string
@@ -64,12 +98,17 @@ func init() {
 }
 
 func runRegister(_ *cobra.Command, _ []string) error {
-	// Validate slug if provided (client-side validation before gRPC call)
-	if registerSlug != "" {
-		if err := domain.ValidateSlug(registerSlug); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: Invalid slug: %v\n", err)
-			return err
-		}
+	// Determine slug: use provided value or auto-generate from display name
+	slug := registerSlug
+	if slug == "" {
+		slug = generateSlugFromName(registerName)
+		fmt.Printf("Auto-generated slug: %s\n", slug)
+	}
+
+	// Validate slug (client-side validation before gRPC call)
+	if err := domain.ValidateSlug(slug); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Invalid slug: %v\n", err)
+		return err
 	}
 
 	tenantClient, err := newClient()
@@ -99,7 +138,7 @@ func runRegister(_ *cobra.Command, _ []string) error {
 		DisplayName:     registerName,
 		SettlementAsset: registerSettlementAsset,
 		Subdomain:       registerSubdomain,
-		Slug:            registerSlug,
+		Slug:            slug,
 		Metadata:        metadata,
 	}
 
