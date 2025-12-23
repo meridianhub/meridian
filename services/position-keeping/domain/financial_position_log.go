@@ -40,7 +40,7 @@ const (
 // in concurrent scenarios. The persistence layer should use this field in UPDATE
 // statements (e.g., WHERE log_id = ? AND version = ?) to detect conflicts.
 // The Version is incremented by all state-changing lifecycle methods that modify
-// StatusTracking (MarkReconciled, MarkPosted, Reject, Amend, Fail, Cancel).
+// StatusTracking (MarkReconciled, MarkPosted, Reject, Amend, Fail, Cancel, ControlLog).
 // AddEntry does NOT increment Version as it represents accumulation within a draft
 // state rather than a lifecycle state transition.
 type FinancialPositionLog struct {
@@ -50,9 +50,12 @@ type FinancialPositionLog struct {
 	TransactionLineage    *TransactionLineage
 	AuditTrail            []*AuditTrailEntry
 	StatusTracking        *StatusTracking
+	StatusHistory         []*StatusChangeEntry // Audit trail for status changes
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	Version               int64 // Optimistic lock version, incremented on status transitions
+	// PreSuspendStatus stores the status before suspension to enable proper resumption
+	PreSuspendStatus *TransactionStatus
 }
 
 // NewFinancialPositionLog creates a FinancialPositionLog for the given account, initializing identifiers, timestamps, version, empty entry and audit collections, and status tracking.
@@ -75,9 +78,11 @@ func NewFinancialPositionLog(
 		TransactionLineage:    lineage,
 		AuditTrail:            make([]*AuditTrailEntry, 0),
 		StatusTracking:        NewStatusTracking(),
+		StatusHistory:         make([]*StatusChangeEntry, 0),
 		CreatedAt:             now,
 		UpdatedAt:             now,
 		Version:               1,
+		PreSuspendStatus:      nil,
 	}
 
 	// Add initial entry if provided
@@ -349,4 +354,162 @@ func (l *FinancialPositionLog) EntryCount() int {
 // AuditEntryCount returns the number of audit entries in the log.
 func (l *FinancialPositionLog) AuditEntryCount() int {
 	return len(l.AuditTrail)
+}
+
+// StatusHistoryCount returns the number of status history entries in the log.
+func (l *FinancialPositionLog) StatusHistoryCount() int {
+	return len(l.StatusHistory)
+}
+
+// GetStatusHistory returns a defensive copy of the status history.
+func (l *FinancialPositionLog) GetStatusHistory() []*StatusChangeEntry {
+	if l.StatusHistory == nil {
+		return []*StatusChangeEntry{}
+	}
+	result := make([]*StatusChangeEntry, len(l.StatusHistory))
+	copy(result, l.StatusHistory)
+	return result
+}
+
+// CanTransitionTo checks if the log can transition to the target status.
+func (l *FinancialPositionLog) CanTransitionTo(target TransactionStatus) error {
+	// Check if already terminated
+	if l.StatusTracking.CurrentStatus == TransactionStatusTerminated {
+		return ErrAlreadyTerminated
+	}
+
+	if !l.StatusTracking.CurrentStatus.CanTransitionTo(target) {
+		return ErrInvalidStatusTransition
+	}
+
+	return nil
+}
+
+// ControlLog applies a control action (SUSPEND, RESUME, TERMINATE) to the log.
+// It validates the transition using the state machine, updates status, and records
+// the change in both the audit trail and status history for compliance tracking.
+//
+// Parameters:
+//   - action: The control action to apply (SUSPEND, RESUME, TERMINATE)
+//   - reason: Context explaining why the action is being performed
+//   - operatorID: Identifier of who is performing the action (required)
+//
+// Returns an error if:
+//   - The action is invalid
+//   - The operator ID is empty
+//   - The current state does not allow the requested action
+func (l *FinancialPositionLog) ControlLog(
+	action ControlAction,
+	reason string,
+	operatorID string,
+) error {
+	// Validate action
+	if !action.IsValid() {
+		return ErrInvalidControlAction
+	}
+
+	// Validate operator ID
+	if operatorID == "" {
+		return ErrEmptyOperatorID
+	}
+
+	// Check if already terminated
+	if l.StatusTracking.CurrentStatus == TransactionStatusTerminated {
+		return ErrAlreadyTerminated
+	}
+
+	var targetStatus TransactionStatus
+	var preSuspendStatus *TransactionStatus
+
+	switch action {
+	case ControlActionSuspend:
+		if !l.StatusTracking.CurrentStatus.CanSuspend() {
+			return ErrCannotSuspend
+		}
+		// Store the current status before suspension for later resumption
+		current := l.StatusTracking.CurrentStatus
+		preSuspendStatus = &current
+		targetStatus = TransactionStatusSuspended
+
+	case ControlActionResume:
+		if !l.StatusTracking.CurrentStatus.CanResume() {
+			return ErrCannotResume
+		}
+		// Determine what status to resume to
+		if l.PreSuspendStatus != nil {
+			targetStatus = *l.PreSuspendStatus
+		} else {
+			// Default to PENDING if no pre-suspend status recorded
+			targetStatus = TransactionStatusPending
+		}
+
+	case ControlActionTerminate:
+		if !l.StatusTracking.CurrentStatus.CanTerminate() {
+			return ErrCannotTerminate
+		}
+		targetStatus = TransactionStatusTerminated
+
+	case ControlActionUnspecified:
+		return ErrInvalidControlAction
+	}
+
+	// Record the status change in history before updating
+	previousStatus := l.StatusTracking.CurrentStatus
+	statusEntry := NewStatusChangeEntry(
+		previousStatus,
+		targetStatus,
+		reason,
+		operatorID,
+		action,
+	)
+	l.StatusHistory = append(l.StatusHistory, statusEntry)
+
+	// Update the pre-suspend status field
+	switch action {
+	case ControlActionSuspend:
+		l.PreSuspendStatus = preSuspendStatus
+	case ControlActionResume:
+		l.PreSuspendStatus = nil
+	case ControlActionTerminate, ControlActionUnspecified:
+		// No change to PreSuspendStatus
+	}
+
+	// Update status tracking - bypass normal validation since we already validated
+	l.StatusTracking.CurrentStatus = targetStatus
+	l.StatusTracking.PreviousStatus = &previousStatus
+	l.StatusTracking.StatusUpdatedAt = time.Now().UTC()
+	l.StatusTracking.StatusReason = reason
+
+	l.UpdatedAt = time.Now().UTC()
+	l.Version++
+
+	return nil
+}
+
+// Suspend temporarily suspends the log processing.
+// This is a convenience method that calls ControlLog with ControlActionSuspend.
+func (l *FinancialPositionLog) Suspend(reason string, operatorID string) error {
+	return l.ControlLog(ControlActionSuspend, reason, operatorID)
+}
+
+// Resume resumes a suspended log.
+// This is a convenience method that calls ControlLog with ControlActionResume.
+func (l *FinancialPositionLog) Resume(reason string, operatorID string) error {
+	return l.ControlLog(ControlActionResume, reason, operatorID)
+}
+
+// Terminate permanently terminates the log.
+// This is a convenience method that calls ControlLog with ControlActionTerminate.
+func (l *FinancialPositionLog) Terminate(reason string, operatorID string) error {
+	return l.ControlLog(ControlActionTerminate, reason, operatorID)
+}
+
+// IsSuspended returns true if the log is currently suspended.
+func (l *FinancialPositionLog) IsSuspended() bool {
+	return l.StatusTracking.CurrentStatus == TransactionStatusSuspended
+}
+
+// IsTerminated returns true if the log has been terminated.
+func (l *FinancialPositionLog) IsTerminated() bool {
+	return l.StatusTracking.CurrentStatus == TransactionStatusTerminated
 }

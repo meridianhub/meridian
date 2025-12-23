@@ -933,6 +933,11 @@ func setLogToStatus(t *testing.T, log *FinancialPositionLog, targetStatus Transa
 		// REVERSED can only be reached from POSTED via StatusTracking.UpdateStatus
 		_ = log.MarkPosted("Setup", audit)
 		_ = log.StatusTracking.UpdateStatus(TransactionStatusReversed, "Setup reversal")
+	case TransactionStatusSuspended:
+		_ = log.Suspend("Setup suspension", "test-operator")
+	case TransactionStatusTerminated:
+		_ = log.Suspend("Setup suspension", "test-operator")
+		_ = log.Terminate("Setup termination", "test-operator")
 	}
 }
 
