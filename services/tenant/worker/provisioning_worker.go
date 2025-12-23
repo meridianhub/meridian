@@ -159,10 +159,10 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 		go w.provisionTenantWithRetry(context.WithoutCancel(ctx), tenant.ID)
 	}
 
-	// Reset queue depth after processing - all found tenants have been claimed and moved
-	// to PROVISIONING status, so they're no longer in the pending queue.
-	// The next poll cycle will update the depth with any new pending tenants.
-	observability.SetProvisioningQueueDepth(0)
+	// Note: We intentionally do NOT reset queue depth to 0 here.
+	// The next poll cycle will set the accurate count of PROVISIONING_PENDING tenants.
+	// Resetting to 0 could cause misleading dashboard values if this function
+	// is called again before all goroutines complete.
 }
 
 // Retry configuration constants for provisioning with exponential backoff.
@@ -295,6 +295,9 @@ func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID te
 }
 
 // markTenantAsFailed updates tenant status to provisioning_failed with error details.
+// TODO: When service-specific provisioning is implemented, call observability.IncrementServiceFailure(serviceName)
+// here based on which service (database, kafka, etc.) caused the failure. Currently, the provisioner
+// returns generic errors without service attribution.
 func (w *ProvisioningWorker) markTenantAsFailed(ctx context.Context, tenantID tenant.TenantID, lastErr error, attempts int) {
 	tenant, getErr := w.repo.GetByID(ctx, tenantID)
 	if getErr != nil {
