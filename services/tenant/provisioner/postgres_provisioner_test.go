@@ -1451,6 +1451,143 @@ func TestPostgresProvisioner_CircuitBreaker_PartialSuccessWithCircuitOpen(t *tes
 }
 
 // =============================================================================
+// Circuit Breaker Observability Tests
+// =============================================================================
+
+// TestPostgresProvisioner_GetCircuitBreakerState tests the observability method
+// for monitoring circuit breaker state.
+func TestPostgresProvisioner_GetCircuitBreakerState(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("cb_observe")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	svcDir := filepath.Join(tc.migDir, "observe-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_initial.sql", `
+		CREATE TABLE observe_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "observe-service", MigrationPath: svcDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Before any provisioning, circuit breaker should not exist
+	state := prov.GetCircuitBreakerState("observe-service")
+	assert.Nil(t, state, "circuit breaker should not exist before first provisioning")
+
+	// Provision a tenant to trigger circuit breaker creation
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Now circuit breaker should exist and be closed
+	state = prov.GetCircuitBreakerState("observe-service")
+	require.NotNil(t, state)
+	assert.Equal(t, "observe-service", state.ServiceName)
+	assert.Equal(t, "closed", state.State)
+	assert.Equal(t, uint32(1), state.Counts.TotalSuccesses)
+}
+
+// TestPostgresProvisioner_GetCircuitBreakerStates tests getting all circuit breaker states.
+func TestPostgresProvisioner_GetCircuitBreakerStates(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("cb_all_states")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	// Create multiple services
+	svc1Dir := filepath.Join(tc.migDir, "svc1")
+	require.NoError(t, os.MkdirAll(svc1Dir, 0o755))
+	createTestMigration(t, svc1Dir, "20251201000000_initial.sql", `
+		CREATE TABLE svc1_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	svc2Dir := filepath.Join(tc.migDir, "svc2")
+	require.NoError(t, os.MkdirAll(svc2Dir, 0o755))
+	createTestMigration(t, svc2Dir, "20251201000000_initial.sql", `
+		CREATE TABLE svc2_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "svc1", MigrationPath: svc1Dir, DatabaseURL: tc.connStr},
+			{Name: "svc2", MigrationPath: svc2Dir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Before provisioning
+	states := prov.GetCircuitBreakerStates()
+	assert.Empty(t, states)
+
+	// After provisioning
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	states = prov.GetCircuitBreakerStates()
+	assert.Len(t, states, 2)
+
+	// Verify both services are present
+	serviceNames := make(map[string]bool)
+	for _, state := range states {
+		serviceNames[state.ServiceName] = true
+		assert.Equal(t, "closed", state.State)
+	}
+	assert.True(t, serviceNames["svc1"])
+	assert.True(t, serviceNames["svc2"])
+}
+
+// TestPostgresProvisioner_CircuitBreaker_OpenStateVisible tests that open circuit
+// breaker state is visible through the observability API.
+func TestPostgresProvisioner_CircuitBreaker_OpenStateVisible(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Create migrations - broken service
+	brokenDir := filepath.Join(tc.migDir, "broken-service")
+	require.NoError(t, os.MkdirAll(brokenDir, 0o755))
+	createTestMigration(t, brokenDir, "20251201000000_broken.sql", `INVALID SQL;`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "broken-service", MigrationPath: brokenDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Trip the circuit breaker with 5 failures
+	for i := 0; i < 5; i++ {
+		tenantID := tenant.MustNewTenantID(fmt.Sprintf("cb_trip_%d", i))
+		createTestTenant(t, tc.db, tenantID.String())
+		_ = prov.ProvisionSchemas(context.Background(), tenantID)
+	}
+
+	// Verify circuit breaker is open
+	state := prov.GetCircuitBreakerState("broken-service")
+	require.NotNil(t, state)
+	assert.Equal(t, "open", state.State)
+	// Note: Counts are reset when breaker transitions to open state
+	// The key assertion is that the state is "open"
+}
+
+// =============================================================================
 // FilterMigrationsAfter Helper Tests
 // =============================================================================
 

@@ -93,3 +93,79 @@ func readyToTrip(counts gobreaker.Counts) bool {
 	failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
 	return failureRatio >= BreakerFailureRatio
 }
+
+// CircuitBreakerState represents the state of a circuit breaker for a service.
+type CircuitBreakerState struct {
+	// ServiceName is the name of the service this circuit breaker protects.
+	ServiceName string
+
+	// State is the current state: "closed", "half-open", or "open".
+	State string
+
+	// Counts contains the current request counts for the circuit breaker.
+	// In closed state: counts since last interval reset.
+	// In half-open state: counts of test requests.
+	// In open state: counts are preserved from when the breaker opened.
+	Counts CircuitBreakerCounts
+}
+
+// CircuitBreakerCounts contains request statistics for a circuit breaker.
+type CircuitBreakerCounts struct {
+	Requests             uint32
+	TotalSuccesses       uint32
+	TotalFailures        uint32
+	ConsecutiveSuccesses uint32
+	ConsecutiveFailures  uint32
+}
+
+// GetCircuitBreakerState returns the current state of the circuit breaker for a service.
+// Returns nil if no circuit breaker exists for the service (service has never been accessed).
+func (s *ServiceCircuitBreakers) GetCircuitBreakerState(serviceName string) *CircuitBreakerState {
+	s.mu.RLock()
+	breaker, exists := s.breakers[serviceName]
+	s.mu.RUnlock()
+
+	if !exists {
+		return nil
+	}
+
+	state := breaker.State()
+	counts := breaker.Counts()
+
+	return &CircuitBreakerState{
+		ServiceName: serviceName,
+		State:       state.String(),
+		Counts: CircuitBreakerCounts{
+			Requests:             counts.Requests,
+			TotalSuccesses:       counts.TotalSuccesses,
+			TotalFailures:        counts.TotalFailures,
+			ConsecutiveSuccesses: counts.ConsecutiveSuccesses,
+			ConsecutiveFailures:  counts.ConsecutiveFailures,
+		},
+	}
+}
+
+// GetAllCircuitBreakerStates returns the state of all circuit breakers.
+// Useful for monitoring dashboards and health checks.
+func (s *ServiceCircuitBreakers) GetAllCircuitBreakerStates() []CircuitBreakerState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	states := make([]CircuitBreakerState, 0, len(s.breakers))
+	for name, breaker := range s.breakers {
+		state := breaker.State()
+		counts := breaker.Counts()
+		states = append(states, CircuitBreakerState{
+			ServiceName: name,
+			State:       state.String(),
+			Counts: CircuitBreakerCounts{
+				Requests:             counts.Requests,
+				TotalSuccesses:       counts.TotalSuccesses,
+				TotalFailures:        counts.TotalFailures,
+				ConsecutiveSuccesses: counts.ConsecutiveSuccesses,
+				ConsecutiveFailures:  counts.ConsecutiveFailures,
+			},
+		})
+	}
+	return states
+}

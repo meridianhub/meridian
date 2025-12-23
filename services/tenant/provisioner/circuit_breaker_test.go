@@ -323,3 +323,326 @@ func TestBreakerBehavior_RecordsSuccessesCorrectly(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "still working", result)
 }
+
+// =============================================================================
+// GetCircuitBreakerState Tests
+// =============================================================================
+
+func TestGetCircuitBreakerState_NonexistentService(t *testing.T) {
+	scb := NewServiceCircuitBreakers()
+
+	// Request state for service that hasn't been accessed
+	state := scb.GetCircuitBreakerState("nonexistent-service")
+
+	assert.Nil(t, state, "should return nil for service that has never been accessed")
+}
+
+func TestGetCircuitBreakerState_ClosedState(t *testing.T) {
+	scb := NewServiceCircuitBreakers()
+	breaker := scb.GetBreaker("closed-service")
+
+	// Execute a successful operation to initialize counts
+	_, _ = breaker.Execute(func() (any, error) {
+		return "success", nil
+	})
+
+	state := scb.GetCircuitBreakerState("closed-service")
+
+	require.NotNil(t, state)
+	assert.Equal(t, "closed-service", state.ServiceName)
+	assert.Equal(t, "closed", state.State)
+	assert.Equal(t, uint32(1), state.Counts.Requests)
+	assert.Equal(t, uint32(1), state.Counts.TotalSuccesses)
+	assert.Equal(t, uint32(0), state.Counts.TotalFailures)
+}
+
+func TestGetCircuitBreakerState_OpenState(t *testing.T) {
+	scb := NewServiceCircuitBreakers()
+	breaker := scb.GetBreaker("open-service")
+
+	// Trip the breaker with failures
+	for i := 0; i < 5; i++ {
+		_, _ = breaker.Execute(func() (any, error) {
+			return nil, errTestFailure
+		})
+	}
+
+	state := scb.GetCircuitBreakerState("open-service")
+
+	require.NotNil(t, state)
+	assert.Equal(t, "open-service", state.ServiceName)
+	assert.Equal(t, "open", state.State)
+	// Note: Counts are reset when breaker transitions to open state
+	// We verify the breaker is open, which is the key assertion
+}
+
+func TestGetAllCircuitBreakerStates(t *testing.T) {
+	scb := NewServiceCircuitBreakers()
+
+	// Access multiple services
+	_ = scb.GetBreaker("service-a")
+	_ = scb.GetBreaker("service-b")
+	_ = scb.GetBreaker("service-c")
+
+	states := scb.GetAllCircuitBreakerStates()
+
+	assert.Len(t, states, 3)
+
+	// Verify all services are present
+	serviceNames := make(map[string]bool)
+	for _, state := range states {
+		serviceNames[state.ServiceName] = true
+	}
+	assert.True(t, serviceNames["service-a"])
+	assert.True(t, serviceNames["service-b"])
+	assert.True(t, serviceNames["service-c"])
+}
+
+func TestGetAllCircuitBreakerStates_Empty(t *testing.T) {
+	scb := NewServiceCircuitBreakers()
+
+	states := scb.GetAllCircuitBreakerStates()
+
+	assert.Empty(t, states, "should return empty slice when no breakers exist")
+}
+
+// =============================================================================
+// Half-Open State and Recovery Tests
+// =============================================================================
+
+// TestBreakerBehavior_HalfOpenStateTransition tests that the circuit breaker
+// transitions to half-open state after the timeout period.
+// Note: This test uses a custom breaker with short timeout for testing.
+func TestBreakerBehavior_HalfOpenStateTransition(t *testing.T) {
+	// Create a custom breaker with very short timeout for testing
+	// MaxRequests=1 means only 1 successful request is needed to close
+	breaker := gobreaker.NewCircuitBreaker[any](gobreaker.Settings{
+		Name:        "half-open-test",
+		MaxRequests: 1, // Only need 1 success to close
+		Interval:    60 * time.Second,
+		Timeout:     100 * time.Millisecond, // Very short for testing
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 3
+		},
+	})
+
+	// Trip the breaker
+	for i := 0; i < 3; i++ {
+		_, _ = breaker.Execute(func() (any, error) {
+			return nil, errTestFailure
+		})
+	}
+
+	// Verify breaker is open
+	assert.Equal(t, gobreaker.StateOpen, breaker.State())
+
+	// Wait for timeout to elapse
+	time.Sleep(150 * time.Millisecond)
+
+	// Next request should be allowed (half-open state allows test requests)
+	// The gobreaker library transitions to half-open lazily on the next request
+	result, err := breaker.Execute(func() (any, error) {
+		return "recovered", nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", result)
+	// After successful execution in half-open (with MaxRequests=1), breaker should close
+	assert.Equal(t, gobreaker.StateClosed, breaker.State())
+}
+
+// TestBreakerBehavior_HalfOpenFailure tests that failures in half-open state
+// cause the breaker to reopen.
+func TestBreakerBehavior_HalfOpenFailure(t *testing.T) {
+	breaker := gobreaker.NewCircuitBreaker[any](gobreaker.Settings{
+		Name:        "half-open-failure-test",
+		MaxRequests: 3,
+		Interval:    60 * time.Second,
+		Timeout:     100 * time.Millisecond,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 3
+		},
+	})
+
+	// Trip the breaker
+	for i := 0; i < 3; i++ {
+		_, _ = breaker.Execute(func() (any, error) {
+			return nil, errTestFailure
+		})
+	}
+	assert.Equal(t, gobreaker.StateOpen, breaker.State())
+
+	// Wait for timeout
+	time.Sleep(150 * time.Millisecond)
+
+	// Try a request that fails in half-open state
+	_, _ = breaker.Execute(func() (any, error) {
+		return nil, errTestFailure
+	})
+
+	// Breaker should reopen
+	assert.Equal(t, gobreaker.StateOpen, breaker.State())
+}
+
+// TestBreakerBehavior_HalfOpenMaxRequests tests that the breaker only allows
+// MaxRequests during half-open state.
+func TestBreakerBehavior_HalfOpenMaxRequests(t *testing.T) {
+	breaker := gobreaker.NewCircuitBreaker[any](gobreaker.Settings{
+		Name:        "half-open-max-test",
+		MaxRequests: 2, // Only allow 2 test requests
+		Interval:    60 * time.Second,
+		Timeout:     100 * time.Millisecond,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 3
+		},
+	})
+
+	// Trip the breaker
+	for i := 0; i < 3; i++ {
+		_, _ = breaker.Execute(func() (any, error) {
+			return nil, errTestFailure
+		})
+	}
+
+	// Wait for timeout
+	time.Sleep(150 * time.Millisecond)
+
+	// Start concurrent requests to test MaxRequests limiting
+	// Use a WaitGroup to synchronize
+	var wg sync.WaitGroup
+	results := make(chan error, 5)
+
+	// Simulate slow operations that would block during half-open
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := breaker.Execute(func() (any, error) {
+				time.Sleep(50 * time.Millisecond) // Simulate slow operation
+				return "success", nil
+			})
+			results <- err
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	// Count errors - some should be ErrTooManyRequests
+	var tooManyErrors int
+	for err := range results {
+		if errors.Is(err, gobreaker.ErrTooManyRequests) {
+			tooManyErrors++
+		}
+	}
+
+	// With MaxRequests=2 and 5 concurrent requests, at least some should be rejected
+	// (exact number depends on timing)
+	assert.Greater(t, tooManyErrors, 0, "some requests should be rejected with ErrTooManyRequests")
+}
+
+// TestBreakerBehavior_RecoverySequence tests the full recovery sequence:
+// closed -> open -> half-open -> closed
+func TestBreakerBehavior_RecoverySequence(t *testing.T) {
+	breaker := gobreaker.NewCircuitBreaker[any](gobreaker.Settings{
+		Name:        "recovery-sequence-test",
+		MaxRequests: 1, // Only need 1 success to close from half-open
+		Interval:    60 * time.Second,
+		Timeout:     100 * time.Millisecond,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 3
+		},
+	})
+
+	// Phase 1: Closed state - normal operation
+	assert.Equal(t, gobreaker.StateClosed, breaker.State())
+
+	result, err := breaker.Execute(func() (any, error) {
+		return "initial success", nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "initial success", result)
+	assert.Equal(t, gobreaker.StateClosed, breaker.State())
+
+	// Phase 2: Trip to Open state
+	for i := 0; i < 3; i++ {
+		_, _ = breaker.Execute(func() (any, error) {
+			return nil, errTestFailure
+		})
+	}
+	assert.Equal(t, gobreaker.StateOpen, breaker.State())
+
+	// Phase 3: Requests blocked in Open state
+	_, err = breaker.Execute(func() (any, error) {
+		return "should not execute", nil
+	})
+	assert.ErrorIs(t, err, gobreaker.ErrOpenState)
+
+	// Phase 4: Wait for timeout and transition to half-open
+	time.Sleep(150 * time.Millisecond)
+
+	// Phase 5: Successful execution in half-open closes the breaker
+	result, err = breaker.Execute(func() (any, error) {
+		return "recovered", nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", result)
+
+	// Phase 6: Verify breaker is closed again
+	assert.Equal(t, gobreaker.StateClosed, breaker.State())
+
+	// Phase 7: Normal operation resumes
+	for i := 0; i < 5; i++ {
+		result, err = breaker.Execute(func() (any, error) {
+			return "normal operation", nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "normal operation", result)
+	}
+}
+
+// TestBreakerBehavior_ReopenAfterHalfOpenFailures tests that continued failures
+// in half-open state keep the breaker open.
+func TestBreakerBehavior_ReopenAfterHalfOpenFailures(t *testing.T) {
+	breaker := gobreaker.NewCircuitBreaker[any](gobreaker.Settings{
+		Name:        "reopen-test",
+		MaxRequests: 1, // Only need 1 success to close
+		Interval:    60 * time.Second,
+		Timeout:     100 * time.Millisecond,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 3
+		},
+	})
+
+	// Initial trip
+	for i := 0; i < 3; i++ {
+		_, _ = breaker.Execute(func() (any, error) {
+			return nil, errTestFailure
+		})
+	}
+	assert.Equal(t, gobreaker.StateOpen, breaker.State())
+
+	// Multiple cycles of: wait -> half-open -> fail -> reopen
+	for cycle := 0; cycle < 3; cycle++ {
+		// Wait for timeout
+		time.Sleep(150 * time.Millisecond)
+
+		// Fail in half-open state
+		_, _ = breaker.Execute(func() (any, error) {
+			return nil, errTestFailure
+		})
+
+		// Should be back to open
+		assert.Equal(t, gobreaker.StateOpen, breaker.State(),
+			"cycle %d: breaker should reopen after half-open failure", cycle)
+	}
+
+	// Finally recover
+	time.Sleep(150 * time.Millisecond)
+	result, err := breaker.Execute(func() (any, error) {
+		return "finally recovered", nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "finally recovered", result)
+	assert.Equal(t, gobreaker.StateClosed, breaker.State())
+}

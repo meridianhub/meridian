@@ -1288,5 +1288,23 @@ func (p *PostgresProvisioner) Close() error {
 	return nil
 }
 
+// GetCircuitBreakerStates returns the current state of all service circuit breakers.
+// This method is useful for monitoring dashboards and health checks to observe:
+//   - Which services have open circuit breakers
+//   - Request counts and failure statistics
+//   - When services are in half-open state (testing recovery)
+//
+// Returns a slice of CircuitBreakerState, one for each service that has been accessed.
+// Services that have never been provisioned will not have a circuit breaker entry.
+func (p *PostgresProvisioner) GetCircuitBreakerStates() []CircuitBreakerState {
+	return p.circuitBreakers.GetAllCircuitBreakerStates()
+}
+
+// GetCircuitBreakerState returns the current state of the circuit breaker for a specific service.
+// Returns nil if the service has never been accessed (no circuit breaker exists).
+func (p *PostgresProvisioner) GetCircuitBreakerState(serviceName string) *CircuitBreakerState {
+	return p.circuitBreakers.GetCircuitBreakerState(serviceName)
+}
+
 // Ensure PostgresProvisioner implements SchemaProvisioner.
 var _ SchemaProvisioner = (*PostgresProvisioner)(nil)
