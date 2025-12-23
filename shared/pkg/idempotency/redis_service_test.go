@@ -674,6 +674,7 @@ func TestRedisService_MaxTTL(t *testing.T) {
 	}
 	if retrieved == nil {
 		t.Fatal("Expected result, got nil")
+		return // unreachable but satisfies staticcheck
 	}
 
 	// TTL should be close to what we set (within 1 second due to conversion precision)
