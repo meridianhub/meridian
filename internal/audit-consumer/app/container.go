@@ -199,7 +199,8 @@ func (c *Container) collectDBPoolStats() {
 }
 
 // Close gracefully closes all resources in the container.
-func (c *Container) Close(_ context.Context) error {
+// Uses the provided context for timeout control during shutdown.
+func (c *Container) Close(ctx context.Context) error {
 	c.Logger.Info("closing container resources...")
 
 	var errs []error
@@ -219,17 +220,31 @@ func (c *Container) Close(_ context.Context) error {
 		}
 	}
 
-	// Close database connection
+	// Close database connection with context timeout control
 	if c.DB != nil {
 		sqlDB, err := c.DB.DB()
 		if err != nil {
 			c.Logger.Error("failed to get database instance for close", "error", err)
 			errs = append(errs, fmt.Errorf("database get instance: %w", err))
-		} else if err := sqlDB.Close(); err != nil {
-			c.Logger.Error("failed to close database", "error", err)
-			errs = append(errs, fmt.Errorf("database close: %w", err))
 		} else {
-			c.Logger.Info("database connection closed")
+			// Use goroutine to respect context timeout
+			done := make(chan error, 1)
+			go func() {
+				done <- sqlDB.Close()
+			}()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					c.Logger.Error("failed to close database", "error", err)
+					errs = append(errs, fmt.Errorf("database close: %w", err))
+				} else {
+					c.Logger.Info("database connection closed")
+				}
+			case <-ctx.Done():
+				c.Logger.Error("database close timeout", "error", ctx.Err())
+				errs = append(errs, fmt.Errorf("database close timeout: %w", ctx.Err()))
+			}
 		}
 	}
 

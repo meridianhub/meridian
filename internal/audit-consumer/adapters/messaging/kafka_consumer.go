@@ -127,7 +127,7 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 		return nil, fmt.Errorf("failed to create DLQ producer: %w", err)
 	}
 
-	// Create DLQ producer wrapper
+	// Create DLQ configuration (used by both DLQProducer and ProtoConsumer)
 	// Safe conversion: validated above
 	maxRetries32 := int32(config.MaxRetries)
 	dlqConfig := kafka.DLQConfig{
@@ -137,6 +137,8 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 		BackoffMultiplier: 2.0,
 		ConsumerGroupID:   config.GroupID,
 	}
+
+	// Create DLQ producer wrapper
 	dlqProducer, err := kafka.NewDLQProducer(producer, dlqConfig)
 	if err != nil {
 		producer.Close()
@@ -168,12 +170,7 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 			EnableAutoCommit: false,
 			HandlerTimeout:   config.HandlerTimeout,
 			DLQProducer:      dlqProducer,
-			DLQConfig: &kafka.DLQConfig{
-				DLQTopicSuffix:    ".dlq",
-				MaxRetries:        maxRetries32, // Safe conversion: validated above
-				RetryBackoffMs:    1000,
-				BackoffMultiplier: 2.0,
-			},
+			DLQConfig:        &dlqConfig,
 		},
 		msgFactory,
 		handler,

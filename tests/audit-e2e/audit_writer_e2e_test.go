@@ -609,8 +609,8 @@ func TestAuditTrailCompleteness(t *testing.T) {
 			for _, row := range rows {
 				trail = append(trail, AuditEntry{
 					Service:       svc.name,
-					EventID:       row["event_id"].(string),
-					TableName:     row["table_name"].(string),
+					EventID:       safeString(row["event_id"]),
+					TableName:     safeString(row["table_name"]),
 					TransactionID: safeString(row["transaction_id"]),
 				})
 			}

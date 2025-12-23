@@ -120,9 +120,7 @@ func getTestDatabaseURL() string {
 }
 
 func getEnv(key string) string {
-	// Helper to get environment variable
-	// In real tests this would use os.Getenv
-	return ""
+	return os.Getenv(key)
 }
 
 func TestTenantAuditWriter_Integration_WriteSingleTenantSchema(t *testing.T) {

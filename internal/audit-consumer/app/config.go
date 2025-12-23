@@ -71,8 +71,6 @@ var (
 	ErrEmptyBootstrapServers = fmt.Errorf("kafka bootstrap servers must not be empty")
 	ErrEmptyTopic            = fmt.Errorf("kafka topic must not be empty")
 	ErrEmptyGroupID          = fmt.Errorf("kafka group ID must not be empty")
-	ErrMaxOpenConnsOverflow  = fmt.Errorf("max open connections exceeds int32 limit")
-	ErrMaxIdleConnsOverflow  = fmt.Errorf("max idle connections exceeds int32 limit")
 )
 
 // LoadConfig loads configuration from environment variables with defaults.
@@ -143,15 +141,7 @@ func (c *Config) Validate() error {
 	if c.Database.MaxIdleConns < 0 {
 		return ErrInvalidMaxIdleConns
 	}
-
-	// Validate connection counts fit in int32 range (pgxpool requirement)
-	const maxInt32 = 2147483647
-	if c.Database.MaxOpenConns > maxInt32 {
-		return fmt.Errorf("%w: %d", ErrMaxOpenConnsOverflow, c.Database.MaxOpenConns)
-	}
-	if c.Database.MaxIdleConns > maxInt32 {
-		return fmt.Errorf("%w: %d", ErrMaxIdleConnsOverflow, c.Database.MaxIdleConns)
-	}
+	// Note: int32 bounds checking for MaxOpenConns and MaxIdleConns happens in getEnvAsInt()
 
 	// Kafka validation
 	if c.Kafka.BootstrapServers == "" {

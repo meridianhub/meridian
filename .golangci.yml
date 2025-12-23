@@ -8,6 +8,9 @@ run:
   tests: true
   modules-download-mode: readonly
   allow-parallel-runners: true
+  # Skip directories with build tags that exclude normal compilation
+  skip-dirs:
+    - tests/audit-e2e  # E2E tests require //go:build integration
 
 linters:
   enable:

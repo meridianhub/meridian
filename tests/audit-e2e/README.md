@@ -249,6 +249,6 @@ Potential additions to E2E suite:
   Database-per-service architecture
 - [ADR-0020: Per-Service Audit Workers](../../docs/adr/0020-per-service-audit-workers.md) - Audit consumer architecture
 - [Audit Consumer README](../../cmd/audit-consumer/README.md) - Deployment and configuration
-- [Audit Writer Integration Tests]
-  (../../internal/audit-consumer/adapters/persistence/tenant_audit_writer_integration_test.go) -
-  Unit-level integration tests
+- [Audit Writer Integration Tests][writer-tests] - Unit-level integration tests
+
+[writer-tests]: ../../internal/audit-consumer/adapters/persistence/tenant_audit_writer_integration_test.go
