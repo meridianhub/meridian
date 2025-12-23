@@ -559,19 +559,13 @@ func (r *Repository) SaveBankRelation(ctx context.Context, partyID uuid.UUID, ac
 		var existing PartyBankRelationEntity
 		result := tx.Where("party_id = ?", partyID).First(&existing)
 
-		var aoID, rmID *uuid.UUID
+		var aoID, rmID, branch *string
 		if accountOfficerID != "" {
-			if parsed, err := uuid.Parse(accountOfficerID); err == nil {
-				aoID = &parsed
-			}
+			aoID = &accountOfficerID
 		}
 		if relationshipManagerID != "" {
-			if parsed, err := uuid.Parse(relationshipManagerID); err == nil {
-				rmID = &parsed
-			}
+			rmID = &relationshipManagerID
 		}
-
-		var branch *string
 		if assignedBranch != "" {
 			branch = &assignedBranch
 		}

@@ -59,8 +59,8 @@ func (PartyReferenceEntity) TableName() string {
 type PartyBankRelationEntity struct {
 	ID                    uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	PartyID               uuid.UUID  `gorm:"column:party_id;type:uuid;not null;uniqueIndex:uq_party_bank_relation_party_id"`
-	AccountOfficerID      *uuid.UUID `gorm:"column:account_officer_id;type:uuid;index:idx_party_bank_relation_account_officer,where:account_officer_id IS NOT NULL"`
-	RelationshipManagerID *uuid.UUID `gorm:"column:relationship_manager_id;type:uuid;index:idx_party_bank_relation_relationship_manager,where:relationship_manager_id IS NOT NULL"`
+	AccountOfficerID      *string    `gorm:"column:account_officer_id;type:varchar(100);index:idx_party_bank_relation_account_officer,where:account_officer_id IS NOT NULL"`
+	RelationshipManagerID *string    `gorm:"column:relationship_manager_id;type:varchar(100);index:idx_party_bank_relation_relationship_manager,where:relationship_manager_id IS NOT NULL"`
 	AssignedBranch        *string    `gorm:"column:assigned_branch;type:varchar(100)"`
 	RelationshipStartDate *time.Time `gorm:"column:relationship_start_date;type:date"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;not null;default:now()"`

@@ -131,8 +131,8 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_bank_relation (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
-		account_officer_id UUID,
-		relationship_manager_id UUID,
+		account_officer_id VARCHAR(100),
+		relationship_manager_id VARCHAR(100),
 		assigned_branch VARCHAR(100),
 		relationship_start_date DATE,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),

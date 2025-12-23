@@ -475,10 +475,20 @@ func (s *Service) UpdateReference(ctx context.Context, req *pb.UpdateReferenceRe
 		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
 	}
 
-	// Save reference data
-	if err := s.repo.SaveReference(ctx, partyID, req.GovernmentId, req.TaxReference, req.IssuingAuthority, req.ExpiryDate); err != nil {
-		s.logger.Error("failed to save reference", "party_id", req.PartyId, "error", err)
-		return nil, status.Errorf(codes.Internal, "failed to save reference: %v", err)
+	// Save government ID reference if provided
+	if req.GovernmentId != "" {
+		if err := s.repo.SaveReference(ctx, partyID, "GOVERNMENT_ID", req.GovernmentId, req.IssuingAuthority, req.ExpiryDate); err != nil {
+			s.logger.Error("failed to save government ID reference", "party_id", req.PartyId, "error", err)
+			return nil, status.Errorf(codes.Internal, "failed to save reference: %v", err)
+		}
+	}
+
+	// Save tax reference if provided
+	if req.TaxReference != "" {
+		if err := s.repo.SaveReference(ctx, partyID, "TAX_REFERENCE", req.TaxReference, "", ""); err != nil {
+			s.logger.Error("failed to save tax reference", "party_id", req.PartyId, "error", err)
+			return nil, status.Errorf(codes.Internal, "failed to save reference: %v", err)
+		}
 	}
 
 	s.logger.Info("party reference updated", "party_id", req.PartyId)
@@ -506,19 +516,24 @@ func (s *Service) RetrieveReference(ctx context.Context, req *pb.RetrieveReferen
 		return nil, status.Errorf(codes.Internal, "failed to retrieve references: %v", err)
 	}
 
-	// Return first reference (simplified for now)
+	// Build response from references by type
 	resp := &pb.RetrieveReferenceResponse{
 		PartyId: req.PartyId,
 	}
-	if len(refs) > 0 {
-		resp.GovernmentId = refs[0].ReferenceValue
-		if refs[0].IssuingAuthority != nil {
-			resp.IssuingAuthority = *refs[0].IssuingAuthority
+	for _, ref := range refs {
+		switch ref.ReferenceType {
+		case "GOVERNMENT_ID":
+			resp.GovernmentId = ref.ReferenceValue
+			if ref.IssuingAuthority != nil {
+				resp.IssuingAuthority = *ref.IssuingAuthority
+			}
+			if ref.ExpiryDate != nil {
+				resp.ExpiryDate = ref.ExpiryDate.Format("2006-01-02")
+			}
+			resp.UpdatedAt = timestamppb.New(ref.CreatedAt)
+		case "TAX_REFERENCE":
+			resp.TaxReference = ref.ReferenceValue
 		}
-		if refs[0].ExpiryDate != nil {
-			resp.ExpiryDate = refs[0].ExpiryDate.Format("2006-01-02")
-		}
-		resp.UpdatedAt = timestamppb.New(refs[0].CreatedAt)
 	}
 
 	return resp, nil
@@ -765,10 +780,10 @@ func (s *Service) RetrieveBankRelations(ctx context.Context, req *pb.RetrieveBan
 	}
 	if bankRel != nil {
 		if bankRel.AccountOfficerID != nil {
-			resp.AccountOfficerId = bankRel.AccountOfficerID.String()
+			resp.AccountOfficerId = *bankRel.AccountOfficerID
 		}
 		if bankRel.RelationshipManagerID != nil {
-			resp.RelationshipManagerId = bankRel.RelationshipManagerID.String()
+			resp.RelationshipManagerId = *bankRel.RelationshipManagerID
 		}
 		if bankRel.AssignedBranch != nil {
 			resp.AssignedBranch = *bankRel.AssignedBranch

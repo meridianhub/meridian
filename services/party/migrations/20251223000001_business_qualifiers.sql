@@ -64,8 +64,8 @@ CREATE INDEX "idx_party_reference_expiry_date" ON "party_reference" ("expiry_dat
 CREATE TABLE "party_bank_relation" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
   "party_id" uuid NOT NULL,
-  "account_officer_id" uuid NULL,
-  "relationship_manager_id" uuid NULL,
+  "account_officer_id" character varying(100) NULL,
+  "relationship_manager_id" character varying(100) NULL,
   "assigned_branch" character varying(100) NULL,
   "relationship_start_date" date NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
