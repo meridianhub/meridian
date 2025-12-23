@@ -1,7 +1,12 @@
 -- Fix audit tables to match shared audit infrastructure
 -- CockroachDB does not support ALTER COLUMN TYPE from UUID to VARCHAR
 -- For fresh databases, we drop and recreate with correct schema
--- This is safe for development environments
+--
+-- ⚠️  WARNING: DESTRUCTIVE MIGRATION ⚠️
+-- This migration DROPS and RECREATES audit_log and audit_outbox tables.
+-- All existing audit data will be PERMANENTLY DELETED.
+-- This is acceptable for development environments with no production data.
+-- DO NOT run this migration in production without data backup/migration plan.
 
 -- Drop dependent views and tables
 DROP VIEW IF EXISTS change_summary;
@@ -24,7 +29,10 @@ CREATE TABLE audit_log (
     changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     changed_by VARCHAR(100),
 
-    -- Change details (TEXT for compatibility with empty strings)
+    -- Change details: TEXT instead of JSONB for compatibility with shared audit infrastructure.
+    -- The shared AuditOutbox may write empty strings for nil values, which is invalid JSONB.
+    -- Note: Tenant service still uses JSONB (created before this requirement was understood).
+    -- This inconsistency is intentional and should be reconciled in a future migration.
     old_values TEXT,
     new_values TEXT,
 
