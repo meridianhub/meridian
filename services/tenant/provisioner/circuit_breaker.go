@@ -1,5 +1,5 @@
-// Package worker implements background workers for tenant provisioning.
-package worker
+// Package provisioner provides PostgreSQL schema provisioning for multi-tenant isolation.
+package provisioner
 
 import (
 	"sync"

@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/sony/gobreaker/v2"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -40,6 +41,10 @@ type PostgresProvisioner struct {
 	// serviceDbs holds database connections indexed by service name.
 	// Each service has its own database where org_{tenant_id} schemas are created.
 	serviceDbs map[string]*gorm.DB
+
+	// circuitBreakers manages per-service circuit breakers to prevent repeated
+	// provisioning attempts when a specific service database is consistently failing.
+	circuitBreakers *ServiceCircuitBreakers
 
 	config *Config
 	logger *slog.Logger
@@ -74,10 +79,11 @@ func NewPostgresProvisioner(platformDB *gorm.DB, config *Config) (*PostgresProvi
 	}
 
 	return &PostgresProvisioner{
-		platformDB: platformDB,
-		serviceDbs: serviceDbs,
-		config:     config,
-		logger:     slog.Default().With("component", "provisioner"),
+		platformDB:      platformDB,
+		serviceDbs:      serviceDbs,
+		circuitBreakers: NewServiceCircuitBreakers(),
+		config:          config,
+		logger:          slog.Default().With("component", "provisioner"),
 	}, nil
 }
 
@@ -255,8 +261,11 @@ func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, ten
 
 // provisionAllServices applies migrations for each configured service.
 // Each service's migrations are applied to that service's dedicated database.
+// Circuit breaker protection is applied per-service to prevent repeated failures.
 func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *ProvisioningStatus, schemaName string) error {
 	logger := p.logger.With("tenant_id", status.TenantID.String(), "schema", schemaName)
+
+	var skippedServices []string
 
 	for i, svc := range p.config.Services {
 		if ctx.Err() != nil {
@@ -285,8 +294,30 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			logger.Warn("failed to save intermediate status", "error", err, "service", svc.Name)
 		}
 
-		// Apply migrations TO SERVICE DATABASE
-		version, err := p.applyServiceMigrationsToDB(ctx, serviceDB, schemaName, svc)
+		// Apply migrations through circuit breaker
+		breaker := p.circuitBreakers.GetBreaker(svc.Name)
+		version, err := p.applyMigrationsWithCircuitBreaker(ctx, breaker, serviceDB, schemaName, svc, logger)
+
+		// Handle circuit breaker specific errors
+		if errors.Is(err, gobreaker.ErrOpenState) {
+			logger.Warn("circuit breaker open, skipping service",
+				"service", svc.Name,
+				"breaker_state", "open")
+			status.Services[i].State = ServiceStateFailed
+			status.Services[i].ErrorMessage = fmt.Sprintf("%v: %s", ErrCircuitBreakerOpen, svc.Name)
+			skippedServices = append(skippedServices, svc.Name)
+			continue // Skip this service but continue with others
+		}
+		if errors.Is(err, gobreaker.ErrTooManyRequests) {
+			logger.Warn("circuit breaker rejecting requests, skipping service",
+				"service", svc.Name,
+				"breaker_state", "half-open")
+			status.Services[i].State = ServiceStateFailed
+			status.Services[i].ErrorMessage = fmt.Sprintf("%v: %s", ErrCircuitBreakerTooManyRequests, svc.Name)
+			skippedServices = append(skippedServices, svc.Name)
+			continue // Skip this service but continue with others
+		}
+
 		if err != nil {
 			logger.Error("service migration failed", "service", svc.Name, "error", err)
 			status.Services[i].State = ServiceStateFailed
@@ -303,7 +334,51 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			logger.Warn("failed to save migration status", "error", err, "service", svc.Name)
 		}
 	}
+
+	// If any services were skipped due to circuit breaker, mark as partial failure
+	if len(skippedServices) > 0 {
+		errMsg := fmt.Sprintf("services skipped due to circuit breaker: %v", skippedServices)
+		logger.Warn("partial provisioning completed", "skipped_services", skippedServices)
+		p.markProvisioningFailed(ctx, status, errMsg)
+		return fmt.Errorf("%w: %s", ErrCircuitBreakerOpen, strings.Join(skippedServices, ", "))
+	}
+
 	return nil
+}
+
+// applyMigrationsWithCircuitBreaker wraps the migration execution with circuit breaker protection.
+// Returns the migration version on success, or an error (which may be circuit breaker errors).
+func (p *PostgresProvisioner) applyMigrationsWithCircuitBreaker(
+	ctx context.Context,
+	breaker *gobreaker.CircuitBreaker[any],
+	db *gorm.DB,
+	schemaName string,
+	svc ServiceConfig,
+	logger *slog.Logger,
+) (string, error) {
+	result, err := breaker.Execute(func() (any, error) {
+		version, migErr := p.applyServiceMigrationsToDB(ctx, db, schemaName, svc)
+		if migErr != nil {
+			return nil, migErr
+		}
+		return version, nil
+	})
+	if err != nil {
+		// Log circuit breaker state transitions
+		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+			logger.Info("circuit breaker prevented execution",
+				"service", svc.Name,
+				"error", err)
+		}
+		return "", err
+	}
+
+	// Type assert the result
+	version, ok := result.(string)
+	if !ok {
+		return "", nil // Empty version is valid
+	}
+	return version, nil
 }
 
 // maskDatabaseURL redacts password from connection string for logging.

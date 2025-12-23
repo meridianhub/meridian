@@ -1077,6 +1077,239 @@ func TestPostgresProvisioner_ReconcileMigrations_SkipsNonActive(t *testing.T) {
 	assert.Equal(t, "20251201000000", status.Services[0].MigrationVersion)
 }
 
+// =============================================================================
+// Circuit Breaker Integration Tests
+// =============================================================================
+
+// TestPostgresProvisioner_CircuitBreaker_AllServicesHealthy tests that all services
+// are provisioned successfully when all are healthy.
+func TestPostgresProvisioner_CircuitBreaker_AllServicesHealthy(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("cb_healthy")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	// Create migrations for two services
+	partyDir := filepath.Join(tc.migDir, "party")
+	require.NoError(t, os.MkdirAll(partyDir, 0o755))
+	createTestMigration(t, partyDir, "20251201000000_initial.sql", `
+		CREATE TABLE parties (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	accountDir := filepath.Join(tc.migDir, "current-account")
+	require.NoError(t, os.MkdirAll(accountDir, 0o755))
+	createTestMigration(t, accountDir, "20251201000000_initial.sql", `
+		CREATE TABLE accounts (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "party", MigrationPath: partyDir, DatabaseURL: tc.connStr},
+			{Name: "current-account", MigrationPath: accountDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Provision tenant - all services should succeed
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Verify both services were migrated
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateActive, status.State)
+	assert.Len(t, status.Services, 2)
+	for _, svc := range status.Services {
+		assert.Equal(t, ServiceStateMigrated, svc.State)
+	}
+}
+
+// TestPostgresProvisioner_CircuitBreaker_FailingServiceTripsBreaker tests that
+// consecutive failures trip the circuit breaker for that service.
+func TestPostgresProvisioner_CircuitBreaker_FailingServiceTripsBreaker(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Create migrations - party has broken migration, account is fine
+	partyDir := filepath.Join(tc.migDir, "party")
+	require.NoError(t, os.MkdirAll(partyDir, 0o755))
+	createTestMigration(t, partyDir, "20251201000000_broken.sql", `
+		INVALID SQL SYNTAX PARTY;
+	`)
+
+	accountDir := filepath.Join(tc.migDir, "current-account")
+	require.NoError(t, os.MkdirAll(accountDir, 0o755))
+	createTestMigration(t, accountDir, "20251201000000_initial.sql", `
+		CREATE TABLE accounts (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "party", MigrationPath: partyDir, DatabaseURL: tc.connStr},
+			{Name: "current-account", MigrationPath: accountDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Create multiple tenants to trip the circuit breaker
+	// BreakerMinRequests = 5, BreakerFailureRatio = 0.6 (60%)
+	// We need 5 failures to potentially trip the breaker
+	for i := 0; i < 5; i++ {
+		tenantID := tenant.MustNewTenantID(fmt.Sprintf("cb_fail_%d", i))
+		createTestTenant(t, tc.db, tenantID.String())
+
+		err = prov.ProvisionSchemas(context.Background(), tenantID)
+		// Should fail due to broken party migration
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrMigrationFailed)
+	}
+
+	// Now the circuit breaker for party should be open
+	// Next tenant provisioning should skip party (circuit open) but continue with account
+	tenantID := tenant.MustNewTenantID("cb_after_trip")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	// Should return circuit breaker error because party is skipped
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrCircuitBreakerOpen)
+
+	// Verify the tenant status shows party as failed (due to circuit breaker)
+	// and the overall state is failed
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateFailed, status.State)
+
+	// Check party service status mentions circuit breaker
+	for _, svc := range status.Services {
+		if svc.ServiceName == "party" {
+			assert.Contains(t, svc.ErrorMessage, "circuit breaker")
+		}
+	}
+}
+
+// TestPostgresProvisioner_CircuitBreaker_OtherServicesContinue tests that when
+// one service's circuit breaker is open, other services continue provisioning.
+func TestPostgresProvisioner_CircuitBreaker_OtherServicesContinue(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Create migrations - party has broken migration, customer and account are fine
+	partyDir := filepath.Join(tc.migDir, "party")
+	require.NoError(t, os.MkdirAll(partyDir, 0o755))
+	createTestMigration(t, partyDir, "20251201000000_broken.sql", `
+		INVALID SQL;
+	`)
+
+	customerDir := filepath.Join(tc.migDir, "customer")
+	require.NoError(t, os.MkdirAll(customerDir, 0o755))
+	createTestMigration(t, customerDir, "20251201000000_initial.sql", `
+		CREATE TABLE customers (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	accountDir := filepath.Join(tc.migDir, "current-account")
+	require.NoError(t, os.MkdirAll(accountDir, 0o755))
+	createTestMigration(t, accountDir, "20251201000000_initial.sql", `
+		CREATE TABLE accounts (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "party", MigrationPath: partyDir, DatabaseURL: tc.connStr},
+			{Name: "customer", MigrationPath: customerDir, DatabaseURL: tc.connStr},
+			{Name: "current-account", MigrationPath: accountDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Trip the circuit breaker for party with 5 failures
+	for i := 0; i < 5; i++ {
+		tenantID := tenant.MustNewTenantID(fmt.Sprintf("trip_cb_%d", i))
+		createTestTenant(t, tc.db, tenantID.String())
+		_ = prov.ProvisionSchemas(context.Background(), tenantID)
+	}
+
+	// Now provision a new tenant - party circuit is open, but customer and account should work
+	tenantID := tenant.MustNewTenantID("continue_others")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	// Overall fails because party was skipped
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrCircuitBreakerOpen)
+
+	// But verify that customer and current-account tables were created
+	var customerExists, accountExists bool
+	tc.db.Raw(`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = 'customers')`, tenantID.SchemaName()).Scan(&customerExists)
+	tc.db.Raw(`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = 'accounts')`, tenantID.SchemaName()).Scan(&accountExists)
+
+	assert.True(t, customerExists, "customer table should exist - service continued despite party failure")
+	assert.True(t, accountExists, "accounts table should exist - service continued despite party failure")
+}
+
+// TestPostgresProvisioner_CircuitBreaker_BreakerStaysClosedBelowThreshold tests that
+// the circuit breaker stays closed when failure rate is below threshold.
+func TestPostgresProvisioner_CircuitBreaker_BreakerStaysClosedBelowThreshold(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Create a migration that sometimes succeeds
+	svcDir := filepath.Join(tc.migDir, "mixed-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_initial.sql", `
+		CREATE TABLE mixed_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "mixed-service", MigrationPath: svcDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Create 10 successful provisioning attempts
+	// With 0% failure rate, breaker should stay closed
+	for i := 0; i < 10; i++ {
+		tenantID := tenant.MustNewTenantID(fmt.Sprintf("success_%d", i))
+		createTestTenant(t, tc.db, tenantID.String())
+
+		err = prov.ProvisionSchemas(context.Background(), tenantID)
+		require.NoError(t, err)
+
+		status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+		require.NoError(t, err)
+		assert.Equal(t, StateActive, status.State)
+	}
+
+	// 11th attempt should also succeed - breaker is closed
+	tenantID := tenant.MustNewTenantID("final_success")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+}
+
+// =============================================================================
+// FilterMigrationsAfter Helper Tests
+// =============================================================================
+
 // TestFilterMigrationsAfter tests the filterMigrationsAfter helper function.
 func TestFilterMigrationsAfter(t *testing.T) {
 	tests := []struct {
