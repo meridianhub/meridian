@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
@@ -193,6 +194,134 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 	return &positionkeepingv1.ListFinancialPositionLogsResponse{
 		Logs:       protoLogs,
 		Pagination: paginationResp,
+	}, nil
+}
+
+// ControlFinancialPositionLog controls the lifecycle of a financial position log.
+// Supports SUSPEND, RESUME, and TERMINATE actions for log processing lifecycle management.
+//
+// gRPC Error Codes:
+//   - codes.InvalidArgument: Invalid log_id format, unspecified control action, or invalid operator_id
+//   - codes.NotFound: Financial position log does not exist
+//   - codes.FailedPrecondition: Control action not allowed in current state
+//   - codes.Internal: Database or system errors
+func (s *PositionKeepingService) ControlFinancialPositionLog(
+	ctx context.Context,
+	req *positionkeepingv1.ControlFinancialPositionLogRequest,
+) (*positionkeepingv1.ControlFinancialPositionLogResponse, error) {
+	// Parse and validate log ID
+	logID, err := parseUUID(req.GetLogId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid log_id: %v", err)
+	}
+
+	// Map proto ControlAction to domain ControlAction
+	var domainAction domain.ControlAction
+	switch req.ControlAction {
+	case positionkeepingv1.ControlAction_CONTROL_ACTION_SUSPEND:
+		domainAction = domain.ControlActionSuspend
+	case positionkeepingv1.ControlAction_CONTROL_ACTION_RESUME:
+		domainAction = domain.ControlActionResume
+	case positionkeepingv1.ControlAction_CONTROL_ACTION_TERMINATE:
+		domainAction = domain.ControlActionTerminate
+	case positionkeepingv1.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		return nil, status.Error(codes.InvalidArgument, "control_action must be specified")
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unknown control_action: %v", req.ControlAction)
+	}
+
+	// Validate operator_id
+	operatorID := req.GetOperatorId()
+	if operatorID == "" {
+		operatorID = "system" // Default to system if not provided
+	}
+
+	// Retrieve position log from repository
+	log, err := s.repository.FindByID(ctx, logID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial position log not found: %s", logID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve financial position log: %v", err)
+	}
+
+	// Capture previous status before the control action
+	previousStatus := log.StatusTracking.CurrentStatus
+
+	// Apply control action via domain model
+	if err := log.ControlLog(domainAction, req.GetReason(), operatorID); err != nil {
+		// Map domain errors to gRPC status codes
+		switch {
+		case errors.Is(err, domain.ErrInvalidControlAction):
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		case errors.Is(err, domain.ErrCannotSuspend):
+			return nil, status.Errorf(codes.FailedPrecondition, "cannot suspend log in current state: %s", previousStatus)
+		case errors.Is(err, domain.ErrCannotResume):
+			return nil, status.Errorf(codes.FailedPrecondition, "cannot resume log in current state: %s", previousStatus)
+		case errors.Is(err, domain.ErrCannotTerminate):
+			return nil, status.Errorf(codes.FailedPrecondition, "cannot terminate log in current state: %s", previousStatus)
+		case errors.Is(err, domain.ErrAlreadyTerminated):
+			return nil, status.Error(codes.FailedPrecondition, "log already terminated")
+		case errors.Is(err, domain.ErrEmptyOperatorID):
+			return nil, status.Error(codes.InvalidArgument, "operator_id cannot be empty")
+		default:
+			return nil, status.Errorf(codes.Internal, "control action failed: %v", err)
+		}
+	}
+
+	// Persist updated log to database
+	if err := s.repository.Update(ctx, log); err != nil {
+		if errors.Is(err, domain.ErrOptimisticLock) {
+			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
+		}
+		return nil, status.Errorf(codes.Internal, "failed to update financial position log: %v", err)
+	}
+
+	// Emit PositionLogStatusChanged event to Kafka
+	event := &domain.PositionLogStatusChanged{
+		LogID:          log.LogID,
+		AccountID:      log.AccountID,
+		PreviousStatus: previousStatus,
+		NewStatus:      log.StatusTracking.CurrentStatus,
+		ControlAction:  domainAction,
+		Reason:         req.GetReason(),
+		OperatorID:     operatorID,
+		CorrelationID:  logID.String(), // Use log ID as correlation ID
+		Timestamp:      time.Now().UTC(),
+		Version:        log.Version,
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		// Event publishing is best-effort - errors are logged but don't fail the operation
+		// The log has already been updated in the database
+		_ = err // Silence lint - TODO: Add structured logging with slog
+	}
+
+	// Map domain status to proto PositionLogStatus
+	var protoStatus positionkeepingv1.PositionLogStatus
+	var protoPreviousStatus positionkeepingv1.PositionLogStatus
+	switch log.StatusTracking.CurrentStatus { //nolint:exhaustive // Only mapping to 3 proto values
+	case domain.TransactionStatusSuspended:
+		protoStatus = positionkeepingv1.PositionLogStatus_POSITION_LOG_STATUS_SUSPENDED
+	case domain.TransactionStatusTerminated:
+		protoStatus = positionkeepingv1.PositionLogStatus_POSITION_LOG_STATUS_TERMINATED
+	default:
+		protoStatus = positionkeepingv1.PositionLogStatus_POSITION_LOG_STATUS_ACTIVE
+	}
+
+	switch previousStatus { //nolint:exhaustive // Only mapping to 3 proto values
+	case domain.TransactionStatusSuspended:
+		protoPreviousStatus = positionkeepingv1.PositionLogStatus_POSITION_LOG_STATUS_SUSPENDED
+	case domain.TransactionStatusTerminated:
+		protoPreviousStatus = positionkeepingv1.PositionLogStatus_POSITION_LOG_STATUS_TERMINATED
+	default:
+		protoPreviousStatus = positionkeepingv1.PositionLogStatus_POSITION_LOG_STATUS_ACTIVE
+	}
+
+	return &positionkeepingv1.ControlFinancialPositionLogResponse{
+		LogId:          log.LogID.String(),
+		Status:         protoStatus,
+		Timestamp:      timestamppb.New(log.UpdatedAt),
+		PreviousStatus: protoPreviousStatus,
 	}, nil
 }
 

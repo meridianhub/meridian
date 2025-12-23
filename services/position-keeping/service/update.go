@@ -235,7 +235,7 @@ func applyStatusTransition(ctx context.Context, log *domain.FinancialPositionLog
 		return status.Errorf(codes.InvalidArgument, "invalid audit_entry: %v", err)
 	}
 
-	switch newStatus {
+	switch newStatus { //nolint:exhaustive // SUSPENDED/TERMINATED handled via ControlFinancialPositionLog
 	case domain.TransactionStatusPosted:
 		if err := log.MarkPosted(req.StatusUpdate.StatusReason, auditEntry); err != nil {
 			return status.Errorf(codes.InvalidArgument, "failed to mark as posted: %v", err)

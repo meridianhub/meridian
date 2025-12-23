@@ -208,8 +208,26 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid financial_booking_log_id: %v", err)
 	}
 
-	// Validate booking log exists (optional check - could be deferred to database constraint)
-	// For now we'll trust the database foreign key constraint
+	// Check if booking log exists and is not suspended or terminated
+	bookingLog, err := s.repository.GetBookingLog(ctx, bookingLogID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve booking log: %v", err)
+	}
+
+	// Block postings to suspended booking logs
+	if bookingLog.IsSuspended() {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"booking log %s is suspended, cannot accept postings", bookingLogID)
+	}
+
+	// Block postings to terminated booking logs
+	if bookingLog.IsTerminated() {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"booking log %s is terminated, cannot accept postings", bookingLogID)
+	}
 
 	// Parse and validate posting amount
 	postingAmount, err := fromProtoMoney(req.GetPostingAmount())
@@ -683,7 +701,7 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 		postingResult = posting.PostingResult // Preserve existing if not provided
 	}
 
-	switch newStatus {
+	switch newStatus { //nolint:exhaustive // SUSPENDED/TERMINATED handled via ControlFinancialBookingLog
 	case domain.TransactionStatusPosted:
 		if err := posting.Post(postingResult); err != nil {
 			if errors.Is(err, domain.ErrAlreadyPosted) {
@@ -1228,6 +1246,137 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 	return response, nil
 }
 
+// ControlFinancialBookingLog controls the lifecycle of a financial booking log.
+// Supports SUSPEND, RESUME, and TERMINATE actions for log processing lifecycle management.
+//
+// gRPC Error Codes:
+//   - codes.InvalidArgument: Invalid log_id format, unspecified control action, or invalid operator_id
+//   - codes.NotFound: Financial booking log does not exist
+//   - codes.FailedPrecondition: Control action not allowed in current state
+//   - codes.Internal: Database or system errors
+func (s *FinancialAccountingService) ControlFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.ControlFinancialBookingLogRequest,
+) (*financialaccountingv1.ControlFinancialBookingLogResponse, error) {
+	// Parse and validate log ID
+	logID, err := parseUUID(req.GetLogId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid log_id: %v", err)
+	}
+
+	// Map proto ControlAction to domain ControlAction
+	var domainAction domain.ControlAction
+	switch req.ControlAction {
+	case financialaccountingv1.ControlAction_CONTROL_ACTION_SUSPEND:
+		domainAction = domain.ControlActionSuspend
+	case financialaccountingv1.ControlAction_CONTROL_ACTION_RESUME:
+		domainAction = domain.ControlActionResume
+	case financialaccountingv1.ControlAction_CONTROL_ACTION_TERMINATE:
+		domainAction = domain.ControlActionTerminate
+	case financialaccountingv1.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		return nil, status.Error(codes.InvalidArgument, "control_action must be specified")
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unknown control_action: %v", req.ControlAction)
+	}
+
+	// Validate operator_id
+	operatorID := req.GetOperatorId()
+	if operatorID == "" {
+		operatorID = "system" // Default to system if not provided
+	}
+
+	// Retrieve booking log from repository
+	bookingLog, err := s.repository.GetBookingLog(ctx, logID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", logID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve financial booking log: %v", err)
+	}
+
+	// Capture previous status before the control action
+	previousStatus := bookingLog.Status
+
+	// Apply control action via domain model
+	updatedLog, err := bookingLog.ControlLog(domainAction, req.GetReason(), operatorID)
+	if err != nil {
+		// Map domain errors to gRPC status codes
+		switch {
+		case errors.Is(err, domain.ErrInvalidControlAction):
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		case errors.Is(err, domain.ErrCannotSuspend):
+			return nil, status.Errorf(codes.FailedPrecondition, "cannot suspend booking log in current state: %s", previousStatus)
+		case errors.Is(err, domain.ErrCannotResume):
+			return nil, status.Errorf(codes.FailedPrecondition, "cannot resume booking log in current state: %s", previousStatus)
+		case errors.Is(err, domain.ErrCannotTerminate):
+			return nil, status.Errorf(codes.FailedPrecondition, "cannot terminate booking log in current state: %s", previousStatus)
+		case errors.Is(err, domain.ErrAlreadyTerminated):
+			return nil, status.Error(codes.FailedPrecondition, "booking log already terminated")
+		case errors.Is(err, domain.ErrEmptyOperatorID):
+			return nil, status.Error(codes.InvalidArgument, "operator_id cannot be empty")
+		default:
+			return nil, status.Errorf(codes.Internal, "control action failed: %v", err)
+		}
+	}
+
+	// Persist updated booking log to database
+	if err := s.repository.UpdateBookingLog(ctx, &updatedLog); err != nil {
+		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", logID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to update financial booking log: %v", err)
+	}
+
+	// Emit BookingLogStatusChangedEvent to Kafka
+	event := &eventsv1.BookingLogStatusChangedEvent{
+		BookingLogId:   updatedLog.ID.String(),
+		PreviousStatus: previousStatus.String(),
+		NewStatus:      updatedLog.Status.String(),
+		ControlAction:  domainAction.String(),
+		Reason:         req.GetReason(),
+		OperatorId:     operatorID,
+		CorrelationId:  logID.String(), // Use log ID as correlation ID
+		CausationId:    logID.String(),
+		Timestamp:      timestamppb.Now(),
+		Version:        1,
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish BookingLogStatusChangedEvent",
+			"error", err,
+			"booking_log_id", updatedLog.ID.String(),
+			"previous_status", previousStatus,
+			"new_status", updatedLog.Status)
+	}
+
+	// Map domain status to proto BookingLogStatus
+	var protoStatus financialaccountingv1.BookingLogStatus
+	var protoPreviousStatus financialaccountingv1.BookingLogStatus
+	switch updatedLog.Status { //nolint:exhaustive // Only mapping to 3 proto values
+	case domain.TransactionStatusSuspended:
+		protoStatus = financialaccountingv1.BookingLogStatus_BOOKING_LOG_STATUS_SUSPENDED
+	case domain.TransactionStatusTerminated:
+		protoStatus = financialaccountingv1.BookingLogStatus_BOOKING_LOG_STATUS_TERMINATED
+	default:
+		protoStatus = financialaccountingv1.BookingLogStatus_BOOKING_LOG_STATUS_ACTIVE
+	}
+
+	switch previousStatus { //nolint:exhaustive // Only mapping to 3 proto values
+	case domain.TransactionStatusSuspended:
+		protoPreviousStatus = financialaccountingv1.BookingLogStatus_BOOKING_LOG_STATUS_SUSPENDED
+	case domain.TransactionStatusTerminated:
+		protoPreviousStatus = financialaccountingv1.BookingLogStatus_BOOKING_LOG_STATUS_TERMINATED
+	default:
+		protoPreviousStatus = financialaccountingv1.BookingLogStatus_BOOKING_LOG_STATUS_ACTIVE
+	}
+
+	return &financialaccountingv1.ControlFinancialBookingLogResponse{
+		LogId:          updatedLog.ID.String(),
+		Status:         protoStatus,
+		Timestamp:      timestamppb.New(updatedLog.UpdatedAt),
+		PreviousStatus: protoPreviousStatus,
+	}, nil
+}
+
 // isValidBookingLogTransition validates that a status transition is allowed.
 //
 // Valid transitions:
@@ -1245,9 +1394,9 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 //   - PENDING -> REVERSED (must be POSTED first to reverse)
 //   - Any transition from terminal states (FAILED, CANCELLED, REVERSED)
 func isValidBookingLogTransition(from, to domain.TransactionStatus) bool {
-	switch from {
+	switch from { //nolint:exhaustive // SUSPENDED/TERMINATED handled via ControlFinancialBookingLog
 	case domain.TransactionStatusPending:
-		switch to {
+		switch to { //nolint:exhaustive // Only checking valid booking log transitions
 		case domain.TransactionStatusPending, // No-op but valid
 			domain.TransactionStatusPosted,
 			domain.TransactionStatusFailed,

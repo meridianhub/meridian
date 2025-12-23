@@ -517,3 +517,81 @@ message BalanceValidationFailedEvent {
   // version is the aggregate version for optimistic locking
   int64 version = 9 [(buf.validate.field).int64 = {gte: 1}];
 }
+
+// BookingLogStatusChangedEvent represents a status change in a financial booking log.
+// Published when control actions (SUSPEND, RESUME, TERMINATE) are applied.
+message BookingLogStatusChangedEvent {
+  // booking_log_id uniquely identifies the financial booking log
+  string booking_log_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // previous_status is the status before the change
+  string previous_status = 2 [(buf.validate.field).string = {
+    in: [
+      "PENDING",
+      "RECONCILED",
+      "POSTED",
+      "FAILED",
+      "REJECTED",
+      "AMENDED",
+      "CANCELLED",
+      "REVERSED",
+      "SUSPENDED",
+      "TERMINATED"
+    ]
+  }];
+
+  // new_status is the status after the change
+  string new_status = 3 [(buf.validate.field).string = {
+    in: [
+      "PENDING",
+      "RECONCILED",
+      "POSTED",
+      "FAILED",
+      "REJECTED",
+      "AMENDED",
+      "CANCELLED",
+      "REVERSED",
+      "SUSPENDED",
+      "TERMINATED"
+    ]
+  }];
+
+  // control_action is the action that triggered the change
+  string control_action = 4 [(buf.validate.field).string = {
+    in: [
+      "SUSPEND",
+      "RESUME",
+      "TERMINATE"
+    ]
+  }];
+
+  // reason provides context for the status change
+  string reason = 5 [(buf.validate.field).string = {max_len: 500}];
+
+  // operator_id identifies who performed the action
+  string operator_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 9 [(buf.validate.field).required = true];
+
+  // version is the aggregate version for optimistic locking
+  int64 version = 10 [(buf.validate.field).int64 = {gte: 1}];
+}

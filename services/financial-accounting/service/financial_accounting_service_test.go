@@ -370,7 +370,7 @@ func (s *testFinancialAccountingService) UpdateLedgerPosting(
 		postingResult = posting.PostingResult
 	}
 
-	switch newStatus {
+	switch newStatus { //nolint:exhaustive // SUSPENDED/TERMINATED handled via ControlFinancialBookingLog
 	case domain.TransactionStatusPosted:
 		if err := posting.Post(postingResult); err != nil {
 			if errors.Is(err, domain.ErrAlreadyPosted) {

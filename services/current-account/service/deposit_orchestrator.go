@@ -157,6 +157,13 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 			"compensated_steps", result.CompensatedSteps,
 			"error", result.Error)
 
+		// Check if failure was due to suspended/terminated service (FailedPrecondition)
+		// Return user-friendly maintenance message for graceful degradation
+		if st, ok := status.FromError(result.Error); ok && st.Code() == codes.FailedPrecondition {
+			return nil, status.Error(codes.Unavailable,
+				"Transaction unavailable due to system maintenance. Please try again later.")
+		}
+
 		return nil, status.Errorf(codes.Internal,
 			"deposit transaction failed at step %s: %v (compensated %d/%d steps)",
 			result.FailedStep, result.Error, result.CompensatedSteps, result.CompletedSteps)

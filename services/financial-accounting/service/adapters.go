@@ -133,7 +133,7 @@ func fromProtoTransactionStatus(status commonv1.TransactionStatus) domain.Transa
 
 // toProtoTransactionStatus converts domain TransactionStatus to protobuf.
 func toProtoTransactionStatus(status domain.TransactionStatus) commonv1.TransactionStatus {
-	switch status {
+	switch status { //nolint:exhaustive // SUSPENDED/TERMINATED don't have proto equivalents yet
 	case domain.TransactionStatusPending:
 		return commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING
 	case domain.TransactionStatusPosted:

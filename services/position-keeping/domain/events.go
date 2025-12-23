@@ -374,6 +374,52 @@ func (e *BulkTransactionCaptured) ToProto() interface{} {
 	}
 }
 
+// PositionLogStatusChanged represents a domain event when a position log status changes.
+// Published when control actions (SUSPEND, RESUME, TERMINATE) are applied.
+type PositionLogStatusChanged struct {
+	LogID          uuid.UUID
+	AccountID      string
+	PreviousStatus TransactionStatus
+	NewStatus      TransactionStatus
+	ControlAction  ControlAction
+	Reason         string
+	OperatorID     string
+	CorrelationID  string
+	Timestamp      time.Time
+	Version        int64
+}
+
+// EventType returns the event type identifier.
+func (e *PositionLogStatusChanged) EventType() string {
+	return "position_keeping.position_log_status_changed.v1"
+}
+
+// AggregateID returns the log ID as the aggregate identifier.
+func (e *PositionLogStatusChanged) AggregateID() string {
+	return e.LogID.String()
+}
+
+// OccurredAt returns when the event occurred.
+func (e *PositionLogStatusChanged) OccurredAt() time.Time {
+	return e.Timestamp
+}
+
+// ToProto converts to protobuf representation.
+func (e *PositionLogStatusChanged) ToProto() interface{} {
+	return &eventsv1.PositionLogStatusChangedEvent{
+		LogId:          e.LogID.String(),
+		AccountId:      e.AccountID,
+		PreviousStatus: e.PreviousStatus.String(),
+		NewStatus:      e.NewStatus.String(),
+		ControlAction:  e.ControlAction.String(),
+		Reason:         e.Reason,
+		OperatorId:     e.OperatorID,
+		CorrelationId:  e.CorrelationID,
+		Timestamp:      timestamppb.New(e.Timestamp),
+		Version:        e.Version,
+	}
+}
+
 // Helper functions for conversions
 
 func currencyToProto(currency Currency) commonv1.Currency {

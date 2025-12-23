@@ -52,19 +52,22 @@ type TopicConfig struct {
 	TransactionCancelledTopic string
 	// BulkTransactionCapturedTopic is the topic for bulk transaction captured events
 	BulkTransactionCapturedTopic string
+	// PositionLogStatusChangedTopic is the topic for position log status changed events
+	PositionLogStatusChangedTopic string
 }
 
 // DefaultTopicConfig returns the default topic configuration for position keeping events.
 func DefaultTopicConfig() TopicConfig {
 	return TopicConfig{
-		TransactionCapturedTopic:     "position-keeping.transaction-captured.v1",
-		TransactionAmendedTopic:      "position-keeping.transaction-amended.v1",
-		TransactionReconciledTopic:   "position-keeping.transaction-reconciled.v1",
-		TransactionPostedTopic:       "position-keeping.transaction-posted.v1",
-		TransactionRejectedTopic:     "position-keeping.transaction-rejected.v1",
-		TransactionFailedTopic:       "position-keeping.transaction-failed.v1",
-		TransactionCancelledTopic:    "position-keeping.transaction-cancelled.v1",
-		BulkTransactionCapturedTopic: "position-keeping.bulk-transaction-captured.v1",
+		TransactionCapturedTopic:      "position-keeping.transaction-captured.v1",
+		TransactionAmendedTopic:       "position-keeping.transaction-amended.v1",
+		TransactionReconciledTopic:    "position-keeping.transaction-reconciled.v1",
+		TransactionPostedTopic:        "position-keeping.transaction-posted.v1",
+		TransactionRejectedTopic:      "position-keeping.transaction-rejected.v1",
+		TransactionFailedTopic:        "position-keeping.transaction-failed.v1",
+		TransactionCancelledTopic:     "position-keeping.transaction-cancelled.v1",
+		BulkTransactionCapturedTopic:  "position-keeping.bulk-transaction-captured.v1",
+		PositionLogStatusChangedTopic: "position-keeping.position-log-status-changed.v1",
 	}
 }
 
@@ -87,14 +90,15 @@ func NewKafkaEventPublisher(producer protoPublisher, topicConfig TopicConfig) (*
 
 	// Pre-build topic routing map for O(1) lookups instead of O(n) switch statements
 	topicMap := map[string]string{
-		"position_keeping.transaction_captured.v1":      topicConfig.TransactionCapturedTopic,
-		"position_keeping.transaction_amended.v1":       topicConfig.TransactionAmendedTopic,
-		"position_keeping.transaction_reconciled.v1":    topicConfig.TransactionReconciledTopic,
-		"position_keeping.transaction_posted.v1":        topicConfig.TransactionPostedTopic,
-		"position_keeping.transaction_rejected.v1":      topicConfig.TransactionRejectedTopic,
-		"position_keeping.transaction_failed.v1":        topicConfig.TransactionFailedTopic,
-		"position_keeping.transaction_cancelled.v1":     topicConfig.TransactionCancelledTopic,
-		"position_keeping.bulk_transaction_captured.v1": topicConfig.BulkTransactionCapturedTopic,
+		"position_keeping.transaction_captured.v1":        topicConfig.TransactionCapturedTopic,
+		"position_keeping.transaction_amended.v1":         topicConfig.TransactionAmendedTopic,
+		"position_keeping.transaction_reconciled.v1":      topicConfig.TransactionReconciledTopic,
+		"position_keeping.transaction_posted.v1":          topicConfig.TransactionPostedTopic,
+		"position_keeping.transaction_rejected.v1":        topicConfig.TransactionRejectedTopic,
+		"position_keeping.transaction_failed.v1":          topicConfig.TransactionFailedTopic,
+		"position_keeping.transaction_cancelled.v1":       topicConfig.TransactionCancelledTopic,
+		"position_keeping.bulk_transaction_captured.v1":   topicConfig.BulkTransactionCapturedTopic,
+		"position_keeping.position_log_status_changed.v1": topicConfig.PositionLogStatusChangedTopic,
 	}
 
 	return &KafkaEventPublisher{
