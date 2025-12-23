@@ -653,23 +653,23 @@ func TestWorkflow_MultipleAssociationsForParty(t *testing.T) {
 
 	// Register primary party and related parties
 	primaryParty := registerTestParty(t, ctx, svc, "Primary Business")
-	subsidiary1 := registerTestParty(t, ctx, svc, "Subsidiary 1")
-	subsidiary2 := registerTestParty(t, ctx, svc, "Subsidiary 2")
+	partner1 := registerTestParty(t, ctx, svc, "Business Partner 1")
+	partner2 := registerTestParty(t, ctx, svc, "Business Partner 2")
 	guarantor := registerTestParty(t, ctx, svc, "Guarantor Corp")
 
 	// Register multiple associations
 	assoc1Req := &pb.RegisterAssociationsRequest{
 		PartyId:          primaryParty.PartyId,
-		RelatedPartyId:   subsidiary1.PartyId,
-		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE,
+		RelatedPartyId:   partner1.PartyId,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER,
 	}
 	_, err := svc.RegisterAssociations(ctx, assoc1Req)
 	require.NoError(t, err)
 
 	assoc2Req := &pb.RegisterAssociationsRequest{
 		PartyId:          primaryParty.PartyId,
-		RelatedPartyId:   subsidiary2.PartyId,
-		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE,
+		RelatedPartyId:   partner2.PartyId,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER,
 	}
 	_, err = svc.RegisterAssociations(ctx, assoc2Req)
 	require.NoError(t, err)
@@ -688,22 +688,22 @@ func TestWorkflow_MultipleAssociationsForParty(t *testing.T) {
 	assert.Len(t, retrieveResp.Associations, 3, "Primary party should have 3 associations")
 
 	// Verify relationship types
-	subsidiaryCount := 0
+	partnerCount := 0
 	guarantorCount := 0
 	for _, assoc := range retrieveResp.Associations {
-		if assoc.RelationshipType == pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE {
-			subsidiaryCount++
+		if assoc.RelationshipType == pb.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER {
+			partnerCount++
 		}
 		if assoc.RelationshipType == pb.RelationshipType_RELATIONSHIP_TYPE_GUARANTOR {
 			guarantorCount++
 		}
 	}
-	assert.Equal(t, 2, subsidiaryCount, "Should have 2 subsidiary associations")
+	assert.Equal(t, 2, partnerCount, "Should have 2 business partner associations")
 	assert.Equal(t, 1, guarantorCount, "Should have 1 guarantor association")
 }
 
 // TestWorkflow_ControlPartyStateTransitions verifies all valid state transitions:
-// ACTIVE → RESTRICTED → ACTIVE → RESTRICTED (via SUSPEND) → TERMINATED
+// ACTIVE → RESTRICTED → ACTIVE → SUSPENDED (via SUSPEND) → TERMINATED
 func TestWorkflow_ControlPartyStateTransitions(t *testing.T) {
 	svc, _, ctx, cleanup := setupLifecycleIntegrationTest(t)
 	defer cleanup()
@@ -734,8 +734,7 @@ func TestWorkflow_ControlPartyStateTransitions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, pb.PartyStatus_PARTY_STATUS_ACTIVE, activateResp.Party.Status)
 
-	// Transition: ACTIVE → RESTRICTED (via SUSPEND action)
-	// Note: SUSPEND action sets status to RESTRICTED (no separate SUSPENDED status)
+	// Transition: ACTIVE → SUSPENDED (via SUSPEND action)
 	suspendReq := &pb.ControlPartyRequest{
 		PartyId:       party.PartyId,
 		ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
@@ -746,7 +745,7 @@ func TestWorkflow_ControlPartyStateTransitions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, pb.PartyStatus_PARTY_STATUS_SUSPENDED, suspendResp.Party.Status)
 
-	// Transition: RESTRICTED → TERMINATED
+	// Transition: SUSPENDED → TERMINATED
 	terminateReq := &pb.ControlPartyRequest{
 		PartyId:       party.PartyId,
 		ControlAction: pb.ControlAction_CONTROL_ACTION_TERMINATE,
