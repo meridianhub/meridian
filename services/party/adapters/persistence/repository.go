@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -22,6 +21,30 @@ var (
 	ErrPartyExists     = errors.New("party already exists")
 	ErrVersionConflict = errors.New("version conflict: party was modified by another transaction")
 )
+
+// toJSONB prepares a string for JSONB storage.
+// If the input is already valid JSON, it's returned as-is.
+// If not, it's marshaled as a JSON string value.
+func toJSONB(s string) string {
+	// Check if already valid JSON
+	if json.Valid([]byte(s)) {
+		return s
+	}
+	// Marshal as JSON string
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// fromJSONB extracts a string from JSONB storage.
+// If the stored value is a JSON string, it's unmarshaled.
+// Otherwise, the raw value is returned.
+func fromJSONB(s string) string {
+	var result string
+	if err := json.Unmarshal([]byte(s), &result); err == nil {
+		return result
+	}
+	return s
+}
 
 // Repository provides persistence operations for parties
 type Repository struct {
@@ -425,16 +448,30 @@ func (r *Repository) FindAssociations(ctx context.Context, partyID uuid.UUID) ([
 	return associations, err
 }
 
-// UpdateAssociation updates an association's relationship type
-func (r *Repository) UpdateAssociation(ctx context.Context, associationID uuid.UUID, relationshipType string) error {
-	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Model(&PartyAssociationEntity{}).
+// UpdateAssociation updates an association's relationship type and returns the updated entity.
+// Returns an error if the association doesn't exist.
+func (r *Repository) UpdateAssociation(ctx context.Context, associationID uuid.UUID, relationshipType string) (*PartyAssociationEntity, error) {
+	var entity PartyAssociationEntity
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		result := tx.Model(&PartyAssociationEntity{}).
 			Where("id = ?", associationID).
 			Updates(map[string]interface{}{
 				"relationship_type": relationshipType,
 				"updated_at":        time.Now(),
-			}).Error
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		// Load the updated entity to return party_id and related_party_id
+		return tx.Where("id = ?", associationID).First(&entity).Error
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &entity, nil
 }
 
 // CheckCircularAssociation checks if adding this association would create a circular reference
@@ -464,18 +501,10 @@ func (r *Repository) SaveDemographic(ctx context.Context, partyID uuid.UUID, soc
 		var existing PartyDemographicEntity
 		result := tx.Where("party_id = ?", partyID).First(&existing)
 
-		// Marshal strings to JSON for JSONB columns
-		socioEconJSON, err := json.Marshal(socioEconomicData)
-		if err != nil {
-			return fmt.Errorf("failed to marshal socio-economic data: %w", err)
-		}
-		empHistoryJSON, err := json.Marshal(employmentHistory)
-		if err != nil {
-			return fmt.Errorf("failed to marshal employment history: %w", err)
-		}
-
-		socioEconStr := string(socioEconJSON)
-		empHistoryStr := string(empHistoryJSON)
+		// Prepare strings for JSONB columns
+		// If already valid JSON, store as-is; otherwise wrap as JSON string
+		socioEconStr := toJSONB(socioEconomicData)
+		empHistoryStr := toJSONB(employmentHistory)
 		socioEcon := &socioEconStr
 		empHistory := &empHistoryStr
 

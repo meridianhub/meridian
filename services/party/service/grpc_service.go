@@ -16,7 +16,19 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
+
+// fromJSONB extracts a string from JSONB storage.
+// If the stored value is a JSON string, it's unmarshaled.
+// Otherwise, the raw value is returned.
+func fromJSONB(s string) string {
+	var result string
+	if err := json.Unmarshal([]byte(s), &result); err == nil {
+		return result
+	}
+	return s
+}
 
 // Service errors
 var (
@@ -45,7 +57,7 @@ type Repository interface {
 	// Business Qualifier operations
 	SaveAssociation(ctx context.Context, partyID, relatedPartyID uuid.UUID, relationshipType string) (uuid.UUID, error)
 	FindAssociations(ctx context.Context, partyID uuid.UUID) ([]persistence.PartyAssociationEntity, error)
-	UpdateAssociation(ctx context.Context, associationID uuid.UUID, relationshipType string) error
+	UpdateAssociation(ctx context.Context, associationID uuid.UUID, relationshipType string) (*persistence.PartyAssociationEntity, error)
 	CheckCircularAssociation(ctx context.Context, partyID, relatedPartyID uuid.UUID) (bool, error)
 
 	SaveDemographic(ctx context.Context, partyID uuid.UUID, socioEconomicData, employmentHistory string) error
@@ -561,12 +573,13 @@ func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAsso
 		return nil, status.Errorf(codes.InvalidArgument, "invalid related party ID format: %v", err)
 	}
 
-	// Verify both parties exist
-	if _, err := s.repo.FindByID(ctx, partyID); err != nil {
+	// Verify both parties exist with FOR UPDATE locks to prevent race condition
+	// where a party could be deleted between verification and association creation
+	if _, err := s.repo.FindByIDForUpdate(ctx, partyID); err != nil {
 		s.logger.Error("party not found for association", "party_id", req.PartyId, "error", err)
 		return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
 	}
-	if _, err := s.repo.FindByID(ctx, relatedPartyID); err != nil {
+	if _, err := s.repo.FindByIDForUpdate(ctx, relatedPartyID); err != nil {
 		s.logger.Error("related party not found for association", "related_party_id", req.RelatedPartyId, "error", err)
 		return nil, status.Errorf(codes.NotFound, "related party not found: %s", req.RelatedPartyId)
 	}
@@ -608,8 +621,12 @@ func (s *Service) UpdateAssociations(ctx context.Context, req *pb.UpdateAssociat
 	}
 
 	relationshipType := protoToRelationshipType(req.RelationshipType)
-	if err := s.repo.UpdateAssociation(ctx, associationID, relationshipType); err != nil {
+	entity, err := s.repo.UpdateAssociation(ctx, associationID, relationshipType)
+	if err != nil {
 		s.logger.Error("failed to update association", "association_id", req.AssociationId, "error", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, status.Errorf(codes.NotFound, "association not found: %s", req.AssociationId)
+		}
 		return nil, status.Errorf(codes.Internal, "failed to update association: %v", err)
 	}
 
@@ -617,6 +634,8 @@ func (s *Service) UpdateAssociations(ctx context.Context, req *pb.UpdateAssociat
 
 	return &pb.UpdateAssociationsResponse{
 		AssociationId:    req.AssociationId,
+		PartyId:          entity.PartyID.String(),
+		RelatedPartyId:   entity.RelatedPartyID.String(),
 		RelationshipType: req.RelationshipType,
 		UpdatedAt:        timestamppb.Now(),
 	}, nil
@@ -727,22 +746,12 @@ func (s *Service) RetrieveDemographics(ctx context.Context, req *pb.RetrieveDemo
 	}
 	if demo != nil {
 		if demo.SocioEconomicData != nil {
-			// Unmarshal JSON string for JSONB column
-			var socioEconStr string
-			if err := json.Unmarshal([]byte(*demo.SocioEconomicData), &socioEconStr); err == nil {
-				resp.SocioEconomicData = socioEconStr
-			} else {
-				resp.SocioEconomicData = *demo.SocioEconomicData
-			}
+			// Extract string from JSONB - handles both JSON strings and raw values
+			resp.SocioEconomicData = fromJSONB(*demo.SocioEconomicData)
 		}
 		if demo.EmploymentHistory != nil {
-			// Unmarshal JSON string for JSONB column
-			var empHistoryStr string
-			if err := json.Unmarshal([]byte(*demo.EmploymentHistory), &empHistoryStr); err == nil {
-				resp.EmploymentHistory = empHistoryStr
-			} else {
-				resp.EmploymentHistory = *demo.EmploymentHistory
-			}
+			// Extract string from JSONB - handles both JSON strings and raw values
+			resp.EmploymentHistory = fromJSONB(*demo.EmploymentHistory)
 		}
 		resp.UpdatedAt = timestamppb.New(demo.UpdatedAt)
 	}

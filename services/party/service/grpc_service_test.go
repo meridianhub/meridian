@@ -95,8 +95,13 @@ func (m *mockRepository) FindAssociations(_ context.Context, _ uuid.UUID) ([]per
 	return []persistence.PartyAssociationEntity{}, nil
 }
 
-func (m *mockRepository) UpdateAssociation(_ context.Context, _ uuid.UUID, _ string) error {
-	return nil
+func (m *mockRepository) UpdateAssociation(_ context.Context, associationID uuid.UUID, relationshipType string) (*persistence.PartyAssociationEntity, error) {
+	return &persistence.PartyAssociationEntity{
+		ID:               associationID,
+		PartyID:          uuid.New(),
+		RelatedPartyID:   uuid.New(),
+		RelationshipType: relationshipType,
+	}, nil
 }
 
 func (m *mockRepository) CheckCircularAssociation(_ context.Context, _, _ uuid.UUID) (bool, error) {
