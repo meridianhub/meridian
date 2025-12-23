@@ -123,12 +123,15 @@ jobs:
               SERVICE=$(basename $(dirname $(dirname "$CONFIG")))
               echo "  Service: $SERVICE"
               # --allow-dirty allows multiple services to share the same org schema in CI
+              # --exec-order non-linear allows each service's migrations to be applied independently
+              # without strict version sequencing (needed when services share a schema in CI)
               # In production, each service has its own database
               if ! atlas migrate apply \
                 --env ci \
                 --config "file://$CONFIG" \
                 --url "${DATABASE_URL}&search_path=${ORG_SCHEMA}" \
                 --tx-mode none \
+                --exec-order non-linear \
                 --allow-dirty; then
                 echo "    ✗ Migration failed for $SERVICE in $ORG_SCHEMA"
                 FAILED=1
