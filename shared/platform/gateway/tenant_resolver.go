@@ -16,6 +16,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/domain"
@@ -32,6 +34,17 @@ var (
 
 // ErrTenantNotFound is returned when a tenant cannot be found by slug.
 var ErrTenantNotFound = errors.New("tenant not found")
+
+// slugPattern matches valid tenant slugs: alphanumeric with hyphens/periods for multi-level.
+// Examples: "acme", "acme-corp", "acme.staging", "my-company.dev"
+// Invalid: "-acme", "acme-", "acme--corp", ".acme", "acme.", "ACME"
+var slugPattern = regexp.MustCompile(`^[a-z0-9]+([-.][a-z0-9]+)*$`)
+
+// isValidSlug validates that a slug matches the allowed format.
+// This prevents potential injection attacks from malicious subdomains.
+func isValidSlug(slug string) bool {
+	return slugPattern.MatchString(slug)
+}
 
 // slugCache defines the caching interface for slug-to-tenant-ID mappings.
 type slugCache interface {
@@ -182,7 +195,7 @@ func (m *TenantResolverMiddleware) extractSlug(hostHeader string) string {
 	}
 
 	// Check if host ends with the expected suffix
-	if host[len(host)-len(expectedSuffix):] != expectedSuffix {
+	if !strings.HasSuffix(host, expectedSuffix) {
 		return ""
 	}
 
@@ -191,6 +204,11 @@ func (m *TenantResolverMiddleware) extractSlug(hostHeader string) string {
 
 	// Return empty string if there's no subdomain (slug would be empty)
 	if slug == "" {
+		return ""
+	}
+
+	// Validate slug format for security
+	if !isValidSlug(slug) {
 		return ""
 	}
 

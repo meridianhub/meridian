@@ -290,6 +290,70 @@ func TestExtractSlug(t *testing.T) {
 			want:       "acme",
 			reason:     "should handle ports with leading zeros",
 		},
+		// Invalid slug format test cases (security validation)
+		{
+			name:       "slug starting with hyphen",
+			baseDomain: "api.meridian.io",
+			host:       "-acme.api.meridian.io",
+			want:       "",
+			reason:     "should reject slug starting with hyphen",
+		},
+		{
+			name:       "slug ending with hyphen",
+			baseDomain: "api.meridian.io",
+			host:       "acme-.api.meridian.io",
+			want:       "",
+			reason:     "should reject slug ending with hyphen",
+		},
+		{
+			name:       "slug with consecutive hyphens",
+			baseDomain: "api.meridian.io",
+			host:       "acme--corp.api.meridian.io",
+			want:       "",
+			reason:     "should reject slug with consecutive hyphens",
+		},
+		{
+			name:       "slug starting with period",
+			baseDomain: "api.meridian.io",
+			host:       ".acme.api.meridian.io",
+			want:       "",
+			reason:     "should reject slug starting with period",
+		},
+		{
+			name:       "slug ending with period",
+			baseDomain: "api.meridian.io",
+			host:       "acme..api.meridian.io",
+			want:       "",
+			reason:     "should reject slug ending with period",
+		},
+		{
+			name:       "slug with uppercase letters",
+			baseDomain: "api.meridian.io",
+			host:       "ACME.api.meridian.io",
+			want:       "",
+			reason:     "should reject slug with uppercase letters",
+		},
+		{
+			name:       "slug with mixed case",
+			baseDomain: "api.meridian.io",
+			host:       "Acme-Corp.api.meridian.io",
+			want:       "",
+			reason:     "should reject slug with mixed case",
+		},
+		{
+			name:       "slug with special characters",
+			baseDomain: "api.meridian.io",
+			host:       "acme_corp.api.meridian.io",
+			want:       "",
+			reason:     "should reject slug with underscore",
+		},
+		{
+			name:       "slug with consecutive periods",
+			baseDomain: "api.meridian.io",
+			host:       "acme..staging.api.meridian.io",
+			want:       "",
+			reason:     "should reject slug with consecutive periods",
+		},
 	}
 
 	for _, tt := range tests {
