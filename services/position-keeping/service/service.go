@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -293,7 +294,11 @@ func (s *PositionKeepingService) ControlFinancialPositionLog(
 	if err := s.eventPublisher.Publish(ctx, event); err != nil {
 		// Event publishing is best-effort - errors are logged but don't fail the operation
 		// The log has already been updated in the database
-		_ = err // Silence lint - TODO: Add structured logging with slog
+		slog.Error("failed to publish PositionLogStatusChanged event",
+			"error", err,
+			"log_id", log.LogID.String(),
+			"previous_status", previousStatus,
+			"new_status", log.StatusTracking.CurrentStatus)
 	}
 
 	// Map domain status to proto PositionLogStatus
