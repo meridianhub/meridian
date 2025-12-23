@@ -257,7 +257,9 @@ func (r *mockOutboxRepository) getEntry(id uuid.UUID) *EventOutbox {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if entry, ok := r.entries[id]; ok {
-		return entry
+		// Return a copy to avoid data races when test reads while worker writes
+		entryCopy := *entry
+		return &entryCopy
 	}
 	return nil
 }
