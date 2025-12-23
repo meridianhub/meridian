@@ -215,12 +215,18 @@ func run(logger *slog.Logger) error {
 	// Initialize provisioning worker (only if schema provisioning is enabled)
 	var provisioningWorker *worker.ProvisioningWorker
 	if provisioningEnabled == envValueTrue && schemaProvisioner != nil {
-		pollInterval := getEnvAsDuration("PROVISIONING_POLL_INTERVAL", 30*time.Second)
+		config := loadWorkerConfig()
 		var err error
 		provisioningWorker, err = worker.NewProvisioningWorker(
 			repo,
 			schemaProvisioner,
-			pollInterval,
+			worker.Config{
+				PollInterval:   config.PollInterval,
+				MaxRetries:     config.MaxRetries,
+				RetryBaseDelay: config.RetryBaseDelay,
+				RetryMaxDelay:  config.RetryMaxDelay,
+				MaxConcurrent:  config.MaxConcurrent,
+			},
 			logger,
 		)
 		if err != nil {
@@ -231,7 +237,11 @@ func run(logger *slog.Logger) error {
 		go provisioningWorker.Start(ctx)
 
 		logger.Info("provisioning worker started",
-			"poll_interval", pollInterval)
+			"poll_interval", config.PollInterval,
+			"max_retries", config.MaxRetries,
+			"retry_base_delay", config.RetryBaseDelay,
+			"retry_max_delay", config.RetryMaxDelay,
+			"max_concurrent", config.MaxConcurrent)
 	} else {
 		logger.Info("provisioning worker disabled",
 			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
