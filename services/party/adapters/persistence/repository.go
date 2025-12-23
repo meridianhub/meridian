@@ -2,7 +2,9 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -462,8 +464,20 @@ func (r *Repository) SaveDemographic(ctx context.Context, partyID uuid.UUID, soc
 		var existing PartyDemographicEntity
 		result := tx.Where("party_id = ?", partyID).First(&existing)
 
-		socioEcon := &socioEconomicData
-		empHistory := &employmentHistory
+		// Marshal strings to JSON for JSONB columns
+		socioEconJSON, err := json.Marshal(socioEconomicData)
+		if err != nil {
+			return fmt.Errorf("failed to marshal socio-economic data: %w", err)
+		}
+		empHistoryJSON, err := json.Marshal(employmentHistory)
+		if err != nil {
+			return fmt.Errorf("failed to marshal employment history: %w", err)
+		}
+
+		socioEconStr := string(socioEconJSON)
+		empHistoryStr := string(empHistoryJSON)
+		socioEcon := &socioEconStr
+		empHistory := &empHistoryStr
 
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			// Create new

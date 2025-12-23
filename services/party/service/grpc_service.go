@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -691,10 +692,22 @@ func (s *Service) RetrieveDemographics(ctx context.Context, req *pb.RetrieveDemo
 	}
 	if demo != nil {
 		if demo.SocioEconomicData != nil {
-			resp.SocioEconomicData = *demo.SocioEconomicData
+			// Unmarshal JSON string for JSONB column
+			var socioEconStr string
+			if err := json.Unmarshal([]byte(*demo.SocioEconomicData), &socioEconStr); err == nil {
+				resp.SocioEconomicData = socioEconStr
+			} else {
+				resp.SocioEconomicData = *demo.SocioEconomicData
+			}
 		}
 		if demo.EmploymentHistory != nil {
-			resp.EmploymentHistory = *demo.EmploymentHistory
+			// Unmarshal JSON string for JSONB column
+			var empHistoryStr string
+			if err := json.Unmarshal([]byte(*demo.EmploymentHistory), &empHistoryStr); err == nil {
+				resp.EmploymentHistory = empHistoryStr
+			} else {
+				resp.EmploymentHistory = *demo.EmploymentHistory
+			}
 		}
 		resp.UpdatedAt = timestamppb.New(demo.UpdatedAt)
 	}

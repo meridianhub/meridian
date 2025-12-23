@@ -781,7 +781,7 @@ func TestWorkflow_UpdateDemographicsIdempotency(t *testing.T) {
 	// Verify only ONE demographics record exists (UNIQUE constraint on party_id)
 	var demoCount int64
 	err := db.Raw(fmt.Sprintf(`
-		SELECT COUNT(*) FROM %q.party_demographics WHERE party_id = ?
+		SELECT COUNT(*) FROM %q.party_demographic WHERE party_id = ?
 	`, tenant.TenantID(testTenantID).SchemaName()), party.PartyId).Scan(&demoCount).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), demoCount, "Should have exactly 1 demographics record")
