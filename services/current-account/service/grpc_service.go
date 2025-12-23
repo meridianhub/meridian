@@ -33,11 +33,25 @@ import (
 // See errors.go for ErrRepositoryNil, ErrNilPositionLog, etc.
 
 // Operation status constants for consistency across the service
+// Note: Some constants are shared with lien_service.go in this package
 const (
 	operationStatusSuccess         = "success"
 	operationStatusFailed          = "failed"
 	operationStatusInvalidCurrency = "invalid_currency"
 	opStatusIdempotent             = "idempotent"
+	// Shared constants - also defined in lien_service.go:
+	// opStatusAccountNotFound, opStatusRetrieveFailed, opStatusCurrencyMismatch,
+	// opStatusInvalidAmount, opStatusSaveFailed, opStatusInsufficientFunds
+	opStatusAmountOverflow      = "amount_overflow"
+	opStatusAccountFrozen       = "account_frozen"
+	opStatusAccountClosed       = "account_closed"
+	opStatusMissingAccountID    = "missing_account_id"
+	opStatusMissingAmount       = "missing_amount"
+	opStatusMissingWithdrawalID = "missing_withdrawal_id"
+	opStatusMissingIdentifier   = "missing_identifier"
+	opStatusNotImplemented      = "not_implemented"
+	opStatusWithdrawalFailed    = "withdrawal_failed"
+	opStatusSagaFailed          = "saga_failed"
 )
 
 // Redis idempotency constants
@@ -55,16 +69,17 @@ const (
 // Service implements the CurrentAccountService gRPC service
 type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
-	repo                *persistence.Repository
-	lienRepo            *persistence.LienRepository
-	posKeepingClient    clients.PositionKeepingClient
-	finAcctClient       clients.FinancialAccountingClient
-	partyClient         clients.PartyClient
-	accountConfig       *config.AccountConfig
-	idempotencyService  idempotency.Service
-	logger              *slog.Logger
-	tracer              *observability.Tracer
-	depositOrchestrator *DepositOrchestrator // Handles deposit saga orchestration
+	repo                   *persistence.Repository
+	lienRepo               *persistence.LienRepository
+	posKeepingClient       clients.PositionKeepingClient
+	finAcctClient          clients.FinancialAccountingClient
+	partyClient            clients.PartyClient
+	accountConfig          *config.AccountConfig
+	idempotencyService     idempotency.Service
+	logger                 *slog.Logger
+	tracer                 *observability.Tracer
+	depositOrchestrator    *DepositOrchestrator    // Handles deposit saga orchestration
+	withdrawalOrchestrator *WithdrawalOrchestrator // Handles withdrawal saga orchestration
 }
 
 // Config contains configuration for creating a new Service with external clients
@@ -150,17 +165,27 @@ func NewServiceWithExistingClients(
 		AccountConfig:    accountConfig,
 	})
 
+	// Create withdrawal orchestrator
+	withdrawalOrchestrator := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
+		Logger:           logger,
+		Repo:             repo,
+		PosKeepingClient: posKeepingClient,
+		FinAcctClient:    finAcctClient,
+		AccountConfig:    accountConfig,
+	})
+
 	return &Service{
-		repo:                repo,
-		lienRepo:            lienRepo,
-		posKeepingClient:    posKeepingClient,
-		finAcctClient:       finAcctClient,
-		partyClient:         partyClient,
-		accountConfig:       accountConfig,
-		idempotencyService:  idempotencyService,
-		logger:              logger,
-		tracer:              tracer,
-		depositOrchestrator: depositOrchestrator,
+		repo:                   repo,
+		lienRepo:               lienRepo,
+		posKeepingClient:       posKeepingClient,
+		finAcctClient:          finAcctClient,
+		partyClient:            partyClient,
+		accountConfig:          accountConfig,
+		idempotencyService:     idempotencyService,
+		logger:                 logger,
+		tracer:                 tracer,
+		depositOrchestrator:    depositOrchestrator,
+		withdrawalOrchestrator: withdrawalOrchestrator,
 	}, nil
 }
 
@@ -256,15 +281,25 @@ func NewServiceWithClients(config Config) (*Service, error) {
 		AccountConfig:    nil, // Not passed in Config - will use defaults
 	})
 
+	// Create withdrawal orchestrator
+	withdrawalOrchestrator := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
+		Logger:           logger,
+		Repo:             config.Repository,
+		PosKeepingClient: resilientPosKeepingClient,
+		FinAcctClient:    resilientFinAcctClient,
+		AccountConfig:    nil, // Not passed in Config - will use defaults
+	})
+
 	return &Service{
-		repo:                config.Repository,
-		lienRepo:            config.LienRepository,
-		posKeepingClient:    resilientPosKeepingClient,
-		finAcctClient:       resilientFinAcctClient,
-		partyClient:         resilientPartyClient,
-		logger:              logger,
-		tracer:              config.Tracer,
-		depositOrchestrator: depositOrchestrator,
+		repo:                   config.Repository,
+		lienRepo:               config.LienRepository,
+		posKeepingClient:       resilientPosKeepingClient,
+		finAcctClient:          resilientFinAcctClient,
+		partyClient:            resilientPartyClient,
+		logger:                 logger,
+		tracer:                 config.Tracer,
+		depositOrchestrator:    depositOrchestrator,
+		withdrawalOrchestrator: withdrawalOrchestrator,
 	}, nil
 }
 
@@ -339,7 +374,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 
 	// Save to database (context carries audit user info for created_by/updated_by fields)
 	if err := s.repo.Save(ctx, account); err != nil {
-		operationStatus = "save_failed"
+		operationStatus = opStatusSaveFailed
 		return nil, status.Errorf(codes.Internal, "failed to create account: %v", err)
 	}
 
@@ -439,16 +474,16 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	account, err := s.repo.FindByID(ctx, req.AccountId)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = "account_not_found"
+			operationStatus = opStatusAccountNotFound
 			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
 		}
-		operationStatus = "retrieve_failed"
+		operationStatus = opStatusRetrieveFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
 	// Validate currency matches account currency
 	if req.Amount.Amount.CurrencyCode != account.Balance().CurrencyCode() {
-		operationStatus = "currency_mismatch"
+		operationStatus = opStatusCurrencyMismatch
 		return nil, status.Errorf(codes.InvalidArgument,
 			"currency mismatch: expected %s, got %s",
 			account.Balance().CurrencyCode(), req.Amount.Amount.CurrencyCode)
@@ -457,7 +492,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// Convert amount from proto (MoneyAmount wraps google.type.Money)
 	// Validate overflow: Units*100 must not overflow int64
 	if req.Amount.Amount.Units > math.MaxInt64/100 || req.Amount.Amount.Units < math.MinInt64/100 {
-		operationStatus = "amount_overflow"
+		operationStatus = opStatusAmountOverflow
 		return nil, status.Errorf(codes.InvalidArgument,
 			"amount too large: units %d would overflow", req.Amount.Amount.Units)
 	}
@@ -489,12 +524,12 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// Validate amount is positive
 	amountCents, err := amount.ToMinorUnits()
 	if err != nil {
-		operationStatus = "amount_overflow"
+		operationStatus = opStatusAmountOverflow
 		return nil, status.Errorf(codes.InvalidArgument,
 			"deposit amount overflow: %v", err)
 	}
 	if amountCents <= 0 {
-		operationStatus = "invalid_amount"
+		operationStatus = opStatusInvalidAmount
 		return nil, status.Errorf(codes.InvalidArgument,
 			"deposit amount must be positive, got %d cents", amountCents)
 	}
@@ -518,7 +553,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 			"transaction_id", transactionID)
 
 		if err := s.repo.Save(ctx, account); err != nil {
-			operationStatus = "save_failed"
+			operationStatus = opStatusSaveFailed
 			return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
 		}
 
@@ -537,7 +572,7 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		// Orchestrate transaction with saga pattern using dedicated orchestrator
 		resp, err = s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID)
 		if err != nil {
-			operationStatus = "saga_failed"
+			operationStatus = opStatusSagaFailed
 			return nil, err
 		}
 
@@ -581,16 +616,455 @@ func (s *Service) RetrieveCurrentAccount(ctx context.Context, req *pb.RetrieveCu
 	account, err := s.repo.FindByID(ctx, req.AccountId)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = "account_not_found"
+			operationStatus = opStatusAccountNotFound
 			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
 		}
-		operationStatus = "retrieve_failed"
+		operationStatus = opStatusRetrieveFailed
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
 	return &pb.RetrieveCurrentAccountResponse{
 		Facility: toProtoFacility(account),
 	}, nil
+}
+
+// ExecuteWithdrawal processes a withdrawal transaction with Redis-based idempotency protection.
+//
+// This method supports two modes:
+//  1. Direct withdrawal: Provide account_id and amount for immediate execution
+//  2. Execute pending withdrawal: Provide withdrawal_id to execute a previously initiated withdrawal
+//
+// Concurrency: This method relies on optimistic locking in the repository layer
+// to handle concurrent modifications to the same account. If two requests attempt
+// to modify the same account simultaneously, one will succeed and the other will
+// receive ErrVersionConflict, which surfaces as an Internal error to the client.
+// Redis-based idempotency provides request deduplication for retried requests.
+func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdrawalRequest) (*pb.ExecuteWithdrawalResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("execute_withdrawal", operationStatus, time.Since(start))
+	}()
+
+	// Determine which account to use - either from withdrawal_id lookup or direct account_id
+	var accountID string
+	var reqAmount *commonpb.MoneyAmount
+
+	if req.WithdrawalId != "" {
+		// TODO: In a full implementation, we would look up the pending withdrawal
+		// and get the account_id and amount from there. For now, require direct execution.
+		operationStatus = "withdrawal_id_not_implemented"
+		return nil, status.Error(codes.Unimplemented, "executing pending withdrawals by withdrawal_id is not yet implemented; use direct withdrawal with account_id and amount")
+	}
+
+	// Direct withdrawal mode
+	if req.AccountId == "" {
+		operationStatus = opStatusMissingAccountID
+		return nil, status.Error(codes.InvalidArgument, "account_id is required for direct withdrawal")
+	}
+	if req.Amount == nil || req.Amount.Amount == nil {
+		operationStatus = opStatusMissingAmount
+		return nil, status.Error(codes.InvalidArgument, "amount is required for direct withdrawal")
+	}
+	accountID = req.AccountId
+	reqAmount = req.Amount
+
+	// Get idempotency key if provided
+	var idempotencyKey string
+	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
+		idempotencyKey = req.IdempotencyKey.Key
+	}
+
+	// Build idempotency key structure for Redis
+	var idempKey idempotency.Key
+	var idempotencyLockAcquired bool
+	if idempotencyKey != "" && s.idempotencyService != nil {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			s.logger.Debug("tenant not found in context for idempotency key",
+				"account_id", accountID)
+		}
+		idempKey = idempotency.Key{
+			TenantID:  string(tenantID),
+			Namespace: idempotencyNamespace,
+			Operation: "withdrawal",
+			EntityID:  accountID,
+			RequestID: idempotencyKey,
+		}
+
+		// Check Redis for existing result
+		result, err := s.idempotencyService.Check(ctx, idempKey)
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
+			var cachedResp pb.ExecuteWithdrawalResponse
+			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
+			if unmarshalErr == nil {
+				s.logger.Info("returning cached withdrawal response from Redis",
+					"account_id", accountID,
+					"transaction_id", cachedResp.TransactionId,
+					"idempotency_key", idempotencyKey)
+				operationStatus = opStatusIdempotent
+				return &cachedResp, nil
+			}
+			s.logger.Warn("failed to unmarshal cached idempotency result",
+				"error", unmarshalErr)
+		} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+			s.logger.Error("idempotency check failed", "error", err)
+			return nil, status.Error(codes.Internal, "failed to check idempotency")
+		}
+
+		// Mark operation as pending (distributed lock)
+		if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+				s.logger.Info("operation already in progress, please retry",
+					"idempotency_key", idempotencyKey)
+				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+			}
+			s.logger.Error("failed to mark operation pending", "error", err)
+			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
+		}
+		idempotencyLockAcquired = true
+
+		// Cleanup pending state on failure
+		defer func() {
+			if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
+				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+					s.logger.Warn("failed to cleanup pending idempotency state",
+						"error", delErr,
+						"idempotency_key", idempotencyKey)
+				}
+			}
+		}()
+	}
+
+	// Retrieve account (context carries organization for multi-tenant routing)
+	account, err := s.repo.FindByID(ctx, accountID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found: %s", accountID)
+		}
+		operationStatus = opStatusRetrieveFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	// Check account status - cannot withdraw from frozen or closed accounts
+	if account.Status() == domain.AccountStatusFrozen {
+		operationStatus = opStatusAccountFrozen
+		return nil, status.Errorf(codes.FailedPrecondition, "cannot withdraw from frozen account: %s", accountID)
+	}
+	if account.Status() == domain.AccountStatusClosed {
+		operationStatus = opStatusAccountClosed
+		return nil, status.Errorf(codes.FailedPrecondition, "cannot withdraw from closed account: %s", accountID)
+	}
+
+	// Validate currency matches account currency
+	if reqAmount.Amount.CurrencyCode != account.Balance().CurrencyCode() {
+		operationStatus = opStatusCurrencyMismatch
+		return nil, status.Errorf(codes.InvalidArgument,
+			"currency mismatch: expected %s, got %s",
+			account.Balance().CurrencyCode(), reqAmount.Amount.CurrencyCode)
+	}
+
+	// Convert amount from proto (MoneyAmount wraps google.type.Money)
+	// Validate overflow: Units*100 must not overflow int64
+	if reqAmount.Amount.Units > math.MaxInt64/100 || reqAmount.Amount.Units < math.MinInt64/100 {
+		operationStatus = opStatusAmountOverflow
+		return nil, status.Errorf(codes.InvalidArgument,
+			"amount too large: units %d would overflow", reqAmount.Amount.Units)
+	}
+
+	// Convert to cents preserving precision
+	unitsCents := reqAmount.Amount.Units * 100
+	// Round nanos to nearest cent (0.5 rounds up)
+	nanosCents := (reqAmount.Amount.Nanos + 5000000) / 10000000
+
+	// Use Money.Add to safely handle potential overflow from adding nanosCents
+	centsMoney, err := domain.NewMoney(reqAmount.Amount.CurrencyCode, unitsCents)
+	if err != nil {
+		operationStatus = operationStatusInvalidCurrency
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+	}
+
+	nanosMoney, err := domain.NewMoney(reqAmount.Amount.CurrencyCode, int64(nanosCents))
+	if err != nil {
+		operationStatus = operationStatusInvalidCurrency
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+	}
+
+	amount, err := centsMoney.Add(nanosMoney)
+	if err != nil {
+		operationStatus = operationStatusInvalidCurrency
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+	}
+
+	// Validate amount is positive
+	amountCents, err := amount.ToMinorUnits()
+	if err != nil {
+		operationStatus = opStatusAmountOverflow
+		return nil, status.Errorf(codes.InvalidArgument,
+			"withdrawal amount overflow: %v", err)
+	}
+	if amountCents <= 0 {
+		operationStatus = opStatusInvalidAmount
+		return nil, status.Errorf(codes.InvalidArgument,
+			"withdrawal amount must be positive, got %d cents", amountCents)
+	}
+
+	// Check sufficient available balance before attempting withdrawal
+	cmp, _ := amount.Compare(account.AvailableBalance())
+	if cmp > 0 {
+		operationStatus = opStatusInsufficientFunds
+		availCents, _ := account.AvailableBalance().ToMinorUnits()
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"insufficient funds: requested %d cents, available %d cents", amountCents, availCents)
+	}
+
+	// Execute withdrawal on domain model (returns new account, original unchanged)
+	account, err = account.Withdraw(amount)
+	if err != nil {
+		if errors.Is(err, domain.ErrInsufficientFunds) {
+			operationStatus = opStatusInsufficientFunds
+			return nil, status.Errorf(codes.FailedPrecondition, "insufficient funds for withdrawal")
+		}
+		if errors.Is(err, domain.ErrAccountFrozen) {
+			operationStatus = opStatusAccountFrozen
+			return nil, status.Errorf(codes.FailedPrecondition, "account is frozen")
+		}
+		if errors.Is(err, domain.ErrAccountClosed) {
+			operationStatus = opStatusAccountClosed
+			return nil, status.Errorf(codes.FailedPrecondition, "account is closed")
+		}
+		operationStatus = opStatusWithdrawalFailed
+		return nil, status.Errorf(codes.InvalidArgument, "withdrawal failed: %v", err)
+	}
+
+	// Generate transaction ID (full UUID required by position-keeping service)
+	transactionID := uuid.New().String()
+
+	var resp *pb.ExecuteWithdrawalResponse
+
+	// If clients are not configured, fall back to simple save (backward compatibility)
+	if s.posKeepingClient == nil || s.finAcctClient == nil {
+		s.logger.Info("executing withdrawal without transaction orchestration (clients not configured)",
+			"account_id", account.AccountID(),
+			"transaction_id", transactionID)
+
+		if err := s.repo.Save(ctx, account); err != nil {
+			operationStatus = opStatusSaveFailed
+			return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
+		}
+
+		// Record business metrics
+		caobservability.RecordWithdrawal(string(account.Balance().Currency()))
+		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
+
+		resp = &pb.ExecuteWithdrawalResponse{
+			AccountId:        account.AccountID(),
+			TransactionId:    transactionID,
+			NewBalance:       toMoneyAmount(account.Balance()),
+			AvailableBalance: toMoneyAmount(account.AvailableBalance()),
+			Status:           pb.WithdrawalStatus_WITHDRAWAL_STATUS_COMPLETED,
+			Timestamp:        timestamppb.Now(),
+		}
+	} else {
+		// Orchestrate transaction with saga pattern using dedicated orchestrator
+		resp, err = s.withdrawalOrchestrator.Orchestrate(ctx, account, amount, transactionID)
+		if err != nil {
+			operationStatus = opStatusSagaFailed
+			return nil, err
+		}
+
+		// Record business metrics on success
+		caobservability.RecordWithdrawal(string(account.Balance().Currency()))
+		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
+	}
+
+	// Store successful result in Redis for future idempotency checks
+	if idempotencyKey != "" && s.idempotencyService != nil {
+		responseData, marshalErr := proto.Marshal(resp)
+		if marshalErr == nil {
+			storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+				Key:         idempKey,
+				Status:      idempotency.StatusCompleted,
+				Data:        responseData,
+				CompletedAt: time.Now(),
+				TTL:         idempotencyResultTTL,
+			})
+			if storeErr != nil {
+				s.logger.Error("failed to store idempotency result", "error", storeErr)
+				// Continue - operation succeeded, caching is optimization
+			}
+		} else {
+			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
+		}
+	}
+
+	return resp, nil
+}
+
+// InitiateWithdrawal creates a pending withdrawal for validation before execution.
+// This implements a two-phase withdrawal pattern where the withdrawal is first validated
+// and created with INITIATED status, then can be executed later via ExecuteWithdrawal.
+func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdrawalRequest) (*pb.InitiateWithdrawalResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("initiate_withdrawal", operationStatus, time.Since(start))
+	}()
+
+	// Validate required fields
+	if req.AccountId == "" {
+		operationStatus = opStatusMissingAccountID
+		return nil, status.Error(codes.InvalidArgument, "account_id is required")
+	}
+	if req.Amount == nil || req.Amount.Amount == nil {
+		operationStatus = opStatusMissingAmount
+		return nil, status.Error(codes.InvalidArgument, "amount is required")
+	}
+
+	// Retrieve account to validate
+	account, err := s.repo.FindByID(ctx, req.AccountId)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+		}
+		operationStatus = opStatusRetrieveFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	var validationMessages []string
+
+	// Validate account status
+	if account.Status() == domain.AccountStatusFrozen {
+		operationStatus = opStatusAccountFrozen
+		return nil, status.Errorf(codes.FailedPrecondition, "cannot initiate withdrawal on frozen account: %s", req.AccountId)
+	}
+	if account.Status() == domain.AccountStatusClosed {
+		operationStatus = opStatusAccountClosed
+		return nil, status.Errorf(codes.FailedPrecondition, "cannot initiate withdrawal on closed account: %s", req.AccountId)
+	}
+
+	// Validate currency matches
+	if req.Amount.Amount.CurrencyCode != account.Balance().CurrencyCode() {
+		operationStatus = opStatusCurrencyMismatch
+		return nil, status.Errorf(codes.InvalidArgument,
+			"currency mismatch: expected %s, got %s",
+			account.Balance().CurrencyCode(), req.Amount.Amount.CurrencyCode)
+	}
+
+	// Convert and validate amount
+	unitsCents := req.Amount.Amount.Units * 100
+	nanosCents := (req.Amount.Amount.Nanos + 5000000) / 10000000
+	amountCents := unitsCents + int64(nanosCents)
+
+	if amountCents <= 0 {
+		operationStatus = opStatusInvalidAmount
+		return nil, status.Errorf(codes.InvalidArgument, "withdrawal amount must be positive")
+	}
+
+	// Check available balance (warning only - balance could change before execution)
+	availCents, _ := account.AvailableBalance().ToMinorUnits()
+	if amountCents > availCents {
+		validationMessages = append(validationMessages,
+			fmt.Sprintf("Warning: requested amount (%d cents) exceeds current available balance (%d cents)", amountCents, availCents))
+	}
+
+	// Generate withdrawal ID
+	withdrawalID := fmt.Sprintf("WTH-%s", uuid.New().String()[:8])
+	now := timestamppb.Now()
+
+	// Create withdrawal record
+	withdrawal := &pb.Withdrawal{
+		WithdrawalId: withdrawalID,
+		AccountId:    req.AccountId,
+		Amount:       req.Amount,
+		Status:       pb.WithdrawalStatus_WITHDRAWAL_STATUS_INITIATED,
+		Description:  req.Description,
+		Reference:    req.Reference,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	// TODO: Persist withdrawal to database
+	// For now, we return the withdrawal without persistence (in-memory only)
+	// A full implementation would save to a withdrawals table
+
+	s.logger.Info("withdrawal initiated",
+		"withdrawal_id", withdrawalID,
+		"account_id", req.AccountId,
+		"amount_cents", amountCents)
+
+	return &pb.InitiateWithdrawalResponse{
+		Withdrawal:         withdrawal,
+		ValidationPassed:   len(validationMessages) == 0,
+		ValidationMessages: validationMessages,
+	}, nil
+}
+
+// UpdateWithdrawal modifies a pending withdrawal before execution.
+// Only withdrawals with INITIATED status can be updated.
+func (s *Service) UpdateWithdrawal(_ context.Context, req *pb.UpdateWithdrawalRequest) (*pb.UpdateWithdrawalResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("update_withdrawal", operationStatus, time.Since(start))
+	}()
+
+	if req.WithdrawalId == "" {
+		operationStatus = opStatusMissingWithdrawalID
+		return nil, status.Error(codes.InvalidArgument, "withdrawal_id is required")
+	}
+
+	// TODO: Implement withdrawal lookup and update from database
+	// For now, return unimplemented as we don't have withdrawal persistence yet
+	operationStatus = opStatusNotImplemented
+	return nil, status.Error(codes.Unimplemented, "UpdateWithdrawal is not yet implemented - withdrawal persistence required")
+}
+
+// RetrieveWithdrawal gets withdrawal details by ID or lists withdrawals by account.
+// When withdrawal_id is provided, returns a single withdrawal.
+// When account_id is provided, returns a paginated list of withdrawals for that account.
+func (s *Service) RetrieveWithdrawal(ctx context.Context, req *pb.RetrieveWithdrawalRequest) (*pb.RetrieveWithdrawalResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("retrieve_withdrawal", operationStatus, time.Since(start))
+	}()
+
+	// Single withdrawal lookup
+	if req.WithdrawalId != "" {
+		// TODO: Implement withdrawal lookup from database
+		operationStatus = opStatusNotImplemented
+		return nil, status.Error(codes.Unimplemented, "RetrieveWithdrawal by withdrawal_id is not yet implemented - withdrawal persistence required")
+	}
+
+	// List withdrawals by account
+	if req.AccountId != "" {
+		// Validate account exists
+		_, err := s.repo.FindByID(ctx, req.AccountId)
+		if err != nil {
+			if errors.Is(err, persistence.ErrAccountNotFound) {
+				operationStatus = opStatusAccountNotFound
+				return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+			}
+			operationStatus = opStatusRetrieveFailed
+			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+		}
+
+		// TODO: Implement withdrawal listing from database
+		// For now, return empty list
+		return &pb.RetrieveWithdrawalResponse{
+			Withdrawals: []*pb.Withdrawal{},
+			Pagination: &commonpb.PaginationResponse{
+				NextPageToken: "",
+				TotalCount:    0,
+			},
+		}, nil
+	}
+
+	operationStatus = opStatusMissingIdentifier
+	return nil, status.Error(codes.InvalidArgument, "either withdrawal_id or account_id is required")
 }
 
 // Helper functions
