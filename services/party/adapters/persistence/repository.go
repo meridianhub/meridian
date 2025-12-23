@@ -523,7 +523,7 @@ func (r *Repository) FindDemographic(ctx context.Context, partyID uuid.UUID) (*P
 		return nil, err
 	}
 	if !found {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil,nil signals "not found" without error
 	}
 	return &demographic, nil
 }
@@ -653,7 +653,7 @@ func (r *Repository) FindBankRelation(ctx context.Context, partyID uuid.UUID) (*
 		return nil, err
 	}
 	if !found {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil,nil signals "not found" without error
 	}
 	return &bankRelation, nil
 }

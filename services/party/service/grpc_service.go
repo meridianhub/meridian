@@ -817,6 +817,8 @@ func (s *Service) RetrieveBankRelations(ctx context.Context, req *pb.RetrieveBan
 // protoToRelationshipType converts proto RelationshipType to domain string
 func protoToRelationshipType(rt pb.RelationshipType) string {
 	switch rt {
+	case pb.RelationshipType_RELATIONSHIP_TYPE_UNSPECIFIED:
+		return "UNSPECIFIED"
 	case pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE:
 		return string(domain.RelationshipTypeSpouse)
 	case pb.RelationshipType_RELATIONSHIP_TYPE_DEPENDENT:
