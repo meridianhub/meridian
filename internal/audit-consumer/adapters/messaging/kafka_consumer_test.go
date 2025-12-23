@@ -22,9 +22,9 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 
-	// Create audit_logs table
+	// Create audit_log table (singular, matching production schema)
 	err = db.Exec(`
-		CREATE TABLE audit_logs (
+		CREATE TABLE audit_log (
 			event_id TEXT PRIMARY KEY,
 			table_name TEXT NOT NULL,
 			operation TEXT NOT NULL,
@@ -190,7 +190,7 @@ func TestHandleAuditEvent(t *testing.T) {
 			wantErr:  false,
 			validateRow: func(t *testing.T, db *gorm.DB) {
 				var count int64
-				err := db.Table("audit_logs").Where("event_id = ?", "evt_123").Count(&count).Error
+				err := db.Table("audit_log").Where("event_id = ?", "evt_123").Count(&count).Error
 				require.NoError(t, err)
 				assert.Equal(t, int64(1), count)
 
@@ -205,7 +205,7 @@ func TestHandleAuditEvent(t *testing.T) {
 					SchemaName string
 					ChangedBy  string
 				}
-				err = db.Table("audit_logs").
+				err = db.Table("audit_log").
 					Select("table_name, operation, record_id, old_values, new_values, tenant_id, schema_name, changed_by").
 					Where("event_id = ?", "evt_123").
 					Scan(&result).Error
@@ -239,7 +239,7 @@ func TestHandleAuditEvent(t *testing.T) {
 					OldValues string
 					NewValues string
 				}
-				err := db.Table("audit_logs").
+				err := db.Table("audit_log").
 					Select("operation, old_values, new_values").
 					Where("event_id = ?", "evt_124").
 					Scan(&result).Error
@@ -267,7 +267,7 @@ func TestHandleAuditEvent(t *testing.T) {
 					Operation string
 					NewValues string
 				}
-				err := db.Table("audit_logs").
+				err := db.Table("audit_log").
 					Select("operation, new_values").
 					Where("event_id = ?", "evt_125").
 					Scan(&result).Error
@@ -292,7 +292,7 @@ func TestHandleAuditEvent(t *testing.T) {
 				var result struct {
 					CreatedAt time.Time
 				}
-				err := db.Table("audit_logs").
+				err := db.Table("audit_log").
 					Select("created_at").
 					Where("event_id = ?", "evt_126").
 					Scan(&result).Error

@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -90,18 +89,22 @@ func createServer(port string) *http.Server {
 }
 
 func main() {
-	log.Printf("audit-consumer v%s (commit: %s, built: %s)", Version, Commit, BuildDate)
-
-	// Setup logger
+	// Setup logger early so we can use it throughout
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
 
+	logger.Info("audit-consumer starting",
+		"version", Version,
+		"commit", Commit,
+		"built", BuildDate)
+
 	// Load configuration from environment
 	config, err := app.LoadConfig()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		logger.Error("failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
 	logger.Info("configuration loaded",
@@ -114,12 +117,14 @@ func main() {
 	ctx := context.Background()
 	container, err := app.NewContainer(ctx, config, logger)
 	if err != nil {
-		log.Fatalf("Failed to initialize container: %v", err)
+		logger.Error("failed to initialize container", "error", err)
+		os.Exit(1)
 	}
 
 	// Start audit consumer
 	if err := container.AuditConsumer.Start(config.Kafka.Topic); err != nil {
-		log.Fatalf("Failed to start audit consumer: %v", err)
+		logger.Error("failed to start audit consumer", "error", err)
+		os.Exit(1)
 	}
 	logger.Info("audit consumer started", "topic", config.Kafka.Topic)
 
@@ -135,7 +140,8 @@ func main() {
 	go func() {
 		logger.Info("starting HTTP server", "port", config.Service.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Failed to start server: %v", err)
+			logger.Error("failed to start HTTP server", "error", err)
+			os.Exit(1)
 		}
 	}()
 

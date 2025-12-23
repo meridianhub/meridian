@@ -60,10 +60,16 @@ func NewTenantAuditWriter(db *gorm.DB) (*TenantAuditWriter, error) {
 //   - event: The AuditEvent protobuf message containing the audit data
 //
 // Returns an error if:
+//   - context is already cancelled
 //   - tenant_id is missing from context
 //   - operation type is invalid
 //   - database write fails (excluding duplicate key constraint violations)
 func (w *TenantAuditWriter) WriteAuditEvent(ctx context.Context, event *auditv1.AuditEvent) error {
+	// Check if context is already cancelled before expensive operations
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before write: %w", err)
+	}
+
 	// Extract tenant ID from context (already injected by Kafka consumer from x-tenant-id header)
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {

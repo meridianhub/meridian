@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"math"
 	"sync"
@@ -40,6 +39,20 @@ var (
 
 // AuditConsumer consumes AuditEvent messages from a single Kafka topic and writes them
 // to the tenant-scoped audit_log table. Each deployment processes events for one service.
+//
+// Architecture Note - Write Path:
+// This consumer uses a SINGLE write path via handleAuditEvent() which directly writes to
+// the database using GORM. The audit logic is inline in this file for simplicity and
+// performance (avoiding extra layers for a straightforward operation).
+//
+// The TenantAuditWriter in adapters/persistence exists as an ALTERNATIVE adapter
+// implementation that demonstrates the full hexagonal architecture pattern with
+// search_path-based tenant isolation. It's currently unused in the main flow but
+// kept for reference and potential future use in multi-tenant deployments requiring
+// stronger schema isolation.
+//
+// Current production path: Kafka → handleAuditEvent() → Direct DB write (tenant_id column)
+// Alternative path: Kafka → TenantAuditWriter → DB write (search_path schema isolation)
 type AuditConsumer struct {
 	consumer    *kafka.ProtoConsumer
 	db          *gorm.DB
@@ -227,9 +240,9 @@ func (c *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Aud
 		return err
 	}
 
-	// Write to audit_logs table (tenant-scoped via tenant_id column)
+	// Write to audit_log table (tenant-scoped via tenant_id column)
 	// Use ON CONFLICT DO NOTHING for idempotency (event_id is unique)
-	result := c.db.WithContext(ctx).Table("audit_logs").Clauses(clause.OnConflict{
+	result := c.db.WithContext(ctx).Table("audit_log").Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "event_id"}},
 		DoNothing: true,
 	}).Create(auditLog)
@@ -266,7 +279,7 @@ func (c *AuditConsumer) Start(topic string) error {
 		return ErrEmptyTopic
 	}
 
-	log.Printf("INFO: Starting audit consumer for topic: %s", topic)
+	slog.Info("starting audit consumer", "topic", topic)
 	if err := c.consumer.Subscribe([]string{topic}); err != nil {
 		return fmt.Errorf("failed to subscribe to topic %s: %w", topic, err)
 	}
@@ -282,7 +295,7 @@ func (c *AuditConsumer) Start(topic string) error {
 // Stop gracefully stops the consumer.
 // Waits for in-flight messages to complete before shutting down.
 func (c *AuditConsumer) Stop() {
-	log.Printf("INFO: Stopping audit consumer...")
+	slog.Info("stopping audit consumer")
 	c.mu.Lock()
 	c.running = false
 	c.mu.Unlock()
@@ -290,7 +303,7 @@ func (c *AuditConsumer) Stop() {
 	if c.consumer != nil {
 		c.consumer.Stop()
 	}
-	log.Printf("INFO: Audit consumer stopped")
+	slog.Info("audit consumer stopped")
 }
 
 // IsRunning returns true if the consumer is currently running.
