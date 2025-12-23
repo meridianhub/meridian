@@ -52,7 +52,7 @@ type EventOutbox struct {
 	EventType     string     `gorm:"size:200;not null;index" json:"event_type"`
 	AggregateID   string     `gorm:"size:100;not null;index" json:"aggregate_id"`
 	AggregateType string     `gorm:"size:100;not null;index" json:"aggregate_type"`
-	EventPayload  []byte     `gorm:"type:blob;not null" json:"event_payload"` // Serialized protobuf
+	EventPayload  []byte     `gorm:"type:bytea;not null" json:"event_payload"` // Serialized protobuf
 	CorrelationID string     `gorm:"size:100;index" json:"correlation_id,omitempty"`
 	CausationID   string     `gorm:"size:100" json:"causation_id,omitempty"`
 	Status        string     `gorm:"size:20;not null;index" json:"status"`

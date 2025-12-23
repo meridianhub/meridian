@@ -40,17 +40,22 @@ func newMockKafkaPublisher() *mockKafkaPublisher {
 
 func (m *mockKafkaPublisher) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.produceError != nil {
+		m.mu.Unlock()
 		return m.produceError
 	}
 
 	m.messages = append(m.messages, msg)
 
+	// Capture values under lock to avoid race conditions
+	deliveryTimeout := m.deliveryTimeout
+	deliveryError := m.deliveryError
+	m.mu.Unlock()
+
 	// Simulate async delivery
 	go func() {
-		if m.deliveryTimeout {
+		if deliveryTimeout {
 			// Don't send anything - simulate timeout
 			return
 		}
@@ -61,8 +66,8 @@ func (m *mockKafkaPublisher) Produce(msg *kafka.Message, deliveryChan chan kafka
 			Value:          msg.Value,
 		}
 
-		if m.deliveryError != nil {
-			deliveryMsg.TopicPartition.Error = m.deliveryError
+		if deliveryError != nil {
+			deliveryMsg.TopicPartition.Error = deliveryError
 		}
 
 		deliveryChan <- deliveryMsg
