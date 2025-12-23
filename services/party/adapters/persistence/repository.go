@@ -358,6 +358,7 @@ func toDomain(entity *PartyEntity) *domain.Party {
 		externalRefType = domain.ExternalReferenceType(*entity.ExternalReferenceType)
 	}
 
+	// BQ data is loaded separately, so we pass empty values here
 	return domain.ReconstructParty(
 		entity.ID,
 		domain.PartyType(entity.PartyType),
@@ -366,6 +367,10 @@ func toDomain(entity *PartyEntity) *domain.Party {
 		domain.PartyStatus(entity.Status),
 		externalRef,
 		externalRefType,
+		[]domain.PartyAssociation{},
+		domain.DemographicData{},
+		domain.ReferenceData{},
+		domain.BankRelationship{},
 		entity.CreatedAt,
 		entity.UpdatedAt,
 		entity.Version,
@@ -386,4 +391,214 @@ func isDuplicateKeyError(err error) bool {
 		strings.Contains(errStr, "23505") ||
 		strings.Contains(errStr, "duplicate key") ||
 		strings.Contains(errStr, "unique constraint")
+}
+
+// SaveAssociation saves a party association
+func (r *Repository) SaveAssociation(ctx context.Context, partyID, relatedPartyID uuid.UUID, relationshipType string) (uuid.UUID, error) {
+	associationID := uuid.New()
+	entity := &PartyAssociationEntity{
+		ID:               associationID,
+		PartyID:          partyID,
+		RelatedPartyID:   relatedPartyID,
+		RelationshipType: relationshipType,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Create(entity).Error
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return associationID, nil
+}
+
+// FindAssociations retrieves all associations for a party
+func (r *Repository) FindAssociations(ctx context.Context, partyID uuid.UUID) ([]PartyAssociationEntity, error) {
+	var associations []PartyAssociationEntity
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Where("party_id = ?", partyID).Find(&associations).Error
+	})
+	return associations, err
+}
+
+// UpdateAssociation updates an association's relationship type
+func (r *Repository) UpdateAssociation(ctx context.Context, associationID uuid.UUID, relationshipType string) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Model(&PartyAssociationEntity{}).
+			Where("id = ?", associationID).
+			Updates(map[string]interface{}{
+				"relationship_type": relationshipType,
+				"updated_at":        time.Now(),
+			}).Error
+	})
+}
+
+// CheckCircularAssociation checks if adding this association would create a circular reference
+func (r *Repository) CheckCircularAssociation(ctx context.Context, partyID, relatedPartyID uuid.UUID) (bool, error) {
+	// Simple check: verify they're not the same and no direct reverse relationship exists
+	if partyID == relatedPartyID {
+		return true, nil
+	}
+
+	var count int64
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Check if reverse relationship exists
+		return tx.Model(&PartyAssociationEntity{}).
+			Where("party_id = ? AND related_party_id = ?", relatedPartyID, partyID).
+			Count(&count).Error
+	})
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// SaveDemographic saves or updates demographic data for a party
+func (r *Repository) SaveDemographic(ctx context.Context, partyID uuid.UUID, socioEconomicData, employmentHistory string) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Check if exists
+		var existing PartyDemographicEntity
+		result := tx.Where("party_id = ?", partyID).First(&existing)
+
+		socioEcon := &socioEconomicData
+		empHistory := &employmentHistory
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			// Create new
+			entity := &PartyDemographicEntity{
+				ID:                uuid.New(),
+				PartyID:           partyID,
+				SocioEconomicData: socioEcon,
+				EmploymentHistory: empHistory,
+				UpdatedAt:         time.Now(),
+			}
+			return tx.Create(entity).Error
+		}
+
+		// Update existing
+		return tx.Model(&PartyDemographicEntity{}).
+			Where("party_id = ?", partyID).
+			Updates(map[string]interface{}{
+				"socio_economic_data": socioEcon,
+				"employment_history":  empHistory,
+				"updated_at":          time.Now(),
+			}).Error
+	})
+}
+
+// FindDemographic retrieves demographic data for a party
+func (r *Repository) FindDemographic(ctx context.Context, partyID uuid.UUID) (*PartyDemographicEntity, error) {
+	var demographic PartyDemographicEntity
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		result := tx.Where("party_id = ?", partyID).First(&demographic)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil // Not an error, just no demographic data
+		}
+		return result.Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &demographic, nil
+}
+
+// SaveReference saves party reference data
+func (r *Repository) SaveReference(ctx context.Context, partyID uuid.UUID, refType, refValue, issuingAuthority, expiryDate string) error {
+	entity := &PartyReferenceEntity{
+		ID:             uuid.New(),
+		PartyID:        partyID,
+		ReferenceType:  refType,
+		ReferenceValue: refValue,
+		CreatedAt:      time.Now(),
+	}
+
+	if issuingAuthority != "" {
+		entity.IssuingAuthority = &issuingAuthority
+	}
+	if expiryDate != "" {
+		parsedDate, err := time.Parse("2006-01-02", expiryDate)
+		if err == nil {
+			entity.ExpiryDate = &parsedDate
+		}
+	}
+
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Create(entity).Error
+	})
+}
+
+// FindReferences retrieves all references for a party
+func (r *Repository) FindReferences(ctx context.Context, partyID uuid.UUID) ([]PartyReferenceEntity, error) {
+	var references []PartyReferenceEntity
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Where("party_id = ?", partyID).Find(&references).Error
+	})
+	return references, err
+}
+
+// SaveBankRelation saves or updates bank relationship data
+func (r *Repository) SaveBankRelation(ctx context.Context, partyID uuid.UUID, accountOfficerID, relationshipManagerID, assignedBranch string) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Check if exists
+		var existing PartyBankRelationEntity
+		result := tx.Where("party_id = ?", partyID).First(&existing)
+
+		var aoID, rmID *uuid.UUID
+		if accountOfficerID != "" {
+			if parsed, err := uuid.Parse(accountOfficerID); err == nil {
+				aoID = &parsed
+			}
+		}
+		if relationshipManagerID != "" {
+			if parsed, err := uuid.Parse(relationshipManagerID); err == nil {
+				rmID = &parsed
+			}
+		}
+
+		var branch *string
+		if assignedBranch != "" {
+			branch = &assignedBranch
+		}
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			// Create new
+			entity := &PartyBankRelationEntity{
+				ID:                    uuid.New(),
+				PartyID:               partyID,
+				AccountOfficerID:      aoID,
+				RelationshipManagerID: rmID,
+				AssignedBranch:        branch,
+				UpdatedAt:             time.Now(),
+			}
+			return tx.Create(entity).Error
+		}
+
+		// Update existing
+		return tx.Model(&PartyBankRelationEntity{}).
+			Where("party_id = ?", partyID).
+			Updates(map[string]interface{}{
+				"account_officer_id":      aoID,
+				"relationship_manager_id": rmID,
+				"assigned_branch":         branch,
+				"updated_at":              time.Now(),
+			}).Error
+	})
+}
+
+// FindBankRelation retrieves bank relationship data for a party
+func (r *Repository) FindBankRelation(ctx context.Context, partyID uuid.UUID) (*PartyBankRelationEntity, error) {
+	var bankRelation PartyBankRelationEntity
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		result := tx.Where("party_id = ?", partyID).First(&bankRelation)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil // Not an error, just no bank relation data
+		}
+		return result.Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &bankRelation, nil
 }
