@@ -126,6 +126,94 @@ func (r *PgxOutboxRepository) FetchUnprocessed(ctx context.Context, serviceName 
 	return entries, nil
 }
 
+// FetchAndLockForProcessing atomically fetches pending entries and marks them as processing
+// using SELECT FOR UPDATE SKIP LOCKED. This prevents race conditions in multi-worker deployments.
+func (r *PgxOutboxRepository) FetchAndLockForProcessing(ctx context.Context, serviceName string, limit int) ([]EventOutbox, error) {
+	var entries []EventOutbox
+
+	// Use a transaction with FOR UPDATE SKIP LOCKED to atomically:
+	// 1. Select pending entries (skipping any already locked by other workers)
+	// 2. Update their status to 'processing'
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Raw SQL with FOR UPDATE SKIP LOCKED for proper locking
+	selectQuery := `
+		SELECT id, event_type, aggregate_id, aggregate_type, event_payload,
+			correlation_id, causation_id, status, topic, partition_key,
+			created_at, processed_at, retry_count, last_error, service_name
+		FROM event_outbox
+		WHERE status = $1 AND service_name = $2
+		ORDER BY created_at ASC
+		LIMIT $3
+		FOR UPDATE SKIP LOCKED`
+
+	rows, err := tx.Query(ctx, selectQuery, StatusPending, serviceName, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch entries: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var entry EventOutbox
+		var correlationID, causationID, partitionKey, lastError *string
+		var processedAt *time.Time
+
+		scanErr := rows.Scan(
+			&entry.ID, &entry.EventType, &entry.AggregateID, &entry.AggregateType, &entry.EventPayload,
+			&correlationID, &causationID, &entry.Status, &entry.Topic, &partitionKey,
+			&entry.CreatedAt, &processedAt, &entry.RetryCount, &lastError, &entry.ServiceName,
+		)
+		if scanErr != nil {
+			return nil, fmt.Errorf("failed to scan outbox entry: %w", scanErr)
+		}
+
+		if correlationID != nil {
+			entry.CorrelationID = *correlationID
+		}
+		if causationID != nil {
+			entry.CausationID = *causationID
+		}
+		if partitionKey != nil {
+			entry.PartitionKey = *partitionKey
+		}
+		if lastError != nil {
+			entry.LastError = lastError
+		}
+		if processedAt != nil {
+			entry.ProcessedAt = processedAt
+		}
+
+		entries = append(entries, entry)
+		ids = append(ids, entry.ID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating outbox entries: %w", err)
+	}
+
+	if len(entries) == 0 {
+		return entries, nil
+	}
+
+	// Update status to processing
+	updateQuery := `UPDATE event_outbox SET status = $1 WHERE id = ANY($2)`
+	_, err = tx.Exec(ctx, updateQuery, StatusProcessing, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mark entries as processing: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return entries, nil
+}
+
 // MarkProcessing atomically updates entries to 'processing' status.
 func (r *PgxOutboxRepository) MarkProcessing(ctx context.Context, ids []uuid.UUID) (int64, error) {
 	if len(ids) == 0 {
@@ -206,6 +294,12 @@ func (r *PgxOutboxRepository) GetPendingCount(ctx context.Context, serviceName s
 }
 
 // ResetStuckEntries resets entries stuck in 'processing' state for too long.
+//
+// NOTE: This uses created_at as an approximation since we don't track when entries
+// entered the 'processing' state. This means very old entries that are legitimately
+// being processed (unlikely but possible) might get reset. Use a conservative threshold
+// (e.g., 5+ minutes) to minimize this risk. In practice, events should be processed
+// within seconds, so the 5-minute default is safe.
 func (r *PgxOutboxRepository) ResetStuckEntries(ctx context.Context, serviceName string, olderThan time.Duration) (int64, error) {
 	threshold := time.Now().Add(-olderThan)
 
@@ -253,6 +347,12 @@ func (p *PgxOutboxPublisher) Publish(
 	}
 	if config.Topic == "" {
 		return ErrEmptyTopic
+	}
+	if config.AggregateID == "" {
+		return ErrEmptyAggregateID
+	}
+	if config.AggregateType == "" {
+		return ErrEmptyAggregateType
 	}
 
 	// Serialize the protobuf event

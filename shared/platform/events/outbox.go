@@ -42,6 +42,12 @@ var (
 
 	// ErrEmptyTopic is returned when an empty topic is provided.
 	ErrEmptyTopic = errors.New("topic cannot be empty")
+
+	// ErrEmptyAggregateID is returned when an empty aggregate ID is provided.
+	ErrEmptyAggregateID = errors.New("aggregate ID cannot be empty")
+
+	// ErrEmptyAggregateType is returned when an empty aggregate type is provided.
+	ErrEmptyAggregateType = errors.New("aggregate type cannot be empty")
 )
 
 // EventOutbox represents an event waiting to be published to Kafka.
@@ -104,6 +110,9 @@ type OutboxRepository interface {
 	// ResetStuckEntries resets entries stuck in 'processing' state for too long.
 	ResetStuckEntries(ctx context.Context, serviceName string, olderThan time.Duration) (int64, error)
 }
+
+// Compile-time interface verification
+var _ OutboxRepository = (*PostgresOutboxRepository)(nil)
 
 // PostgresOutboxRepository implements OutboxRepository using PostgreSQL via GORM.
 type PostgresOutboxRepository struct {
@@ -271,6 +280,12 @@ func (r *PostgresOutboxRepository) GetPendingCount(ctx context.Context, serviceN
 }
 
 // ResetStuckEntries resets entries stuck in 'processing' state for too long.
+//
+// NOTE: This uses created_at as an approximation since we don't track when entries
+// entered the 'processing' state. This means very old entries that are legitimately
+// being processed (unlikely but possible) might get reset. Use a conservative threshold
+// (e.g., 5+ minutes) to minimize this risk. In practice, events should be processed
+// within seconds, so the 5-minute default is safe.
 func (r *PostgresOutboxRepository) ResetStuckEntries(ctx context.Context, serviceName string, olderThan time.Duration) (int64, error) {
 	threshold := time.Now().Add(-olderThan)
 

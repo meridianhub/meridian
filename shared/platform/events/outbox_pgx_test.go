@@ -238,6 +238,8 @@ func TestEventOutboxErrors(t *testing.T) {
 	assert.True(t, errors.Is(ErrInvalidEventType, ErrInvalidEventType))
 	assert.True(t, errors.Is(ErrNilEvent, ErrNilEvent))
 	assert.True(t, errors.Is(ErrEmptyTopic, ErrEmptyTopic))
+	assert.True(t, errors.Is(ErrEmptyAggregateID, ErrEmptyAggregateID))
+	assert.True(t, errors.Is(ErrEmptyAggregateType, ErrEmptyAggregateType))
 
 	// Error messages should be descriptive
 	assert.Contains(t, ErrOutboxEntryNotFound.Error(), "not found")
@@ -245,6 +247,8 @@ func TestEventOutboxErrors(t *testing.T) {
 	assert.Contains(t, ErrInvalidEventType.Error(), "invalid")
 	assert.Contains(t, ErrNilEvent.Error(), "nil")
 	assert.Contains(t, ErrEmptyTopic.Error(), "empty")
+	assert.Contains(t, ErrEmptyAggregateID.Error(), "aggregate ID")
+	assert.Contains(t, ErrEmptyAggregateType.Error(), "aggregate type")
 }
 
 // TestEventOutbox_TableName verifies the table name for database operations.

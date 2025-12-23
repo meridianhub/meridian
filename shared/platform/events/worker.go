@@ -289,7 +289,10 @@ func (w *Worker) processEntry(ctx context.Context, entry *EventOutbox) error {
 				"error", markErr)
 		}
 
-		// Check if retries exhausted
+		// Check if retries exhausted.
+		// NOTE: entry.RetryCount is the in-memory value before MarkFailed's atomic increment.
+		// This is intentional - we use +1 to predict the new count for logging purposes.
+		// The actual DB count is authoritative and was atomically incremented in MarkFailed.
 		if entry.RetryCount+1 >= w.config.MaxRetries {
 			RecordDLQEntry(w.config.ServiceName, entry.EventType)
 			w.logger.Error("event moved to DLQ (retries exhausted)",

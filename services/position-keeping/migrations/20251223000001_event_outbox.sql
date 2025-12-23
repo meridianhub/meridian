@@ -27,9 +27,9 @@ CREATE TABLE IF NOT EXISTS event_outbox (
     partition_key VARCHAR(200),
 
     -- Timestamps and retry tracking
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    processed_at TIMESTAMPTZ,
-    retry_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP WITH TIME ZONE,
+    retry_count INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
 
     -- Service identifier for multi-tenant outbox tables

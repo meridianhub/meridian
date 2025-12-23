@@ -89,6 +89,12 @@ func (p *OutboxPublisher) Publish(
 	if config.Topic == "" {
 		return ErrEmptyTopic
 	}
+	if config.AggregateID == "" {
+		return ErrEmptyAggregateID
+	}
+	if config.AggregateType == "" {
+		return ErrEmptyAggregateType
+	}
 
 	// Serialize the protobuf event
 	payload, err := proto.Marshal(event)
