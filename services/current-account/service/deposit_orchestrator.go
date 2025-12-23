@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -159,11 +158,9 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 			"error", result.Error)
 
 		// Check if failure was due to suspended/terminated service (FailedPrecondition)
-		// Only return maintenance message for genuinely maintenance-related conditions
+		// Use structured error details instead of fragile string matching
 		if st, ok := status.FromError(result.Error); ok && st.Code() == codes.FailedPrecondition {
-			errMsg := st.Message()
-			// Check for suspended/terminated conditions which indicate system maintenance
-			if strings.Contains(errMsg, "is suspended") || strings.Contains(errMsg, "is terminated") {
+			if isMaintenanceError(st) {
 				return nil, status.Error(codes.Unavailable,
 					"Transaction unavailable due to system maintenance. Please try again later.")
 			}
@@ -663,4 +660,24 @@ func (o *DepositOrchestrator) addSaveAccountStep(
 			return nil
 		},
 	)
+}
+
+// isMaintenanceError checks if the gRPC status contains error details indicating
+// a suspended or terminated resource. This replaces fragile string matching with
+// structured error inspection using the commonv1.Error details.
+//
+// The function inspects the error details for commonv1.Error messages with
+// ERROR_CODE_RESOURCE_SUSPENDED or ERROR_CODE_RESOURCE_TERMINATED codes.
+func isMaintenanceError(st *status.Status) bool {
+	for _, detail := range st.Details() {
+		if errDetail, ok := detail.(*commonpb.Error); ok {
+			//nolint:exhaustive // Only checking for maintenance-related error codes
+			switch errDetail.Code {
+			case commonpb.ErrorCode_ERROR_CODE_RESOURCE_SUSPENDED,
+				commonpb.ErrorCode_ERROR_CODE_RESOURCE_TERMINATED:
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -232,9 +232,14 @@ func (s *PositionKeepingService) ControlFinancialPositionLog(
 	}
 
 	// Validate operator_id
+	// Design Decision: operator_id defaults to "system" when empty to maintain backward
+	// compatibility with existing clients and to support system-initiated control actions
+	// (e.g., automated lifecycle management, scheduled suspensions). The domain layer
+	// validates ErrEmptyOperatorID, but this defaulting occurs before domain validation
+	// to handle the common case of system-initiated operations gracefully.
 	operatorID := req.GetOperatorId()
 	if operatorID == "" {
-		operatorID = "system" // Default to system if not provided
+		operatorID = "system"
 	}
 
 	// Retrieve position log from repository

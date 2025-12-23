@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -219,14 +220,16 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 
 	// Block postings to suspended booking logs
 	if bookingLog.IsSuspended() {
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"booking log %s is suspended, cannot accept postings", bookingLogID)
+		return nil, newMaintenanceError(codes.FailedPrecondition,
+			commonv1.ErrorCode_ERROR_CODE_RESOURCE_SUSPENDED,
+			fmt.Sprintf("booking log %s is suspended, cannot accept postings", bookingLogID))
 	}
 
 	// Block postings to terminated booking logs
 	if bookingLog.IsTerminated() {
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"booking log %s is terminated, cannot accept postings", bookingLogID)
+		return nil, newMaintenanceError(codes.FailedPrecondition,
+			commonv1.ErrorCode_ERROR_CODE_RESOURCE_TERMINATED,
+			fmt.Sprintf("booking log %s is terminated, cannot accept postings", bookingLogID))
 	}
 
 	// Parse and validate posting amount
@@ -1280,9 +1283,14 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 	}
 
 	// Validate operator_id
+	// Design Decision: operator_id defaults to "system" when empty to maintain backward
+	// compatibility with existing clients and to support system-initiated control actions
+	// (e.g., automated lifecycle management, scheduled suspensions). The domain layer
+	// validates ErrEmptyOperatorID, but this defaulting occurs before domain validation
+	// to handle the common case of system-initiated operations gracefully.
 	operatorID := req.GetOperatorId()
 	if operatorID == "" {
-		operatorID = "system" // Default to system if not provided
+		operatorID = "system"
 	}
 
 	// Retrieve booking log from repository
@@ -1329,16 +1337,17 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 
 	// Emit BookingLogStatusChangedEvent to Kafka
 	event := &eventsv1.BookingLogStatusChangedEvent{
-		BookingLogId:   updatedLog.ID.String(),
-		PreviousStatus: previousStatus.String(),
-		NewStatus:      updatedLog.Status.String(),
-		ControlAction:  domainAction.String(),
-		Reason:         req.GetReason(),
-		OperatorId:     operatorID,
-		CorrelationId:  logID.String(), // Use log ID as correlation ID
-		CausationId:    logID.String(),
-		Timestamp:      timestamppb.Now(),
-		Version:        1,
+		BookingLogId:          updatedLog.ID.String(),
+		BusinessUnitReference: updatedLog.BusinessUnitReference,
+		PreviousStatus:        previousStatus.String(),
+		NewStatus:             updatedLog.Status.String(),
+		ControlAction:         domainAction.String(),
+		Reason:                req.GetReason(),
+		OperatorId:            operatorID,
+		CorrelationId:         logID.String(), // Use log ID as correlation ID
+		CausationId:           logID.String(),
+		Timestamp:             timestamppb.Now(),
+		Version:               1,
 	}
 	if err := s.eventPublisher.Publish(ctx, event); err != nil {
 		slog.Error("failed to publish BookingLogStatusChangedEvent",
@@ -1416,4 +1425,49 @@ func isValidBookingLogTransition(from, to domain.TransactionStatus) bool {
 		return false
 	}
 	return false
+}
+
+// newMaintenanceError creates a gRPC error with structured error details for maintenance conditions.
+// The error includes a commonv1.Error in the status details, allowing callers to inspect the
+// error code programmatically without parsing error messages.
+//
+// Usage example (caller side):
+//
+//	st, ok := status.FromError(err)
+//	if ok {
+//	    for _, detail := range st.Details() {
+//	        if errDetail, ok := detail.(*commonv1.Error); ok {
+//	            switch errDetail.Code {
+//	            case commonv1.ErrorCode_ERROR_CODE_RESOURCE_SUSPENDED:
+//	                // Handle suspended resource
+//	            case commonv1.ErrorCode_ERROR_CODE_RESOURCE_TERMINATED:
+//	                // Handle terminated resource
+//	            }
+//	        }
+//	    }
+//	}
+func newMaintenanceError(grpcCode codes.Code, errorCode commonv1.ErrorCode, message string) error {
+	st := status.New(grpcCode, message)
+	errDetail := &commonv1.Error{
+		Code:    errorCode,
+		Message: message,
+		RetryInfo: &commonv1.RetryInfo{
+			Retryable:         errorCode == commonv1.ErrorCode_ERROR_CODE_RESOURCE_SUSPENDED,
+			RetryDelaySeconds: 30, // Suggest retry after 30 seconds for suspended resources
+		},
+	}
+
+	anyDetail, err := anypb.New(errDetail)
+	if err != nil {
+		// Fall back to basic error if we can't create the detail
+		return st.Err()
+	}
+
+	stWithDetails, err := st.WithDetails(anyDetail)
+	if err != nil {
+		// Fall back to basic error if we can't attach details
+		return st.Err()
+	}
+
+	return stWithDetails.Err()
 }

@@ -69,6 +69,12 @@ enum ErrorCode {
   ERROR_CODE_BEHAVIOR_QUALIFIER_INVALID = 3001;
   // ERROR_CODE_SERVICE_DOMAIN_UNAVAILABLE means the BIAN service domain is unavailable.
   ERROR_CODE_SERVICE_DOMAIN_UNAVAILABLE = 3002;
+
+  // Control operation errors (4000-4999)
+  // ERROR_CODE_RESOURCE_SUSPENDED means the resource (log, account) is temporarily suspended.
+  ERROR_CODE_RESOURCE_SUSPENDED = 4000;
+  // ERROR_CODE_RESOURCE_TERMINATED means the resource has been permanently terminated.
+  ERROR_CODE_RESOURCE_TERMINATED = 4001;
 }
 
 // Error represents a structured error response.
