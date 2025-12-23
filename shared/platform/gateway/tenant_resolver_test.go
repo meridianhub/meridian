@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
@@ -530,5 +532,316 @@ func TestResolveTenant(t *testing.T) {
 		// Verify cache was called
 		mockCache.AssertExpectations(t)
 		mockRepo.AssertNotCalled(t, "GetBySlug")
+	})
+}
+
+// TestServeHTTP tests the complete middleware integration including
+// slug extraction, tenant resolution, header injection, and context propagation.
+func TestServeHTTP(t *testing.T) {
+	ctx := context.Background()
+	baseDomain := "api.meridian.io"
+	testSlug := "acme"
+	testHost := "acme.api.meridian.io"
+	testTenantID := tenant.MustNewTenantID("tenant_123")
+	testTenant := &domain.Tenant{
+		ID:          testTenantID,
+		DisplayName: "Acme Corp",
+		Slug:        testSlug,
+		Status:      domain.StatusActive,
+	}
+
+	t.Run("valid subdomain returns 200 with x-tenant-id header set", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache hit
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		// Create test request
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		// Track if next handler was called
+		nextCalled := false
+		var capturedTenantID tenant.TenantID
+		var capturedTenantOk bool
+		var capturedHeaderValue string
+
+		next := func(w http.ResponseWriter, r *http.Request) {
+			nextCalled = true
+			capturedHeaderValue = r.Header.Get(tenant.TenantIDKey)
+			capturedTenantID, capturedTenantOk = tenant.FromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		}
+
+		// Execute
+		middleware.ServeHTTP(rec, req, next)
+
+		// Assert
+		assert.Equal(t, http.StatusOK, rec.Code, "should return 200 OK")
+		assert.True(t, nextCalled, "next handler should be called")
+
+		// Verify x-tenant-id header was injected
+		assert.Equal(t, string(testTenantID), capturedHeaderValue,
+			"x-tenant-id header should be set")
+
+		// Verify tenant context was propagated
+		assert.True(t, capturedTenantOk, "tenant should be in context")
+		assert.Equal(t, testTenantID, capturedTenantID, "tenant ID in context should match")
+
+		mockCache.AssertExpectations(t)
+	})
+
+	t.Run("missing subdomain returns 404 with Invalid subdomain", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		// Create test request with no subdomain
+		req := httptest.NewRequest(http.MethodGet, "http://api.meridian.io/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		// Track if next handler was called
+		nextCalled := false
+
+		next := func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		}
+
+		// Execute
+		middleware.ServeHTTP(rec, req, next)
+
+		// Assert
+		assert.Equal(t, http.StatusNotFound, rec.Code, "should return 404 Not Found")
+		assert.Contains(t, rec.Body.String(), "Invalid subdomain",
+			"response should contain 'Invalid subdomain'")
+		assert.False(t, nextCalled, "next handler should not be called")
+
+		// Verify no cache/DB calls were made
+		mockCache.AssertNotCalled(t, "Get")
+		mockRepo.AssertNotCalled(t, "GetBySlug")
+	})
+
+	t.Run("unknown tenant returns 404 with Tenant not found", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache miss, DB returns not found
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, persistence.ErrTenantNotFound)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		// Create test request
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		// Track if next handler was called
+		nextCalled := false
+
+		next := func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		}
+
+		// Execute
+		middleware.ServeHTTP(rec, req, next)
+
+		// Assert
+		assert.Equal(t, http.StatusNotFound, rec.Code, "should return 404 Not Found")
+		assert.Contains(t, rec.Body.String(), "Tenant not found",
+			"response should contain 'Tenant not found'")
+		assert.False(t, nextCalled, "next handler should not be called")
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("cache miss with DB hit populates cache and succeeds", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache miss, DB hit, cache write succeeds
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID).Return(nil)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		// Create test request
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		// Track captured request
+		var capturedRequest *http.Request
+
+		next := func(w http.ResponseWriter, r *http.Request) {
+			capturedRequest = r
+			w.WriteHeader(http.StatusOK)
+		}
+
+		// Execute
+		middleware.ServeHTTP(rec, req, next)
+
+		// Assert
+		assert.Equal(t, http.StatusOK, rec.Code, "should return 200 OK")
+
+		// Verify tenant ID was injected
+		assert.Equal(t, string(testTenantID), capturedRequest.Header.Get(tenant.TenantIDKey),
+			"x-tenant-id header should be set")
+
+		// Verify all cache/DB calls were made
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("subdomain with port number is handled correctly", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache hit
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		// Create test request with port number
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+":8080/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		next := func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}
+
+		// Execute
+		middleware.ServeHTTP(rec, req, next)
+
+		// Assert
+		assert.Equal(t, http.StatusOK, rec.Code, "should handle port in Host header")
+		mockCache.AssertExpectations(t)
+	})
+
+	t.Run("multi-level subdomain is handled correctly", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		multiLevelSlug := "acme.staging"
+		multiLevelHost := "acme.staging.api.meridian.io"
+		multiLevelTenantID := tenant.MustNewTenantID("tenant_456")
+
+		// Setup: Cache hit for multi-level slug
+		mockCache.On("Get", ctx, multiLevelSlug).Return(multiLevelTenantID, nil)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		// Create test request
+		req := httptest.NewRequest(http.MethodGet, "http://"+multiLevelHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		var capturedRequest *http.Request
+
+		next := func(w http.ResponseWriter, r *http.Request) {
+			capturedRequest = r
+			w.WriteHeader(http.StatusOK)
+		}
+
+		// Execute
+		middleware.ServeHTTP(rec, req, next)
+
+		// Assert
+		assert.Equal(t, http.StatusOK, rec.Code, "should handle multi-level subdomain")
+		assert.Equal(t, string(multiLevelTenantID), capturedRequest.Header.Get(tenant.TenantIDKey),
+			"x-tenant-id header should be set for multi-level subdomain")
+		mockCache.AssertExpectations(t)
+	})
+
+	t.Run("database error returns 404", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache miss, DB error
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, errDatabaseLost)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		// Create test request
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+
+		next := func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		}
+
+		// Execute
+		middleware.ServeHTTP(rec, req, next)
+
+		// Assert
+		assert.Equal(t, http.StatusNotFound, rec.Code, "should return 404 on DB error")
+		assert.Contains(t, rec.Body.String(), "Tenant not found",
+			"response should contain 'Tenant not found'")
+		assert.False(t, nextCalled, "next handler should not be called")
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
 	})
 }
