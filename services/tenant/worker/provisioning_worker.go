@@ -245,8 +245,10 @@ func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, t
 			break // Permanent error, don't retry
 		}
 
-		// Record retry attempt for observability
-		observability.IncrementRetryAttempt()
+		// Record retry attempt for observability (only after first attempt)
+		if attempt > 0 {
+			observability.IncrementRetryAttempt()
+		}
 
 		if cancelled := w.waitWithBackoff(ctx, tenantID, attempt, lastErr); cancelled {
 			return 0, nil // Context cancelled, don't mark as failed
