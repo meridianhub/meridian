@@ -120,11 +120,14 @@ jobs:
           for ORG in acme_bank test_org; do
             ORG_SCHEMA="org_${ORG}"
             echo "Migrating $ORG_SCHEMA..."
+            # Run services in dependency order:
+            # 1. Services with no audit migration or that create their own tables first
+            # 2. financial-accounting last (converts TEXT columns which other services depend on)
             for CONFIG in services/current-account/atlas/atlas.hcl \
-                         services/financial-accounting/atlas/atlas.hcl \
                          services/party/atlas/atlas.hcl \
                          services/payment-order/atlas/atlas.hcl \
-                         services/position-keeping/atlas/atlas.hcl; do
+                         services/position-keeping/atlas/atlas.hcl \
+                         services/financial-accounting/atlas/atlas.hcl; do
               SERVICE=$(basename $(dirname $(dirname "$CONFIG")))
               SERVICE_UNDERSCORE=$(echo "$SERVICE" | tr '-' '_')
               REVISION_SCHEMA="atlas_${SERVICE_UNDERSCORE}_revisions"
