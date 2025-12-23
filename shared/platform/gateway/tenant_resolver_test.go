@@ -454,9 +454,9 @@ func TestResolveTenant(t *testing.T) {
 		mockRepo := new(MockTenantRepository)
 		logger := slog.Default()
 
-		// Setup: Cache miss, DB returns not found
+		// Setup: Cache miss, DB returns domain.ErrNotFound
 		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
-		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, ErrTenantNotFound)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, domain.ErrNotFound)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -719,9 +719,9 @@ func TestServeHTTP(t *testing.T) {
 		mockRepo := new(MockTenantRepository)
 		logger := slog.Default()
 
-		// Setup: Cache miss, DB returns not found
+		// Setup: Cache miss, DB returns domain.ErrNotFound
 		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
-		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, ErrTenantNotFound)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, domain.ErrNotFound)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -881,12 +881,12 @@ func TestServeHTTP(t *testing.T) {
 		mockCache.AssertExpectations(t)
 	})
 
-	t.Run("database error returns 404", func(t *testing.T) {
+	t.Run("database error returns 503", func(t *testing.T) {
 		mockCache := new(MockSlugCache)
 		mockRepo := new(MockTenantRepository)
 		logger := slog.Default()
 
-		// Setup: Cache miss, DB error
+		// Setup: Cache miss, DB error (transient failure)
 		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, errDatabaseLost)
 
@@ -914,9 +914,9 @@ func TestServeHTTP(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 
 		// Assert
-		assert.Equal(t, http.StatusNotFound, rec.Code, "should return 404 on DB error")
-		assert.Contains(t, rec.Body.String(), "Tenant not found",
-			"response should contain 'Tenant not found'")
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "should return 503 on transient DB error")
+		assert.Contains(t, rec.Body.String(), "Service temporarily unavailable",
+			"response should contain 'Service temporarily unavailable'")
 		assert.False(t, nextCalled, "next handler should not be called")
 
 		mockCache.AssertExpectations(t)

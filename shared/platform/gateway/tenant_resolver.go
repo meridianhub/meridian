@@ -35,7 +35,11 @@ var (
 // ErrTenantNotFound is returned when a tenant cannot be found by slug.
 var ErrTenantNotFound = errors.New("tenant not found")
 
-// slugPattern matches valid tenant slugs: alphanumeric with hyphens/periods for multi-level.
+// slugPattern validates tenant slugs extracted from subdomains.
+// This pattern allows periods for multi-level subdomains (e.g., "acme.staging")
+// which differs from domain.slugPattern that only validates single-level slugs.
+// The gateway handles subdomain routing while the domain validates the actual tenant slug.
+//
 // Examples: "acme", "acme-corp", "acme.staging", "my-company.dev"
 // Invalid: "-acme", "acme-", "acme--corp", ".acme", "acme.", "ACME"
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+([-.][a-z0-9]+)*$`)
@@ -124,13 +128,22 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 		resolutionTimeMs := time.Since(startTime).Milliseconds()
 
 		if err != nil {
-			// Log resolution failure with structured fields
-			m.logger.Warn("tenant resolution failed",
-				slog.String("tenant_slug", slug),
-				slog.String("error", err.Error()),
-				slog.Int64("resolution_time_ms", resolutionTimeMs),
-			)
-			http.Error(w, "Tenant not found", http.StatusNotFound)
+			// Distinguish between tenant not found (404) and transient errors (503)
+			if errors.Is(err, ErrTenantNotFound) {
+				m.logger.Warn("tenant not found",
+					slog.String("tenant_slug", slug),
+					slog.Int64("resolution_time_ms", resolutionTimeMs),
+				)
+				http.Error(w, "Tenant not found", http.StatusNotFound)
+			} else {
+				// Transient DB/network error - client can retry
+				m.logger.Error("database error during tenant resolution",
+					slog.String("tenant_slug", slug),
+					slog.String("error", err.Error()),
+					slog.Int64("resolution_time_ms", resolutionTimeMs),
+				)
+				http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
+			}
 			return
 		}
 
@@ -248,8 +261,8 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 	// Step 2: Cache miss or error - query database
 	tenantEntity, err := m.tenantRepo.GetBySlug(ctx, slug)
 	if err != nil {
-		// Propagate not-found error directly for proper HTTP status code handling
-		if errors.Is(err, ErrTenantNotFound) {
+		// Check for domain-layer not-found error and wrap it in gateway error
+		if errors.Is(err, domain.ErrNotFound) {
 			return "", ErrTenantNotFound
 		}
 		return "", fmt.Errorf("failed to get tenant from database: %w", err)
