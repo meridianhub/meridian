@@ -327,6 +327,11 @@ func TestConcurrentProvisioningStressTest(t *testing.T) {
 
 	repo := persistence.NewRepository(tc.db)
 
+	// Stress test parameters:
+	// - 10 iterations: enough to expose timing-dependent race conditions reliably
+	// - 10 workers per iteration: simulates realistic multi-instance deployment
+	// These values balance thorough testing with reasonable CI execution time (~2-3s).
+	// Increase numWorkers for more aggressive race testing locally.
 	const numIterations = 10
 	const numWorkers = 10
 
@@ -421,20 +426,25 @@ func TestMultipleTenantsWithConcurrentWorkers(t *testing.T) {
 	testLogger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	const numWorkers = 10
+
+	// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
+	workers := make([]*ProvisioningWorker, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, testLogger)
+		require.NoError(t, err)
+		workers[i] = worker
+	}
+
 	var wg sync.WaitGroup
 
 	// Start multiple workers concurrently
-	for i := 0; i < numWorkers; i++ {
+	for _, worker := range workers {
 		wg.Add(1)
-		go func() {
+		go func(w *ProvisioningWorker) {
 			defer wg.Done()
-
-			worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, testLogger)
-			require.NoError(t, err)
-
-			worker.processPendingTenants(tc.ctx)
-			worker.wg.Wait()
-		}()
+			w.processPendingTenants(tc.ctx)
+			w.wg.Wait()
+		}(worker)
 	}
 
 	wg.Wait()
@@ -533,7 +543,9 @@ func TestRaceDetection(t *testing.T) {
 	silentLogger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelError}))
 	countingProvisioner := NewCountingMockProvisioner()
 
-	// Create many workers that will all try to claim the same tenant simultaneously
+	// Create many workers that will all try to claim the same tenant simultaneously.
+	// 50 workers provides high contention to reliably expose race conditions that
+	// might only manifest with sufficient concurrent goroutines competing for resources.
 	const numWorkers = 50
 
 	// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
