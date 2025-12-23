@@ -91,17 +91,22 @@ func runList(_ *cobra.Command, _ []string) error {
 
 	// Print as table
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "ID\tNAME\tSTATUS\tSETTLEMENT ASSET\tCREATED AT")
-	_, _ = fmt.Fprintln(w, "--\t----\t------\t----------------\t----------")
+	_, _ = fmt.Fprintln(w, "ID\tNAME\tSLUG\tSTATUS\tSETTLEMENT ASSET\tCREATED AT")
+	_, _ = fmt.Fprintln(w, "--\t----\t----\t------\t----------------\t----------")
 
 	for _, tenant := range resp.Tenants {
 		createdAt := ""
 		if tenant.CreatedAt != nil {
 			createdAt = tenant.CreatedAt.AsTime().Format("2006-01-02 15:04:05")
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		slug := tenant.Slug
+		if slug == "" {
+			slug = "-"
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			tenant.TenantId,
 			tenant.DisplayName,
+			slug,
 			formatStatus(tenant.Status),
 			tenant.SettlementAsset,
 			createdAt,
