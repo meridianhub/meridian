@@ -36,7 +36,7 @@ This document defines testing standards for Meridian services.
 Use `shared/platform/await` instead. It polls until conditions are met or timeout.
 
 ```go
-import "meridian/shared/platform/await"
+import "github.com/meridianhub/meridian/shared/platform/await"
 
 // BAD - arbitrary sleep, flaky and slow
 time.Sleep(2 * time.Second)
