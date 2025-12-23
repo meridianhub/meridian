@@ -35,6 +35,7 @@ require (
 	google.golang.org/protobuf v1.36.10
 	gorm.io/datatypes v1.2.6
 	gorm.io/driver/postgres v1.6.0
+	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
 
@@ -51,7 +52,6 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/mod v0.29.0 // indirect
-	gorm.io/driver/sqlite v1.6.0 // indirect
 )
 
 require (
