@@ -953,6 +953,13 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 			account.Balance().CurrencyCode(), req.Amount.Amount.CurrencyCode)
 	}
 
+	// Validate overflow: Units*100 must not overflow int64
+	if req.Amount.Amount.Units > math.MaxInt64/100 || req.Amount.Amount.Units < math.MinInt64/100 {
+		operationStatus = opStatusAmountOverflow
+		return nil, status.Errorf(codes.InvalidArgument,
+			"amount too large: units %d would overflow", req.Amount.Amount.Units)
+	}
+
 	// Convert and validate amount
 	unitsCents := req.Amount.Amount.Units * 100
 	nanosCents := (req.Amount.Amount.Nanos + 5000000) / 10000000
