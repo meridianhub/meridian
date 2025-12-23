@@ -7,6 +7,7 @@ package observability
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,7 +17,8 @@ import (
 var (
 	// serviceName holds the current service name (from SERVICE_NAME environment variable).
 	// Set via SetServiceName() during application initialization.
-	serviceName = "unknown"
+	serviceName   = "unknown"
+	serviceNameMu sync.RWMutex
 
 	// eventsProcessedTotal counts audit events successfully processed per tenant.
 	// WARNING: tenant_id label has high cardinality risk. Monitor the number of unique
@@ -147,19 +149,33 @@ func SetServiceName(name string) {
 	if name == "" {
 		name = "unknown"
 	}
+	serviceNameMu.Lock()
+	defer serviceNameMu.Unlock()
 	serviceName = name
 }
 
 // GetServiceName returns the currently configured service name.
 func GetServiceName() string {
+	serviceNameMu.RLock()
+	defer serviceNameMu.RUnlock()
 	return serviceName
+}
+
+// withServiceName executes fn with the current service name.
+// This is the preferred way to access serviceName for metric recording.
+func withServiceName(fn func(string)) {
+	serviceNameMu.RLock()
+	defer serviceNameMu.RUnlock()
+	fn(serviceName)
 }
 
 // RecordEventProcessed increments the counter for successfully processed events.
 // tenantID should be the tenant identifier (e.g., "org_123").
 // operation should be "INSERT", "UPDATE", or "DELETE".
 func RecordEventProcessed(tenantID, operation string) {
-	eventsProcessedTotal.WithLabelValues(serviceName, tenantID, operation).Inc()
+	withServiceName(func(svcName string) {
+		eventsProcessedTotal.WithLabelValues(svcName, tenantID, operation).Inc()
+	})
 }
 
 // RecordEventFailed increments the counter for failed event processing.
@@ -167,33 +183,41 @@ func RecordEventProcessed(tenantID, operation string) {
 // operation should be "INSERT", "UPDATE", or "DELETE".
 // reason should describe the failure (e.g., "missing_tenant_context", "invalid_operation", "db_write_failed").
 func RecordEventFailed(tenantID, operation, reason string) {
-	eventsFailedTotal.WithLabelValues(serviceName, tenantID, operation, reason).Inc()
+	withServiceName(func(svcName string) {
+		eventsFailedTotal.WithLabelValues(svcName, tenantID, operation, reason).Inc()
+	})
 }
 
 // RecordTenantAuditWriteDuration observes the duration of a tenant audit write operation.
 // tenantID should be the tenant identifier (e.g., "org_123").
 // duration is the time taken to write the audit log entry.
 func RecordTenantAuditWriteDuration(tenantID string, duration time.Duration) {
-	tenantAuditWriteDuration.WithLabelValues(serviceName, tenantID).Observe(duration.Seconds())
+	withServiceName(func(svcName string) {
+		tenantAuditWriteDuration.WithLabelValues(svcName, tenantID).Observe(duration.Seconds())
+	})
 }
 
 // RecordConsumerLag sets the current consumer lag for the topic.
 // topic should be the Kafka topic name (e.g., "audit.events.current-account").
 // lag is the number of messages behind the latest offset.
 func RecordConsumerLag(topic string, lag float64) {
-	consumerLag.WithLabelValues(serviceName, topic).Set(lag)
+	withServiceName(func(svcName string) {
+		consumerLag.WithLabelValues(svcName, topic).Set(lag)
+	})
 }
 
 // RecordDBConnectionPoolStats records database connection pool metrics.
 // This should be called periodically (e.g., every 10 seconds) to track pool utilization.
 func RecordDBConnectionPoolStats(inUse, idle int, waitCount int64, waitDuration time.Duration) {
-	dbConnectionPoolInUse.WithLabelValues(serviceName).Set(float64(inUse))
-	dbConnectionPoolIdle.WithLabelValues(serviceName).Set(float64(idle))
+	withServiceName(func(svcName string) {
+		dbConnectionPoolInUse.WithLabelValues(svcName).Set(float64(inUse))
+		dbConnectionPoolIdle.WithLabelValues(svcName).Set(float64(idle))
 
-	// Use Add() for counters to accumulate delta values
-	// Note: This assumes we're tracking the delta since last call
-	dbConnectionPoolWaitCount.WithLabelValues(serviceName).Add(float64(waitCount))
-	dbConnectionPoolWaitDuration.WithLabelValues(serviceName).Add(waitDuration.Seconds())
+		// Use Add() for counters to accumulate delta values
+		// Note: This assumes we're tracking the delta since last call
+		dbConnectionPoolWaitCount.WithLabelValues(svcName).Add(float64(waitCount))
+		dbConnectionPoolWaitDuration.WithLabelValues(svcName).Add(waitDuration.Seconds())
+	})
 }
 
 // RecordKafkaHealth sets the Kafka health status.
@@ -203,7 +227,9 @@ func RecordKafkaHealth(healthy bool) {
 	if healthy {
 		value = 1.0
 	}
-	kafkaHealthy.WithLabelValues(serviceName).Set(value)
+	withServiceName(func(svcName string) {
+		kafkaHealthy.WithLabelValues(svcName).Set(value)
+	})
 }
 
 // RecordDBHealth sets the database health status.
@@ -213,7 +239,9 @@ func RecordDBHealth(healthy bool) {
 	if healthy {
 		value = 1.0
 	}
-	dbHealthy.WithLabelValues(serviceName).Set(value)
+	withServiceName(func(svcName string) {
+		dbHealthy.WithLabelValues(svcName).Set(value)
+	})
 }
 
 // HealthChecker provides health check functionality for the audit consumer.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/meridianhub/meridian/internal/audit-consumer/adapters/messaging"
@@ -28,7 +29,8 @@ type Container struct {
 	HealthChecker *observability.HealthChecker
 
 	// Shutdown coordination
-	done chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // ContainerCloseError is returned when multiple errors occur during container close.
@@ -200,10 +202,12 @@ func (c *Container) collectDBPoolStats() {
 func (c *Container) Close(_ context.Context) error {
 	c.Logger.Info("closing container resources...")
 
-	// Signal goroutines to stop
-	close(c.done)
-
 	var errs []error
+
+	// Signal goroutines to stop (only once)
+	c.closeOnce.Do(func() {
+		close(c.done)
+	})
 
 	// Close audit consumer first (stop consuming before closing DB)
 	if c.AuditConsumer != nil {

@@ -26,6 +26,7 @@ configMapGenerator:
   - audit_topic=audit.events.payment-order
   - kafka_group_id=audit-consumer-payment-order
   - kafka_client_id=audit-consumer-payment-order
+  - db_max_open_conns=40
 
 # Payment Order has HIGH audit volume - scale accordingly
 patches:
@@ -52,15 +53,6 @@ patches:
         limits:
           cpu: 750m
           memory: 768Mi
-
-# Higher database connection pool
-- target:
-    kind: Deployment
-    name: audit-consumer
-  patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/env/9/value
-      value: "40"
 
 # Higher HPA limits
 - target:

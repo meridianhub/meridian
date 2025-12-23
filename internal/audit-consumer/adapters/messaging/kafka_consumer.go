@@ -16,6 +16,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -224,11 +225,16 @@ func (c *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Aud
 		return err
 	}
 
-	// Write to audit_log table (tenant-scoped via tenant_id column)
-	// GORM uses table name "audit_logs" by convention
-	if err := c.db.WithContext(ctx).Table("audit_logs").Create(auditLog).Error; err != nil {
+	// Write to audit_logs table (tenant-scoped via tenant_id column)
+	// Use ON CONFLICT DO NOTHING for idempotency (event_id is unique)
+	result := c.db.WithContext(ctx).Table("audit_logs").Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "event_id"}},
+		DoNothing: true,
+	}).Create(auditLog)
+
+	if result.Error != nil {
 		observability.RecordEventFailed(string(tenantID), operation, "db_write_failed")
-		return fmt.Errorf("failed to insert audit log: %w", err)
+		return fmt.Errorf("failed to insert audit log: %w", result.Error)
 	}
 
 	// Record successful processing metrics
