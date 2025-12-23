@@ -114,7 +114,7 @@ def migration_job(name, service_name, db_url_key, resource_deps=[]):
 
     # Generate unique job name suffix from git commit to ensure idempotency
     # Jobs are immutable - a new suffix ensures re-runs create new jobs
-    job_suffix = local('git rev-parse --short HEAD', quiet=True).strip()
+    job_suffix = str(local('git rev-parse --short HEAD', quiet=True)).strip()
     job_name_full = '{}-{}'.format(name, job_suffix)
 
     # Create ConfigMap for migration files
