@@ -71,4 +71,13 @@ var (
 
 	// ErrNilPlatformDB indicates the platformDB parameter was nil.
 	ErrNilPlatformDB = errors.New("platformDB cannot be nil")
+
+	// ErrCircuitBreakerOpen indicates the circuit breaker for a service is open.
+	// This occurs when a service has experienced too many recent failures.
+	// The service will be skipped until the circuit breaker transitions to half-open.
+	ErrCircuitBreakerOpen = errors.New("circuit breaker open for service")
+
+	// ErrCircuitBreakerTooManyRequests indicates too many requests are being
+	// sent to a service in half-open state. Wait for the test requests to complete.
+	ErrCircuitBreakerTooManyRequests = errors.New("circuit breaker rejecting requests")
 )
