@@ -6,6 +6,7 @@ import (
 	"os"
 
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -15,6 +16,7 @@ var (
 	registerName            string
 	registerSettlementAsset string
 	registerSubdomain       string
+	registerSlug            string
 	registerMetadata        map[string]string
 )
 
@@ -39,7 +41,10 @@ Examples:
 
   # Register with subdomain and metadata
   tenantctl register --id=test_org --name="Test Org" --settlement-asset=USD \
-    --subdomain=test.demo.meridian.io --metadata tier=enterprise`,
+    --subdomain=test.demo.meridian.io --metadata tier=enterprise
+
+  # Register with explicit slug for API subdomain
+  tenantctl register --id=acme_bank --name="Acme Bank" --settlement-asset=GBP --slug=acme-bank`,
 	RunE: runRegister,
 }
 
@@ -50,6 +55,7 @@ func init() {
 	registerCmd.Flags().StringVar(&registerName, "name", "", "Display name (required)")
 	registerCmd.Flags().StringVar(&registerSettlementAsset, "settlement-asset", "", "Primary settlement asset (required, e.g., GBP, USD, GPU-HOUR)")
 	registerCmd.Flags().StringVar(&registerSubdomain, "subdomain", "", "API subdomain (optional)")
+	registerCmd.Flags().StringVar(&registerSlug, "slug", "", "URL-safe slug for API subdomain (auto-generated if not provided)")
 	registerCmd.Flags().StringToStringVar(&registerMetadata, "metadata", nil, "Key-value metadata (optional, format: key=value)")
 
 	_ = registerCmd.MarkFlagRequired("id")
@@ -58,6 +64,14 @@ func init() {
 }
 
 func runRegister(_ *cobra.Command, _ []string) error {
+	// Validate slug if provided (client-side validation before gRPC call)
+	if registerSlug != "" {
+		if err := domain.ValidateSlug(registerSlug); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Invalid slug: %v\n", err)
+			return err
+		}
+	}
+
 	tenantClient, err := newClient()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to create client: %v\n", err)
@@ -85,6 +99,7 @@ func runRegister(_ *cobra.Command, _ []string) error {
 		DisplayName:     registerName,
 		SettlementAsset: registerSettlementAsset,
 		Subdomain:       registerSubdomain,
+		Slug:            registerSlug,
 		Metadata:        metadata,
 	}
 
@@ -101,6 +116,9 @@ func runRegister(_ *cobra.Command, _ []string) error {
 		fmt.Printf("  Name:             %s\n", tenant.DisplayName)
 		fmt.Printf("  Settlement Asset: %s\n", tenant.SettlementAsset)
 		fmt.Printf("  Status:           %s\n", tenant.Status.String())
+		if tenant.Slug != "" {
+			fmt.Printf("  Slug:             %s\n", tenant.Slug)
+		}
 		if tenant.Subdomain != "" {
 			fmt.Printf("  Subdomain:        %s\n", tenant.Subdomain)
 		}
