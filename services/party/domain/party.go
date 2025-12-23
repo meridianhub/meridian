@@ -18,6 +18,12 @@ var (
 	ErrInvalidStatusTransition  = errors.New("invalid status transition")
 	ErrInvalidExternalReference = errors.New("invalid external reference format")
 	ErrExternalReferenceExists  = errors.New("external reference already set")
+	ErrInvalidControlAction     = errors.New("invalid control action")
+	ErrCircularAssociation      = errors.New("circular association detected")
+	ErrInvalidUpdateField       = errors.New("invalid field for update")
+	ErrInvalidRelationshipType  = errors.New("invalid relationship type")
+	ErrInvalidPoliticalExposure = errors.New("invalid political exposure status")
+	ErrInvalidReferenceType     = errors.New("invalid reference type")
 )
 
 // PartyType represents the type of party (person or organization)
@@ -46,8 +52,94 @@ type PartyStatus string
 const (
 	PartyStatusActive     PartyStatus = "ACTIVE"
 	PartyStatusRestricted PartyStatus = "RESTRICTED"
+	PartyStatusSuspended  PartyStatus = "SUSPENDED"
 	PartyStatusTerminated PartyStatus = "TERMINATED"
 )
+
+// ControlAction represents an action to control the party lifecycle
+type ControlAction string
+
+// Control action constants
+const (
+	ControlActionRestrict  ControlAction = "RESTRICT"
+	ControlActionSuspend   ControlAction = "SUSPEND"
+	ControlActionActivate  ControlAction = "ACTIVATE"
+	ControlActionTerminate ControlAction = "TERMINATE"
+)
+
+// IsValid checks if the control action is valid
+func (ca ControlAction) IsValid() bool {
+	switch ca {
+	case ControlActionRestrict, ControlActionSuspend, ControlActionActivate, ControlActionTerminate:
+		return true
+	default:
+		return false
+	}
+}
+
+// RelationshipType represents the type of relationship between parties
+type RelationshipType string
+
+// Relationship type constants
+const (
+	RelationshipTypeSpouse          RelationshipType = "SPOUSE"
+	RelationshipTypeDependent       RelationshipType = "DEPENDENT"
+	RelationshipTypeBusinessPartner RelationshipType = "BUSINESS_PARTNER"
+	RelationshipTypeGuarantor       RelationshipType = "GUARANTOR"
+	RelationshipTypeBeneficialOwner RelationshipType = "BENEFICIAL_OWNER"
+)
+
+// IsValid checks if the relationship type is valid
+func (rt RelationshipType) IsValid() bool {
+	switch rt {
+	case RelationshipTypeSpouse, RelationshipTypeDependent, RelationshipTypeBusinessPartner,
+		RelationshipTypeGuarantor, RelationshipTypeBeneficialOwner:
+		return true
+	default:
+		return false
+	}
+}
+
+// PoliticalExposureStatus represents the political exposure classification
+type PoliticalExposureStatus string
+
+// Political exposure status constants
+const (
+	PoliticalExposureNone PoliticalExposureStatus = "NONE"
+	PoliticalExposurePEP  PoliticalExposureStatus = "PEP" // Politically Exposed Person
+	PoliticalExposureRCA  PoliticalExposureStatus = "RCA" // Relative or Close Associate
+)
+
+// IsValid checks if the political exposure status is valid
+func (pes PoliticalExposureStatus) IsValid() bool {
+	switch pes {
+	case PoliticalExposureNone, PoliticalExposurePEP, PoliticalExposureRCA:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReferenceType represents the type of reference document
+type ReferenceType string
+
+// Reference type constants
+const (
+	ReferenceTypeGovernmentID  ReferenceType = "GOVERNMENT_ID"
+	ReferenceTypePassport      ReferenceType = "PASSPORT"
+	ReferenceTypeDriverLicense ReferenceType = "DRIVER_LICENSE"
+	ReferenceTypeUtilityBill   ReferenceType = "UTILITY_BILL"
+)
+
+// IsValid checks if the reference type is valid
+func (rt ReferenceType) IsValid() bool {
+	switch rt {
+	case ReferenceTypeGovernmentID, ReferenceTypePassport, ReferenceTypeDriverLicense, ReferenceTypeUtilityBill:
+		return true
+	default:
+		return false
+	}
+}
 
 // ExternalReferenceType represents the type of external reference
 type ExternalReferenceType string
@@ -59,6 +151,51 @@ const (
 	ExternalReferenceTypeLEI            ExternalReferenceType = "LEI"
 	ExternalReferenceTypeTaxID          ExternalReferenceType = "TAX_ID"
 )
+
+// PartyAssociation represents a relationship between two parties
+type PartyAssociation struct {
+	RelatedPartyID   uuid.UUID
+	RelationshipType RelationshipType
+	CreatedAt        time.Time
+}
+
+// Employment represents employment history information
+type Employment struct {
+	Employer  string
+	StartDate time.Time
+	EndDate   *time.Time // nil for current employment
+	Position  string
+}
+
+// DemographicData contains socio-economic and employment information
+type DemographicData struct {
+	SocioEconomicData map[string]interface{} // JSONB-friendly data
+	EmploymentHistory []Employment
+	IncomeLevel       string
+	EducationLevel    string
+}
+
+// Reference represents a reference document
+type Reference struct {
+	Type             ReferenceType
+	Value            string
+	IssuingAuthority string
+	ExpiryDate       *time.Time // nil for documents without expiry
+}
+
+// ReferenceData contains identity verification and political exposure information
+type ReferenceData struct {
+	References              []Reference
+	PoliticalExposureStatus PoliticalExposureStatus
+}
+
+// BankRelationship contains information about the party's relationship with the bank
+type BankRelationship struct {
+	AccountOfficerID      uuid.UUID
+	RelationshipManagerID uuid.UUID
+	AssignedBranch        string
+	RelationshipStartDate time.Time
+}
 
 // Party represents a BIAN Party Reference Data Directory domain model.
 //
@@ -75,6 +212,10 @@ type Party struct {
 	status                PartyStatus
 	externalReference     string
 	externalReferenceType ExternalReferenceType
+	associations          []PartyAssociation
+	demographics          DemographicData
+	referenceData         ReferenceData
+	bankRelations         BankRelationship
 	createdAt             time.Time
 	updatedAt             time.Time
 	version               int64
@@ -112,6 +253,10 @@ func ReconstructParty(
 	status PartyStatus,
 	externalReference string,
 	externalReferenceType ExternalReferenceType,
+	associations []PartyAssociation,
+	demographics DemographicData,
+	referenceData ReferenceData,
+	bankRelations BankRelationship,
 	createdAt time.Time,
 	updatedAt time.Time,
 	version int64,
@@ -124,6 +269,10 @@ func ReconstructParty(
 		status:                status,
 		externalReference:     externalReference,
 		externalReferenceType: externalReferenceType,
+		associations:          associations,
+		demographics:          demographics,
+		referenceData:         referenceData,
+		bankRelations:         bankRelations,
 		createdAt:             createdAt,
 		updatedAt:             updatedAt,
 		version:               version,
@@ -180,6 +329,26 @@ func (p *Party) Version() int64 {
 	return p.version
 }
 
+// Associations returns the party's associations
+func (p *Party) Associations() []PartyAssociation {
+	return p.associations
+}
+
+// Demographics returns the party's demographic data
+func (p *Party) Demographics() DemographicData {
+	return p.demographics
+}
+
+// ReferenceData returns the party's reference data
+func (p *Party) ReferenceData() ReferenceData {
+	return p.referenceData
+}
+
+// BankRelations returns the party's bank relationship information
+func (p *Party) BankRelations() BankRelationship {
+	return p.bankRelations
+}
+
 // SetDisplayName sets the party's display name
 func (p *Party) SetDisplayName(displayName string) error {
 	if err := validateDisplayName(displayName); err != nil {
@@ -221,6 +390,18 @@ func (p *Party) Restrict() error {
 	return nil
 }
 
+// Suspend transitions the party to suspended status
+func (p *Party) Suspend() error {
+	if p.status == PartyStatusTerminated {
+		return ErrInvalidStatusTransition
+	}
+
+	p.status = PartyStatusSuspended
+	p.updatedAt = time.Now()
+	p.version++
+	return nil
+}
+
 // Terminate transitions the party to terminated status
 func (p *Party) Terminate() error {
 	// Termination is allowed from any state
@@ -238,6 +419,126 @@ func (p *Party) Activate() error {
 	}
 
 	p.status = PartyStatusActive
+	p.updatedAt = time.Now()
+	p.version++
+	return nil
+}
+
+// ControlParty applies a control action with state machine enforcement
+// The reason parameter is reserved for future audit logging but not currently used in validation
+func (p *Party) ControlParty(action ControlAction, _ string) error {
+	if !action.IsValid() {
+		return ErrInvalidControlAction
+	}
+
+	switch action {
+	case ControlActionActivate:
+		return p.Activate()
+	case ControlActionRestrict:
+		return p.Restrict()
+	case ControlActionSuspend:
+		return p.Suspend()
+	case ControlActionTerminate:
+		return p.Terminate()
+	default:
+		return ErrInvalidControlAction
+	}
+}
+
+// UpdateParty updates party fields with validation
+func (p *Party) UpdateParty(updates map[string]interface{}) error {
+	for field, value := range updates {
+		if err := p.updateField(field, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// updateField updates a single field with validation
+func (p *Party) updateField(field string, value interface{}) error {
+	switch field {
+	case "displayName":
+		return p.updateDisplayName(value)
+	case "demographics":
+		return p.updateDemographics(value)
+	case "referenceData":
+		return p.updateReferenceData(value)
+	case "bankRelations":
+		return p.updateBankRelations(value)
+	case "associations":
+		return p.updateAssociations(value)
+	default:
+		return ErrInvalidUpdateField
+	}
+}
+
+func (p *Party) updateDisplayName(value interface{}) error {
+	displayName, ok := value.(string)
+	if !ok {
+		return ErrInvalidUpdateField
+	}
+	return p.SetDisplayName(displayName)
+}
+
+func (p *Party) updateDemographics(value interface{}) error {
+	demographics, ok := value.(DemographicData)
+	if !ok {
+		return ErrInvalidUpdateField
+	}
+	p.demographics = demographics
+	p.updatedAt = time.Now()
+	p.version++
+	return nil
+}
+
+func (p *Party) updateReferenceData(value interface{}) error {
+	referenceData, ok := value.(ReferenceData)
+	if !ok {
+		return ErrInvalidUpdateField
+	}
+	// Validate political exposure status
+	if !referenceData.PoliticalExposureStatus.IsValid() {
+		return ErrInvalidPoliticalExposure
+	}
+	// Validate reference types
+	for _, ref := range referenceData.References {
+		if !ref.Type.IsValid() {
+			return ErrInvalidReferenceType
+		}
+	}
+	p.referenceData = referenceData
+	p.updatedAt = time.Now()
+	p.version++
+	return nil
+}
+
+func (p *Party) updateBankRelations(value interface{}) error {
+	bankRelations, ok := value.(BankRelationship)
+	if !ok {
+		return ErrInvalidUpdateField
+	}
+	p.bankRelations = bankRelations
+	p.updatedAt = time.Now()
+	p.version++
+	return nil
+}
+
+func (p *Party) updateAssociations(value interface{}) error {
+	associations, ok := value.([]PartyAssociation)
+	if !ok {
+		return ErrInvalidUpdateField
+	}
+	// Validate relationship types and check for circular associations
+	for _, assoc := range associations {
+		if !assoc.RelationshipType.IsValid() {
+			return ErrInvalidRelationshipType
+		}
+		if assoc.RelatedPartyID == p.id {
+			return ErrCircularAssociation
+		}
+	}
+	p.associations = associations
 	p.updatedAt = time.Now()
 	p.version++
 	return nil
