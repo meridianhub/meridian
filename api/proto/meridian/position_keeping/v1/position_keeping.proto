@@ -10,6 +10,30 @@ import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1;positionkeepingv1";
 
+// PositionLogStatus defines the lifecycle state of a financial position log.
+enum PositionLogStatus {
+  // POSITION_LOG_STATUS_UNSPECIFIED means the status is unknown.
+  POSITION_LOG_STATUS_UNSPECIFIED = 0;
+  // POSITION_LOG_STATUS_ACTIVE means the log is active and processing transactions.
+  POSITION_LOG_STATUS_ACTIVE = 1;
+  // POSITION_LOG_STATUS_SUSPENDED means the log is temporarily suspended.
+  POSITION_LOG_STATUS_SUSPENDED = 2;
+  // POSITION_LOG_STATUS_TERMINATED means the log has been permanently terminated.
+  POSITION_LOG_STATUS_TERMINATED = 3;
+}
+
+// ControlAction defines the control operations for log lifecycle management.
+enum ControlAction {
+  // CONTROL_ACTION_UNSPECIFIED means no action specified.
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  // CONTROL_ACTION_SUSPEND temporarily suspends log processing.
+  CONTROL_ACTION_SUSPEND = 1;
+  // CONTROL_ACTION_RESUME resumes a suspended log.
+  CONTROL_ACTION_RESUME = 2;
+  // CONTROL_ACTION_TERMINATE permanently terminates the log.
+  CONTROL_ACTION_TERMINATE = 3;
+}
+
 // OpenAPI specification metadata for Position Keeping Service
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
@@ -395,6 +419,48 @@ message ListFinancialPositionLogsResponse {
   meridian.common.v1.PaginationResponse pagination = 2;
 }
 
+// ControlFinancialPositionLogRequest controls the lifecycle of a financial position log.
+message ControlFinancialPositionLogRequest {
+  // log_id is the identifier of the log to control.
+  string log_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // control_action is the action to perform on the log.
+  ControlAction control_action = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] /* Disallow UNSPECIFIED */
+  }];
+
+  // reason provides context for the control action.
+  string reason = 3 [(buf.validate.field).string.max_len = 500];
+
+  // operator_id identifies who performed the control action (optional).
+  string operator_id = 4 [(buf.validate.field).string = {
+    max_len: 255
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+}
+
+// ControlFinancialPositionLogResponse returns the result of the control action.
+message ControlFinancialPositionLogResponse {
+  // log_id is the identifier of the controlled log.
+  string log_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // status is the new status of the log after the control action.
+  PositionLogStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] /* Disallow UNSPECIFIED */
+  }];
+
+  // timestamp is when the control action was applied.
+  google.protobuf.Timestamp timestamp = 3 [(buf.validate.field).required = true];
+
+  // previous_status is the status before the control action.
+  PositionLogStatus previous_status = 4 [(buf.validate.field).enum.defined_only = true];
+}
+
 // PositionKeepingService provides operations for managing financial position logs.
 service PositionKeepingService {
   // InitiateFinancialPositionLog creates a new financial position log.
@@ -456,6 +522,23 @@ service PositionKeepingService {
   rpc ListFinancialPositionLogs(ListFinancialPositionLogsRequest) returns (ListFinancialPositionLogsResponse) {
     option (google.api.http) = {
       get: "/v1/position-logs"
+    };
+  }
+
+  // ControlFinancialPositionLog controls the lifecycle of a financial position log.
+  // Supports SUSPEND, RESUME, and TERMINATE actions for log processing lifecycle management.
+  rpc ControlFinancialPositionLog(ControlFinancialPositionLogRequest) returns (ControlFinancialPositionLogResponse) {
+    option (google.api.http) = {
+      post: "/v1/position-logs/{log_id}/control"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "200"
+        value: {
+          description: "Control action applied successfully"
+        }
+      }
     };
   }
 }
