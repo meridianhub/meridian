@@ -162,6 +162,10 @@ func setupTestEnvironment(t *testing.T) *TestEnvironment {
 // TestSetupEnvironment verifies that the test environment setup works correctly.
 // This is a meta-test that validates our test infrastructure.
 func TestSetupEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	// Setup environment
 	env := setupTestEnvironment(t)
 	defer env.Cleanup()
@@ -241,6 +245,10 @@ func TestSetupEnvironment(t *testing.T) {
 // TestSetupEnvironment_MultipleEnvironments verifies that multiple test environments
 // can be created in parallel without interference.
 func TestSetupEnvironment_MultipleEnvironments(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	// Create two environments in parallel
 	env1 := setupTestEnvironment(t)
 	defer env1.Cleanup()
@@ -271,6 +279,10 @@ func TestSetupEnvironment_MultipleEnvironments(t *testing.T) {
 // 2. Background worker processes the tenant and transitions to ACTIVE
 // 3. All services show completed provisioning status
 func TestAsyncProvisioningFlow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	// Setup test environment with worker running
 	env := setupTestEnvironment(t)
 	defer env.Cleanup()
@@ -408,6 +420,10 @@ func TestAsyncProvisioningFlow(t *testing.T) {
 // 4. Verify tenant eventually reaches ACTIVE status
 // 5. Verify ProvisioningCalls shows multiple attempts (indicating retries)
 func TestProvisioningFailureRetry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	// Setup test environment with worker running
 	env := setupTestEnvironment(t)
 	defer env.Cleanup()
@@ -544,6 +560,10 @@ func TestProvisioningFailureRetry(t *testing.T) {
 // - Reasonable total completion time (<3 minutes for 50 tenants)
 // - All tenants successfully provision to ACTIVE status
 func TestConcurrentTenantProvisioning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	// Setup test environment with worker running
 	env := setupTestEnvironment(t)
 	defer env.Cleanup()
@@ -750,6 +770,10 @@ func TestConcurrentTenantProvisioning(t *testing.T) {
 // - Tenant status transitions to PROVISIONING_FAILED
 // - Error message is persisted in the tenant record and retrievable via API
 func TestProvisioningMaxRetriesExceeded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	// Setup test environment with worker running
 	env := setupTestEnvironment(t)
 	defer env.Cleanup()
