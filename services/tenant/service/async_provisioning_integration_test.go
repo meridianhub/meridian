@@ -5,8 +5,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
 
@@ -537,6 +540,204 @@ func TestProvisioningFailureRetry(t *testing.T) {
 
 	t.Logf("Provisioning retry test completed: %d total attempts, recovered after clearing failure at attempt %d",
 		totalCalls, failureClearedAt)
+}
+
+// TestConcurrentTenantProvisioning stress tests the async provisioning system
+// by creating 50 tenants concurrently and verifying all reach ACTIVE status.
+//
+// This test validates:
+// - No race conditions in concurrent tenant creation
+// - No database deadlocks or constraint violations under high load
+// - Worker processes all tasks without data loss
+// - Reasonable total completion time (<3 minutes for 50 tenants)
+// - All tenants successfully provision to ACTIVE status
+func TestConcurrentTenantProvisioning(t *testing.T) {
+	// Setup test environment with worker running
+	env := setupTestEnvironment(t)
+	defer env.Cleanup()
+
+	// Create the gRPC service with the test environment's repo and provisioner
+	svc := NewService(env.Repo, env.Provisioner, nil, nil, env.Logger)
+
+	// Number of tenants to create concurrently
+	const numTenants = 50
+
+	// Create platform admin context for API calls
+	claims := &auth.Claims{
+		UserID:   "admin-concurrent-test",
+		TenantID: "platform",
+		Roles:    []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// =========================================================================
+	// Step 1: Create 50 tenants concurrently
+	// =========================================================================
+	t.Logf("Starting concurrent creation of %d tenants", numTenants)
+
+	// Track tenant IDs and any errors during creation
+	tenantIDs := make([]string, numTenants)
+	creationErrors := make([]error, numTenants)
+	creationTimes := make([]time.Duration, numTenants)
+
+	var wg sync.WaitGroup
+	startTime := time.Now()
+
+	for i := 0; i < numTenants; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+
+			tenantID := fmt.Sprintf("concurrent_test_%03d", index)
+			tenantIDs[index] = tenantID
+
+			req := &pb.InitiateTenantRequest{
+				TenantId:        tenantID,
+				DisplayName:     fmt.Sprintf("Concurrent Test Tenant %d", index),
+				SettlementAsset: "USD",
+			}
+
+			callStart := time.Now()
+			_, err := svc.InitiateTenant(ctx, req)
+			creationTimes[index] = time.Since(callStart)
+			creationErrors[index] = err
+		}(i)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+	creationElapsed := time.Since(startTime)
+
+	t.Logf("All %d InitiateTenant calls completed in %v", numTenants, creationElapsed)
+
+	// =========================================================================
+	// Step 2: Verify all creation calls succeeded in <500ms each
+	// =========================================================================
+	var failedCreations int
+	var slowCreations int
+	for i, err := range creationErrors {
+		if err != nil {
+			failedCreations++
+			t.Errorf("Tenant %s creation failed: %v", tenantIDs[i], err)
+		}
+		if creationTimes[i] > 500*time.Millisecond {
+			slowCreations++
+			t.Logf("Warning: Tenant %s creation took %v (>500ms)", tenantIDs[i], creationTimes[i])
+		}
+	}
+
+	require.Zero(t, failedCreations, "All %d tenant creations should succeed, but %d failed", numTenants, failedCreations)
+	assert.LessOrEqual(t, slowCreations, 5, "At most 5 tenants should have slow creation times (>500ms)")
+
+	t.Logf("Creation phase: %d tenants created, %d slow creations", numTenants-failedCreations, slowCreations)
+
+	// =========================================================================
+	// Step 3: Poll until all tenants reach ACTIVE status
+	// =========================================================================
+	t.Logf("Waiting for all %d tenants to reach ACTIVE status...", numTenants)
+
+	// Track status for each tenant
+	tenantStatuses := make([]pb.TenantStatus, numTenants)
+	for i := range tenantStatuses {
+		tenantStatuses[i] = pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING
+	}
+
+	// Use errgroup to poll all tenants in parallel
+	provisioningStart := time.Now()
+	require.Eventually(t, func() bool {
+		var activeCount int
+		var failedCount int
+		var pendingCount int
+
+		// Poll all tenants concurrently using errgroup
+		g, gCtx := errgroup.WithContext(ctx)
+
+		for i := 0; i < numTenants; i++ {
+			i := i // capture loop variable
+			g.Go(func() error {
+				statusReq := &pb.GetTenantProvisioningStatusRequest{
+					TenantId: tenantIDs[i],
+				}
+
+				statusResp, err := svc.GetTenantProvisioningStatus(gCtx, statusReq)
+				if err == nil {
+					tenantStatuses[i] = statusResp.OverallStatus
+				}
+				// Ignore transient errors during polling - tenant status remains unchanged
+				return nil
+			})
+		}
+
+		// Wait for all polling requests to complete
+		_ = g.Wait()
+
+		// Count statuses
+		for _, status := range tenantStatuses {
+			//exhaustive:ignore - we only care about ACTIVE and FAILED for this test
+			switch status {
+			case pb.TenantStatus_TENANT_STATUS_ACTIVE:
+				activeCount++
+			case pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED:
+				failedCount++
+			default:
+				pendingCount++
+			}
+		}
+
+		// Log progress periodically
+		elapsed := time.Since(provisioningStart)
+		if elapsed.Seconds() > 0 && int(elapsed.Seconds())%5 == 0 {
+			t.Logf("Progress: %d/%d active, %d failed, %d pending (elapsed: %v)",
+				activeCount, numTenants, failedCount, pendingCount, elapsed)
+		}
+
+		// Success when all tenants are active
+		return activeCount == numTenants
+	}, 3*time.Minute, 200*time.Millisecond,
+		"All %d tenants should reach ACTIVE status within 3 minutes", numTenants)
+
+	provisioningElapsed := time.Since(provisioningStart)
+	t.Logf("All %d tenants reached ACTIVE status in %v", numTenants, provisioningElapsed)
+
+	// =========================================================================
+	// Step 4: Verify all tenants are ACTIVE and no failures
+	// =========================================================================
+	var activeCount, failedCount int
+	for i, status := range tenantStatuses {
+		//exhaustive:ignore - we only care about ACTIVE and FAILED for final verification
+		switch status {
+		case pb.TenantStatus_TENANT_STATUS_ACTIVE:
+			activeCount++
+		case pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED:
+			failedCount++
+			t.Errorf("Tenant %s failed provisioning", tenantIDs[i])
+		default:
+			t.Errorf("Tenant %s has unexpected status: %s", tenantIDs[i], status)
+		}
+	}
+
+	assert.Equal(t, numTenants, activeCount, "All %d tenants should be ACTIVE", numTenants)
+	assert.Zero(t, failedCount, "No tenants should have failed provisioning")
+
+	// =========================================================================
+	// Step 5: Verify total test time is reasonable
+	// =========================================================================
+	totalElapsed := time.Since(startTime)
+	assert.Less(t, totalElapsed, 3*time.Minute,
+		"Total test time should be <3 minutes, got %v", totalElapsed)
+
+	t.Logf("Concurrent provisioning test completed: %d tenants, creation=%v, provisioning=%v, total=%v",
+		numTenants, creationElapsed, provisioningElapsed, totalElapsed)
+
+	// =========================================================================
+	// Step 6: Verify worker processed all tasks (no data loss)
+	// =========================================================================
+	totalProvisioningCalls := env.Provisioner.GetProvisioningCallCount()
+	assert.GreaterOrEqual(t, totalProvisioningCalls, numTenants,
+		"Worker should have processed at least %d provisioning calls, got %d", numTenants, totalProvisioningCalls)
+
+	t.Logf("Total provisioning calls: %d (expected >= %d)", totalProvisioningCalls, numTenants)
+	t.Logf("Concurrent tenant provisioning stress test completed successfully")
 }
 
 // TestProvisioningMaxRetriesExceeded verifies that persistent provisioning failures
