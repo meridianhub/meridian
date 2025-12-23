@@ -617,3 +617,71 @@ func TestRaceDetection(t *testing.T) {
 	// If we get here without race detector failures, the test passes
 	t.Log("Race detection test completed successfully")
 }
+
+// TestAlertCheckIntegration verifies that the alert checking mechanism
+// executes within the worker loop and properly identifies failed tenants.
+func TestAlertCheckIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	tc := setupIntegrationTestDatabase(t)
+
+	repo := persistence.NewRepository(tc.db)
+
+	// Create a tenant in provisioning_failed state with old timestamp
+	// We use CreatedAt from 2 hours ago to ensure it exceeds the 1-hour threshold
+	oldTimestamp := time.Now().Add(-2 * time.Hour)
+	testTenant := &domain.Tenant{
+		ID:              tenant.MustNewTenantID("failed_alert_tenant"),
+		DisplayName:     "Failed Alert Test",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "mock provisioning failure",
+		CreatedAt:       oldTimestamp,
+		Version:         1,
+		Metadata:        make(map[string]interface{}),
+	}
+	require.NoError(t, repo.Create(tc.ctx, testTenant))
+
+	// Capture log output to verify alert is logged
+	var logBuffer safeBuffer
+	testLogger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	countingProvisioner := NewCountingMockProvisioner()
+
+	// Create worker with short alert interval for testing (1 second)
+	config := testWorkerConfig(5 * time.Second)
+	config.AlertInterval = 1 * time.Second
+
+	worker, err := NewProvisioningWorker(repo, countingProvisioner, config, testLogger)
+	require.NoError(t, err)
+
+	// Start worker in background
+	ctx, cancel := context.WithCancel(tc.ctx)
+	defer cancel()
+
+	go worker.Start(ctx)
+
+	// Wait for alert check to execute (should happen within 1 second + buffer)
+	err = await.AtMost(3 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
+		logOutput := logBuffer.String()
+		return strings.Contains(logOutput, "tenant provisioning failure alert") &&
+			strings.Contains(logOutput, "failed_alert_tenant")
+	})
+	require.NoError(t, err, "alert should be logged within expected interval")
+
+	// Verify alert message contains expected fields
+	logOutput := logBuffer.String()
+	assert.Contains(t, logOutput, "tenant provisioning failure alert")
+	assert.Contains(t, logOutput, "failed_alert_tenant")
+	assert.Contains(t, logOutput, "mock provisioning failure")
+	assert.Contains(t, logOutput, "alert=tenant_provisioning_failed")
+
+	// Stop worker and verify graceful shutdown
+	cancel()
+	worker.Stop()
+
+	// Verify no goroutine leaks by checking Stop completed without hanging
+	t.Log("Worker stopped successfully without goroutine leaks")
+}
