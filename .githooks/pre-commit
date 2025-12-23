@@ -147,7 +147,12 @@ echo -e "${YELLOW}→${NC} Running golangci-lint..."
 LINT_FAILED=0
 
 # Group files by directory and run golangci-lint per directory
+# Skip directories with build tags that exclude normal compilation
 for dir in $(echo "$STAGED_GO_FILES" | xargs -n1 dirname | sort -u); do
+    # Skip E2E tests directory (requires //go:build integration)
+    if [[ "$dir" == tests/audit-e2e* ]]; then
+        continue
+    fi
     if ! golangci-lint run --config=.golangci.yml "$dir"; then
         LINT_FAILED=1
     fi
