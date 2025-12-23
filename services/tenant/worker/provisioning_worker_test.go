@@ -26,6 +26,17 @@ func testErr(msg string) error {
 	return fmt.Errorf("%s", msg) //nolint:err113 // test helper for dynamic error messages
 }
 
+// testWorkerConfig creates a default Config for tests.
+func testWorkerConfig(pollInterval time.Duration) Config {
+	return Config{
+		PollInterval:   pollInterval,
+		MaxRetries:     maxRetries,
+		RetryBaseDelay: baseDelay,
+		RetryMaxDelay:  maxDelay,
+		MaxConcurrent:  10,
+	}
+}
+
 // setupTestDB creates an in-memory database with the tenant table schema.
 func setupTestDB(t *testing.T) (*gorm.DB, *persistence.Repository) {
 	// Use a unique database name per test to ensure isolation, with cache=shared so
@@ -93,9 +104,10 @@ func TestNewProvisioningWorker_Success(t *testing.T) {
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 5 * time.Second
+	config := testWorkerConfig(pollInterval)
 
 	// Create worker
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
 
 	// Verify
 	require.NoError(t, err)
@@ -110,9 +122,9 @@ func TestNewProvisioningWorker_Success(t *testing.T) {
 func TestNewProvisioningWorker_NilRepository(t *testing.T) {
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	pollInterval := 5 * time.Second
+	config := testWorkerConfig(5 * time.Second)
 
-	worker, err := NewProvisioningWorker(nil, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(nil, prov, config, logger)
 
 	assert.ErrorIs(t, err, ErrNilRepository)
 	assert.Nil(t, worker)
@@ -124,9 +136,9 @@ func TestNewProvisioningWorker_NilProvisioner(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	pollInterval := 5 * time.Second
+	config := testWorkerConfig(5 * time.Second)
 
-	worker, err := NewProvisioningWorker(repo, nil, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, nil, config, logger)
 
 	assert.ErrorIs(t, err, ErrNilProvisioner)
 	assert.Nil(t, worker)
@@ -138,9 +150,9 @@ func TestNewProvisioningWorker_NilLogger(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
-	pollInterval := 5 * time.Second
+	config := testWorkerConfig(5 * time.Second)
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, nil)
+	worker, err := NewProvisioningWorker(repo, prov, config, nil)
 
 	assert.ErrorIs(t, err, ErrNilLogger)
 	assert.Nil(t, worker)
@@ -153,8 +165,9 @@ func TestNewProvisioningWorker_ZeroPollInterval(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	config := testWorkerConfig(0)
 
-	worker, err := NewProvisioningWorker(repo, prov, 0, logger)
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
 
 	assert.ErrorIs(t, err, ErrInvalidPollInterval)
 	assert.Nil(t, worker)
@@ -167,8 +180,9 @@ func TestNewProvisioningWorker_NegativePollInterval(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	config := testWorkerConfig(-5 * time.Second)
 
-	worker, err := NewProvisioningWorker(repo, prov, -5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
 
 	assert.ErrorIs(t, err, ErrInvalidPollInterval)
 	assert.Nil(t, worker)
@@ -184,7 +198,7 @@ func TestProvisioningWorker_Start_ContextCancellation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 50 * time.Millisecond
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(pollInterval), logger)
 	require.NoError(t, err)
 
 	// Start worker with cancellable context
@@ -221,7 +235,7 @@ func TestProvisioningWorker_Start_ExplicitStop(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 50 * time.Millisecond
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(pollInterval), logger)
 	require.NoError(t, err)
 
 	// Start worker
@@ -258,7 +272,7 @@ func TestProvisioningWorker_Stop_MultipleCalls(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 50 * time.Millisecond
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(pollInterval), logger)
 	require.NoError(t, err)
 
 	// Call Stop() multiple times - should not panic
@@ -279,7 +293,7 @@ func TestProvisioningWorker_Start_TickerInterval(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	pollInterval := 50 * time.Millisecond
 
-	worker, err := NewProvisioningWorker(repo, prov, pollInterval, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(pollInterval), logger)
 	require.NoError(t, err)
 
 	// Start worker with short timeout to observe multiple ticks
@@ -344,7 +358,7 @@ func TestProcessPendingTenants_Success(t *testing.T) {
 		failureSequence: []error{nil, nil, nil}, // Success for all 3 tenants
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -413,7 +427,7 @@ func TestProcessPendingTenants_VersionConflict(t *testing.T) {
 		failureSequence: []error{nil, nil}, // Success for tenant1 and tenant3
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute - should skip tenant2 (already claimed) and process tenant1 and tenant3
@@ -449,7 +463,7 @@ func TestProcessPendingTenants_ListByStatusError(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute - should not crash
@@ -465,7 +479,7 @@ func TestProcessPendingTenants_NoTenantsFound(t *testing.T) {
 	// No tenants created - empty database
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -505,7 +519,7 @@ func TestProcessPendingTenants_GoroutinesSpawned(t *testing.T) {
 		failureSequence: []error{nil, nil}, // Success for both tenants
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -536,7 +550,7 @@ func TestProvisionTenantWithRetry_NoPanic(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute - should not panic
@@ -557,7 +571,7 @@ func TestProvisionTenantWithRetry_PanicRecovery(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Override provisionTenantWithRetry to force a panic
@@ -606,7 +620,7 @@ func TestProvisioningWorker_GracefulShutdown(t *testing.T) {
 	// Create worker
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 50*time.Millisecond, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(50*time.Millisecond), logger)
 	require.NoError(t, err)
 
 	// Start worker
@@ -653,7 +667,7 @@ func TestProvisioningWorker_NoGoroutineLeaks(t *testing.T) {
 	// Create worker
 	prov := &provisioner.MockProvisioner{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, prov, 50*time.Millisecond, logger)
+	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(50*time.Millisecond), logger)
 	require.NoError(t, err)
 
 	// Start worker
@@ -776,7 +790,7 @@ func TestProvisionTenantWithRetry_SuccessOnFirstAttempt(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -813,7 +827,7 @@ func TestProvisionTenantWithRetry_SuccessAfterRetries(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute (this will take time due to exponential backoff, but tests use actual delays)
@@ -862,7 +876,7 @@ func TestProvisionTenantWithRetry_MaxRetriesExhausted(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute
@@ -902,7 +916,7 @@ func TestProvisionTenantWithRetry_ContextCancellation(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Create cancellable context
@@ -961,7 +975,7 @@ func TestProvisionTenantWithRetry_ExponentialBackoffTiming(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	worker, err := NewProvisioningWorker(repo, mockProv, 5*time.Second, logger)
+	worker, err := NewProvisioningWorker(repo, mockProv, testWorkerConfig(5*time.Second), logger)
 	require.NoError(t, err)
 
 	// Execute and measure time
