@@ -76,6 +76,9 @@ k8s_namespace = 'default'
 # with corresponding users (e.g., meridian_party_user, meridian_current_account_user).
 #
 # See init-database.sh for database/user creation and ADR-0003 for architecture details.
+#
+# NOTE: All URLs use 'cockroachdb' hostname since both services and migrations
+# run inside the cluster (migrations run as Kubernetes Jobs, not local_resource).
 db_urls = {
   'platform': os.getenv('PLATFORM_DATABASE_URL', 'postgres://meridian_platform_user@cockroachdb:26257/meridian_platform?sslmode=disable'),
   'current_account': os.getenv('CURRENT_ACCOUNT_DATABASE_URL', 'postgres://meridian_current_account_user@cockroachdb:26257/meridian_current_account?sslmode=disable'),
@@ -85,9 +88,130 @@ db_urls = {
   'party': os.getenv('PARTY_DATABASE_URL', 'postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable'),
 }
 
+# NOTE: Migrations now run as Kubernetes Jobs inside the cluster
+# They use db_urls (with 'cockroachdb' hostname) since they run in pods
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+def migration_job(name, service_name, db_url_key, resource_deps=[]):
+    """
+    Create a Kubernetes Job to run database migrations inside the cluster.
+    The job runs inside the cluster where 'cockroachdb' hostname resolves.
+
+    Creates ConfigMaps for migration files and atlas.hcl, then creates a Job
+    that runs Atlas migration inside the cluster.
+
+    Args:
+        name: Migration job name (e.g., 'migrate-current-account')
+        service_name: Service name for migration path (e.g., 'current-account')
+        db_url_key: Key in db_urls dictionary (e.g., 'current_account')
+        resource_deps: List of resource dependencies
+    """
+    configmap_name_migrations = '{}-migrations'.format(name)
+    configmap_name_atlas = '{}-atlas-config'.format(name)
+
+    # Create ConfigMap for migration files
+    local_resource(
+        '{}-create-migrations-cm'.format(name),
+        cmd='kubectl create configmap {} --from-file=services/{}/migrations --dry-run=client -o yaml | kubectl apply -f -'.format(
+            configmap_name_migrations, service_name
+        ),
+        resource_deps=resource_deps,
+        labels=['database'],
+        auto_init=True,
+        trigger_mode=TRIGGER_MODE_MANUAL,
+    )
+
+    # Create ConfigMap for atlas.hcl
+    local_resource(
+        '{}-create-atlas-cm'.format(name),
+        cmd='kubectl create configmap {} --from-file=atlas.hcl=services/{}/atlas/atlas.hcl --dry-run=client -o yaml | kubectl apply -f -'.format(
+            configmap_name_atlas, service_name
+        ),
+        resource_deps=resource_deps,
+        labels=['database'],
+        auto_init=True,
+        trigger_mode=TRIGGER_MODE_MANUAL,
+    )
+
+    # Delete any existing job before creating new one (Jobs are immutable)
+    # This ensures re-runs work correctly
+    local_resource(
+        '{}-cleanup'.format(name),
+        cmd='kubectl delete job {} --ignore-not-found=true'.format(name),
+        resource_deps=['{}-create-migrations-cm'.format(name), '{}-create-atlas-cm'.format(name)] + resource_deps,
+        labels=['database'],
+        auto_init=True,
+        trigger_mode=TRIGGER_MODE_MANUAL,
+    )
+
+    # Create Job YAML using official Atlas image (no curl|sh)
+    job_yaml = '''
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {job_name}
+spec:
+  ttlSecondsAfterFinished: 300
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migrate
+        image: arigaio/atlas:latest-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          cd /workspace
+          atlas migrate apply \\
+            --env local \\
+            --config file://services/{service_name}/atlas/atlas.hcl \\
+            --url "{db_url}" \\
+            --allow-dirty
+        env:
+        - name: DATABASE_URL
+          value: "{db_url}"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        volumeMounts:
+        - name: migrations
+          mountPath: /workspace/services/{service_name}/migrations
+        - name: atlas-config
+          mountPath: /workspace/services/{service_name}/atlas
+      volumes:
+      - name: migrations
+        configMap:
+          name: {configmap_migrations}
+      - name: atlas-config
+        configMap:
+          name: {configmap_atlas}
+  backoffLimit: 3
+'''.format(
+        job_name=name,
+        service_name=service_name,
+        db_url=db_urls[db_url_key],
+        configmap_migrations=configmap_name_migrations,
+        configmap_atlas=configmap_name_atlas,
+    )
+
+    k8s_yaml(blob(job_yaml))
+
+    # Track the Job resource
+    k8s_resource(
+        name,
+        labels=['database'],
+        resource_deps=['{}-cleanup'.format(name)],
+        auto_init=True,
+    )
 
 def grpc_microservice(name, grpc_port, resource_deps=[], extra_k8s_objects=[]):
     """
@@ -448,62 +572,53 @@ local_resource(
 # - Within each database, org schemas are created for multi-tenant isolation
 # - Tables use singular, unqualified names (relies on search_path for routing)
 #
+# Migrations run as Kubernetes Jobs inside the cluster where 'cockroachdb' hostname resolves.
+# This ensures migrations use the same network context as the services.
+#
 # Migrations execute in parallel where possible:
 # - Parallel: current_account + financial_accounting + party + tenant (all independent)
 # - Sequential: position_keeping and payment_order wait for current_account (Account FK reference)
 # This minimizes total migration time while respecting schema dependencies
-local_resource(
+migration_job(
   'migrate-current-account',
-  cmd='atlas migrate apply --env local --config file://services/current-account/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['current_account']),
+  'current-account',
+  'current_account',
   resource_deps=['init-database'],  # Database and user must exist before migrations
-  labels=['database'],
-  auto_init=True,
-  trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
-local_resource(
+migration_job(
   'migrate-position-keeping',
-  cmd='atlas migrate apply --env local --config file://services/position-keeping/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['position_keeping']),
+  'position-keeping',
+  'position_keeping',
   resource_deps=['migrate-current-account'],  # Depends on current_account being migrated first
-  labels=['database'],
-  auto_init=True,
-  trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
-local_resource(
+migration_job(
   'migrate-financial-accounting',
-  cmd='atlas migrate apply --env local --config file://services/financial-accounting/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['financial_accounting']),
+  'financial-accounting',
+  'financial_accounting',
   resource_deps=['init-database'],  # Independent database, only needs init to complete
-  labels=['database'],
-  auto_init=True,
-  trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
-local_resource(
+migration_job(
   'migrate-payment-order',
-  cmd='atlas migrate apply --env local --config file://services/payment-order/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['payment_order']),
+  'payment-order',
+  'payment_order',
   resource_deps=['migrate-current-account'],  # Depends on current_account for account FK reference
-  labels=['database'],
-  auto_init=True,
-  trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
-local_resource(
+migration_job(
   'migrate-tenant',
-  cmd='atlas migrate apply --env local --config file://services/tenant/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['platform']),
+  'tenant',
+  'platform',
   resource_deps=['init-database'],  # Independent database (platform), only needs init to complete
-  labels=['database'],
-  auto_init=True,
-  trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
-local_resource(
+migration_job(
   'migrate-party',
-  cmd='atlas migrate apply --env local --config file://services/party/atlas/atlas.hcl --url "{}" --allow-dirty'.format(db_urls['party']),
+  'party',
+  'party',
   resource_deps=['init-database'],  # Independent database, only needs init to complete
-  labels=['database'],
-  auto_init=True,
-  trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
 # Kafka cluster health check - runs automatically after kafka-cluster is ready
