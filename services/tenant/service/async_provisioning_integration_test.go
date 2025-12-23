@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -23,6 +24,16 @@ import (
 // =============================================================================
 // Test Infrastructure
 // =============================================================================
+
+// Test error definitions for simulating provisioning failures.
+// These match patterns in provisioning_worker.go's retryablePatterns and permanentPatterns.
+var (
+	// errRetryableTimeout is a retryable error matching "timeout" pattern.
+	errRetryableTimeout = errors.New("connection timeout waiting for database")
+
+	// errPermanentPermissionDenied is a permanent error matching "permission" and "denied" patterns.
+	errPermanentPermissionDenied = errors.New("permission denied: insufficient privileges for schema creation")
+)
 
 // TestEnvironment holds all fixtures for async provisioning integration tests.
 type TestEnvironment struct {
@@ -393,4 +404,254 @@ func TestAsyncProvisioningFlow(t *testing.T) {
 		"Overall provisioning should have no error message")
 
 	t.Logf("Async provisioning flow completed successfully")
+}
+
+// TestProvisioningFailureRetry verifies that transient provisioning failures
+// trigger automatic retry logic and eventually succeed after recovery.
+//
+// Test scenario:
+// 1. Configure MockProvisioner to fail with a retryable error ("connection timeout")
+// 2. Create a tenant, triggering async provisioning
+// 3. After some provisioning attempts, clear the failure condition
+// 4. Verify tenant eventually reaches ACTIVE status
+// 5. Verify ProvisioningCalls shows multiple attempts (indicating retries)
+func TestProvisioningFailureRetry(t *testing.T) {
+	// Setup test environment with worker running
+	env := setupTestEnvironment(t)
+	defer env.Cleanup()
+
+	// Create the gRPC service with the test environment's repo and provisioner
+	svc := NewService(env.Repo, env.Provisioner, nil, nil, env.Logger)
+
+	// Configure tenant ID for this test
+	testTenantID := "test_retry_tenant"
+
+	// Create an authenticated context with platform admin claims
+	claims := &auth.Claims{
+		UserID:   "admin-123",
+		TenantID: testTenantID,
+		Roles:    []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// =========================================================================
+	// Step 1: Configure MockProvisioner to fail with a retryable error
+	// =========================================================================
+	// Use "connection timeout" which matches retryablePatterns in provisioning_worker.go
+	env.Provisioner.FailProvisioningFor[testTenantID] = errRetryableTimeout
+
+	t.Logf("Configured MockProvisioner to fail provisioning for %s with: %v", testTenantID, errRetryableTimeout)
+
+	// =========================================================================
+	// Step 2: Create tenant, triggering async provisioning
+	// =========================================================================
+	req := &pb.InitiateTenantRequest{
+		TenantId:        testTenantID,
+		DisplayName:     "Retry Test Tenant",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err, "InitiateTenant should succeed")
+	require.NotNil(t, resp, "Response should not be nil")
+
+	// Verify initial status is PROVISIONING_PENDING
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status,
+		"Initial tenant status should be PROVISIONING_PENDING")
+
+	t.Logf("Tenant created with status: %s", resp.Tenant.Status)
+
+	// =========================================================================
+	// Step 3: Wait for some provisioning attempts, then clear the failure
+	// =========================================================================
+	// We'll wait until at least 2 provisioning attempts have been made,
+	// then clear the failure to allow the next attempt to succeed.
+	failureClearedAt := 0
+	require.Eventually(t, func() bool {
+		// Use thread-safe helper method to get call count
+		callCount := env.Provisioner.GetProvisioningCallCount()
+
+		t.Logf("Provisioning call count: %d", callCount)
+
+		// After at least 2 attempts, clear the failure condition
+		if callCount >= 2 && failureClearedAt == 0 {
+			// Use thread-safe helper method to clear failure
+			if env.Provisioner.ClearFailure(testTenantID) {
+				failureClearedAt = callCount
+				t.Logf("Cleared failure condition after %d provisioning attempts", callCount)
+			}
+		}
+
+		return failureClearedAt > 0 && callCount > failureClearedAt
+	}, 30*time.Second, 100*time.Millisecond,
+		"Should have multiple provisioning attempts and clear failure")
+
+	t.Logf("Failure condition was cleared after %d attempts", failureClearedAt)
+
+	// =========================================================================
+	// Step 4: Verify tenant eventually becomes ACTIVE
+	// =========================================================================
+	statusReq := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: testTenantID,
+	}
+
+	var finalStatusResp *pb.GetTenantProvisioningStatusResponse
+	require.Eventually(t, func() bool {
+		statusResp, err := svc.GetTenantProvisioningStatus(ctx, statusReq)
+		if err != nil {
+			t.Logf("GetTenantProvisioningStatus error (will retry): %v", err)
+			return false
+		}
+
+		t.Logf("Polling: overall_status=%s", statusResp.OverallStatus)
+
+		if statusResp.OverallStatus == pb.TenantStatus_TENANT_STATUS_ACTIVE {
+			finalStatusResp = statusResp
+			return true
+		}
+
+		return false
+	}, 60*time.Second, 100*time.Millisecond,
+		"Tenant should transition to ACTIVE status within 60 seconds after retry")
+
+	require.NotNil(t, finalStatusResp, "Final status response should be captured")
+
+	// =========================================================================
+	// Step 5: Verify ProvisioningCalls shows multiple attempts (retries occurred)
+	// =========================================================================
+	totalCalls := env.Provisioner.GetProvisioningCallCount()
+
+	// Should have at least 3 calls: 2 failures + 1 success
+	assert.GreaterOrEqual(t, totalCalls, 3,
+		"Should have at least 3 provisioning attempts (2 failures + 1 success), got %d", totalCalls)
+
+	t.Logf("Total provisioning attempts: %d (cleared failure after %d)", totalCalls, failureClearedAt)
+
+	// Verify final status is ACTIVE
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_ACTIVE, finalStatusResp.OverallStatus,
+		"Final tenant status should be ACTIVE after retry recovery")
+
+	// Verify no error message (successful recovery)
+	assert.Empty(t, finalStatusResp.ErrorMessage,
+		"Overall provisioning should have no error message after successful retry")
+
+	t.Logf("Provisioning retry test completed: %d total attempts, recovered after clearing failure at attempt %d",
+		totalCalls, failureClearedAt)
+}
+
+// TestProvisioningMaxRetriesExceeded verifies that persistent provisioning failures
+// with non-retryable errors result in PROVISIONING_FAILED status without retries.
+//
+// This test demonstrates:
+// - Permanent/non-retryable errors are not retried (only 1 provisioning attempt)
+// - Tenant status transitions to PROVISIONING_FAILED
+// - Error message is persisted in the tenant record and retrievable via API
+func TestProvisioningMaxRetriesExceeded(t *testing.T) {
+	// Setup test environment with worker running
+	env := setupTestEnvironment(t)
+	defer env.Cleanup()
+
+	// Create the gRPC service with the test environment's repo and provisioner
+	svc := NewService(env.Repo, env.Provisioner, nil, nil, env.Logger)
+
+	// =========================================================================
+	// Step 1: Configure MockProvisioner to fail with a permanent (non-retryable) error
+	// =========================================================================
+	// Use "permission denied" which matches the permanentPatterns in provisioning_worker.go
+	// Permanent errors should NOT be retried - the worker should fail fast
+	testTenantID := "test_permanent_failure_tenant"
+	env.Provisioner.FailProvisioningFor[testTenantID] = errPermanentPermissionDenied
+
+	t.Logf("Configured MockProvisioner to fail provisioning for %s with permanent error: %v", testTenantID, errPermanentPermissionDenied)
+
+	// Create an authenticated context with platform admin claims
+	claims := &auth.Claims{
+		UserID:   "admin-123",
+		TenantID: testTenantID,
+		Roles:    []string{auth.RolePlatformAdmin},
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+
+	// =========================================================================
+	// Step 2: Call InitiateTenant to create the tenant
+	// =========================================================================
+	req := &pb.InitiateTenantRequest{
+		TenantId:        testTenantID,
+		DisplayName:     "Permanent Failure Test Tenant",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err, "InitiateTenant should succeed")
+	require.NotNil(t, resp, "Response should not be nil")
+	require.NotNil(t, resp.Tenant, "Tenant in response should not be nil")
+
+	// Verify initial status is PROVISIONING_PENDING
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING, resp.Tenant.Status,
+		"Initial tenant status should be PROVISIONING_PENDING")
+
+	t.Logf("Tenant created with status: %s", resp.Tenant.Status)
+
+	// =========================================================================
+	// Step 3: Poll until tenant status becomes PROVISIONING_FAILED
+	// =========================================================================
+	// Since this is a permanent error, it should fail fast (no retries)
+	// Use a shorter timeout since we expect quick failure
+	statusReq := &pb.GetTenantProvisioningStatusRequest{
+		TenantId: testTenantID,
+	}
+
+	var finalStatusResp *pb.GetTenantProvisioningStatusResponse
+	require.Eventually(t, func() bool {
+		statusResp, err := svc.GetTenantProvisioningStatus(ctx, statusReq)
+		if err != nil {
+			t.Logf("GetTenantProvisioningStatus error (will retry): %v", err)
+			return false
+		}
+
+		t.Logf("Polling: overall_status=%s, error_message=%q",
+			statusResp.OverallStatus, statusResp.ErrorMessage)
+
+		// Check if tenant has reached PROVISIONING_FAILED status
+		if statusResp.OverallStatus == pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED {
+			finalStatusResp = statusResp
+			return true
+		}
+
+		return false
+	}, 10*time.Second, 100*time.Millisecond,
+		"Tenant should transition to PROVISIONING_FAILED status within 10 seconds")
+
+	require.NotNil(t, finalStatusResp, "Final status response should be captured")
+
+	// =========================================================================
+	// Step 4: Verify final tenant status is PROVISIONING_FAILED
+	// =========================================================================
+	assert.Equal(t, pb.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED, finalStatusResp.OverallStatus,
+		"Final tenant status should be PROVISIONING_FAILED")
+
+	t.Logf("Final provisioning status: %s", finalStatusResp.OverallStatus)
+
+	// =========================================================================
+	// Step 5: Verify error message is persisted and retrievable
+	// =========================================================================
+	assert.NotEmpty(t, finalStatusResp.ErrorMessage,
+		"Error message should be persisted in the response")
+	assert.Contains(t, finalStatusResp.ErrorMessage, "permission denied",
+		"Error message should contain the original error details")
+
+	t.Logf("Persisted error message: %s", finalStatusResp.ErrorMessage)
+
+	// =========================================================================
+	// Step 6: Verify only 1 provisioning attempt was made (no retries)
+	// =========================================================================
+	// For permanent errors, the worker should NOT retry
+	// Count how many times ProvisionSchemas was called for this tenant
+	callCount := env.Provisioner.GetProvisioningCallCountForTenant(testTenantID)
+
+	assert.Equal(t, 1, callCount,
+		"Permanent errors should NOT be retried - expected 1 provisioning call, got %d", callCount)
+
+	t.Logf("Provisioning attempts: %d (expected 1 for permanent error)", callCount)
+	t.Logf("Permanent failure test completed successfully")
 }

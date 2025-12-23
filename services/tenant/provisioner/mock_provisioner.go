@@ -308,5 +308,40 @@ func (m *MockProvisioner) InitializeProvisioningStatus(_ context.Context, tenant
 	return nil
 }
 
+// GetProvisioningCallCount returns the number of times ProvisionSchemas was called.
+// Thread-safe for concurrent access during tests.
+func (m *MockProvisioner) GetProvisioningCallCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.ProvisioningCalls)
+}
+
+// GetProvisioningCallCountForTenant returns the number of times ProvisionSchemas was called
+// for a specific tenant. Thread-safe for concurrent access during tests.
+func (m *MockProvisioner) GetProvisioningCallCountForTenant(tenantID string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	count := 0
+	for _, calledID := range m.ProvisioningCalls {
+		if calledID.String() == tenantID {
+			count++
+		}
+	}
+	return count
+}
+
+// ClearFailure removes a tenant from the FailProvisioningFor map.
+// Thread-safe for concurrent access during tests.
+// Returns true if the tenant was in the map and removed, false otherwise.
+func (m *MockProvisioner) ClearFailure(tenantID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.FailProvisioningFor[tenantID]; exists {
+		delete(m.FailProvisioningFor, tenantID)
+		return true
+	}
+	return false
+}
+
 // Ensure MockProvisioner implements SchemaProvisioner.
 var _ SchemaProvisioner = (*MockProvisioner)(nil)
