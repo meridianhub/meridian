@@ -35,17 +35,6 @@ func toJSONB(s string) string {
 	return string(b)
 }
 
-// fromJSONB extracts a string from JSONB storage.
-// If the stored value is a JSON string, it's unmarshaled.
-// Otherwise, the raw value is returned.
-func fromJSONB(s string) string {
-	var result string
-	if err := json.Unmarshal([]byte(s), &result); err == nil {
-		return result
-	}
-	return s
-}
-
 // Repository provides persistence operations for parties
 type Repository struct {
 	db *gorm.DB
