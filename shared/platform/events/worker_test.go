@@ -152,6 +152,23 @@ func (r *mockOutboxRepository) FetchUnprocessed(_ context.Context, serviceName s
 	return result, nil
 }
 
+func (r *mockOutboxRepository) FetchAndLockForProcessing(ctx context.Context, serviceName string, limit int) ([]EventOutbox, error) {
+	// For tests, this is equivalent to FetchUnprocessed + MarkProcessing
+	entries, err := r.FetchUnprocessed(ctx, serviceName, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Mark them as processing
+	ids := make([]uuid.UUID, len(entries))
+	for i, entry := range entries {
+		ids[i] = entry.ID
+	}
+	_, _ = r.MarkProcessing(ctx, ids)
+
+	return entries, nil
+}
+
 func (r *mockOutboxRepository) MarkProcessing(_ context.Context, ids []uuid.UUID) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

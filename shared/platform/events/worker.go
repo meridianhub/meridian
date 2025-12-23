@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/google/uuid"
 )
 
 // Worker errors.
@@ -225,10 +224,11 @@ func (w *Worker) processBatch(ctx context.Context) error {
 		RecordProcessingDuration(w.config.ServiceName, time.Since(start).Seconds())
 	}()
 
-	// Fetch pending entries
-	entries, err := w.repository.FetchUnprocessed(ctx, w.config.ServiceName, w.config.BatchSize)
+	// Fetch and atomically lock pending entries for processing.
+	// Uses FOR UPDATE SKIP LOCKED to prevent race conditions in multi-worker deployments.
+	entries, err := w.repository.FetchAndLockForProcessing(ctx, w.config.ServiceName, w.config.BatchSize)
 	if err != nil {
-		return fmt.Errorf("failed to fetch pending entries: %w", err)
+		return fmt.Errorf("failed to fetch and lock entries: %w", err)
 	}
 
 	// Record outbox depth
@@ -242,15 +242,6 @@ func (w *Worker) processBatch(ctx context.Context) error {
 	}
 
 	w.logger.Info("processing event outbox batch", "count", len(entries))
-
-	// Mark entries as processing
-	ids := make([]uuid.UUID, len(entries))
-	for i, entry := range entries {
-		ids[i] = entry.ID
-	}
-	if _, err := w.repository.MarkProcessing(ctx, ids); err != nil {
-		return fmt.Errorf("failed to mark entries as processing: %w", err)
-	}
 
 	// Process entries sequentially to maintain order
 	var processedCount, failedCount int

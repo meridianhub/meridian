@@ -11,6 +11,7 @@ package events
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -78,10 +79,16 @@ type OutboxRepository interface {
 
 	// FetchUnprocessed retrieves a batch of unprocessed entries for a specific service.
 	// Entries are ordered by created_at for FIFO processing.
+	// Note: For multi-worker deployments, prefer FetchAndLockForProcessing.
 	FetchUnprocessed(ctx context.Context, serviceName string, limit int) ([]EventOutbox, error)
+
+	// FetchAndLockForProcessing atomically fetches pending entries and marks them as processing.
+	// Uses SELECT FOR UPDATE SKIP LOCKED to prevent race conditions in multi-worker deployments.
+	FetchAndLockForProcessing(ctx context.Context, serviceName string, limit int) ([]EventOutbox, error)
 
 	// MarkProcessing atomically updates entries to 'processing' status.
 	// Returns the number of entries updated.
+	// Note: When using FetchAndLockForProcessing, this is called internally.
 	MarkProcessing(ctx context.Context, ids []uuid.UUID) (int64, error)
 
 	// MarkCompleted marks an entry as successfully processed.
@@ -131,6 +138,7 @@ func (r *PostgresOutboxRepository) Insert(ctx context.Context, tx *gorm.DB, entr
 }
 
 // FetchUnprocessed retrieves a batch of unprocessed entries for a specific service.
+// Note: For multi-worker deployments, prefer FetchAndLockForProcessing to avoid race conditions.
 func (r *PostgresOutboxRepository) FetchUnprocessed(ctx context.Context, serviceName string, limit int) ([]EventOutbox, error) {
 	var entries []EventOutbox
 
@@ -142,6 +150,48 @@ func (r *PostgresOutboxRepository) FetchUnprocessed(ctx context.Context, service
 		Find(&entries).Error
 	if err != nil {
 		return nil, err
+	}
+
+	return entries, nil
+}
+
+// FetchAndLockForProcessing atomically fetches pending entries and marks them as processing
+// using SELECT FOR UPDATE SKIP LOCKED. This prevents race conditions in multi-worker deployments.
+func (r *PostgresOutboxRepository) FetchAndLockForProcessing(ctx context.Context, serviceName string, limit int) ([]EventOutbox, error) {
+	var entries []EventOutbox
+
+	// Use a transaction with FOR UPDATE SKIP LOCKED to atomically:
+	// 1. Select pending entries (skipping any already locked by other workers)
+	// 2. Update their status to 'processing'
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Raw SQL with FOR UPDATE SKIP LOCKED for proper locking
+		sql := `
+			SELECT * FROM event_outbox
+			WHERE status = ? AND service_name = ?
+			ORDER BY created_at ASC
+			LIMIT ?
+			FOR UPDATE SKIP LOCKED`
+
+		if err := tx.Raw(sql, StatusPending, serviceName, limit).Scan(&entries).Error; err != nil {
+			return err
+		}
+
+		if len(entries) == 0 {
+			return nil
+		}
+
+		// Extract IDs and update status
+		ids := make([]uuid.UUID, len(entries))
+		for i, entry := range entries {
+			ids[i] = entry.ID
+		}
+
+		return tx.Model(&EventOutbox{}).
+			Where("id IN ?", ids).
+			Update("status", StatusProcessing).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch and lock entries: %w", err)
 	}
 
 	return entries, nil
@@ -182,37 +232,31 @@ func (r *PostgresOutboxRepository) MarkCompleted(ctx context.Context, id uuid.UU
 	return nil
 }
 
-// MarkFailed increments retry count and updates error message.
+// MarkFailed atomically increments retry count and updates error message.
+// Uses atomic SQL to avoid race conditions when multiple workers process the same entry.
 func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID, err error, maxRetries int) error {
-	// First, fetch current entry to check retry count
-	var entry EventOutbox
-	if fetchErr := r.db.WithContext(ctx).First(&entry, "id = ?", id).Error; fetchErr != nil {
-		if errors.Is(fetchErr, gorm.ErrRecordNotFound) {
-			return ErrOutboxEntryNotFound
-		}
-		return fetchErr
-	}
-
-	newRetryCount := entry.RetryCount + 1
 	errorMsg := err.Error()
-	updates := map[string]interface{}{
-		"retry_count": newRetryCount,
-		"last_error":  errorMsg,
+
+	// Use raw SQL for atomic retry_count increment and conditional status update.
+	// This avoids the read-then-update race condition.
+	sql := `
+		UPDATE event_outbox
+		SET retry_count = retry_count + 1,
+			last_error = ?,
+			status = CASE
+				WHEN retry_count + 1 >= ? THEN ?
+				ELSE ?
+			END
+		WHERE id = ?`
+
+	result := r.db.WithContext(ctx).Exec(sql, errorMsg, maxRetries, StatusFailed, StatusPending, id)
+	if result.Error != nil {
+		return result.Error
 	}
-
-	// If retries exhausted, mark as failed; otherwise reset to pending for retry
-	if newRetryCount >= maxRetries {
-		updates["status"] = StatusFailed
-	} else {
-		updates["status"] = StatusPending
+	if result.RowsAffected == 0 {
+		return ErrOutboxEntryNotFound
 	}
-
-	result := r.db.WithContext(ctx).
-		Model(&EventOutbox{}).
-		Where("id = ?", id).
-		Updates(updates)
-
-	return result.Error
+	return nil
 }
 
 // GetPendingCount returns the number of pending entries for observability.

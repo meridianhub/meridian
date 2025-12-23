@@ -2,7 +2,6 @@ package events
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -165,36 +164,29 @@ func (r *PgxOutboxRepository) MarkCompleted(ctx context.Context, id uuid.UUID) e
 	return nil
 }
 
-// MarkFailed increments retry count and updates error message.
+// MarkFailed atomically increments retry count and updates error message.
+// Uses atomic SQL to avoid race conditions when multiple workers process the same entry.
 func (r *PgxOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID, err error, maxRetries int) error {
-	// First get current retry count
-	var currentRetryCount int
-	querySelect := `SELECT retry_count FROM event_outbox WHERE id = $1`
-	selectErr := r.pool.QueryRow(ctx, querySelect, id).Scan(&currentRetryCount)
-	if selectErr != nil {
-		if errors.Is(selectErr, pgx.ErrNoRows) {
-			return ErrOutboxEntryNotFound
-		}
-		return fmt.Errorf("failed to get current retry count: %w", selectErr)
-	}
-
-	newRetryCount := currentRetryCount + 1
 	errorMsg := err.Error()
 
-	// Determine new status
-	newStatus := StatusPending
-	if newRetryCount >= maxRetries {
-		newStatus = StatusFailed
-	}
-
+	// Use atomic SQL for retry_count increment and conditional status update.
+	// This avoids the read-then-update race condition.
 	query := `
 		UPDATE event_outbox
-		SET status = $1, retry_count = $2, last_error = $3
-		WHERE id = $4`
+		SET retry_count = retry_count + 1,
+			last_error = $1,
+			status = CASE
+				WHEN retry_count + 1 >= $2 THEN $3
+				ELSE $4
+			END
+		WHERE id = $5`
 
-	_, updateErr := r.pool.Exec(ctx, query, newStatus, newRetryCount, errorMsg, id)
+	result, updateErr := r.pool.Exec(ctx, query, errorMsg, maxRetries, StatusFailed, StatusPending, id)
 	if updateErr != nil {
 		return fmt.Errorf("failed to mark entry as failed: %w", updateErr)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrOutboxEntryNotFound
 	}
 
 	return nil
