@@ -5,6 +5,10 @@ metadata:
   labels:
     app: tenant
     component: microservice
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
 spec:
   type: ClusterIP
   clusterIP: None  # Headless service for gRPC client-side load balancing
@@ -12,6 +16,10 @@ spec:
   - name: grpc
     port: 50056
     targetPort: grpc
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: metrics
     protocol: TCP
   selector:
     app: tenant

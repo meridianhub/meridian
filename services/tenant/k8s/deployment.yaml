@@ -38,6 +38,9 @@ spec:
         - name: grpc
           containerPort: 50056
           protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: tenant-config

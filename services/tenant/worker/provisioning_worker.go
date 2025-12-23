@@ -14,6 +14,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/services/tenant/observability"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
@@ -140,10 +141,14 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 
 	if len(tenants) == 0 {
 		w.logger.Debug("no pending tenants found")
+		observability.SetProvisioningQueueDepth(0)
 		return
 	}
 
 	w.logger.Info("found pending tenants", "count", len(tenants))
+
+	// Record queue depth before processing
+	observability.SetProvisioningQueueDepth(len(tenants))
 
 	// Process each tenant with optimistic locking
 	for _, tenant := range tenants {
@@ -170,6 +175,11 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 		// We use context.WithoutCancel to prevent parent cancellation from stopping provisioning
 		go w.provisionTenantWithRetry(context.WithoutCancel(ctx), tenant.ID)
 	}
+
+	// Note: We intentionally do NOT reset queue depth to 0 here.
+	// The next poll cycle will set the accurate count of PROVISIONING_PENDING tenants.
+	// Resetting to 0 could cause misleading dashboard values if this function
+	// is called again before all goroutines complete.
 }
 
 // Retry configuration constants for provisioning with exponential backoff.
@@ -191,9 +201,22 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 	// Ensure we decrement the WaitGroup when this goroutine completes
 	defer w.wg.Done()
 
+	// Start timing the provisioning operation
+	start := time.Now()
+	var status string
+
+	// Defer metric recording to ensure it happens even on panic
+	defer func() {
+		if status == "" {
+			status = observability.StatusError // Default to error if status not set
+		}
+		observability.RecordProvisioningDuration(status, time.Since(start))
+	}()
+
 	// Panic recovery to prevent a single tenant provisioning failure from crashing the worker
 	defer func() {
 		if r := recover(); r != nil {
+			status = observability.StatusError
 			w.logger.Error("panic during tenant provisioning",
 				"tenant_id", tenantID,
 				"panic", r)
@@ -205,10 +228,12 @@ func (w *ProvisioningWorker) provisionTenantWithRetry(ctx context.Context, tenan
 
 	attempts, lastErr := w.executeProvisioningWithRetry(ctx, tenantID)
 	if lastErr == nil {
+		status = observability.StatusSuccess
 		return // Success
 	}
 
 	// Mark as failed
+	status = observability.StatusError
 	w.markTenantAsFailed(ctx, tenantID, lastErr, attempts)
 }
 
@@ -237,6 +262,11 @@ func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, t
 				"attempt", attempts,
 				"error", err)
 			break // Permanent error, don't retry
+		}
+
+		// Record retry attempt for observability (starting from second attempt)
+		if attempt > 0 {
+			observability.IncrementRetryAttempt()
 		}
 
 		if cancelled := w.waitWithBackoff(ctx, tenantID, attempt, lastErr); cancelled {
@@ -286,6 +316,9 @@ func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID te
 }
 
 // markTenantAsFailed updates tenant status to provisioning_failed with error details.
+// TODO: When service-specific provisioning is implemented, call observability.IncrementServiceFailure(serviceName)
+// here based on which service (database, kafka, etc.) caused the failure. Currently, the provisioner
+// returns generic errors without service attribution.
 func (w *ProvisioningWorker) markTenantAsFailed(ctx context.Context, tenantID tenant.TenantID, lastErr error, attempts int) {
 	tenant, getErr := w.repo.GetByID(ctx, tenantID)
 	if getErr != nil {
