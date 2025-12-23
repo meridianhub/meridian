@@ -77,9 +77,8 @@ k8s_namespace = 'default'
 #
 # See init-database.sh for database/user creation and ADR-0003 for architecture details.
 #
-# NOTE: Two sets of URLs:
-# - db_urls: For in-cluster services (pods) - use 'cockroachdb' hostname
-# - db_urls_local: For local resources (migrations) - use 'localhost' via port forwarding
+# NOTE: All URLs use 'cockroachdb' hostname since both services and migrations
+# run inside the cluster (migrations run as Kubernetes Jobs, not local_resource).
 db_urls = {
   'platform': os.getenv('PLATFORM_DATABASE_URL', 'postgres://meridian_platform_user@cockroachdb:26257/meridian_platform?sslmode=disable'),
   'current_account': os.getenv('CURRENT_ACCOUNT_DATABASE_URL', 'postgres://meridian_current_account_user@cockroachdb:26257/meridian_current_account?sslmode=disable'),
@@ -100,10 +99,10 @@ def migration_job(name, service_name, db_url_key, resource_deps=[]):
     """
     Create a Kubernetes Job to run database migrations inside the cluster.
     The job runs inside the cluster where 'cockroachdb' hostname resolves.
-    
+
     Creates ConfigMaps for migration files and atlas.hcl, then creates a Job
     that runs Atlas migration inside the cluster.
-    
+
     Args:
         name: Migration job name (e.g., 'migrate-current-account')
         service_name: Service name for migration path (e.g., 'current-account')
@@ -112,7 +111,12 @@ def migration_job(name, service_name, db_url_key, resource_deps=[]):
     """
     configmap_name_migrations = '{}-migrations'.format(name)
     configmap_name_atlas = '{}-atlas-config'.format(name)
-    
+
+    # Generate unique job name suffix from git commit to ensure idempotency
+    # Jobs are immutable - a new suffix ensures re-runs create new jobs
+    job_suffix = local('git rev-parse --short HEAD', quiet=True).strip()
+    job_name_full = '{}-{}'.format(name, job_suffix)
+
     # Create ConfigMap for migration files
     local_resource(
         '{}-create-migrations-cm'.format(name),
@@ -124,7 +128,7 @@ def migration_job(name, service_name, db_url_key, resource_deps=[]):
         auto_init=True,
         trigger_mode=TRIGGER_MODE_MANUAL,
     )
-    
+
     # Create ConfigMap for atlas.hcl
     local_resource(
         '{}-create-atlas-cm'.format(name),
@@ -136,8 +140,8 @@ def migration_job(name, service_name, db_url_key, resource_deps=[]):
         auto_init=True,
         trigger_mode=TRIGGER_MODE_MANUAL,
     )
-    
-    # Create Job YAML that uses the ConfigMaps
+
+    # Create Job YAML using official Atlas image (no curl|sh)
     job_yaml = '''
 apiVersion: batch/v1
 kind: Job
@@ -145,18 +149,17 @@ metadata:
   name: {job_name}
 spec:
   ttlSecondsAfterFinished: 300
+  activeDeadlineSeconds: 300
   template:
     spec:
       restartPolicy: Never
       containers:
       - name: migrate
-        image: golang:1.25-alpine
+        image: arigaio/atlas:latest
         command:
-        - sh
+        - /bin/sh
         - -c
         - |
-          apk add --no-cache curl
-          curl -sSf https://atlasgo.sh | sh
           cd /workspace
           atlas migrate apply \\
             --env local \\
@@ -166,6 +169,13 @@ spec:
         env:
         - name: DATABASE_URL
           value: "{db_url}"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
         volumeMounts:
         - name: migrations
           mountPath: /workspace/services/{service_name}/migrations
@@ -180,18 +190,19 @@ spec:
           name: {configmap_atlas}
   backoffLimit: 3
 '''.format(
-        job_name=name,
+        job_name=job_name_full,
         service_name=service_name,
         db_url=db_urls[db_url_key],
         configmap_migrations=configmap_name_migrations,
         configmap_atlas=configmap_name_atlas,
     )
-    
+
     k8s_yaml(blob(job_yaml))
-    
+
     # Track the Job resource
     k8s_resource(
         name,
+        new_name=job_name_full,
         labels=['database'],
         resource_deps=['{}-create-migrations-cm'.format(name), '{}-create-atlas-cm'.format(name)] + resource_deps,
         auto_init=True,
