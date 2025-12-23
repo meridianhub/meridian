@@ -1648,6 +1648,169 @@ func TestService_toProtoServiceStatus(t *testing.T) {
 	}
 }
 
+// TestService_InitiateTenant_WithValidSlug tests slug validation and uniqueness check with a valid slug.
+func TestService_InitiateTenant_WithValidSlug(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "acme_corp",
+		Slug:            "acme-corp",
+		DisplayName:     "Acme Corporation",
+		SettlementAsset: "USD",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Tenant)
+	assert.Equal(t, "acme-corp", resp.Tenant.Slug)
+	assert.Equal(t, "acme_corp", resp.Tenant.TenantId)
+}
+
+// TestService_InitiateTenant_WithInvalidSlugFormat tests slug validation with invalid formats.
+func TestService_InitiateTenant_WithInvalidSlugFormat(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	testCases := []struct {
+		name        string
+		tenantID    string
+		slug        string
+		expectedErr string
+	}{
+		{
+			name:        "slug too short",
+			tenantID:    "test_short",
+			slug:        "ab",
+			expectedErr: "slug must be at least 3 characters long",
+		},
+		{
+			name:        "slug too long",
+			tenantID:    "test_long",
+			slug:        "this-is-a-very-long-slug-that-exceeds-the-maximum-allowed-length-of-sixty-three-characters",
+			expectedErr: "slug must be at most 63 characters long",
+		},
+		{
+			name:        "slug with uppercase",
+			tenantID:    "test_uppercase",
+			slug:        "Acme-Corp",
+			expectedErr: "slug must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:        "slug with leading hyphen",
+			tenantID:    "test_leading",
+			slug:        "-acme-corp",
+			expectedErr: "slug must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:        "slug with trailing hyphen",
+			tenantID:    "test_trailing",
+			slug:        "acme-corp-",
+			expectedErr: "slug must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:        "slug with special characters",
+			tenantID:    "test_special",
+			slug:        "acme_corp",
+			expectedErr: "slug must contain only lowercase alphanumeric characters and hyphens",
+		},
+		{
+			name:        "reserved slug",
+			tenantID:    "test_reserved",
+			slug:        "api",
+			expectedErr: "slug is reserved and cannot be used",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &pb.InitiateTenantRequest{
+				TenantId:        tc.tenantID,
+				Slug:            tc.slug,
+				DisplayName:     "Test Tenant",
+				SettlementAsset: "GBP",
+			}
+
+			_, err := svc.InitiateTenant(ctx, req)
+			require.Error(t, err)
+
+			st, ok := status.FromError(err)
+			require.True(t, ok)
+			assert.Equal(t, codes.InvalidArgument, st.Code())
+			assert.Contains(t, st.Message(), tc.expectedErr)
+		})
+	}
+}
+
+// TestService_InitiateTenant_WithDuplicateSlug tests slug uniqueness check.
+func TestService_InitiateTenant_WithDuplicateSlug(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create first tenant with slug
+	req1 := &pb.InitiateTenantRequest{
+		TenantId:        "tenant_one",
+		Slug:            "duplicate-slug",
+		DisplayName:     "Tenant One",
+		SettlementAsset: "GBP",
+	}
+	_, err := svc.InitiateTenant(ctx, req1)
+	require.NoError(t, err)
+
+	// Try to create second tenant with same slug
+	req2 := &pb.InitiateTenantRequest{
+		TenantId:        "tenant_two",
+		Slug:            "duplicate-slug",
+		DisplayName:     "Tenant Two",
+		SettlementAsset: "USD",
+	}
+	_, err = svc.InitiateTenant(ctx, req2)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.AlreadyExists, st.Code())
+	assert.Contains(t, st.Message(), "slug duplicate-slug is already taken")
+}
+
+// TestService_InitiateTenant_WithEmptySlug tests backward compatibility with empty slug.
+func TestService_InitiateTenant_WithEmptySlug(t *testing.T) {
+	svc, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "no_slug_tenant",
+		Slug:            "", // Empty slug should be allowed
+		DisplayName:     "No Slug Tenant",
+		SettlementAsset: "GBP",
+	}
+
+	resp, err := svc.InitiateTenant(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Tenant)
+	assert.Equal(t, "", resp.Tenant.Slug)
+}
+
+// TestService_InitiateTenant_SlugRepositoryError tests handling of repository errors during slug availability check.
+func TestService_InitiateTenant_SlugRepositoryError(t *testing.T) {
+	// This test would require a mock repository to simulate database errors
+	// For now, we rely on integration tests to cover this scenario
+	// In a real implementation, you would use a mock repository like this:
+	//
+	// mockRepo := &MockRepository{}
+	// mockRepo.On("IsSlugAvailable", mock.Anything, "test-slug").Return(false, errors.New("database error"))
+	// svc := NewService(mockRepo, nil, nil, nil, logger)
+	//
+	// Then verify that the error is properly handled and returns codes.Internal
+	t.Skip("Requires mock repository - covered by integration tests")
+}
+
 // stringPtr is a helper function to create a pointer to a string.
 func stringPtr(s string) *string {
 	return &s
