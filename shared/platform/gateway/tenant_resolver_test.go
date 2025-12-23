@@ -1,11 +1,15 @@
 package gateway
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"testing"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/service"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -293,4 +297,238 @@ func TestExtractSlug(t *testing.T) {
 			assert.Equal(t, tt.want, got, tt.reason)
 		})
 	}
+}
+
+// Test errors for resolveTenant tests.
+var (
+	errCacheWriteFailed = errors.New("redis connection failed")
+	errCacheReadTimeout = errors.New("redis connection timeout")
+	errDatabaseLost     = errors.New("database connection lost")
+)
+
+// TestResolveTenant tests the cache-first tenant resolution with database fallback.
+func TestResolveTenant(t *testing.T) {
+	ctx := context.Background()
+	testSlug := "acme"
+	testTenantID := tenant.MustNewTenantID("tenant_123")
+	testTenant := &domain.Tenant{
+		ID:          testTenantID,
+		DisplayName: "Acme Corp",
+		Slug:        testSlug,
+		Status:      domain.StatusActive,
+	}
+
+	t.Run("cache hit returns tenant ID without DB call", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache returns tenant ID
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: "meridian.io",
+			logger:     logger,
+		}
+
+		// Execute
+		result, err := middleware.resolveTenant(ctx, testSlug)
+
+		// Assert
+		require.NoError(t, err)
+		assert.Equal(t, testTenantID, result)
+
+		// Verify cache was called
+		mockCache.AssertExpectations(t)
+
+		// Verify repository was NOT called (cache hit)
+		mockRepo.AssertNotCalled(t, "GetBySlug")
+	})
+
+	t.Run("cache miss triggers DB lookup and cache population", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache miss (empty TenantID), DB returns tenant
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID).Return(nil)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: "meridian.io",
+			logger:     logger,
+		}
+
+		// Execute
+		result, err := middleware.resolveTenant(ctx, testSlug)
+
+		// Assert
+		require.NoError(t, err)
+		assert.Equal(t, testTenantID, result)
+
+		// Verify all expected calls were made
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("DB not-found error propagates correctly", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache miss, DB returns not found
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, persistence.ErrTenantNotFound)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: "meridian.io",
+			logger:     logger,
+		}
+
+		// Execute
+		result, err := middleware.resolveTenant(ctx, testSlug)
+
+		// Assert
+		require.Error(t, err)
+		assert.ErrorIs(t, err, persistence.ErrTenantNotFound)
+		assert.Empty(t, result)
+
+		// Verify calls
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+		mockCache.AssertNotCalled(t, "Set") // Should not attempt to cache not-found
+	})
+
+	t.Run("cache write failure doesn't fail request", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache miss, DB succeeds, but cache write fails
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID).Return(errCacheWriteFailed)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: "meridian.io",
+			logger:     logger,
+		}
+
+		// Execute
+		result, err := middleware.resolveTenant(ctx, testSlug)
+
+		// Assert: Request should succeed despite cache write failure
+		require.NoError(t, err, "cache write failure should not fail the request")
+		assert.Equal(t, testTenantID, result)
+
+		// Verify all calls were made
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("cache read failure is returned as error", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache read fails
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), errCacheReadTimeout)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: "meridian.io",
+			logger:     logger,
+		}
+
+		// Execute
+		result, err := middleware.resolveTenant(ctx, testSlug)
+
+		// Assert
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get tenant from cache")
+		assert.Empty(t, result)
+
+		// Verify cache was called but repository was not
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertNotCalled(t, "GetBySlug")
+	})
+
+	t.Run("DB error is wrapped and returned", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache miss, DB fails with non-not-found error
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, errDatabaseLost)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: "meridian.io",
+			logger:     logger,
+		}
+
+		// Execute
+		result, err := middleware.resolveTenant(ctx, testSlug)
+
+		// Assert
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get tenant from database")
+		assert.ErrorIs(t, err, errDatabaseLost)
+		assert.Empty(t, result)
+
+		// Verify calls
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("context cancellation is respected", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Create cancelled context
+		cancelledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		// Setup: Cache returns context.Canceled error
+		mockCache.On("Get", cancelledCtx, testSlug).Return(tenant.TenantID(""), context.Canceled)
+
+		// Create middleware
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: "meridian.io",
+			logger:     logger,
+		}
+
+		// Execute
+		result, err := middleware.resolveTenant(cancelledCtx, testSlug)
+
+		// Assert
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.Empty(t, result)
+
+		// Verify cache was called
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertNotCalled(t, "GetBySlug")
+	})
 }
