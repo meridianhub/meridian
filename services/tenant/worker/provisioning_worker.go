@@ -27,6 +27,7 @@ type ProvisioningWorker struct {
 	alertManager   *AlertManager
 	pollInterval   time.Duration
 	alertInterval  time.Duration
+	alertThreshold time.Duration
 	maxRetries     int
 	retryBaseDelay time.Duration
 	retryMaxDelay  time.Duration
@@ -49,6 +50,7 @@ var (
 type Config struct {
 	PollInterval   time.Duration
 	AlertInterval  time.Duration // Interval for checking failed provisioning alerts
+	AlertThreshold time.Duration // Age threshold for failed tenant alerting (default: 1 hour)
 	MaxRetries     int
 	RetryBaseDelay time.Duration
 	RetryMaxDelay  time.Duration
@@ -83,12 +85,19 @@ func NewProvisioningWorker(
 		alertInterval = 15 * time.Minute
 	}
 
+	// Default alert threshold to 1 hour if not specified
+	alertThreshold := config.AlertThreshold
+	if alertThreshold <= 0 {
+		alertThreshold = 1 * time.Hour
+	}
+
 	return &ProvisioningWorker{
 		repo:           repo,
 		provisioner:    provisioner,
 		alertManager:   NewAlertManager(repo, logger),
 		pollInterval:   config.PollInterval,
 		alertInterval:  alertInterval,
+		alertThreshold: alertThreshold,
 		maxRetries:     config.MaxRetries,
 		retryBaseDelay: config.RetryBaseDelay,
 		retryMaxDelay:  config.RetryMaxDelay,
@@ -150,9 +159,9 @@ func (w *ProvisioningWorker) Stop() {
 func (w *ProvisioningWorker) checkFailedProvisioningAlerts(ctx context.Context) {
 	w.logger.Debug("checking for persistent provisioning failures")
 
-	// Check for tenants that have been in provisioning_failed for more than 1 hour
+	// Check for tenants that have been in provisioning_failed for more than the configured threshold
 	// This threshold prevents alerting on transient failures that may self-recover
-	if err := w.alertManager.CheckFailedProvisioningAlerts(ctx, 1*time.Hour); err != nil {
+	if err := w.alertManager.CheckFailedProvisioningAlerts(ctx, w.alertThreshold); err != nil {
 		w.logger.Error("failed to check provisioning alerts", "error", err)
 	}
 }

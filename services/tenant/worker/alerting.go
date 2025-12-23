@@ -38,7 +38,6 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 	cutoffTime := time.Now().Add(-threshold)
 
 	// Query for tenants in provisioning_failed state older than threshold
-	// Note: ListByStatusOlderThan will be implemented in subtask 76.2
 	failedTenants, err := a.repo.ListByStatusOlderThan(ctx, domain.StatusProvisioningFailed, cutoffTime)
 	if err != nil {
 		a.logger.Error("failed to query provisioning_failed tenants",
@@ -53,7 +52,11 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 			"alert", "tenant_provisioning_failed",
 			"tenant_id", tenant.ID,
 			"error_message", tenant.ErrorMessage,
-			"failed_at", tenant.CreatedAt, // Using CreatedAt as proxy for failed timestamp
+			// Note: Using created_at as a proxy for failure timestamp. In typical workflows,
+			// tenants transition to provisioning_failed within seconds of creation, making
+			// created_at a reasonable approximation. A dedicated failed_at field would require
+			// schema changes and is deferred to future work.
+			"failed_at", tenant.CreatedAt,
 			"status", tenant.Status,
 			"threshold_hours", threshold.Hours())
 

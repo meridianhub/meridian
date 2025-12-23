@@ -97,18 +97,9 @@ func TestCheckFailedProvisioningAlerts_WithFailedTenants(t *testing.T) {
 
 	threshold := 1 * time.Hour
 
-	// Note: This test will fail until subtask 76.2 implements ListByStatusOlderThan
-	// For now, we're testing the structure and logging behavior
 	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
-	// We expect this to fail until the repository method is implemented
-	// When implemented, the assertions below will validate the behavior
-	if err != nil {
-		// Expected until ListByStatusOlderThan is implemented
-		assert.Contains(t, err.Error(), "ListByStatusOlderThan")
-		return
-	}
+	require.NoError(t, err)
 
-	// Once implemented, these assertions will validate alert logging
 	logs := logBuf.String()
 
 	// Should contain alerts for both failed tenants

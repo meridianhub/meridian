@@ -277,11 +277,13 @@ func (r *Repository) ListByStatus(ctx context.Context, status domain.Status, lim
 // Used by the alert manager to identify tenants stuck in a failed state for extended periods.
 // Returns empty slice if no tenants found (not an error).
 // The cutoff parameter filters tenants WHERE created_at < cutoff.
+// Limited to 100 results to prevent large result sets in degraded states.
 func (r *Repository) ListByStatusOlderThan(ctx context.Context, status domain.Status, cutoff time.Time) ([]*domain.Tenant, error) {
 	var entities []TenantEntity
 	result := r.db.WithContext(ctx).
 		Where("status = ? AND created_at < ?", status, cutoff).
 		Order("created_at ASC").
+		Limit(100). // Prevent large result sets in degraded states
 		Find(&entities)
 
 	if result.Error != nil {

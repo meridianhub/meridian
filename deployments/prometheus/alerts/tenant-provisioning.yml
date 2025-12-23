@@ -26,7 +26,7 @@ groups:
         expr: |
           (
             rate(tenant_service_provisioning_failures_total[5m])
-            / (rate(tenant_provisioning_duration_seconds_count[5m]) + rate(tenant_service_provisioning_failures_total[5m]))
+            / clamp_min(rate(tenant_provisioning_duration_seconds_count[5m]) + rate(tenant_service_provisioning_failures_total[5m]), 0.0001)
           ) > 0.20
         for: 10m
         labels:
