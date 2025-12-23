@@ -93,6 +93,18 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		if err := domain.ValidateSlug(req.Slug); err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid slug: %v", err)
 		}
+
+		// Check slug availability
+		available, err := s.repo.IsSlugAvailable(ctx, req.Slug)
+		if err != nil {
+			s.logger.Error("failed to check slug availability",
+				"slug", req.Slug,
+				"error", err)
+			return nil, status.Errorf(codes.Internal, "failed to check slug availability")
+		}
+		if !available {
+			return nil, status.Errorf(codes.AlreadyExists, "slug %s is already taken", req.Slug)
+		}
 	}
 
 	// Create domain tenant
