@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -286,8 +287,12 @@ func TestConcurrentProvisioningWithOptimisticLocking(t *testing.T) {
 	// Wait for all workers to complete
 	wg.Wait()
 
-	// Give a moment for any spawned goroutines to complete
-	time.Sleep(100 * time.Millisecond)
+	// Wait for tenant to reach PROVISIONING status
+	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		tenant, _ := repo.GetByID(tc.ctx, testTenant.ID)
+		return tenant != nil && tenant.Status == domain.StatusProvisioning
+	})
+	require.NoError(t, err, "tenant should reach PROVISIONING status")
 
 	// Verify the tenant was successfully claimed (status changed to PROVISIONING)
 	finalTenant, err := repo.GetByID(tc.ctx, testTenant.ID)
@@ -378,7 +383,13 @@ func TestConcurrentProvisioningStressTest(t *testing.T) {
 			}
 
 			wg.Wait()
-			time.Sleep(50 * time.Millisecond)
+
+			// Wait for tenant to reach PROVISIONING status
+			awaitErr := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+				tenant, _ := repo.GetByID(tc.ctx, tenantID)
+				return tenant != nil && tenant.Status == domain.StatusProvisioning
+			})
+			require.NoError(t, awaitErr, "Iteration %d: tenant should reach PROVISIONING status", iteration)
 
 			// Verify tenant state is consistent
 			finalTenant, err := repo.GetByID(tc.ctx, tenantID)
@@ -448,7 +459,18 @@ func TestMultipleTenantsWithConcurrentWorkers(t *testing.T) {
 	}
 
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond)
+
+	// Wait for all tenants to reach PROVISIONING status
+	awaitErr := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		for _, tenantID := range tenantIDs {
+			tenant, _ := repo.GetByID(tc.ctx, tenantID)
+			if tenant == nil || tenant.Status != domain.StatusProvisioning {
+				return false
+			}
+		}
+		return true
+	})
+	require.NoError(t, awaitErr, "all tenants should reach PROVISIONING status")
 
 	// Verify all tenants were claimed and are in PROVISIONING status
 	for _, tenantID := range tenantIDs {
@@ -578,7 +600,13 @@ func TestRaceDetection(t *testing.T) {
 
 	// Wait for all workers
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond)
+
+	// Wait for tenant to reach PROVISIONING status
+	awaitErr := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		tenant, _ := repo.GetByID(tc.ctx, testTenant.ID)
+		return tenant != nil && tenant.Status == domain.StatusProvisioning
+	})
+	require.NoError(t, awaitErr, "tenant should reach PROVISIONING status")
 
 	// Verify final state is consistent
 	finalTenant, err := repo.GetByID(tc.ctx, testTenant.ID)

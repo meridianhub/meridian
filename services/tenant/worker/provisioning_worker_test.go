@@ -14,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1423,7 +1424,11 @@ func TestProcessPendingTenants_VersionConflictLogging(t *testing.T) {
 	worker.processPendingTenants(ctx)
 
 	// Wait for the background provisioning goroutine to complete
-	time.Sleep(100 * time.Millisecond)
+	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		t, _ := repo.GetByID(ctx, tenant1.ID)
+		return t != nil && t.Status == domain.StatusActive
+	})
+	require.NoError(t, err, "tenant should reach ACTIVE status")
 
 	// Verify the tenant was successfully provisioned (status changed to ACTIVE)
 	// Flow: PROVISIONING_PENDING -> PROVISIONING (claim) -> ACTIVE (after successful ProvisionSchemas)
@@ -1489,8 +1494,15 @@ func TestProcessPendingTenants_ConcurrentClaimSkipped(t *testing.T) {
 	}()
 
 	wg.Wait()
-	// Wait for background provisioning goroutines to complete
-	time.Sleep(200 * time.Millisecond)
+
+	// Wait for both tenants to reach ACTIVE status
+	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		t1, _ := repo.GetByID(ctx, tenant1.ID)
+		t2, _ := repo.GetByID(ctx, tenant2.ID)
+		return t1 != nil && t1.Status == domain.StatusActive &&
+			t2 != nil && t2.Status == domain.StatusActive
+	})
+	require.NoError(t, err, "both tenants should reach ACTIVE status")
 
 	// Both tenants should be ACTIVE after successful provisioning
 	// (They go through PROVISIONING_PENDING -> PROVISIONING -> ACTIVE)
