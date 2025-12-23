@@ -24,6 +24,31 @@ import (
 	"gorm.io/gorm"
 )
 
+// Test configuration constants for better maintainability.
+const (
+	// defaultPollInterval is the interval between worker polling cycles during tests.
+	defaultPollInterval = 100 * time.Millisecond
+
+	// asyncProvisioningTimeout is the maximum time to wait for a single tenant
+	// to complete provisioning in the happy path.
+	asyncProvisioningTimeout = 30 * time.Second
+
+	// retryProvisioningTimeout is the maximum time to wait for provisioning
+	// when retries are expected (includes exponential backoff delays).
+	retryProvisioningTimeout = 60 * time.Second
+
+	// concurrentTenantCount is the number of tenants to create in stress tests.
+	concurrentTenantCount = 50
+
+	// concurrentProvisioningTimeout is the maximum time to wait for all concurrent
+	// tenants to complete provisioning.
+	concurrentProvisioningTimeout = 3 * time.Minute
+
+	// permanentFailureTimeout is the maximum time to wait for a permanent failure
+	// to be detected (should be fast since no retries occur).
+	permanentFailureTimeout = 10 * time.Second
+)
+
 // =============================================================================
 // Test Infrastructure
 // =============================================================================
@@ -97,8 +122,7 @@ func setupTestEnvironment(t *testing.T) *TestEnvironment {
 	}))
 
 	// Create provisioning worker with fast poll interval for testing
-	pollInterval := 100 * time.Millisecond
-	w, err := worker.NewProvisioningWorker(repo, mockProv, pollInterval, logger)
+	w, err := worker.NewProvisioningWorker(repo, mockProv, defaultPollInterval, logger)
 	require.NoError(t, err, "Failed to create provisioning worker")
 
 	// Create cancellable context for worker
@@ -328,8 +352,8 @@ func TestAsyncProvisioningFlow(t *testing.T) {
 		}
 
 		return false
-	}, 30*time.Second, 100*time.Millisecond,
-		"Tenant should transition to ACTIVE status within 30 seconds")
+	}, asyncProvisioningTimeout, defaultPollInterval,
+		"Tenant should transition to ACTIVE status within %v", asyncProvisioningTimeout)
 
 	require.NotNil(t, finalStatusResp, "Final status response should be captured")
 
@@ -448,8 +472,11 @@ func TestProvisioningFailureRetry(t *testing.T) {
 			}
 		}
 
-		return failureClearedAt > 0 && callCount > failureClearedAt
-	}, 30*time.Second, 100*time.Millisecond,
+		// Wait for failure to be cleared. The actual provisioning success
+		// is verified in Step 4, making this assertion more resilient to
+		// timing variations in slow CI environments.
+		return failureClearedAt > 0
+	}, asyncProvisioningTimeout, defaultPollInterval,
 		"Should have multiple provisioning attempts and clear failure")
 
 	t.Logf("Failure condition was cleared after %d attempts", failureClearedAt)
@@ -477,8 +504,8 @@ func TestProvisioningFailureRetry(t *testing.T) {
 		}
 
 		return false
-	}, 60*time.Second, 100*time.Millisecond,
-		"Tenant should transition to ACTIVE status within 60 seconds after retry")
+	}, retryProvisioningTimeout, defaultPollInterval,
+		"Tenant should transition to ACTIVE status within %v after retry", retryProvisioningTimeout)
 
 	require.NotNil(t, finalStatusResp, "Final status response should be captured")
 
@@ -523,7 +550,7 @@ func TestConcurrentTenantProvisioning(t *testing.T) {
 	svc := NewService(env.Repo, env.Provisioner, nil, nil, env.Logger)
 
 	// Number of tenants to create concurrently
-	const numTenants = 50
+	const numTenants = concurrentTenantCount
 
 	// Create platform admin context for API calls
 	claims := &auth.Claims{
@@ -625,7 +652,6 @@ func TestConcurrentTenantProvisioning(t *testing.T) {
 		g, gCtx := errgroup.WithContext(ctx)
 
 		for i := 0; i < numTenants; i++ {
-			i := i // capture loop variable
 			g.Go(func() error {
 				statusReq := &pb.GetTenantProvisioningStatusRequest{
 					TenantId: tenantIDs[i],
@@ -667,8 +693,8 @@ func TestConcurrentTenantProvisioning(t *testing.T) {
 
 		// Success when all tenants are active
 		return activeCount == numTenants
-	}, 3*time.Minute, 200*time.Millisecond,
-		"All %d tenants should reach ACTIVE status within 3 minutes", numTenants)
+	}, concurrentProvisioningTimeout, 200*time.Millisecond,
+		"All %d tenants should reach ACTIVE status within %v", numTenants, concurrentProvisioningTimeout)
 
 	provisioningElapsed := time.Since(provisioningStart)
 	t.Logf("All %d tenants reached ACTIVE status in %v", numTenants, provisioningElapsed)
@@ -697,8 +723,8 @@ func TestConcurrentTenantProvisioning(t *testing.T) {
 	// Step 5: Verify total test time is reasonable
 	// =========================================================================
 	totalElapsed := time.Since(startTime)
-	assert.Less(t, totalElapsed, 3*time.Minute,
-		"Total test time should be <3 minutes, got %v", totalElapsed)
+	assert.Less(t, totalElapsed, concurrentProvisioningTimeout,
+		"Total test time should be <%v, got %v", concurrentProvisioningTimeout, totalElapsed)
 
 	t.Logf("Concurrent provisioning test completed: %d tenants, creation=%v, provisioning=%v, total=%v",
 		numTenants, creationElapsed, provisioningElapsed, totalElapsed)
@@ -794,8 +820,8 @@ func TestProvisioningMaxRetriesExceeded(t *testing.T) {
 		}
 
 		return false
-	}, 10*time.Second, 100*time.Millisecond,
-		"Tenant should transition to PROVISIONING_FAILED status within 10 seconds")
+	}, permanentFailureTimeout, defaultPollInterval,
+		"Tenant should transition to PROVISIONING_FAILED status within %v", permanentFailureTimeout)
 
 	require.NotNil(t, finalStatusResp, "Final status response should be captured")
 
