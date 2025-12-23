@@ -350,6 +350,228 @@ message ExecuteDepositResponse {
   TransactionStatus status = 5;
 }
 
+// WithdrawalStatus defines the lifecycle state of a withdrawal operation
+// Withdrawals follow a two-phase pattern: Initiate (validate and hold) -> Execute (commit)
+enum WithdrawalStatus {
+  // WITHDRAWAL_STATUS_UNSPECIFIED is the default value and should not be used
+  WITHDRAWAL_STATUS_UNSPECIFIED = 0;
+  // WITHDRAWAL_STATUS_INITIATED means the withdrawal has been validated but not yet executed
+  WITHDRAWAL_STATUS_INITIATED = 1;
+  // WITHDRAWAL_STATUS_COMPLETED means the withdrawal has been successfully executed
+  WITHDRAWAL_STATUS_COMPLETED = 2;
+  // WITHDRAWAL_STATUS_FAILED means the withdrawal execution failed
+  WITHDRAWAL_STATUS_FAILED = 3;
+  // WITHDRAWAL_STATUS_CANCELLED means the withdrawal was cancelled before execution
+  WITHDRAWAL_STATUS_CANCELLED = 4;
+}
+
+// Withdrawal represents a pending or completed withdrawal operation
+message Withdrawal {
+  // withdrawal_id is the unique identifier for this withdrawal
+  string withdrawal_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // account_id is the account this withdrawal belongs to
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the withdrawal amount (must be positive)
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // status is the current withdrawal lifecycle state
+  WithdrawalStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // description is a human-readable withdrawal description
+  string description = 5 [(buf.validate.field).string = {max_len: 500}];
+
+  // reference is an external reference for this withdrawal
+  string reference = 6 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_/-]*$"
+  }];
+
+  // transaction_id is set once the withdrawal is executed
+  string transaction_id = 7 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // created_at is when the withdrawal was initiated
+  google.protobuf.Timestamp created_at = 8;
+
+  // updated_at is when the withdrawal was last modified
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+// Request to initiate a withdrawal (validate and prepare, but not execute)
+// BQ: Initiate - Creates a pending withdrawal for later execution
+message InitiateWithdrawalRequest {
+  // account_id is the account to withdraw from
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the withdrawal amount (must be positive)
+  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+
+  // description is optional withdrawal description
+  string description = 3 [(buf.validate.field).string = {max_len: 500}];
+
+  // reference is optional external reference
+  string reference = 4 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_/-]*$"
+  }];
+
+  // idempotency_key ensures exactly-once withdrawal initiation
+  meridian.common.v1.IdempotencyKey idempotency_key = 5;
+}
+
+// Response for initiating a withdrawal
+message InitiateWithdrawalResponse {
+  // withdrawal is the created withdrawal with INITIATED status
+  Withdrawal withdrawal = 1 [(buf.validate.field).required = true];
+
+  // validation_passed indicates all validation checks passed
+  bool validation_passed = 2;
+
+  // validation_messages contains any validation warnings or info
+  repeated string validation_messages = 3;
+}
+
+// Request to execute a withdrawal (commit the withdrawal)
+// BQ: Execute - Commits a pending withdrawal or performs direct withdrawal
+message ExecuteWithdrawalRequest {
+  // withdrawal_id is the pending withdrawal to execute (mutually exclusive with direct withdrawal fields)
+  string withdrawal_id = 1 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // For direct execution without prior initiation:
+  // account_id is the account to withdraw from
+  string account_id = 2 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // amount is the withdrawal amount for direct execution
+  meridian.common.v1.MoneyAmount amount = 3;
+
+  // description is optional withdrawal description for direct execution
+  string description = 4 [(buf.validate.field).string = {max_len: 500}];
+
+  // reference is optional external reference for direct execution
+  string reference = 5 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_/-]*$"
+  }];
+
+  // idempotency_key ensures exactly-once withdrawal execution
+  meridian.common.v1.IdempotencyKey idempotency_key = 6;
+}
+
+// Response for executing a withdrawal
+message ExecuteWithdrawalResponse {
+  // account_id is the account withdrawn from
+  string account_id = 1;
+
+  // transaction_id is the created debit transaction ID
+  string transaction_id = 2;
+
+  // new_balance is the updated account balance after withdrawal
+  meridian.common.v1.MoneyAmount new_balance = 3;
+
+  // available_balance is the updated available balance
+  meridian.common.v1.MoneyAmount available_balance = 4;
+
+  // status is the withdrawal status (COMPLETED or FAILED)
+  WithdrawalStatus status = 5;
+
+  // timestamp is when the withdrawal was executed
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+// Request to update a pending withdrawal (before execution)
+// BQ: Update - Modifies a pending withdrawal's details
+message UpdateWithdrawalRequest {
+  // withdrawal_id is the withdrawal to update
+  string withdrawal_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the updated withdrawal amount (optional, must be positive if provided)
+  meridian.common.v1.MoneyAmount amount = 2;
+
+  // description is the updated description (optional)
+  string description = 3 [(buf.validate.field).string = {max_len: 500}];
+
+  // reference is the updated external reference (optional)
+  string reference = 4 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_/-]*$"
+  }];
+}
+
+// Response for updating a withdrawal
+message UpdateWithdrawalResponse {
+  // withdrawal is the updated withdrawal
+  Withdrawal withdrawal = 1 [(buf.validate.field).required = true];
+
+  // validation_passed indicates all validation checks passed after update
+  bool validation_passed = 2;
+
+  // validation_messages contains any validation warnings or info
+  repeated string validation_messages = 3;
+}
+
+// Request to retrieve withdrawal details
+// BQ: Retrieve - Gets withdrawal details by ID
+message RetrieveWithdrawalRequest {
+  // withdrawal_id is the withdrawal to retrieve (for single withdrawal lookup)
+  string withdrawal_id = 1 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // account_id is the account to list withdrawals for (for listing by account)
+  string account_id = 2 [(buf.validate.field).string = {
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]*$"
+  }];
+
+  // pagination controls result pagination when listing by account
+  meridian.common.v1.Pagination pagination = 3;
+
+  // status_filter filters withdrawals by status when listing
+  WithdrawalStatus status_filter = 4;
+}
+
+// Response for retrieving withdrawal(s)
+message RetrieveWithdrawalResponse {
+  // withdrawal is the requested withdrawal (when retrieving by withdrawal_id)
+  Withdrawal withdrawal = 1;
+
+  // withdrawals is the list of withdrawals (when listing by account_id)
+  repeated Withdrawal withdrawals = 2;
+
+  // pagination contains pagination metadata for list operations
+  meridian.common.v1.PaginationResponse pagination = 3;
+}
+
 // Request to retrieve current account details
 message RetrieveCurrentAccountRequest {
   // account_id is the account to retrieve
@@ -500,6 +722,58 @@ service CurrentAccountService {
     option (google.api.http) = {
       post: "/v1/current-accounts/{account_id}/deposits"
       body: "*"
+    };
+  }
+
+  // InitiateWithdrawal creates a pending withdrawal for validation before execution.
+  // The withdrawal can be executed later via ExecuteWithdrawal.
+  // BQ: Initiate - Creates and validates a withdrawal request
+  rpc InitiateWithdrawal(InitiateWithdrawalRequest) returns (InitiateWithdrawalResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts/{account_id}/withdrawals:initiate"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Withdrawal initiated successfully - pending execution"
+        }
+      }
+    };
+  }
+
+  // ExecuteWithdrawal commits a pending withdrawal or performs a direct withdrawal.
+  // Can either execute a previously initiated withdrawal (by withdrawal_id) or
+  // perform a direct withdrawal (by providing account_id and amount).
+  // BQ: Execute - Commits the withdrawal and updates account balance
+  rpc ExecuteWithdrawal(ExecuteWithdrawalRequest) returns (ExecuteWithdrawalResponse) {
+    option (google.api.http) = {
+      post: "/v1/current-accounts/{account_id}/withdrawals:execute"
+      body: "*"
+    };
+  }
+
+  // UpdateWithdrawal modifies a pending withdrawal before execution.
+  // Can update amount, description, or reference. Only allowed for INITIATED status.
+  // BQ: Update - Modifies pending withdrawal details
+  rpc UpdateWithdrawal(UpdateWithdrawalRequest) returns (UpdateWithdrawalResponse) {
+    option (google.api.http) = {
+      patch: "/v1/withdrawals/{withdrawal_id}"
+      body: "*"
+    };
+  }
+
+  // RetrieveWithdrawal gets withdrawal details by ID or lists withdrawals by account.
+  // When withdrawal_id is provided, returns single withdrawal.
+  // When account_id is provided, returns paginated list of withdrawals.
+  // BQ: Retrieve - Gets withdrawal information
+  rpc RetrieveWithdrawal(RetrieveWithdrawalRequest) returns (RetrieveWithdrawalResponse) {
+    option (google.api.http) = {
+      get: "/v1/withdrawals/{withdrawal_id}"
+      additional_bindings: {
+        get: "/v1/current-accounts/{account_id}/withdrawals"
+      }
     };
   }
 
