@@ -554,3 +554,73 @@ func TestService_GetBySlug_CacheDisabled(t *testing.T) {
 		t.Errorf("Expected tenant ID no_cache_test, got %s", result.ID.String())
 	}
 }
+
+func TestService_InitiateTenant_CachePopulationFailure_NonFatal(t *testing.T) {
+	// Setup with cache
+	svc, _, mr, cleanup := setupServiceWithCache(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Close Redis to simulate cache failure
+	mr.Close()
+
+	// Create tenant - should succeed despite cache failure
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "cache_fail_test",
+		DisplayName:     "Cache Fail Test",
+		SettlementAsset: "GBP",
+		Slug:            "cache-fail",
+	}
+	resp, err := svc.InitiateTenant(ctx, req)
+	if err != nil {
+		t.Fatalf("InitiateTenant should succeed even if cache fails: %v", err)
+	}
+
+	// Verify tenant was created successfully
+	if resp.Tenant == nil {
+		t.Fatal("Expected tenant to be created")
+	}
+	if resp.Tenant.TenantId != "cache_fail_test" {
+		t.Errorf("Expected tenant ID cache_fail_test, got %s", resp.Tenant.TenantId)
+	}
+	if resp.Tenant.Slug != "cache-fail" {
+		t.Errorf("Expected slug cache-fail, got %s", resp.Tenant.Slug)
+	}
+
+	// Note: Cache population failure would be logged but we can't easily verify
+	// log output in this test. The important part is that the request succeeded.
+}
+
+func TestService_InitiateTenant_EmptySlug_SkipsCachePopulation(t *testing.T) {
+	svc, _, mr, cleanup := setupServiceWithCache(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create tenant without slug
+	req := &pb.InitiateTenantRequest{
+		TenantId:        "empty_slug_test",
+		DisplayName:     "Empty Slug Test",
+		SettlementAsset: "USD",
+		Slug:            "", // Empty slug
+	}
+	resp, err := svc.InitiateTenant(ctx, req)
+	if err != nil {
+		t.Fatalf("InitiateTenant failed: %v", err)
+	}
+
+	// Verify tenant was created
+	if resp.Tenant == nil {
+		t.Fatal("Expected tenant to be created")
+	}
+
+	// Verify no cache entry was created (can't cache empty slug)
+	// Check that there are no keys matching the tenant:slug: pattern
+	keys := mr.Keys()
+	for _, key := range keys {
+		if key == "tenant:slug:" || key == "tenant:slug:empty_slug_test" {
+			t.Errorf("Unexpected cache entry for empty slug: %s", key)
+		}
+	}
+}
