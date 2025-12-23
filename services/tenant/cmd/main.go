@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -43,6 +44,15 @@ const envValueTrue = "true"
 
 // ErrJWKSURLRequired is returned when AUTH_ENABLED is true but AUTH_JWKS_URL is not set.
 var ErrJWKSURLRequired = errors.New("AUTH_JWKS_URL is required when AUTH_ENABLED=true")
+
+// WorkerConfig holds configuration for the provisioning worker behavior.
+type WorkerConfig struct {
+	PollInterval   time.Duration
+	MaxRetries     int
+	RetryBaseDelay time.Duration
+	RetryMaxDelay  time.Duration
+	MaxConcurrent  int
+}
 
 func main() {
 	// Initialize structured logging
@@ -503,6 +513,46 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 
 	value, err := time.ParseDuration(valueStr)
 	if err != nil {
+		return defaultValue
+	}
+	return value
+}
+
+// getEnvDuration returns the environment variable value as duration or default with logging.
+// Logs a warning via slog.Warn when falling back to default value.
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := time.ParseDuration(valueStr)
+	if err != nil {
+		slog.Warn("invalid duration environment variable, using default",
+			"key", key,
+			"value", valueStr,
+			"error", err,
+			"default", defaultValue)
+		return defaultValue
+	}
+	return value
+}
+
+// getEnvInt returns the environment variable value as int or default with logging.
+// Logs a warning via slog.Warn when falling back to default value.
+func getEnvInt(key string, defaultValue int) int {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		slog.Warn("invalid int environment variable, using default",
+			"key", key,
+			"value", valueStr,
+			"error", err,
+			"default", defaultValue)
 		return defaultValue
 	}
 	return value
