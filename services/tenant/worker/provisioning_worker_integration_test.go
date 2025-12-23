@@ -267,7 +267,7 @@ func TestConcurrentProvisioningWithOptimisticLocking(t *testing.T) {
 	// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
 	workers := make([]*ProvisioningWorker, numWorkers)
 	for i := 0; i < numWorkers; i++ {
-		worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, testLogger)
+		worker, err := NewProvisioningWorker(repo, countingProvisioner, testWorkerConfig(5*time.Second), testLogger)
 		require.NoError(t, err)
 		workers[i] = worker
 	}
@@ -365,7 +365,7 @@ func TestConcurrentProvisioningStressTest(t *testing.T) {
 			// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
 			workers := make([]*ProvisioningWorker, numWorkers)
 			for i := 0; i < numWorkers; i++ {
-				worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, silentLogger)
+				worker, err := NewProvisioningWorker(repo, countingProvisioner, testWorkerConfig(5*time.Second), silentLogger)
 				require.NoError(t, err)
 				workers[i] = worker
 			}
@@ -441,7 +441,7 @@ func TestMultipleTenantsWithConcurrentWorkers(t *testing.T) {
 	// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
 	workers := make([]*ProvisioningWorker, numWorkers)
 	for i := 0; i < numWorkers; i++ {
-		worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, testLogger)
+		worker, err := NewProvisioningWorker(repo, countingProvisioner, testWorkerConfig(5*time.Second), testLogger)
 		require.NoError(t, err)
 		workers[i] = worker
 	}
@@ -522,7 +522,7 @@ func TestVersionConflictHandling(t *testing.T) {
 
 	countingProvisioner := NewCountingMockProvisioner()
 
-	worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, testLogger)
+	worker, err := NewProvisioningWorker(repo, countingProvisioner, testWorkerConfig(5*time.Second), testLogger)
 	require.NoError(t, err)
 
 	// Process - should find no pending tenants (status already changed)
@@ -573,7 +573,7 @@ func TestRaceDetection(t *testing.T) {
 	// Pre-create workers before spawning goroutines (require.NoError unsafe in goroutines)
 	workers := make([]*ProvisioningWorker, numWorkers)
 	for i := 0; i < numWorkers; i++ {
-		worker, err := NewProvisioningWorker(repo, countingProvisioner, 5*time.Second, silentLogger)
+		worker, err := NewProvisioningWorker(repo, countingProvisioner, testWorkerConfig(5*time.Second), silentLogger)
 		require.NoError(t, err)
 		workers[i] = worker
 	}
