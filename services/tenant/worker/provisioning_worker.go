@@ -159,8 +159,8 @@ func (w *ProvisioningWorker) Stop() {
 func (w *ProvisioningWorker) checkFailedProvisioningAlerts(ctx context.Context) {
 	w.logger.Debug("checking for persistent provisioning failures")
 
-	// Check for tenants that have been in provisioning_failed for more than the configured threshold
-	// This threshold prevents alerting on transient failures that may self-recover
+	// Check for tenants that have been in provisioning_failed for more than the configured threshold.
+	// This threshold prevents alerting on transient failures that may self-recover.
 	if err := w.alertManager.CheckFailedProvisioningAlerts(ctx, w.alertThreshold); err != nil {
 		w.logger.Error("failed to check provisioning alerts", "error", err)
 	}

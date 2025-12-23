@@ -33,6 +33,10 @@ func NewAlertManager(repo *persistence.Repository, logger *slog.Logger) *AlertMa
 //
 // The threshold parameter determines how old a failed tenant must be before alerting.
 // Typically set to 1 hour to avoid alerting on transient failures that may self-recover.
+//
+// Note: Alerts will repeat every 15 minutes (default alert interval) for the same tenant
+// until the provisioning issue is resolved. Downstream alerting systems (PagerDuty, Slack, etc.)
+// should implement deduplication based on tenant_id to avoid alert fatigue.
 func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, threshold time.Duration) error {
 	// Calculate cutoff time for failed tenants
 	cutoffTime := time.Now().Add(-threshold)
@@ -48,7 +52,7 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 
 	// Log alert for each failed tenant
 	for _, tenant := range failedTenants {
-		a.logger.Error("tenant provisioning failure alert",
+		a.logger.Warn("tenant provisioning failure alert",
 			"alert", "tenant_provisioning_failed",
 			"tenant_id", tenant.ID,
 			"error_message", tenant.ErrorMessage,

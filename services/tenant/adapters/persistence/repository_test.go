@@ -940,6 +940,9 @@ func TestRepository_ListByStatusOlderThan(t *testing.T) {
 	oldFailed.ErrorMessage = "database connection timeout"
 	err := db.WithContext(ctx).Create(toEntity(oldFailed)).Error
 	require.NoError(t, err)
+	// Set updated_at to match created_at for test purposes
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", oldFailed.ID.String()).Error
+	require.NoError(t, err)
 
 	// Recent failed tenant (should be excluded)
 	recentFailed := newTestTenant("recent_failed")
@@ -948,12 +951,18 @@ func TestRepository_ListByStatusOlderThan(t *testing.T) {
 	recentFailed.ErrorMessage = "network error"
 	err = db.WithContext(ctx).Create(toEntity(recentFailed)).Error
 	require.NoError(t, err)
+	// Set updated_at to match created_at for test purposes
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", recentFailed.ID.String()).Error
+	require.NoError(t, err)
 
 	// Old active tenant (should be excluded - different status)
 	oldActive := newTestTenant("old_active")
 	oldActive.Status = domain.StatusActive
 	oldActive.CreatedAt = twoHoursAgo
 	err = db.WithContext(ctx).Create(toEntity(oldActive)).Error
+	require.NoError(t, err)
+	// Set updated_at to match created_at for test purposes
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", oldActive.ID.String()).Error
 	require.NoError(t, err)
 
 	// Query for failed tenants older than 1 hour
@@ -1007,6 +1016,8 @@ func TestRepository_ListByStatusOlderThan_BoundaryCondition(t *testing.T) {
 	exactTenant.CreatedAt = exactlyOneHourAgo
 	err := db.WithContext(ctx).Create(toEntity(exactTenant)).Error
 	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", exactTenant.ID.String()).Error
+	require.NoError(t, err)
 
 	// Tenant created 1 hour + 1 second ago (should be included)
 	olderTenant := newTestTenant("older_tenant")
@@ -1014,12 +1025,16 @@ func TestRepository_ListByStatusOlderThan_BoundaryCondition(t *testing.T) {
 	olderTenant.CreatedAt = exactlyOneHourAgo.Add(-1 * time.Second)
 	err = db.WithContext(ctx).Create(toEntity(olderTenant)).Error
 	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", olderTenant.ID.String()).Error
+	require.NoError(t, err)
 
 	// Tenant created 1 hour - 1 second ago (should be excluded)
 	newerTenant := newTestTenant("newer_tenant")
 	newerTenant.Status = domain.StatusProvisioningFailed
 	newerTenant.CreatedAt = exactlyOneHourAgo.Add(1 * time.Second)
 	err = db.WithContext(ctx).Create(toEntity(newerTenant)).Error
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", newerTenant.ID.String()).Error
 	require.NoError(t, err)
 
 	// Query with cutoff exactly 1 hour ago
@@ -1056,6 +1071,8 @@ func TestRepository_ListByStatusOlderThan_MultipleStatuses(t *testing.T) {
 		tenant.CreatedAt = twoHoursAgo
 		err := db.WithContext(ctx).Create(toEntity(tenant)).Error
 		require.NoError(t, err)
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+		require.NoError(t, err)
 	}
 
 	// Query for only failed tenants
@@ -1091,6 +1108,8 @@ func TestRepository_ListByStatusOlderThan_OrderedByCreatedAt(t *testing.T) {
 		tenant.CreatedAt = timestamp
 		err := db.WithContext(ctx).Create(toEntity(tenant)).Error
 		require.NoError(t, err)
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+		require.NoError(t, err)
 	}
 
 	// Query all failed tenants
@@ -1098,7 +1117,7 @@ func TestRepository_ListByStatusOlderThan_OrderedByCreatedAt(t *testing.T) {
 	tenants, err := repo.ListByStatusOlderThan(ctx, domain.StatusProvisioningFailed, cutoff)
 	require.NoError(t, err)
 
-	// Verify results are ordered by created_at ASC (oldest first)
+	// Verify results are ordered by updated_at ASC (oldest first)
 	assert.Len(t, tenants, 4)
 	assert.Equal(t, "tenant_1", tenants[0].ID.String()) // 5 hours ago (oldest)
 	assert.Equal(t, "tenant_3", tenants[1].ID.String()) // 4 hours ago

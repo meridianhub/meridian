@@ -273,16 +273,17 @@ func (r *Repository) ListByStatus(ctx context.Context, status domain.Status, lim
 	return tenants, nil
 }
 
-// ListByStatusOlderThan returns tenants with the given status created before the specified cutoff time.
+// ListByStatusOlderThan returns tenants with the given status last updated before the specified cutoff time.
 // Used by the alert manager to identify tenants stuck in a failed state for extended periods.
 // Returns empty slice if no tenants found (not an error).
-// The cutoff parameter filters tenants WHERE created_at < cutoff.
+// The cutoff parameter filters tenants WHERE updated_at < cutoff.
+// Using updated_at is more accurate than created_at because it reflects when the status last changed.
 // Limited to 100 results to prevent large result sets in degraded states.
 func (r *Repository) ListByStatusOlderThan(ctx context.Context, status domain.Status, cutoff time.Time) ([]*domain.Tenant, error) {
 	var entities []TenantEntity
 	result := r.db.WithContext(ctx).
-		Where("status = ? AND created_at < ?", status, cutoff).
-		Order("created_at ASC").
+		Where("status = ? AND updated_at < ?", status, cutoff).
+		Order("updated_at ASC").
 		Limit(100). // Prevent large result sets in degraded states
 		Find(&entities)
 

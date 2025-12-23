@@ -48,7 +48,7 @@ func TestCheckFailedProvisioningAlerts_NoFailedTenants(t *testing.T) {
 }
 
 func TestCheckFailedProvisioningAlerts_WithFailedTenants(t *testing.T) {
-	_, repo := setupTestDB(t)
+	db, repo := setupTestDB(t)
 
 	// Create a buffer to capture logs
 	var logBuf safeBuffer
@@ -70,6 +70,9 @@ func TestCheckFailedProvisioningAlerts_WithFailedTenants(t *testing.T) {
 	}
 	err := repo.Create(ctx, failedTenant1)
 	require.NoError(t, err)
+	// Set updated_at to match created_at for test purposes (GORM sets updated_at to NOW())
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", failedTenant1.ID.String()).Error
+	require.NoError(t, err)
 
 	failedTenant2 := &domain.Tenant{
 		ID:              tenant.TenantID("failed_tenant_2"),
@@ -82,6 +85,8 @@ func TestCheckFailedProvisioningAlerts_WithFailedTenants(t *testing.T) {
 	}
 	err = repo.Create(ctx, failedTenant2)
 	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", failedTenant2.ID.String()).Error
+	require.NoError(t, err)
 
 	// Create an active tenant (should not be included in alerts)
 	activeTenant := &domain.Tenant{
@@ -93,6 +98,8 @@ func TestCheckFailedProvisioningAlerts_WithFailedTenants(t *testing.T) {
 		Version:         1,
 	}
 	err = repo.Create(ctx, activeTenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", activeTenant.ID.String()).Error
 	require.NoError(t, err)
 
 	threshold := 1 * time.Hour
@@ -143,7 +150,7 @@ func TestCheckFailedProvisioningAlerts_RepositoryError(t *testing.T) {
 }
 
 func TestCheckFailedProvisioningAlerts_AlertStructuredFields(t *testing.T) {
-	_, repo := setupTestDB(t)
+	db, repo := setupTestDB(t)
 	var logBuf safeBuffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
@@ -163,15 +170,14 @@ func TestCheckFailedProvisioningAlerts_AlertStructuredFields(t *testing.T) {
 	}
 	err := repo.Create(ctx, failedTenant)
 	require.NoError(t, err)
+	// Set updated_at to match created_at for test purposes (GORM sets updated_at to NOW())
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", failedTenant.ID.String()).Error
+	require.NoError(t, err)
 
 	threshold := 1 * time.Hour
 
-	// Note: This test will fail until subtask 76.2 implements ListByStatusOlderThan
 	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
-	if err != nil {
-		// Expected until ListByStatusOlderThan is implemented
-		return
-	}
+	require.NoError(t, err)
 
 	// Verify structured logging fields are present (JSON format)
 	logs := logBuf.String()
