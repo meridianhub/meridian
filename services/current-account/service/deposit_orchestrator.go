@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -158,10 +159,17 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 			"error", result.Error)
 
 		// Check if failure was due to suspended/terminated service (FailedPrecondition)
-		// Return user-friendly maintenance message for graceful degradation
+		// Only return maintenance message for genuinely maintenance-related conditions
 		if st, ok := status.FromError(result.Error); ok && st.Code() == codes.FailedPrecondition {
-			return nil, status.Error(codes.Unavailable,
-				"Transaction unavailable due to system maintenance. Please try again later.")
+			errMsg := st.Message()
+			// Check for suspended/terminated conditions which indicate system maintenance
+			if strings.Contains(errMsg, "is suspended") || strings.Contains(errMsg, "is terminated") {
+				return nil, status.Error(codes.Unavailable,
+					"Transaction unavailable due to system maintenance. Please try again later.")
+			}
+			// Other FailedPrecondition errors (invalid state, validation failures) should propagate
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"deposit transaction failed at step %s: %v", result.FailedStep, result.Error)
 		}
 
 		return nil, status.Errorf(codes.Internal,
