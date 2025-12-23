@@ -8,6 +8,7 @@ import (
 	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
+	"github.com/meridianhub/meridian/internal/audit-consumer/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
@@ -70,7 +71,7 @@ func (w *TenantAuditWriter) WriteAuditEvent(ctx context.Context, event *auditv1.
 	}
 
 	// Convert protobuf operation to string
-	operation := protoToOperation(event.Operation)
+	operation := domain.ProtoToOperation(event.Operation)
 	if operation == "" {
 		return fmt.Errorf("%w: %v", ErrInvalidOperation, event.Operation)
 	}
@@ -176,19 +177,4 @@ func buildAuditLogMap(event *auditv1.AuditEvent, operation string, createdAt tim
 	addOptionalField("idempotency_key", event.IdempotencyKey)
 
 	return auditLog
-}
-
-// protoToOperation converts a protobuf AuditOperation to a string.
-func protoToOperation(op auditv1.AuditOperation) string {
-	switch op {
-	case auditv1.AuditOperation_AUDIT_OPERATION_INSERT:
-		return "INSERT"
-	case auditv1.AuditOperation_AUDIT_OPERATION_UPDATE:
-		return "UPDATE"
-	case auditv1.AuditOperation_AUDIT_OPERATION_DELETE:
-		return "DELETE"
-	case auditv1.AuditOperation_AUDIT_OPERATION_UNSPECIFIED:
-		return ""
-	}
-	return ""
 }

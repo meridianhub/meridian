@@ -6,6 +6,7 @@ import (
 	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
+	"github.com/meridianhub/meridian/internal/audit-consumer/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -382,7 +383,7 @@ func TestProtoToOperation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := protoToOperation(tt.operation)
+			result := domain.ProtoToOperation(tt.operation)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

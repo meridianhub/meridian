@@ -65,6 +65,9 @@ patches:
     - op: replace
       path: /spec/maxReplicas
       value: 20
+    - op: replace
+      path: /spec/behavior/scaleDown/stabilizationWindowSeconds
+      value: 600
 
 images:
 - name: audit-consumer

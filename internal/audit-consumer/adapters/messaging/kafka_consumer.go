@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"math"
 	"sync"
 	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
+	"github.com/meridianhub/meridian/internal/audit-consumer/domain"
 	"github.com/meridianhub/meridian/internal/audit-consumer/observability"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -185,7 +187,7 @@ func (c *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Aud
 	}
 
 	// Convert protobuf operation to string
-	operation := protoToOperation(event.Operation)
+	operation := domain.ProtoToOperation(event.Operation)
 	if operation == "" {
 		observability.RecordEventFailed(string(tenantID), "unknown", "invalid_operation")
 		return fmt.Errorf("%w: %v", ErrInvalidOperation, event.Operation)
@@ -242,25 +244,14 @@ func (c *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Aud
 	observability.RecordEventProcessed(string(tenantID), operation)
 	observability.RecordTenantAuditWriteDuration(string(tenantID), duration)
 
-	log.Printf("DEBUG: Processed audit event: tenant=%s table=%s operation=%s record=%s duration=%v",
-		tenantID, event.TableName, operation, event.RecordId, duration)
+	slog.Debug("processed audit event",
+		"tenant", tenantID,
+		"table", event.TableName,
+		"operation", operation,
+		"record", event.RecordId,
+		"duration", duration)
 
 	return nil
-}
-
-// protoToOperation converts a protobuf AuditOperation to a string.
-func protoToOperation(op auditv1.AuditOperation) string {
-	switch op {
-	case auditv1.AuditOperation_AUDIT_OPERATION_INSERT:
-		return "INSERT"
-	case auditv1.AuditOperation_AUDIT_OPERATION_UPDATE:
-		return "UPDATE"
-	case auditv1.AuditOperation_AUDIT_OPERATION_DELETE:
-		return "DELETE"
-	case auditv1.AuditOperation_AUDIT_OPERATION_UNSPECIFIED:
-		return ""
-	}
-	return ""
 }
 
 // Start begins consuming audit events from the configured topic.

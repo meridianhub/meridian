@@ -38,7 +38,8 @@ func setupRoutes(mux *http.ServeMux, container *app.Container) {
 
 	// Readiness probe - checks if the application is ready to serve traffic
 	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
 		healthy, dbErr, kafkaErr := container.HealthChecker.CheckAll(ctx)
 
 		if !healthy {
@@ -53,7 +54,8 @@ func setupRoutes(mux *http.ServeMux, container *app.Container) {
 
 	// Startup probe - checks if the application has started
 	mux.HandleFunc("/health/startup", func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
 		healthy, dbErr, kafkaErr := container.HealthChecker.CheckAll(ctx)
 
 		if !healthy {
