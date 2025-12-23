@@ -558,6 +558,17 @@ func getEnvInt(key string, defaultValue int) int {
 	return value
 }
 
+// loadWorkerConfig loads worker configuration from environment variables with defaults.
+func loadWorkerConfig() WorkerConfig {
+	return WorkerConfig{
+		PollInterval:   getEnvDuration("PROVISIONING_WORKER_POLL_INTERVAL", 10*time.Second),
+		MaxRetries:     getEnvInt("PROVISIONING_MAX_RETRIES", 5),
+		RetryBaseDelay: getEnvDuration("PROVISIONING_RETRY_BASE_DELAY", 2*time.Second),
+		RetryMaxDelay:  getEnvDuration("PROVISIONING_RETRY_MAX_DELAY", 30*time.Second),
+		MaxConcurrent:  getEnvInt("PROVISIONING_MAX_CONCURRENT", 5),
+	}
+}
+
 // createRedisClient creates and initializes a Redis client from environment configuration.
 func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
 	redisURL := getEnvOrDefault("REDIS_URL", "redis://localhost:6379")

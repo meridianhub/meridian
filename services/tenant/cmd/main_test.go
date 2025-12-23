@@ -176,3 +176,103 @@ func TestGetEnvInt(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadWorkerConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		envVars map[string]string
+		want    WorkerConfig
+	}{
+		{
+			name:    "returns all defaults when no env vars set",
+			envVars: nil,
+			want: WorkerConfig{
+				PollInterval:   10 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  5,
+			},
+		},
+		{
+			name: "returns custom values when env vars set",
+			envVars: map[string]string{
+				"PROVISIONING_WORKER_POLL_INTERVAL": "1s",
+				"PROVISIONING_MAX_RETRIES":          "10",
+				"PROVISIONING_RETRY_BASE_DELAY":     "5s",
+				"PROVISIONING_RETRY_MAX_DELAY":      "60s",
+				"PROVISIONING_MAX_CONCURRENT":       "20",
+			},
+			want: WorkerConfig{
+				PollInterval:   1 * time.Second,
+				MaxRetries:     10,
+				RetryBaseDelay: 5 * time.Second,
+				RetryMaxDelay:  60 * time.Second,
+				MaxConcurrent:  20,
+			},
+		},
+		{
+			name: "returns defaults for invalid values",
+			envVars: map[string]string{
+				"PROVISIONING_WORKER_POLL_INTERVAL": "invalid",
+				"PROVISIONING_MAX_RETRIES":          "not-a-number",
+			},
+			want: WorkerConfig{
+				PollInterval:   10 * time.Second,
+				MaxRetries:     5,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  5,
+			},
+		},
+		{
+			name: "returns partial custom values with defaults",
+			envVars: map[string]string{
+				"PROVISIONING_WORKER_POLL_INTERVAL": "15s",
+				"PROVISIONING_MAX_RETRIES":          "7",
+			},
+			want: WorkerConfig{
+				PollInterval:   15 * time.Second,
+				MaxRetries:     7,
+				RetryBaseDelay: 2 * time.Second,
+				RetryMaxDelay:  30 * time.Second,
+				MaxConcurrent:  5,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set up logger to avoid noise in test output
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+				Level: slog.LevelWarn,
+			}))
+			slog.SetDefault(logger)
+
+			// Set environment variables
+			for key, value := range tt.envVars {
+				t.Setenv(key, value)
+			}
+
+			got := loadWorkerConfig()
+
+			// Compare each field
+			if got.PollInterval != tt.want.PollInterval {
+				t.Errorf("loadWorkerConfig().PollInterval = %v, want %v", got.PollInterval, tt.want.PollInterval)
+			}
+			if got.MaxRetries != tt.want.MaxRetries {
+				t.Errorf("loadWorkerConfig().MaxRetries = %d, want %d", got.MaxRetries, tt.want.MaxRetries)
+			}
+			if got.RetryBaseDelay != tt.want.RetryBaseDelay {
+				t.Errorf("loadWorkerConfig().RetryBaseDelay = %v, want %v", got.RetryBaseDelay, tt.want.RetryBaseDelay)
+			}
+			if got.RetryMaxDelay != tt.want.RetryMaxDelay {
+				t.Errorf("loadWorkerConfig().RetryMaxDelay = %v, want %v", got.RetryMaxDelay, tt.want.RetryMaxDelay)
+			}
+			if got.MaxConcurrent != tt.want.MaxConcurrent {
+				t.Errorf("loadWorkerConfig().MaxConcurrent = %d, want %d", got.MaxConcurrent, tt.want.MaxConcurrent)
+			}
+		})
+	}
+}
