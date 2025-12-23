@@ -1,5 +1,5 @@
 -- Event Outbox Schema for PostgreSQL
--- This schema should be added via Flyway migration in each service that uses the outbox pattern.
+-- This schema should be added via Atlas migration in each service that uses the outbox pattern.
 --
 -- The transactional outbox pattern ensures at-least-once delivery of events by storing them
 -- in a database table within the same transaction as the business operation.

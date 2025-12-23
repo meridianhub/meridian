@@ -78,6 +78,11 @@ func (EventOutbox) TableName() string {
 }
 
 // OutboxRepository defines the interface for managing event outbox entries.
+//
+// NOTE: PgxOutboxRepository (in outbox_pgx.go) intentionally does not implement this interface
+// because it uses pgx.Tx instead of *gorm.DB for the Insert method. This is by design to allow
+// services using pgx to write events within their native transaction type. For worker operations
+// (FetchAndLockForProcessing, MarkCompleted, etc.), PgxOutboxRepository provides compatible methods.
 type OutboxRepository interface {
 	// Insert adds a new event to the outbox within an existing transaction.
 	// This should be called within the same transaction as the business operation.

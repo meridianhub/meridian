@@ -512,6 +512,7 @@ func TestWorker_PublishWithHeaders(t *testing.T) {
 		headerMap[h.Key] = string(h.Value)
 	}
 
+	assert.NotEmpty(t, headerMap["event_id"], "event_id header should be set")
 	assert.Equal(t, "event.type.1", headerMap["event_type"])
 	assert.Equal(t, "TestAggregate", headerMap["aggregate_type"])
 	assert.Equal(t, "agg-1", headerMap["aggregate_id"])

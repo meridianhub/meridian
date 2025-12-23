@@ -158,7 +158,8 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 // Stop initiates graceful shutdown of the worker.
-// It signals the worker to stop and waits for the current batch to complete.
+// It signals the worker to stop, waits for the current batch to complete,
+// and flushes any remaining Kafka messages.
 // Safe to call multiple times - subsequent calls will block until shutdown completes.
 func (w *Worker) Stop() {
 	w.shutdownOnce.Do(func() {
@@ -166,6 +167,12 @@ func (w *Worker) Stop() {
 		close(w.shutdown)
 	})
 	w.wg.Wait()
+
+	// Flush any remaining messages to Kafka
+	if remaining := w.publisher.Flush(w.config.PublishTimeoutMs); remaining > 0 {
+		w.logger.Warn("unflushed Kafka messages on shutdown", "count", remaining)
+	}
+
 	w.logger.Info("event outbox worker stopped")
 }
 
@@ -327,6 +334,7 @@ func (w *Worker) processEntry(ctx context.Context, entry *EventOutbox) error {
 func (w *Worker) publishToKafka(ctx context.Context, entry *EventOutbox) error {
 	// Build Kafka headers
 	headers := []kafka.Header{
+		{Key: "event_id", Value: []byte(entry.ID.String())},
 		{Key: "event_type", Value: []byte(entry.EventType)},
 		{Key: "aggregate_type", Value: []byte(entry.AggregateType)},
 		{Key: "aggregate_id", Value: []byte(entry.AggregateID)},
