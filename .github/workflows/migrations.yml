@@ -99,6 +99,11 @@ jobs:
           # For CI: single database, test schema-per-org isolation
           psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS org_acme_bank;"
           psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS org_test_org;"
+          # Create service-specific schemas for Atlas revision tracking
+          # This prevents cross-service version confusion when sharing org schemas
+          for SERVICE in current_account financial_accounting party payment_order position_keeping; do
+            psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS atlas_${SERVICE}_revisions;"
+          done
           echo "✓ Test organization schemas created"
 
       - name: Apply migrations to test organizations
@@ -121,17 +126,18 @@ jobs:
                          services/payment-order/atlas/atlas.hcl \
                          services/position-keeping/atlas/atlas.hcl; do
               SERVICE=$(basename $(dirname $(dirname "$CONFIG")))
-              echo "  Service: $SERVICE"
+              SERVICE_UNDERSCORE=$(echo "$SERVICE" | tr '-' '_')
+              REVISION_SCHEMA="atlas_${SERVICE_UNDERSCORE}_revisions"
+              echo "  Service: $SERVICE (revisions in $REVISION_SCHEMA)"
               # --allow-dirty allows multiple services to share the same org schema in CI
-              # --exec-order non-linear allows each service's migrations to be applied independently
-              # without strict version sequencing (needed when services share a schema in CI)
+              # --revisions-schema isolates each service's revision tracking to prevent cross-service version confusion
               # In production, each service has its own database
               if ! atlas migrate apply \
                 --env ci \
                 --config "file://$CONFIG" \
                 --url "${DATABASE_URL}&search_path=${ORG_SCHEMA}" \
+                --revisions-schema "$REVISION_SCHEMA" \
                 --tx-mode none \
-                --exec-order non-linear \
                 --allow-dirty; then
                 echo "    ✗ Migration failed for $SERVICE in $ORG_SCHEMA"
                 FAILED=1
