@@ -1,35 +1,78 @@
 -- Fix audit tables to match shared audit infrastructure
--- The shared AuditOutbox uses:
--- - record_id VARCHAR(50) instead of UUID (to support both UUID and string IDs)
--- - status CHECK includes 'completed' (for successful Kafka processing)
--- - old_values/new_values as TEXT (shared infrastructure may write empty strings)
+-- CockroachDB does not support ALTER COLUMN TYPE from UUID to VARCHAR
+-- For fresh databases, we drop and recreate with correct schema
+-- This is safe for development environments
 
--- Drop dependent views FIRST before any column alterations
--- This prevents errors when altering columns that views depend on
+-- Drop dependent views and tables
 DROP VIEW IF EXISTS change_summary;
+DROP TABLE IF EXISTS audit_outbox;
+DROP TABLE IF EXISTS audit_log;
 
--- Add 'completed' status to the constraint (matching tenant service pattern)
-ALTER TABLE audit_outbox DROP CONSTRAINT IF EXISTS audit_outbox_status_check;
-ALTER TABLE audit_outbox ADD CONSTRAINT audit_outbox_status_check
-    CHECK (status IN ('pending', 'processing', 'completed', 'failed'));
+-- Recreate audit_log with VARCHAR(50) for record_id
+-- This matches the shared audit infrastructure which uses string IDs
+CREATE TABLE audit_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
--- Convert record_id from UUID to VARCHAR(50) to match shared infrastructure
--- This allows AuditOutbox.RecordID (string) to be inserted without type errors
-ALTER TABLE audit_outbox ALTER COLUMN record_id TYPE VARCHAR(50) USING record_id::VARCHAR(50);
+    -- What changed
+    table_name VARCHAR(100) NOT NULL,
+    operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
 
--- Convert old_values/new_values from JSONB to TEXT for compatibility
--- The shared audit infrastructure may write empty strings when values are nil,
--- which is invalid for JSONB columns. TEXT columns accept any string.
-ALTER TABLE audit_outbox ALTER COLUMN old_values TYPE TEXT USING old_values::TEXT;
-ALTER TABLE audit_outbox ALTER COLUMN new_values TYPE TEXT USING new_values::TEXT;
+    -- Record identification (VARCHAR to support both UUID and string IDs)
+    record_id VARCHAR(50) NOT NULL,
 
--- Alter the column types for audit_log as well
-ALTER TABLE audit_log ALTER COLUMN record_id TYPE VARCHAR(50) USING record_id::VARCHAR(50);
-ALTER TABLE audit_log ALTER COLUMN old_values TYPE TEXT USING old_values::TEXT;
-ALTER TABLE audit_log ALTER COLUMN new_values TYPE TEXT USING new_values::TEXT;
+    -- Change metadata
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    changed_by VARCHAR(100),
+
+    -- Change details (TEXT for compatibility with empty strings)
+    old_values TEXT,
+    new_values TEXT,
+
+    -- Additional context
+    transaction_id VARCHAR(100),
+    client_ip INET,
+    user_agent TEXT
+);
+
+-- Create indexes for efficient audit queries
+CREATE INDEX idx_audit_log_table_name ON audit_log(table_name);
+CREATE INDEX idx_audit_log_record_id ON audit_log(record_id);
+CREATE INDEX idx_audit_log_changed_at ON audit_log(changed_at);
+CREATE INDEX idx_audit_log_changed_by ON audit_log(changed_by);
+CREATE INDEX idx_audit_log_operation ON audit_log(operation);
+
+-- Recreate audit_outbox with VARCHAR(50) for record_id
+CREATE TABLE audit_outbox (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- What changed
+    table_name VARCHAR(100) NOT NULL,
+    operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+
+    -- Record identification (VARCHAR to support both UUID and string IDs)
+    record_id VARCHAR(50) NOT NULL,
+
+    -- Change details (TEXT for compatibility with empty strings)
+    old_values TEXT,
+    new_values TEXT,
+
+    -- Processing status (includes 'completed' for successful processing)
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    retry_count INT NOT NULL DEFAULT 0,
+    last_error TEXT,
+
+    -- Additional context
+    changed_by VARCHAR(100),
+    transaction_id VARCHAR(100),
+    client_ip INET,
+    user_agent TEXT
+);
+
+-- Index for worker to efficiently find pending entries
+CREATE INDEX idx_audit_outbox_status_created ON audit_outbox(status, created_at);
 
 -- Recreate the view using TEXT columns (parse JSON only when valid)
--- Validates that values look like JSON objects before casting to prevent errors
 CREATE OR REPLACE VIEW change_summary AS
 SELECT
     id,

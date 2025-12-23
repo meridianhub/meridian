@@ -1,17 +1,18 @@
 # audit-worker - Development Dockerfile for Tilt Live Update
-# Uses alpine base for shell tools (tar, rm, sh) required by Tilt
+# Uses Debian bookworm for CGO support (required by confluent-kafka-go/librdkafka)
 
-FROM golang:1.25-alpine
+FROM golang:1.25-bookworm AS builder
 
-# Install runtime dependencies for live update
-RUN apk add --no-cache \
+# Install build dependencies for CGO (librdkafka)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
-    bash
+    bash \
+    librdkafka-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
-RUN addgroup -g 65532 -S nonroot && \
-    adduser -u 65532 -S nonroot -G nonroot
+RUN useradd -u 65532 -s /bin/false nonroot
 
 # Set working directory
 WORKDIR /app
@@ -23,12 +24,13 @@ RUN go mod download && go mod verify
 # Copy source code
 COPY . .
 
-# Build binary
+# Build binary with CGO enabled for Kafka support
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
+ARG TARGETARCH=arm64
 
-RUN CGO_ENABLED=0 go build \
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags="-X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
     -o audit-worker \
     ./services/audit-worker
