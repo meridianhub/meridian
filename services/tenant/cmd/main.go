@@ -39,6 +39,9 @@ var (
 	BuildDate = "unknown"
 )
 
+// ErrMetricsServerStartupTimeout is returned when the metrics server fails to start within the timeout.
+var ErrMetricsServerStartupTimeout = errors.New("metrics server startup timed out")
+
 // envValueTrue is the string value for enabled environment variables.
 const envValueTrue = "true"
 
@@ -153,12 +156,14 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Wait for metrics server to be ready or fail
+	// Wait for metrics server to be ready or fail (with timeout)
 	select {
 	case <-metricsReady:
 		// Server successfully bound to port
 	case err := <-metricsServerErrors:
 		return fmt.Errorf("metrics server startup failed: %w", err)
+	case <-time.After(10 * time.Second):
+		return ErrMetricsServerStartupTimeout
 	}
 
 	// Initialize database connection

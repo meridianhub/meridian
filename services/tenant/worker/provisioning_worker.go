@@ -245,7 +245,7 @@ func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, t
 			break // Permanent error, don't retry
 		}
 
-		// Record retry attempt for observability (only after first attempt)
+		// Record retry attempt for observability (starting from second attempt)
 		if attempt > 0 {
 			observability.IncrementRetryAttempt()
 		}

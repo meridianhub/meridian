@@ -38,11 +38,13 @@ var (
 		[]string{"status"},
 	)
 
-	// Gauge for tracking number of pending tenants in provisioning queue
+	// Gauge for tracking number of tenants in PROVISIONING_PENDING status.
+	// This reflects tenants waiting to be claimed, not in-flight provisioning work.
+	// Once a tenant is claimed, it moves to PROVISIONING status and is no longer counted here.
 	provisioningQueueDepth = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "tenant_provisioning_queue_depth",
-			Help: "Number of pending tenants in the provisioning queue",
+			Help: "Number of tenants in PROVISIONING_PENDING status awaiting provisioning",
 		},
 	)
 
