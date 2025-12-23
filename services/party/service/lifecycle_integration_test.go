@@ -63,27 +63,34 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the party_reference table (BQ: Reference)
+	// Create the party_reference table (BQ: Reference) - matches migration schema
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_reference (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
-		government_id VARCHAR(100),
-		tax_reference VARCHAR(100),
-		issuing_authority VARCHAR(255),
+		reference_type VARCHAR(50) NOT NULL,
+		reference_value VARCHAR(255) NOT NULL,
+		issuing_authority VARCHAR(100),
+		issue_date DATE,
 		expiry_date DATE,
-		is_active BOOLEAN NOT NULL DEFAULT true,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
-	// Create partial unique index for active references (only one active reference per party)
-	err = db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS idx_party_reference_active
-		ON %q.party_reference(party_id) WHERE is_active = true`, schemaName)).Error
+	// Create indexes matching migration
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_reference_party_id
+		ON %q.party_reference(party_id)`, schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the party_associations table (BQ: Associations)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_associations (
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_reference_type_value
+		ON %q.party_reference(reference_type, reference_value)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_reference_expiry_date
+		ON %q.party_reference(expiry_date) WHERE expiry_date IS NOT NULL`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the party_association table (BQ: Associations) - singular to match migration
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_association (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
 		related_party_id UUID NOT NULL,
@@ -94,29 +101,56 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the party_demographics table (BQ: Demographics)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_demographics (
+	// Create the party_demographic table (BQ: Demographics) - singular to match migration
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_demographic (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
-		socio_economic_data VARCHAR(500),
-		employment_history VARCHAR(1000),
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		socio_economic_data JSONB,
+		employment_history JSONB,
+		income_level VARCHAR(50),
+		education_level VARCHAR(50),
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		UNIQUE(party_id)
+		CONSTRAINT uq_party_demographic_party_id UNIQUE(party_id)
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the party_bank_relations table (BQ: BankRelations)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_bank_relations (
+	// Create indexes matching migration
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_demographic_party_id
+		ON %q.party_demographic(party_id)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_demographic_socio_economic
+		ON %q.party_demographic USING GIN(socio_economic_data)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_demographic_employment
+		ON %q.party_demographic USING GIN(employment_history)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create the party_bank_relation table (BQ: BankRelations) - singular to match migration
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.party_bank_relation (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		party_id UUID NOT NULL REFERENCES %[1]q.party(id) ON DELETE CASCADE,
-		account_officer_id VARCHAR(100),
-		relationship_manager_id VARCHAR(100),
+		account_officer_id UUID,
+		relationship_manager_id UUID,
 		assigned_branch VARCHAR(100),
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+		relationship_start_date DATE,
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		UNIQUE(party_id)
+		CONSTRAINT uq_party_bank_relation_party_id UNIQUE(party_id)
 	)`, schemaName)).Error
+	require.NoError(t, err)
+
+	// Create indexes matching migration
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_bank_relation_party_id
+		ON %q.party_bank_relation(party_id)`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_bank_relation_account_officer
+		ON %q.party_bank_relation(account_officer_id) WHERE account_officer_id IS NOT NULL`, schemaName)).Error
+	require.NoError(t, err)
+
+	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_party_bank_relation_relationship_manager
+		ON %q.party_bank_relation(relationship_manager_id) WHERE relationship_manager_id IS NOT NULL`, schemaName)).Error
 	require.NoError(t, err)
 
 	// Create the audit_outbox table for event publishing
