@@ -112,11 +112,6 @@ def migration_job(name, service_name, db_url_key, resource_deps=[]):
     configmap_name_migrations = '{}-migrations'.format(name)
     configmap_name_atlas = '{}-atlas-config'.format(name)
 
-    # Generate unique job name suffix from git commit to ensure idempotency
-    # Jobs are immutable - a new suffix ensures re-runs create new jobs
-    job_suffix = str(local('git rev-parse --short HEAD', quiet=True)).strip()
-    job_name_full = '{}-{}'.format(name, job_suffix)
-
     # Create ConfigMap for migration files
     local_resource(
         '{}-create-migrations-cm'.format(name),
@@ -136,6 +131,17 @@ def migration_job(name, service_name, db_url_key, resource_deps=[]):
             configmap_name_atlas, service_name
         ),
         resource_deps=resource_deps,
+        labels=['database'],
+        auto_init=True,
+        trigger_mode=TRIGGER_MODE_MANUAL,
+    )
+
+    # Delete any existing job before creating new one (Jobs are immutable)
+    # This ensures re-runs work correctly
+    local_resource(
+        '{}-cleanup'.format(name),
+        cmd='kubectl delete job {} --ignore-not-found=true'.format(name),
+        resource_deps=['{}-create-migrations-cm'.format(name), '{}-create-atlas-cm'.format(name)] + resource_deps,
         labels=['database'],
         auto_init=True,
         trigger_mode=TRIGGER_MODE_MANUAL,
@@ -190,7 +196,7 @@ spec:
           name: {configmap_atlas}
   backoffLimit: 3
 '''.format(
-        job_name=job_name_full,
+        job_name=name,
         service_name=service_name,
         db_url=db_urls[db_url_key],
         configmap_migrations=configmap_name_migrations,
@@ -202,9 +208,8 @@ spec:
     # Track the Job resource
     k8s_resource(
         name,
-        new_name=job_name_full,
         labels=['database'],
-        resource_deps=['{}-create-migrations-cm'.format(name), '{}-create-atlas-cm'.format(name)] + resource_deps,
+        resource_deps=['{}-cleanup'.format(name)],
         auto_init=True,
     )
 
