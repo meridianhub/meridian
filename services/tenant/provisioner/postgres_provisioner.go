@@ -300,20 +300,27 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 
 		// Handle circuit breaker specific errors
 		if errors.Is(err, gobreaker.ErrOpenState) {
+			retryAfter := time.Now().Add(BreakerTimeout)
 			logger.Warn("circuit breaker open, skipping service",
 				"service", svc.Name,
-				"breaker_state", "open")
-			status.Services[i].State = ServiceStateFailed
-			status.Services[i].ErrorMessage = fmt.Sprintf("%v: %s", ErrCircuitBreakerOpen, svc.Name)
+				"breaker_state", "open",
+				"retry_after", retryAfter.Format(time.RFC3339))
+			status.Services[i].State = ServiceStateCircuitOpen
+			status.Services[i].ErrorMessage = fmt.Sprintf(
+				"circuit breaker open for %s: too many recent failures. Retry after %s",
+				svc.Name, retryAfter.Format(time.RFC3339))
 			skippedServices = append(skippedServices, svc.Name)
 			continue // Skip this service but continue with others
 		}
 		if errors.Is(err, gobreaker.ErrTooManyRequests) {
-			logger.Warn("circuit breaker rejecting requests, skipping service",
+			logger.Info("circuit breaker half-open, too many test requests",
 				"service", svc.Name,
-				"breaker_state", "half-open")
-			status.Services[i].State = ServiceStateFailed
-			status.Services[i].ErrorMessage = fmt.Sprintf("%v: %s", ErrCircuitBreakerTooManyRequests, svc.Name)
+				"breaker_state", "half-open",
+				"max_requests", BreakerMaxRequests)
+			status.Services[i].State = ServiceStateCircuitOpen
+			status.Services[i].ErrorMessage = fmt.Sprintf(
+				"circuit breaker half-open for %s: max test requests (%d) exceeded. Waiting for test results",
+				svc.Name, BreakerMaxRequests)
 			skippedServices = append(skippedServices, svc.Name)
 			continue // Skip this service but continue with others
 		}
@@ -348,6 +355,10 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 
 // applyMigrationsWithCircuitBreaker wraps the migration execution with circuit breaker protection.
 // Returns the migration version on success, or an error (which may be circuit breaker errors).
+//
+// Circuit breaker state logging is handled by the caller (provisionAllServices) at appropriate
+// log levels: WARN for open state, INFO for half-open. On success after half-open, this function
+// logs at INFO level to indicate the circuit has closed.
 func (p *PostgresProvisioner) applyMigrationsWithCircuitBreaker(
 	ctx context.Context,
 	breaker *gobreaker.CircuitBreaker[any],
@@ -356,6 +367,9 @@ func (p *PostgresProvisioner) applyMigrationsWithCircuitBreaker(
 	svc ServiceConfig,
 	logger *slog.Logger,
 ) (string, error) {
+	// Track if we're in half-open state before execution (to log transition to closed)
+	stateBefore := breaker.State()
+
 	result, err := breaker.Execute(func() (any, error) {
 		version, migErr := p.applyServiceMigrationsToDB(ctx, db, schemaName, svc)
 		if migErr != nil {
@@ -364,13 +378,17 @@ func (p *PostgresProvisioner) applyMigrationsWithCircuitBreaker(
 		return version, nil
 	})
 	if err != nil {
-		// Log circuit breaker state transitions
-		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
-			logger.Info("circuit breaker prevented execution",
-				"service", svc.Name,
-				"error", err)
-		}
+		// Circuit breaker errors are logged by the caller at appropriate levels
 		return "", err
+	}
+
+	// Log successful execution that transitioned circuit from half-open to closed
+	stateAfter := breaker.State()
+	if stateBefore == gobreaker.StateHalfOpen && stateAfter == gobreaker.StateClosed {
+		logger.Info("circuit breaker closed after successful execution",
+			"service", svc.Name,
+			"previous_state", "half-open",
+			"new_state", "closed")
 	}
 
 	// Type assert the result

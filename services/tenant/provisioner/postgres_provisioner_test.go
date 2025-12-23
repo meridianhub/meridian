@@ -1183,16 +1183,18 @@ func TestPostgresProvisioner_CircuitBreaker_FailingServiceTripsBreaker(t *testin
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrCircuitBreakerOpen)
 
-	// Verify the tenant status shows party as failed (due to circuit breaker)
+	// Verify the tenant status shows party with circuit_open state
 	// and the overall state is failed
 	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, StateFailed, status.State)
 
-	// Check party service status mentions circuit breaker
+	// Check party service status has circuit_open state and includes retry timing
 	for _, svc := range status.Services {
 		if svc.ServiceName == "party" {
-			assert.Contains(t, svc.ErrorMessage, "circuit breaker")
+			assert.Equal(t, ServiceStateCircuitOpen, svc.State, "Party service should have circuit_open state")
+			assert.Contains(t, svc.ErrorMessage, "circuit breaker open")
+			assert.Contains(t, svc.ErrorMessage, "Retry after", "Error message should include retry timing")
 		}
 	}
 }
@@ -1304,6 +1306,148 @@ func TestPostgresProvisioner_CircuitBreaker_BreakerStaysClosedBelowThreshold(t *
 
 	err = prov.ProvisionSchemas(context.Background(), tenantID)
 	require.NoError(t, err)
+}
+
+// TestPostgresProvisioner_CircuitBreaker_StatusTracking tests that circuit breaker
+// state is properly reflected in provisioning_status with descriptive error messages.
+func TestPostgresProvisioner_CircuitBreaker_StatusTracking(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Create migrations - party has broken migration, account and customer are fine
+	partyDir := filepath.Join(tc.migDir, "party")
+	require.NoError(t, os.MkdirAll(partyDir, 0o755))
+	createTestMigration(t, partyDir, "20251201000000_broken.sql", `
+		INVALID SQL PARTY;
+	`)
+
+	accountDir := filepath.Join(tc.migDir, "current-account")
+	require.NoError(t, os.MkdirAll(accountDir, 0o755))
+	createTestMigration(t, accountDir, "20251201000000_initial.sql", `
+		CREATE TABLE accounts (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	customerDir := filepath.Join(tc.migDir, "customer")
+	require.NoError(t, os.MkdirAll(customerDir, 0o755))
+	createTestMigration(t, customerDir, "20251201000000_initial.sql", `
+		CREATE TABLE customers (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "party", MigrationPath: partyDir, DatabaseURL: tc.connStr},
+			{Name: "current-account", MigrationPath: accountDir, DatabaseURL: tc.connStr},
+			{Name: "customer", MigrationPath: customerDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Trip the circuit breaker for party service with 5 failures
+	for i := 0; i < 5; i++ {
+		tenantID := tenant.MustNewTenantID(fmt.Sprintf("trip_%d", i))
+		createTestTenant(t, tc.db, tenantID.String())
+		_ = prov.ProvisionSchemas(context.Background(), tenantID)
+	}
+
+	// Provision a new tenant - party circuit is open
+	tenantID := tenant.MustNewTenantID("status_tracking")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrCircuitBreakerOpen)
+
+	// Get provisioning status and verify circuit breaker state is visible
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateFailed, status.State, "Overall state should be failed due to circuit breaker")
+
+	// Verify per-service status
+	serviceStates := make(map[string]ServiceSchemaStatus)
+	for _, svc := range status.Services {
+		serviceStates[svc.ServiceName] = svc
+	}
+
+	// Party should have circuit_open state
+	partyStatus := serviceStates["party"]
+	assert.Equal(t, ServiceStateCircuitOpen, partyStatus.State, "Party should be in circuit_open state")
+	assert.Contains(t, partyStatus.ErrorMessage, "circuit breaker open", "Error should indicate circuit breaker is open")
+	assert.Contains(t, partyStatus.ErrorMessage, "Retry after", "Error should include next retry time")
+
+	// Other services should still be migrated (since they come after party in the list)
+	// Note: This depends on processing order - services after an open circuit still get processed
+	accountStatus := serviceStates["current-account"]
+	assert.Equal(t, ServiceStateMigrated, accountStatus.State, "current-account should be migrated")
+
+	customerStatus := serviceStates["customer"]
+	assert.Equal(t, ServiceStateMigrated, customerStatus.State, "customer should be migrated")
+}
+
+// TestPostgresProvisioner_CircuitBreaker_PartialSuccessWithCircuitOpen tests that
+// when one service has open circuit, others still complete and status reflects this.
+func TestPostgresProvisioner_CircuitBreaker_PartialSuccessWithCircuitOpen(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	// Setup: party fails, others succeed
+	partyDir := filepath.Join(tc.migDir, "party")
+	require.NoError(t, os.MkdirAll(partyDir, 0o755))
+	createTestMigration(t, partyDir, "20251201000000_broken.sql", `INVALID;`)
+
+	accountDir := filepath.Join(tc.migDir, "current-account")
+	require.NoError(t, os.MkdirAll(accountDir, 0o755))
+	createTestMigration(t, accountDir, "20251201000000_ok.sql", `
+		CREATE TABLE accounts (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "party", MigrationPath: partyDir, DatabaseURL: tc.connStr},
+			{Name: "current-account", MigrationPath: accountDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Trip the circuit breaker
+	for i := 0; i < 5; i++ {
+		tid := tenant.MustNewTenantID(fmt.Sprintf("partial_%d", i))
+		createTestTenant(t, tc.db, tid.String())
+		_ = prov.ProvisionSchemas(context.Background(), tid)
+	}
+
+	// New tenant with open circuit for party
+	tenantID := tenant.MustNewTenantID("partial_final")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.Error(t, err)
+
+	// Verify status shows partial success pattern
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	var circuitOpenCount, migratedCount int
+	for _, svc := range status.Services {
+		switch svc.State {
+		case ServiceStateCircuitOpen:
+			circuitOpenCount++
+		case ServiceStateMigrated:
+			migratedCount++
+		case ServiceStatePending, ServiceStateCreated, ServiceStateFailed:
+			// Not expected in this test, but required for exhaustive switch
+		}
+	}
+
+	assert.Equal(t, 1, circuitOpenCount, "One service should have circuit_open state")
+	assert.Equal(t, 1, migratedCount, "One service should be migrated despite other's circuit open")
 }
 
 // =============================================================================
