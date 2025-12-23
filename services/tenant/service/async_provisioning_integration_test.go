@@ -122,7 +122,9 @@ func setupTestEnvironment(t *testing.T) *TestEnvironment {
 	}))
 
 	// Create provisioning worker with fast poll interval for testing
-	w, err := worker.NewProvisioningWorker(repo, mockProv, defaultPollInterval, logger)
+	w, err := worker.NewProvisioningWorker(repo, mockProv, worker.Config{
+		PollInterval: defaultPollInterval,
+	}, logger)
 	require.NoError(t, err, "Failed to create provisioning worker")
 
 	// Create cancellable context for worker
