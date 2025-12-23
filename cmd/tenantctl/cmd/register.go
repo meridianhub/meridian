@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -18,6 +19,9 @@ var slugReplacementPattern = regexp.MustCompile(`[^a-z0-9-]+`)
 
 // consecutiveHyphensPattern matches multiple consecutive hyphens.
 var consecutiveHyphensPattern = regexp.MustCompile(`-+`)
+
+// ErrSlugAutoGenerationFailed is returned when auto-generation cannot produce a valid slug.
+var ErrSlugAutoGenerationFailed = errors.New("slug auto-generation failed")
 
 // generateSlugFromName converts a display name to a URL-safe slug following DNS subdomain rules.
 // It converts to lowercase, replaces non-alphanumeric characters (except hyphens) with a single hyphen,
@@ -102,6 +106,11 @@ func runRegister(_ *cobra.Command, _ []string) error {
 	slug := registerSlug
 	if slug == "" {
 		slug = generateSlugFromName(registerName)
+		if slug == "" {
+			// Auto-generation produced empty slug (e.g., display name was all special characters)
+			fmt.Fprintf(os.Stderr, "Error: Could not auto-generate slug from display name '%s'. Please provide --slug flag.\n", registerName)
+			return fmt.Errorf("%w: display name '%s' contains no alphanumeric characters", ErrSlugAutoGenerationFailed, registerName)
+		}
 		fmt.Printf("Auto-generated slug: %s\n", slug)
 	}
 
