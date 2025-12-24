@@ -4,6 +4,7 @@ package auth
 
 import (
 	"context"
+	"net"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -67,11 +68,14 @@ func extractClientIP(ctx context.Context) string {
 
 	// Fallback to peer address (direct gRPC connection)
 	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
-		// Extract just the IP portion (peer address may include port like "192.168.1.1:50051")
 		addr := p.Addr.String()
-		if idx := strings.LastIndex(addr, ":"); idx > 0 {
-			return addr[:idx]
+		// Use net.SplitHostPort to correctly handle both IPv4 and IPv6 addresses
+		// e.g., "192.168.1.1:50051" -> "192.168.1.1"
+		//       "[2001:db8::1]:50051" -> "2001:db8::1"
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			return host
 		}
+		// If no port separator (unusual for gRPC), return as-is
 		return addr
 	}
 

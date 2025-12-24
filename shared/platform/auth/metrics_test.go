@@ -137,9 +137,22 @@ func TestExtractClientIP(t *testing.T) {
 		assert.Equal(t, "192.168.1.100", ip)
 	})
 
-	t.Run("handles IPv6 addresses", func(t *testing.T) {
+	t.Run("handles IPv6 addresses in header", func(t *testing.T) {
 		md := metadata.Pairs("x-forwarded-for", "2001:db8::1")
 		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		ip := extractClientIP(ctx)
+		assert.Equal(t, "2001:db8::1", ip)
+	})
+
+	t.Run("handles IPv6 peer addresses with port", func(t *testing.T) {
+		// IPv6 addresses with port are formatted as "[ip]:port"
+		ctx := peer.NewContext(context.Background(), &peer.Peer{
+			Addr: &net.TCPAddr{
+				IP:   net.ParseIP("2001:db8::1"),
+				Port: 50051,
+			},
+		})
 
 		ip := extractClientIP(ctx)
 		assert.Equal(t, "2001:db8::1", ip)
