@@ -377,6 +377,9 @@ func run(logger *slog.Logger) error {
 
 	// Close Kafka producer after outbox worker stops
 	if kafkaProducer != nil {
+		logger.Info("flushing Kafka producer...")
+		// Flush pending messages with 5 second timeout to ensure delivery
+		kafkaProducer.Flush(5000) // 5 seconds in milliseconds
 		logger.Info("closing Kafka producer...")
 		kafkaProducer.Close()
 		logger.Info("Kafka producer closed")

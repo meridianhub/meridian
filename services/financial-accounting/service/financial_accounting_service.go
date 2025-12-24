@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
@@ -1400,73 +1401,74 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 		return nil, status.Error(codes.InvalidArgument, "reason is required for control operations")
 	}
 
-	// Retrieve existing booking log
-	bookingLog, err := s.repository.GetBookingLog(ctx, bookingLogID)
-	if err != nil {
-		if errors.Is(err, persistence.ErrBookingLogNotFound) {
-			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
-		}
-		return nil, status.Errorf(codes.Internal, "failed to retrieve booking log: %v", err)
-	}
-
-	// Capture previous status for event
-	previousStatus := bookingLog.Status
-
-	// Apply control action using domain method
-	updated, err := bookingLog.ControlLog(domainAction, req.Reason)
-	if err != nil {
-		switch {
-		case errors.Is(err, domain.ErrInvalidControlAction):
-			return nil, status.Errorf(codes.InvalidArgument, "invalid control action: %v", err)
-		case errors.Is(err, domain.ErrReasonRequired):
-			return nil, status.Error(codes.InvalidArgument, "reason is required for control operations")
-		case errors.Is(err, domain.ErrCannotSuspendTerminal):
-			return nil, status.Error(codes.FailedPrecondition, "cannot suspend booking log in terminal state")
-		case errors.Is(err, domain.ErrCannotResumePending):
-			return nil, status.Error(codes.FailedPrecondition, "cannot resume booking log that is not suspended")
-		case errors.Is(err, domain.ErrCannotTerminateTerminal):
-			return nil, status.Error(codes.FailedPrecondition, "cannot terminate booking log already in terminal state")
-		default:
-			return nil, status.Errorf(codes.Internal, "control operation failed: %v", err)
-		}
-	}
-
 	// Extract correlation ID
 	correlationID := req.IdempotencyKey.Key
 
-	// Create the control event
-	controlEvent := &eventsv1.FinancialBookingLogControlledEvent{
-		BookingLogId:   bookingLogID.String(),
-		ControlAction:  domainAction.String(),
-		PreviousStatus: toProtoTransactionStatus(previousStatus),
-		NewStatus:      toProtoTransactionStatus(updated.Status),
-		Reason:         req.Reason,
-		ControlledBy:   "system", // TODO: Extract from auth context when available
-		CorrelationId:  correlationID,
-		CausationId:    correlationID,
-		Timestamp:      timestamppb.Now(),
-		Version:        1,
-	}
+	// Variables to capture results from transaction
+	var previousStatus domain.TransactionStatus
+	var newStatus domain.TransactionStatus
+	var controlledAt time.Time
+	var updatedBookingLog *domain.FinancialBookingLog
 
 	// Execute state change and event write atomically using transactional outbox pattern
 	err = s.repository.WithTransaction(ctx, func(tx *gorm.DB) error {
-		// 1. Update booking log within transaction
-		var existing persistence.FinancialBookingLogEntity
-		if err := tx.First(&existing, "id = ?", bookingLogID).Error; err != nil {
+		// 1. Retrieve and lock booking log entity within transaction (FOR UPDATE)
+		var entity persistence.FinancialBookingLogEntity
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&entity, "id = ?", bookingLogID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return persistence.ErrBookingLogNotFound
 			}
 			return err
 		}
 
-		// Apply updates
-		existing.Status = string(updated.Status)
-		existing.UpdatedAt = updated.UpdatedAt
-		if err := tx.Save(&existing).Error; err != nil {
+		// 2. Reconstruct domain model from locked entity
+		bookingLog := &domain.FinancialBookingLog{
+			ID:                      entity.ID,
+			FinancialAccountType:    entity.FinancialAccountType,
+			ProductServiceReference: entity.ProductServiceReference,
+			BusinessUnitReference:   entity.BusinessUnitReference,
+			ChartOfAccountsRules:    entity.ChartOfAccountsRules,
+			BaseCurrency:            domain.Currency(entity.BaseCurrency),
+			Status:                  domain.TransactionStatus(entity.Status),
+			CreatedAt:               entity.CreatedAt,
+			UpdatedAt:               entity.UpdatedAt,
+		}
+
+		// 3. Capture previous status for event
+		previousStatus = bookingLog.Status
+
+		// 4. Apply control action using domain method
+		updated, err := bookingLog.ControlLog(domainAction, req.Reason)
+		if err != nil {
+			return err // Will be handled by error mapping below
+		}
+
+		// 5. Apply domain updates to locked entity
+		entity.Status = string(updated.Status)
+		entity.UpdatedAt = updated.UpdatedAt
+		if err := tx.Save(&entity).Error; err != nil {
 			return err
 		}
 
-		// 2. Write event to outbox within the same transaction
+		// 6. Capture results for response and event
+		newStatus = updated.Status
+		controlledAt = updated.UpdatedAt
+		updatedBookingLog = &updated
+
+		// 7. Build and write control event to outbox within the same transaction
+		controlEvent := &eventsv1.FinancialBookingLogControlledEvent{
+			BookingLogId:   bookingLogID.String(),
+			ControlAction:  domainAction.String(),
+			PreviousStatus: toProtoTransactionStatus(previousStatus),
+			NewStatus:      toProtoTransactionStatus(newStatus),
+			Reason:         req.Reason,
+			ControlledBy:   "system", // TODO: Extract from auth context when available
+			CorrelationId:  correlationID,
+			CausationId:    correlationID,
+			Timestamp:      timestamppb.New(controlledAt),
+			Version:        1,
+		}
+
 		eventTopic := "financial-accounting.booking-log.controlled"
 		if err := s.outboxPublisher.PublishControlEvent(
 			ctx,
@@ -1484,10 +1486,23 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+		// Map domain errors to gRPC status codes
+		switch {
+		case errors.Is(err, persistence.ErrBookingLogNotFound):
 			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
+		case errors.Is(err, domain.ErrInvalidControlAction):
+			return nil, status.Errorf(codes.InvalidArgument, "invalid control action: %v", err)
+		case errors.Is(err, domain.ErrReasonRequired):
+			return nil, status.Error(codes.InvalidArgument, "reason is required for control operations")
+		case errors.Is(err, domain.ErrCannotSuspendTerminal):
+			return nil, status.Error(codes.FailedPrecondition, "cannot suspend booking log in terminal state")
+		case errors.Is(err, domain.ErrCannotResumePending):
+			return nil, status.Error(codes.FailedPrecondition, "cannot resume booking log that is not suspended")
+		case errors.Is(err, domain.ErrCannotTerminateTerminal):
+			return nil, status.Error(codes.FailedPrecondition, "cannot terminate booking log already in terminal state")
+		default:
+			return nil, status.Errorf(codes.Internal, "failed to apply control operation: %v", err)
 		}
-		return nil, status.Errorf(codes.Internal, "failed to apply control operation: %v", err)
 	}
 
 	// Log success
@@ -1495,12 +1510,12 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 		"booking_log_id", bookingLogID.String(),
 		"control_action", domainAction.String(),
 		"previous_status", previousStatus.String(),
-		"new_status", updated.Status.String(),
+		"new_status", newStatus.String(),
 		"reason", req.Reason)
 
 	// Convert to proto response
 	response := &financialaccountingv1.ControlFinancialBookingLogResponse{
-		FinancialBookingLog: toProtoFinancialBookingLog(&updated),
+		FinancialBookingLog: toProtoFinancialBookingLog(updatedBookingLog),
 	}
 
 	// Store idempotency result
