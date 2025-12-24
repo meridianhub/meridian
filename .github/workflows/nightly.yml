@@ -122,21 +122,60 @@ jobs:
         # Regular CI runs with -short, but nightly runs the full suite
         echo "Running full test suite including timing-sensitive tests..."
         go test -v -race -timeout 15m ./... 2>&1 | tee test-output.txt
+        TEST_EXIT_CODE=${PIPESTATUS[0]}
 
-        # Report summary
-        echo ""
-        echo "=== Test Summary ==="
+        # Parse test counts
         PASS_COUNT=$(grep -c "^--- PASS" test-output.txt || echo "0")
         FAIL_COUNT=$(grep -c "^--- FAIL" test-output.txt || echo "0")
         SKIP_COUNT=$(grep -c "^--- SKIP" test-output.txt || echo "0")
+
+        # Console output
+        echo ""
+        echo "=== Test Summary ==="
         echo "Passed: $PASS_COUNT"
         echo "Failed: $FAIL_COUNT"
         echo "Skipped: $SKIP_COUNT"
 
-        # Exit with failure if any tests failed
-        if [ "$FAIL_COUNT" -gt 0 ]; then
+        # Write GitHub Step Summary (markdown)
+        {
+          echo "## Nightly Integration Test Results"
           echo ""
-          echo "=== Failed Tests ==="
-          grep -B5 "^--- FAIL" test-output.txt
+          if [ "$FAIL_COUNT" -gt 0 ]; then
+            echo "| Status | Count |"
+            echo "|--------|-------|"
+            echo "| :white_check_mark: Passed | $PASS_COUNT |"
+            echo "| :x: **Failed** | **$FAIL_COUNT** |"
+            echo "| :fast_forward: Skipped | $SKIP_COUNT |"
+            echo ""
+            echo "### Failed Tests"
+            echo ""
+            echo "| Test | Package |"
+            echo "|------|---------|"
+            # Extract failed test names and their packages
+            grep "^--- FAIL:" test-output.txt | while read line; do
+              TEST_NAME=$(echo "$line" | sed 's/^--- FAIL: //' | awk '{print $1}')
+              echo "| \`$TEST_NAME\` | _(see logs)_ |"
+            done
+            echo ""
+            echo "<details>"
+            echo "<summary>Error Details (click to expand)</summary>"
+            echo ""
+            echo '```'
+            # Show context around failures
+            grep -B10 "^--- FAIL" test-output.txt | grep -v "^--$" | tail -100
+            echo '```'
+            echo "</details>"
+          else
+            echo ":white_check_mark: **All tests passed!**"
+            echo ""
+            echo "| Status | Count |"
+            echo "|--------|-------|"
+            echo "| Passed | $PASS_COUNT |"
+            echo "| Skipped | $SKIP_COUNT |"
+          fi
+        } >> $GITHUB_STEP_SUMMARY
+
+        # Exit with original test exit code
+        if [ "$FAIL_COUNT" -gt 0 ]; then
           exit 1
         fi
