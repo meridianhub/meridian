@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -19,7 +20,7 @@ import (
 // setupTestDBWithAudit creates a test database with both payment_order and audit tables.
 func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &AuditOutbox{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &audit.AuditOutbox{}})
 
 	// Create tenant schema
 	tid := tenant.TenantID(testTenantID)
@@ -95,9 +96,9 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 }
 
 // getAuditEntries retrieves all audit entries for a specific record from the outbox.
-func getAuditEntries(t *testing.T, db *gorm.DB, recordID uuid.UUID) []AuditOutbox {
+func getAuditEntries(t *testing.T, db *gorm.DB, recordID uuid.UUID) []audit.AuditOutbox {
 	t.Helper()
-	var entries []AuditOutbox
+	var entries []audit.AuditOutbox
 	err := db.Where("record_id = ?", recordID).Order("created_at ASC").Find(&entries).Error
 	require.NoError(t, err)
 	return entries
@@ -414,7 +415,7 @@ func TestAudit_OutboxStatus_DefaultsToPending(t *testing.T) {
 // =============================================================================
 
 // assertStatusTransition verifies an audit entry captures a status transition.
-func assertStatusTransition(t *testing.T, entry AuditOutbox, oldStatus, newStatus string) {
+func assertStatusTransition(t *testing.T, entry audit.AuditOutbox, oldStatus, newStatus string) {
 	t.Helper()
 
 	var oldValues, newValues map[string]interface{}

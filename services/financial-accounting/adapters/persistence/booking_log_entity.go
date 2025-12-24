@@ -56,14 +56,6 @@ func (e FinancialBookingLogEntity) AuditTableName() string {
 	return "financial_booking_log"
 }
 
-// AuditOutbox is an alias for the shared audit.AuditOutbox type.
-// Kept for backward compatibility with existing tests.
-type AuditOutbox = audit.AuditOutbox
-
-// AuditLog is an alias for the shared audit.AuditLog type.
-// Kept for backward compatibility with existing tests.
-type AuditLog = audit.AuditLog
-
 // AfterCreate is a GORM hook that runs after INSERT operations.
 // Publishes audit events to Kafka with outbox fallback.
 func (e *FinancialBookingLogEntity) AfterCreate(tx *gorm.DB) error {

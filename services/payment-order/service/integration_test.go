@@ -21,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -57,7 +58,7 @@ func setupIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.PaymentOrderEntity{},
-		&persistence.AuditOutbox{},
+		&audit.AuditOutbox{},
 	})
 
 	// Create tenant schema

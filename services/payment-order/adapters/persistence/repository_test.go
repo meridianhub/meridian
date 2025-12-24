@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -20,7 +21,7 @@ const testTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &AuditOutbox{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &audit.AuditOutbox{}})
 
 	// Create tenant schema
 	tid := tenant.TenantID(testTenantID)

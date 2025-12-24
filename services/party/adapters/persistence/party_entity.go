@@ -84,7 +84,3 @@ func (p *PartyEntity) AfterUpdate(tx *gorm.DB) error {
 func (p *PartyEntity) AfterDelete(tx *gorm.DB) error {
 	return audit.RecordDelete(tx, *p)
 }
-
-// PartyAuditOutbox is an alias for the shared audit.AuditOutbox type.
-// Kept for backward compatibility with existing tests and migrations.
-type PartyAuditOutbox = audit.AuditOutbox

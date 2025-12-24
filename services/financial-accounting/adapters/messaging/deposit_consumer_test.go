@@ -12,6 +12,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -101,7 +102,7 @@ func setupTestServices(t *testing.T) (*service.PostingService, context.Context, 
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.LedgerPostingEntity{},
 		&persistence.FinancialBookingLogEntity{},
-		&persistence.AuditOutbox{},
+		&audit.AuditOutbox{},
 	})
 
 	// Create the tenant schema for tests

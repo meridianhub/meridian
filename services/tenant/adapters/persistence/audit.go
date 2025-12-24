@@ -35,10 +35,3 @@ func (t *TenantEntity) AfterUpdate(tx *gorm.DB) error {
 func (t *TenantEntity) AfterDelete(tx *gorm.DB) error {
 	return audit.RecordDelete(tx, *t)
 }
-
-// systemUser is an alias for audit.DefaultAuditUser for backward compatibility with tests.
-const systemUser = audit.DefaultAuditUser
-
-// AuditOutbox is an alias for the shared audit.AuditOutbox type.
-// Kept for backward compatibility with existing tests.
-type AuditOutbox = audit.AuditOutbox

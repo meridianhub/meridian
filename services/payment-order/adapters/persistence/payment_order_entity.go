@@ -84,10 +84,6 @@ func (p PaymentOrderEntity) AuditTableName() string {
 	return p.TableName()
 }
 
-// AuditOutbox is an alias for the shared audit.AuditOutbox type.
-// Kept for backward compatibility with existing tests.
-type AuditOutbox = audit.AuditOutbox
-
 // AfterCreate is a GORM hook that runs after INSERT operations on PaymentOrderEntity.
 // It writes an audit outbox entry with the new payment order data.
 func (p *PaymentOrderEntity) AfterCreate(tx *gorm.DB) error {

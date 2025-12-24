@@ -1,17 +1,17 @@
 package models
 
 import (
-	"context"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"gorm.io/gorm"
 )
 
 const (
-	// SystemUser is the default user ID for background jobs and migrations
-	SystemUser = "system"
+	// SystemUser is the default user ID for background jobs and migrations.
+	// This is an alias for audit.DefaultAuditUser to maintain backward compatibility.
+	SystemUser = audit.DefaultAuditUser
 )
 
 // BaseModel contains common fields for all domain models.
@@ -59,20 +59,16 @@ func (base *BaseModel) BeforeCreate(tx *gorm.DB) error {
 		base.ID = uuid.New()
 	}
 
-	// Extract user ID from JWT context (set by auth interceptor)
-	// Guard against nil tx or nil tx.Statement
-	var userID string
-	if tx != nil && tx.Statement != nil {
-		userID = getUserIDFromContext(tx.Statement.Context)
-	}
+	// Extract user ID from JWT context (set by auth interceptor).
+	// Uses audit.GetUserFromContext which returns DefaultAuditUser if not found.
+	userID := getUserFromGormContext(tx)
 
-	if userID != "" {
+	// Only set if not already manually set (e.g., in tests or data imports)
+	if base.CreatedBy == "" {
 		base.CreatedBy = userID
+	}
+	if base.UpdatedBy == "" {
 		base.UpdatedBy = userID
-	} else if base.CreatedBy == "" {
-		// Fallback to system for background jobs or migrations
-		base.CreatedBy = SystemUser
-		base.UpdatedBy = SystemUser
 	}
 
 	return nil
@@ -83,40 +79,24 @@ func (base *BaseModel) BeforeCreate(tx *gorm.DB) error {
 //
 // NOTE: This method mutates the receiver, which is required by GORM's hook interface.
 func (base *BaseModel) BeforeUpdate(tx *gorm.DB) error {
-	// Extract user ID from JWT context
-	// Guard against nil tx or nil tx.Statement
-	var userID string
-	if tx != nil && tx.Statement != nil {
-		userID = getUserIDFromContext(tx.Statement.Context)
-	}
+	// Extract user ID from JWT context.
+	// Uses audit.GetUserFromContext which returns DefaultAuditUser if not found.
+	userID := getUserFromGormContext(tx)
 
-	if userID != "" {
+	// Only set if not already manually set
+	if base.UpdatedBy == "" {
 		base.UpdatedBy = userID
-	} else if base.UpdatedBy == "" {
-		// Fallback to system for background jobs or migrations
-		base.UpdatedBy = SystemUser
 	}
 
 	return nil
 }
 
-// getUserIDFromContext extracts the user ID from the context.
-// Returns empty string if not found or if type assertion fails.
-func getUserIDFromContext(ctx any) string {
-	if ctx == nil {
-		return ""
+// getUserFromGormContext safely extracts the user ID from a GORM transaction context.
+// This is a thin wrapper around audit.GetUserFromContext that handles nil checks.
+func getUserFromGormContext(tx *gorm.DB) string {
+	if tx == nil || tx.Statement == nil || tx.Statement.Context == nil {
+		return audit.DefaultAuditUser
 	}
 
-	// Safely convert to context.Context interface
-	stdCtx, ok := ctx.(context.Context)
-	if !ok {
-		return ""
-	}
-
-	// Try to extract user_id from context (set by JWT auth interceptor)
-	if userID, ok := stdCtx.Value(auth.UserIDContextKey).(string); ok {
-		return userID
-	}
-
-	return ""
+	return audit.GetUserFromContext(tx.Statement.Context)
 }

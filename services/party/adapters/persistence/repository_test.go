@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/party/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -20,7 +21,7 @@ const testTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PartyEntity{}, &PartyAuditOutbox{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PartyEntity{}, &audit.AuditOutbox{}})
 
 	// Create the tenant schema for tests
 	tid := tenant.TenantID(testTenantID)
@@ -701,7 +702,7 @@ func TestAudit_CreateParty_WritesAuditOutboxEntry(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify audit outbox entry was created
-	var auditEntries []PartyAuditOutbox
+	var auditEntries []audit.AuditOutbox
 	err = db.WithContext(ctx).Where("record_id = ?", party.ID()).Find(&auditEntries).Error
 	require.NoError(t, err)
 
@@ -748,7 +749,7 @@ func TestAudit_CreateParty_AuditContainsPartyFields(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify audit contains the expected fields
-	var auditEntry PartyAuditOutbox
+	var auditEntry audit.AuditOutbox
 	err = db.WithContext(ctx).Where("record_id = ?", party.ID()).First(&auditEntry).Error
 	require.NoError(t, err)
 
@@ -786,7 +787,7 @@ func TestAudit_CreateParty_WithUserContext_SetsChangedBy(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify changed_by was set from context
-	var auditEntry PartyAuditOutbox
+	var auditEntry audit.AuditOutbox
 	err = db.WithContext(ctx).Where("record_id = ?", party.ID()).First(&auditEntry).Error
 	require.NoError(t, err)
 
@@ -822,7 +823,7 @@ func TestAudit_DeleteParty_WritesAuditOutboxEntry(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify audit entries - should have INSERT and DELETE
-	var auditEntries []PartyAuditOutbox
+	var auditEntries []audit.AuditOutbox
 	err = db.WithContext(ctx).Where("record_id = ?", party.ID()).Order("created_at").Find(&auditEntries).Error
 	require.NoError(t, err)
 
