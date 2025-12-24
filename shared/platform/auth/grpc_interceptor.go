@@ -39,7 +39,24 @@ const (
 	ClaimsContextKey contextKey = "claims"
 )
 
-// Interceptor provides gRPC interceptors for JWT authentication
+// Interceptor provides gRPC interceptors for JWT authentication.
+//
+// IMPORTANT: This interceptor performs tenant context validation as a security measure.
+// When processing requests, it:
+//
+//  1. Validates the JWT and extracts the tenant_id claim
+//  2. Checks if an x-tenant-id header exists in gRPC metadata (set by API gateway)
+//  3. If the header exists, validates that it matches the JWT tenant_id claim
+//  4. Rejects requests where header and JWT tenant don't match (codes.PermissionDenied)
+//
+// This double-check prevents "subdomain hopping" attacks where a user with a valid JWT
+// for tenant A attempts to access tenant B's data by navigating to tenant B's subdomain.
+// The API gateway sets x-tenant-id based on the subdomain, so this validation ensures
+// users can only access the tenant they're authorized for via their JWT.
+//
+// The TenantExtractionInterceptor is provided for development/testing when auth is
+// disabled, but it should NEVER be used in production as it trusts the header without
+// JWT validation.
 type Interceptor struct {
 	validator     *JWTValidator
 	jwksValidator *JWTValidatorWithJWKS
@@ -135,6 +152,16 @@ func (a *Interceptor) StreamInterceptor() grpc.StreamServerInterceptor {
 
 // authenticate extracts and validates the JWT token, returning an enriched context.
 // This is for tenant-layer services that REQUIRE tenant_id claims.
+//
+// SECURITY: This method performs a critical double-check of tenant context:
+//   - The JWT contains the user's authorized tenant_id claim
+//   - The x-tenant-id header (if present) contains the subdomain-derived tenant
+//   - If both exist, they MUST match or the request is rejected
+//
+// This prevents "subdomain hopping" attacks where a user with a valid JWT for
+// tenant A navigates to tenant B's subdomain to access their data. The API gateway
+// sets x-tenant-id based on the subdomain, so this validation ensures users stay
+// within their authorized tenant boundaries.
 func (a *Interceptor) authenticate(ctx context.Context) (context.Context, error) {
 	claims, err := a.validateToken(ctx)
 	if err != nil {

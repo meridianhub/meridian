@@ -8,16 +8,27 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// TenantExtractionInterceptor extracts tenant ID from gRPC metadata.
-// This works alongside JWT auth interceptor for service-to-service calls.
-// If tenant is already in context (from JWT auth), this is a no-op.
+// TenantExtractionInterceptor extracts tenant ID from gRPC metadata (x-tenant-id header).
+//
+// IMPORTANT: This interceptor is MUTUALLY EXCLUSIVE with auth.Interceptor.UnaryInterceptor().
+// Do NOT use both in the same interceptor chain.
+//
+//   - With AUTH_ENABLED=true:  Use auth.Interceptor.UnaryInterceptor() which validates
+//     the x-tenant-id header against the JWT tenant_id claim for security.
+//   - With AUTH_ENABLED=false: Use this interceptor (TenantExtractionInterceptor) which
+//     trusts the x-tenant-id header without JWT validation (development/testing only).
+//
+// The x-tenant-id header is set by the API gateway's TenantResolverMiddleware based on
+// the request subdomain (e.g., "acme.api.meridian.io" -> x-tenant-id: "org_acme_uuid").
 //
 // Use case: Service A calls Service B with tenant in metadata. Service B
 // extracts the tenant from metadata and injects it into context, enabling multi-hop
 // call chains to propagate tenant context.
 //
-// Security: The tenant ID is validated before being added to context.
+// Security: The tenant ID format is validated before being added to context.
 // Invalid tenant IDs are silently ignored (context remains unchanged).
+// However, this interceptor does NOT validate tenant ownership - use auth.Interceptor
+// in production to ensure the JWT tenant matches the header.
 func TenantExtractionInterceptor() grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -51,10 +62,15 @@ func TenantExtractionInterceptor() grpc.UnaryServerInterceptor {
 // metadata for streaming RPCs. This is the streaming equivalent of
 // TenantExtractionInterceptor.
 //
+// IMPORTANT: This interceptor is MUTUALLY EXCLUSIVE with auth.Interceptor.StreamInterceptor().
+// Do NOT use both in the same interceptor chain. See TenantExtractionInterceptor docs for details.
+//
 // If tenant is already in context (from JWT auth), this is a no-op.
 //
-// Security: The tenant ID is validated before being added to context.
+// Security: The tenant ID format is validated before being added to context.
 // Invalid tenant IDs are silently ignored (context remains unchanged).
+// However, this interceptor does NOT validate tenant ownership - use auth.Interceptor
+// in production to ensure the JWT tenant matches the header.
 func TenantExtractionStreamInterceptor() grpc.StreamServerInterceptor {
 	return func(
 		srv interface{},
