@@ -25,16 +25,27 @@ import (
 )
 
 // Test configuration constants for better maintainability.
+//
+// Timeout values are intentionally generous to accommodate CI environment variability.
+// Expected typical durations (local development):
+//   - Single tenant provisioning: 1-5s
+//   - Retry with 2 failures: 5-15s (includes backoff)
+//   - 50 concurrent tenants: 30-60s
+//   - Permanent failure detection: 1-3s
+//
+// CI environments may take 2-3x longer due to resource contention.
 const (
 	// defaultPollInterval is the interval between worker polling cycles during tests.
 	defaultPollInterval = 100 * time.Millisecond
 
 	// asyncProvisioningTimeout is the maximum time to wait for a single tenant
 	// to complete provisioning in the happy path.
+	// Expected: 1-5s local, up to 15s in CI.
 	asyncProvisioningTimeout = 30 * time.Second
 
 	// retryProvisioningTimeout is the maximum time to wait for provisioning
 	// when retries are expected (includes exponential backoff delays).
+	// Expected: 5-15s local, up to 30s in CI.
 	retryProvisioningTimeout = 60 * time.Second
 
 	// concurrentTenantCount is the number of tenants to create in stress tests.
@@ -42,10 +53,12 @@ const (
 
 	// concurrentProvisioningTimeout is the maximum time to wait for all concurrent
 	// tenants to complete provisioning.
+	// Expected: 30-60s local, up to 2min in CI.
 	concurrentProvisioningTimeout = 3 * time.Minute
 
 	// permanentFailureTimeout is the maximum time to wait for a permanent failure
 	// to be detected (should be fast since no retries occur).
+	// Expected: 1-3s local, up to 5s in CI.
 	permanentFailureTimeout = 10 * time.Second
 )
 
@@ -142,13 +155,15 @@ func setupTestEnvironment(t *testing.T) *TestEnvironment {
 		cancelFunc:  cancel,
 	}
 
-	// Create cleanup function that stops worker and container
+	// Create cleanup function that stops worker and container.
+	// Shutdown sequence:
+	// 1. Cancel context - signals worker to stop accepting new work
+	// 2. Stop worker - waits for any in-flight provisioning operations to complete
+	//    (graceful shutdown with internal timeout, see worker.Stop() implementation)
+	// 3. Clean up database - terminates the testcontainer
 	env.Cleanup = func() {
-		// Cancel worker context
 		cancel()
-		// Stop worker and wait for in-flight provisioning
 		w.Stop()
-		// Clean up database container
 		dbCleanup()
 	}
 

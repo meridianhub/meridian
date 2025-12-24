@@ -68,6 +68,13 @@ func NewMockProvisioner(services []ServiceConfig) *MockProvisioner {
 }
 
 // ProvisionSchemas simulates schema provisioning for the tenant.
+//
+// Note on locking: The lock is intentionally released before invoking OnProvisionAttempt
+// callback and re-acquired afterward. This allows test code to modify MockProvisioner state
+// (e.g., clearing FailProvisioningFor) during the callback. As a result, there's a window
+// where concurrent goroutines could modify ProvisioningCalls between unlock and re-lock.
+// This is acceptable for testing purposes where the callback mechanism provides deterministic
+// control over the test flow.
 func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	m.mu.Lock()
 
@@ -86,7 +93,7 @@ func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.
 	callback := m.OnProvisionAttempt
 	m.mu.Unlock()
 
-	// Invoke callback outside lock to allow test code to modify state
+	// Invoke callback outside lock to allow test code to modify state (e.g., ClearFailure)
 	if callback != nil {
 		callback(tenantID.String(), attemptCount)
 	}
