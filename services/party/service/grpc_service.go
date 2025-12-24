@@ -693,7 +693,8 @@ func (s *Service) ExchangeDemographics(ctx context.Context, req *pb.ExchangeDemo
 		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
 	}
 
-	// Simplified verification (would call external service in production)
+	// TODO: Integrate with external verification service (KYC/AML provider)
+	// Currently returns hardcoded "VERIFIED" status for development
 	verificationStatus := "VERIFIED"
 	s.logger.Info("demographics verified", "party_id", req.PartyId)
 
