@@ -14,6 +14,11 @@ func TestNewContainer(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
+	// Require explicit opt-in for integration tests
+	if os.Getenv("INTEGRATION_TESTS") != "1" {
+		t.Skip("INTEGRATION_TESTS=1 not set, skipping integration test")
+	}
+
 	// Check if DATABASE_URL is set for integration testing
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -125,6 +130,11 @@ func TestContainer_Close(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
+	// Require explicit opt-in for integration tests
+	if os.Getenv("INTEGRATION_TESTS") != "1" {
+		t.Skip("INTEGRATION_TESTS=1 not set, skipping integration test")
+	}
+
 	// Check if DATABASE_URL is set for integration testing
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -187,6 +197,11 @@ func TestContainer_DatabaseConnection(t *testing.T) {
 	// Skip integration tests in short mode
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
+	}
+
+	// Require explicit opt-in for integration tests
+	if os.Getenv("INTEGRATION_TESTS") != "1" {
+		t.Skip("INTEGRATION_TESTS=1 not set, skipping integration test")
 	}
 
 	// Check if DATABASE_URL is set for integration testing

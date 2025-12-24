@@ -1,4 +1,5 @@
-h1:9i6d0WdUZhj6f6LAUOaanU+N011midB+rYh6EizF54o=
+h1:ZAbglZaEDUTInEZtRINXsBPq6TT5cDpRaawRe5VMA4M=
 20251216000001_initial.sql h1:6OnEp0f+4nW5xTX8e9mIHgBrQgBeBUA2WHJCP2HdLkQ=
 20251217000001_audit_system.sql h1:bdOKALYedtSvgAN9OD6GdfcpHa4ls69t+N7g7gyiBSg=
 20251223000001_event_outbox.sql h1:tO/avMAYr1TbQ/Kpg4CtC4K2RlrZi3Gzbu3cuJ/KiOY=
+20251223000002_fix_audit_schema_compatibility.sql h1:WmNL64ugcy7OKIRkv4GJ+5jfxyMtfRazH6gzs58lu2Q=

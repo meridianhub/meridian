@@ -92,6 +92,7 @@ func TestRedisService_Check_CompletedOperation(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Expected result to be non-nil")
+		return // unreachable but satisfies staticcheck
 	}
 	if result.Status != StatusCompleted {
 		t.Errorf("Expected status %v, got %v", StatusCompleted, result.Status)
@@ -117,6 +118,7 @@ func TestRedisService_Check_PendingOperation(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Expected result to be non-nil")
+		return // unreachable but satisfies staticcheck
 	}
 	if result.Status != StatusPending {
 		t.Errorf("Expected status %v, got %v", StatusPending, result.Status)
@@ -672,6 +674,7 @@ func TestRedisService_MaxTTL(t *testing.T) {
 	}
 	if retrieved == nil {
 		t.Fatal("Expected result, got nil")
+		return // unreachable but satisfies staticcheck
 	}
 
 	// TTL should be close to what we set (within 1 second due to conversion precision)

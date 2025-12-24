@@ -17,6 +17,7 @@ func TestNewLogger(t *testing.T) {
 
 	if logger == nil {
 		t.Fatal("NewLogger returned nil")
+		return // unreachable but satisfies staticcheck
 	}
 
 	if logger.output != buf {

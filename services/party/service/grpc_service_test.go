@@ -86,6 +86,56 @@ func (m *mockRepository) FindByExternalReference(_ context.Context, ref, refType
 	return party, nil
 }
 
+// BQ operation stubs for mock repository
+func (m *mockRepository) SaveAssociation(_ context.Context, _, _ uuid.UUID, _ string) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
+func (m *mockRepository) FindAssociations(_ context.Context, _ uuid.UUID) ([]persistence.PartyAssociationEntity, error) {
+	return []persistence.PartyAssociationEntity{}, nil
+}
+
+func (m *mockRepository) UpdateAssociation(_ context.Context, associationID uuid.UUID, relationshipType string) (*persistence.PartyAssociationEntity, error) {
+	return &persistence.PartyAssociationEntity{
+		ID:               associationID,
+		PartyID:          uuid.New(),
+		RelatedPartyID:   uuid.New(),
+		RelationshipType: relationshipType,
+	}, nil
+}
+
+func (m *mockRepository) CheckCircularAssociation(_ context.Context, _, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+func (m *mockRepository) SaveDemographic(_ context.Context, _ uuid.UUID, _, _ string) error {
+	return nil
+}
+
+func (m *mockRepository) FindDemographic(_ context.Context, _ uuid.UUID) (*persistence.PartyDemographicEntity, error) {
+	return nil, nil
+}
+
+func (m *mockRepository) SaveReference(_ context.Context, _ uuid.UUID, _, _, _, _ string) error {
+	return nil
+}
+
+func (m *mockRepository) SaveReferences(_ context.Context, _ uuid.UUID, _ []persistence.ReferenceInput) error {
+	return nil
+}
+
+func (m *mockRepository) FindReferences(_ context.Context, _ uuid.UUID) ([]persistence.PartyReferenceEntity, error) {
+	return []persistence.PartyReferenceEntity{}, nil
+}
+
+func (m *mockRepository) SaveBankRelation(_ context.Context, _ uuid.UUID, _, _, _ string) error {
+	return nil
+}
+
+func (m *mockRepository) FindBankRelation(_ context.Context, _ uuid.UUID) (*persistence.PartyBankRelationEntity, error) {
+	return nil, nil
+}
+
 func newTestService(mock *mockRepository) *Service {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	svc, _ := NewService(mock, logger)

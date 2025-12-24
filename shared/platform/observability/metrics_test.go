@@ -17,6 +17,7 @@ func TestNewMetricsCollector(t *testing.T) {
 
 	if mc == nil {
 		t.Fatal("NewMetricsCollector returned nil")
+		return // unreachable but satisfies staticcheck
 	}
 
 	if mc.HTTPRequestsTotal == nil {

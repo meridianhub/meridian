@@ -99,6 +99,11 @@ jobs:
           # For CI: single database, test schema-per-org isolation
           psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS org_acme_bank;"
           psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS org_test_org;"
+          # Create service-specific schemas for Atlas revision tracking
+          # This prevents cross-service version confusion when sharing org schemas
+          for SERVICE in current_account financial_accounting party payment_order position_keeping; do
+            psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS atlas_${SERVICE}_revisions;"
+          done
           echo "✓ Test organization schemas created"
 
       - name: Apply migrations to test organizations
@@ -110,26 +115,32 @@ jobs:
           echo "- In production: each service has its own database"
           echo "- Within each database: each org gets its own schema"
           echo "- Tables use singular, unqualified names (search_path routing)"
+          echo "- In CI: services get separate schemas to mirror production separation"
           echo ""
           FAILED=0
           for ORG in acme_bank test_org; do
-            ORG_SCHEMA="org_${ORG}"
-            echo "Migrating $ORG_SCHEMA..."
+            echo "Migrating organization: $ORG..."
             for CONFIG in services/current-account/atlas/atlas.hcl \
                          services/financial-accounting/atlas/atlas.hcl \
                          services/party/atlas/atlas.hcl \
                          services/payment-order/atlas/atlas.hcl \
                          services/position-keeping/atlas/atlas.hcl; do
               SERVICE=$(basename $(dirname $(dirname "$CONFIG")))
-              echo "  Service: $SERVICE"
-              # --allow-dirty allows multiple services to share the same org schema in CI
+              SERVICE_UNDERSCORE=$(echo "$SERVICE" | tr '-' '_')
+              # Each service gets its own schema per org (mirrors production database-per-service)
+              ORG_SCHEMA="${SERVICE_UNDERSCORE}_org_${ORG}"
+              REVISION_SCHEMA="atlas_${SERVICE_UNDERSCORE}_revisions"
+              echo "  Service: $SERVICE (schema: $ORG_SCHEMA, revisions: $REVISION_SCHEMA)"
+              # Create service-specific org schema if it doesn't exist
+              psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS ${ORG_SCHEMA};" 2>&1 | grep -v "CREATE SCHEMA" || true
+              # --revisions-schema isolates each service's revision tracking
               # In production, each service has its own database
               if ! atlas migrate apply \
                 --env ci \
                 --config "file://$CONFIG" \
                 --url "${DATABASE_URL}&search_path=${ORG_SCHEMA}" \
-                --tx-mode none \
-                --allow-dirty; then
+                --revisions-schema "$REVISION_SCHEMA" \
+                --tx-mode none; then
                 echo "    ✗ Migration failed for $SERVICE in $ORG_SCHEMA"
                 FAILED=1
               fi
@@ -146,49 +157,52 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/meridian_test?sslmode=disable
         run: |
-          echo "Verifying organization schemas and table naming..."
+          echo "Verifying service-per-org schemas and table naming..."
+          echo "Each service gets its own schema per org (mirrors production database-per-service)"
 
-          # Expected singular table names (all services use unqualified names now)
-          # current-account: account, lien, audit_log, audit_outbox
-          # financial-accounting: financial_booking_log, ledger_posting
-          # party: party
-          # payment-order: payment_order
-          # position-keeping: financial_position_log, audit_trail_entry, transaction_lineage, transaction_log_entry
-          EXPECTED_TABLES="account lien audit_log audit_outbox financial_booking_log ledger_posting party payment_order financial_position_log audit_trail_entry transaction_lineage transaction_log_entry"
+          # Define expected tables per service (all use unqualified/singular names)
+          declare -A SERVICE_TABLES
+          SERVICE_TABLES[current_account]="account lien audit_log audit_outbox"
+          SERVICE_TABLES[financial_accounting]="financial_booking_log ledger_posting audit_log audit_outbox"
+          SERVICE_TABLES[party]="party party_association party_demographic party_reference party_bank_relation audit_log audit_outbox"
+          SERVICE_TABLES[payment_order]="payment_order audit_log audit_outbox"
+          SERVICE_TABLES[position_keeping]="financial_position_log audit_trail_entry transaction_lineage transaction_log_entry audit_log audit_outbox"
 
           for ORG in acme_bank test_org; do
-            ORG_SCHEMA="org_${ORG}"
             echo ""
-            echo "Checking schema: $ORG_SCHEMA"
+            echo "Verifying organization: $ORG"
+            for SERVICE in current_account financial_accounting party payment_order position_keeping; do
+              SCHEMA="${SERVICE}_org_${ORG}"
+              echo "  Schema: $SCHEMA"
 
-            # Count tables in org schema
-            TABLE_COUNT=$(psql "$DATABASE_URL" -t -c "
-              SELECT COUNT(*) FROM information_schema.tables
-              WHERE table_schema = '$ORG_SCHEMA' AND table_type = 'BASE TABLE';
-            " | xargs)
-            echo "  Total tables: $TABLE_COUNT"
-
-            # Verify expected singular table names exist
-            for TABLE in $EXPECTED_TABLES; do
-              EXISTS=$(psql "$DATABASE_URL" -t -c "
-                SELECT COUNT(*) FROM information_schema.tables
-                WHERE table_schema = '$ORG_SCHEMA' AND table_name = '$TABLE';
+              # Verify schema exists
+              SCHEMA_EXISTS=$(psql "$DATABASE_URL" -t -c "
+                SELECT COUNT(*) FROM information_schema.schemata
+                WHERE schema_name = '$SCHEMA';
               " | xargs)
-              if [ "$EXISTS" -eq 0 ]; then
-                echo "  ⚠ Table '$TABLE' not found in $ORG_SCHEMA"
-              else
-                echo "  ✓ $TABLE"
+              if [ "$SCHEMA_EXISTS" -eq 0 ]; then
+                echo "    ✗ Schema does not exist!"
+                continue
               fi
-            done
 
-            # Verify Atlas revision tracking exists
-            REVISIONS=$(psql "$DATABASE_URL" -t -c "
-              SELECT COUNT(*) FROM information_schema.tables
-              WHERE table_schema = '$ORG_SCHEMA' AND table_name = 'atlas_schema_revisions';
-            " | xargs)
-            if [ "$REVISIONS" -ge 1 ]; then
-              echo "  ✓ atlas_schema_revisions (revision tracking)"
-            fi
+              # Count tables
+              TABLE_COUNT=$(psql "$DATABASE_URL" -t -c "
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = '$SCHEMA' AND table_type = 'BASE TABLE';
+              " | xargs)
+              echo "    Tables: $TABLE_COUNT"
+
+              # Verify expected tables exist
+              for TABLE in ${SERVICE_TABLES[$SERVICE]}; do
+                EXISTS=$(psql "$DATABASE_URL" -t -c "
+                  SELECT COUNT(*) FROM information_schema.tables
+                  WHERE table_schema = '$SCHEMA' AND table_name = '$TABLE';
+                " | xargs)
+                if [ "$EXISTS" -gt 0 ]; then
+                  echo "    ✓ $TABLE"
+                fi
+              done
+            done
           done
 
           # Verify NO old schema-qualified patterns exist

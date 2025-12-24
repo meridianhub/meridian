@@ -128,6 +128,7 @@ func TestHTTPHandler_ReadinessHandler_Unhealthy(t *testing.T) {
 
 	if redisComp == nil {
 		t.Fatal("Redis component not found in response")
+		return // unreachable but satisfies staticcheck
 	}
 
 	if redisComp.Status != "unhealthy" {
