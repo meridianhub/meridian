@@ -171,7 +171,7 @@ func TestExecuteWithdrawal_AccountFrozen(t *testing.T) {
 	account, err = account.Deposit(depositAmount)
 	require.NoError(t, err)
 
-	account, err = account.Freeze()
+	account, err = account.Freeze("Suspicious activity detected on account")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 

@@ -86,7 +86,7 @@ func TestDeposit(t *testing.T) {
 func TestDepositWhenFrozen(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
-	account, _ = account.Freeze()
+	account, _ = account.Freeze("Suspicious activity detected on account")
 
 	depositMoney, _ := NewMoney("GBP", 1000)
 	_, err = account.Deposit(depositMoney)
@@ -96,12 +96,20 @@ func TestDepositWhenFrozen(t *testing.T) {
 }
 
 func TestDepositWhenClosed(t *testing.T) {
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
-	require.NoError(t, err)
-	account, _ = account.Close()
+	// Build a closed account using builder (simulating a reconstructed account)
+	zeroMoney, _ := NewMoney("GBP", 0)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(zeroMoney).
+		WithAvailableBalance(zeroMoney).
+		WithStatus(AccountStatusClosed).
+		WithVersion(1).
+		Build()
 
 	depositMoney, _ := NewMoney("GBP", 1000)
-	_, err = account.Deposit(depositMoney)
+	_, err := account.Deposit(depositMoney)
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrAccountClosed)
@@ -267,7 +275,7 @@ func TestWithdraw_FrozenAccount(t *testing.T) {
 	require.NoError(t, err)
 
 	// Freeze the account
-	account, err = account.Freeze()
+	account, err = account.Freeze("Suspicious activity detected on account")
 	require.NoError(t, err)
 
 	// Attempt withdrawal from frozen account
@@ -279,22 +287,22 @@ func TestWithdraw_FrozenAccount(t *testing.T) {
 }
 
 func TestWithdraw_ClosedAccount(t *testing.T) {
-	// Create account and close it
-	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
-	require.NoError(t, err)
-
-	// Deposit some money first
-	depositMoney, _ := NewMoney("GBP", 10000)
-	account, err = account.Deposit(depositMoney)
-	require.NoError(t, err)
-
-	// Close the account
-	account, err = account.Close()
-	require.NoError(t, err)
+	// Build a closed account with balance using builder (simulating a legacy or reconstructed account)
+	// This tests that withdrawal is blocked on closed accounts regardless of balance
+	balance, _ := NewMoney("GBP", 10000)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusClosed).
+		WithVersion(1).
+		Build()
 
 	// Attempt withdrawal from closed account
 	withdrawMoney, _ := NewMoney("GBP", 5000)
-	_, err = account.Withdraw(withdrawMoney)
+	_, err := account.Withdraw(withdrawMoney)
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrAccountClosed)
@@ -372,16 +380,18 @@ func TestStatusTransitions(t *testing.T) {
 	require.NoError(t, err)
 
 	// Active -> Frozen
-	account, err = account.Freeze()
+	account, err = account.Freeze("Suspicious activity detected on account")
 	assert.NoError(t, err)
 	assert.Equal(t, AccountStatusFrozen, account.Status())
+	assert.Equal(t, "Suspicious activity detected on account", account.FreezeReason())
 
-	// Frozen -> Active
-	account, err = account.Activate()
+	// Frozen -> Active (using Unfreeze)
+	account, err = account.Unfreeze()
 	assert.NoError(t, err)
 	assert.Equal(t, AccountStatusActive, account.Status())
+	assert.Empty(t, account.FreezeReason()) // Freeze reason should be cleared
 
-	// Active -> Closed
+	// Active -> Closed (balance is zero)
 	account, err = account.Close()
 	assert.NoError(t, err)
 	assert.Equal(t, AccountStatusClosed, account.Status())
@@ -602,7 +612,7 @@ func TestImmutability_FreezeDoesNotModifyOriginal(t *testing.T) {
 
 	originalStatus := account.Status()
 
-	_, err = account.Freeze()
+	_, err = account.Freeze("Suspicious activity detected on account")
 	require.NoError(t, err)
 
 	// Original should be unchanged
@@ -724,4 +734,393 @@ func TestCalculateAvailableBalance(t *testing.T) {
 
 		assert.Equal(t, int64(2000), result.AmountCents())
 	})
+}
+
+// Tests for state machine enforcement
+
+func TestFreeze_ValidTransition(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	frozenAccount, err := account.Freeze("Suspicious activity detected on account")
+
+	assert.NoError(t, err)
+	assert.Equal(t, AccountStatusFrozen, frozenAccount.Status())
+	assert.Equal(t, "Suspicious activity detected on account", frozenAccount.FreezeReason())
+
+	// Verify status history is recorded
+	history := frozenAccount.StatusHistory()
+	require.Len(t, history, 1)
+	assert.Equal(t, AccountStatusActive, history[0].From)
+	assert.Equal(t, AccountStatusFrozen, history[0].To)
+	assert.Equal(t, "Suspicious activity detected on account", history[0].Reason)
+}
+
+func TestFreeze_InvalidFromFrozen(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	frozenAccount, err := account.Freeze("Initial freeze reason for testing")
+	require.NoError(t, err)
+
+	// Attempt to freeze an already frozen account
+	_, err = frozenAccount.Freeze("Second freeze attempt reason")
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+}
+
+func TestFreeze_InvalidFromClosed(t *testing.T) {
+	// Build a closed account
+	zeroMoney, _ := NewMoney("GBP", 0)
+	closedAccount := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalance(zeroMoney).
+		WithAvailableBalance(zeroMoney).
+		WithStatus(AccountStatusClosed).
+		Build()
+
+	_, err := closedAccount.Freeze("Attempting to freeze a closed account")
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+}
+
+func TestFreeze_ReasonTooShort(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name   string
+		reason string
+	}{
+		{"empty reason", ""},
+		{"single char", "a"},
+		{"9 chars", "123456789"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := account.Freeze(tt.reason)
+
+			assert.Error(t, err)
+			assert.ErrorIs(t, err, ErrInvalidFreezeReason)
+		})
+	}
+}
+
+func TestFreeze_ReasonExactly10Chars(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	// Exactly 10 characters should succeed
+	frozenAccount, err := account.Freeze("1234567890")
+
+	assert.NoError(t, err)
+	assert.Equal(t, AccountStatusFrozen, frozenAccount.Status())
+}
+
+func TestUnfreeze_ValidTransition(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	frozenAccount, err := account.Freeze("Suspicious activity detected on account")
+	require.NoError(t, err)
+
+	unfrozenAccount, err := frozenAccount.Unfreeze()
+
+	assert.NoError(t, err)
+	assert.Equal(t, AccountStatusActive, unfrozenAccount.Status())
+	assert.Empty(t, unfrozenAccount.FreezeReason()) // Freeze reason should be cleared
+
+	// Verify status history records both transitions
+	history := unfrozenAccount.StatusHistory()
+	require.Len(t, history, 2)
+	assert.Equal(t, AccountStatusActive, history[0].From)
+	assert.Equal(t, AccountStatusFrozen, history[0].To)
+	assert.Equal(t, AccountStatusFrozen, history[1].From)
+	assert.Equal(t, AccountStatusActive, history[1].To)
+}
+
+func TestUnfreeze_InvalidFromActive(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	_, err = account.Unfreeze()
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+}
+
+func TestUnfreeze_InvalidFromClosed(t *testing.T) {
+	zeroMoney, _ := NewMoney("GBP", 0)
+	closedAccount := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalance(zeroMoney).
+		WithAvailableBalance(zeroMoney).
+		WithStatus(AccountStatusClosed).
+		Build()
+
+	_, err := closedAccount.Unfreeze()
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+}
+
+func TestClose_ValidTransition_ZeroBalance(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	closedAccount, err := account.Close()
+
+	assert.NoError(t, err)
+	assert.Equal(t, AccountStatusClosed, closedAccount.Status())
+
+	// Verify status history is recorded
+	history := closedAccount.StatusHistory()
+	require.Len(t, history, 1)
+	assert.Equal(t, AccountStatusActive, history[0].From)
+	assert.Equal(t, AccountStatusClosed, history[0].To)
+}
+
+func TestClose_ValidTransition_FromFrozen(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	frozenAccount, err := account.Freeze("Suspicious activity detected on account")
+	require.NoError(t, err)
+
+	closedAccount, err := frozenAccount.Close()
+
+	assert.NoError(t, err)
+	assert.Equal(t, AccountStatusClosed, closedAccount.Status())
+
+	// Verify status history records both transitions
+	history := closedAccount.StatusHistory()
+	require.Len(t, history, 2)
+}
+
+func TestClose_InvalidWithNonZeroBalance(t *testing.T) {
+	balance, _ := NewMoney("GBP", 10000)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusActive).
+		Build()
+
+	_, err := account.Close()
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrNonZeroBalance)
+}
+
+func TestClose_InvalidWithNegativeBalance(t *testing.T) {
+	balance, _ := NewMoney("GBP", -5000) // Overdrawn account
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusActive).
+		Build()
+
+	_, err := account.Close()
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrNonZeroBalance)
+}
+
+func TestClose_InvalidFromClosed(t *testing.T) {
+	zeroMoney, _ := NewMoney("GBP", 0)
+	closedAccount := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalance(zeroMoney).
+		WithAvailableBalance(zeroMoney).
+		WithStatus(AccountStatusClosed).
+		Build()
+
+	_, err := closedAccount.Close()
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+}
+
+func TestClose_TerminalState(t *testing.T) {
+	// Test that CLOSED is truly terminal - no transitions allowed
+	zeroMoney, _ := NewMoney("GBP", 0)
+	closedAccount := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalance(zeroMoney).
+		WithAvailableBalance(zeroMoney).
+		WithStatus(AccountStatusClosed).
+		Build()
+
+	t.Run("cannot freeze", func(t *testing.T) {
+		_, err := closedAccount.Freeze("Attempting to freeze closed account")
+		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+	})
+
+	t.Run("cannot unfreeze", func(t *testing.T) {
+		_, err := closedAccount.Unfreeze()
+		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+	})
+
+	t.Run("cannot activate", func(t *testing.T) {
+		_, err := closedAccount.Activate()
+		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+	})
+
+	t.Run("cannot close again", func(t *testing.T) {
+		_, err := closedAccount.Close()
+		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+	})
+}
+
+func TestUpdateOverdraftSettings_Valid(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	limit, _ := NewMoney("GBP", 50000)
+	updatedAccount, err := account.UpdateOverdraftSettings(limit, 19.9, true)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(50000), updatedAccount.OverdraftLimit().AmountCents())
+	assert.Equal(t, 19.9, updatedAccount.OverdraftRate())
+	assert.True(t, updatedAccount.OverdraftEnabled())
+}
+
+func TestUpdateOverdraftSettings_NegativeRate(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	limit, _ := NewMoney("GBP", 50000)
+	_, err = account.UpdateOverdraftSettings(limit, -0.5, true)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrNegativeOverdraftRate)
+}
+
+func TestUpdateOverdraftSettings_ZeroRate(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	// Zero rate should be valid (promotional period, etc.)
+	limit, _ := NewMoney("GBP", 50000)
+	updatedAccount, err := account.UpdateOverdraftSettings(limit, 0, true)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0.0, updatedAccount.OverdraftRate())
+}
+
+func TestStatusHistory_Immutability(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	frozenAccount, err := account.Freeze("Suspicious activity detected on account")
+	require.NoError(t, err)
+
+	// Get a copy of the history
+	history := frozenAccount.StatusHistory()
+	originalLen := len(history)
+
+	// Modify the returned slice (use _ to satisfy ineffassign linter)
+	_ = append(history, StatusChange{From: AccountStatusActive, To: AccountStatusClosed})
+
+	// The original should be unchanged
+	assert.Len(t, frozenAccount.StatusHistory(), originalLen)
+}
+
+func TestStatusHistory_MultipleTransitions(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	// Perform multiple state transitions
+	frozen1, err := account.Freeze("First freeze - suspicious activity")
+	require.NoError(t, err)
+
+	unfrozen1, err := frozen1.Unfreeze()
+	require.NoError(t, err)
+
+	frozen2, err := unfrozen1.Freeze("Second freeze - fraud detected")
+	require.NoError(t, err)
+
+	closed, err := frozen2.Close()
+	require.NoError(t, err)
+
+	// Verify full audit trail
+	history := closed.StatusHistory()
+	require.Len(t, history, 4)
+
+	assert.Equal(t, AccountStatusActive, history[0].From)
+	assert.Equal(t, AccountStatusFrozen, history[0].To)
+	assert.Equal(t, "First freeze - suspicious activity", history[0].Reason)
+
+	assert.Equal(t, AccountStatusFrozen, history[1].From)
+	assert.Equal(t, AccountStatusActive, history[1].To)
+
+	assert.Equal(t, AccountStatusActive, history[2].From)
+	assert.Equal(t, AccountStatusFrozen, history[2].To)
+	assert.Equal(t, "Second freeze - fraud detected", history[2].Reason)
+
+	assert.Equal(t, AccountStatusFrozen, history[3].From)
+	assert.Equal(t, AccountStatusClosed, history[3].To)
+}
+
+func TestActivate_DelegatesForFrozen(t *testing.T) {
+	// Test that Activate() delegates to Unfreeze() for frozen accounts
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	frozenAccount, err := account.Freeze("Suspicious activity detected on account")
+	require.NoError(t, err)
+
+	activatedAccount, err := frozenAccount.Activate()
+
+	assert.NoError(t, err)
+	assert.Equal(t, AccountStatusActive, activatedAccount.Status())
+	assert.Empty(t, activatedAccount.FreezeReason()) // Should be cleared like Unfreeze()
+}
+
+func TestActivate_IdempotentForActive(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	// Activating an active account should return the same account
+	activatedAccount, err := account.Activate()
+
+	assert.NoError(t, err)
+	assert.Equal(t, account.Version(), activatedAccount.Version()) // No version bump
+}
+
+func TestBuilderWithFreezeReason(t *testing.T) {
+	balance, _ := NewMoney("GBP", 10000)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusFrozen).
+		WithFreezeReason("Fraud investigation in progress").
+		Build()
+
+	assert.Equal(t, AccountStatusFrozen, account.Status())
+	assert.Equal(t, "Fraud investigation in progress", account.FreezeReason())
+}
+
+func TestBuilderWithStatusHistory(t *testing.T) {
+	balance, _ := NewMoney("GBP", 10000)
+	now := time.Now()
+	history := []StatusChange{
+		{From: AccountStatusActive, To: AccountStatusFrozen, Reason: "Initial freeze", Timestamp: now},
+	}
+
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusFrozen).
+		WithStatusHistory(history).
+		Build()
+
+	assert.Len(t, account.StatusHistory(), 1)
+	assert.Equal(t, "Initial freeze", account.StatusHistory()[0].Reason)
 }
