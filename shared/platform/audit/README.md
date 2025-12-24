@@ -215,10 +215,10 @@ For operators monitoring the audit system, see:
 
 **Key Prometheus metrics:**
 
-- `meridian_audit_kafka_events_published_total` - Primary path usage (Kafka)
-- `meridian_audit_kafka_fallback_total` - Fallback path activations
-- `meridian_audit_outbox_depth_total` - Queue depth (alert if > 1000)
-- `meridian_audit_consumer_messages_processed_total` - Consumer throughput
+- `meridian_audit_kafka_events_published_total` - Primary path usage (Kafka) (counter)
+- `meridian_audit_kafka_fallback_used_total` - Fallback path activations (counter)
+- `meridian_audit_worker_outbox_depth` - Queue depth (gauge, alert if > 1000)
+- `meridian_audit_kafka_events_consumed_total` - Consumer throughput (counter)
 
 See ADR-0009 for complete metrics reference and alerting thresholds.
 

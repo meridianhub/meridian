@@ -788,10 +788,10 @@ The async audit system has been fully implemented across all 6 services with a d
 ### Monitoring
 
 Prometheus metrics exposed:
-- `meridian_audit_kafka_events_published_total` - Primary path usage
-- `meridian_audit_kafka_fallback_total` - Fallback path usage
-- `meridian_audit_outbox_depth_total` - Outbox queue depth
-- `meridian_audit_consumer_messages_processed_total` - Consumer throughput
+- `meridian_audit_kafka_events_published_total` - Primary path usage (counter)
+- `meridian_audit_kafka_fallback_used_total` - Fallback path usage (counter)
+- `meridian_audit_worker_outbox_depth` - Outbox queue depth (gauge)
+- `meridian_audit_kafka_events_consumed_total` - Consumer throughput (counter)
 
 ## Decision Review
 

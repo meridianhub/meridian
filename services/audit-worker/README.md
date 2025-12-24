@@ -38,7 +38,7 @@ entries written during Kafka outages.
 
 **Worker-specific metrics:**
 
-- `meridian_audit_worker_outbox_depth_total` - Current number of entries in outbox (gauge)
+- `meridian_audit_worker_outbox_depth` - Current number of entries in outbox (gauge)
 - `meridian_audit_worker_outbox_processed_total` - Total entries processed (counter)
 - `meridian_audit_worker_outbox_failed_total` - Total entries failed (counter)
 - `meridian_audit_worker_processing_duration_seconds` - Batch processing duration (histogram)
@@ -46,13 +46,13 @@ entries written during Kafka outages.
 
 **System-wide metrics** (for overall audit health):
 
-- `meridian_audit_kafka_events_published_total` - Primary path usage (Kafka)
-- `meridian_audit_kafka_fallback_total` - Fallback path activations
-- `meridian_audit_consumer_messages_processed_total` - Consumer throughput
+- `meridian_audit_kafka_events_published_total` - Primary path usage (Kafka) (counter)
+- `meridian_audit_kafka_fallback_used_total` - Fallback path activations (counter)
+- `meridian_audit_kafka_events_consumed_total` - Consumer throughput (counter)
 
 **Alerting thresholds:**
 
-- Alert if `outbox_depth_total` > 1000 for 5 minutes (indicates Kafka outage or worker lag)
+- Alert if `meridian_audit_worker_outbox_depth` > 1000 for 5 minutes (indicates Kafka outage or worker lag)
 - Alert if `entry_age_seconds` p99 > 60s (indicates processing delays)
 
 See [ADR-0009](../../docs/adr/0009-application-level-audit-logging.md) for complete Prometheus metrics
