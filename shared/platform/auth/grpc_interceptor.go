@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -44,6 +45,7 @@ type Interceptor struct {
 	jwksValidator *JWTValidatorWithJWKS
 	bypassMethods map[string]bool
 	useJWKS       bool
+	logger        *slog.Logger
 }
 
 // InterceptorConfig holds configuration for the auth interceptor
@@ -51,6 +53,7 @@ type InterceptorConfig struct {
 	Validator     *JWTValidator         // Standard JWT validator
 	JWKSValidator *JWTValidatorWithJWKS // JWKS-based validator
 	BypassMethods []string              // Methods to bypass authentication (e.g., health checks)
+	Logger        *slog.Logger          // Logger for security events (optional, uses slog.Default if nil)
 }
 
 // NewAuthInterceptor creates a new authentication interceptor
@@ -64,11 +67,17 @@ func NewAuthInterceptor(cfg *InterceptorConfig) (*Interceptor, error) {
 		bypassMap[method] = true
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &Interceptor{
 		validator:     cfg.Validator,
 		jwksValidator: cfg.JWKSValidator,
 		bypassMethods: bypassMap,
 		useJWKS:       cfg.JWKSValidator != nil,
+		logger:        logger,
 	}, nil
 }
 
@@ -145,6 +154,30 @@ func (a *Interceptor) authenticate(ctx context.Context) (context.Context, error)
 		}
 		return nil, status.Error(codes.InvalidArgument, "invalid tenant_id format")
 	}
+
+	// SECURITY: Double-check tenant context vs JWT claims
+	// If x-tenant-id header exists (from gateway), it MUST match JWT
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		if vals := md.Get(tenant.TenantIDKey); len(vals) > 0 {
+			headerTenantID, err := tenant.NewTenantID(vals[0])
+			if err == nil && headerTenantID != tenantID {
+				// Tenant mismatch: user accessing wrong subdomain
+				span := trace.SpanFromContext(ctx)
+				span.SetAttributes(
+					attribute.String("security.tenant_mismatch.jwt", tenantID.String()),
+					attribute.String("security.tenant_mismatch.header", headerTenantID.String()),
+				)
+				a.logger.Warn("tenant context mismatch",
+					"jwt_tenant", tenantID,
+					"header_tenant", headerTenantID,
+					"user_id", claims.UserID,
+				)
+				return nil, status.Error(codes.PermissionDenied, "tenant context mismatch")
+			}
+		}
+	}
+
 	ctx = tenant.WithTenant(ctx, tenantID)
 
 	// Add tenant to OpenTelemetry span attributes

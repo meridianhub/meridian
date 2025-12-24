@@ -1120,3 +1120,283 @@ func TestPlatformStreamInterceptor(t *testing.T) {
 		assert.Equal(t, codes.Unauthenticated, st.Code())
 	})
 }
+
+// TestTenantMismatchValidation tests the double-check validation between JWT tenant and header tenant.
+// This is a SECURITY feature to prevent cross-tenant access attacks.
+func TestTenantMismatchValidation(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	validator, err := NewJWTValidator(publicKey)
+	require.NoError(t, err)
+
+	t.Run("success when JWT tenant matches header tenant", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with tenant claim
+		claims := &Claims{
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		// Create context with both authorization and x-tenant-id header (matching)
+		md := metadata.Pairs(
+			"authorization", "Bearer "+tokenString,
+			tenant.TenantIDKey, "acme_bank",
+		)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Verify tenant was injected into context
+		resultCtx := resp.(context.Context)
+		tenantID, ok := tenant.FromContext(resultCtx)
+		assert.True(t, ok)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
+	})
+
+	t.Run("error when JWT tenant differs from header tenant", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with tenant claim
+		claims := &Claims{
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		// Create context with MISMATCHED tenants (user trying to access wrong tenant)
+		md := metadata.Pairs(
+			"authorization", "Bearer "+tokenString,
+			tenant.TenantIDKey, "other_bank", // Different from JWT's acme_bank
+		)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.PermissionDenied, st.Code())
+		assert.Contains(t, st.Message(), "tenant context mismatch")
+	})
+
+	t.Run("success when header is missing but JWT tenant exists", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with tenant claim
+		claims := &Claims{
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		// Create context with ONLY authorization header (no x-tenant-id)
+		// This is for backward compatibility and direct gRPC calls without gateway
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Verify tenant was injected into context from JWT
+		resultCtx := resp.(context.Context)
+		tenantID, ok := tenant.FromContext(resultCtx)
+		assert.True(t, ok)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
+	})
+
+	t.Run("error with missing tenant_id claim", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token WITHOUT tenant claim
+		claims := &Claims{
+			UserID: "user-123",
+			Roles:  []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+		assert.Contains(t, st.Message(), "tenant_id claim required")
+	})
+
+	t.Run("error with invalid tenant_id format in JWT", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with INVALID tenant format
+		claims := &Claims{
+			UserID:   "user-123",
+			TenantID: "invalid tenant!", // Invalid format (spaces and special chars)
+			Roles:    []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		md := metadata.Pairs("authorization", "Bearer "+tokenString)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "invalid tenant_id format")
+	})
+
+	t.Run("ignores invalid header tenant format and succeeds with JWT tenant", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with valid tenant claim
+		claims := &Claims{
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		// Create context with invalid header tenant format
+		// Invalid header format is ignored (err != nil from NewTenantID)
+		md := metadata.Pairs(
+			"authorization", "Bearer "+tokenString,
+			tenant.TenantIDKey, "invalid tenant!", // Invalid format
+		)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
+		resp, err := interceptor.UnaryInterceptor()(ctx, nil, info, mockUnaryHandler)
+
+		// Should succeed because header parsing error is ignored
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+
+		// Verify JWT tenant was used
+		resultCtx := resp.(context.Context)
+		tenantID, ok := tenant.FromContext(resultCtx)
+		assert.True(t, ok)
+		assert.Equal(t, tenant.TenantID("acme_bank"), tenantID)
+	})
+
+	t.Run("stream interceptor rejects tenant mismatch", func(t *testing.T) {
+		cfg := &InterceptorConfig{
+			Validator: validator,
+		}
+
+		interceptor, err := NewAuthInterceptor(cfg)
+		require.NoError(t, err)
+
+		// Create token with tenant claim
+		claims := &Claims{
+			UserID:   "user-123",
+			TenantID: "acme_bank",
+			Roles:    []string{"admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenString, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		// Create context with MISMATCHED tenants
+		md := metadata.Pairs(
+			"authorization", "Bearer "+tokenString,
+			tenant.TenantIDKey, "other_bank",
+		)
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		stream := &mockServerStream{ctx: ctx}
+
+		info := &grpc.StreamServerInfo{FullMethod: "/test.Service/StreamMethod"}
+		err = interceptor.StreamInterceptor()(nil, stream, info, mockStreamHandler)
+
+		assert.Error(t, err)
+		st, ok := status.FromError(err)
+		assert.True(t, ok)
+		assert.Equal(t, codes.PermissionDenied, st.Code())
+		assert.Contains(t, st.Message(), "tenant context mismatch")
+	})
+}
