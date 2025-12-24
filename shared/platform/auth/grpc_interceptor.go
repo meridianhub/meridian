@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -38,12 +39,30 @@ const (
 	ClaimsContextKey contextKey = "claims"
 )
 
-// Interceptor provides gRPC interceptors for JWT authentication
+// Interceptor provides gRPC interceptors for JWT authentication.
+//
+// IMPORTANT: This interceptor performs tenant context validation as a security measure.
+// When processing requests, it:
+//
+//  1. Validates the JWT and extracts the tenant_id claim
+//  2. Checks if an x-tenant-id header exists in gRPC metadata (set by API gateway)
+//  3. If the header exists, validates that it matches the JWT tenant_id claim
+//  4. Rejects requests where header and JWT tenant don't match (codes.PermissionDenied)
+//
+// This double-check prevents "subdomain hopping" attacks where a user with a valid JWT
+// for tenant A attempts to access tenant B's data by navigating to tenant B's subdomain.
+// The API gateway sets x-tenant-id based on the subdomain, so this validation ensures
+// users can only access the tenant they're authorized for via their JWT.
+//
+// The TenantExtractionInterceptor is provided for development/testing when auth is
+// disabled, but it should NEVER be used in production as it trusts the header without
+// JWT validation.
 type Interceptor struct {
 	validator     *JWTValidator
 	jwksValidator *JWTValidatorWithJWKS
 	bypassMethods map[string]bool
 	useJWKS       bool
+	logger        *slog.Logger
 }
 
 // InterceptorConfig holds configuration for the auth interceptor
@@ -51,6 +70,7 @@ type InterceptorConfig struct {
 	Validator     *JWTValidator         // Standard JWT validator
 	JWKSValidator *JWTValidatorWithJWKS // JWKS-based validator
 	BypassMethods []string              // Methods to bypass authentication (e.g., health checks)
+	Logger        *slog.Logger          // Logger for security events (optional, uses slog.Default if nil)
 }
 
 // NewAuthInterceptor creates a new authentication interceptor
@@ -64,11 +84,17 @@ func NewAuthInterceptor(cfg *InterceptorConfig) (*Interceptor, error) {
 		bypassMap[method] = true
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &Interceptor{
 		validator:     cfg.Validator,
 		jwksValidator: cfg.JWKSValidator,
 		bypassMethods: bypassMap,
 		useJWKS:       cfg.JWKSValidator != nil,
+		logger:        logger,
 	}, nil
 }
 
@@ -126,6 +152,16 @@ func (a *Interceptor) StreamInterceptor() grpc.StreamServerInterceptor {
 
 // authenticate extracts and validates the JWT token, returning an enriched context.
 // This is for tenant-layer services that REQUIRE tenant_id claims.
+//
+// SECURITY: This method performs a critical double-check of tenant context:
+//   - The JWT contains the user's authorized tenant_id claim
+//   - The x-tenant-id header (if present) contains the subdomain-derived tenant
+//   - If both exist, they MUST match or the request is rejected
+//
+// This prevents "subdomain hopping" attacks where a user with a valid JWT for
+// tenant A navigates to tenant B's subdomain to access their data. The API gateway
+// sets x-tenant-id based on the subdomain, so this validation ensures users stay
+// within their authorized tenant boundaries.
 func (a *Interceptor) authenticate(ctx context.Context) (context.Context, error) {
 	claims, err := a.validateToken(ctx)
 	if err != nil {
@@ -145,6 +181,41 @@ func (a *Interceptor) authenticate(ctx context.Context) (context.Context, error)
 		}
 		return nil, status.Error(codes.InvalidArgument, "invalid tenant_id format")
 	}
+
+	// SECURITY: Double-check tenant context vs JWT claims
+	// If x-tenant-id header exists (from gateway), it MUST match JWT
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		if vals := md.Get(tenant.TenantIDKey); len(vals) > 0 {
+			headerTenantID, err := tenant.NewTenantID(vals[0])
+			if err == nil && headerTenantID != tenantID {
+				// Tenant mismatch: user accessing wrong subdomain
+				// This is a SECURITY event - log with full context and record metric
+				span := trace.SpanFromContext(ctx)
+				span.SetAttributes(
+					attribute.String("security.tenant_mismatch.jwt", tenantID.String()),
+					attribute.String("security.tenant_mismatch.header", headerTenantID.String()),
+				)
+
+				// Extract client IP for security logging
+				clientIP := extractClientIP(ctx)
+
+				// Structured security logging with all contextual fields
+				a.logger.Warn("tenant context mismatch",
+					"jwt_tenant", tenantID.String(),
+					"header_tenant", headerTenantID.String(),
+					"user_id", claims.UserID,
+					"client_ip", clientIP,
+				)
+
+				// Record metric for monitoring and alerting
+				RecordTenantMismatch(tenantID.String(), headerTenantID.String())
+
+				return nil, status.Error(codes.PermissionDenied, "tenant context mismatch")
+			}
+		}
+	}
+
 	ctx = tenant.WithTenant(ctx, tenantID)
 
 	// Add tenant to OpenTelemetry span attributes
