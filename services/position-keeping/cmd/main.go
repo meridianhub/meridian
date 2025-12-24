@@ -21,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
@@ -120,6 +121,30 @@ func run(logger *slog.Logger) error {
 	}()
 
 	logger.Info("dependency container initialized")
+
+	// Initialize and start event outbox worker (if Kafka enabled)
+	var outboxWorker *events.Worker
+	if container.KafkaProducer() != nil {
+		workerConfig := events.DefaultWorkerConfig("position-keeping")
+		outboxWorker = events.NewWorker(
+			container.OutboxRepository,
+			container.KafkaProducer(),
+			workerConfig,
+			logger,
+		)
+
+		// Start worker in background
+		workerCtx, workerCancel := context.WithCancel(context.Background())
+		defer workerCancel()
+		outboxWorker.Start(workerCtx)
+
+		logger.Info("event outbox worker started",
+			"service_name", workerConfig.ServiceName,
+			"batch_size", workerConfig.BatchSize,
+			"poll_interval", workerConfig.PollInterval)
+	} else {
+		logger.Info("event outbox worker disabled (kafka not configured)")
+	}
 
 	// Create idempotency service
 	var idempotencySvc idempotency.Service
@@ -273,6 +298,13 @@ func run(logger *slog.Logger) error {
 
 	// Graceful shutdown
 	logger.Info("shutting down servers...")
+
+	// Shutdown outbox worker before stopping servers
+	if outboxWorker != nil {
+		logger.Info("stopping event outbox worker...")
+		outboxWorker.Stop() // Blocks until current batch completes and Kafka flush finishes
+		logger.Info("event outbox worker stopped")
+	}
 
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.GracefulShutdownTimeout)
