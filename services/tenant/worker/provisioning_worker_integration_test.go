@@ -288,7 +288,8 @@ func TestConcurrentProvisioningWithOptimisticLocking(t *testing.T) {
 	wg.Wait()
 
 	// Wait for tenant to reach PROVISIONING status
-	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+	// Use longer timeout for CI environments where containers may be slower
+	err = await.AtMost(10 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
 		tenant, _ := repo.GetByID(tc.ctx, testTenant.ID)
 		return tenant != nil && tenant.Status == domain.StatusProvisioning
 	})
@@ -385,7 +386,7 @@ func TestConcurrentProvisioningStressTest(t *testing.T) {
 			wg.Wait()
 
 			// Wait for tenant to reach PROVISIONING status
-			awaitErr := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+			awaitErr := await.AtMost(10 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
 				tenant, _ := repo.GetByID(tc.ctx, tenantID)
 				return tenant != nil && tenant.Status == domain.StatusProvisioning
 			})
@@ -461,7 +462,7 @@ func TestMultipleTenantsWithConcurrentWorkers(t *testing.T) {
 	wg.Wait()
 
 	// Wait for all tenants to reach PROVISIONING status
-	awaitErr := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+	awaitErr := await.AtMost(10 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
 		for _, tenantID := range tenantIDs {
 			tenant, _ := repo.GetByID(tc.ctx, tenantID)
 			if tenant == nil || tenant.Status != domain.StatusProvisioning {
@@ -602,7 +603,7 @@ func TestRaceDetection(t *testing.T) {
 	wg.Wait()
 
 	// Wait for tenant to reach PROVISIONING status
-	awaitErr := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+	awaitErr := await.AtMost(10 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
 		tenant, _ := repo.GetByID(tc.ctx, testTenant.ID)
 		return tenant != nil && tenant.Status == domain.StatusProvisioning
 	})
