@@ -392,7 +392,7 @@ func TestStatusTransitions(t *testing.T) {
 	assert.Empty(t, account.FreezeReason()) // Freeze reason should be cleared
 
 	// Active -> Closed (balance is zero)
-	account, err = account.Close()
+	account, err = account.Close("Account closure requested by customer")
 	assert.NoError(t, err)
 	assert.Equal(t, AccountStatusClosed, account.Status())
 
@@ -871,16 +871,17 @@ func TestClose_ValidTransition_ZeroBalance(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
 
-	closedAccount, err := account.Close()
+	closedAccount, err := account.Close("Customer requested account closure")
 
 	assert.NoError(t, err)
 	assert.Equal(t, AccountStatusClosed, closedAccount.Status())
 
-	// Verify status history is recorded
+	// Verify status history is recorded with custom reason
 	history := closedAccount.StatusHistory()
 	require.Len(t, history, 1)
 	assert.Equal(t, AccountStatusActive, history[0].From)
 	assert.Equal(t, AccountStatusClosed, history[0].To)
+	assert.Equal(t, "Customer requested account closure", history[0].Reason)
 }
 
 func TestClose_ValidTransition_FromFrozen(t *testing.T) {
@@ -890,7 +891,7 @@ func TestClose_ValidTransition_FromFrozen(t *testing.T) {
 	frozenAccount, err := account.Freeze("Suspicious activity detected on account")
 	require.NoError(t, err)
 
-	closedAccount, err := frozenAccount.Close()
+	closedAccount, err := frozenAccount.Close("Fraud confirmed, closing account")
 
 	assert.NoError(t, err)
 	assert.Equal(t, AccountStatusClosed, closedAccount.Status())
@@ -898,6 +899,22 @@ func TestClose_ValidTransition_FromFrozen(t *testing.T) {
 	// Verify status history records both transitions
 	history := closedAccount.StatusHistory()
 	require.Len(t, history, 2)
+}
+
+func TestClose_DefaultReason_WhenEmpty(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	// Close with empty reason should use default
+	closedAccount, err := account.Close("")
+
+	assert.NoError(t, err)
+	assert.Equal(t, AccountStatusClosed, closedAccount.Status())
+
+	// Verify status history uses default reason
+	history := closedAccount.StatusHistory()
+	require.Len(t, history, 1)
+	assert.Equal(t, "Account closed", history[0].Reason)
 }
 
 func TestClose_InvalidWithNonZeroBalance(t *testing.T) {
@@ -909,7 +926,7 @@ func TestClose_InvalidWithNonZeroBalance(t *testing.T) {
 		WithStatus(AccountStatusActive).
 		Build()
 
-	_, err := account.Close()
+	_, err := account.Close("")
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrNonZeroBalance)
@@ -924,7 +941,7 @@ func TestClose_InvalidWithNegativeBalance(t *testing.T) {
 		WithStatus(AccountStatusActive).
 		Build()
 
-	_, err := account.Close()
+	_, err := account.Close("")
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrNonZeroBalance)
@@ -939,7 +956,7 @@ func TestClose_InvalidFromClosed(t *testing.T) {
 		WithStatus(AccountStatusClosed).
 		Build()
 
-	_, err := closedAccount.Close()
+	_, err := closedAccount.Close("")
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
@@ -971,7 +988,7 @@ func TestClose_TerminalState(t *testing.T) {
 	})
 
 	t.Run("cannot close again", func(t *testing.T) {
-		_, err := closedAccount.Close()
+		_, err := closedAccount.Close("")
 		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
 	})
 }
@@ -1044,7 +1061,7 @@ func TestStatusHistory_MultipleTransitions(t *testing.T) {
 	frozen2, err := unfrozen1.Freeze("Second freeze - fraud detected")
 	require.NoError(t, err)
 
-	closed, err := frozen2.Close()
+	closed, err := frozen2.Close("Final closure after fraud investigation")
 	require.NoError(t, err)
 
 	// Verify full audit trail

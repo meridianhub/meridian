@@ -1414,8 +1414,8 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 			}
 		}
 
-		// Attempt to close via domain
-		account, err = account.Close()
+		// Attempt to close via domain (pass reason for audit trail)
+		account, err = account.Close(req.Reason)
 		if err != nil {
 			if errors.Is(err, domain.ErrInvalidStatusTransition) {
 				operationStatus = opStatusInvalidStatusTransition

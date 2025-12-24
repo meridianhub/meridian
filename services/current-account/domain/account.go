@@ -47,6 +47,7 @@ type StatusChange struct {
 	To        AccountStatus
 	Reason    string
 	Timestamp time.Time
+	ChangedBy string // User who initiated the status change (populated from persistence)
 }
 
 // CurrentAccount represents a BIAN current account facility domain model.
@@ -310,6 +311,9 @@ func (a CurrentAccount) Activate() (CurrentAccount, error) {
 // Close permanently closes the account and returns a new account with closed status.
 // CLOSED is a terminal state - no further transitions are allowed.
 //
+// The reason parameter is recorded in the status history for audit purposes.
+// If empty, a default reason of "Account closed" is used.
+//
 // Prerequisites (validated by this method):
 //   - Account balance must be zero
 //   - Account must not already be closed
@@ -318,7 +322,7 @@ func (a CurrentAccount) Activate() (CurrentAccount, error) {
 //   - Account must have no active liens (requires LienRepository check)
 //
 // The original account is not modified.
-func (a CurrentAccount) Close() (CurrentAccount, error) {
+func (a CurrentAccount) Close(reason string) (CurrentAccount, error) {
 	if a.status == AccountStatusClosed {
 		return CurrentAccount{}, ErrInvalidStatusTransition
 	}
@@ -328,7 +332,11 @@ func (a CurrentAccount) Close() (CurrentAccount, error) {
 		return CurrentAccount{}, ErrNonZeroBalance
 	}
 
-	return a.withStatusChange(AccountStatusClosed, "Account closed"), nil
+	closeReason := reason
+	if closeReason == "" {
+		closeReason = "Account closed"
+	}
+	return a.withStatusChange(AccountStatusClosed, closeReason), nil
 }
 
 // UpdateOverdraftSettings configures the overdraft facility with validation and returns a new account.

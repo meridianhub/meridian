@@ -201,7 +201,7 @@ func TestExecuteWithdrawal_AccountClosed(t *testing.T) {
 	require.NoError(t, err)
 
 	// Close the zero-balance account
-	account, err = account.Close()
+	account, err = account.Close("Account closure test")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 

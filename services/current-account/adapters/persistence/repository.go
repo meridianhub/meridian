@@ -487,6 +487,7 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 				To:        domain.AccountStatus(entry.ToStatus),
 				Reason:    entry.Reason,
 				Timestamp: entry.Timestamp,
+				ChangedBy: entry.ChangedBy,
 			}
 		}
 	}
