@@ -220,6 +220,35 @@ func RecordDelete[T Auditable](tx *gorm.DB, entity T) error {
 	return recordAudit(tx, entity.AuditTableName(), "DELETE", entity.AuditID(), entity, nil)
 }
 
+// RecordUpdateManual writes an audit outbox entry for an UPDATE operation
+// when GORM hooks cannot be used (e.g., map-based updates for optimistic locking).
+//
+// Use this when your repository uses patterns like:
+//
+//	tx.Model(&Entity{}).Where("id = ? AND version = ?", id, version).Updates(map[string]interface{}{...})
+//
+// These map-based updates bypass GORM hooks, so you must explicitly call this function
+// after a successful update.
+//
+// Example:
+//
+//	func (r *Repository) Update(ctx context.Context, entity *Entity) error {
+//	    return r.db.Transaction(func(tx *gorm.DB) error {
+//	        var oldEntity Entity
+//	        tx.First(&oldEntity, entity.ID)
+//
+//	        result := tx.Model(&Entity{}).Where("id = ? AND version = ?", entity.ID, oldVersion).Updates(map[...]{...})
+//	        if result.Error != nil || result.RowsAffected == 0 {
+//	            return err
+//	        }
+//
+//	        return audit.RecordUpdateManual(tx, &oldEntity, entity)
+//	    })
+//	}
+func RecordUpdateManual[T Auditable](tx *gorm.DB, oldEntity, newEntity T) error {
+	return recordAudit(tx, newEntity.AuditTableName(), "UPDATE", newEntity.AuditID(), oldEntity, newEntity)
+}
+
 // Global schema name for the current service.
 // Set by the service during initialization.
 // Protected by mutex for thread-safe access.
