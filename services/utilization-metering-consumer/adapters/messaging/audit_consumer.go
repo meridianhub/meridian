@@ -3,58 +3,175 @@ package messaging
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 
+	"buf.build/go/protovalidate"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
+	"google.golang.org/protobuf/proto"
+)
+
+var (
+	// ErrNilTransformer is returned when the transformer is nil
+	ErrNilTransformer = errors.New("transformer cannot be nil")
+	// ErrNilPositionKeepingClient is returned when the position keeping client is nil
+	ErrNilPositionKeepingClient = errors.New("position keeping client cannot be nil")
+	// ErrUnexpectedMessageType is returned when the message is not an AuditEvent
+	ErrUnexpectedMessageType = errors.New("unexpected message type")
+	// ErrInvalidAuditEvent is returned when the audit event fails validation
+	ErrInvalidAuditEvent = errors.New("invalid audit event")
 )
 
 // AuditConsumer consumes audit events from Kafka and transforms them
 // into utilization measurements for billing.
 type AuditConsumer struct {
-	// consumer will be initialized in subtask 18.2
-	// consumer    *kafka.ProtoConsumer
+	consumer    *kafka.ProtoConsumer
 	transformer *domain.AuditEventTransformer
 	pkClient    domain.PositionKeepingClient
+	validator   protovalidate.Validator
+	logger      *slog.Logger
 }
 
-// NewAuditConsumer creates a new audit event consumer.
-// TODO: Implement in subsequent subtask (18.2)
+// NewAuditConsumer creates a new Kafka consumer for AuditEvent messages.
+// It connects to Kafka using the provided configuration and sets up a handler
+// that transforms audit events into utilization measurements and sends them
+// to the Position Keeping service.
+//
+// Parameters:
+// - config: Kafka consumer configuration (bootstrap servers, group ID, etc.)
+// - transformer: Service that transforms audit events into utilization measurements
+// - pkClient: Client for communicating with Position Keeping service
+//
+// Returns an error if the consumer cannot be initialized or if dependencies are nil.
 func NewAuditConsumer(
-	_ kafka.ConsumerConfig,
+	config kafka.ConsumerConfig,
 	transformer *domain.AuditEventTransformer,
 	pkClient domain.PositionKeepingClient,
 ) (*AuditConsumer, error) {
-	// Stub implementation - will be filled in subtask 18.2
-	return &AuditConsumer{
+	if transformer == nil {
+		return nil, ErrNilTransformer
+	}
+	if pkClient == nil {
+		return nil, ErrNilPositionKeepingClient
+	}
+
+	validator, err := protovalidate.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create validator: %w", err)
+	}
+
+	logger := slog.Default().With("component", "audit_consumer")
+
+	ac := &AuditConsumer{
 		transformer: transformer,
 		pkClient:    pkClient,
-	}, nil
+		validator:   validator,
+		logger:      logger,
+	}
+
+	// Message factory creates new AuditEvent instances for deserialization
+	msgFactory := func() proto.Message {
+		return &auditv1.AuditEvent{}
+	}
+
+	// Handler converts Kafka messages to utilization measurements
+	handler := func(ctx context.Context, _ []byte, msg proto.Message) error {
+		event, ok := msg.(*auditv1.AuditEvent)
+		if !ok {
+			return fmt.Errorf("%w: expected *AuditEvent, got %T", ErrUnexpectedMessageType, msg)
+		}
+		return ac.handleAuditEvent(ctx, event)
+	}
+
+	consumer, err := kafka.NewProtoConsumer(config, msgFactory, handler)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create audit consumer: %w", err)
+	}
+
+	ac.consumer = consumer
+	return ac, nil
 }
 
-// HandleAuditEvent processes a single audit event.
-// TODO: Implement in subsequent subtask (18.2)
-func (ac *AuditConsumer) HandleAuditEvent(_ context.Context, _ *auditv1.AuditEvent) error {
-	// Stub implementation - will be filled in subtask 18.2
+// handleAuditEvent processes a single AuditEvent by transforming it into
+// a utilization measurement and sending it to the Position Keeping service
+// for tenant-zero billing.
+func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.AuditEvent) error {
+	// Validate proto message
+	if err := ac.validator.Validate(event); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidAuditEvent, err)
+	}
+
+	ac.logger.DebugContext(ctx, "processing audit event",
+		"event_id", event.EventId,
+		"schema", event.SchemaName,
+		"table", event.TableName,
+		"operation", event.Operation.String())
+
+	// Transform audit event to utilization measurement
+	measurement, err := ac.transformer.Transform(event)
+	if err != nil {
+		return fmt.Errorf("failed to transform audit event: %w", err)
+	}
+
+	// If transformer returns nil, this event should not be metered (e.g., internal operations)
+	if measurement == nil {
+		ac.logger.DebugContext(ctx, "audit event not metered (filtered by transformer)",
+			"event_id", event.EventId,
+			"schema", event.SchemaName)
+		return nil
+	}
+
+	// Send measurement to Position Keeping service
+	if err := ac.pkClient.RecordMeasurement(ctx, measurement); err != nil {
+		return fmt.Errorf("failed to record measurement: %w", err)
+	}
+
+	ac.logger.InfoContext(ctx, "successfully recorded utilization measurement",
+		"event_id", event.EventId,
+		"tenant_id", measurement.TenantID,
+		"service", measurement.ServiceName,
+		"operation", measurement.OperationType,
+		"quantity", measurement.Quantity)
+
 	return nil
 }
 
-// Start begins consuming audit events from the specified topics.
-// TODO: Implement in subsequent subtask (18.2)
-func (ac *AuditConsumer) Start(_ []string) error {
-	// Stub implementation - will be filled in subtask 18.2
+// Start begins consuming AuditEvent messages from the specified topics.
+// This method blocks until Stop() is called or an error occurs.
+//
+// The consumer will:
+// - Subscribe to all provided topics (typically 6 service audit topics)
+// - Poll for messages
+// - Deserialize protobuf messages
+// - Validate using protovalidate
+// - Transform to utilization measurements
+// - Send to Position Keeping service
+// - Commit offsets after successful processing
+//
+// Parameters:
+// - topics: List of Kafka topic names to consume from (e.g., ["current-account.audit.events", ...])
+func (ac *AuditConsumer) Start(topics []string) error {
+	ac.logger.Info("starting audit consumer", "topics", topics)
+	if err := ac.consumer.Subscribe(topics); err != nil {
+		return fmt.Errorf("failed to subscribe to topics: %w", err)
+	}
 	return nil
 }
 
 // Stop gracefully stops the consumer.
-// TODO: Implement in subsequent subtask (18.2)
 func (ac *AuditConsumer) Stop() {
-	// Stub implementation - will be filled in subtask 18.2
+	ac.logger.Info("stopping audit consumer")
+	ac.consumer.Stop()
 }
 
 // Close closes the consumer and releases resources.
-// TODO: Implement in subsequent subtask (18.2)
 func (ac *AuditConsumer) Close() error {
-	// Stub implementation - will be filled in subtask 18.2
+	if err := ac.consumer.Close(); err != nil {
+		return fmt.Errorf("failed to close consumer: %w", err)
+	}
+	ac.logger.Info("audit consumer closed")
 	return nil
 }

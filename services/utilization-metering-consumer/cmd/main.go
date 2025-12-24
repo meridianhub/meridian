@@ -14,7 +14,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
+	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
+	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -58,7 +62,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("configuration loaded",
 		"kafka_bootstrap_servers", config.KafkaBootstrapServers,
 		"consumer_group_id", config.ConsumerGroupID,
-		"audit_topic", config.AuditTopic,
+		"audit_topics", config.AuditTopics,
 		"position_keeping_endpoint", config.PositionKeepingEndpoint,
 		"tenant_zero_id", config.TenantZeroID)
 
@@ -99,9 +103,55 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// TODO: Initialize Kafka consumer and Position Keeping client once implemented
+	// Initialize Position Keeping client
+	logger.Info("initializing position keeping client", "endpoint", config.PositionKeepingEndpoint)
+	pkClient, err := grpc.NewPositionKeepingClient(config.PositionKeepingEndpoint)
+	if err != nil {
+		return fmt.Errorf("failed to create position keeping client: %w", err)
+	}
+	defer func() {
+		if err := pkClient.Close(); err != nil {
+			logger.Error("failed to close position keeping client", "error", err)
+		}
+	}()
 
-	// Wait for interrupt signal or server error
+	// Initialize transformer
+	transformer := domain.NewAuditEventTransformer()
+
+	// Initialize Kafka consumer
+	logger.Info("initializing kafka consumer",
+		"topics", config.AuditTopics,
+		"group_id", config.ConsumerGroupID)
+
+	kafkaConfig := kafka.ConsumerConfig{
+		BootstrapServers: config.KafkaBootstrapServers,
+		GroupID:          config.ConsumerGroupID,
+		ClientID:         "utilization-metering-consumer",
+		AutoOffsetReset:  "earliest",
+		EnableAutoCommit: false, // Manual commit for at-least-once semantics
+	}
+
+	consumer, err := messaging.NewAuditConsumer(kafkaConfig, transformer, pkClient)
+	if err != nil {
+		return fmt.Errorf("failed to create audit consumer: %w", err)
+	}
+	defer func() {
+		if err := consumer.Close(); err != nil {
+			logger.Error("failed to close audit consumer", "error", err)
+		}
+	}()
+
+	// Start consuming in background
+	consumerErrors := make(chan error, 1)
+	go func() {
+		logger.Info("starting audit event consumption")
+		if err := consumer.Start(config.AuditTopics); err != nil {
+			logger.Error("consumer error", "error", err)
+			consumerErrors <- fmt.Errorf("consumer error: %w", err)
+		}
+	}()
+
+	// Wait for interrupt signal, server error, or consumer error
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -110,6 +160,8 @@ func run(logger *slog.Logger) error {
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
 		return fmt.Errorf("server error: %w", err)
+	case err := <-consumerErrors:
+		return fmt.Errorf("consumer error: %w", err)
 	}
 
 	// Graceful shutdown
@@ -119,14 +171,17 @@ func run(logger *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Stop Kafka consumer first to drain in-flight messages
+	logger.Info("stopping kafka consumer...")
+	consumer.Stop()
+	logger.Info("kafka consumer stopped")
+
 	// Shutdown HTTP server
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err)
 	} else {
 		logger.Info("HTTP server stopped")
 	}
-
-	// TODO: Stop Kafka consumer gracefully once implemented
 
 	return nil
 }

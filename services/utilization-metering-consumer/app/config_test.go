@@ -51,8 +51,22 @@ func TestLoadConfig_Success(t *testing.T) {
 	if config.TenantZeroID != "00000000-0000-0000-0000-000000000000" {
 		t.Errorf("Expected TenantZeroID to be '00000000-0000-0000-0000-000000000000', got '%s'", config.TenantZeroID)
 	}
-	if config.AuditTopic != "audit.events" {
-		t.Errorf("Expected AuditTopic to be 'audit.events' (default), got '%s'", config.AuditTopic)
+	// Verify default audit topics (6 services)
+	expectedTopics := []string{
+		"current-account.audit.events",
+		"financial-accounting.audit.events",
+		"position-keeping.audit.events",
+		"party.audit.events",
+		"payment-order.audit.events",
+		"tenant.audit.events",
+	}
+	if len(config.AuditTopics) != len(expectedTopics) {
+		t.Errorf("Expected %d audit topics, got %d", len(expectedTopics), len(config.AuditTopics))
+	}
+	for i, expected := range expectedTopics {
+		if i >= len(config.AuditTopics) || config.AuditTopics[i] != expected {
+			t.Errorf("Expected AuditTopics[%d] to be '%s', got '%s'", i, expected, config.AuditTopics[i])
+		}
 	}
 	if config.HTTPPort != "8080" {
 		t.Errorf("Expected HTTPPort to be '8080' (default), got '%s'", config.HTTPPort)
@@ -84,8 +98,8 @@ func TestLoadConfig_MissingKafkaBootstrapServers(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_MissingConsumerGroupID(t *testing.T) {
-	// Set only some required variables
+func TestLoadConfig_MissingPositionKeepingEndpoint_First(t *testing.T) {
+	// Set only some required variables (removed ConsumerGroupID check since it has a default)
 	envVars := map[string]string{
 		"KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
 	}
@@ -113,10 +127,10 @@ func TestLoadConfig_MissingConsumerGroupID(t *testing.T) {
 		}
 	}()
 
-	// Load configuration
+	// Load configuration - should fail on missing POSITION_KEEPING_ENDPOINT
 	_, err := LoadConfig()
-	if !errors.Is(err, ErrConsumerGroupIDRequired) {
-		t.Errorf("Expected ErrConsumerGroupIDRequired, got %v", err)
+	if !errors.Is(err, ErrPositionKeepingEndpointRequired) {
+		t.Errorf("Expected ErrPositionKeepingEndpointRequired, got %v", err)
 	}
 }
 
@@ -223,14 +237,12 @@ func TestLoadConfig_InvalidTenantZeroID(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_CustomAuditTopic(t *testing.T) {
-	// Set required environment variables with custom audit topic
+func TestLoadConfig_DefaultConsumerGroupID(t *testing.T) {
+	// Set required environment variables WITHOUT consumer group ID to test default
 	envVars := map[string]string{
 		"KAFKA_BOOTSTRAP_SERVERS":   "kafka:9092",
-		"CONSUMER_GROUP_ID":         "test-group",
 		"POSITION_KEEPING_ENDPOINT": "position-keeping:50051",
 		"TENANT_ZERO_ID":            "00000000-0000-0000-0000-000000000000",
-		"AUDIT_TOPIC":               "custom.audit.topic",
 	}
 
 	backup := make(map[string]string)
@@ -238,6 +250,12 @@ func TestLoadConfig_CustomAuditTopic(t *testing.T) {
 		backup[key] = os.Getenv(key)
 		os.Setenv(key, value)
 	}
+	// Ensure CONSUMER_GROUP_ID is not set
+	if val := os.Getenv("CONSUMER_GROUP_ID"); val != "" {
+		backup["CONSUMER_GROUP_ID"] = val
+	}
+	os.Unsetenv("CONSUMER_GROUP_ID")
+
 	defer func() {
 		for key, value := range backup {
 			if value == "" {
@@ -254,7 +272,7 @@ func TestLoadConfig_CustomAuditTopic(t *testing.T) {
 		t.Fatalf("LoadConfig() failed: %v", err)
 	}
 
-	if config.AuditTopic != "custom.audit.topic" {
-		t.Errorf("Expected AuditTopic to be 'custom.audit.topic', got '%s'", config.AuditTopic)
+	if config.ConsumerGroupID != "utilization-metering-consumer" {
+		t.Errorf("Expected ConsumerGroupID to be 'utilization-metering-consumer' (default), got '%s'", config.ConsumerGroupID)
 	}
 }

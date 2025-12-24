@@ -22,9 +22,9 @@ var (
 // Config holds the configuration for the utilization-metering-consumer service.
 type Config struct {
 	// Kafka configuration
-	KafkaBootstrapServers string // Required: Kafka broker addresses (e.g., "kafka:9092")
-	ConsumerGroupID       string // Required: Consumer group ID for offset management
-	AuditTopic            string // Audit events topic (default: "audit.events")
+	KafkaBootstrapServers string   // Required: Kafka broker addresses (e.g., "kafka:9092")
+	ConsumerGroupID       string   // Required: Consumer group ID for offset management
+	AuditTopics           []string // Audit events topics to consume from
 
 	// Position Keeping gRPC endpoint
 	PositionKeepingEndpoint string // Required: gRPC endpoint for Position Keeping service (e.g., "position-keeping:50051")
@@ -39,10 +39,20 @@ type Config struct {
 // LoadConfig loads configuration from environment variables.
 // Returns an error if required configuration is missing.
 func LoadConfig() (*Config, error) {
+	// Default audit topics for all 6 services
+	defaultAuditTopics := []string{
+		"current-account.audit.events",
+		"financial-accounting.audit.events",
+		"position-keeping.audit.events",
+		"party.audit.events",
+		"payment-order.audit.events",
+		"tenant.audit.events",
+	}
+
 	config := &Config{
 		KafkaBootstrapServers:   getEnv("KAFKA_BOOTSTRAP_SERVERS"),
-		ConsumerGroupID:         getEnv("CONSUMER_GROUP_ID"),
-		AuditTopic:              getEnvOrDefault("AUDIT_TOPIC", "audit.events"),
+		ConsumerGroupID:         getEnvOrDefault("CONSUMER_GROUP_ID", "utilization-metering-consumer"),
+		AuditTopics:             defaultAuditTopics, // Use default topics
 		PositionKeepingEndpoint: getEnv("POSITION_KEEPING_ENDPOINT"),
 		TenantZeroID:            getEnv("TENANT_ZERO_ID"),
 		HTTPPort:                getEnvOrDefault("HTTP_PORT", "8080"),
