@@ -452,6 +452,65 @@ message LedgerPostingRejectedEvent {
   int64 version = 8 [(buf.validate.field).int64 = {gte: 1}];
 }
 
+// FinancialBookingLogControlledEvent represents a control action applied to
+// a financial booking log (SUSPEND, RESUME, TERMINATE). Published when
+// administrative control operations are performed.
+message FinancialBookingLogControlledEvent {
+  // booking_log_id uniquely identifies the financial booking log
+  string booking_log_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // control_action is the action that was performed (SUSPEND, RESUME, TERMINATE)
+  string control_action = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+
+  // previous_status is the status before the control action
+  meridian.common.v1.TransactionStatus previous_status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // new_status is the status after the control action
+  meridian.common.v1.TransactionStatus new_status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // reason explains why the control action was performed
+  string reason = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // controlled_by identifies who performed the control action
+  string controlled_by = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 9 [(buf.validate.field).required = true];
+
+  // version is the aggregate version for optimistic locking
+  int64 version = 10 [(buf.validate.field).int64 = {gte: 1}];
+}
+
 // BalanceValidationFailedEvent represents a booking log that failed
 // double-entry balance validation (debits != credits). Published when
 // attempting to post an unbalanced booking log.

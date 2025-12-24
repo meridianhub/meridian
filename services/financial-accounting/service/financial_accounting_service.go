@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
@@ -20,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/events"
 )
 
 const (
@@ -36,6 +38,10 @@ var (
 	ErrEventPublisherNil = errors.New("financial accounting service: event publisher cannot be nil")
 	// ErrIdempotencyServiceNil is returned when attempting to create a service with a nil idempotency service
 	ErrIdempotencyServiceNil = errors.New("financial accounting service: idempotency service cannot be nil")
+	// ErrOutboxPublisherNil is returned when attempting to create a service with a nil outbox publisher
+	ErrOutboxPublisherNil = errors.New("financial accounting service: outbox publisher cannot be nil")
+	// ErrOutboxRepositoryNil is returned when attempting to create a service with a nil outbox repository
+	ErrOutboxRepositoryNil = errors.New("financial accounting service: outbox repository cannot be nil")
 )
 
 // DomainEvent is a marker interface for all financial accounting domain events.
@@ -96,6 +102,13 @@ type FinancialAccountingService struct {
 
 	// idempotency ensures exactly-once processing of requests with idempotency keys
 	idempotency idempotency.Service
+
+	// outboxPublisher publishes events through the transactional outbox pattern
+	// for guaranteed at-least-once delivery of audit-critical control operation events
+	outboxPublisher *events.OutboxPublisher
+
+	// outboxRepo provides persistence operations for the event outbox table
+	outboxRepo *events.PostgresOutboxRepository
 }
 
 // NewFinancialAccountingService creates a new FinancialAccountingService with dependency injection.
@@ -104,6 +117,8 @@ type FinancialAccountingService struct {
 //   - repository: Persistence layer for ledger postings and booking logs (must not be nil)
 //   - eventPublisher: Publishes domain events to Kafka (must not be nil)
 //   - idempotencySvc: Ensures exactly-once processing of idempotent operations (must not be nil)
+//   - outboxPublisher: Publishes events through transactional outbox (must not be nil)
+//   - outboxRepo: Persistence for event outbox entries (must not be nil)
 //
 // The returned service embeds UnimplementedFinancialAccountingServiceServer, which provides
 // default "Unimplemented" responses for all gRPC methods. Methods will be implemented incrementally
@@ -116,8 +131,10 @@ type FinancialAccountingService struct {
 //	repo := persistence.NewLedgerRepository(db)
 //	publisher := messaging.NewKafkaEventPublisher(kafkaProducer)
 //	idempotencySvc := idempotency.NewRedisService(redisClient)
+//	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+//	outboxRepo := events.NewPostgresOutboxRepository(db)
 //
-//	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+//	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create financial accounting service: %w", err)
 //	}
@@ -125,6 +142,8 @@ func NewFinancialAccountingService(
 	repository *persistence.LedgerRepository,
 	eventPublisher EventPublisher,
 	idempotencySvc idempotency.Service,
+	outboxPublisher *events.OutboxPublisher,
+	outboxRepo *events.PostgresOutboxRepository,
 ) (*FinancialAccountingService, error) {
 	if repository == nil {
 		return nil, ErrRepositoryNil
@@ -135,11 +154,19 @@ func NewFinancialAccountingService(
 	if idempotencySvc == nil {
 		return nil, ErrIdempotencyServiceNil
 	}
+	if outboxPublisher == nil {
+		return nil, ErrOutboxPublisherNil
+	}
+	if outboxRepo == nil {
+		return nil, ErrOutboxRepositoryNil
+	}
 
 	return &FinancialAccountingService{
-		repository:     repository,
-		eventPublisher: eventPublisher,
-		idempotency:    idempotencySvc,
+		repository:      repository,
+		eventPublisher:  eventPublisher,
+		idempotency:     idempotencySvc,
+		outboxPublisher: outboxPublisher,
+		outboxRepo:      outboxRepo,
 	}, nil
 }
 
@@ -1267,4 +1294,245 @@ func isValidBookingLogTransition(from, to domain.TransactionStatus) bool {
 		return false
 	}
 	return false
+}
+
+// ControlFinancialBookingLog applies a control action (SUSPEND, RESUME, TERMINATE) to a booking log.
+//
+// This method implements the BIAN CoCR (Control Correlation Reference) pattern for
+// administrative control operations. It uses the transactional outbox pattern to ensure
+// atomic persistence of both the state change and the corresponding event.
+//
+// Control Actions:
+//   - SUSPEND: Temporarily suspends processing (PENDING -> FAILED/suspended)
+//   - RESUME: Reactivates a suspended booking log (FAILED/suspended -> PENDING)
+//   - TERMINATE: Permanently ends the booking log lifecycle (PENDING/FAILED -> CANCELLED)
+//
+// Transactional Guarantees:
+//   - State change and event are written in the same database transaction
+//   - Either both succeed or both are rolled back
+//   - Background worker publishes events to Kafka for at-least-once delivery
+//
+// Idempotency:
+//   - Operations are idempotent via the provided idempotency key
+//   - Duplicate requests with the same key return the original result
+//
+// gRPC Error Codes:
+//   - codes.InvalidArgument: Invalid booking log ID, control action, or missing reason
+//   - codes.NotFound: Booking log does not exist
+//   - codes.FailedPrecondition: Control action not allowed for current state
+//   - codes.AlreadyExists: Duplicate idempotency key
+//   - codes.Internal: Database or system errors
+func (s *FinancialAccountingService) ControlFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.ControlFinancialBookingLogRequest,
+) (*financialaccountingv1.ControlFinancialBookingLogResponse, error) {
+	// Validate idempotency key is provided
+	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
+		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
+	}
+
+	idempotencyKey := idempotency.Key{
+		Namespace: "financial-accounting",
+		Operation: "control-booking-log",
+		EntityID:  req.GetId(),
+		RequestID: req.IdempotencyKey.Key,
+	}
+
+	// Check idempotency
+	if s.idempotency != nil {
+		result, err := s.idempotency.Check(ctx, idempotencyKey)
+		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+				if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
+					// Deserialize cached response from protobuf
+					var cachedResponse financialaccountingv1.ControlFinancialBookingLogResponse
+					if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
+						slog.Error("failed to deserialize cached idempotency response",
+							"error", unmarshalErr,
+							"idempotency_key", req.IdempotencyKey.Key,
+							"operation", "control-booking-log")
+						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+					}
+					slog.Info("returning cached idempotent response",
+						"idempotency_key", req.IdempotencyKey.Key,
+						"operation", "control-booking-log",
+						"booking_log_id", req.GetId())
+					return &cachedResponse, nil
+				}
+				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+			}
+			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+		}
+
+		// Mark as pending to prevent concurrent processing
+		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+		}
+	}
+
+	// Parse booking log ID
+	bookingLogID, err := parseUUID(req.GetId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid booking log id: %v", err)
+	}
+
+	// Validate control action
+	if req.ControlAction == financialaccountingv1.ControlAction_CONTROL_ACTION_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "control_action must be specified")
+	}
+
+	// Convert proto control action to domain
+	var domainAction domain.ControlAction
+	switch req.ControlAction {
+	case financialaccountingv1.ControlAction_CONTROL_ACTION_SUSPEND:
+		domainAction = domain.ControlActionSuspend
+	case financialaccountingv1.ControlAction_CONTROL_ACTION_RESUME:
+		domainAction = domain.ControlActionResume
+	case financialaccountingv1.ControlAction_CONTROL_ACTION_TERMINATE:
+		domainAction = domain.ControlActionTerminate
+	case financialaccountingv1.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		// Already handled above, but included for exhaustive switch linter
+		return nil, status.Error(codes.InvalidArgument, "control_action must be specified")
+	}
+
+	// Validate reason is provided
+	if req.Reason == "" {
+		return nil, status.Error(codes.InvalidArgument, "reason is required for control operations")
+	}
+
+	// Retrieve existing booking log
+	bookingLog, err := s.repository.GetBookingLog(ctx, bookingLogID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve booking log: %v", err)
+	}
+
+	// Capture previous status for event
+	previousStatus := bookingLog.Status
+
+	// Apply control action using domain method
+	updated, err := bookingLog.ControlLog(domainAction, req.Reason)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrInvalidControlAction):
+			return nil, status.Errorf(codes.InvalidArgument, "invalid control action: %v", err)
+		case errors.Is(err, domain.ErrReasonRequired):
+			return nil, status.Error(codes.InvalidArgument, "reason is required for control operations")
+		case errors.Is(err, domain.ErrCannotSuspendTerminal):
+			return nil, status.Error(codes.FailedPrecondition, "cannot suspend booking log in terminal state")
+		case errors.Is(err, domain.ErrCannotResumePending):
+			return nil, status.Error(codes.FailedPrecondition, "cannot resume booking log that is not suspended")
+		case errors.Is(err, domain.ErrCannotTerminateTerminal):
+			return nil, status.Error(codes.FailedPrecondition, "cannot terminate booking log already in terminal state")
+		default:
+			return nil, status.Errorf(codes.Internal, "control operation failed: %v", err)
+		}
+	}
+
+	// Extract correlation ID
+	correlationID := req.IdempotencyKey.Key
+
+	// Create the control event
+	controlEvent := &eventsv1.FinancialBookingLogControlledEvent{
+		BookingLogId:   bookingLogID.String(),
+		ControlAction:  domainAction.String(),
+		PreviousStatus: toProtoTransactionStatus(previousStatus),
+		NewStatus:      toProtoTransactionStatus(updated.Status),
+		Reason:         req.Reason,
+		ControlledBy:   "system", // TODO: Extract from auth context when available
+		CorrelationId:  correlationID,
+		CausationId:    correlationID,
+		Timestamp:      timestamppb.Now(),
+		Version:        1,
+	}
+
+	// Execute state change and event write atomically using transactional outbox pattern
+	err = s.repository.WithTransaction(ctx, func(tx *gorm.DB) error {
+		// 1. Update booking log within transaction
+		var existing persistence.FinancialBookingLogEntity
+		if err := tx.First(&existing, "id = ?", bookingLogID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return persistence.ErrBookingLogNotFound
+			}
+			return err
+		}
+
+		// Apply updates
+		existing.Status = string(updated.Status)
+		existing.UpdatedAt = updated.UpdatedAt
+		if err := tx.Save(&existing).Error; err != nil {
+			return err
+		}
+
+		// 2. Write event to outbox within the same transaction
+		eventTopic := "financial-accounting.booking-log.controlled"
+		if err := s.outboxPublisher.PublishControlEvent(
+			ctx,
+			tx,
+			controlEvent,
+			"financial_accounting.booking_log_controlled.v1",
+			bookingLogID.String(),
+			"FinancialBookingLog",
+			eventTopic,
+			correlationID,
+		); err != nil {
+			return fmt.Errorf("failed to write event to outbox: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, persistence.ErrBookingLogNotFound) {
+			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to apply control operation: %v", err)
+	}
+
+	// Log success
+	slog.Info("control operation applied successfully",
+		"booking_log_id", bookingLogID.String(),
+		"control_action", domainAction.String(),
+		"previous_status", previousStatus.String(),
+		"new_status", updated.Status.String(),
+		"reason", req.Reason)
+
+	// Convert to proto response
+	response := &financialaccountingv1.ControlFinancialBookingLogResponse{
+		FinancialBookingLog: toProtoFinancialBookingLog(&updated),
+	}
+
+	// Store idempotency result
+	if s.idempotency != nil {
+		ttl := defaultIdempotencyTTL
+		if req.IdempotencyKey.TtlSeconds > 0 {
+			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
+		}
+
+		responseData, marshalErr := proto.Marshal(response)
+		if marshalErr != nil {
+			slog.Error("failed to serialize response for idempotency cache",
+				"error", marshalErr,
+				"idempotency_key", req.IdempotencyKey.Key,
+				"operation", "control-booking-log")
+		} else {
+			result := idempotency.Result{
+				Key:         idempotencyKey,
+				Status:      idempotency.StatusCompleted,
+				Data:        responseData,
+				CompletedAt: time.Now(),
+				TTL:         ttl,
+			}
+
+			if storeErr := s.idempotency.StoreResult(ctx, result); storeErr != nil {
+				slog.Error("failed to store idempotency result",
+					"error", storeErr,
+					"idempotency_key", req.IdempotencyKey.Key,
+					"operation", "control-booking-log")
+			}
+		}
+	}
+
+	return response, nil
 }

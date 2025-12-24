@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	serviceobs "github.com/meridianhub/meridian/services/financial-accounting/observability"
@@ -22,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -37,6 +39,11 @@ var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
+)
+
+// Package-level variables for lifecycle management
+var (
+	outboxWorker *events.Worker
 )
 
 // Static errors for configuration validation
@@ -126,6 +133,47 @@ func run(logger *slog.Logger) error {
 		}()
 	}
 
+	// Initialize outbox repository and worker for transactional event publishing.
+	// The outbox pattern ensures at-least-once delivery of events by storing them
+	// in the database first and then publishing asynchronously via Kafka.
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+
+	// Initialize Kafka producer for outbox worker (optional - depends on KAFKA_BOOTSTRAP_SERVERS)
+	var kafkaProducer *kafka.Producer
+	bootstrapServers := getEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers != "" {
+		producer, err := kafka.NewProducer(&kafka.ConfigMap{
+			"bootstrap.servers": bootstrapServers,
+			"client.id":         "financial-accounting-outbox-worker",
+			"acks":              "all",
+			"retries":           3,
+			"compression.type":  "snappy",
+			"linger.ms":         10,
+			"batch.size":        16384,
+		})
+		if err != nil {
+			logger.Warn("failed to create Kafka producer for outbox worker",
+				"error", err)
+		} else {
+			kafkaProducer = producer
+			logger.Info("Kafka producer initialized for outbox worker",
+				"bootstrap_servers", bootstrapServers)
+		}
+	} else {
+		logger.Info("outbox worker disabled: KAFKA_BOOTSTRAP_SERVERS not set")
+	}
+
+	// Start outbox worker if Kafka producer is available
+	if kafkaProducer != nil {
+		workerConfig := events.DefaultWorkerConfig("financial-accounting")
+		outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
+		outboxWorker.Start(ctx)
+		logger.Info("outbox worker started",
+			"batch_size", workerConfig.BatchSize,
+			"poll_interval", workerConfig.PollInterval)
+	}
+
 	// Validate bank cash account ID is configured
 	bankCashAccountID := getEnvOrDefault("BANK_CASH_ACCOUNT_ID", "")
 	if bankCashAccountID == "" {
@@ -171,7 +219,13 @@ func run(logger *slog.Logger) error {
 	logger.Info("event publisher initialized (noop mode)")
 
 	// Create Financial Accounting service
-	financialAccountingSvc, err := service.NewFinancialAccountingService(ledgerRepo, eventPublisher, idempotencySvc)
+	financialAccountingSvc, err := service.NewFinancialAccountingService(
+		ledgerRepo,
+		eventPublisher,
+		idempotencySvc,
+		outboxPublisher,
+		outboxRepo,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create financial accounting service: %w", err)
 	}
@@ -314,7 +368,21 @@ func run(logger *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Shutdown HTTP server first (faster, allows metrics scraping during gRPC drain)
+	// Stop outbox worker first (stop processing before closing Kafka producer)
+	if outboxWorker != nil {
+		logger.Info("stopping outbox worker...")
+		outboxWorker.Stop()
+		logger.Info("outbox worker stopped")
+	}
+
+	// Close Kafka producer after outbox worker stops
+	if kafkaProducer != nil {
+		logger.Info("closing Kafka producer...")
+		kafkaProducer.Close()
+		logger.Info("Kafka producer closed")
+	}
+
+	// Shutdown HTTP server (faster, allows metrics scraping during gRPC drain)
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err)
 	} else {
