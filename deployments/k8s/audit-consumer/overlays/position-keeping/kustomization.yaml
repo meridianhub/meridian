@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: audit-consumer-position-keeping
+
+namespace: meridian
+
+labels:
+- pairs:
+    app: audit-consumer
+    service: position-keeping
+    managed-by: kustomize
+
+resources:
+- ../../base
+
+namePrefix: position-keeping-
+
+# Service-specific configuration
+configMapGenerator:
+- name: audit-consumer-config
+  behavior: merge
+  literals:
+  - service_name=position-keeping
+  - audit_topic=audit.events.position-keeping
+  - kafka_group_id=audit-consumer-position-keeping
+  - kafka_client_id=audit-consumer-position-keeping
+
+# Position Keeping has MEDIUM audit volume
+patches:
+# Medium replica count
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 3
+
+# Medium resource limits
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 150m
+          memory: 192Mi
+        limits:
+          cpu: 750m
+          memory: 768Mi
+
+# Medium HPA limits
+- target:
+    kind: HorizontalPodAutoscaler
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 3
+    - op: replace
+      path: /spec/maxReplicas
+      value: 12
+
+images:
+- name: audit-consumer
+  newTag: position-keeping-v1.0.0

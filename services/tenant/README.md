@@ -163,10 +163,51 @@ In-memory tenant cache for validation middleware:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `GRPC_PORT` | 50056 | gRPC server port |
+| `METRICS_PORT` | 9090 | Prometheus metrics endpoint port |
 | `DATABASE_URL` | - | PostgreSQL connection string |
 | `DB_MAX_OPEN_CONNS` | 25 | Connection pool size |
 | `DB_MAX_IDLE_CONNS` | 5 | Idle connections |
 | `DB_CONN_MAX_LIFETIME` | 5m | Connection max age |
+
+## Observability
+
+### Metrics Endpoint
+
+The service exposes Prometheus metrics on port 9090:
+
+- **Endpoint**: `http://localhost:9090/metrics`
+- **Health Check**: `http://localhost:9090/healthz`
+
+**Provisioning Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `tenant_provisioning_duration_seconds` | Histogram | status | Duration of tenant provisioning operations |
+| `tenant_provisioning_queue_depth` | Gauge | - | Number of tenants in PROVISIONING_PENDING status awaiting provisioning |
+| `tenant_service_provisioning_failures_total` | Counter | service_name | Service-specific provisioning failures |
+| `tenant_provisioning_retries_total` | Counter | - | Provisioning retry attempts across all tenants |
+
+**Prometheus Scrape Configuration:**
+
+```yaml
+scrape_configs:
+  - job_name: 'tenant-service'
+    kubernetes_sd_configs:
+      - role: endpoints
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_port]
+        action: replace
+        target_label: __address__
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+```
 
 ## Key Patterns
 

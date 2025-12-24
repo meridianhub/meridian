@@ -204,6 +204,169 @@ func TestWithdrawWithOverdraft(t *testing.T) {
 	assert.Equal(t, int64(-200), updatedAccount.Balance().AmountCents())
 }
 
+func TestWithdraw_ExceedsOverdraft(t *testing.T) {
+	// Build account with £10 balance
+	initialBalance, _ := NewMoney("GBP", 1000) // £10
+	zeroMoney, _ := NewMoney("GBP", 0)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(initialBalance).
+		WithAvailableBalance(initialBalance).
+		WithOverdraftLimit(zeroMoney).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	// Set overdraft limit of £5
+	overdraftLimit, _ := NewMoney("GBP", 500) // £5
+	account, err := account.SetOverdraftLimit(overdraftLimit, 19.9, true)
+	require.NoError(t, err)
+
+	// Available balance should be £15 (£10 balance + £5 overdraft)
+	assert.Equal(t, int64(1500), account.AvailableBalance().AmountCents())
+
+	// Attempt to withdraw £20 (exceeds £15 available)
+	withdrawMoney, _ := NewMoney("GBP", 2000) // £20
+	_, err = account.Withdraw(withdrawMoney)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInsufficientFunds)
+}
+
+func TestWithdraw_CurrencyMismatch(t *testing.T) {
+	// Create GBP account with balance
+	initialBalance, _ := NewMoney("GBP", 10000) // £100
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(initialBalance).
+		WithAvailableBalance(initialBalance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	// Attempt EUR withdrawal from GBP account
+	withdrawMoney, _ := NewMoney("EUR", 5000) // €50
+	_, err := account.Withdraw(withdrawMoney)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrCurrencyMismatch)
+}
+
+func TestWithdraw_FrozenAccount(t *testing.T) {
+	// Create account and freeze it
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	// Deposit some money first
+	depositMoney, _ := NewMoney("GBP", 10000)
+	account, err = account.Deposit(depositMoney)
+	require.NoError(t, err)
+
+	// Freeze the account
+	account, err = account.Freeze()
+	require.NoError(t, err)
+
+	// Attempt withdrawal from frozen account
+	withdrawMoney, _ := NewMoney("GBP", 5000)
+	_, err = account.Withdraw(withdrawMoney)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountFrozen)
+}
+
+func TestWithdraw_ClosedAccount(t *testing.T) {
+	// Create account and close it
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	// Deposit some money first
+	depositMoney, _ := NewMoney("GBP", 10000)
+	account, err = account.Deposit(depositMoney)
+	require.NoError(t, err)
+
+	// Close the account
+	account, err = account.Close()
+	require.NoError(t, err)
+
+	// Attempt withdrawal from closed account
+	withdrawMoney, _ := NewMoney("GBP", 5000)
+	_, err = account.Withdraw(withdrawMoney)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountClosed)
+}
+
+func TestWithdraw_ExactAvailableBalance(t *testing.T) {
+	// Build account with exact balance
+	initialBalance, _ := NewMoney("GBP", 10000) // £100
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(initialBalance).
+		WithAvailableBalance(initialBalance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	// Withdraw exact available balance
+	withdrawMoney, _ := NewMoney("GBP", 10000)
+	updatedAccount, err := account.Withdraw(withdrawMoney)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), updatedAccount.Balance().AmountCents())
+}
+
+func TestWithdraw_ExactAvailableBalanceWithOverdraft(t *testing.T) {
+	// Build account with £10 balance and £5 overdraft = £15 available
+	initialBalance, _ := NewMoney("GBP", 1000)   // £10
+	overdraftLimit, _ := NewMoney("GBP", 500)    // £5
+	availableBalance, _ := NewMoney("GBP", 1500) // £15
+
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(initialBalance).
+		WithAvailableBalance(availableBalance).
+		WithOverdraftLimit(overdraftLimit).
+		WithOverdraftEnabled(true).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	// Withdraw exact available balance (£15)
+	withdrawMoney, _ := NewMoney("GBP", 1500)
+	updatedAccount, err := account.Withdraw(withdrawMoney)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-500), updatedAccount.Balance().AmountCents()) // Balance is -£5 (fully using overdraft)
+}
+
+func TestWithdraw_NegativeAmount(t *testing.T) {
+	initialBalance, _ := NewMoney("GBP", 10000)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(initialBalance).
+		WithAvailableBalance(initialBalance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	// Attempt to withdraw negative amount
+	withdrawMoney, _ := NewMoney("GBP", -500)
+	_, err := account.Withdraw(withdrawMoney)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidAmount)
+}
+
 func TestStatusTransitions(t *testing.T) {
 	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
 	require.NoError(t, err)
