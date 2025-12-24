@@ -32,8 +32,8 @@ type AuditOutbox struct {
 	Table         string    `gorm:"column:table_name;type:varchar(100);not null;index" json:"table_name"`
 	Operation     string    `gorm:"type:varchar(10);not null;index" json:"operation"` // INSERT, UPDATE, DELETE
 	RecordID      string    `gorm:"type:varchar(50);not null;index" json:"record_id"` // String to support both UUID and custom IDs
-	OldValues     string    `gorm:"type:jsonb" json:"old_values,omitempty"`
-	NewValues     string    `gorm:"type:jsonb" json:"new_values,omitempty"`
+	OldValues     string    `gorm:"type:text" json:"old_values,omitempty"`
+	NewValues     string    `gorm:"type:text" json:"new_values,omitempty"`
 	Status        string    `gorm:"type:varchar(20);not null;default:'pending';index" json:"status"`
 	CreatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 	RetryCount    int       `gorm:"not null;default:0" json:"retry_count"`
@@ -60,8 +60,8 @@ type AuditLog struct {
 	Table         string    `gorm:"column:table_name;type:varchar(100);not null;index" json:"table_name"`
 	Operation     string    `gorm:"type:varchar(10);not null;index" json:"operation"` // INSERT, UPDATE, DELETE
 	RecordID      string    `gorm:"type:varchar(50);not null;index" json:"record_id"` // String to support both UUID and custom IDs
-	OldValues     string    `gorm:"type:jsonb" json:"old_values,omitempty"`
-	NewValues     string    `gorm:"type:jsonb" json:"new_values,omitempty"`
+	OldValues     string    `gorm:"type:text" json:"old_values,omitempty"`
+	NewValues     string    `gorm:"type:text" json:"new_values,omitempty"`
 	CreatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 	ChangedBy     *string   `gorm:"type:varchar(100)" json:"changed_by,omitempty"`
 	TransactionID *string   `gorm:"type:varchar(100)" json:"transaction_id,omitempty"`
