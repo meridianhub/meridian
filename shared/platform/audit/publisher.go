@@ -2,7 +2,6 @@ package audit
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -15,15 +14,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Errors returned by the audit Publisher.
-var (
-	// ErrPublisherDisabled indicates Kafka publishing is disabled (no bootstrap servers).
-	ErrPublisherDisabled = errors.New("audit publisher disabled: no bootstrap servers configured")
-	// ErrEventsNotDelivered indicates some events were not delivered during shutdown.
-	ErrEventsNotDelivered = errors.New("audit events not delivered")
-	// ErrEmptyRecordID indicates the event has no record ID for partitioning.
-	ErrEmptyRecordID = errors.New("event RecordId cannot be empty")
-)
+// Publisher errors are defined in errors.go for centralized error management.
+// See: ErrPublisherDisabled, ErrEventsNotDelivered, ErrEmptyRecordID
 
 // Publisher handles publishing audit events to Kafka.
 // It provides a primary path via Kafka and a fallback path via the audit_outbox table.
@@ -179,11 +171,11 @@ func CreateAuditEvent(
 // operationToProto converts a string operation to the protobuf enum.
 func operationToProto(op string) auditv1.AuditOperation {
 	switch op {
-	case "INSERT":
+	case OperationInsert:
 		return auditv1.AuditOperation_AUDIT_OPERATION_INSERT
-	case "UPDATE":
+	case OperationUpdate:
 		return auditv1.AuditOperation_AUDIT_OPERATION_UPDATE
-	case "DELETE":
+	case OperationDelete:
 		return auditv1.AuditOperation_AUDIT_OPERATION_DELETE
 	default:
 		return auditv1.AuditOperation_AUDIT_OPERATION_UNSPECIFIED
@@ -320,7 +312,7 @@ func publishToKafkaWithFallback(
 		RecordID:  recordID,
 		OldValues: oldJSON,
 		NewValues: newJSON,
-		Status:    "pending",
+		Status:    StatusPending,
 		CreatedAt: time.Now(),
 	}
 

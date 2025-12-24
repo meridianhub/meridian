@@ -13,17 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Errors returned by audit hook helpers.
-var (
-	// ErrNilTransaction is returned when a nil transaction is passed to RecordAudit.
-	ErrNilTransaction = errors.New("tx cannot be nil for audit recording")
-
-	// ErrOldValueType is returned when the old value in context has an incorrect type.
-	ErrOldValueType = errors.New("failed to retrieve old values from context: invalid type")
-
-	// ErrOldValueNotFound is returned when old values are not found in context.
-	ErrOldValueNotFound = errors.New("old values not found in context")
-)
+// Errors for audit hooks are defined in errors.go for centralized error management.
+// See: ErrNilTransaction, ErrOldValueType, ErrOldValueNotFound
 
 // contextKey is a private type for context keys to avoid collisions.
 type contextKey string
@@ -112,7 +103,7 @@ func oldValueKey(tableName string) contextKey {
 //	    return audit.RecordCreate(tx, e)
 //	}
 func RecordCreate[T Auditable](tx *gorm.DB, entity T) error {
-	return recordAudit(tx, entity.AuditTableName(), "INSERT", entity.AuditID(), nil, entity)
+	return recordAudit(tx, entity.AuditTableName(), OperationInsert, entity.AuditID(), nil, entity)
 }
 
 // CaptureOldValue fetches and stores the old entity values before an update.
@@ -205,7 +196,7 @@ func RecordUpdate[T Auditable](tx *gorm.DB, entity T) error {
 		return nil
 	}
 
-	return recordAudit(tx, entity.AuditTableName(), "UPDATE", idStr, old, entity)
+	return recordAudit(tx, entity.AuditTableName(), OperationUpdate, idStr, old, entity)
 }
 
 // RecordDelete writes an audit outbox entry for a DELETE operation.
@@ -217,7 +208,7 @@ func RecordUpdate[T Auditable](tx *gorm.DB, entity T) error {
 //	    return audit.RecordDelete(tx, e)
 //	}
 func RecordDelete[T Auditable](tx *gorm.DB, entity T) error {
-	return recordAudit(tx, entity.AuditTableName(), "DELETE", entity.AuditID(), entity, nil)
+	return recordAudit(tx, entity.AuditTableName(), OperationDelete, entity.AuditID(), entity, nil)
 }
 
 // RecordUpdateManual writes an audit outbox entry for an UPDATE operation
@@ -246,7 +237,7 @@ func RecordDelete[T Auditable](tx *gorm.DB, entity T) error {
 //	    })
 //	}
 func RecordUpdateManual[T Auditable](tx *gorm.DB, oldEntity, newEntity T) error {
-	return recordAudit(tx, newEntity.AuditTableName(), "UPDATE", newEntity.AuditID(), oldEntity, newEntity)
+	return recordAudit(tx, newEntity.AuditTableName(), OperationUpdate, newEntity.AuditID(), oldEntity, newEntity)
 }
 
 // Global schema name for the current service.
