@@ -36,32 +36,9 @@ func TestHealthEndpoint_Liveness(_ *testing.T) {
 		}
 	}()
 
-	// Start service in background
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	errChan := make(chan error, 1)
-	go func() {
-		// Redirect logs to suppress output during tests
-		oldLogger := os.Stdout
-		os.Stdout, _ = os.Open(os.DevNull)
-		defer func() { os.Stdout = oldLogger }()
-
-		// Run the service (will block until context is cancelled)
-		// Note: We can't easily test run() directly since it blocks,
-		// so this test just verifies the health endpoint works
-		// A full integration test would need more sophisticated setup
-		errChan <- nil
-	}()
-
-	// Give service time to start (in real test, would use proper synchronization)
-	time.Sleep(100 * time.Millisecond)
-
-	// For this basic test, we'll just verify the health endpoint responds
-	// In a real integration test, we'd start the actual server and check it
-	// For now, this test is a placeholder that will be expanded in integration tests
-
-	cancel() // Stop the background goroutine
+	// This is a placeholder test that will be expanded with full integration tests.
+	// The actual service startup is tested in TestHealthEndpoint_Integration.
+	// This test just verifies environment variable handling and basic setup.
 }
 
 func TestHealthEndpoint_Integration(t *testing.T) {
