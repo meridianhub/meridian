@@ -451,7 +451,29 @@ func TestProvisioningFailureRetry(t *testing.T) {
 	t.Logf("Configured MockProvisioner to fail provisioning for %s with: %v", testTenantID, errRetryableTimeout)
 
 	// =========================================================================
-	// Step 2: Create tenant, triggering async provisioning
+	// Step 2: Set up callback to clear failure after 2 attempts (deterministic)
+	// =========================================================================
+	// Using callback instead of polling eliminates timing-based flakiness
+	var failureClearedAt int
+	failureCleared := make(chan struct{})
+	env.Provisioner.OnProvisionAttempt = func(tenantID string, attemptCount int) {
+		if tenantID != testTenantID {
+			return
+		}
+		t.Logf("Provisioning attempt %d for tenant %s", attemptCount, tenantID)
+
+		// After 2 failed attempts, clear the failure to allow success
+		if attemptCount >= 2 && failureClearedAt == 0 {
+			if env.Provisioner.ClearFailure(testTenantID) {
+				failureClearedAt = attemptCount
+				t.Logf("Cleared failure condition after %d provisioning attempts", attemptCount)
+				close(failureCleared)
+			}
+		}
+	}
+
+	// =========================================================================
+	// Step 3: Create tenant, triggering async provisioning
 	// =========================================================================
 	req := &pb.InitiateTenantRequest{
 		TenantId:        testTenantID,
@@ -470,37 +492,17 @@ func TestProvisioningFailureRetry(t *testing.T) {
 	t.Logf("Tenant created with status: %s", resp.Tenant.Status)
 
 	// =========================================================================
-	// Step 3: Wait for some provisioning attempts, then clear the failure
+	// Step 4: Wait for callback to clear the failure (deterministic wait)
 	// =========================================================================
-	// We'll wait until at least 2 provisioning attempts have been made,
-	// then clear the failure to allow the next attempt to succeed.
-	failureClearedAt := 0
-	require.Eventually(t, func() bool {
-		// Use thread-safe helper method to get call count
-		callCount := env.Provisioner.GetProvisioningCallCount()
-
-		t.Logf("Provisioning call count: %d", callCount)
-
-		// After at least 2 attempts, clear the failure condition
-		if callCount >= 2 && failureClearedAt == 0 {
-			// Use thread-safe helper method to clear failure
-			if env.Provisioner.ClearFailure(testTenantID) {
-				failureClearedAt = callCount
-				t.Logf("Cleared failure condition after %d provisioning attempts", callCount)
-			}
-		}
-
-		// Wait for failure to be cleared. The actual provisioning success
-		// is verified in Step 4, making this assertion more resilient to
-		// timing variations in slow CI environments.
-		return failureClearedAt > 0
-	}, asyncProvisioningTimeout, defaultPollInterval,
-		"Should have multiple provisioning attempts and clear failure")
-
-	t.Logf("Failure condition was cleared after %d attempts", failureClearedAt)
+	select {
+	case <-failureCleared:
+		t.Logf("Failure condition was cleared after %d attempts", failureClearedAt)
+	case <-time.After(asyncProvisioningTimeout):
+		t.Fatalf("Timeout waiting for provisioning attempts - callback never triggered")
+	}
 
 	// =========================================================================
-	// Step 4: Verify tenant eventually becomes ACTIVE
+	// Step 5: Verify tenant eventually becomes ACTIVE
 	// =========================================================================
 	statusReq := &pb.GetTenantProvisioningStatusRequest{
 		TenantId: testTenantID,
@@ -528,7 +530,7 @@ func TestProvisioningFailureRetry(t *testing.T) {
 	require.NotNil(t, finalStatusResp, "Final status response should be captured")
 
 	// =========================================================================
-	// Step 5: Verify ProvisioningCalls shows multiple attempts (retries occurred)
+	// Step 6: Verify ProvisioningCalls shows multiple attempts (retries occurred)
 	// =========================================================================
 	totalCalls := env.Provisioner.GetProvisioningCallCount()
 
@@ -762,14 +764,17 @@ func TestConcurrentTenantProvisioning(t *testing.T) {
 	t.Logf("Concurrent tenant provisioning stress test completed successfully")
 }
 
-// TestProvisioningMaxRetriesExceeded verifies that persistent provisioning failures
-// with non-retryable errors result in PROVISIONING_FAILED status without retries.
+// TestProvisioningPermanentFailure verifies that permanent provisioning failures
+// (non-retryable errors) result in PROVISIONING_FAILED status without retries.
 //
 // This test demonstrates:
 // - Permanent/non-retryable errors are not retried (only 1 provisioning attempt)
 // - Tenant status transitions to PROVISIONING_FAILED
 // - Error message is persisted in the tenant record and retrievable via API
-func TestProvisioningMaxRetriesExceeded(t *testing.T) {
+//
+// Note: For testing actual retry exhaustion with retryable errors, see
+// TestProvisioningFailureRetry which verifies the retry mechanism.
+func TestProvisioningPermanentFailure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
@@ -880,5 +885,5 @@ func TestProvisioningMaxRetriesExceeded(t *testing.T) {
 		"Permanent errors should NOT be retried - expected 1 provisioning call, got %d", callCount)
 
 	t.Logf("Provisioning attempts: %d (expected 1 for permanent error)", callCount)
-	t.Logf("Permanent failure test completed successfully")
+	t.Logf("Permanent failure (non-retryable error) test completed successfully")
 }

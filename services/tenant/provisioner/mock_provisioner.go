@@ -44,6 +44,12 @@ type MockProvisioner struct {
 
 	// DataRetentionPeriod for testing retention enforcement
 	DataRetentionPeriod time.Duration
+
+	// OnProvisionAttempt is called after each provisioning attempt (before returning).
+	// Useful for deterministic testing of retry behavior without polling.
+	// The callback receives the tenant ID and the current attempt count for that tenant.
+	// Set to nil to disable (default).
+	OnProvisionAttempt func(tenantID string, attemptCount int)
 }
 
 // NewMockProvisioner creates a new mock provisioner with the given service configuration.
@@ -64,10 +70,30 @@ func NewMockProvisioner(services []ServiceConfig) *MockProvisioner {
 // ProvisionSchemas simulates schema provisioning for the tenant.
 func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Record the call
 	m.ProvisioningCalls = append(m.ProvisioningCalls, tenantID)
+
+	// Calculate attempt count for this tenant before releasing lock
+	attemptCount := 0
+	for _, calledID := range m.ProvisioningCalls {
+		if calledID.String() == tenantID.String() {
+			attemptCount++
+		}
+	}
+
+	// Capture callback before releasing lock
+	callback := m.OnProvisionAttempt
+	m.mu.Unlock()
+
+	// Invoke callback outside lock to allow test code to modify state
+	if callback != nil {
+		callback(tenantID.String(), attemptCount)
+	}
+
+	// Re-acquire lock for the rest of the operation
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Check for concurrent provisioning attempt
 	if status, exists := m.statuses[tenantID.String()]; exists && status.State == StateInProgress {
