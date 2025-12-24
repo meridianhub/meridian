@@ -48,6 +48,9 @@ var (
 
 	// ErrEmptyAggregateType is returned when an empty aggregate type is provided.
 	ErrEmptyAggregateType = errors.New("aggregate type cannot be empty")
+
+	// ErrEmptyServiceName is returned when an empty service name is provided.
+	ErrEmptyServiceName = errors.New("service name cannot be empty")
 )
 
 // EventOutbox represents an event waiting to be published to Kafka.

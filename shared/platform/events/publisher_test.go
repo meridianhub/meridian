@@ -39,6 +39,19 @@ func setupPublisherTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestNewOutboxPublisher(t *testing.T) {
+	t.Run("creates publisher with valid service name", func(t *testing.T) {
+		publisher := NewOutboxPublisher("my-service")
+		assert.NotNil(t, publisher)
+	})
+
+	t.Run("panics on empty service name", func(t *testing.T) {
+		assert.Panics(t, func() {
+			NewOutboxPublisher("")
+		})
+	})
+}
+
 func TestOutboxPublisher_Publish(t *testing.T) {
 	db := setupPublisherTestDB(t)
 	publisher := NewOutboxPublisher("test-service")

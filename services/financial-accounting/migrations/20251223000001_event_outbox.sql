@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS event_outbox (
 );
 
 -- Indexes for efficient polling and monitoring
-CREATE INDEX IF NOT EXISTS idx_event_outbox_status_service ON event_outbox(status, service_name);
+-- Compound index for worker polling: covers WHERE status=? AND service_name=? ORDER BY created_at
+CREATE INDEX IF NOT EXISTS idx_event_outbox_polling ON event_outbox(status, service_name, created_at);
 CREATE INDEX IF NOT EXISTS idx_event_outbox_created_at ON event_outbox(created_at);
 CREATE INDEX IF NOT EXISTS idx_event_outbox_aggregate ON event_outbox(aggregate_type, aggregate_id);
 CREATE INDEX IF NOT EXISTS idx_event_outbox_event_type ON event_outbox(event_type);

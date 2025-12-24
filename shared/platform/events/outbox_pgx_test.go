@@ -259,9 +259,17 @@ func TestEventOutbox_TableName(t *testing.T) {
 
 // TestNewPgxOutboxPublisher verifies constructor.
 func TestNewPgxOutboxPublisher(t *testing.T) {
-	publisher := NewPgxOutboxPublisher("my-service")
-	assert.NotNil(t, publisher)
-	assert.Equal(t, "my-service", publisher.serviceName)
+	t.Run("creates publisher with valid service name", func(t *testing.T) {
+		publisher := NewPgxOutboxPublisher("my-service")
+		assert.NotNil(t, publisher)
+		assert.Equal(t, "my-service", publisher.serviceName)
+	})
+
+	t.Run("panics on empty service name", func(t *testing.T) {
+		assert.Panics(t, func() {
+			NewPgxOutboxPublisher("")
+		})
+	})
 }
 
 // BenchmarkNewEventOutbox measures allocation overhead.

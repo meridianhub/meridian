@@ -18,7 +18,11 @@ type OutboxPublisher struct {
 }
 
 // NewOutboxPublisher creates a new OutboxPublisher for the given service.
+// Panics if serviceName is empty to fail fast during initialization.
 func NewOutboxPublisher(serviceName string) *OutboxPublisher {
+	if serviceName == "" {
+		panic("events: " + ErrEmptyServiceName.Error())
+	}
 	return &OutboxPublisher{
 		serviceName: serviceName,
 	}

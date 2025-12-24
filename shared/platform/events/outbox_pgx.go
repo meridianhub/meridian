@@ -322,8 +322,12 @@ type PgxOutboxPublisher struct {
 	serviceName string
 }
 
-// NewPgxOutboxPublisher creates a new PgxOutboxPublisher for the given service.
+// NewPgxOutboxPublisher creates a new pgx-based outbox publisher.
+// Panics if serviceName is empty to fail fast during initialization.
 func NewPgxOutboxPublisher(serviceName string) *PgxOutboxPublisher {
+	if serviceName == "" {
+		panic("events: " + ErrEmptyServiceName.Error())
+	}
 	return &PgxOutboxPublisher{
 		serviceName: serviceName,
 	}

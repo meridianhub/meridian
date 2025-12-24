@@ -391,7 +391,7 @@ func (w *Worker) publishToKafka(ctx context.Context, entry *EventOutbox) error {
 		return nil
 	case <-time.After(time.Duration(w.config.PublishTimeoutMs) * time.Millisecond):
 		RecordPublished(w.config.ServiceName, entry.EventType, "timeout")
-		return fmt.Errorf("%w after %dms", ErrPublishTimeout, w.config.PublishTimeoutMs)
+		return fmt.Errorf("%w: after %dms", ErrPublishTimeout, w.config.PublishTimeoutMs)
 	case <-ctx.Done():
 		return fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
