@@ -159,6 +159,8 @@ func (r *Repository) Save(ctx context.Context, account domain.CurrentAccount) er
 					"balance":            entity.Balance,
 					"available_balance":  entity.AvailableBalance,
 					"status":             entity.Status,
+					"freeze_reason":      entity.FreezeReason,
+					"status_history":     entity.StatusHistory,
 					"overdraft_limit":    entity.OverdraftLimit,
 					"overdraft_rate":     entity.OverdraftRate,
 					"balance_updated_at": entity.BalanceUpdatedAt,
@@ -402,6 +404,26 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 
 	balanceUpdatedAt := account.BalanceUpdatedAt()
 
+	// Convert domain StatusHistory to persistence StatusHistoryJSON
+	domainHistory := account.StatusHistory()
+	statusHistory := make(StatusHistoryJSON, len(domainHistory))
+	for i, change := range domainHistory {
+		statusHistory[i] = StatusHistoryEntry{
+			FromStatus: string(change.From),
+			ToStatus:   string(change.To),
+			Reason:     change.Reason,
+			Timestamp:  change.Timestamp,
+			ChangedBy:  auditUser,
+		}
+	}
+
+	// Handle freeze reason - nil if empty
+	var freezeReason *string
+	if account.FreezeReason() != "" {
+		reason := account.FreezeReason()
+		freezeReason = &reason
+	}
+
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid accounts
 	return &CurrentAccountEntity{
@@ -417,6 +439,8 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		OverdraftLimit:        account.OverdraftLimit().ToMinorUnitsUnchecked(),
 		OverdraftRate:         account.OverdraftRate(),
 		BalanceUpdatedAt:      &balanceUpdatedAt,
+		FreezeReason:          freezeReason,
+		StatusHistory:         statusHistory,
 		Version:               account.Version(),
 		CreatedAt:             account.CreatedAt(),
 		UpdatedAt:             account.UpdatedAt(),
@@ -453,6 +477,26 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 		balanceUpdatedAt = *entity.BalanceUpdatedAt
 	}
 
+	// Convert persistence StatusHistoryJSON to domain StatusHistory
+	var statusHistory []domain.StatusChange
+	if len(entity.StatusHistory) > 0 {
+		statusHistory = make([]domain.StatusChange, len(entity.StatusHistory))
+		for i, entry := range entity.StatusHistory {
+			statusHistory[i] = domain.StatusChange{
+				From:      domain.AccountStatus(entry.FromStatus),
+				To:        domain.AccountStatus(entry.ToStatus),
+				Reason:    entry.Reason,
+				Timestamp: entry.Timestamp,
+			}
+		}
+	}
+
+	// Handle freeze reason - empty string if nil
+	freezeReason := ""
+	if entity.FreezeReason != nil {
+		freezeReason = *entity.FreezeReason
+	}
+
 	// Use builder pattern to construct immutable domain model
 	return domain.NewCurrentAccountBuilder().
 		WithID(entity.ID).
@@ -462,6 +506,8 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 		WithBalance(balance).
 		WithAvailableBalance(availableBalance).
 		WithStatus(domain.AccountStatus(entity.Status)).
+		WithFreezeReason(freezeReason).
+		WithStatusHistory(statusHistory).
 		WithOverdraftLimit(overdraftLimit).
 		WithOverdraftEnabled(overdraftEnabled).
 		WithOverdraftRate(entity.OverdraftRate).

@@ -2,10 +2,17 @@
 package persistence
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrInvalidStatusHistoryScan is returned when scanning an incompatible type into StatusHistoryJSON.
+var ErrInvalidStatusHistoryScan = errors.New("cannot scan into StatusHistoryJSON")
 
 // CurrentAccountEntity represents the database persistence model for current accounts.
 // This entity MUST match the schema defined in migrations/current_account/*.sql
@@ -28,6 +35,11 @@ type CurrentAccountEntity struct {
 	BalanceUpdatedAt      *time.Time `gorm:"column:balance_updated_at"`
 	OpenedAt              *time.Time `gorm:"column:opened_at;index"`
 	ClosedAt              *time.Time `gorm:"column:closed_at;index"`
+	FreezeReason          *string    `gorm:"column:freeze_reason;type:varchar(1000)"` // Reason when account is frozen
+
+	// Status audit trail - JSONB array of status changes
+	// Note: default is handled in code, not database, for GORM AutoMigrate compatibility
+	StatusHistory StatusHistoryJSON `gorm:"column:status_history;type:jsonb;not null"`
 
 	// Optimistic locking
 	Version int64 `gorm:"column:version;not null;default:1"`
@@ -44,4 +56,44 @@ type CurrentAccountEntity struct {
 // Uses singular, unqualified name per database-per-service architecture.
 func (CurrentAccountEntity) TableName() string {
 	return "account"
+}
+
+// StatusHistoryEntry represents a single status change record for audit trail.
+type StatusHistoryEntry struct {
+	FromStatus string    `json:"from_status"`
+	ToStatus   string    `json:"to_status"`
+	Reason     string    `json:"reason"`
+	Timestamp  time.Time `json:"timestamp"`
+	ChangedBy  string    `json:"changed_by"`
+}
+
+// StatusHistoryJSON is a custom type for handling JSONB status_history column.
+type StatusHistoryJSON []StatusHistoryEntry
+
+// Value implements driver.Valuer for database writes.
+func (s StatusHistoryJSON) Value() (driver.Value, error) {
+	if s == nil {
+		return "[]", nil
+	}
+	return json.Marshal(s)
+}
+
+// Scan implements sql.Scanner for database reads.
+func (s *StatusHistoryJSON) Scan(value interface{}) error {
+	if value == nil {
+		*s = StatusHistoryJSON{}
+		return nil
+	}
+
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("%w: unsupported type %T", ErrInvalidStatusHistoryScan, value)
+	}
+
+	return json.Unmarshal(bytes, s)
 }

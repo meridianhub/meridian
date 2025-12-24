@@ -195,15 +195,12 @@ func TestExecuteWithdrawal_AccountClosed(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	// Create account, deposit funds, then close it
+	// Create account with zero balance and close it
+	// Per domain rules, accounts must have zero balance to close
 	account, err := domain.NewCurrentAccount("ACC-WTH-CLOSED", "ACC-WTH-CLOSED", uuid.New().String(), "GBP")
 	require.NoError(t, err)
 
-	depositAmount, err := domain.NewMoney("GBP", 100000) // $1000
-	require.NoError(t, err)
-	account, err = account.Deposit(depositAmount)
-	require.NoError(t, err)
-
+	// Close the zero-balance account
 	account, err = account.Close()
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
