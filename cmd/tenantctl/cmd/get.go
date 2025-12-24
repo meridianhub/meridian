@@ -80,6 +80,7 @@ func outputJSON(tenant *tenantv1.Tenant) error {
 	output := map[string]interface{}{
 		"tenant_id":        tenant.TenantId,
 		"display_name":     tenant.DisplayName,
+		"slug":             tenant.Slug,
 		"settlement_asset": tenant.SettlementAsset,
 		"status":           formatStatus(tenant.Status),
 		"version":          tenant.Version,
@@ -110,6 +111,11 @@ func outputText(tenant *tenantv1.Tenant) {
 	fmt.Printf("Tenant Details:\n")
 	fmt.Printf("  ID:               %s\n", tenant.TenantId)
 	fmt.Printf("  Name:             %s\n", tenant.DisplayName)
+	slug := tenant.Slug
+	if slug == "" {
+		slug = "-"
+	}
+	fmt.Printf("  Slug:             %s\n", slug)
 	fmt.Printf("  Settlement Asset: %s\n", tenant.SettlementAsset)
 	fmt.Printf("  Status:           %s\n", formatStatus(tenant.Status))
 	fmt.Printf("  Version:          %d\n", tenant.Version)

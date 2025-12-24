@@ -1,0 +1,176 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-consumer
+  labels:
+    app: audit-consumer
+    component: audit
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: audit-consumer
+      component: audit
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: audit-consumer
+        component: audit
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: audit-consumer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: audit-consumer
+        image: audit-consumer:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8080"
+        - name: SERVICE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: audit-consumer-config
+              key: service_name
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: audit-consumer-db
+              key: DATABASE_URL
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: audit-consumer-config
+              key: kafka_bootstrap_servers
+        - name: AUDIT_TOPIC
+          valueFrom:
+            configMapKeyRef:
+              name: audit-consumer-config
+              key: audit_topic
+        - name: KAFKA_GROUP_ID
+          valueFrom:
+            configMapKeyRef:
+              name: audit-consumer-config
+              key: kafka_group_id
+        - name: KAFKA_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: audit-consumer-config
+              key: kafka_client_id
+        - name: KAFKA_HANDLER_TIMEOUT
+          value: "30s"
+        - name: KAFKA_MAX_RETRIES
+          value: "3"
+        - name: DB_MAX_OPEN_CONNS
+          valueFrom:
+            configMapKeyRef:
+              name: audit-consumer-config
+              key: db_max_open_conns
+              optional: true
+        - name: DB_MAX_IDLE_CONNS
+          value: "5"
+        - name: DB_CONN_MAX_LIFETIME
+          value: "5m"
+        - name: DB_CONN_MAX_IDLE_TIME
+          value: "10m"
+        - name: GRACEFUL_SHUTDOWN_TIMEOUT
+          value: "30s"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health/startup
+            port: http
+          initialDelaySeconds: 0
+          periodSeconds: 2
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: config
+          mountPath: /etc/audit-consumer
+          readOnly: true
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: config
+        configMap:
+          name: audit-consumer-config
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - audit-consumer
+              topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 30

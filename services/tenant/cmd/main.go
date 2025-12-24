@@ -24,6 +24,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -38,6 +39,9 @@ var (
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
+
+// ErrMetricsServerStartupTimeout is returned when the metrics server fails to start within the timeout.
+var ErrMetricsServerStartupTimeout = errors.New("metrics server startup timed out")
 
 // envValueTrue is the string value for enabled environment variables.
 const envValueTrue = "true"
@@ -138,6 +142,71 @@ func run(logger *slog.Logger) error {
 		"environment", tracerConfig.Environment,
 		"otlp_endpoint", tracerConfig.OTLPEndpoint,
 		"sampling_rate", tracerConfig.SamplingRate)
+
+	// Start metrics server with /metrics and /healthz endpoints
+	metricsPort := getEnvOrDefault("METRICS_PORT", "9090")
+	metricsAddr := fmt.Sprintf(":%s", metricsPort)
+
+	// Create context for metrics server lifecycle
+	metricsCtx, cancelMetrics := context.WithCancel(ctx)
+	defer cancelMetrics()
+
+	metricsServerErrors := make(chan error, 1)
+	metricsReady := make(chan struct{})
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		})
+
+		server := &http.Server{
+			Addr:              metricsAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+
+		// Graceful shutdown
+		go func() {
+			<-metricsCtx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck // Intentionally using fresh context for shutdown grace period
+				logger.Error("failed to shutdown metrics server", "error", err)
+			}
+		}()
+
+		logger.Info("starting metrics server", "address", metricsAddr)
+
+		// Create listener first to ensure port binding before signaling ready
+		listener, err := (&net.ListenConfig{}).Listen(metricsCtx, "tcp", metricsAddr) //nolint:contextcheck // Using metricsCtx for lifecycle management
+		if err != nil {
+			metricsServerErrors <- fmt.Errorf("metrics server failed to bind: %w", err)
+			return
+		}
+
+		// Signal that server is ready (port bound successfully)
+		close(metricsReady)
+		logger.Info("metrics server started", "address", metricsAddr)
+
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			metricsServerErrors <- fmt.Errorf("metrics server failed: %w", err)
+		}
+	}()
+
+	// Wait for metrics server to be ready or fail (with timeout)
+	select {
+	case <-metricsReady:
+		// Server successfully bound to port
+	case err := <-metricsServerErrors:
+		return fmt.Errorf("metrics server startup failed: %w", err)
+	case <-time.After(10 * time.Second):
+		return ErrMetricsServerStartupTimeout
+	}
 
 	// Initialize database connection
 	db, err := initDatabase(logger)
@@ -420,7 +489,9 @@ func run(logger *slog.Logger) error {
 	case sig := <-sigChan:
 		logger.Info("received signal", "signal", sig)
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		return fmt.Errorf("gRPC server error: %w", err)
+	case err := <-metricsServerErrors:
+		return fmt.Errorf("metrics server error: %w", err)
 	}
 
 	// Graceful shutdown

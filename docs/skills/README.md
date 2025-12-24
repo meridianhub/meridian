@@ -24,6 +24,10 @@ Each skill document includes:
 
 - **[security.md](security.md)** - Security scanning and vulnerability management
 
+### Testing
+
+- **[testing.md](testing.md)** - Testing standards: await package, testcontainers, defensive testing
+
 ## Skill Metadata Format
 
 Skills use YAML frontmatter at the start of each document:

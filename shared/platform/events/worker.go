@@ -309,6 +309,9 @@ func (w *Worker) processEntry(ctx context.Context, entry *EventOutbox) error {
 				"retry_count", entry.RetryCount+1,
 				"max_retries", w.config.MaxRetries,
 				"error", err)
+		} else {
+			// Record retry metric when the entry will be retried
+			RecordRetry(w.config.ServiceName, entry.EventType)
 		}
 
 		return fmt.Errorf("publish failed for entry %s: %w", entry.ID, err)

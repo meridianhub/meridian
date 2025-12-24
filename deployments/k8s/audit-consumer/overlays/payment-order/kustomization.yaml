@@ -1,0 +1,74 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: audit-consumer-payment-order
+
+namespace: meridian
+
+labels:
+- pairs:
+    app: audit-consumer
+    service: payment-order
+    managed-by: kustomize
+
+resources:
+- ../../base
+
+namePrefix: payment-order-
+
+# Service-specific configuration
+configMapGenerator:
+- name: audit-consumer-config
+  behavior: merge
+  literals:
+  - service_name=payment-order
+  - audit_topic=audit.events.payment-order
+  - kafka_group_id=audit-consumer-payment-order
+  - kafka_client_id=audit-consumer-payment-order
+  - db_max_open_conns=40
+
+# Payment Order has HIGH audit volume - scale accordingly
+patches:
+# Higher replica count for high-volume service
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 4
+
+# Higher resource limits
+- target:
+    kind: Deployment
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 150m
+          memory: 192Mi
+        limits:
+          cpu: 750m
+          memory: 768Mi
+
+# Higher HPA limits
+- target:
+    kind: HorizontalPodAutoscaler
+    name: audit-consumer
+  patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 4
+    - op: replace
+      path: /spec/maxReplicas
+      value: 16
+    - op: replace
+      path: /spec/behavior/scaleDown/stabilizationWindowSeconds
+      value: 600
+
+images:
+- name: audit-consumer
+  newTag: payment-order-v1.0.0
