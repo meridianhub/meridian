@@ -163,16 +163,27 @@ func (a *Interceptor) authenticate(ctx context.Context) (context.Context, error)
 			headerTenantID, err := tenant.NewTenantID(vals[0])
 			if err == nil && headerTenantID != tenantID {
 				// Tenant mismatch: user accessing wrong subdomain
+				// This is a SECURITY event - log with full context and record metric
 				span := trace.SpanFromContext(ctx)
 				span.SetAttributes(
 					attribute.String("security.tenant_mismatch.jwt", tenantID.String()),
 					attribute.String("security.tenant_mismatch.header", headerTenantID.String()),
 				)
+
+				// Extract client IP for security logging
+				clientIP := extractClientIP(ctx)
+
+				// Structured security logging with all contextual fields
 				a.logger.Warn("tenant context mismatch",
-					"jwt_tenant", tenantID,
-					"header_tenant", headerTenantID,
+					"jwt_tenant", tenantID.String(),
+					"header_tenant", headerTenantID.String(),
 					"user_id", claims.UserID,
+					"client_ip", clientIP,
 				)
+
+				// Record metric for monitoring and alerting
+				RecordTenantMismatch(tenantID.String(), headerTenantID.String())
+
 				return nil, status.Error(codes.PermissionDenied, "tenant context mismatch")
 			}
 		}
