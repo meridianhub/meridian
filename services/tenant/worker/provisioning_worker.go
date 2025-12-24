@@ -24,7 +24,10 @@ import (
 type ProvisioningWorker struct {
 	repo           *persistence.Repository
 	provisioner    provisioner.SchemaProvisioner
+	alertManager   *AlertManager
 	pollInterval   time.Duration
+	alertInterval  time.Duration
+	alertThreshold time.Duration
 	maxRetries     int
 	retryBaseDelay time.Duration
 	retryMaxDelay  time.Duration
@@ -46,6 +49,8 @@ var (
 // Config holds configuration for worker behavior.
 type Config struct {
 	PollInterval   time.Duration
+	AlertInterval  time.Duration // Interval for checking failed provisioning alerts
+	AlertThreshold time.Duration // Age threshold for failed tenant alerting (default: 1 hour)
 	MaxRetries     int
 	RetryBaseDelay time.Duration
 	RetryMaxDelay  time.Duration
@@ -74,10 +79,25 @@ func NewProvisioningWorker(
 		return nil, ErrInvalidPollInterval
 	}
 
+	// Default alert interval to 15 minutes if not specified
+	alertInterval := config.AlertInterval
+	if alertInterval <= 0 {
+		alertInterval = 15 * time.Minute
+	}
+
+	// Default alert threshold to 1 hour if not specified
+	alertThreshold := config.AlertThreshold
+	if alertThreshold <= 0 {
+		alertThreshold = 1 * time.Hour
+	}
+
 	return &ProvisioningWorker{
 		repo:           repo,
 		provisioner:    provisioner,
+		alertManager:   NewAlertManager(repo, logger),
 		pollInterval:   config.PollInterval,
+		alertInterval:  alertInterval,
+		alertThreshold: alertThreshold,
 		maxRetries:     config.MaxRetries,
 		retryBaseDelay: config.RetryBaseDelay,
 		retryMaxDelay:  config.RetryMaxDelay,
@@ -94,7 +114,12 @@ func (w *ProvisioningWorker) Start(ctx context.Context) {
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 
-	w.logger.Info("provisioning worker started", "pollInterval", w.pollInterval)
+	alertTicker := time.NewTicker(w.alertInterval)
+	defer alertTicker.Stop()
+
+	w.logger.Info("provisioning worker started",
+		"pollInterval", w.pollInterval,
+		"alertInterval", w.alertInterval)
 
 	for {
 		select {
@@ -106,6 +131,8 @@ func (w *ProvisioningWorker) Start(ctx context.Context) {
 			return
 		case <-ticker.C:
 			w.processPendingTenants(ctx)
+		case <-alertTicker.C:
+			w.checkFailedProvisioningAlerts(ctx)
 		}
 	}
 }
@@ -125,6 +152,18 @@ func (w *ProvisioningWorker) Stop() {
 	w.logger.Info("waiting for in-flight provisioning to complete")
 	w.wg.Wait()
 	w.logger.Info("all provisioning goroutines completed")
+}
+
+// checkFailedProvisioningAlerts checks for persistent provisioning failures
+// and logs alerts for external alerting system integration.
+func (w *ProvisioningWorker) checkFailedProvisioningAlerts(ctx context.Context) {
+	w.logger.Debug("checking for persistent provisioning failures")
+
+	// Check for tenants that have been in provisioning_failed for more than the configured threshold.
+	// This threshold prevents alerting on transient failures that may self-recover.
+	if err := w.alertManager.CheckFailedProvisioningAlerts(ctx, w.alertThreshold); err != nil {
+		w.logger.Error("failed to check provisioning alerts", "error", err)
+	}
 }
 
 // processPendingTenants queries for tenants in PROVISIONING_PENDING status

@@ -315,7 +315,7 @@ func setupServiceWithCache(t *testing.T) (*Service, *redis.Client, *miniredis.Mi
 
 	// Setup PostgreSQL
 	db, dbCleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
-	createAuditOutboxTable(t, db)
+	testdb.CreateAuditTables(t, db)
 
 	// Setup miniredis
 	mr := miniredis.RunT(t)
@@ -525,7 +525,7 @@ func TestService_GetBySlug_CacheDisabled(t *testing.T) {
 	// Setup without cache
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
 	defer cleanup()
-	createAuditOutboxTable(t, db)
+	testdb.CreateAuditTables(t, db)
 
 	repo := persistence.NewRepository(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))

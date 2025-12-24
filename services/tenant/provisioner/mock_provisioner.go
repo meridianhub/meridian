@@ -44,6 +44,12 @@ type MockProvisioner struct {
 
 	// DataRetentionPeriod for testing retention enforcement
 	DataRetentionPeriod time.Duration
+
+	// OnProvisionAttempt is called after each provisioning attempt (before returning).
+	// Useful for deterministic testing of retry behavior without polling.
+	// The callback receives the tenant ID and the current attempt count for that tenant.
+	// Set to nil to disable (default).
+	OnProvisionAttempt func(tenantID string, attemptCount int)
 }
 
 // NewMockProvisioner creates a new mock provisioner with the given service configuration.
@@ -62,12 +68,39 @@ func NewMockProvisioner(services []ServiceConfig) *MockProvisioner {
 }
 
 // ProvisionSchemas simulates schema provisioning for the tenant.
+//
+// Note on locking: The lock is intentionally released before invoking OnProvisionAttempt
+// callback and re-acquired afterward. This allows test code to modify MockProvisioner state
+// (e.g., clearing FailProvisioningFor) during the callback. As a result, there's a window
+// where concurrent goroutines could modify ProvisioningCalls between unlock and re-lock.
+// This is acceptable for testing purposes where the callback mechanism provides deterministic
+// control over the test flow.
 func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Record the call
 	m.ProvisioningCalls = append(m.ProvisioningCalls, tenantID)
+
+	// Calculate attempt count for this tenant before releasing lock
+	attemptCount := 0
+	for _, calledID := range m.ProvisioningCalls {
+		if calledID.String() == tenantID.String() {
+			attemptCount++
+		}
+	}
+
+	// Capture callback before releasing lock
+	callback := m.OnProvisionAttempt
+	m.mu.Unlock()
+
+	// Invoke callback outside lock to allow test code to modify state (e.g., ClearFailure)
+	if callback != nil {
+		callback(tenantID.String(), attemptCount)
+	}
+
+	// Re-acquire lock for the rest of the operation
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Check for concurrent provisioning attempt
 	if status, exists := m.statuses[tenantID.String()]; exists && status.State == StateInProgress {
@@ -306,6 +339,41 @@ func (m *MockProvisioner) InitializeProvisioningStatus(_ context.Context, tenant
 	}
 
 	return nil
+}
+
+// GetProvisioningCallCount returns the number of times ProvisionSchemas was called.
+// Thread-safe for concurrent access during tests.
+func (m *MockProvisioner) GetProvisioningCallCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.ProvisioningCalls)
+}
+
+// GetProvisioningCallCountForTenant returns the number of times ProvisionSchemas was called
+// for a specific tenant. Thread-safe for concurrent access during tests.
+func (m *MockProvisioner) GetProvisioningCallCountForTenant(tenantID string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	count := 0
+	for _, calledID := range m.ProvisioningCalls {
+		if calledID.String() == tenantID {
+			count++
+		}
+	}
+	return count
+}
+
+// ClearFailure removes a tenant from the FailProvisioningFor map.
+// Thread-safe for concurrent access during tests.
+// Returns true if the tenant was in the map and removed, false otherwise.
+func (m *MockProvisioner) ClearFailure(tenantID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.FailProvisioningFor[tenantID]; exists {
+		delete(m.FailProvisioningFor, tenantID)
+		return true
+	}
+	return false
 }
 
 // Ensure MockProvisioner implements SchemaProvisioner.
