@@ -87,6 +87,7 @@ func TestHealthServer_Check_WithHealthyDatabase(t *testing.T) {
 
 	if resp == nil {
 		t.Fatal("Check() returned nil response")
+		return
 	}
 
 	// With a healthy database, should return SERVING
@@ -140,6 +141,7 @@ func TestHealthServer_Check_ReturnsResponse(t *testing.T) {
 
 	if resp == nil {
 		t.Fatal("Check() returned nil response")
+		return
 	}
 
 	// Should return either SERVING or NOT_SERVING (not unknown or other)
