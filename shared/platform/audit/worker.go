@@ -32,6 +32,10 @@ const (
 	defaultMaxRetries    = 3
 	defaultProcessingAge = 5 * time.Minute // Consider 'processing' entries stuck after this duration
 
+	// Adaptive polling configuration
+	defaultMinPollInterval = 100 * time.Millisecond // Minimum poll interval when busy
+	defaultMaxPollInterval = 30 * time.Second       // Maximum poll interval when idle
+
 	// Status values
 	statusPending    = "pending"
 	statusProcessing = "processing"
@@ -56,6 +60,61 @@ type Worker struct {
 	shutdown     chan struct{}
 	shutdownOnce sync.Once
 	wg           sync.WaitGroup
+
+	// Adaptive polling configuration
+	adaptivePolling bool          // Enable adaptive poll intervals based on load
+	minPollInterval time.Duration // Minimum poll interval (when busy)
+	maxPollInterval time.Duration // Maximum poll interval (when idle)
+	emptyPollCount  int           // Consecutive empty polls (for adaptive interval calculation)
+}
+
+// WorkerOption is a functional option for configuring a Worker.
+type WorkerOption func(*Worker)
+
+// WithBatchSize sets the maximum number of entries to process per batch.
+// Default: 100
+func WithBatchSize(size int) WorkerOption {
+	return func(w *Worker) {
+		if size > 0 {
+			w.batchSize = size
+		}
+	}
+}
+
+// WithPollInterval sets the base polling interval.
+// Default: 5 seconds
+func WithPollInterval(interval time.Duration) WorkerOption {
+	return func(w *Worker) {
+		if interval > 0 {
+			w.pollInterval = interval
+		}
+	}
+}
+
+// WithMaxRetries sets the maximum number of retry attempts for failed entries.
+// Default: 3
+func WithMaxRetries(retries int) WorkerOption {
+	return func(w *Worker) {
+		if retries >= 0 {
+			w.maxRetries = retries
+		}
+	}
+}
+
+// WithAdaptivePolling enables adaptive poll intervals that adjust based on load.
+// When the outbox is empty, the interval increases (up to maxInterval).
+// When entries are present, the interval decreases (down to minInterval).
+// This reduces database load during idle periods while maintaining responsiveness under load.
+func WithAdaptivePolling(minInterval, maxInterval time.Duration) WorkerOption {
+	return func(w *Worker) {
+		w.adaptivePolling = true
+		if minInterval > 0 {
+			w.minPollInterval = minInterval
+		}
+		if maxInterval > 0 {
+			w.maxPollInterval = maxInterval
+		}
+	}
 }
 
 // NewAuditWorker creates a new audit worker for a specific service schema.
@@ -66,27 +125,45 @@ type Worker struct {
 //   - db: GORM database connection
 //   - schema: PostgreSQL schema name (e.g., "party_audit", "current_account_audit")
 //   - logger: Structured logger (uses slog.Default() if nil)
+//   - opts: Optional functional options for configuration
 //
 // Returns a configured Worker ready to start processing.
 //
 // Example:
 //
+//	// Basic usage with defaults
 //	auditWorker := audit.NewAuditWorker(db, "party_audit", logger)
+//
+//	// With custom configuration
+//	auditWorker := audit.NewAuditWorker(db, "party_audit", logger,
+//	    audit.WithBatchSize(200),
+//	    audit.WithPollInterval(10*time.Second),
+//	    audit.WithAdaptivePolling(100*time.Millisecond, 30*time.Second),
+//	)
 //	auditWorker.Start(ctx)
-func NewAuditWorker(db *gorm.DB, schema string, logger *slog.Logger) *Worker {
+func NewAuditWorker(db *gorm.DB, schema string, logger *slog.Logger, opts ...WorkerOption) *Worker {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	return &Worker{
-		db:           db,
-		schema:       schema,
-		batchSize:    defaultBatchSize,
-		pollInterval: defaultPollInterval,
-		maxRetries:   defaultMaxRetries,
-		logger:       logger.With("schema", schema),
-		shutdown:     make(chan struct{}),
+	w := &Worker{
+		db:              db,
+		schema:          schema,
+		batchSize:       defaultBatchSize,
+		pollInterval:    defaultPollInterval,
+		maxRetries:      defaultMaxRetries,
+		minPollInterval: defaultMinPollInterval,
+		maxPollInterval: defaultMaxPollInterval,
+		logger:          logger.With("schema", schema),
+		shutdown:        make(chan struct{}),
 	}
+
+	// Apply functional options
+	for _, opt := range opts {
+		opt(w)
+	}
+
+	return w
 }
 
 // Start begins background processing of audit outbox entries.
@@ -141,7 +218,8 @@ func (w *Worker) auditLogTable() string {
 func (w *Worker) run(ctx context.Context) {
 	defer w.wg.Done()
 
-	ticker := time.NewTicker(w.pollInterval)
+	currentInterval := w.pollInterval
+	ticker := time.NewTicker(currentInterval)
 	defer ticker.Stop()
 
 	w.logger.Info("audit worker processing loop started")
@@ -162,12 +240,52 @@ func (w *Worker) run(ctx context.Context) {
 			}
 
 			// Process a batch of pending entries
-			if err := w.processBatch(ctx); err != nil {
+			processedCount, err := w.processBatchWithCount(ctx)
+			if err != nil {
 				w.logger.Error("batch processing failed",
 					"error", err)
 			}
+
+			// Adjust poll interval based on load (if adaptive polling is enabled)
+			if w.adaptivePolling {
+				newInterval := w.calculateAdaptiveInterval(processedCount)
+				if newInterval != currentInterval {
+					currentInterval = newInterval
+					ticker.Reset(currentInterval)
+					RecordPollInterval(w.schema, currentInterval.Seconds())
+					w.logger.Debug("adaptive poll interval adjusted",
+						"interval", currentInterval,
+						"empty_polls", w.emptyPollCount)
+				}
+			}
 		}
 	}
+}
+
+// calculateAdaptiveInterval determines the next poll interval based on recent activity.
+// When entries are being processed, the interval decreases toward minPollInterval.
+// When the outbox is empty, the interval gradually increases toward maxPollInterval.
+func (w *Worker) calculateAdaptiveInterval(processedCount int) time.Duration {
+	if processedCount > 0 {
+		// Work found - reset to minimum interval for responsiveness
+		w.emptyPollCount = 0
+		RecordEmptyPolls(w.schema, 0)
+		return w.minPollInterval
+	}
+
+	// No work - increase interval exponentially (up to max)
+	w.emptyPollCount++
+	RecordEmptyPolls(w.schema, w.emptyPollCount)
+
+	// Exponential backoff: double the base interval for each consecutive empty poll
+	// Cap at maxPollInterval
+	backoffMultiplier := 1 << min(w.emptyPollCount, 10) // Cap multiplier at 1024x
+	newInterval := time.Duration(backoffMultiplier) * w.minPollInterval
+
+	if newInterval > w.maxPollInterval {
+		return w.maxPollInterval
+	}
+	return newInterval
 }
 
 // resetStuckEntries resets entries that have been in 'processing' state for too long.
@@ -201,6 +319,14 @@ func (w *Worker) resetStuckEntries(ctx context.Context) error {
 // Returns an error if the database query fails, but continues processing
 // even if individual entries fail.
 func (w *Worker) processBatch(ctx context.Context) error {
+	_, err := w.processBatchWithCount(ctx)
+	return err
+}
+
+// processBatchWithCount fetches and processes a batch of pending audit entries,
+// returning the number of successfully processed entries along with any error.
+// This is useful for adaptive polling to know if work was done.
+func (w *Worker) processBatchWithCount(ctx context.Context) (int, error) {
 	start := time.Now()
 	defer func() {
 		RecordProcessingDuration(time.Since(start).Seconds())
@@ -217,10 +343,12 @@ func (w *Worker) processBatch(ctx context.Context) error {
 		Find(&entries)
 
 	if result.Error != nil {
-		return fmt.Errorf("failed to fetch pending entries: %w", result.Error)
+		return 0, fmt.Errorf("failed to fetch pending entries: %w", result.Error)
 	}
 
-	// Record outbox depth (pending entries count)
+	// Record batch size and outbox depth metrics
+	RecordBatchSize(len(entries))
+
 	var pendingCount int64
 	if err := w.db.WithContext(ctx).
 		Table(w.outboxTable()).
@@ -231,7 +359,7 @@ func (w *Worker) processBatch(ctx context.Context) error {
 
 	if len(entries) == 0 {
 		// No entries to process, this is normal
-		return nil
+		return 0, nil
 	}
 
 	w.logger.Info("processing audit batch",
@@ -264,10 +392,10 @@ func (w *Worker) processBatch(ctx context.Context) error {
 		"total", len(entries))
 
 	if failedCount > 0 {
-		return fmt.Errorf("%w: %d failures out of %d entries", ErrBatchProcessingFailed, failedCount, len(entries))
+		return processedCount, fmt.Errorf("%w: %d failures out of %d entries", ErrBatchProcessingFailed, failedCount, len(entries))
 	}
 
-	return nil
+	return processedCount, nil
 }
 
 // processEntry processes a single audit outbox entry.

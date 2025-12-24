@@ -613,7 +613,7 @@ func TestAuditWorker_MultipleStartStop(t *testing.T) {
 func TestAuditWorker_Configuration(t *testing.T) {
 	db := setupTestDB(t)
 
-	// Create worker with custom settings
+	// Create worker with custom settings (legacy direct assignment)
 	worker := NewAuditWorker(db, "", nil)
 	worker.batchSize = 50
 	worker.pollInterval = 10 * time.Second
@@ -622,6 +622,91 @@ func TestAuditWorker_Configuration(t *testing.T) {
 	assert.Equal(t, 50, worker.batchSize, "BatchSize should be customizable")
 	assert.Equal(t, 10*time.Second, worker.pollInterval, "PollInterval should be customizable")
 	assert.Equal(t, 5, worker.maxRetries, "MaxRetries should be customizable")
+}
+
+// TestAuditWorker_FunctionalOptions verifies functional options pattern.
+func TestAuditWorker_FunctionalOptions(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create worker with functional options
+	worker := NewAuditWorker(db, "test_schema", nil,
+		WithBatchSize(200),
+		WithPollInterval(15*time.Second),
+		WithMaxRetries(5),
+	)
+
+	assert.Equal(t, 200, worker.batchSize, "BatchSize should be set via option")
+	assert.Equal(t, 15*time.Second, worker.pollInterval, "PollInterval should be set via option")
+	assert.Equal(t, 5, worker.maxRetries, "MaxRetries should be set via option")
+	assert.Equal(t, "test_schema", worker.schema, "Schema should be preserved")
+	assert.False(t, worker.adaptivePolling, "AdaptivePolling should be false by default")
+}
+
+// TestAuditWorker_FunctionalOptions_AdaptivePolling verifies adaptive polling configuration.
+func TestAuditWorker_FunctionalOptions_AdaptivePolling(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create worker with adaptive polling enabled
+	worker := NewAuditWorker(db, "", nil,
+		WithAdaptivePolling(50*time.Millisecond, 10*time.Second),
+	)
+
+	assert.True(t, worker.adaptivePolling, "AdaptivePolling should be enabled")
+	assert.Equal(t, 50*time.Millisecond, worker.minPollInterval, "MinPollInterval should be set")
+	assert.Equal(t, 10*time.Second, worker.maxPollInterval, "MaxPollInterval should be set")
+}
+
+// TestAuditWorker_FunctionalOptions_InvalidValues verifies invalid values are ignored.
+func TestAuditWorker_FunctionalOptions_InvalidValues(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create worker with invalid options (should use defaults)
+	worker := NewAuditWorker(db, "", nil,
+		WithBatchSize(0),    // Invalid - should keep default
+		WithBatchSize(-1),   // Invalid - should keep default
+		WithPollInterval(0), // Invalid - should keep default
+		WithMaxRetries(-1),  // Invalid - should keep default (but 0 is valid)
+	)
+
+	assert.Equal(t, defaultBatchSize, worker.batchSize, "Invalid batch size should keep default")
+	assert.Equal(t, defaultPollInterval, worker.pollInterval, "Invalid poll interval should keep default")
+	assert.Equal(t, defaultMaxRetries, worker.maxRetries, "Invalid max retries should keep default")
+}
+
+// TestAuditWorker_AdaptivePolling_IntervalCalculation verifies adaptive interval logic.
+func TestAuditWorker_AdaptivePolling_IntervalCalculation(t *testing.T) {
+	db := setupTestDB(t)
+
+	worker := NewAuditWorker(db, "", nil,
+		WithAdaptivePolling(100*time.Millisecond, 5*time.Second),
+	)
+
+	// When entries are processed, interval should be minimum
+	interval := worker.calculateAdaptiveInterval(10)
+	assert.Equal(t, 100*time.Millisecond, interval, "With entries, should use min interval")
+	assert.Equal(t, 0, worker.emptyPollCount, "Empty poll count should reset to 0")
+
+	// First empty poll - should increase interval
+	interval = worker.calculateAdaptiveInterval(0)
+	assert.Equal(t, 1, worker.emptyPollCount, "Empty poll count should be 1")
+	assert.True(t, interval > 100*time.Millisecond, "Interval should increase after empty poll")
+
+	// More empty polls - interval should continue increasing
+	for i := 0; i < 5; i++ {
+		interval = worker.calculateAdaptiveInterval(0)
+	}
+	assert.Equal(t, 6, worker.emptyPollCount, "Empty poll count should be 6")
+
+	// Eventually should cap at max interval
+	for i := 0; i < 20; i++ {
+		interval = worker.calculateAdaptiveInterval(0)
+	}
+	assert.Equal(t, 5*time.Second, interval, "Interval should cap at max")
+
+	// Processing entries again should reset to min
+	interval = worker.calculateAdaptiveInterval(5)
+	assert.Equal(t, 100*time.Millisecond, interval, "Should reset to min after processing entries")
+	assert.Equal(t, 0, worker.emptyPollCount, "Empty poll count should reset to 0")
 }
 
 // TestAuditWorker_ProcessBatch_PartialFailure would verify handling of partial batch failures.
