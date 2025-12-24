@@ -1,0 +1,32 @@
+// Package domain contains the core domain models for utilization metering.
+package domain
+
+import "time"
+
+// UtilizationMeasurement represents a single utilization measurement derived from an audit event.
+// This will be sent to Position Keeping service as a position change for tenant-zero billing.
+type UtilizationMeasurement struct {
+	// TenantID is the tenant that generated the utilization (customer being billed)
+	TenantID string
+
+	// ServiceName is the Meridian service that generated the audit event
+	// Examples: "current-account", "payment-order", "financial-accounting"
+	ServiceName string
+
+	// OperationType is the operation that was performed (e.g., "CreateAccount", "ProcessPayment")
+	OperationType string
+
+	// Quantity is the measured quantity for billing purposes
+	// Examples: 1 (for transaction count), bytes processed, API calls made
+	Quantity int64
+
+	// UnitOfMeasure describes what is being measured
+	// Examples: "transaction", "api_call", "storage_gb"
+	UnitOfMeasure string
+
+	// Timestamp is when the utilization occurred
+	Timestamp time.Time
+
+	// CorrelationID links the measurement back to the original audit event
+	CorrelationID string
+}
