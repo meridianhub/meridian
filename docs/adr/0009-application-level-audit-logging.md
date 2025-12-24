@@ -803,7 +803,7 @@ Prometheus metrics exposed:
 - [x] Audit logging works identically in CockroachDB and PostgreSQL
 - [x] Performance overhead <10ms per operation (Kafka primary path: ~2ms)
 - [x] Unit test coverage >90% for audit logic
-- [ ] Zero missing audit records in staging for 2 weeks (ongoing validation)
+- [ ] Zero missing audit records in staging for 2 weeks (ongoing validation - started 2025-12-24, expected completion 2026-01-07)
 
 **Stakeholders to Consult:**
 

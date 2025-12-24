@@ -18,6 +18,53 @@ The audit system uses a **dual-path approach** for guaranteed delivery:
 
 This ensures audit events are never lost, even during Kafka outages.
 
+### Dual-Path Flow Diagram
+
+```text
+                                    ┌─────────────────────┐
+                                    │   GORM Hook Event   │
+                                    │  (Create/Update/    │
+                                    │      Delete)        │
+                                    └──────────┬──────────┘
+                                               │
+                                               ▼
+                                    ┌──────────────────────┐
+                                    │   Kafka Available?   │
+                                    └──────────┬───────────┘
+                                               │
+                        ┌──────────────────────┴──────────────────────┐
+                        │                                             │
+                   YES  ▼                                        NO   ▼
+         ┌──────────────────────┐                    ┌──────────────────────┐
+         │   Kafka Topic        │                    │   audit_outbox       │
+         │  audit.events.*      │                    │   (transactional)    │
+         └──────────┬───────────┘                    └──────────┬───────────┘
+                    │                                           │
+                    ▼                                           ▼
+         ┌──────────────────────┐                    ┌──────────────────────┐
+         │  Audit Consumer      │                    │   audit-worker       │
+         │  (2-20 replicas)     │                    │  (polls every 5s)    │
+         └──────────┬───────────┘                    └──────────┬───────────┘
+                    │                                           │
+                    └──────────────────┬────────────────────────┘
+                                       │
+                                       ▼
+                            ┌──────────────────────┐
+                            │     audit_log        │
+                            │  (permanent record)  │
+                            └──────────────────────┘
+```
+
+**Key characteristics:**
+
+- **Primary path**: Low latency (~2ms), high throughput (1000s/sec)
+- **Fallback path**: Reliable recovery during Kafka outages, 5s polling interval
+- **Transactional safety**: Outbox entries written atomically with business data
+- **No lost events**: Dual-path guarantees delivery under all conditions
+
+**Note**: This is separate from the event outbox system (`shared/platform/events/`) which handles
+domain events (SUSPEND/RESUME). The audit outbox is specifically for audit logging only.
+
 ## Quick Start
 
 ### 1. Implement the `Auditable` interface on your entity
@@ -176,6 +223,24 @@ func (e *MyEntity) BeforeUpdate(tx *gorm.DB) error { return audit.CaptureOldValu
 func (e *MyEntity) AfterUpdate(tx *gorm.DB) error  { return audit.RecordUpdate(tx, *e) }
 func (e *MyEntity) AfterDelete(tx *gorm.DB) error  { return audit.RecordDelete(tx, *e) }
 ```
+
+## Monitoring and Metrics
+
+For operators monitoring the audit system, see:
+
+- [ADR-0009: Application-Level Audit Logging](../../../docs/adr/0009-application-level-audit-logging.md) -
+  Complete architecture and Prometheus metrics reference
+- [audit-worker README](../../../services/audit-worker/README.md) - Fallback worker metrics and operational
+  guidance
+
+**Key Prometheus metrics:**
+
+- `meridian_audit_kafka_events_published_total` - Primary path usage (Kafka)
+- `meridian_audit_kafka_fallback_total` - Fallback path activations
+- `meridian_audit_outbox_depth_total` - Queue depth (alert if > 1000)
+- `meridian_audit_consumer_messages_processed_total` - Consumer throughput
+
+See ADR-0009 for complete metrics reference and alerting thresholds.
 
 ## Examples
 
