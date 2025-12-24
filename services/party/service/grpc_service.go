@@ -480,8 +480,9 @@ func (s *Service) UpdateReference(ctx context.Context, req *pb.UpdateReferenceRe
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
 	}
 
-	// Verify party exists
-	if _, err := s.repo.FindByID(ctx, partyID); err != nil {
+	// Verify party exists with FOR UPDATE lock to prevent deletion during update.
+	// The FK constraint on party_reference provides additional safety.
+	if _, err := s.repo.FindByIDForUpdate(ctx, partyID); err != nil {
 		if errors.Is(err, persistence.ErrPartyNotFound) {
 			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
 		}
@@ -576,12 +577,18 @@ func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAsso
 	// Verify both parties exist with FOR UPDATE locks to prevent race condition
 	// where a party could be deleted between verification and association creation
 	if _, err := s.repo.FindByIDForUpdate(ctx, partyID); err != nil {
-		s.logger.Error("party not found for association", "party_id", req.PartyId, "error", err)
-		return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
+		s.logger.Error("failed to find party for association", "party_id", req.PartyId, "error", err)
+		if errors.Is(err, persistence.ErrPartyNotFound) {
+			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to verify party: %v", err)
 	}
 	if _, err := s.repo.FindByIDForUpdate(ctx, relatedPartyID); err != nil {
-		s.logger.Error("related party not found for association", "related_party_id", req.RelatedPartyId, "error", err)
-		return nil, status.Errorf(codes.NotFound, "related party not found: %s", req.RelatedPartyId)
+		s.logger.Error("failed to find related party for association", "related_party_id", req.RelatedPartyId, "error", err)
+		if errors.Is(err, persistence.ErrPartyNotFound) {
+			return nil, status.Errorf(codes.NotFound, "related party not found: %s", req.RelatedPartyId)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to verify related party: %v", err)
 	}
 
 	// Check for circular association
@@ -704,8 +711,9 @@ func (s *Service) UpdateDemographics(ctx context.Context, req *pb.UpdateDemograp
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
 	}
 
-	// Verify party exists
-	if _, err := s.repo.FindByID(ctx, partyID); err != nil {
+	// Verify party exists with FOR UPDATE lock to prevent deletion during update.
+	// The FK constraint on party_demographic provides additional safety.
+	if _, err := s.repo.FindByIDForUpdate(ctx, partyID); err != nil {
 		if errors.Is(err, persistence.ErrPartyNotFound) {
 			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
 		}
@@ -766,8 +774,9 @@ func (s *Service) UpdateBankRelations(ctx context.Context, req *pb.UpdateBankRel
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
 	}
 
-	// Verify party exists
-	if _, err := s.repo.FindByID(ctx, partyID); err != nil {
+	// Verify party exists with FOR UPDATE lock to prevent deletion during update.
+	// The FK constraint on party_bank_relation provides additional safety.
+	if _, err := s.repo.FindByIDForUpdate(ctx, partyID); err != nil {
 		if errors.Is(err, persistence.ErrPartyNotFound) {
 			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
 		}

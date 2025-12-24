@@ -23,11 +23,14 @@ var (
 )
 
 // toJSONB prepares a string for JSONB storage.
-// If the input is already valid JSON, it's returned as-is.
-// If not, it's marshaled as a JSON string value.
+// If the input is a valid JSON object or array, it's returned as-is.
+// Otherwise (including JSON primitives like null, numbers, booleans),
+// it's marshaled as a JSON string value to avoid ambiguity.
 func toJSONB(s string) string {
-	// Check if already valid JSON
-	if json.Valid([]byte(s)) {
+	// Only treat JSON objects ({...}) and arrays ([...]) as valid JSON.
+	// Primitive values like "null", "true", "123" should be stored as strings.
+	trimmed := strings.TrimSpace(s)
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') && json.Valid([]byte(s)) {
 		return s
 	}
 	// Marshal as JSON string

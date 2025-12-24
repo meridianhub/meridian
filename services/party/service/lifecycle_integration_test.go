@@ -854,3 +854,56 @@ func TestNegative_ControlPartyInvalidTransition(t *testing.T) {
 	assert.Contains(t, st.Message(), "invalid", "Error should mention invalid transition")
 	assert.Contains(t, st.Message(), "transition", "Error should mention transition")
 }
+
+// TestNegative_RegisterAssociationNonExistentRelatedParty verifies error handling
+// when registering an association with a related party that doesn't exist.
+func TestNegative_RegisterAssociationNonExistentRelatedParty(t *testing.T) {
+	svc, _, ctx, cleanup := setupLifecycleIntegrationTest(t)
+	defer cleanup()
+
+	// Create a valid party
+	party := registerTestParty(t, ctx, svc, "Valid Party")
+	nonExistentPartyID := uuid.New().String()
+
+	// Attempt to register association with non-existent related party
+	assocReq := &pb.RegisterAssociationsRequest{
+		PartyId:          party.PartyId,
+		RelatedPartyId:   nonExistentPartyID,
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE,
+	}
+
+	resp, err := svc.RegisterAssociations(ctx, assocReq)
+	require.Error(t, err, "Registering association with non-existent related party should fail")
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code(), "Should return NotFound error")
+	assert.Contains(t, st.Message(), "related party not found", "Error should mention related party")
+}
+
+// TestNegative_RegisterAssociationCircularSameParty verifies error handling
+// when attempting to create a circular association (party associated with itself).
+func TestNegative_RegisterAssociationCircularSameParty(t *testing.T) {
+	svc, _, ctx, cleanup := setupLifecycleIntegrationTest(t)
+	defer cleanup()
+
+	// Create a party
+	party := registerTestParty(t, ctx, svc, "Self-Association Test")
+
+	// Attempt to associate party with itself
+	assocReq := &pb.RegisterAssociationsRequest{
+		PartyId:          party.PartyId,
+		RelatedPartyId:   party.PartyId, // Same party
+		RelationshipType: pb.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER,
+	}
+
+	resp, err := svc.RegisterAssociations(ctx, assocReq)
+	require.Error(t, err, "Registering self-association should fail")
+	assert.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code(), "Should return InvalidArgument error")
+	assert.Contains(t, st.Message(), "circular", "Error should mention circular association")
+}
