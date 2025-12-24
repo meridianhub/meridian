@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"gorm.io/gorm"
 )
@@ -382,7 +383,7 @@ func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentO
 		// Record audit entry for the update (explicit audit for Map-based Updates)
 		// Update newEntity version to match what we just wrote to DB
 		newEntity.Version = po.Version + 1
-		return recordAudit(tx, "payment_order", "UPDATE", newEntity.ID, &oldEntity, newEntity)
+		return audit.RecordUpdateManual(tx, oldEntity, *newEntity)
 	})
 	if err != nil {
 		return err
