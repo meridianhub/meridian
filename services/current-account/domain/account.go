@@ -290,9 +290,10 @@ func (a CurrentAccount) Unfreeze() (CurrentAccount, error) {
 }
 
 // Activate restores the account to active status and returns a new account.
-// Deprecated: Use Unfreeze() instead for transitioning from FROZEN to ACTIVE.
 // This method is kept for backward compatibility but delegates to Unfreeze for FROZEN accounts.
 // The original account is not modified.
+//
+// Deprecated: Use Unfreeze() instead for transitioning from FROZEN to ACTIVE.
 func (a CurrentAccount) Activate() (CurrentAccount, error) {
 	if a.status == AccountStatusClosed {
 		return CurrentAccount{}, ErrInvalidStatusTransition
