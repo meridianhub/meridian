@@ -920,3 +920,207 @@ func TestRepository_GetBySlug_UsesIndex(t *testing.T) {
 
 	t.Logf("Query plan for GetBySlug:\n%s", queryPlan)
 }
+
+func TestRepository_ListByStatusOlderThan(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenants with different statuses and timestamps
+	now := time.Now()
+	twoHoursAgo := now.Add(-2 * time.Hour)
+	thirtyMinutesAgo := now.Add(-30 * time.Minute)
+
+	// Old failed tenant (should be included)
+	oldFailed := newTestTenant("old_failed")
+	oldFailed.Status = domain.StatusProvisioningFailed
+	oldFailed.CreatedAt = twoHoursAgo
+	oldFailed.ErrorMessage = "database connection timeout"
+	err := db.WithContext(ctx).Create(toEntity(oldFailed)).Error
+	require.NoError(t, err)
+	// Set updated_at to match created_at for test purposes
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", oldFailed.ID.String()).Error
+	require.NoError(t, err)
+
+	// Recent failed tenant (should be excluded)
+	recentFailed := newTestTenant("recent_failed")
+	recentFailed.Status = domain.StatusProvisioningFailed
+	recentFailed.CreatedAt = thirtyMinutesAgo
+	recentFailed.ErrorMessage = "network error"
+	err = db.WithContext(ctx).Create(toEntity(recentFailed)).Error
+	require.NoError(t, err)
+	// Set updated_at to match created_at for test purposes
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", recentFailed.ID.String()).Error
+	require.NoError(t, err)
+
+	// Old active tenant (should be excluded - different status)
+	oldActive := newTestTenant("old_active")
+	oldActive.Status = domain.StatusActive
+	oldActive.CreatedAt = twoHoursAgo
+	err = db.WithContext(ctx).Create(toEntity(oldActive)).Error
+	require.NoError(t, err)
+	// Set updated_at to match created_at for test purposes
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", oldActive.ID.String()).Error
+	require.NoError(t, err)
+
+	// Query for failed tenants older than 1 hour
+	cutoff := now.Add(-1 * time.Hour)
+	tenants, err := repo.ListByStatusOlderThan(ctx, domain.StatusProvisioningFailed, cutoff)
+	require.NoError(t, err)
+
+	// Should only return the old failed tenant
+	assert.Len(t, tenants, 1)
+	assert.Equal(t, "old_failed", tenants[0].ID.String())
+	assert.Equal(t, domain.StatusProvisioningFailed, tenants[0].Status)
+	assert.Equal(t, "database connection timeout", tenants[0].ErrorMessage)
+	assert.True(t, tenants[0].CreatedAt.Before(cutoff))
+}
+
+func TestRepository_ListByStatusOlderThan_EmptyResult(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create only recent failed tenants
+	now := time.Now()
+	recentFailed := newTestTenant("recent_failed")
+	recentFailed.Status = domain.StatusProvisioningFailed
+	recentFailed.CreatedAt = now.Add(-10 * time.Minute)
+	err := repo.Create(ctx, recentFailed)
+	require.NoError(t, err)
+
+	// Query with cutoff 1 hour ago (no tenants should match)
+	cutoff := now.Add(-1 * time.Hour)
+	tenants, err := repo.ListByStatusOlderThan(ctx, domain.StatusProvisioningFailed, cutoff)
+	require.NoError(t, err)
+	assert.Len(t, tenants, 0)
+}
+
+func TestRepository_ListByStatusOlderThan_BoundaryCondition(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	now := time.Now()
+	exactlyOneHourAgo := now.Add(-1 * time.Hour)
+
+	// Tenant created exactly 1 hour ago
+	exactTenant := newTestTenant("exact_tenant")
+	exactTenant.Status = domain.StatusProvisioningFailed
+	exactTenant.CreatedAt = exactlyOneHourAgo
+	err := db.WithContext(ctx).Create(toEntity(exactTenant)).Error
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", exactTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Tenant created 1 hour + 1 second ago (should be included)
+	olderTenant := newTestTenant("older_tenant")
+	olderTenant.Status = domain.StatusProvisioningFailed
+	olderTenant.CreatedAt = exactlyOneHourAgo.Add(-1 * time.Second)
+	err = db.WithContext(ctx).Create(toEntity(olderTenant)).Error
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", olderTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Tenant created 1 hour - 1 second ago (should be excluded)
+	newerTenant := newTestTenant("newer_tenant")
+	newerTenant.Status = domain.StatusProvisioningFailed
+	newerTenant.CreatedAt = exactlyOneHourAgo.Add(1 * time.Second)
+	err = db.WithContext(ctx).Create(toEntity(newerTenant)).Error
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", newerTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Query with cutoff exactly 1 hour ago
+	// created_at < cutoff means exact match is excluded
+	tenants, err := repo.ListByStatusOlderThan(ctx, domain.StatusProvisioningFailed, exactlyOneHourAgo)
+	require.NoError(t, err)
+
+	// Should only return the tenant that is strictly older (1h + 1s ago)
+	assert.Len(t, tenants, 1)
+	assert.Equal(t, "older_tenant", tenants[0].ID.String())
+}
+
+func TestRepository_ListByStatusOlderThan_MultipleStatuses(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	now := time.Now()
+	twoHoursAgo := now.Add(-2 * time.Hour)
+
+	// Create old tenants with different statuses
+	statuses := []domain.Status{
+		domain.StatusProvisioningFailed,
+		domain.StatusActive,
+		domain.StatusSuspended,
+		domain.StatusDeprovisioned,
+	}
+
+	for i, status := range statuses {
+		tenant := newTestTenant(fmt.Sprintf("tenant_%d", i))
+		tenant.Status = status
+		tenant.CreatedAt = twoHoursAgo
+		err := db.WithContext(ctx).Create(toEntity(tenant)).Error
+		require.NoError(t, err)
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+		require.NoError(t, err)
+	}
+
+	// Query for only failed tenants
+	cutoff := now.Add(-1 * time.Hour)
+	tenants, err := repo.ListByStatusOlderThan(ctx, domain.StatusProvisioningFailed, cutoff)
+	require.NoError(t, err)
+
+	// Should only return the provisioning_failed tenant
+	assert.Len(t, tenants, 1)
+	assert.Equal(t, domain.StatusProvisioningFailed, tenants[0].Status)
+}
+
+func TestRepository_ListByStatusOlderThan_OrderedByCreatedAt(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	now := time.Now()
+
+	// Create multiple old failed tenants in non-chronological order
+	timestamps := []time.Time{
+		now.Add(-3 * time.Hour),
+		now.Add(-5 * time.Hour),
+		now.Add(-2 * time.Hour),
+		now.Add(-4 * time.Hour),
+	}
+
+	for i, timestamp := range timestamps {
+		tenant := newTestTenant(fmt.Sprintf("tenant_%d", i))
+		tenant.Status = domain.StatusProvisioningFailed
+		tenant.CreatedAt = timestamp
+		err := db.WithContext(ctx).Create(toEntity(tenant)).Error
+		require.NoError(t, err)
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+		require.NoError(t, err)
+	}
+
+	// Query all failed tenants
+	cutoff := now.Add(-1 * time.Hour)
+	tenants, err := repo.ListByStatusOlderThan(ctx, domain.StatusProvisioningFailed, cutoff)
+	require.NoError(t, err)
+
+	// Verify results are ordered by updated_at ASC (oldest first)
+	assert.Len(t, tenants, 4)
+	assert.Equal(t, "tenant_1", tenants[0].ID.String()) // 5 hours ago (oldest)
+	assert.Equal(t, "tenant_3", tenants[1].ID.String()) // 4 hours ago
+	assert.Equal(t, "tenant_0", tenants[2].ID.String()) // 3 hours ago
+	assert.Equal(t, "tenant_2", tenants[3].ID.String()) // 2 hours ago (newest)
+}

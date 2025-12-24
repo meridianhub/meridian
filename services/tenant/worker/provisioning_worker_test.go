@@ -90,6 +90,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, *persistence.Repository) {
 			subdomain TEXT UNIQUE,
 			status TEXT NOT NULL,
 			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
 			deprovisioned_at DATETIME,
 			metadata TEXT,
 			version INTEGER NOT NULL DEFAULT 1,
