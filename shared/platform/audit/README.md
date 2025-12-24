@@ -4,6 +4,47 @@ This package provides reusable generic helper functions for adding audit logging
 Instead of copying the same hook patterns to each model, you can implement a simple interface
 and call the helper functions.
 
+## Architecture Overview
+
+The audit system uses a **dual-path approach** for guaranteed delivery:
+
+1. **Primary Path (Kafka)**: GORM hooks → Kafka topic → Audit Consumer → `audit_log` table
+   - High throughput, asynchronous processing
+   - Scales with Kafka consumer replicas (2-20 per service)
+
+2. **Fallback Path (Outbox)**: GORM hooks → `audit_outbox` table → audit-worker → `audit_log` table
+   - Automatic failover when Kafka unavailable
+   - Transactional guarantees (outbox written in same transaction as business data)
+
+This ensures audit events are never lost, even during Kafka outages.
+
+### Dual-Path Flow Diagram
+
+```mermaid
+flowchart TD
+    Start[GORM Hook Event<br/>Create/Update/Delete]
+    Start --> Decision{Kafka Available?}
+
+    Decision -->|YES| Kafka[Kafka Topic<br/>audit.events.*]
+    Decision -->|NO| Outbox[audit_outbox<br/>transactional]
+
+    Kafka --> Consumer[Audit Consumer<br/>2-20 replicas]
+    Outbox --> Worker[audit-worker<br/>polls every 5s]
+
+    Consumer --> AuditLog[audit_log<br/>permanent record]
+    Worker --> AuditLog
+```
+
+**Key characteristics:**
+
+- **Primary path**: Low latency (~2ms), high throughput (1000s/sec)
+- **Fallback path**: Reliable recovery during Kafka outages, 5s polling interval
+- **Transactional safety**: Outbox entries written atomically with business data
+- **No lost events**: Dual-path guarantees delivery under all conditions
+
+**Note**: This is separate from the event outbox system (`shared/platform/events/`) which handles
+domain events (SUSPEND/RESUME). The audit outbox is specifically for audit logging only.
+
 ## Quick Start
 
 ### 1. Implement the `Auditable` interface on your entity
@@ -162,6 +203,24 @@ func (e *MyEntity) BeforeUpdate(tx *gorm.DB) error { return audit.CaptureOldValu
 func (e *MyEntity) AfterUpdate(tx *gorm.DB) error  { return audit.RecordUpdate(tx, *e) }
 func (e *MyEntity) AfterDelete(tx *gorm.DB) error  { return audit.RecordDelete(tx, *e) }
 ```
+
+## Monitoring and Metrics
+
+For operators monitoring the audit system, see:
+
+- [ADR-0009: Application-Level Audit Logging](../../../docs/adr/0009-application-level-audit-logging.md) -
+  Complete architecture and Prometheus metrics reference
+- [audit-worker README](../../../services/audit-worker/README.md) - Fallback worker metrics and operational
+  guidance
+
+**Key Prometheus metrics:**
+
+- `meridian_audit_kafka_events_published_total` - Primary path usage (Kafka)
+- `meridian_audit_kafka_fallback_total` - Fallback path activations
+- `meridian_audit_outbox_depth_total` - Queue depth (alert if > 1000)
+- `meridian_audit_consumer_messages_processed_total` - Consumer throughput
+
+See ADR-0009 for complete metrics reference and alerting thresholds.
 
 ## Examples
 

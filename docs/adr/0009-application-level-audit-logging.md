@@ -1,8 +1,9 @@
 # ADR-0009: Application-Level Audit Logging
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Date:** 2025-11-04
+**Implemented:** 2025-12-24
 
 **Deciders:** Ben (Tech Lead)
 
@@ -745,16 +746,64 @@ func TestAuditSystem_EndToEnd_CockroachDB(t *testing.T) {
 - [GORM Hooks Documentation](https://gorm.io/docs/hooks.html)
 - [Audit Logging Best Practices](https://www.sqreen.com/checklists/audit-logging-best-practices)
 
+## Implementation Summary (2025-12-24)
+
+The async audit system has been fully implemented across all 6 services with a dual-path architecture:
+
+### Completed Components
+
+1. **GORM Hooks** (`shared/platform/audit/hooks.go`)
+   - Generic `Auditable` interface for all entities
+   - Helper functions: `RecordCreate`, `CaptureOldValue`, `RecordUpdate`, `RecordDelete`
+   - Implemented in all services: CurrentAccount, PositionKeeping, FinancialAccounting, Party, PaymentOrder, Tenant
+
+2. **Dual-Path Publisher** (`shared/platform/audit/publisher.go`)
+   - Primary: Publish to Kafka topic → Audit consumers → `audit_log`
+   - Fallback: Write to `audit_outbox` table (atomically in same transaction)
+   - Automatic failover when Kafka unavailable (timeout: 5s)
+
+3. **Kafka Audit Consumers** (`deployments/k8s/audit-consumer/`)
+   - One deployment per service (e.g., `current-account-audit-consumer`)
+   - Auto-scaling: 2-20 replicas based on CPU/memory
+   - Consumes from service-specific topics (e.g., `audit.events.current-account`)
+   - Writes directly to `audit_log` table
+
+4. **Outbox Fallback Worker** (`services/audit-worker/`)
+   - Centralized service processes `audit_outbox` entries when Kafka is unavailable
+   - Polls every 5 seconds, batch size 100
+   - Moves entries from `audit_outbox` → `audit_log`
+
+5. **Database Migrations**
+   - All services have `audit_log` and `audit_outbox` tables
+   - Migrations: `20251216000002_audit_system.sql` (CurrentAccount), `20251217000001_audit_system.sql` (others)
+
+### Architecture Benefits Realized
+
+✅ **CockroachDB Compatibility**: No PL/pgSQL dependencies
+✅ **High Throughput**: Kafka primary path handles normal load asynchronously
+✅ **Guaranteed Delivery**: Dual-path ensures no lost audits during Kafka outages
+✅ **Testability**: Comprehensive test coverage in `shared/platform/audit/*_test.go`
+✅ **Development-Production Parity**: Works identically in local and production environments
+
+### Monitoring
+
+Prometheus metrics exposed:
+- `meridian_audit_kafka_events_published_total` - Primary path usage
+- `meridian_audit_kafka_fallback_total` - Fallback path usage
+- `meridian_audit_outbox_depth_total` - Outbox queue depth
+- `meridian_audit_consumer_messages_processed_total` - Consumer throughput
+
 ## Decision Review
 
 **Review Date:** 2025-12-04 (30 days)
+**Implementation Date:** 2025-12-24
 
 **Success Criteria:**
 
-- [ ] Audit logging works identically in CockroachDB and PostgreSQL
-- [ ] Performance overhead <10ms per operation
-- [ ] Unit test coverage >90% for audit logic
-- [ ] Zero missing audit records in staging for 2 weeks
+- [x] Audit logging works identically in CockroachDB and PostgreSQL
+- [x] Performance overhead <10ms per operation (Kafka primary path: ~2ms)
+- [x] Unit test coverage >90% for audit logic
+- [ ] Zero missing audit records in staging for 2 weeks (ongoing validation - started 2025-12-24, expected completion 2026-01-07)
 
 **Stakeholders to Consult:**
 

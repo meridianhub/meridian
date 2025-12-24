@@ -1,19 +1,28 @@
 # audit-worker
 
-Platform service that processes audit log entries from the outbox table.
+**Fallback service** that processes audit log entries from the outbox table when Kafka is unavailable.
 
 ## Purpose
 
-The audit-worker implements the worker component of the
-[transactional outbox pattern][adr-0009] for audit logging. It:
+The audit-worker implements the **fallback path** of the dual-path audit system described in
+[ADR-0009][adr-0009]. Under normal operation, audit events flow through Kafka to dedicated audit consumers.
+When Kafka is unavailable (network partition, broker outage), GORM hooks automatically write to the `audit_outbox`
+table instead, and this worker:
 
 [adr-0009]: ../../docs/adr/0009-application-level-audit-logging.md
 
-1. Polls the `audit_outbox` table every 5 seconds
+**Note**: "Unavailable" refers to runtime detection of Kafka connectivity issues (5s timeout), not a configuration
+flag. There is no feature flag to enable/disable this worker - it is always running in production to process outbox
+entries written during Kafka outages.
+
+1. Polls the `audit_outbox` table every 5 seconds (for entries written during Kafka outages)
 2. Processes records in batches of 100
 3. Moves entries to the `audit_log` table
 4. Implements retry logic (max 3 retries)
 5. Exposes Prometheus metrics for monitoring
+
+**Normal flow**: GORM hooks → Kafka → Audit Consumers → `audit_log`
+**Fallback flow**: GORM hooks → `audit_outbox` → audit-worker → `audit_log`
 
 ## Endpoints
 
@@ -27,11 +36,27 @@ The audit-worker implements the worker component of the
 
 ## Metrics
 
+**Worker-specific metrics:**
+
 - `meridian_audit_worker_outbox_depth_total` - Current number of entries in outbox (gauge)
 - `meridian_audit_worker_outbox_processed_total` - Total entries processed (counter)
 - `meridian_audit_worker_outbox_failed_total` - Total entries failed (counter)
 - `meridian_audit_worker_processing_duration_seconds` - Batch processing duration (histogram)
 - `meridian_audit_worker_entry_age_seconds` - Age of entries when processed (histogram)
+
+**System-wide metrics** (for overall audit health):
+
+- `meridian_audit_kafka_events_published_total` - Primary path usage (Kafka)
+- `meridian_audit_kafka_fallback_total` - Fallback path activations
+- `meridian_audit_consumer_messages_processed_total` - Consumer throughput
+
+**Alerting thresholds:**
+
+- Alert if `outbox_depth_total` > 1000 for 5 minutes (indicates Kafka outage or worker lag)
+- Alert if `entry_age_seconds` p99 > 60s (indicates processing delays)
+
+See [ADR-0009](../../docs/adr/0009-application-level-audit-logging.md) for complete Prometheus metrics
+reference and monitoring strategy.
 
 ## Configuration
 
