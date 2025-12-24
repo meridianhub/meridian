@@ -27,20 +27,20 @@ CREATE TABLE IF NOT EXISTS audit_log (
     table_name VARCHAR(100) NOT NULL,
     operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
 
-    -- Record identification (use UUID or VARCHAR(50) based on your ID type)
-    record_id UUID NOT NULL,
+    -- Record identification (VARCHAR to support both UUID and string IDs)
+    record_id VARCHAR(50) NOT NULL,
 
     -- Change metadata
     changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     changed_by VARCHAR(100),
 
-    -- Change details (JSONB for efficient querying)
-    old_values JSONB,
-    new_values JSONB,
+    -- Change details (TEXT for compatibility with shared audit types)
+    old_values TEXT,
+    new_values TEXT,
 
     -- Additional context
     transaction_id VARCHAR(100),
-    client_ip INET,
+    client_ip VARCHAR(45),
     user_agent TEXT
 );
 
@@ -59,12 +59,12 @@ CREATE TABLE IF NOT EXISTS audit_outbox (
     table_name VARCHAR(100) NOT NULL,
     operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
 
-    -- Record identification
-    record_id UUID NOT NULL,
+    -- Record identification (VARCHAR to support both UUID and string IDs)
+    record_id VARCHAR(50) NOT NULL,
 
-    -- Change details
-    old_values JSONB,
-    new_values JSONB,
+    -- Change details (TEXT for compatibility with shared audit types)
+    old_values TEXT,
+    new_values TEXT,
 
     -- Processing status (MUST include 'completed')
     status VARCHAR(20) NOT NULL DEFAULT 'pending'
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS audit_outbox (
     -- Additional context
     changed_by VARCHAR(100),
     transaction_id VARCHAR(100),
-    client_ip INET,
+    client_ip VARCHAR(45),
     user_agent TEXT
 );
 
@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS audit_outbox (
 CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created ON audit_outbox(status, created_at);
 
 -- Optional: Create helper view for audit queries
+-- Note: Uses TEXT columns, cast to JSONB only when valid JSON format
 CREATE OR REPLACE VIEW change_summary AS
 SELECT
     id,
@@ -93,19 +94,27 @@ SELECT
     changed_at,
     changed_by,
     CASE
-        WHEN operation = 'UPDATE' AND new_values IS NOT NULL AND old_values IS NOT NULL THEN
-            (SELECT json_object_agg(key, value)
-             FROM jsonb_each(new_values)
-             WHERE new_values->key IS DISTINCT FROM old_values->key)
+        WHEN operation = 'UPDATE'
+             AND new_values IS NOT NULL
+             AND new_values != ''
+             AND new_values ~ '^{.*}$' THEN
+            COALESCE(
+                (SELECT json_object_agg(key, value)
+                 FROM jsonb_each(new_values::jsonb)
+                 WHERE (old_values IS NULL
+                        OR old_values = ''
+                        OR NOT (old_values ~ '^{.*}$')
+                        OR (old_values ~ '^{.*}$'
+                            AND new_values::jsonb->key IS DISTINCT FROM old_values::jsonb->key
+                        ))),
+                '{}'::json
+            )
         ELSE NULL
     END AS changed_fields,
     transaction_id
 FROM audit_log
 ORDER BY changed_at DESC;
 ```
-
-**Important:** If your service uses string IDs instead of UUIDs (e.g., tenant service),
-change `record_id UUID` to `record_id VARCHAR(50)`.
 
 ## Step 2: Implement Auditable Interface on Entities
 
