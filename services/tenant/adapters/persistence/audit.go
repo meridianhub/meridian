@@ -2,66 +2,9 @@
 package persistence
 
 import (
-	"time"
-
-	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"gorm.io/gorm"
 )
-
-// TenantAuditOutbox represents an audit record waiting to be processed by the background worker.
-// Records are written to the outbox within the same transaction as the business operation,
-// ensuring atomicity and preventing lost audit records.
-//
-// Note: This is a service-specific type kept for backward compatibility with existing migrations.
-// Uses string IDs (varchar(50)) for record_id since tenants use string IDs.
-type TenantAuditOutbox struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	Table         string    `gorm:"column:table_name;type:varchar(100);not null;index" json:"table_name"`
-	Operation     string    `gorm:"type:varchar(10);not null;index" json:"operation"` // INSERT, UPDATE, DELETE
-	RecordID      string    `gorm:"type:varchar(50);not null;index" json:"record_id"` // String ID for tenant compatibility
-	OldValues     string    `gorm:"type:jsonb" json:"old_values,omitempty"`           // JSON representation of old values
-	NewValues     string    `gorm:"type:jsonb" json:"new_values,omitempty"`           // JSON representation of new values
-	Status        string    `gorm:"type:varchar(20);not null;default:'pending';index" json:"status"`
-	CreatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
-	RetryCount    int       `gorm:"not null;default:0" json:"retry_count"`
-	LastError     *string   `gorm:"type:text" json:"last_error,omitempty"`
-	ChangedBy     *string   `gorm:"type:varchar(100)" json:"changed_by,omitempty"`
-	TransactionID *string   `gorm:"type:varchar(100)" json:"transaction_id,omitempty"`
-	ClientIP      *string   `gorm:"type:varchar(45)" json:"client_ip,omitempty"`
-	UserAgent     *string   `gorm:"type:text" json:"user_agent,omitempty"`
-}
-
-// TableName overrides the table name for TenantAuditOutbox.
-// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
-func (TenantAuditOutbox) TableName() string {
-	return "audit_outbox"
-}
-
-// TenantAuditLog represents a permanent audit log entry.
-// Records are moved from the audit_outbox to audit_log by the background worker.
-// Once written, audit log entries are immutable and provide a permanent audit trail.
-//
-// Note: Uses string IDs (varchar(50)) for record_id since tenants use string IDs.
-type TenantAuditLog struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	Table         string    `gorm:"column:table_name;type:varchar(100);not null;index" json:"table_name"`
-	Operation     string    `gorm:"type:varchar(10);not null;index" json:"operation"` // INSERT, UPDATE, DELETE
-	RecordID      string    `gorm:"type:varchar(50);not null;index" json:"record_id"` // String ID for tenant compatibility
-	OldValues     string    `gorm:"type:jsonb" json:"old_values,omitempty"`           // JSON representation of old values
-	NewValues     string    `gorm:"type:jsonb" json:"new_values,omitempty"`           // JSON representation of new values
-	ChangedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"changed_at"`
-	ChangedBy     *string   `gorm:"type:varchar(100)" json:"changed_by,omitempty"`
-	TransactionID *string   `gorm:"type:varchar(100)" json:"transaction_id,omitempty"`
-	ClientIP      *string   `gorm:"type:varchar(45)" json:"client_ip,omitempty"`
-	UserAgent     *string   `gorm:"type:text" json:"user_agent,omitempty"`
-}
-
-// TableName overrides the table name for TenantAuditLog.
-// Uses singular unqualified name to allow PostgreSQL search_path to route queries.
-func (TenantAuditLog) TableName() string {
-	return "audit_log"
-}
 
 // AfterCreate is a GORM hook that runs after INSERT operations on TenantEntity.
 // It writes an audit outbox entry with the new tenant data.
