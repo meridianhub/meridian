@@ -42,16 +42,17 @@ const (
 	// Shared constants - also defined in lien_service.go:
 	// opStatusAccountNotFound, opStatusRetrieveFailed, opStatusCurrencyMismatch,
 	// opStatusInvalidAmount, opStatusSaveFailed, opStatusInsufficientFunds
-	opStatusAmountOverflow      = "amount_overflow"
-	opStatusAccountFrozen       = "account_frozen"
-	opStatusAccountClosed       = "account_closed"
-	opStatusMissingAccountID    = "missing_account_id"
-	opStatusMissingAmount       = "missing_amount"
-	opStatusMissingWithdrawalID = "missing_withdrawal_id"
-	opStatusMissingIdentifier   = "missing_identifier"
-	opStatusNotImplemented      = "not_implemented"
-	opStatusWithdrawalFailed    = "withdrawal_failed"
-	opStatusSagaFailed          = "saga_failed"
+	opStatusAmountOverflow          = "amount_overflow"
+	opStatusAccountFrozen           = "account_frozen"
+	opStatusAccountClosed           = "account_closed"
+	opStatusMissingAccountID        = "missing_account_id"
+	opStatusMissingAmount           = "missing_amount"
+	opStatusMissingWithdrawalID     = "missing_withdrawal_id"
+	opStatusMissingIdentifier       = "missing_identifier"
+	opStatusNotImplemented          = "not_implemented"
+	opStatusWithdrawalFailed        = "withdrawal_failed"
+	opStatusSagaFailed              = "saga_failed"
+	opStatusInvalidStatusTransition = "invalid_status_transition"
 )
 
 // Redis idempotency constants
@@ -1189,4 +1190,289 @@ func mapCurrency(currency commonpb.Currency) string {
 	default:
 		return ""
 	}
+}
+
+// UpdateCurrentAccount modifies account configuration settings.
+// BIAN: Update Control Record (UpCR) - Updates overdraft settings.
+// Uses optimistic locking to prevent lost updates from concurrent modifications.
+func (s *Service) UpdateCurrentAccount(ctx context.Context, req *pb.UpdateCurrentAccountRequest) (*pb.UpdateCurrentAccountResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("update_account", operationStatus, time.Since(start))
+	}()
+
+	// Validate required fields
+	if req.AccountId == "" {
+		operationStatus = opStatusMissingAccountID
+		return nil, status.Error(codes.InvalidArgument, "account_id is required")
+	}
+
+	// Retrieve account (context carries organization for multi-tenant routing)
+	account, err := s.repo.FindByID(ctx, req.AccountId)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+		}
+		operationStatus = opStatusRetrieveFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	// Check if account is closed - cannot update closed accounts
+	if account.Status() == domain.AccountStatusClosed {
+		operationStatus = opStatusAccountClosed
+		return nil, status.Errorf(codes.FailedPrecondition, "cannot update closed account: %s", req.AccountId)
+	}
+
+	// Track if any updates were made
+	updated := false
+
+	// Apply overdraft settings updates if any overdraft fields are provided
+	if req.OverdraftLimit != nil || req.OverdraftEnabled != nil || req.OverdraftRate != nil {
+		// Determine new overdraft values, using current values as defaults
+		newLimit := account.OverdraftLimit()
+		newRate := account.OverdraftRate()
+		newEnabled := account.OverdraftEnabled()
+
+		// Apply overdraft limit if provided
+		if req.OverdraftLimit != nil {
+			limitCurrency := req.OverdraftLimit.Amount.CurrencyCode
+			if limitCurrency != account.Balance().CurrencyCode() {
+				operationStatus = opStatusCurrencyMismatch
+				return nil, status.Errorf(codes.InvalidArgument,
+					"overdraft limit currency mismatch: expected %s, got %s",
+					account.Balance().CurrencyCode(), limitCurrency)
+			}
+
+			// Convert to minor units
+			limitCents := req.OverdraftLimit.Amount.Units*100 + int64(req.OverdraftLimit.Amount.Nanos/10000000)
+			var err error
+			newLimit, err = domain.NewMoney(limitCurrency, limitCents)
+			if err != nil {
+				operationStatus = operationStatusInvalidCurrency
+				return nil, status.Errorf(codes.InvalidArgument, "invalid overdraft limit: %v", err)
+			}
+		}
+
+		// Apply overdraft rate if provided
+		if req.OverdraftRate != nil {
+			newRate = *req.OverdraftRate
+		}
+
+		// Apply overdraft enabled if provided
+		if req.OverdraftEnabled != nil {
+			newEnabled = *req.OverdraftEnabled
+		}
+
+		// Use domain method to update overdraft settings with validation
+		account, err = account.UpdateOverdraftSettings(newLimit, newRate, newEnabled)
+		if err != nil {
+			if errors.Is(err, domain.ErrNegativeOverdraftRate) {
+				operationStatus = opStatusInvalidAmount
+				return nil, status.Errorf(codes.InvalidArgument, "invalid overdraft rate: %v", err)
+			}
+			operationStatus = "update_overdraft_failed"
+			return nil, status.Errorf(codes.InvalidArgument, "failed to update overdraft settings: %v", err)
+		}
+		updated = true
+
+		s.logger.Info("overdraft settings updated",
+			"account_id", req.AccountId,
+			"overdraft_enabled", newEnabled,
+			"overdraft_rate", newRate)
+	}
+
+	// If no updates were made, return current state
+	if !updated {
+		s.logger.Debug("no changes to apply for UpdateCurrentAccount",
+			"account_id", req.AccountId)
+		return &pb.UpdateCurrentAccountResponse{
+			Facility: toProtoFacility(account),
+			Version:  account.Version(),
+		}, nil
+	}
+
+	// Persist with optimistic locking
+	if err := s.repo.Save(ctx, account); err != nil {
+		if errors.Is(err, persistence.ErrVersionConflict) {
+			operationStatus = "version_conflict"
+			s.logger.Warn("version conflict during account update",
+				"account_id", req.AccountId)
+			return nil, status.Errorf(codes.Aborted, "version conflict: account was modified by another transaction, please retry")
+		}
+		operationStatus = opStatusSaveFailed
+		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
+	}
+
+	s.logger.Info("account updated successfully",
+		"account_id", req.AccountId,
+		"new_version", account.Version())
+
+	return &pb.UpdateCurrentAccountResponse{
+		Facility: toProtoFacility(account),
+		Version:  account.Version(),
+	}, nil
+}
+
+// ControlCurrentAccount performs lifecycle state transitions on an account.
+// BIAN: Control Control Record (CoCR) - Freeze, Unfreeze, or Close accounts.
+// All control actions are logged with timestamps and reasons for audit compliance.
+//
+// State transitions:
+//   - FREEZE: ACTIVE → FROZEN (requires reason of at least 10 characters)
+//   - UNFREEZE: FROZEN → ACTIVE
+//   - CLOSE: ACTIVE or FROZEN → CLOSED (requires zero balance and no active liens)
+func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurrentAccountRequest) (*pb.ControlCurrentAccountResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("control_account", operationStatus, time.Since(start))
+	}()
+
+	// Validate required fields
+	if req.AccountId == "" {
+		operationStatus = opStatusMissingAccountID
+		return nil, status.Error(codes.InvalidArgument, "account_id is required")
+	}
+
+	// Retrieve account
+	account, err := s.repo.FindByID(ctx, req.AccountId)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+		}
+		operationStatus = opStatusRetrieveFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	actionTimestamp := time.Now()
+
+	// Apply control action based on the action type
+	switch req.ControlAction {
+	case pb.ControlAction_CONTROL_ACTION_FREEZE:
+		// Validate reason length (domain layer also validates, but we provide clearer error message)
+		if len(req.Reason) < 10 {
+			operationStatus = "invalid_freeze_reason"
+			return nil, status.Errorf(codes.InvalidArgument, "freeze reason must be at least 10 characters, got %d", len(req.Reason))
+		}
+
+		account, err = account.Freeze(req.Reason)
+		if err != nil {
+			if errors.Is(err, domain.ErrInvalidStatusTransition) {
+				operationStatus = opStatusInvalidStatusTransition
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot freeze account in status %s: only ACTIVE accounts can be frozen", account.Status())
+			}
+			if errors.Is(err, domain.ErrInvalidFreezeReason) {
+				operationStatus = "invalid_freeze_reason"
+				return nil, status.Errorf(codes.InvalidArgument, "freeze reason must be at least 10 characters")
+			}
+			operationStatus = "freeze_failed"
+			return nil, status.Errorf(codes.Internal, "failed to freeze account: %v", err)
+		}
+
+		s.logger.Info("account frozen",
+			"account_id", req.AccountId,
+			"reason", req.Reason)
+
+	case pb.ControlAction_CONTROL_ACTION_UNFREEZE:
+		account, err = account.Unfreeze()
+		if err != nil {
+			if errors.Is(err, domain.ErrInvalidStatusTransition) {
+				operationStatus = opStatusInvalidStatusTransition
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot unfreeze account in status %s: only FROZEN accounts can be unfrozen", account.Status())
+			}
+			operationStatus = "unfreeze_failed"
+			return nil, status.Errorf(codes.Internal, "failed to unfreeze account: %v", err)
+		}
+
+		s.logger.Info("account unfrozen",
+			"account_id", req.AccountId)
+
+	case pb.ControlAction_CONTROL_ACTION_CLOSE:
+		// Validate balance is zero before attempting close
+		if !account.Balance().IsZero() {
+			operationStatus = "non_zero_balance"
+			balanceCents, _ := account.Balance().ToMinorUnits()
+			return nil, status.Errorf(codes.FailedPrecondition, "cannot close account with non-zero balance: %d cents", balanceCents)
+		}
+
+		// Check for active liens (requires lienRepo)
+		if s.lienRepo != nil {
+			activeLienCount, err := s.lienRepo.CountActiveByAccountID(ctx, account.ID())
+			if err != nil {
+				operationStatus = "lien_check_failed"
+				s.logger.Error("failed to check active liens for account close",
+					"account_id", req.AccountId,
+					"error", err)
+				return nil, status.Errorf(codes.Internal, "failed to check active liens: %v", err)
+			}
+			if activeLienCount > 0 {
+				operationStatus = "active_liens_exist"
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot close account with %d active liens", activeLienCount)
+			}
+		}
+
+		// Attempt to close via domain
+		account, err = account.Close()
+		if err != nil {
+			if errors.Is(err, domain.ErrInvalidStatusTransition) {
+				operationStatus = opStatusInvalidStatusTransition
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot close account in status %s: account is already closed", account.Status())
+			}
+			if errors.Is(err, domain.ErrNonZeroBalance) {
+				operationStatus = "non_zero_balance"
+				return nil, status.Errorf(codes.FailedPrecondition, "cannot close account with non-zero balance")
+			}
+			operationStatus = "close_failed"
+			return nil, status.Errorf(codes.Internal, "failed to close account: %v", err)
+		}
+
+		s.logger.Info("account closed",
+			"account_id", req.AccountId,
+			"reason", req.Reason)
+
+	case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		operationStatus = "unspecified_action"
+		return nil, status.Error(codes.InvalidArgument, "control_action is required and cannot be UNSPECIFIED")
+
+	default:
+		operationStatus = "unknown_action"
+		return nil, status.Errorf(codes.InvalidArgument, "unknown control action: %v", req.ControlAction)
+	}
+
+	// Persist with optimistic locking
+	if err := s.repo.Save(ctx, account); err != nil {
+		if errors.Is(err, persistence.ErrVersionConflict) {
+			operationStatus = "version_conflict"
+			s.logger.Warn("version conflict during control action",
+				"account_id", req.AccountId,
+				"action", req.ControlAction.String())
+			return nil, status.Errorf(codes.Aborted, "version conflict: account was modified by another transaction, please retry")
+		}
+		operationStatus = opStatusSaveFailed
+		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
+	}
+
+	// TODO: Emit Kafka events for account lifecycle changes
+	// Events to emit based on action:
+	// - FREEZE: account.frozen with reason and timestamp
+	// - UNFREEZE: account.unfrozen with timestamp
+	// - CLOSE: account.closed with reason and timestamp
+	// This requires Kafka producer integration (future task)
+
+	// TODO: Emit webhook notifications for FREEZE and CLOSE actions (regulatory compliance)
+	// This requires webhook integration (future task)
+
+	s.logger.Info("control action executed successfully",
+		"account_id", req.AccountId,
+		"action", req.ControlAction.String(),
+		"new_status", account.Status(),
+		"new_version", account.Version())
+
+	return &pb.ControlCurrentAccountResponse{
+		Facility:        toProtoFacility(account),
+		ActionTimestamp: timestamppb.New(actionTimestamp),
+	}, nil
 }
