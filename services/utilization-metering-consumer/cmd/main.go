@@ -105,7 +105,14 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Position Keeping client
 	logger.Info("initializing position keeping client", "endpoint", config.PositionKeepingEndpoint)
-	pkClient, err := grpc.NewPositionKeepingClient(config.PositionKeepingEndpoint)
+	pkClient, err := grpc.NewPositionKeepingClient(&grpc.ClientConfig{
+		ServiceName:    "position-keeping",
+		Namespace:      getEnvOrDefault("K8S_NAMESPACE", "default"),
+		Port:           50053, // Position Keeping service port
+		Timeout:        10 * time.Second,
+		Logger:         logger,
+		SimulationMode: true, // TODO: Set to false when RecordMeasurement endpoint exists
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create position keeping client: %w", err)
 	}
@@ -184,4 +191,13 @@ func run(logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+// getEnvOrDefault returns the value of an environment variable or a default value.
+func getEnvOrDefault(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }
