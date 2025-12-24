@@ -20,39 +20,19 @@ This ensures audit events are never lost, even during Kafka outages.
 
 ### Dual-Path Flow Diagram
 
-```text
-                                    ┌─────────────────────┐
-                                    │   GORM Hook Event   │
-                                    │  (Create/Update/    │
-                                    │      Delete)        │
-                                    └──────────┬──────────┘
-                                               │
-                                               ▼
-                                    ┌──────────────────────┐
-                                    │   Kafka Available?   │
-                                    └──────────┬───────────┘
-                                               │
-                        ┌──────────────────────┴──────────────────────┐
-                        │                                             │
-                   YES  ▼                                        NO   ▼
-         ┌──────────────────────┐                    ┌──────────────────────┐
-         │   Kafka Topic        │                    │   audit_outbox       │
-         │  audit.events.*      │                    │   (transactional)    │
-         └──────────┬───────────┘                    └──────────┬───────────┘
-                    │                                           │
-                    ▼                                           ▼
-         ┌──────────────────────┐                    ┌──────────────────────┐
-         │  Audit Consumer      │                    │   audit-worker       │
-         │  (2-20 replicas)     │                    │  (polls every 5s)    │
-         └──────────┬───────────┘                    └──────────┬───────────┘
-                    │                                           │
-                    └──────────────────┬────────────────────────┘
-                                       │
-                                       ▼
-                            ┌──────────────────────┐
-                            │     audit_log        │
-                            │  (permanent record)  │
-                            └──────────────────────┘
+```mermaid
+flowchart TD
+    Start[GORM Hook Event<br/>Create/Update/Delete]
+    Start --> Decision{Kafka Available?}
+
+    Decision -->|YES| Kafka[Kafka Topic<br/>audit.events.*]
+    Decision -->|NO| Outbox[audit_outbox<br/>transactional]
+
+    Kafka --> Consumer[Audit Consumer<br/>2-20 replicas]
+    Outbox --> Worker[audit-worker<br/>polls every 5s]
+
+    Consumer --> AuditLog[audit_log<br/>permanent record]
+    Worker --> AuditLog
 ```
 
 **Key characteristics:**
