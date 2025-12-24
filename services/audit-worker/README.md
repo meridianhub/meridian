@@ -1,19 +1,23 @@
 # audit-worker
 
-Platform service that processes audit log entries from the outbox table.
+**Fallback service** that processes audit log entries from the outbox table when Kafka is unavailable.
 
 ## Purpose
 
-The audit-worker implements the worker component of the
-[transactional outbox pattern][adr-0009] for audit logging. It:
+The audit-worker implements the **fallback path** of the dual-path audit system described in
+[ADR-0009][adr-0009]. Under normal operation, audit events flow through Kafka to dedicated audit consumers.
+When Kafka is unavailable or disabled, GORM hooks write to the `audit_outbox` table, and this worker:
 
 [adr-0009]: ../../docs/adr/0009-application-level-audit-logging.md
 
-1. Polls the `audit_outbox` table every 5 seconds
+1. Polls the `audit_outbox` table every 5 seconds (for entries written during Kafka outages)
 2. Processes records in batches of 100
 3. Moves entries to the `audit_log` table
 4. Implements retry logic (max 3 retries)
 5. Exposes Prometheus metrics for monitoring
+
+**Normal flow**: GORM hooks → Kafka → Audit Consumers → `audit_log`
+**Fallback flow**: GORM hooks → `audit_outbox` → audit-worker → `audit_log`
 
 ## Endpoints
 

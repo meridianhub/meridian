@@ -20,7 +20,13 @@ Date: 2025-12-18
 
 ## Status
 
-Proposed
+Superseded
+
+**Note:** This ADR proposed per-service embedded workers. The actual implementation (2025-12-24) uses a dual-path approach:
+- **Primary path**: Kafka audit consumers (one deployment per service, deployed separately)
+- **Fallback path**: Centralized audit-worker service processes outbox when Kafka unavailable
+
+See implementation details in ADR-0009 and `/services/README.md`.
 
 ## Context
 

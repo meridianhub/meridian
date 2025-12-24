@@ -237,34 +237,39 @@ Aggregated health endpoints check:
 
 ## Cross-Cutting Concerns
 
-### Audit Outbox Pattern
+### Async Audit System
 
-The transactional outbox pattern provides guaranteed audit logging with eventual delivery.
+The async audit system provides guaranteed audit logging with dual-path delivery (Kafka primary, outbox fallback).
 See [ADR-0009](../docs/adr/0009-application-level-audit-logging.md) for architecture rationale.
 
 **Implementation Status:**
 
-| Service | Audit Schema | Outbox Table | GORM Hooks | Worker |
-|---------|:------------:|:------------:|:----------:|:------:|
-| CurrentAccount | ✅ | ✅ | ❌ | ❌ |
-| PositionKeeping | ✅ (per-aggregate) | ❌ | ❌ | ❌ |
-| FinancialAccounting | ❌ | ❌ | ❌ | ❌ |
-| Party | ❌ | ❌ | ❌ | ❌ |
-| PaymentOrder | ❌ | ❌ | ❌ | ❌ |
-| Tenant | ❌ | ❌ | ❌ | ❌ |
+| Service | Audit Tables | GORM Hooks | Kafka Publisher | Audit Consumer |
+|---------|:------------:|:----------:|:---------------:|:--------------:|
+| CurrentAccount | ✅ | ✅ | ✅ | ✅ |
+| PositionKeeping | ✅ | ✅ | ✅ | ✅ |
+| FinancialAccounting | ✅ | ✅ | ✅ | ✅ |
+| Party | ✅ | ✅ | ✅ | ✅ |
+| PaymentOrder | ✅ | ✅ | ✅ | ✅ |
+| Tenant | ✅ | ✅ | ✅ | ✅ |
 
-**Pattern Components:**
+**Architecture Components:**
 
-1. **Audit Schema**: Dedicated `{service}_audit` schema with `audit_log` table
-2. **Outbox Table**: `audit_outbox` table written atomically with business transaction
-3. **GORM Hooks**: `AfterCreate`, `BeforeUpdate`, `AfterUpdate`, `AfterDelete` hooks
-4. **Worker**: The `audit-worker` service polls the outbox and moves entries to `audit_log`
+1. **Audit Tables**: `audit_log` (permanent trail) and `audit_outbox` (fallback queue)
+2. **GORM Hooks**: `AfterCreate`, `BeforeUpdate`, `AfterUpdate`, `AfterDelete` hooks capture changes
+3. **Dual-Path Delivery**:
+   - **Primary**: Publish audit event to Kafka → Audit Consumer → `audit_log` table
+   - **Fallback**: Write to `audit_outbox` table → audit-worker → `audit_log` table
+4. **Kafka Topics**: Per-service audit event topics (e.g., `audit.events.current-account`)
+5. **Audit Consumers**: One Kafka consumer deployment per service (auto-scaling 2-20 replicas)
+6. **Audit Worker**: Centralized service processes outbox entries when Kafka unavailable
 
 **Key Guarantees:**
 
-- Atomicity: Audit intent committed with business operation
-- No lost audits: Outbox survives application crashes
-- Idempotency: Retry-safe processing without duplicates
+- **High Throughput**: Kafka primary path handles normal load asynchronously
+- **Atomicity**: Outbox fallback committed with business operation (same transaction)
+- **No Lost Audits**: Dual-path ensures delivery even during Kafka outages
+- **Eventual Consistency**: Audit records appear in `audit_log` within ~100ms
 
 ## Service Directory Structure
 

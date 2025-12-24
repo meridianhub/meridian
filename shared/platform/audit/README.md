@@ -4,6 +4,20 @@ This package provides reusable generic helper functions for adding audit logging
 Instead of copying the same hook patterns to each model, you can implement a simple interface
 and call the helper functions.
 
+## Architecture Overview
+
+The audit system uses a **dual-path approach** for guaranteed delivery:
+
+1. **Primary Path (Kafka)**: GORM hooks → Kafka topic → Audit Consumer → `audit_log` table
+   - High throughput, asynchronous processing
+   - Scales with Kafka consumer replicas (2-20 per service)
+
+2. **Fallback Path (Outbox)**: GORM hooks → `audit_outbox` table → audit-worker → `audit_log` table
+   - Automatic failover when Kafka unavailable
+   - Transactional guarantees (outbox written in same transaction as business data)
+
+This ensures audit events are never lost, even during Kafka outages.
+
 ## Quick Start
 
 ### 1. Implement the `Auditable` interface on your entity
