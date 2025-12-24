@@ -13,6 +13,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/services/party/domain"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -434,8 +435,14 @@ func (s *Service) ControlParty(ctx context.Context, req *pb.ControlPartyRequest)
 		return nil, status.Errorf(codes.FailedPrecondition, "invalid status transition: %v", err)
 	}
 
-	// Persist updated party
-	if err := s.repo.Save(ctx, party); err != nil {
+	// Set actor_id in context for audit trail if provided
+	saveCtx := ctx
+	if req.ActorId != "" {
+		saveCtx = context.WithValue(ctx, auth.UserIDContextKey, req.ActorId)
+	}
+
+	// Persist updated party (actor_id captured in audit via context)
+	if err := s.repo.Save(saveCtx, party); err != nil {
 		s.logger.Error("failed to save party after control action", "party_id", req.PartyId, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to save party: %v", err)
 	}
@@ -472,7 +479,11 @@ func protoToControlAction(action pb.ControlAction) (domain.ControlAction, error)
 	}
 }
 
-// UpdateReference updates party reference data
+// UpdateReference adds party reference data.
+// NOTE: This method creates new reference records rather than updating existing ones.
+// Multiple references of the same type (e.g., multiple passports) are allowed.
+// To implement true update-or-insert behavior, a unique constraint on
+// (party_id, reference_type) would be needed.
 func (s *Service) UpdateReference(ctx context.Context, req *pb.UpdateReferenceRequest) (*pb.UpdateReferenceResponse, error) {
 	partyID, err := uuid.Parse(req.PartyId)
 	if err != nil {
@@ -606,6 +617,9 @@ func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAsso
 	associationID, err := s.repo.SaveAssociation(ctx, partyID, relatedPartyID, relationshipType)
 	if err != nil {
 		s.logger.Error("failed to save association", "party_id", req.PartyId, "error", err)
+		if errors.Is(err, persistence.ErrAssociationExists) {
+			return nil, status.Errorf(codes.AlreadyExists, "association already exists between parties")
+		}
 		return nil, status.Errorf(codes.Internal, "failed to save association: %v", err)
 	}
 

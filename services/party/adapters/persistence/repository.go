@@ -17,9 +17,10 @@ import (
 
 // Repository errors
 var (
-	ErrPartyNotFound   = errors.New("party not found")
-	ErrPartyExists     = errors.New("party already exists")
-	ErrVersionConflict = errors.New("version conflict: party was modified by another transaction")
+	ErrPartyNotFound     = errors.New("party not found")
+	ErrPartyExists       = errors.New("party already exists")
+	ErrVersionConflict   = errors.New("version conflict: party was modified by another transaction")
+	ErrAssociationExists = errors.New("association already exists between parties")
 )
 
 // toJSONB prepares a string for JSONB storage.
@@ -410,7 +411,8 @@ func isDuplicateKeyError(err error) bool {
 		strings.Contains(errStr, "unique constraint")
 }
 
-// SaveAssociation saves a party association
+// SaveAssociation saves a party association.
+// Returns ErrAssociationExists if an association already exists between the parties.
 func (r *Repository) SaveAssociation(ctx context.Context, partyID, relatedPartyID uuid.UUID, relationshipType string) (uuid.UUID, error) {
 	associationID := uuid.New()
 	entity := &PartyAssociationEntity{
@@ -426,6 +428,9 @@ func (r *Repository) SaveAssociation(ctx context.Context, partyID, relatedPartyI
 		return tx.Create(entity).Error
 	})
 	if err != nil {
+		if isDuplicateKeyError(err) {
+			return uuid.Nil, ErrAssociationExists
+		}
 		return uuid.Nil, err
 	}
 	return associationID, nil
