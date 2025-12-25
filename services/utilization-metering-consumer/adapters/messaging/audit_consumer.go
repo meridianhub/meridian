@@ -110,6 +110,9 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 		"table", event.TableName,
 		"operation", event.Operation.String())
 
+	// Record event consumption metric
+	domain.RecordEventConsumed(event.SchemaName, "audit.events")
+
 	// Transform audit event to utilization measurement
 	measurement, err := ac.transformer.Transform(event)
 	if err != nil {
@@ -128,6 +131,10 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 	if err := ac.pkClient.RecordMeasurement(ctx, measurement); err != nil {
 		return fmt.Errorf("failed to record measurement: %w", err)
 	}
+
+	// Record successful measurement metric
+	// Note: Using UnitOfMeasure as a proxy for asset code in metrics
+	domain.RecordMeasurementRecorded(measurement.ServiceName, measurement.UnitOfMeasure)
 
 	ac.logger.InfoContext(ctx, "successfully recorded utilization measurement",
 		"event_id", event.EventId,

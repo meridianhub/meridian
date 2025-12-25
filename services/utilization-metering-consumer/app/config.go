@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/google/uuid"
 )
 
 // Configuration validation errors
@@ -72,9 +74,9 @@ func LoadConfig() (*Config, error) {
 		return nil, ErrTenantZeroIDRequired
 	}
 
-	// Validate tenant zero ID format (basic UUID check)
-	if len(config.TenantZeroID) != 36 || config.TenantZeroID[8] != '-' || config.TenantZeroID[13] != '-' {
-		return nil, fmt.Errorf("%w: got %s", ErrTenantZeroIDRequired, config.TenantZeroID)
+	// Validate tenant zero ID format using proper UUID parsing
+	if _, err := uuid.Parse(config.TenantZeroID); err != nil {
+		return nil, fmt.Errorf("invalid TENANT_ZERO_ID UUID format: %w", err)
 	}
 
 	return config, nil

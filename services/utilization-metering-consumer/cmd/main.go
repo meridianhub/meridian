@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -51,8 +52,6 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	_ = context.Background() // Reserved for future use with observability
-
 	// Load configuration
 	config, err := app.LoadConfig()
 	if err != nil {
@@ -66,6 +65,15 @@ func run(logger *slog.Logger) error {
 		"position_keeping_endpoint", config.PositionKeepingEndpoint,
 		"tenant_zero_id", config.TenantZeroID)
 
+	// Create readiness tracker
+	type readinessState struct {
+		consumerInitialized bool
+	}
+	var (
+		readiness   = &readinessState{}
+		readinessMu = &sync.RWMutex{}
+	)
+
 	// Create HTTP server for health checks and metrics
 	httpMux := http.NewServeMux()
 
@@ -76,7 +84,13 @@ func run(logger *slog.Logger) error {
 	})
 
 	httpMux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
-		// TODO: Check consumer readiness once implemented
+		readinessMu.RLock()
+		defer readinessMu.RUnlock()
+		if !readiness.consumerInitialized {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("NOT_READY"))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("READY"))
 	})
@@ -147,6 +161,11 @@ func run(logger *slog.Logger) error {
 			logger.Error("failed to close audit consumer", "error", err)
 		}
 	}()
+
+	// Mark consumer as initialized for readiness probe
+	readinessMu.Lock()
+	readiness.consumerInitialized = true
+	readinessMu.Unlock()
 
 	// Start consuming in background
 	consumerErrors := make(chan error, 1)
