@@ -1,6 +1,6 @@
 # Meridian API Gateway Ingress
 # Provides wildcard subdomain routing for multi-tenant access
-# Routes *.api.meridianhub.cloud and api.meridianhub.cloud to gateway-service
+# Routes *.api.meridianhub.cloud and api.meridianhub.cloud to gateway service
 #
 # Features:
 # - Wildcard TLS certificate via cert-manager
@@ -19,7 +19,8 @@ metadata:
     component: ingress
   annotations:
     # cert-manager will automatically provision TLS certificate
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Use staging for local development to avoid Let's Encrypt rate limits
+    cert-manager.io/cluster-issuer: letsencrypt-staging
     # Force HTTPS redirects
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Pass original host header to upstream for tenant resolution
@@ -40,7 +41,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: gateway-service
+            name: gateway
             port:
               number: 8080
   # Apex domain routing (api.meridianhub.cloud)
@@ -51,6 +52,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: gateway-service
+            name: gateway
             port:
               number: 8080

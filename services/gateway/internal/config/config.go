@@ -49,11 +49,11 @@ func LoadFromEnv() (*Config, error) {
 }
 
 // loadBackends loads backend configurations from environment variables.
-// Expected format: BACKEND_{NAME}_TARGET and BACKEND_{NAME}_PATH_PREFIX
+// Expected format: {SERVICE}_SERVICE_TARGET and {SERVICE}_SERVICE_PATH_PREFIX
 // Example:
 //
-//	BACKEND_CURRENT_ACCOUNT_TARGET=current-account:50051
-//	BACKEND_CURRENT_ACCOUNT_PATH_PREFIX=/accounts
+//	CURRENT_ACCOUNT_SERVICE_TARGET=current-account:50051
+//	CURRENT_ACCOUNT_SERVICE_PATH_PREFIX=/accounts
 func loadBackends() []BackendConfig {
 	backends := []BackendConfig{}
 
