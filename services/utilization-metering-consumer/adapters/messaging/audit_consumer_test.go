@@ -24,8 +24,10 @@ var errPKUnavailable = errors.New("position keeping service unavailable")
 // newTestTransformer creates a transformer with a test tenant account map
 func newTestTransformer() *auditdomain.AuditEventTransformer {
 	tenantZeroID := uuid.MustParse("00000000-0000-0000-0000-000000000000")
+	tenantTestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	tenantAccountMap := map[uuid.UUID]uuid.UUID{
 		tenantZeroID: tenantZeroID,
+		tenantTestID: tenantTestID,
 	}
 	return auditdomain.NewAuditEventTransformer(tenantAccountMap)
 }
@@ -326,7 +328,7 @@ func TestAuditConsumer_handleAuditEvent_AllServiceTypes(t *testing.T) {
 				CorrelationId: "corr-456",
 				Timestamp:     timestamppb.Now(),
 				Metadata: map[string]string{
-					"tenant_id": "tenant-test",
+					"tenant_id": "11111111-1111-1111-1111-111111111111",
 				},
 			}
 
@@ -373,7 +375,7 @@ func TestAuditConsumer_handleAuditEvent_AllOperationTypes(t *testing.T) {
 				CorrelationId: "corr-456",
 				Timestamp:     timestamppb.Now(),
 				Metadata: map[string]string{
-					"tenant_id": "tenant-test",
+					"tenant_id": "11111111-1111-1111-1111-111111111111",
 				},
 			}
 
