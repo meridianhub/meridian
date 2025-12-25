@@ -216,8 +216,10 @@ func calculateAvailableBalance(balance, overdraftLimit Money, overdraftEnabled b
 	return balance
 }
 
-// withStatusChange returns a new account with the given status and records the transition.
-// This is a helper method to reduce duplication in status transition methods.
+// withStatusChange creates a new CurrentAccount with the status changed and history recorded.
+// Note: Uses time.Now() directly for simplicity. For precise test control, consider injecting
+// a clock interface in a future refactor. ChangedBy is populated by the persistence layer
+// from the request context, not here - domain operations don't have access to user identity.
 func (a CurrentAccount) withStatusChange(newStatus AccountStatus, reason string) CurrentAccount {
 	now := time.Now()
 
@@ -295,6 +297,7 @@ func (a CurrentAccount) Unfreeze() (CurrentAccount, error) {
 // The original account is not modified.
 //
 // Deprecated: Use Unfreeze() instead for transitioning from FROZEN to ACTIVE.
+// TODO(bian-alignment): Remove in next major version once all callers migrate to Unfreeze().
 func (a CurrentAccount) Activate() (CurrentAccount, error) {
 	if a.status == AccountStatusClosed {
 		return CurrentAccount{}, ErrInvalidStatusTransition
