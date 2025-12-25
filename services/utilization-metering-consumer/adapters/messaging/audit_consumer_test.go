@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ type mockPositionKeepingClient struct {
 	recordMeasurementFunc func(ctx context.Context, measurement *domain.UtilizationMeasurement) error
 	closeFunc             func() error
 	measurements          []*domain.UtilizationMeasurement // Store all recorded measurements
+	mu                    sync.Mutex                       // Protects measurements slice
 }
 
 func newMockPositionKeepingClient() *mockPositionKeepingClient {
@@ -38,7 +40,9 @@ func newMockPositionKeepingClient() *mockPositionKeepingClient {
 }
 
 func (m *mockPositionKeepingClient) RecordMeasurement(ctx context.Context, measurement *domain.UtilizationMeasurement) error {
+	m.mu.Lock()
 	m.measurements = append(m.measurements, measurement)
+	m.mu.Unlock()
 	if m.recordMeasurementFunc != nil {
 		return m.recordMeasurementFunc(ctx, measurement)
 	}
@@ -53,7 +57,11 @@ func (m *mockPositionKeepingClient) Close() error {
 }
 
 func (m *mockPositionKeepingClient) getMeasurements() []*domain.UtilizationMeasurement {
-	return m.measurements
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]*domain.UtilizationMeasurement, len(m.measurements))
+	copy(result, m.measurements)
+	return result
 }
 
 func TestNewAuditConsumer(t *testing.T) {

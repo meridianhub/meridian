@@ -77,12 +77,16 @@ func TestHealthEndpoint_Integration(t *testing.T) {
 	serverReady := make(chan bool)
 	go func() {
 		// TODO: Start actual server when fully implemented
-		// For now, create a simple test server
-		http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		// For now, create a simple test server with dedicated ServeMux
+		mux := http.NewServeMux()
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("OK"))
 		})
-		server := &http.Server{Addr: ":18081"}
+		server := &http.Server{
+			Addr:    ":18081",
+			Handler: mux,
+		}
 		serverReady <- true
 		go func() {
 			_ = server.ListenAndServe()

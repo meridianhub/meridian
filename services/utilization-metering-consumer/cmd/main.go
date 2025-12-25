@@ -119,10 +119,21 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Position Keeping client
 	logger.Info("initializing position keeping client", "endpoint", config.PositionKeepingEndpoint)
+
+	// Parse port from endpoint (format: "host:port")
+	var pkPort int
+	if _, err := fmt.Sscanf(config.PositionKeepingEndpoint, "%*[^:]:%d", &pkPort); err != nil || pkPort == 0 {
+		// Default to 50053 if parsing fails
+		pkPort = 50053
+		logger.Warn("failed to parse port from POSITION_KEEPING_ENDPOINT, using default",
+			"endpoint", config.PositionKeepingEndpoint,
+			"default_port", pkPort)
+	}
+
 	pkClient, err := grpc.NewPositionKeepingClient(&grpc.ClientConfig{
 		ServiceName:    "position-keeping",
 		Namespace:      getEnvOrDefault("K8S_NAMESPACE", "default"),
-		Port:           50053, // Position Keeping service port
+		Port:           pkPort,
 		Timeout:        10 * time.Second,
 		Logger:         logger,
 		SimulationMode: true, // TODO: Set to false when RecordMeasurement endpoint exists
@@ -162,11 +173,6 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Mark consumer as initialized for readiness probe
-	readinessMu.Lock()
-	readiness.consumerInitialized = true
-	readinessMu.Unlock()
-
 	// Start consuming in background
 	consumerErrors := make(chan error, 1)
 	go func() {
@@ -174,7 +180,14 @@ func run(logger *slog.Logger) error {
 		if err := consumer.Start(config.AuditTopics); err != nil {
 			logger.Error("consumer error", "error", err)
 			consumerErrors <- fmt.Errorf("consumer error: %w", err)
+			return
 		}
+
+		// Mark consumer as initialized for readiness probe after successful start
+		readinessMu.Lock()
+		readiness.consumerInitialized = true
+		readinessMu.Unlock()
+		logger.Info("audit consumer ready")
 	}()
 
 	// Wait for interrupt signal, server error, or consumer error

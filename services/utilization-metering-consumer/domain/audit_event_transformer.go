@@ -3,7 +3,6 @@ package domain
 
 import (
 	"errors"
-	"time"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
 )
@@ -51,7 +50,7 @@ func (t *AuditEventTransformer) Transform(event *auditv1.AuditEvent) (*Utilizati
 		OperationType: operationType,
 		Quantity:      1, // Simple count for now
 		UnitOfMeasure: "operation",
-		Timestamp:     time.Now(),
+		Timestamp:     event.Timestamp.AsTime(), // Use event's timestamp for billing accuracy
 		CorrelationID: event.CorrelationId,
 	}, nil
 }

@@ -63,8 +63,13 @@ func TestLoadConfig_Success(t *testing.T) {
 	if len(config.AuditTopics) != len(expectedTopics) {
 		t.Errorf("Expected %d audit topics, got %d", len(expectedTopics), len(config.AuditTopics))
 	}
+	// Verify each topic with proper bounds checking
 	for i, expected := range expectedTopics {
-		if i >= len(config.AuditTopics) || config.AuditTopics[i] != expected {
+		if i >= len(config.AuditTopics) {
+			t.Errorf("Expected AuditTopics[%d] to be '%s', but index is out of bounds (length: %d)", i, expected, len(config.AuditTopics))
+			continue
+		}
+		if config.AuditTopics[i] != expected {
 			t.Errorf("Expected AuditTopics[%d] to be '%s', got '%s'", i, expected, config.AuditTopics[i])
 		}
 	}

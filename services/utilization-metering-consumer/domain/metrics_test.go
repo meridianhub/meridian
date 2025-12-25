@@ -138,29 +138,24 @@ func TestRecordEventProcessingDuration(_ *testing.T) {
 
 func TestMetricsLabels(t *testing.T) {
 	tests := []struct {
-		name          string
-		metric        prometheus.Collector
-		expectedLabel string
+		name   string
+		metric prometheus.Collector
 	}{
 		{
-			name:          "eventsConsumedTotal has service and topic labels",
-			metric:        eventsConsumedTotal,
-			expectedLabel: "service",
+			name:   "eventsConsumedTotal has service and topic labels",
+			metric: eventsConsumedTotal,
 		},
 		{
-			name:          "measurementsRecordedTotal has service and asset_code labels",
-			metric:        measurementsRecordedTotal,
-			expectedLabel: "service",
+			name:   "measurementsRecordedTotal has service and asset_code labels",
+			metric: measurementsRecordedTotal,
 		},
 		{
-			name:          "transformationErrorsTotal has service and error_type labels",
-			metric:        transformationErrorsTotal,
-			expectedLabel: "service",
+			name:   "transformationErrorsTotal has service and error_type labels",
+			metric: transformationErrorsTotal,
 		},
 		{
-			name:          "kafkaConsumerLag has topic and partition labels",
-			metric:        kafkaConsumerLag,
-			expectedLabel: "topic",
+			name:   "kafkaConsumerLag has topic and partition labels",
+			metric: kafkaConsumerLag,
 		},
 	}
 
@@ -171,20 +166,15 @@ func TestMetricsLabels(t *testing.T) {
 			close(desc)
 
 			d := <-desc
-			found := false
-			for _, label := range d.String() {
-				if string(label) == tt.expectedLabel {
-					found = true
-					break
-				}
-			}
-			// Basic smoke test - just verify metric is describable
+			// Basic smoke test - verify metric is describable and has a valid description
 			if d == nil {
 				t.Errorf("metric %s has nil description", tt.name)
 			}
-			// Note: We're not strictly validating label presence due to testutil limitations
-			// The actual label validation happens at registration time
-			_ = found // Suppress unused variable warning
+			// Note: Label validation happens at registration time via Prometheus.
+			// Direct label inspection from Desc is not straightforward without
+			// reflection, so we rely on the metric definition and registration
+			// to ensure correctness. The metric recording tests above verify
+			// that the metrics work correctly with their labels.
 		})
 	}
 }

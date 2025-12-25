@@ -110,8 +110,12 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 		"table", event.TableName,
 		"operation", event.Operation.String())
 
+	// Derive topic from schema name (format: "<schema-name>.audit.events")
+	// This matches the actual Kafka topic naming convention used in production
+	topic := event.SchemaName + ".audit.events"
+
 	// Record event consumption metric
-	domain.RecordEventConsumed(event.SchemaName, "audit.events")
+	domain.RecordEventConsumed(event.SchemaName, topic)
 
 	// Transform audit event to utilization measurement
 	measurement, err := ac.transformer.Transform(event)
@@ -147,11 +151,12 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 }
 
 // Start begins consuming AuditEvent messages from the specified topics.
-// This method blocks until Stop() is called or an error occurs.
+// This method subscribes to topics and returns immediately. The underlying
+// consumer runs in a separate goroutine managed by the platform kafka consumer.
 //
 // The consumer will:
 // - Subscribe to all provided topics (typically 6 service audit topics)
-// - Poll for messages
+// - Poll for messages (in background)
 // - Deserialize protobuf messages
 // - Validate using protovalidate
 // - Transform to utilization measurements
@@ -160,6 +165,8 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 //
 // Parameters:
 // - topics: List of Kafka topic names to consume from (e.g., ["current-account.audit.events", ...])
+//
+// Returns an error if subscription fails. Call Stop() to gracefully shutdown consumption.
 func (ac *AuditConsumer) Start(topics []string) error {
 	ac.logger.Info("starting audit consumer", "topics", topics)
 	if err := ac.consumer.Subscribe(topics); err != nil {
