@@ -461,6 +461,43 @@ grpc_microservice(
     resource_deps=['cockroachdb', 'migrate-party'],
 )
 
+# Gateway Service - HTTP API gateway with tenant routing and gRPC-to-HTTP bridging
+# Standard build args
+gateway_build_args = {
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+}
+
+# Docker build
+docker_build(
+    'gateway',
+    context='.',
+    dockerfile='services/gateway/cmd/Dockerfile',
+    build_args=gateway_build_args,
+)
+
+# K8s manifests
+k8s_yaml('services/gateway/k8s/configmap.yaml')
+k8s_yaml('services/gateway/k8s/deployment.yaml')
+k8s_yaml('services/gateway/k8s/service.yaml')
+
+# K8s resource configuration
+# Gateway depends on all backend services for routing
+k8s_resource(
+    'gateway',
+    port_forwards=['8080:8080'],
+    resource_deps=[
+        'current-account',
+        'financial-accounting',
+        'position-keeping',
+        'payment-order',
+        'party',
+        'tenant',
+    ],
+    labels=['gateway'],
+)
+
 # =============================================================================
 # Resource Configuration
 # =============================================================================
@@ -672,6 +709,11 @@ print("""
 Services:
   • Meridian API           → http://localhost:8080
   • Meridian gRPC          → localhost:9090
+
+Gateway:
+  • Gateway (HTTP)         → http://localhost:8080
+    - Local dev mode: Use X-Tenant header (e.g., curl -H "X-Tenant: acme" http://localhost:8080/accounts)
+    - Production: Subdomain routing (e.g., acme.api.meridian.io)
 
 Microservices:
   • Current-Account        → localhost:50051 (gRPC)

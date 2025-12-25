@@ -29,7 +29,8 @@ func NewTenantResolver(baseDomain string, allowedHosts []string) *TenantResolver
 	}
 }
 
-// Middleware returns an HTTP middleware that extracts tenant from subdomain.
+// Middleware returns an HTTP middleware that extracts tenant from subdomain or X-Tenant header.
+// For local development, the X-Tenant header can be used instead of subdomain routing.
 func (tr *TenantResolver) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
@@ -50,11 +51,19 @@ func (tr *TenantResolver) Middleware(next http.Handler) http.Handler {
 			}
 		}
 
-		// Extract tenant from subdomain
-		tenantSlug, err := tr.extractTenant(host)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		var tenantSlug string
+		var err error
+
+		// Try to extract tenant from X-Tenant header first (for local development)
+		if headerTenant := r.Header.Get("X-Tenant"); headerTenant != "" {
+			tenantSlug = headerTenant
+		} else {
+			// Fall back to subdomain extraction (production mode)
+			tenantSlug, err = tr.extractTenant(host)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 
 		// Validate and create tenant ID
