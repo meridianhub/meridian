@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -28,7 +29,7 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.PartyEntity{},
-		&persistence.PartyAuditOutbox{},
+		&audit.AuditOutbox{},
 	})
 
 	// Create the tenant schema for tests
@@ -61,7 +62,7 @@ func setupIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Context, fu
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL,
-		record_id UUID NOT NULL,
+		record_id VARCHAR(50) NOT NULL,
 		old_values TEXT,
 		new_values TEXT,
 		status VARCHAR(20) NOT NULL DEFAULT 'pending',

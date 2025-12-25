@@ -172,7 +172,7 @@ func createTestEntries(t *testing.T, db *gorm.DB, count int) {
 	t.Helper()
 
 	for i := 0; i < count; i++ {
-		_ = createTestEntry(t, db, statusPending)
+		_ = createTestEntry(t, db, StatusPending)
 	}
 }
 
@@ -188,7 +188,7 @@ func waitForProcessing(t *testing.T, db *gorm.DB, expectedCompleted int, timeout
 	for {
 		var count int64
 		err := db.Model(&AuditOutbox{}).
-			Where("status = ?", statusCompleted).
+			Where("status = ?", StatusCompleted).
 			Count(&count).Error
 		require.NoError(t, err, "Failed to count completed entries")
 
@@ -230,7 +230,7 @@ func TestAuditWorker_ProcessBatch_Success(t *testing.T) {
 	// Verify all have status='completed'
 	var completed int64
 	err := db.Model(&AuditOutbox{}).
-		Where("status = ?", statusCompleted).
+		Where("status = ?", StatusCompleted).
 		Count(&completed).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(10), completed, "All entries should be completed")
@@ -238,7 +238,7 @@ func TestAuditWorker_ProcessBatch_Success(t *testing.T) {
 	// Verify no pending entries remain
 	var pending int64
 	err = db.Model(&AuditOutbox{}).
-		Where("status = ?", statusPending).
+		Where("status = ?", StatusPending).
 		Count(&pending).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), pending, "No pending entries should remain")
@@ -267,7 +267,7 @@ func TestAuditWorker_ProcessBatch_BatchSize(t *testing.T) {
 	// Verify exactly 100 were processed
 	var completed int64
 	err = db.Model(&AuditOutbox{}).
-		Where("status = ?", statusCompleted).
+		Where("status = ?", StatusCompleted).
 		Count(&completed).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(100), completed, "Exactly 100 entries should be completed")
@@ -275,7 +275,7 @@ func TestAuditWorker_ProcessBatch_BatchSize(t *testing.T) {
 	// Verify 150 remain pending
 	var pending int64
 	err = db.Model(&AuditOutbox{}).
-		Where("status = ?", statusPending).
+		Where("status = ?", StatusPending).
 		Count(&pending).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(150), pending, "150 entries should remain pending")
@@ -290,7 +290,7 @@ func TestAuditWorker_ProcessEntry_Idempotency(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create entry with status='completed'
-	entry := createTestEntry(t, db, statusCompleted)
+	entry := createTestEntry(t, db, StatusCompleted)
 	originalUpdatedAt := entry.CreatedAt
 
 	// Create worker
@@ -305,7 +305,7 @@ func TestAuditWorker_ProcessEntry_Idempotency(t *testing.T) {
 	var updated AuditOutbox
 	err = db.First(&updated, entry.ID).Error
 	require.NoError(t, err)
-	assert.Equal(t, statusCompleted, updated.Status, "Status should still be completed")
+	assert.Equal(t, StatusCompleted, updated.Status, "Status should still be completed")
 	assert.Equal(t, originalUpdatedAt.Unix(), updated.CreatedAt.Unix(), "CreatedAt should be unchanged")
 }
 
@@ -321,7 +321,7 @@ func TestAuditWorker_ProcessEntry_RetryLogic(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create entry
-	entry := createTestEntry(t, db, statusPending)
+	entry := createTestEntry(t, db, StatusPending)
 
 	// Create worker with custom max retries
 	worker := NewAuditWorker(db, "", nil)
@@ -330,7 +330,7 @@ func TestAuditWorker_ProcessEntry_RetryLogic(t *testing.T) {
 
 	// Manually simulate what happens on processing errors
 	// Set entry to processing state
-	entry.Status = statusProcessing
+	entry.Status = StatusProcessing
 	err := db.Save(entry).Error
 	require.NoError(t, err)
 
@@ -343,7 +343,7 @@ func TestAuditWorker_ProcessEntry_RetryLogic(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify status goes back to 'pending'
-	assert.Equal(t, statusPending, entry.Status, "Status should be pending after first retry")
+	assert.Equal(t, StatusPending, entry.Status, "Status should be pending after first retry")
 	// Verify RetryCount incremented
 	assert.Equal(t, 1, entry.RetryCount, "RetryCount should be 1")
 	// Verify LastError set
@@ -351,7 +351,7 @@ func TestAuditWorker_ProcessEntry_RetryLogic(t *testing.T) {
 	assert.Contains(t, *entry.LastError, "simulated processing error", "LastError should contain error message")
 
 	// Simulate second failure
-	entry.Status = statusProcessing
+	entry.Status = StatusProcessing
 	err = db.Save(entry).Error
 	require.NoError(t, err)
 
@@ -359,11 +359,11 @@ func TestAuditWorker_ProcessEntry_RetryLogic(t *testing.T) {
 	require.Error(t, err)
 	err = db.First(entry, entry.ID).Error
 	require.NoError(t, err)
-	assert.Equal(t, statusPending, entry.Status, "Status should still be pending")
+	assert.Equal(t, StatusPending, entry.Status, "Status should still be pending")
 	assert.Equal(t, 2, entry.RetryCount, "RetryCount should be 2")
 
 	// Simulate third failure - should move to 'failed' state
-	entry.Status = statusProcessing
+	entry.Status = StatusProcessing
 	err = db.Save(entry).Error
 	require.NoError(t, err)
 
@@ -371,7 +371,7 @@ func TestAuditWorker_ProcessEntry_RetryLogic(t *testing.T) {
 	require.Error(t, err)
 	err = db.First(entry, entry.ID).Error
 	require.NoError(t, err)
-	assert.Equal(t, statusFailed, entry.Status, "Status should be failed after max retries")
+	assert.Equal(t, StatusFailed, entry.Status, "Status should be failed after max retries")
 	assert.Equal(t, 3, entry.RetryCount, "RetryCount should be 3")
 
 	// Verify metrics - failed counter should be incremented
@@ -429,7 +429,7 @@ func TestAuditWorker_ResetStuckEntries(t *testing.T) {
 		Operation: "INSERT",
 		RecordID:  uuid.New().String(),
 		NewValues: `{"id": "123", "name": "Test Customer"}`,
-		Status:    statusProcessing,
+		Status:    StatusProcessing,
 		CreatedAt: time.Now().Add(-10 * time.Minute), // 10 minutes ago (older than defaultProcessingAge)
 	}
 	err := db.Create(stuckEntry).Error
@@ -442,7 +442,7 @@ func TestAuditWorker_ResetStuckEntries(t *testing.T) {
 		Operation: "INSERT",
 		RecordID:  uuid.New().String(),
 		NewValues: `{"id": "456", "name": "Recent Customer"}`,
-		Status:    statusProcessing,
+		Status:    StatusProcessing,
 		CreatedAt: time.Now().Add(-1 * time.Minute), // 1 minute ago (newer than defaultProcessingAge)
 	}
 	err = db.Create(recentEntry).Error
@@ -459,13 +459,13 @@ func TestAuditWorker_ResetStuckEntries(t *testing.T) {
 	var updatedStuckEntry AuditOutbox
 	err = db.First(&updatedStuckEntry, stuckEntry.ID).Error
 	require.NoError(t, err)
-	assert.Equal(t, statusPending, updatedStuckEntry.Status, "Stuck entry should be reset to pending")
+	assert.Equal(t, StatusPending, updatedStuckEntry.Status, "Stuck entry should be reset to pending")
 
 	// Verify recent entry is still 'processing'
 	var updatedRecentEntry AuditOutbox
 	err = db.First(&updatedRecentEntry, recentEntry.ID).Error
 	require.NoError(t, err)
-	assert.Equal(t, statusProcessing, updatedRecentEntry.Status, "Recent entry should still be processing")
+	assert.Equal(t, StatusProcessing, updatedRecentEntry.Status, "Recent entry should still be processing")
 }
 
 // TestAuditWorker_ConcurrentSafety verifies concurrent workers don't process duplicates.
@@ -504,7 +504,7 @@ func TestAuditWorker_ConcurrentSafety(t *testing.T) {
 	// Verify all entries are completed
 	var completed int64
 	err := db.Model(&AuditOutbox{}).
-		Where("status = ?", statusCompleted).
+		Where("status = ?", StatusCompleted).
 		Count(&completed).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(100), completed, "All 100 entries should be completed")
@@ -553,7 +553,7 @@ func TestAuditWorker_ProcessEntry_ContextCancellation(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Create entry
-	entry := createTestEntry(t, db, statusPending)
+	entry := createTestEntry(t, db, StatusPending)
 
 	// Create worker
 	worker := NewAuditWorker(db, "", nil)
@@ -613,7 +613,7 @@ func TestAuditWorker_MultipleStartStop(t *testing.T) {
 func TestAuditWorker_Configuration(t *testing.T) {
 	db := setupTestDB(t)
 
-	// Create worker with custom settings
+	// Create worker with custom settings (legacy direct assignment)
 	worker := NewAuditWorker(db, "", nil)
 	worker.batchSize = 50
 	worker.pollInterval = 10 * time.Second
@@ -622,6 +622,91 @@ func TestAuditWorker_Configuration(t *testing.T) {
 	assert.Equal(t, 50, worker.batchSize, "BatchSize should be customizable")
 	assert.Equal(t, 10*time.Second, worker.pollInterval, "PollInterval should be customizable")
 	assert.Equal(t, 5, worker.maxRetries, "MaxRetries should be customizable")
+}
+
+// TestAuditWorker_FunctionalOptions verifies functional options pattern.
+func TestAuditWorker_FunctionalOptions(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create worker with functional options
+	worker := NewAuditWorker(db, "test_schema", nil,
+		WithBatchSize(200),
+		WithPollInterval(15*time.Second),
+		WithMaxRetries(5),
+	)
+
+	assert.Equal(t, 200, worker.batchSize, "BatchSize should be set via option")
+	assert.Equal(t, 15*time.Second, worker.pollInterval, "PollInterval should be set via option")
+	assert.Equal(t, 5, worker.maxRetries, "MaxRetries should be set via option")
+	assert.Equal(t, "test_schema", worker.schema, "Schema should be preserved")
+	assert.False(t, worker.adaptivePolling, "AdaptivePolling should be false by default")
+}
+
+// TestAuditWorker_FunctionalOptions_AdaptivePolling verifies adaptive polling configuration.
+func TestAuditWorker_FunctionalOptions_AdaptivePolling(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create worker with adaptive polling enabled
+	worker := NewAuditWorker(db, "", nil,
+		WithAdaptivePolling(50*time.Millisecond, 10*time.Second),
+	)
+
+	assert.True(t, worker.adaptivePolling, "AdaptivePolling should be enabled")
+	assert.Equal(t, 50*time.Millisecond, worker.minPollInterval, "MinPollInterval should be set")
+	assert.Equal(t, 10*time.Second, worker.maxPollInterval, "MaxPollInterval should be set")
+}
+
+// TestAuditWorker_FunctionalOptions_InvalidValues verifies invalid values are ignored.
+func TestAuditWorker_FunctionalOptions_InvalidValues(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create worker with invalid options (should use defaults)
+	worker := NewAuditWorker(db, "", nil,
+		WithBatchSize(0),    // Invalid - should keep default
+		WithBatchSize(-1),   // Invalid - should keep default
+		WithPollInterval(0), // Invalid - should keep default
+		WithMaxRetries(-1),  // Invalid - should keep default (but 0 is valid)
+	)
+
+	assert.Equal(t, defaultBatchSize, worker.batchSize, "Invalid batch size should keep default")
+	assert.Equal(t, defaultPollInterval, worker.pollInterval, "Invalid poll interval should keep default")
+	assert.Equal(t, defaultMaxRetries, worker.maxRetries, "Invalid max retries should keep default")
+}
+
+// TestAuditWorker_AdaptivePolling_IntervalCalculation verifies adaptive interval logic.
+func TestAuditWorker_AdaptivePolling_IntervalCalculation(t *testing.T) {
+	db := setupTestDB(t)
+
+	worker := NewAuditWorker(db, "", nil,
+		WithAdaptivePolling(100*time.Millisecond, 5*time.Second),
+	)
+
+	// When entries are processed, interval should be minimum
+	interval := worker.calculateAdaptiveInterval(10)
+	assert.Equal(t, 100*time.Millisecond, interval, "With entries, should use min interval")
+	assert.Equal(t, 0, worker.emptyPollCount, "Empty poll count should reset to 0")
+
+	// First empty poll - should increase interval
+	interval = worker.calculateAdaptiveInterval(0)
+	assert.Equal(t, 1, worker.emptyPollCount, "Empty poll count should be 1")
+	assert.True(t, interval > 100*time.Millisecond, "Interval should increase after empty poll")
+
+	// More empty polls - interval should continue increasing
+	for i := 0; i < 5; i++ {
+		interval = worker.calculateAdaptiveInterval(0)
+	}
+	assert.Equal(t, 6, worker.emptyPollCount, "Empty poll count should be 6")
+
+	// Eventually should cap at max interval
+	for i := 0; i < 20; i++ {
+		interval = worker.calculateAdaptiveInterval(0)
+	}
+	assert.Equal(t, 5*time.Second, interval, "Interval should cap at max")
+
+	// Processing entries again should reset to min
+	interval = worker.calculateAdaptiveInterval(5)
+	assert.Equal(t, 100*time.Millisecond, interval, "Should reset to min after processing entries")
+	assert.Equal(t, 0, worker.emptyPollCount, "Empty poll count should reset to 0")
 }
 
 // TestAuditWorker_ProcessBatch_PartialFailure would verify handling of partial batch failures.
@@ -709,7 +794,7 @@ func TestAuditWorker_InsertsIntoAuditLog(t *testing.T) {
 
 	// Fetch the created entries for verification later
 	var entries []AuditOutbox
-	err := db.Where("status = ?", statusPending).Find(&entries).Error
+	err := db.Where("status = ?", StatusPending).Find(&entries).Error
 	if err != nil {
 		t.Fatalf("Failed to fetch outbox entries: %v", err)
 	}
@@ -807,7 +892,7 @@ func createBenchmarkEntries(b *testing.B, db *gorm.DB, count int) {
 			Operation: "INSERT",
 			RecordID:  uuid.New().String(),
 			NewValues: `{"id": "123", "customer_number": "CUST001", "first_name": "Benchmark", "last_name": "Test", "email": "bench@example.com", "status": "active"}`,
-			Status:    statusPending,
+			Status:    StatusPending,
 			CreatedAt: time.Now(),
 		}
 
@@ -898,7 +983,7 @@ func BenchmarkAuditWorkerProcessEntry(b *testing.B) {
 			Operation: "INSERT",
 			RecordID:  uuid.New().String(),
 			NewValues: `{"id": "123", "name": "Test"}`,
-			Status:    statusPending,
+			Status:    StatusPending,
 			CreatedAt: time.Now(),
 		}
 		if err := db.Create(entry).Error; err != nil {
@@ -961,7 +1046,7 @@ func BenchmarkAuditWorkerE2E(b *testing.B) {
 		case <-ticker.C:
 			var completed int64
 			if err := db.Model(&AuditOutbox{}).
-				Where("status = ?", statusCompleted).
+				Where("status = ?", StatusCompleted).
 				Count(&completed).Error; err != nil {
 				b.Fatalf("Failed to count completed entries: %v", err)
 			}

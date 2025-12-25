@@ -222,6 +222,95 @@ For operators monitoring the audit system, see:
 
 See ADR-0009 for complete metrics reference and alerting thresholds.
 
+## Configuration Options
+
+### Worker Configuration
+
+The audit worker can be customized with functional options:
+
+```go
+worker := audit.NewAuditWorker(db, "my_service", logger,
+    audit.WithBatchSize(200),                                    // Default: 100
+    audit.WithPollInterval(10*time.Second),                      // Default: 5s
+    audit.WithMaxRetries(5),                                     // Default: 3
+    audit.WithAdaptivePolling(100*time.Millisecond, 30*time.Second),  // Optional
+)
+worker.Start(ctx)
+defer worker.Stop()
+```
+
+### Adaptive Polling
+
+Adaptive polling automatically adjusts the poll interval based on workload:
+
+- When entries are found: Interval decreases to `minPollInterval` (100ms default)
+- When outbox is empty: Interval increases exponentially up to `maxPollInterval` (30s default)
+
+This reduces database load during idle periods while maintaining responsiveness under load.
+
+## Troubleshooting
+
+### Audit entries not appearing in audit_log
+
+1. **Check outbox depth**: `SELECT COUNT(*) FROM audit_outbox WHERE status = 'pending'`
+2. **Check for failed entries**: `SELECT * FROM audit_outbox WHERE status = 'failed'`
+3. **Verify worker is running**: Check for `meridian_audit_worker_outbox_depth` metric
+4. **Check Kafka connectivity**: Look for `meridian_audit_kafka_fallback_used_total` metric
+
+### Map-based updates not audited
+
+GORM hooks are bypassed for map-based updates (e.g., `db.Model(&Entity{}).Updates(map...)`).
+Use `audit.RecordUpdateManual()` for these cases:
+
+```go
+func (r *Repository) Update(ctx context.Context, entity *Entity) error {
+    return r.db.Transaction(func(tx *gorm.DB) error {
+        // Fetch old values first
+        var oldEntity Entity
+        if err := tx.First(&oldEntity, entity.ID).Error; err != nil {
+            return err
+        }
+
+        // Perform map-based update (e.g., for optimistic locking)
+        result := tx.Model(&Entity{}).
+            Where("id = ? AND version = ?", entity.ID, oldEntity.Version).
+            Updates(map[string]interface{}{
+                "name":    entity.Name,
+                "version": entity.Version + 1,
+            })
+        if result.RowsAffected == 0 {
+            return ErrOptimisticLock
+        }
+
+        // Manually record audit
+        return audit.RecordUpdateManual(tx, &oldEntity, entity)
+    })
+}
+```
+
+### ErrNilTransaction errors
+
+Ensure audit functions are called within a GORM transaction context:
+
+```go
+// Wrong - no transaction context
+audit.RecordCreate(db, entity)
+
+// Correct - within transaction or GORM hooks
+db.Transaction(func(tx *gorm.DB) error {
+    return audit.RecordCreate(tx, entity)
+})
+```
+
+### High outbox depth
+
+If outbox depth is consistently high:
+
+1. **Check worker health**: Ensure audit-worker pods are running
+2. **Check for processing errors**: `SELECT last_error FROM audit_outbox WHERE status = 'failed'`
+3. **Increase worker batch size**: Configure with `WithBatchSize(200)` or higher
+4. **Scale Kafka consumers**: Increase `current-account-audit-consumer` replicas
+
 ## Examples
 
 See the following files for real-world usage:
@@ -229,4 +318,11 @@ See the following files for real-world usage:
 - `shared/domain/models/customer.go` - UUID-based entity
 - `shared/domain/models/account.go` - UUID-based entity
 - `services/party/adapters/persistence/party_entity.go` - Service-level entity
-- `services/tenant/adapters/persistence/entity.go` - String ID entity
+- `services/tenant/adapters/persistence/audit.go` - String ID entity
+
+## Related Documentation
+
+- [ADR-0009: Application-Level Audit Logging](../../../docs/adr/0009-application-level-audit-logging.md)
+- [ADR-0020: Per-Service Audit Workers](../../../docs/adr/0020-per-service-audit-workers.md) - Deployment pattern
+- [Audit Monitoring Guide](../../../docs/operations/audit-monitoring.md) - Operations runbook
+- [Adding Audit to a New Service](../../../docs/development/audit-adding-new-service.md) - Step-by-step guide

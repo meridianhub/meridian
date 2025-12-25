@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -19,7 +20,7 @@ import (
 // setupTestDBWithAudit creates a test database with both payment_order and audit tables.
 func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &AuditOutbox{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &audit.AuditOutbox{}})
 
 	// Create tenant schema
 	tid := tenant.TenantID(testTenantID)
@@ -59,13 +60,16 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	require.NoError(t, err)
 
 	// Create audit_outbox table in tenant schema
+	// Note: record_id is VARCHAR(50) to match the shared audit.AuditOutbox struct
+	// which uses string to support both UUID and string IDs.
+	// old_values/new_values use TEXT to handle empty strings (JSONB rejects empty string).
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-		record_id UUID NOT NULL,
-		old_values JSONB,
-		new_values JSONB,
+		record_id VARCHAR(50) NOT NULL,
+		old_values TEXT,
+		new_values TEXT,
 		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 		retry_count INT NOT NULL DEFAULT 0,
@@ -92,9 +96,9 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 }
 
 // getAuditEntries retrieves all audit entries for a specific record from the outbox.
-func getAuditEntries(t *testing.T, db *gorm.DB, recordID uuid.UUID) []AuditOutbox {
+func getAuditEntries(t *testing.T, db *gorm.DB, recordID uuid.UUID) []audit.AuditOutbox {
 	t.Helper()
-	var entries []AuditOutbox
+	var entries []audit.AuditOutbox
 	err := db.Where("record_id = ?", recordID).Order("created_at ASC").Find(&entries).Error
 	require.NoError(t, err)
 	return entries
@@ -131,10 +135,10 @@ func TestAudit_PaymentOrderCreation_IsAudited(t *testing.T) {
 	entry := entries[0]
 	assert.Equal(t, "payment_order", entry.Table)
 	assert.Equal(t, "INSERT", entry.Operation)
-	assert.Equal(t, po.ID, entry.RecordID)
+	assert.Equal(t, po.ID.String(), entry.RecordID)
 	assert.Equal(t, "pending", entry.Status)
-	assert.Nil(t, entry.OldValues, "INSERT should have no old values")
-	assert.NotNil(t, entry.NewValues, "INSERT should have new values")
+	assert.Empty(t, entry.OldValues, "INSERT should have no old values")
+	assert.NotEmpty(t, entry.NewValues, "INSERT should have new values")
 
 	// Verify ChangedBy defaults to system
 	require.NotNil(t, entry.ChangedBy)
@@ -142,7 +146,7 @@ func TestAudit_PaymentOrderCreation_IsAudited(t *testing.T) {
 
 	// Verify new values contain expected data
 	var newValues map[string]interface{}
-	err = json.Unmarshal([]byte(*entry.NewValues), &newValues)
+	err = json.Unmarshal([]byte(entry.NewValues), &newValues)
 	require.NoError(t, err)
 	assert.Equal(t, "acc-123", newValues["DebtorAccountID"])
 	assert.Equal(t, "INITIATED", newValues["Status"])
@@ -229,10 +233,10 @@ func TestAudit_PaymentOrderFailure_CapturesReasonAndErrorCode(t *testing.T) {
 	// Verify failure audit entry captures critical fields
 	failEntry := entries[1]
 	assert.Equal(t, "UPDATE", failEntry.Operation)
-	require.NotNil(t, failEntry.NewValues)
+	require.NotEmpty(t, failEntry.NewValues)
 
 	var newValues map[string]interface{}
-	err = json.Unmarshal([]byte(*failEntry.NewValues), &newValues)
+	err = json.Unmarshal([]byte(failEntry.NewValues), &newValues)
 	require.NoError(t, err)
 
 	assert.Equal(t, "FAILED", newValues["Status"])
@@ -281,17 +285,17 @@ func TestAudit_PaymentOrderLienTracking_CapturesLienExecutionStatus(t *testing.T
 
 	// Check that the reserved entry captures lien_id
 	reservedEntry := entries[1]
-	require.NotNil(t, reservedEntry.NewValues)
+	require.NotEmpty(t, reservedEntry.NewValues)
 	var reservedNewValues map[string]interface{}
-	err = json.Unmarshal([]byte(*reservedEntry.NewValues), &reservedNewValues)
+	err = json.Unmarshal([]byte(reservedEntry.NewValues), &reservedNewValues)
 	require.NoError(t, err)
 	assert.Equal(t, "lien-123", reservedNewValues["LienID"])
 
 	// Check final entry captures lien execution status
 	finalEntry := entries[len(entries)-1]
-	require.NotNil(t, finalEntry.NewValues)
+	require.NotEmpty(t, finalEntry.NewValues)
 	var finalNewValues map[string]interface{}
-	err = json.Unmarshal([]byte(*finalEntry.NewValues), &finalNewValues)
+	err = json.Unmarshal([]byte(finalEntry.NewValues), &finalNewValues)
 	require.NoError(t, err)
 	assert.Equal(t, "SUCCEEDED", finalNewValues["LienExecutionStatus"])
 }
@@ -326,12 +330,12 @@ func TestAudit_PaymentOrderDeletion_IsAudited(t *testing.T) {
 	// Verify DELETE audit entry
 	deleteEntry := entries[1]
 	assert.Equal(t, "DELETE", deleteEntry.Operation)
-	assert.NotNil(t, deleteEntry.OldValues, "DELETE should have old values")
-	assert.Nil(t, deleteEntry.NewValues, "DELETE should have no new values")
+	assert.NotEmpty(t, deleteEntry.OldValues, "DELETE should have old values")
+	assert.Empty(t, deleteEntry.NewValues, "DELETE should have no new values")
 
 	// Verify old values contain the deleted data
 	var oldValues map[string]interface{}
-	err := json.Unmarshal([]byte(*deleteEntry.OldValues), &oldValues)
+	err := json.Unmarshal([]byte(deleteEntry.OldValues), &oldValues)
 	require.NoError(t, err)
 	assert.Equal(t, "acc-delete-test", oldValues["DebtorAccountID"])
 }
@@ -366,10 +370,10 @@ func TestAudit_CriticalFields_AreAlwaysCaptured(t *testing.T) {
 	// Get final entry
 	entries := getAuditEntries(t, db, po.ID)
 	finalEntry := entries[len(entries)-1]
-	require.NotNil(t, finalEntry.NewValues)
+	require.NotEmpty(t, finalEntry.NewValues)
 
 	var newValues map[string]interface{}
-	err = json.Unmarshal([]byte(*finalEntry.NewValues), &newValues)
+	err = json.Unmarshal([]byte(finalEntry.NewValues), &newValues)
 	require.NoError(t, err)
 
 	// Verify all critical fields are captured
@@ -411,19 +415,19 @@ func TestAudit_OutboxStatus_DefaultsToPending(t *testing.T) {
 // =============================================================================
 
 // assertStatusTransition verifies an audit entry captures a status transition.
-func assertStatusTransition(t *testing.T, entry AuditOutbox, oldStatus, newStatus string) {
+func assertStatusTransition(t *testing.T, entry audit.AuditOutbox, oldStatus, newStatus string) {
 	t.Helper()
 
 	var oldValues, newValues map[string]interface{}
 
-	if entry.OldValues != nil {
-		err := json.Unmarshal([]byte(*entry.OldValues), &oldValues)
+	if entry.OldValues != "" {
+		err := json.Unmarshal([]byte(entry.OldValues), &oldValues)
 		require.NoError(t, err)
 		assert.Equal(t, oldStatus, oldValues["Status"], "Old status should be %s", oldStatus)
 	}
 
-	require.NotNil(t, entry.NewValues)
-	err := json.Unmarshal([]byte(*entry.NewValues), &newValues)
+	require.NotEmpty(t, entry.NewValues)
+	err := json.Unmarshal([]byte(entry.NewValues), &newValues)
 	require.NoError(t, err)
 	assert.Equal(t, newStatus, newValues["Status"], "New status should be %s", newStatus)
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -86,7 +87,7 @@ func TestAuditOutbox_AtomicCommit(t *testing.T) {
 	require.NoError(t, err, "Failed to create tenant")
 
 	// Verify outbox entry exists
-	var outbox AuditOutbox
+	var outbox audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ?", tenantObj.ID.String()).
 		First(&outbox).Error
@@ -168,7 +169,7 @@ func TestAuditOutbox_TenantRegistration(t *testing.T) {
 	require.NoError(t, err, "Failed to create tenant")
 
 	// Verify INSERT audit
-	var insertAudit AuditOutbox
+	var insertAudit audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", tenantObj.ID.String(), "INSERT").
 		First(&insertAudit).Error
@@ -214,7 +215,7 @@ func TestAuditOutbox_StatusTransitions(t *testing.T) {
 	require.NoError(t, err, "Failed to suspend tenant")
 
 	// Verify UPDATE audit for suspension
-	var suspendAudit AuditOutbox
+	var suspendAudit audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", entity.ID, "UPDATE").
 		Order("created_at DESC").
@@ -275,7 +276,7 @@ func TestAuditOutbox_MetadataChanges(t *testing.T) {
 	require.NoError(t, err, "Failed to update tenant metadata")
 
 	// Verify UPDATE audit
-	var updateAudit AuditOutbox
+	var updateAudit audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", entity.ID, "UPDATE").
 		First(&updateAudit).Error
@@ -332,7 +333,7 @@ func TestAuditOutbox_DeprovisionedAtTimestamp(t *testing.T) {
 	require.NoError(t, err, "Failed to deprovision tenant")
 
 	// Verify UPDATE audit captures DeprovisionedAt
-	var updateAudit AuditOutbox
+	var updateAudit audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", entity.ID, "UPDATE").
 		First(&updateAudit).Error
@@ -363,15 +364,15 @@ func TestAuditOutbox_CapturesChangedBy(t *testing.T) {
 	require.NoError(t, err, "Failed to create tenant")
 
 	// Verify audit captures changed_by
-	var outbox AuditOutbox
+	var outbox audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ?", tenantObj.ID.String()).
 		First(&outbox).Error
 	require.NoError(t, err, "Audit outbox entry should exist")
 
-	// Should default to systemUser when no JWT context present
+	// Should default to audit.DefaultAuditUser ("system") when no JWT context present
 	require.NotNil(t, outbox.ChangedBy, "ChangedBy should not be nil")
-	assert.Equal(t, systemUser, *outbox.ChangedBy, "ChangedBy should default to systemUser")
+	assert.Equal(t, audit.DefaultAuditUser, *outbox.ChangedBy, "ChangedBy should default to system user")
 }
 
 // TestAuditOutbox_CapturesInsertUpdateDelete verifies that all operations
@@ -396,7 +397,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
 	require.NoError(t, err, "Failed to create tenant")
 
 	// Verify INSERT audit
-	var insertAudit AuditOutbox
+	var insertAudit audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", entity.ID, "INSERT").
 		First(&insertAudit).Error
@@ -413,7 +414,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
 	require.NoError(t, err, "Failed to update tenant")
 
 	// Verify UPDATE audit
-	var updateAudit AuditOutbox
+	var updateAudit audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", entity.ID, "UPDATE").
 		First(&updateAudit).Error
@@ -427,7 +428,7 @@ func TestAuditOutbox_CapturesInsertUpdateDelete(t *testing.T) {
 	require.NoError(t, err, "Failed to delete tenant")
 
 	// Verify DELETE audit
-	var deleteAudit AuditOutbox
+	var deleteAudit audit.AuditOutbox
 	err = db.Table("audit_outbox").
 		Where("record_id = ? AND operation = ?", entity.ID, "DELETE").
 		First(&deleteAudit).Error

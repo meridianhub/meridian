@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
@@ -23,7 +24,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.LedgerPostingEntity{},
 		&persistence.FinancialBookingLogEntity{},
-		&persistence.AuditOutbox{},
+		&audit.AuditOutbox{},
 	})
 
 	// Create the tenant schema for tests

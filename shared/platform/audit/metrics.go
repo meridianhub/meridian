@@ -33,6 +33,8 @@ var (
 	}, []string{"schema"})
 
 	// processingDuration tracks the duration of batch processing operations
+	// Note: Using simple histogram without batch_size label to avoid high cardinality.
+	// Batch size correlation can be done via log analysis if needed.
 	processingDuration = promauto.NewHistogram(prometheus.HistogramOpts{
 		Namespace: "meridian",
 		Subsystem: "audit_worker",
@@ -40,6 +42,31 @@ var (
 		Help:      "Duration of batch processing operations in seconds",
 		Buckets:   prometheus.DefBuckets,
 	})
+
+	// batchSize tracks the actual batch sizes processed (useful for adaptive polling analysis)
+	batchSizeHistogram = promauto.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_worker",
+		Name:      "batch_size",
+		Help:      "Number of entries processed per batch",
+		Buckets:   []float64{0, 1, 5, 10, 25, 50, 100, 250, 500, 1000},
+	})
+
+	// currentPollInterval tracks the current adaptive poll interval per schema
+	currentPollInterval = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_worker",
+		Name:      "poll_interval_seconds",
+		Help:      "Current poll interval in seconds (adaptive)",
+	}, []string{"schema"})
+
+	// emptyPolls tracks consecutive empty poll cycles (useful for tuning adaptive intervals)
+	emptyPolls = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "meridian",
+		Subsystem: "audit_worker",
+		Name:      "empty_polls_consecutive",
+		Help:      "Number of consecutive polls with no pending entries",
+	}, []string{"schema"})
 
 	// entryAge tracks how old entries are when they are processed (latency)
 	entryAge = promauto.NewHistogram(prometheus.HistogramOpts{
@@ -134,6 +161,21 @@ func RecordProcessingDuration(seconds float64) {
 // RecordEntryAge observes the age of an entry when it is processed
 func RecordEntryAge(ageSeconds float64) {
 	entryAge.Observe(ageSeconds)
+}
+
+// RecordBatchSize observes the number of entries processed in a batch
+func RecordBatchSize(size int) {
+	batchSizeHistogram.Observe(float64(size))
+}
+
+// RecordPollInterval sets the current poll interval for a schema
+func RecordPollInterval(schema string, intervalSeconds float64) {
+	currentPollInterval.WithLabelValues(schema).Set(intervalSeconds)
+}
+
+// RecordEmptyPolls sets the consecutive empty poll count for a schema
+func RecordEmptyPolls(schema string, count int) {
+	emptyPolls.WithLabelValues(schema).Set(float64(count))
 }
 
 // RecordKafkaPublished increments the counter for events published to Kafka.

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
@@ -25,7 +26,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&FinancialBookingLogEntity{},
 		&LedgerPostingEntity{},
-		&AuditOutbox{},
+		&audit.AuditOutbox{},
 	})
 
 	// Create the tenant schema for tests
@@ -594,8 +595,8 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&FinancialBookingLogEntity{},
 		&LedgerPostingEntity{},
-		&AuditOutbox{},
-		&AuditLog{},
+		&audit.AuditOutbox{},
+		&audit.AuditLog{},
 	})
 
 	// Create the tenant schema for tests
@@ -712,7 +713,7 @@ func TestAuditBookingLogCreate(t *testing.T) {
 	require.NoError(t, db.Create(bookingLog).Error)
 
 	// Verify audit outbox entry was created
-	var outbox AuditOutbox
+	var outbox audit.AuditOutbox
 	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID.String(), "financial_booking_log").First(&outbox).Error
 	require.NoError(t, err)
 
@@ -749,7 +750,7 @@ func TestAuditBookingLogUpdate(t *testing.T) {
 	require.NoError(t, db.Save(bookingLog).Error)
 
 	// Verify both INSERT and UPDATE audit outbox entries exist
-	var outboxEntries []AuditOutbox
+	var outboxEntries []audit.AuditOutbox
 	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID.String(), "financial_booking_log").
 		Order("created_at ASC").
 		Find(&outboxEntries).Error
@@ -790,7 +791,7 @@ func TestAuditBookingLogDelete(t *testing.T) {
 	require.NoError(t, db.Delete(bookingLog).Error)
 
 	// Verify both INSERT and DELETE audit outbox entries exist
-	var outboxEntries []AuditOutbox
+	var outboxEntries []audit.AuditOutbox
 	err := db.Where("record_id = ? AND table_name = ?", bookingLog.ID.String(), "financial_booking_log").
 		Order("created_at ASC").
 		Find(&outboxEntries).Error
@@ -841,7 +842,7 @@ func TestAuditLedgerPostingCreate(t *testing.T) {
 	require.NoError(t, db.Create(posting).Error)
 
 	// Verify audit outbox entry was created for the posting
-	var outbox AuditOutbox
+	var outbox audit.AuditOutbox
 	err := db.Where("record_id = ? AND table_name = ?", posting.ID.String(), "ledger_posting").First(&outbox).Error
 	require.NoError(t, err)
 
@@ -893,7 +894,7 @@ func TestAuditLedgerPostingUpdate(t *testing.T) {
 	require.NoError(t, db.Save(posting).Error)
 
 	// Verify both INSERT and UPDATE audit outbox entries exist
-	var outboxEntries []AuditOutbox
+	var outboxEntries []audit.AuditOutbox
 	err := db.Where("record_id = ? AND table_name = ?", posting.ID.String(), "ledger_posting").
 		Order("created_at ASC").
 		Find(&outboxEntries).Error
@@ -925,7 +926,7 @@ func TestAuditOutboxStatusValues(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			outbox := &AuditOutbox{
+			outbox := &audit.AuditOutbox{
 				ID:        uuid.New(),
 				Table:     "test_table",
 				Operation: "INSERT",
@@ -966,7 +967,7 @@ func TestAuditChangedByDefaultsToSystem(t *testing.T) {
 	require.NoError(t, db.Create(bookingLog).Error)
 
 	// Verify audit entry has "system" as changed_by
-	var outbox AuditOutbox
+	var outbox audit.AuditOutbox
 	err := db.Where("record_id = ?", bookingLog.ID.String()).First(&outbox).Error
 	require.NoError(t, err)
 

@@ -31,6 +31,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -64,7 +65,7 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 	db, dbCleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.FinancialBookingLogEntity{},
 		&persistence.LedgerPostingEntity{},
-		&persistence.AuditOutbox{},
+		&audit.AuditOutbox{},
 	})
 
 	// Create tenant schema

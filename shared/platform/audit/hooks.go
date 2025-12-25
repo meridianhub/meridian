@@ -13,17 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Errors returned by audit hook helpers.
-var (
-	// ErrNilTransaction is returned when a nil transaction is passed to RecordAudit.
-	ErrNilTransaction = errors.New("tx cannot be nil for audit recording")
-
-	// ErrOldValueType is returned when the old value in context has an incorrect type.
-	ErrOldValueType = errors.New("failed to retrieve old values from context: invalid type")
-
-	// ErrOldValueNotFound is returned when old values are not found in context.
-	ErrOldValueNotFound = errors.New("old values not found in context")
-)
+// Errors for audit hooks are defined in errors.go for centralized error management.
+// See: ErrNilTransaction, ErrOldValueType, ErrOldValueNotFound
 
 // contextKey is a private type for context keys to avoid collisions.
 type contextKey string
@@ -41,8 +32,8 @@ type AuditOutbox struct {
 	Table         string    `gorm:"column:table_name;type:varchar(100);not null;index" json:"table_name"`
 	Operation     string    `gorm:"type:varchar(10);not null;index" json:"operation"` // INSERT, UPDATE, DELETE
 	RecordID      string    `gorm:"type:varchar(50);not null;index" json:"record_id"` // String to support both UUID and custom IDs
-	OldValues     string    `gorm:"type:jsonb" json:"old_values,omitempty"`
-	NewValues     string    `gorm:"type:jsonb" json:"new_values,omitempty"`
+	OldValues     string    `gorm:"type:text" json:"old_values,omitempty"`
+	NewValues     string    `gorm:"type:text" json:"new_values,omitempty"`
 	Status        string    `gorm:"type:varchar(20);not null;default:'pending';index" json:"status"`
 	CreatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 	RetryCount    int       `gorm:"not null;default:0" json:"retry_count"`
@@ -69,8 +60,8 @@ type AuditLog struct {
 	Table         string    `gorm:"column:table_name;type:varchar(100);not null;index" json:"table_name"`
 	Operation     string    `gorm:"type:varchar(10);not null;index" json:"operation"` // INSERT, UPDATE, DELETE
 	RecordID      string    `gorm:"type:varchar(50);not null;index" json:"record_id"` // String to support both UUID and custom IDs
-	OldValues     string    `gorm:"type:jsonb" json:"old_values,omitempty"`
-	NewValues     string    `gorm:"type:jsonb" json:"new_values,omitempty"`
+	OldValues     string    `gorm:"type:text" json:"old_values,omitempty"`
+	NewValues     string    `gorm:"type:text" json:"new_values,omitempty"`
 	CreatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 	ChangedBy     *string   `gorm:"type:varchar(100)" json:"changed_by,omitempty"`
 	TransactionID *string   `gorm:"type:varchar(100)" json:"transaction_id,omitempty"`
@@ -112,7 +103,7 @@ func oldValueKey(tableName string) contextKey {
 //	    return audit.RecordCreate(tx, e)
 //	}
 func RecordCreate[T Auditable](tx *gorm.DB, entity T) error {
-	return recordAudit(tx, entity.AuditTableName(), "INSERT", entity.AuditID(), nil, entity)
+	return recordAudit(tx, entity.AuditTableName(), OperationInsert, entity.AuditID(), nil, entity)
 }
 
 // CaptureOldValue fetches and stores the old entity values before an update.
@@ -205,7 +196,7 @@ func RecordUpdate[T Auditable](tx *gorm.DB, entity T) error {
 		return nil
 	}
 
-	return recordAudit(tx, entity.AuditTableName(), "UPDATE", idStr, old, entity)
+	return recordAudit(tx, entity.AuditTableName(), OperationUpdate, idStr, old, entity)
 }
 
 // RecordDelete writes an audit outbox entry for a DELETE operation.
@@ -217,7 +208,36 @@ func RecordUpdate[T Auditable](tx *gorm.DB, entity T) error {
 //	    return audit.RecordDelete(tx, e)
 //	}
 func RecordDelete[T Auditable](tx *gorm.DB, entity T) error {
-	return recordAudit(tx, entity.AuditTableName(), "DELETE", entity.AuditID(), entity, nil)
+	return recordAudit(tx, entity.AuditTableName(), OperationDelete, entity.AuditID(), entity, nil)
+}
+
+// RecordUpdateManual writes an audit outbox entry for an UPDATE operation
+// when GORM hooks cannot be used (e.g., map-based updates for optimistic locking).
+//
+// Use this when your repository uses patterns like:
+//
+//	tx.Model(&Entity{}).Where("id = ? AND version = ?", id, version).Updates(map[string]interface{}{...})
+//
+// These map-based updates bypass GORM hooks, so you must explicitly call this function
+// after a successful update.
+//
+// Example:
+//
+//	func (r *Repository) Update(ctx context.Context, entity *Entity) error {
+//	    return r.db.Transaction(func(tx *gorm.DB) error {
+//	        var oldEntity Entity
+//	        tx.First(&oldEntity, entity.ID)
+//
+//	        result := tx.Model(&Entity{}).Where("id = ? AND version = ?", entity.ID, oldVersion).Updates(map[...]{...})
+//	        if result.Error != nil || result.RowsAffected == 0 {
+//	            return err
+//	        }
+//
+//	        return audit.RecordUpdateManual(tx, &oldEntity, entity)
+//	    })
+//	}
+func RecordUpdateManual[T Auditable](tx *gorm.DB, oldEntity, newEntity T) error {
+	return recordAudit(tx, newEntity.AuditTableName(), OperationUpdate, newEntity.AuditID(), oldEntity, newEntity)
 }
 
 // Global schema name for the current service.

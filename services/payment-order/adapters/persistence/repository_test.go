@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -20,7 +21,7 @@ const testTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &AuditOutbox{}})
+	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &audit.AuditOutbox{}})
 
 	// Create tenant schema
 	tid := tenant.TenantID(testTenantID)
@@ -60,13 +61,14 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	require.NoError(t, err)
 
 	// Create audit_outbox table in tenant schema (required for audit hooks)
+	// Uses TEXT for old_values/new_values to match shared audit infrastructure
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-		record_id UUID NOT NULL,
-		old_values JSONB,
-		new_values JSONB,
+		record_id VARCHAR(50) NOT NULL,
+		old_values TEXT,
+		new_values TEXT,
 		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
 		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 		retry_count INT NOT NULL DEFAULT 0,

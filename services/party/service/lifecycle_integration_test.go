@@ -22,6 +22,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 
 	// "github.com/meridianhub/meridian/shared/platform/await" // TODO: Use in future Kafka tests
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -35,7 +36,7 @@ func setupLifecycleIntegrationTest(t *testing.T) (*Service, *gorm.DB, context.Co
 
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.PartyEntity{},
-		&persistence.PartyAuditOutbox{},
+		&audit.AuditOutbox{},
 	})
 
 	// Create the tenant schema for tests
