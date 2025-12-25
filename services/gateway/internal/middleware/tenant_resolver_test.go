@@ -287,3 +287,110 @@ func TestTenantResolver_NestedSubdomain(t *testing.T) {
 	// Takes the first subdomain segment
 	assert.Equal(t, "team", capturedTenant.String())
 }
+
+func TestTenantResolver_XTenantHeader(t *testing.T) {
+	tests := []struct {
+		name         string
+		host         string
+		headerValue  string
+		allowedHosts []string
+		expectStatus int
+		expectTenant string
+		expectInCtx  bool
+	}{
+		{
+			name:         "valid X-Tenant header without subdomain",
+			host:         "gateway.local",
+			headerValue:  "localtenant",
+			allowedHosts: nil,
+			expectStatus: http.StatusOK,
+			expectTenant: "localtenant",
+			expectInCtx:  true,
+		},
+		{
+			name:         "valid X-Tenant header with port",
+			host:         "gateway.local:8080",
+			headerValue:  "devtenant",
+			allowedHosts: nil,
+			expectStatus: http.StatusOK,
+			expectTenant: "devtenant",
+			expectInCtx:  true,
+		},
+		{
+			name:         "invalid X-Tenant header with dot",
+			host:         "gateway.local",
+			headerValue:  "invalid.tenant",
+			allowedHosts: nil,
+			expectStatus: http.StatusBadRequest,
+			expectTenant: "",
+			expectInCtx:  false,
+		},
+		{
+			name:         "invalid X-Tenant header with special chars",
+			host:         "gateway.local",
+			headerValue:  "invalid@tenant",
+			allowedHosts: nil,
+			expectStatus: http.StatusBadRequest,
+			expectTenant: "",
+			expectInCtx:  false,
+		},
+		{
+			name:         "invalid X-Tenant header starting with hyphen",
+			host:         "gateway.local",
+			headerValue:  "-invalid",
+			allowedHosts: nil,
+			expectStatus: http.StatusBadRequest,
+			expectTenant: "",
+			expectInCtx:  false,
+		},
+		{
+			name:         "X-Tenant header takes precedence over subdomain",
+			host:         "old.api.meridianhub.cloud",
+			headerValue:  "newtenant",
+			allowedHosts: nil,
+			expectStatus: http.StatusOK,
+			expectTenant: "newtenant",
+			expectInCtx:  true,
+		},
+		{
+			name:         "empty X-Tenant header falls back to subdomain",
+			host:         "acme.api.meridianhub.cloud",
+			headerValue:  "",
+			allowedHosts: nil,
+			expectStatus: http.StatusOK,
+			expectTenant: "acme",
+			expectInCtx:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := middleware.NewTenantResolver("api.meridianhub.cloud", tt.allowedHosts)
+
+			var capturedTenant tenant.TenantID
+			var handlerCalled bool
+			handler := resolver.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				handlerCalled = true
+				capturedTenant, _ = tenant.FromContext(r.Context())
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req.Host = tt.host
+			if tt.headerValue != "" {
+				req.Header.Set("X-Tenant", tt.headerValue)
+			}
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.expectStatus, rec.Code)
+
+			if tt.expectInCtx {
+				assert.True(t, handlerCalled, "handler should be called")
+				assert.Equal(t, tt.expectTenant, capturedTenant.String())
+			} else {
+				assert.False(t, handlerCalled, "handler should not be called for invalid tenant")
+			}
+		})
+	}
+}
