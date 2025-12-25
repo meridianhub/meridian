@@ -70,6 +70,9 @@ stringData:
 #   secret-access-key: "<REPLACE_WITH_AWS_SECRET_ACCESS_KEY>"
 #
 # Google Cloud DNS (requires service account with DNS Administrator role)
+# See: https://cert-manager.io/docs/configuration/acme/dns01/google/
+# Create service account key at: https://console.cloud.google.com/iam-admin/serviceaccounts
+#
 # apiVersion: v1
 # kind: Secret
 # metadata:
@@ -77,17 +80,7 @@ stringData:
 #   namespace: cert-manager
 # type: Opaque
 # stringData:
-#   key.json: |
-#     {
-#       "type": "service_account",
-#       "project_id": "your-project-id",
-#       "private_key_id": "...",
-#       "private_key": "...",
-#       "client_email": "...",
-#       "client_id": "...",
-#       "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-#       "token_uri": "https://oauth2.googleapis.com/token"
-#     }
+#   key.json: "<REPLACE_WITH_GCP_SERVICE_ACCOUNT_JSON>"
 #
 # Azure DNS (requires service principal with DNS Zone Contributor role)
 # apiVersion: v1
