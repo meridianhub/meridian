@@ -1,0 +1,231 @@
+# cert-manager ClusterIssuer for Wildcard TLS Certificates
+#
+# Purpose: Provisions wildcard TLS certificates for *.api.meridian.io using Let's Encrypt
+#
+# Why DNS-01 Challenge?
+# - HTTP-01 challenge does NOT support wildcard certificates (*.domain.com)
+# - DNS-01 is the ONLY ACME challenge type that supports wildcard domains
+# - Requires API access to your DNS provider to create TXT records for validation
+#
+# Architecture:
+# - ClusterIssuer: Cluster-wide resource (not namespaced)
+# - ACME protocol: Automated Certificate Management Environment
+# - Let's Encrypt: Free, automated, and open Certificate Authority
+#
+# Setup Requirements:
+# 1. cert-manager must be installed in the cluster:
+#    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+#
+# 2. DNS provider API credentials must be configured (see secrets below)
+#
+# 3. Update DNS provider configuration in the solver section
+#
+# Environment Selection:
+# - Development/Staging: Use letsencrypt-staging to avoid rate limits (5 certs/hour)
+# - Production: Use letsencrypt-prod (50 certs/week)
+#
+# Testing ClusterIssuer:
+# 1. Apply this file: kubectl apply -f cert-manager-issuer.yaml
+# 2. Verify ready: kubectl get clusterissuer letsencrypt-prod -o yaml
+# 3. Check status: kubectl describe clusterissuer letsencrypt-prod
+# 4. Look for: status.conditions[?(@.type=="Ready")].status == "True"
+#
+# Certificate Validation Process:
+# 1. cert-manager creates Certificate resource
+# 2. ACME server requests DNS TXT record: _acme-challenge.api.meridian.io
+# 3. cert-manager uses DNS provider API to create TXT record
+# 4. ACME server validates TXT record
+# 5. Certificate issued and stored in Kubernetes Secret
+# 6. Ingress automatically uses certificate
+#
+# Troubleshooting:
+# - View challenges: kubectl get challenges --all-namespaces
+# - View orders: kubectl get orders --all-namespaces
+# - Check logs: kubectl logs -n cert-manager deployment/cert-manager
+# - Describe certificate: kubectl describe certificate <cert-name>
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-api-token-secret
+  namespace: cert-manager
+type: Opaque
+stringData:
+  # Cloudflare API Token (NOT API Key)
+  # Required permissions: Zone.DNS (Edit), Zone.Zone (Read)
+  # Create at: https://dash.cloudflare.com/profile/api-tokens
+  # Template: "Edit zone DNS" template
+  api-token: "<REPLACE_WITH_CLOUDFLARE_API_TOKEN>"
+---
+# Alternative DNS Provider Secrets (comment out unused providers)
+#
+# AWS Route53 (requires IAM credentials with route53:ChangeResourceRecordSets permission)
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: route53-credentials-secret
+#   namespace: cert-manager
+# type: Opaque
+# stringData:
+#   secret-access-key: "<REPLACE_WITH_AWS_SECRET_ACCESS_KEY>"
+#
+# Google Cloud DNS (requires service account with DNS Administrator role)
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: clouddns-dns01-solver-sa
+#   namespace: cert-manager
+# type: Opaque
+# stringData:
+#   key.json: |
+#     {
+#       "type": "service_account",
+#       "project_id": "your-project-id",
+#       "private_key_id": "...",
+#       "private_key": "...",
+#       "client_email": "...",
+#       "client_id": "...",
+#       "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+#       "token_uri": "https://oauth2.googleapis.com/token"
+#     }
+#
+# Azure DNS (requires service principal with DNS Zone Contributor role)
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: azuredns-config
+#   namespace: cert-manager
+# type: Opaque
+# stringData:
+#   client-secret: "<REPLACE_WITH_AZURE_CLIENT_SECRET>"
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    # Let's Encrypt Production Server
+    # Rate limits: 50 certificates per registered domain per week
+    # Certificates are trusted by all major browsers
+    server: https://acme-v02.api.letsencrypt.org/directory
+
+    # Email for urgent renewal and security notices
+    # IMPORTANT: Replace with your actual email address
+    email: admin@meridian.io
+
+    # Secret to store ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+
+    # DNS-01 challenge solver configuration
+    solvers:
+    # Cloudflare DNS-01 solver (default configuration)
+    - dns01:
+        cloudflare:
+          # Cloudflare API Token (recommended over API Key)
+          apiTokenSecretRef:
+            name: cloudflare-api-token-secret
+            key: api-token
+      selector:
+        # This solver applies to both wildcard and apex domain
+        dnsNames:
+        - "*.api.meridian.io"
+        - "api.meridian.io"
+
+    # Alternative DNS Provider Configurations (comment out unused)
+    #
+    # AWS Route53 DNS-01 solver
+    # - dns01:
+    #     route53:
+    #       region: us-east-1
+    #       accessKeyID: <REPLACE_WITH_AWS_ACCESS_KEY_ID>
+    #       secretAccessKeySecretRef:
+    #         name: route53-credentials-secret
+    #         key: secret-access-key
+    #   selector:
+    #     dnsNames:
+    #     - "*.api.meridian.io"
+    #     - "api.meridian.io"
+    #
+    # Google Cloud DNS solver
+    # - dns01:
+    #     cloudDNS:
+    #       project: <REPLACE_WITH_GCP_PROJECT_ID>
+    #       serviceAccountSecretRef:
+    #         name: clouddns-dns01-solver-sa
+    #         key: key.json
+    #   selector:
+    #     dnsNames:
+    #     - "*.api.meridian.io"
+    #     - "api.meridian.io"
+    #
+    # Azure DNS solver
+    # - dns01:
+    #     azureDNS:
+    #       subscriptionID: <REPLACE_WITH_AZURE_SUBSCRIPTION_ID>
+    #       resourceGroupName: <REPLACE_WITH_RESOURCE_GROUP>
+    #       hostedZoneName: meridian.io
+    #       environment: AzurePublicCloud
+    #       # Managed Identity (recommended for AKS)
+    #       managedIdentity:
+    #         clientID: <REPLACE_WITH_MANAGED_IDENTITY_CLIENT_ID>
+    #       # OR Service Principal (alternative)
+    #       # clientID: <REPLACE_WITH_SERVICE_PRINCIPAL_CLIENT_ID>
+    #       # tenantID: <REPLACE_WITH_AZURE_TENANT_ID>
+    #       # clientSecretSecretRef:
+    #       #   name: azuredns-config
+    #       #   key: client-secret
+    #   selector:
+    #     dnsNames:
+    #     - "*.api.meridian.io"
+    #     - "api.meridian.io"
+---
+# Staging ClusterIssuer for testing (recommended before using production)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    # Let's Encrypt Staging Server
+    # Higher rate limits, certificates NOT trusted by browsers (for testing only)
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+
+    email: admin@meridian.io
+
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+
+    solvers:
+    - dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            name: cloudflare-api-token-secret
+            key: api-token
+      selector:
+        dnsNames:
+        - "*.api.meridian.io"
+        - "api.meridian.io"
+---
+# Example Certificate Resource (for testing the ClusterIssuer)
+# This resource can be used to manually test certificate issuance
+# In production, Ingress resources with cert-manager annotations will auto-create certificates
+#
+# apiVersion: cert-manager.io/v1
+# kind: Certificate
+# metadata:
+#   name: wildcard-api-meridian-cert
+#   namespace: default
+# spec:
+#   secretName: wildcard-api-meridian-tls
+#   issuerRef:
+#     name: letsencrypt-prod
+#     kind: ClusterIssuer
+#   dnsNames:
+#   - "*.api.meridian.io"
+#   - "api.meridian.io"
+#
+# Test certificate status:
+# kubectl describe certificate wildcard-api-meridian-cert
+# kubectl get secret wildcard-api-meridian-tls -o yaml
