@@ -1,9 +1,48 @@
 package domain
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+)
+
+// ControlAction represents an administrative control operation on a booking log.
+type ControlAction string
+
+// Control actions for administrative operations.
+const (
+	ControlActionSuspend   ControlAction = "SUSPEND"
+	ControlActionResume    ControlAction = "RESUME"
+	ControlActionTerminate ControlAction = "TERMINATE"
+)
+
+// IsValid returns true if the control action is valid.
+func (c ControlAction) IsValid() bool {
+	switch c {
+	case ControlActionSuspend, ControlActionResume, ControlActionTerminate:
+		return true
+	}
+	return false
+}
+
+// String returns the string representation of the control action.
+func (c ControlAction) String() string {
+	return string(c)
+}
+
+// Control operation errors.
+var (
+	// ErrInvalidControlAction is returned when an invalid control action is provided.
+	ErrInvalidControlAction = errors.New("invalid control action")
+	// ErrCannotSuspendTerminal is returned when trying to suspend a booking log in terminal state.
+	ErrCannotSuspendTerminal = errors.New("cannot suspend booking log in terminal state")
+	// ErrCannotResumePending is returned when trying to resume a booking log that is not suspended.
+	ErrCannotResumePending = errors.New("cannot resume booking log that is not suspended")
+	// ErrCannotTerminateTerminal is returned when trying to terminate a booking log already in terminal state.
+	ErrCannotTerminateTerminal = errors.New("cannot terminate booking log already in terminal state")
+	// ErrReasonRequired is returned when a reason is required but not provided.
+	ErrReasonRequired = errors.New("reason is required for control operations")
 )
 
 // FinancialBookingLog represents the BIAN Financial Booking Log aggregate root.
@@ -165,4 +204,83 @@ func (l *FinancialBookingLog) IsTerminal() bool {
 	return l.Status == TransactionStatusPosted ||
 		l.Status == TransactionStatusFailed ||
 		l.Status == TransactionStatusCancelled
+}
+
+// IsSuspended returns true if the booking log is currently suspended.
+func (l *FinancialBookingLog) IsSuspended() bool {
+	return l.Status == TransactionStatusFailed
+}
+
+// ControlLog applies a control action (SUSPEND, RESUME, TERMINATE) to the booking log.
+//
+// Control Actions:
+//   - SUSPEND: Transitions from PENDING to FAILED (suspended state uses FAILED status)
+//   - RESUME: Transitions from FAILED (suspended) back to PENDING
+//   - TERMINATE: Transitions from PENDING or FAILED to CANCELLED (terminal state)
+//
+// State Machine:
+//
+//	PENDING → SUSPEND → FAILED (suspended)
+//	FAILED (suspended) → RESUME → PENDING
+//	PENDING/FAILED → TERMINATE → CANCELLED (terminal)
+//
+// Parameters:
+//   - action: The control action to perform (SUSPEND, RESUME, TERMINATE)
+//   - reason: Explanation for the control action (required)
+//
+// Returns a new instance following immutability guidelines per CONTRIBUTING.md.
+// Returns an error if:
+//   - action is invalid
+//   - reason is empty
+//   - state transition is not allowed
+func (l FinancialBookingLog) ControlLog(action ControlAction, reason string) (FinancialBookingLog, error) {
+	if !action.IsValid() {
+		return l, ErrInvalidControlAction
+	}
+	if reason == "" {
+		return l, ErrReasonRequired
+	}
+
+	var newStatus TransactionStatus
+
+	switch action {
+	case ControlActionSuspend:
+		// SUSPEND: PENDING → FAILED (suspended)
+		if l.IsTerminal() {
+			return l, ErrCannotSuspendTerminal
+		}
+		newStatus = TransactionStatusFailed
+
+	case ControlActionResume:
+		// RESUME: FAILED (suspended) → PENDING
+		if !l.IsSuspended() {
+			return l, ErrCannotResumePending
+		}
+		newStatus = TransactionStatusPending
+
+	case ControlActionTerminate:
+		// TERMINATE: PENDING/FAILED → CANCELLED
+		if l.Status == TransactionStatusPosted ||
+			l.Status == TransactionStatusCancelled ||
+			l.Status == TransactionStatusReversed {
+			return l, ErrCannotTerminateTerminal
+		}
+		newStatus = TransactionStatusCancelled
+
+	default:
+		return l, ErrInvalidControlAction
+	}
+
+	return FinancialBookingLog{
+		ID:                      l.ID,
+		FinancialAccountType:    l.FinancialAccountType,
+		ProductServiceReference: l.ProductServiceReference,
+		BusinessUnitReference:   l.BusinessUnitReference,
+		ChartOfAccountsRules:    l.ChartOfAccountsRules,
+		BaseCurrency:            l.BaseCurrency,
+		Status:                  newStatus,
+		CreatedAt:               l.CreatedAt,
+		UpdatedAt:               time.Now().UTC(),
+		postings:                l.postings,
+	}, nil
 }

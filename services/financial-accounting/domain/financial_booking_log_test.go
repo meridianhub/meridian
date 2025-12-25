@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -535,5 +536,452 @@ func TestFinancialBookingLog_AllSupportedCurrencies(t *testing.T) {
 				t.Errorf("Expected currency %v, got %v", currency, log.BaseCurrency)
 			}
 		})
+	}
+}
+
+func TestControlAction_IsValid(t *testing.T) {
+	tests := []struct {
+		name    string
+		action  ControlAction
+		isValid bool
+	}{
+		{
+			name:    "SUSPEND is valid",
+			action:  ControlActionSuspend,
+			isValid: true,
+		},
+		{
+			name:    "RESUME is valid",
+			action:  ControlActionResume,
+			isValid: true,
+		},
+		{
+			name:    "TERMINATE is valid",
+			action:  ControlActionTerminate,
+			isValid: true,
+		},
+		{
+			name:    "empty string is invalid",
+			action:  ControlAction(""),
+			isValid: false,
+		},
+		{
+			name:    "unknown action is invalid",
+			action:  ControlAction("UNKNOWN"),
+			isValid: false,
+		},
+		{
+			name:    "lowercase suspend is invalid",
+			action:  ControlAction("suspend"),
+			isValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.action.IsValid(); got != tt.isValid {
+				t.Errorf("ControlAction.IsValid() = %v, want %v", got, tt.isValid)
+			}
+		})
+	}
+}
+
+func TestControlAction_String(t *testing.T) {
+	tests := []struct {
+		name   string
+		action ControlAction
+		want   string
+	}{
+		{
+			name:   "SUSPEND string representation",
+			action: ControlActionSuspend,
+			want:   "SUSPEND",
+		},
+		{
+			name:   "RESUME string representation",
+			action: ControlActionResume,
+			want:   "RESUME",
+		},
+		{
+			name:   "TERMINATE string representation",
+			action: ControlActionTerminate,
+			want:   "TERMINATE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.action.String(); got != tt.want {
+				t.Errorf("ControlAction.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFinancialBookingLog_ControlLog_Suspend(t *testing.T) {
+	t.Run("suspend from PENDING succeeds", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		)
+
+		updated, err := log.ControlLog(ControlActionSuspend, "Suspicious activity detected")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if updated.Status != TransactionStatusFailed {
+			t.Errorf("Expected status FAILED (suspended), got %v", updated.Status)
+		}
+
+		// Verify immutability - original unchanged
+		if log.Status != TransactionStatusPending {
+			t.Error("Original log status should remain PENDING")
+		}
+	})
+
+	t.Run("suspend from POSTED fails", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		).WithStatus(TransactionStatusPosted)
+
+		_, err := log.ControlLog(ControlActionSuspend, "Attempting to suspend")
+		if err == nil {
+			t.Fatal("Expected error for suspending terminal state")
+		}
+		if !errors.Is(err, ErrCannotSuspendTerminal) {
+			t.Errorf("Expected ErrCannotSuspendTerminal, got %v", err)
+		}
+	})
+
+	t.Run("suspend from CANCELLED fails", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		).WithStatus(TransactionStatusCancelled)
+
+		_, err := log.ControlLog(ControlActionSuspend, "Attempting to suspend")
+		if !errors.Is(err, ErrCannotSuspendTerminal) {
+			t.Errorf("Expected ErrCannotSuspendTerminal, got %v", err)
+		}
+	})
+
+	t.Run("suspend without reason fails", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		)
+
+		_, err := log.ControlLog(ControlActionSuspend, "")
+		if !errors.Is(err, ErrReasonRequired) {
+			t.Errorf("Expected ErrReasonRequired, got %v", err)
+		}
+	})
+}
+
+func TestFinancialBookingLog_ControlLog_Resume(t *testing.T) {
+	t.Run("resume from FAILED (suspended) succeeds", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		).WithStatus(TransactionStatusFailed) // Simulates suspended state
+
+		updated, err := log.ControlLog(ControlActionResume, "Issue resolved, resuming")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if updated.Status != TransactionStatusPending {
+			t.Errorf("Expected status PENDING, got %v", updated.Status)
+		}
+	})
+
+	t.Run("resume from PENDING fails", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		)
+
+		_, err := log.ControlLog(ControlActionResume, "Attempting to resume")
+		if !errors.Is(err, ErrCannotResumePending) {
+			t.Errorf("Expected ErrCannotResumePending, got %v", err)
+		}
+	})
+
+	t.Run("resume from POSTED fails", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		).WithStatus(TransactionStatusPosted)
+
+		_, err := log.ControlLog(ControlActionResume, "Attempting to resume")
+		if !errors.Is(err, ErrCannotResumePending) {
+			t.Errorf("Expected ErrCannotResumePending, got %v", err)
+		}
+	})
+}
+
+func TestFinancialBookingLog_ControlLog_Terminate(t *testing.T) {
+	t.Run("terminate from PENDING succeeds", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		)
+
+		updated, err := log.ControlLog(ControlActionTerminate, "Business decision to cancel")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if updated.Status != TransactionStatusCancelled {
+			t.Errorf("Expected status CANCELLED, got %v", updated.Status)
+		}
+	})
+
+	t.Run("terminate from FAILED (suspended) succeeds", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		).WithStatus(TransactionStatusFailed)
+
+		updated, err := log.ControlLog(ControlActionTerminate, "Cannot resolve issue, terminating")
+		if err != nil {
+			t.Fatalf("Expected no error, got %v", err)
+		}
+
+		if updated.Status != TransactionStatusCancelled {
+			t.Errorf("Expected status CANCELLED, got %v", updated.Status)
+		}
+	})
+
+	t.Run("terminate from POSTED fails", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		).WithStatus(TransactionStatusPosted)
+
+		_, err := log.ControlLog(ControlActionTerminate, "Attempting to terminate")
+		if !errors.Is(err, ErrCannotTerminateTerminal) {
+			t.Errorf("Expected ErrCannotTerminateTerminal, got %v", err)
+		}
+	})
+
+	t.Run("terminate from CANCELLED fails", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		).WithStatus(TransactionStatusCancelled)
+
+		_, err := log.ControlLog(ControlActionTerminate, "Attempting to terminate again")
+		if !errors.Is(err, ErrCannotTerminateTerminal) {
+			t.Errorf("Expected ErrCannotTerminateTerminal, got %v", err)
+		}
+	})
+
+	t.Run("terminate from REVERSED fails", func(t *testing.T) {
+		log := NewFinancialBookingLog(
+			"ASSET",
+			"PROD-001",
+			"BU-TREASURY",
+			"UK-GAAP-2024",
+			CurrencyGBP,
+		).WithStatus(TransactionStatusReversed)
+
+		_, err := log.ControlLog(ControlActionTerminate, "Attempting to terminate reversed")
+		if !errors.Is(err, ErrCannotTerminateTerminal) {
+			t.Errorf("Expected ErrCannotTerminateTerminal, got %v", err)
+		}
+	})
+}
+
+func TestFinancialBookingLog_ControlLog_InvalidAction(t *testing.T) {
+	log := NewFinancialBookingLog(
+		"ASSET",
+		"PROD-001",
+		"BU-TREASURY",
+		"UK-GAAP-2024",
+		CurrencyGBP,
+	)
+
+	_, err := log.ControlLog(ControlAction("INVALID"), "Some reason")
+	if !errors.Is(err, ErrInvalidControlAction) {
+		t.Errorf("Expected ErrInvalidControlAction, got %v", err)
+	}
+}
+
+func TestFinancialBookingLog_ControlLog_Immutability(t *testing.T) {
+	original := NewFinancialBookingLog(
+		"ASSET",
+		"PROD-001",
+		"BU-TREASURY",
+		"UK-GAAP-2024",
+		CurrencyGBP,
+	)
+	originalID := original.ID
+	originalCreatedAt := original.CreatedAt
+
+	updated, err := original.ControlLog(ControlActionSuspend, "Test suspension")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Original unchanged
+	if original.Status != TransactionStatusPending {
+		t.Error("Original status should remain PENDING")
+	}
+
+	// Updated has new status
+	if updated.Status != TransactionStatusFailed {
+		t.Error("Updated status should be FAILED (suspended)")
+	}
+
+	// ID preserved
+	if updated.ID != originalID {
+		t.Error("ID should be preserved")
+	}
+
+	// CreatedAt preserved
+	if !updated.CreatedAt.Equal(originalCreatedAt) {
+		t.Error("CreatedAt should be preserved")
+	}
+
+	// UpdatedAt should be more recent
+	if !updated.UpdatedAt.After(original.UpdatedAt) && !updated.UpdatedAt.Equal(original.UpdatedAt) {
+		t.Error("UpdatedAt should be updated or equal")
+	}
+
+	// Other fields preserved
+	if updated.FinancialAccountType != original.FinancialAccountType {
+		t.Error("FinancialAccountType should be preserved")
+	}
+	if updated.ProductServiceReference != original.ProductServiceReference {
+		t.Error("ProductServiceReference should be preserved")
+	}
+	if updated.BusinessUnitReference != original.BusinessUnitReference {
+		t.Error("BusinessUnitReference should be preserved")
+	}
+	if updated.ChartOfAccountsRules != original.ChartOfAccountsRules {
+		t.Error("ChartOfAccountsRules should be preserved")
+	}
+	if updated.BaseCurrency != original.BaseCurrency {
+		t.Error("BaseCurrency should be preserved")
+	}
+}
+
+func TestFinancialBookingLog_IsSuspended(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        TransactionStatus
+		wantSuspended bool
+	}{
+		{
+			name:          "FAILED is suspended",
+			status:        TransactionStatusFailed,
+			wantSuspended: true,
+		},
+		{
+			name:          "PENDING is not suspended",
+			status:        TransactionStatusPending,
+			wantSuspended: false,
+		},
+		{
+			name:          "POSTED is not suspended",
+			status:        TransactionStatusPosted,
+			wantSuspended: false,
+		},
+		{
+			name:          "CANCELLED is not suspended",
+			status:        TransactionStatusCancelled,
+			wantSuspended: false,
+		},
+		{
+			name:          "REVERSED is not suspended",
+			status:        TransactionStatusReversed,
+			wantSuspended: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log := NewFinancialBookingLog(
+				"ASSET",
+				"PROD-001",
+				"BU-TREASURY",
+				"UK-GAAP-2024",
+				CurrencyGBP,
+			).WithStatus(tt.status)
+
+			if got := log.IsSuspended(); got != tt.wantSuspended {
+				t.Errorf("IsSuspended() = %v, want %v", got, tt.wantSuspended)
+			}
+		})
+	}
+}
+
+func TestFinancialBookingLog_ControlLog_SuspendResumeChain(t *testing.T) {
+	// Test the complete suspend -> resume flow
+	log := NewFinancialBookingLog(
+		"ASSET",
+		"PROD-001",
+		"BU-TREASURY",
+		"UK-GAAP-2024",
+		CurrencyGBP,
+	)
+
+	// Step 1: Suspend
+	suspended, err := log.ControlLog(ControlActionSuspend, "Flagged for review")
+	if err != nil {
+		t.Fatalf("Suspend failed: %v", err)
+	}
+	if suspended.Status != TransactionStatusFailed {
+		t.Errorf("Expected FAILED after suspend, got %v", suspended.Status)
+	}
+
+	// Step 2: Resume
+	resumed, err := suspended.ControlLog(ControlActionResume, "Review completed, cleared")
+	if err != nil {
+		t.Fatalf("Resume failed: %v", err)
+	}
+	if resumed.Status != TransactionStatusPending {
+		t.Errorf("Expected PENDING after resume, got %v", resumed.Status)
+	}
+
+	// Verify original is unchanged throughout
+	if log.Status != TransactionStatusPending {
+		t.Error("Original log should remain PENDING")
 	}
 }

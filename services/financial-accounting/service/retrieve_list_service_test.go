@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -109,8 +110,10 @@ func TestRetrieveLedgerPosting_DefensiveTests(t *testing.T) {
 			repo := persistence.NewLedgerRepository(db)
 			publisher := &mockEventPublisher{}
 			idempotencySvc := &mockIdempotencyService{}
+			outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+			outboxRepo := events.NewPostgresOutboxRepository(db)
 
-			service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
 			if err != nil {
 				t.Fatalf("failed to create service: %v", err)
 			}
@@ -263,8 +266,10 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 			repo := persistence.NewLedgerRepository(db)
 			publisher := &mockEventPublisher{}
 			idempotencySvc := &mockIdempotencyService{}
+			outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+			outboxRepo := events.NewPostgresOutboxRepository(db)
 
-			service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+			service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
 			if err != nil {
 				t.Fatalf("failed to create service: %v", err)
 			}

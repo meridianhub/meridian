@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -46,12 +47,15 @@ func (m *mockEventPublisher) PublishBatch(_ context.Context, _ []DomainEvent) er
 // TestNewFinancialAccountingService verifies the constructor creates a valid service instance.
 func TestNewFinancialAccountingService(t *testing.T) {
 	// Arrange
-	repo := persistence.NewLedgerRepository(&gorm.DB{})
+	db := &gorm.DB{}
+	repo := persistence.NewLedgerRepository(db)
 	publisher := &mockEventPublisher{}
 	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
 
 	// Act
-	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
 
 	// Assert
 	require.NoError(t, err, "Should create service without error")
@@ -59,17 +63,22 @@ func TestNewFinancialAccountingService(t *testing.T) {
 	assert.NotNil(t, service.repository, "Repository should be injected")
 	assert.NotNil(t, service.eventPublisher, "Event publisher should be injected")
 	assert.NotNil(t, service.idempotency, "Idempotency service should be injected")
+	assert.NotNil(t, service.outboxPublisher, "Outbox publisher should be injected")
+	assert.NotNil(t, service.outboxRepo, "Outbox repository should be injected")
 }
 
 // TestFinancialAccountingService_ImplementsInterface verifies the service implements the gRPC interface.
 func TestFinancialAccountingService_ImplementsInterface(t *testing.T) {
 	// Arrange
-	repo := persistence.NewLedgerRepository(&gorm.DB{})
+	db := &gorm.DB{}
+	repo := persistence.NewLedgerRepository(db)
 	publisher := &mockEventPublisher{}
 	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
 
 	// Act
-	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
 	require.NoError(t, err)
 
 	// Assert - compile-time check that service implements the interface
@@ -80,70 +89,111 @@ func TestFinancialAccountingService_ImplementsInterface(t *testing.T) {
 // Rationale: Financial services must validate all dependencies to prevent runtime panics
 // that could cause service outages or data corruption.
 func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
+	db := &gorm.DB{}
+	validRepo := persistence.NewLedgerRepository(db)
+	validEventPub := &mockEventPublisher{}
+	validIdempotencySvc := &mockIdempotencyService{}
+	validOutboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	validOutboxRepo := events.NewPostgresOutboxRepository(db)
+
 	tests := []struct {
-		name           string
-		repository     *persistence.LedgerRepository
-		eventPub       EventPublisher
-		idempotencySvc idempotency.Service
-		wantErr        bool
-		wantSentinel   error // Expected sentinel error for errors.Is() verification
-		rationale      string
+		name            string
+		repository      *persistence.LedgerRepository
+		eventPub        EventPublisher
+		idempotencySvc  idempotency.Service
+		outboxPublisher *events.OutboxPublisher
+		outboxRepo      *events.PostgresOutboxRepository
+		wantErr         bool
+		wantSentinel    error // Expected sentinel error for errors.Is() verification
+		rationale       string
 	}{
 		// Happy path - covered by TestNewFinancialAccountingService
 		{
-			name:           "valid dependencies",
-			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
-			eventPub:       &mockEventPublisher{},
-			idempotencySvc: &mockIdempotencyService{},
-			wantErr:        false,
-			wantSentinel:   nil,
-			rationale:      "Standard valid initialization with all dependencies",
+			name:            "valid dependencies",
+			repository:      validRepo,
+			eventPub:        validEventPub,
+			idempotencySvc:  validIdempotencySvc,
+			outboxPublisher: validOutboxPublisher,
+			outboxRepo:      validOutboxRepo,
+			wantErr:         false,
+			wantSentinel:    nil,
+			rationale:       "Standard valid initialization with all dependencies",
 		},
 
 		// Unhappy paths - nil dependencies (ADR-0008 mandatory tests)
 		{
-			name:           "nil repository",
-			repository:     nil,
-			eventPub:       &mockEventPublisher{},
-			idempotencySvc: &mockIdempotencyService{},
-			wantErr:        true,
-			wantSentinel:   ErrRepositoryNil,
-			rationale:      "Repository is essential - nil would cause panic on first use",
+			name:            "nil repository",
+			repository:      nil,
+			eventPub:        validEventPub,
+			idempotencySvc:  validIdempotencySvc,
+			outboxPublisher: validOutboxPublisher,
+			outboxRepo:      validOutboxRepo,
+			wantErr:         true,
+			wantSentinel:    ErrRepositoryNil,
+			rationale:       "Repository is essential - nil would cause panic on first use",
 		},
 		{
-			name:           "nil event publisher",
-			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
-			eventPub:       nil,
-			idempotencySvc: &mockIdempotencyService{},
-			wantErr:        true,
-			wantSentinel:   ErrEventPublisherNil,
-			rationale:      "Event publisher is essential - nil would cause panic when publishing events",
+			name:            "nil event publisher",
+			repository:      validRepo,
+			eventPub:        nil,
+			idempotencySvc:  validIdempotencySvc,
+			outboxPublisher: validOutboxPublisher,
+			outboxRepo:      validOutboxRepo,
+			wantErr:         true,
+			wantSentinel:    ErrEventPublisherNil,
+			rationale:       "Event publisher is essential - nil would cause panic when publishing events",
 		},
 		{
-			name:           "nil idempotency service",
-			repository:     persistence.NewLedgerRepository(&gorm.DB{}),
-			eventPub:       &mockEventPublisher{},
-			idempotencySvc: nil,
-			wantErr:        true,
-			wantSentinel:   ErrIdempotencyServiceNil,
-			rationale:      "Idempotency service is essential - nil would cause panic on idempotent operations",
+			name:            "nil idempotency service",
+			repository:      validRepo,
+			eventPub:        validEventPub,
+			idempotencySvc:  nil,
+			outboxPublisher: validOutboxPublisher,
+			outboxRepo:      validOutboxRepo,
+			wantErr:         true,
+			wantSentinel:    ErrIdempotencyServiceNil,
+			rationale:       "Idempotency service is essential - nil would cause panic on idempotent operations",
+		},
+		{
+			name:            "nil outbox publisher",
+			repository:      validRepo,
+			eventPub:        validEventPub,
+			idempotencySvc:  validIdempotencySvc,
+			outboxPublisher: nil,
+			outboxRepo:      validOutboxRepo,
+			wantErr:         true,
+			wantSentinel:    ErrOutboxPublisherNil,
+			rationale:       "Outbox publisher is essential for transactional outbox pattern",
+		},
+		{
+			name:            "nil outbox repository",
+			repository:      validRepo,
+			eventPub:        validEventPub,
+			idempotencySvc:  validIdempotencySvc,
+			outboxPublisher: validOutboxPublisher,
+			outboxRepo:      nil,
+			wantErr:         true,
+			wantSentinel:    ErrOutboxRepositoryNil,
+			rationale:       "Outbox repository is essential for transactional outbox pattern",
 		},
 
 		// Edge case - multiple nil dependencies
 		{
-			name:           "all dependencies nil",
-			repository:     nil,
-			eventPub:       nil,
-			idempotencySvc: nil,
-			wantErr:        true,
-			wantSentinel:   ErrRepositoryNil,
-			rationale:      "Should error on first nil check (repository)",
+			name:            "all dependencies nil",
+			repository:      nil,
+			eventPub:        nil,
+			idempotencySvc:  nil,
+			outboxPublisher: nil,
+			outboxRepo:      nil,
+			wantErr:         true,
+			wantSentinel:    ErrRepositoryNil,
+			rationale:       "Should error on first nil check (repository)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service, err := NewFinancialAccountingService(tt.repository, tt.eventPub, tt.idempotencySvc)
+			service, err := NewFinancialAccountingService(tt.repository, tt.eventPub, tt.idempotencySvc, tt.outboxPublisher, tt.outboxRepo)
 			if tt.wantErr {
 				require.Error(t, err, tt.rationale)
 				assert.Nil(t, service, "Service should be nil when error occurs")
@@ -155,6 +205,8 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 				assert.NotNil(t, service.repository, "Repository should be injected")
 				assert.NotNil(t, service.eventPublisher, "Event publisher should be injected")
 				assert.NotNil(t, service.idempotency, "Idempotency service should be injected")
+				assert.NotNil(t, service.outboxPublisher, "Outbox publisher should be injected")
+				assert.NotNil(t, service.outboxRepo, "Outbox repository should be injected")
 			}
 		})
 	}
@@ -162,9 +214,13 @@ func TestNewFinancialAccountingService_DefensiveTests(t *testing.T) {
 
 // mustNewFinancialAccountingService creates a service and fails the test if an error occurs.
 // Use this for tests where the service should always be created successfully.
+// It creates default outbox publisher and repository for tests that don't need to mock them.
 func mustNewFinancialAccountingService(t *testing.T, repo *persistence.LedgerRepository, publisher EventPublisher, idempotencySvc idempotency.Service) *FinancialAccountingService {
 	t.Helper()
-	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc)
+	db := repo.DB()
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+	service, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
 	require.NoError(t, err, "unexpected error creating service")
 	return service
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 )
@@ -147,9 +148,11 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 	idempotencySvc := &inMemoryIdempotencyService{
 		store: make(map[string]*idempotency.Result),
 	}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
 
 	// Create the financial accounting service
-	service, err := NewFinancialAccountingService(repo, eventPublisher, idempotencySvc)
+	service, err := NewFinancialAccountingService(repo, eventPublisher, idempotencySvc, outboxPublisher, outboxRepo)
 	require.NoError(t, err, "Failed to create financial accounting service")
 
 	// Create gRPC server with tenant interceptor

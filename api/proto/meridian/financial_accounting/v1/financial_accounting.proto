@@ -104,6 +104,19 @@ message FinancialBookingLog {
   repeated LedgerPosting postings = 10;
 }
 
+// ControlAction defines the lifecycle control actions for financial booking logs.
+// These are BIAN control operations for administrative management of booking logs.
+enum ControlAction {
+  // CONTROL_ACTION_UNSPECIFIED means the action is unknown.
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  // CONTROL_ACTION_SUSPEND temporarily suspends the booking log (transitions to FAILED/suspended).
+  CONTROL_ACTION_SUSPEND = 1;
+  // CONTROL_ACTION_RESUME reactivates a suspended booking log (returns to PENDING).
+  CONTROL_ACTION_RESUME = 2;
+  // CONTROL_ACTION_TERMINATE permanently ends the booking log lifecycle (transitions to CANCELLED).
+  CONTROL_ACTION_TERMINATE = 3;
+}
+
 // LedgerPosting represents a single posting operation in double-entry bookkeeping.
 message LedgerPosting {
   // id is the unique identifier for this posting.
@@ -429,6 +442,44 @@ message ListLedgerPostingsResponse {
   meridian.common.v1.PaginationResponse pagination = 2;
 }
 
+// ControlFinancialBookingLogRequest controls the lifecycle of a booking log (BIAN CoCR).
+//
+// This operation supports administrative control actions:
+//   - SUSPEND: Temporarily suspend processing of the booking log
+//   - RESUME: Resume processing of a previously suspended booking log
+//   - TERMINATE: Permanently terminate the booking log lifecycle
+//
+// The operation uses the transactional outbox pattern to ensure atomic
+// persistence of both the state change and the associated event.
+message ControlFinancialBookingLogRequest {
+  // id is the booking log to control.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // control_action is the lifecycle action to perform.
+  ControlAction control_action = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+
+  // reason is an explanation for the control action (required for audit trail).
+  string reason = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 4 [(buf.validate.field).required = true];
+}
+
+// ControlFinancialBookingLogResponse returns the controlled booking log.
+message ControlFinancialBookingLogResponse {
+  // financial_booking_log is the booking log after the control action.
+  FinancialBookingLog financial_booking_log = 1 [(buf.validate.field).required = true];
+}
+
 // FinancialAccountingService provides the BIAN Financial Accounting service interface.
 service FinancialAccountingService {
   // InitiateFinancialBookingLog creates a new financial booking log.
@@ -504,6 +555,16 @@ service FinancialAccountingService {
   rpc ListLedgerPostings(ListLedgerPostingsRequest) returns (ListLedgerPostingsResponse) {
     option (google.api.http) = {
       get: "/v1/postings"
+    };
+  }
+
+  // ControlFinancialBookingLog controls the lifecycle of a booking log (BIAN CoCR).
+  // Supports SUSPEND, RESUME, and TERMINATE control actions.
+  // Uses transactional outbox pattern for reliable event publishing.
+  rpc ControlFinancialBookingLog(ControlFinancialBookingLogRequest) returns (ControlFinancialBookingLogResponse) {
+    option (google.api.http) = {
+      post: "/v1/booking-logs/{id}/control"
+      body: "*"
     };
   }
 }

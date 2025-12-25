@@ -666,3 +666,29 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 	}
 	return result, nil
 }
+
+// WithTransaction executes a function within a database transaction with tenant scoping.
+// This is used for implementing the transactional outbox pattern where both the entity
+// update and the outbox event write must succeed or fail together atomically.
+//
+// The provided function receives a tenant-scoped *gorm.DB transaction that can be used
+// for all database operations within the transaction.
+//
+// Example:
+//
+//	err := repo.WithTransaction(ctx, func(tx *gorm.DB) error {
+//	    if err := tx.Save(&entity).Error; err != nil {
+//	        return err
+//	    }
+//	    return outboxRepo.Insert(ctx, tx, event)
+//	})
+func (r *LedgerRepository) WithTransaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	return r.withTenantTransaction(ctx, fn)
+}
+
+// DB returns the underlying GORM database instance.
+// This is primarily used for passing the DB to other components that need
+// database access, such as the outbox repository for the transactional outbox pattern.
+func (r *LedgerRepository) DB() *gorm.DB {
+	return r.db
+}
