@@ -190,6 +190,27 @@ func (r *LienRepository) Update(lien *domain.Lien) error {
 	return nil
 }
 
+// CountActiveByAccountID returns the count of active non-expired liens for an account.
+// Used to check if an account has any active liens before closing.
+// In multi-org mode, this query is scoped to the organization from context.
+func (r *LienRepository) CountActiveByAccountID(ctx context.Context, accountID uuid.UUID) (int64, error) {
+	var count int64
+	now := time.Now()
+
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		result := tx.Model(&LienEntity{}).
+			Where("account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+				accountID, string(domain.LienStatusActive), now).
+			Count(&count)
+		return result.Error
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
 // SumActiveAmountByAccountID returns the total amount of active non-expired liens for an account in cents.
 // Returns ErrLienCurrencyInconsistent if liens with different currencies exist (indicates data corruption).
 // Currency validation is enforced at the service layer when creating liens (InitiateLien).

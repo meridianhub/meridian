@@ -15,6 +15,10 @@ var (
 	ErrAccountClosed           = errors.New("account is closed")
 	ErrInvalidAmount           = errors.New("invalid amount")
 	ErrInvalidStatusTransition = errors.New("invalid status transition")
+	ErrInvalidFreezeReason     = errors.New("freeze reason must be at least 10 characters")
+	ErrNegativeOverdraftRate   = errors.New("overdraft rate cannot be negative")
+	ErrNonZeroBalance          = errors.New("account balance must be zero to close")
+	ErrActiveLiens             = errors.New("account has active liens and cannot be closed")
 )
 
 // AccountStatus represents the lifecycle state of an account
@@ -27,6 +31,25 @@ const (
 	AccountStatusClosed AccountStatus = "CLOSED"
 )
 
+// Valid state transitions for accounts:
+//
+//	ACTIVE ──► FROZEN (via Freeze) ──► CLOSED (via Close)
+//	   ▲           │
+//	   └───────────┘ (via Unfreeze)
+//
+// CLOSED is a terminal state - no transitions allowed from CLOSED.
+// Direct ACTIVE → CLOSED is permitted for accounts with zero balance.
+
+// StatusChange represents a recorded state transition for audit purposes.
+// This prepares for the status_history JSONB column in persistence.
+type StatusChange struct {
+	From      AccountStatus
+	To        AccountStatus
+	Reason    string
+	Timestamp time.Time
+	ChangedBy string // User who initiated the status change (populated from persistence)
+}
+
 // CurrentAccount represents a BIAN current account facility domain model.
 // This type is immutable: all fields are unexported and all methods return
 // new instances rather than mutating the receiver.
@@ -38,6 +61,8 @@ type CurrentAccount struct {
 	balance               Money
 	availableBalance      Money
 	status                AccountStatus
+	freezeReason          string         // Reason for freezing the account (required when frozen)
+	statusHistory         []StatusChange // Audit trail of status changes
 	overdraftLimit        Money
 	overdraftEnabled      bool
 	overdraftRate         float64
@@ -110,6 +135,8 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 		balance:               newBalance,
 		availableBalance:      newAvailableBalance,
 		status:                a.status,
+		freezeReason:          a.freezeReason,
+		statusHistory:         a.statusHistory,
 		overdraftLimit:        a.overdraftLimit,
 		overdraftEnabled:      a.overdraftEnabled,
 		overdraftRate:         a.overdraftRate,
@@ -162,6 +189,8 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 		balance:               newBalance,
 		availableBalance:      newAvailableBalance,
 		status:                a.status,
+		freezeReason:          a.freezeReason,
+		statusHistory:         a.statusHistory,
 		overdraftLimit:        a.overdraftLimit,
 		overdraftEnabled:      a.overdraftEnabled,
 		overdraftRate:         a.overdraftRate,
@@ -187,9 +216,37 @@ func calculateAvailableBalance(balance, overdraftLimit Money, overdraftEnabled b
 	return balance
 }
 
-// withStatus returns a new account with the given status.
-// This is a helper method to reduce duplication in status transition methods.
-func (a CurrentAccount) withStatus(status AccountStatus) CurrentAccount {
+// withStatusChange creates a new CurrentAccount with the status changed and history recorded.
+// Note: Uses time.Now() directly for simplicity. For precise test control, consider injecting
+// a clock interface in a future refactor. ChangedBy is populated by the persistence layer
+// from the request context, not here - domain operations don't have access to user identity.
+func (a CurrentAccount) withStatusChange(newStatus AccountStatus, reason string) CurrentAccount {
+	now := time.Now()
+
+	// Record the status change for audit trail
+	change := StatusChange{
+		From:      a.status,
+		To:        newStatus,
+		Reason:    reason,
+		Timestamp: now,
+	}
+
+	// Create a new slice to preserve immutability
+	newHistory := make([]StatusChange, len(a.statusHistory), len(a.statusHistory)+1)
+	copy(newHistory, a.statusHistory)
+	newHistory = append(newHistory, change)
+
+	// Determine freeze reason - keep existing if unfreezing, set new if freezing
+	freezeReason := a.freezeReason
+	switch newStatus {
+	case AccountStatusFrozen:
+		freezeReason = reason
+	case AccountStatusActive:
+		freezeReason = "" // Clear freeze reason when unfreezing
+	case AccountStatusClosed:
+		// Keep existing freeze reason for audit trail when closing
+	}
+
 	return CurrentAccount{
 		id:                    a.id,
 		accountID:             a.accountID,
@@ -197,44 +254,106 @@ func (a CurrentAccount) withStatus(status AccountStatus) CurrentAccount {
 		partyID:               a.partyID,
 		balance:               a.balance,
 		availableBalance:      a.availableBalance,
-		status:                status,
+		status:                newStatus,
+		freezeReason:          freezeReason,
+		statusHistory:         newHistory,
 		overdraftLimit:        a.overdraftLimit,
 		overdraftEnabled:      a.overdraftEnabled,
 		overdraftRate:         a.overdraftRate,
 		balanceUpdatedAt:      a.balanceUpdatedAt,
 		version:               a.version + 1,
 		createdAt:             a.createdAt,
-		updatedAt:             time.Now(),
+		updatedAt:             now,
 	}
 }
 
 // Freeze suspends the account and returns a new account with frozen status.
-// The original account is not modified.
-func (a CurrentAccount) Freeze() (CurrentAccount, error) {
-	if a.status == AccountStatusClosed {
+// Requires a reason of at least 10 characters for audit purposes.
+// Only valid from ACTIVE status. The original account is not modified.
+func (a CurrentAccount) Freeze(reason string) (CurrentAccount, error) {
+	if a.status != AccountStatusActive {
 		return CurrentAccount{}, ErrInvalidStatusTransition
 	}
 
-	return a.withStatus(AccountStatusFrozen), nil
+	if len(reason) < 10 {
+		return CurrentAccount{}, ErrInvalidFreezeReason
+	}
+
+	return a.withStatusChange(AccountStatusFrozen, reason), nil
+}
+
+// Unfreeze restores the account to active status and returns a new account.
+// Only valid from FROZEN status. The original account is not modified.
+func (a CurrentAccount) Unfreeze() (CurrentAccount, error) {
+	if a.status != AccountStatusFrozen {
+		return CurrentAccount{}, ErrInvalidStatusTransition
+	}
+
+	return a.withStatusChange(AccountStatusActive, "Account unfrozen"), nil
 }
 
 // Activate restores the account to active status and returns a new account.
+// This method is kept for backward compatibility but delegates to Unfreeze for FROZEN accounts.
 // The original account is not modified.
+//
+// Deprecated: Use Unfreeze() instead for transitioning from FROZEN to ACTIVE.
+// TODO(bian-alignment): Remove in next major version once all callers migrate to Unfreeze().
 func (a CurrentAccount) Activate() (CurrentAccount, error) {
 	if a.status == AccountStatusClosed {
 		return CurrentAccount{}, ErrInvalidStatusTransition
 	}
 
-	return a.withStatus(AccountStatusActive), nil
+	if a.status == AccountStatusFrozen {
+		return a.Unfreeze()
+	}
+
+	// Already active - no change needed
+	return a, nil
 }
 
 // Close permanently closes the account and returns a new account with closed status.
+// CLOSED is a terminal state - no further transitions are allowed.
+//
+// The reason parameter is recorded in the status history for audit purposes.
+// If empty, a default reason of "Account closed" is used.
+//
+// Prerequisites (validated by this method):
+//   - Account balance must be zero
+//   - Account must not already be closed
+//
+// Prerequisites (must be validated by service layer - see ErrActiveLiens):
+//   - Account must have no active liens (requires LienRepository check)
+//
 // The original account is not modified.
-func (a CurrentAccount) Close() (CurrentAccount, error) {
-	return a.withStatus(AccountStatusClosed), nil
+func (a CurrentAccount) Close(reason string) (CurrentAccount, error) {
+	if a.status == AccountStatusClosed {
+		return CurrentAccount{}, ErrInvalidStatusTransition
+	}
+
+	// Validate balance is zero
+	if !a.balance.IsZero() {
+		return CurrentAccount{}, ErrNonZeroBalance
+	}
+
+	closeReason := reason
+	if closeReason == "" {
+		closeReason = "Account closed"
+	}
+	return a.withStatusChange(AccountStatusClosed, closeReason), nil
+}
+
+// UpdateOverdraftSettings configures the overdraft facility with validation and returns a new account.
+// This is a convenience wrapper that validates rate >= 0 before delegating to SetOverdraftLimit.
+// The original account is not modified.
+func (a CurrentAccount) UpdateOverdraftSettings(limit Money, rate float64, enabled bool) (CurrentAccount, error) {
+	if rate < 0 {
+		return CurrentAccount{}, ErrNegativeOverdraftRate
+	}
+	return a.SetOverdraftLimit(limit, rate, enabled)
 }
 
 // SetOverdraftLimit configures the overdraft facility and returns a new account.
+// Note: For new code, prefer UpdateOverdraftSettings which includes rate validation.
 // The original account is not modified.
 func (a CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled bool) (CurrentAccount, error) {
 	if limit.Currency() != a.balance.Currency() {
@@ -259,6 +378,8 @@ func (a CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled boo
 		balance:               a.balance,
 		availableBalance:      newAvailableBalance,
 		status:                a.status,
+		freezeReason:          a.freezeReason,
+		statusHistory:         a.statusHistory,
 		overdraftLimit:        limit,
 		overdraftEnabled:      enabled,
 		overdraftRate:         rate,
@@ -292,6 +413,22 @@ func (a CurrentAccount) AvailableBalance() Money { return a.availableBalance }
 
 // Status returns the account status.
 func (a CurrentAccount) Status() AccountStatus { return a.status }
+
+// FreezeReason returns the reason for freezing the account.
+// Returns empty string if account is not frozen.
+func (a CurrentAccount) FreezeReason() string { return a.freezeReason }
+
+// StatusHistory returns a copy of the status change history for audit purposes.
+// Returns nil if no status changes have occurred.
+func (a CurrentAccount) StatusHistory() []StatusChange {
+	if a.statusHistory == nil {
+		return nil
+	}
+	// Return a copy to preserve immutability
+	result := make([]StatusChange, len(a.statusHistory))
+	copy(result, a.statusHistory)
+	return result
+}
 
 // OverdraftLimit returns the configured overdraft limit.
 func (a CurrentAccount) OverdraftLimit() Money { return a.overdraftLimit }
@@ -368,6 +505,18 @@ func (b *CurrentAccountBuilder) WithAvailableBalance(availableBalance Money) *Cu
 // WithStatus sets the account status.
 func (b *CurrentAccountBuilder) WithStatus(status AccountStatus) *CurrentAccountBuilder {
 	b.account.status = status
+	return b
+}
+
+// WithFreezeReason sets the freeze reason.
+func (b *CurrentAccountBuilder) WithFreezeReason(reason string) *CurrentAccountBuilder {
+	b.account.freezeReason = reason
+	return b
+}
+
+// WithStatusHistory sets the status change history.
+func (b *CurrentAccountBuilder) WithStatusHistory(history []StatusChange) *CurrentAccountBuilder {
+	b.account.statusHistory = history
 	return b
 }
 
