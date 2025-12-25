@@ -11,14 +11,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+	auditdomain "github.com/meridianhub/meridian/internal/audit-consumer/domain"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -121,11 +123,20 @@ func run(logger *slog.Logger) error {
 	logger.Info("initializing position keeping client", "endpoint", config.PositionKeepingEndpoint)
 
 	// Parse port from endpoint (format: "host:port")
+	// Handle Kubernetes DNS names like "position-keeping.default.svc.cluster.local:50053"
 	var pkPort int
-	if _, err := fmt.Sscanf(config.PositionKeepingEndpoint, "%*[^:]:%d", &pkPort); err != nil || pkPort == 0 {
-		// Default to 50053 if parsing fails
+	if lastColon := strings.LastIndex(config.PositionKeepingEndpoint, ":"); lastColon != -1 {
+		if _, err := fmt.Sscanf(config.PositionKeepingEndpoint[lastColon:], ":%d", &pkPort); err != nil || pkPort == 0 {
+			// Default to 50053 if parsing fails
+			pkPort = 50053
+			logger.Warn("failed to parse port from POSITION_KEEPING_ENDPOINT, using default",
+				"endpoint", config.PositionKeepingEndpoint,
+				"default_port", pkPort)
+		}
+	} else {
+		// No colon found, use default port
 		pkPort = 50053
-		logger.Warn("failed to parse port from POSITION_KEEPING_ENDPOINT, using default",
+		logger.Warn("no port found in POSITION_KEEPING_ENDPOINT, using default",
 			"endpoint", config.PositionKeepingEndpoint,
 			"default_port", pkPort)
 	}
@@ -147,8 +158,21 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Initialize transformer
-	transformer := domain.NewAuditEventTransformer()
+	// Parse tenant zero ID
+	tenantZeroID, err := uuid.Parse(config.TenantZeroID)
+	if err != nil {
+		return fmt.Errorf("invalid TENANT_ZERO_ID: %w", err)
+	}
+
+	// For now, we map all tenants to tenant-zero's billing account
+	// In a real implementation, this would be loaded from configuration or a database
+	// TODO: Load tenant-to-account mapping from configuration or database
+	tenantAccountMap := make(map[uuid.UUID]uuid.UUID)
+	// Map tenant-zero to itself for self-billing
+	tenantAccountMap[tenantZeroID] = tenantZeroID
+
+	// Initialize transformer with tenant account mapping
+	transformer := auditdomain.NewAuditEventTransformer(tenantAccountMap)
 
 	// Initialize Kafka consumer
 	logger.Info("initializing kafka consumer",

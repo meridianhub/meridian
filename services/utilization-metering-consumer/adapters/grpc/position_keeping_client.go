@@ -8,7 +8,7 @@ import (
 	"time"
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
+	auditdomain "github.com/meridianhub/meridian/internal/audit-consumer/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"google.golang.org/grpc"
@@ -136,7 +136,7 @@ func NewPositionKeepingClient(cfg *ClientConfig) (*PositionKeepingGRPCClient, er
 //	  double quality_score = 7;
 //	  map<string, string> attributes = 8;
 //	}
-func (c *PositionKeepingGRPCClient) RecordMeasurement(ctx context.Context, measurement *domain.UtilizationMeasurement) error {
+func (c *PositionKeepingGRPCClient) RecordMeasurement(ctx context.Context, measurement *auditdomain.Measurement) error {
 	// Apply timeout
 	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -149,13 +149,14 @@ func (c *PositionKeepingGRPCClient) RecordMeasurement(ctx context.Context, measu
 	if c.simulationMode {
 		// Simulation mode: log what would be sent
 		c.logger.Info("SIMULATION: would record measurement to Position Keeping",
-			"tenant_id", measurement.TenantID,
-			"service_name", measurement.ServiceName,
-			"operation_type", measurement.OperationType,
+			"measurement_id", measurement.ID,
+			"account_id", measurement.AccountID,
+			"asset_code", measurement.AssetCode,
 			"quantity", measurement.Quantity,
-			"unit_of_measure", measurement.UnitOfMeasure,
-			"timestamp", measurement.Timestamp,
-			"correlation_id", measurement.CorrelationID,
+			"period", measurement.Period,
+			"source", measurement.Source,
+			"quality_score", measurement.QualityScore,
+			"attributes", measurement.Attributes,
 		)
 		return nil
 	}

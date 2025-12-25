@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"buf.build/go/protovalidate"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
+	auditdomain "github.com/meridianhub/meridian/internal/audit-consumer/domain"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"google.golang.org/protobuf/proto"
@@ -29,7 +31,7 @@ var (
 // into utilization measurements for billing.
 type AuditConsumer struct {
 	consumer    *kafka.ProtoConsumer
-	transformer *domain.AuditEventTransformer
+	transformer *auditdomain.AuditEventTransformer
 	pkClient    domain.PositionKeepingClient
 	validator   protovalidate.Validator
 	logger      *slog.Logger
@@ -48,7 +50,7 @@ type AuditConsumer struct {
 // Returns an error if the consumer cannot be initialized or if dependencies are nil.
 func NewAuditConsumer(
 	config kafka.ConsumerConfig,
-	transformer *domain.AuditEventTransformer,
+	transformer *auditdomain.AuditEventTransformer,
 	pkClient domain.PositionKeepingClient,
 ) (*AuditConsumer, error) {
 	if transformer == nil {
@@ -99,6 +101,9 @@ func NewAuditConsumer(
 // a utilization measurement and sending it to the Position Keeping service
 // for tenant-zero billing.
 func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.AuditEvent) error {
+	// Start timing for processing duration metric
+	startTime := time.Now()
+
 	// Validate proto message
 	if err := ac.validator.Validate(event); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidAuditEvent, err)
@@ -137,14 +142,17 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 	}
 
 	// Record successful measurement metric
-	// Note: Using UnitOfMeasure as a proxy for asset code in metrics
-	domain.RecordMeasurementRecorded(measurement.ServiceName, measurement.UnitOfMeasure)
+	domain.RecordMeasurementRecorded(event.SchemaName, measurement.AssetCode)
+
+	// Record processing duration metric
+	duration := time.Since(startTime).Seconds()
+	domain.RecordEventProcessingDuration(event.SchemaName, duration)
 
 	ac.logger.InfoContext(ctx, "successfully recorded utilization measurement",
 		"event_id", event.EventId,
-		"tenant_id", measurement.TenantID,
-		"service", measurement.ServiceName,
-		"operation", measurement.OperationType,
+		"account_id", measurement.AccountID,
+		"asset_code", measurement.AssetCode,
+		"service", event.SchemaName,
 		"quantity", measurement.Quantity)
 
 	return nil

@@ -66,6 +66,9 @@ var (
 	// kafkaConsumerLag tracks consumer lag per topic and partition.
 	// Labels: topic (Kafka topic), partition (partition number)
 	// This gauge shows how far behind the consumer is from the latest offset.
+	// NOTE: Consumer lag is typically tracked by external Kafka exporters (e.g., kafka_exporter, Burrow)
+	// rather than by the application itself. This metric is defined for completeness but may be
+	// populated by an external monitoring system rather than RecordKafkaConsumerLag calls.
 	kafkaConsumerLag = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "meridian",

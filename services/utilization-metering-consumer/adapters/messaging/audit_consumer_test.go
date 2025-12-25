@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"buf.build/go/protovalidate"
+	"github.com/google/uuid"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
+	auditdomain "github.com/meridianhub/meridian/internal/audit-consumer/domain"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
@@ -19,18 +21,27 @@ import (
 
 var errPKUnavailable = errors.New("position keeping service unavailable")
 
+// newTestTransformer creates a transformer with a test tenant account map
+func newTestTransformer() *auditdomain.AuditEventTransformer {
+	tenantZeroID := uuid.MustParse("00000000-0000-0000-0000-000000000000")
+	tenantAccountMap := map[uuid.UUID]uuid.UUID{
+		tenantZeroID: tenantZeroID,
+	}
+	return auditdomain.NewAuditEventTransformer(tenantAccountMap)
+}
+
 // mockPositionKeepingClient implements domain.PositionKeepingClient for testing
 type mockPositionKeepingClient struct {
-	recordMeasurementFunc func(ctx context.Context, measurement *domain.UtilizationMeasurement) error
+	recordMeasurementFunc func(ctx context.Context, measurement *auditdomain.Measurement) error
 	closeFunc             func() error
-	measurements          []*domain.UtilizationMeasurement // Store all recorded measurements
-	mu                    sync.Mutex                       // Protects measurements slice
+	measurements          []*auditdomain.Measurement // Store all recorded measurements
+	mu                    sync.Mutex                 // Protects measurements slice
 }
 
 func newMockPositionKeepingClient() *mockPositionKeepingClient {
 	return &mockPositionKeepingClient{
-		measurements: make([]*domain.UtilizationMeasurement, 0),
-		recordMeasurementFunc: func(_ context.Context, _ *domain.UtilizationMeasurement) error {
+		measurements: make([]*auditdomain.Measurement, 0),
+		recordMeasurementFunc: func(_ context.Context, _ *auditdomain.Measurement) error {
 			return nil
 		},
 		closeFunc: func() error {
@@ -39,7 +50,7 @@ func newMockPositionKeepingClient() *mockPositionKeepingClient {
 	}
 }
 
-func (m *mockPositionKeepingClient) RecordMeasurement(ctx context.Context, measurement *domain.UtilizationMeasurement) error {
+func (m *mockPositionKeepingClient) RecordMeasurement(ctx context.Context, measurement *auditdomain.Measurement) error {
 	m.mu.Lock()
 	m.measurements = append(m.measurements, measurement)
 	m.mu.Unlock()
@@ -56,22 +67,22 @@ func (m *mockPositionKeepingClient) Close() error {
 	return nil
 }
 
-func (m *mockPositionKeepingClient) getMeasurements() []*domain.UtilizationMeasurement {
+func (m *mockPositionKeepingClient) getMeasurements() []*auditdomain.Measurement {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	result := make([]*domain.UtilizationMeasurement, len(m.measurements))
+	result := make([]*auditdomain.Measurement, len(m.measurements))
 	copy(result, m.measurements)
 	return result
 }
 
 func TestNewAuditConsumer(t *testing.T) {
-	transformer := domain.NewAuditEventTransformer()
+	transformer := newTestTransformer()
 	mockPK := newMockPositionKeepingClient()
 
 	tests := []struct {
 		name        string
 		config      kafka.ConsumerConfig
-		transformer *domain.AuditEventTransformer
+		transformer *auditdomain.AuditEventTransformer
 		pkClient    domain.PositionKeepingClient
 		wantErr     bool
 		errContains string
@@ -150,7 +161,7 @@ func TestNewAuditConsumer(t *testing.T) {
 }
 
 func TestAuditConsumer_handleAuditEvent_ValidEvent(t *testing.T) {
-	transformer := domain.NewAuditEventTransformer()
+	transformer := newTestTransformer()
 	mockPK := newMockPositionKeepingClient()
 
 	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
@@ -174,7 +185,7 @@ func TestAuditConsumer_handleAuditEvent_ValidEvent(t *testing.T) {
 		CorrelationId: "corr-456",
 		Timestamp:     timestamppb.Now(),
 		Metadata: map[string]string{
-			"tenant_id": "tenant-test",
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
 		},
 	}
 
@@ -191,13 +202,15 @@ func TestAuditConsumer_handleAuditEvent_ValidEvent(t *testing.T) {
 
 	measurements := mockPK.getMeasurements()
 	require.Len(t, measurements, 1)
-	assert.Equal(t, "tenant-test", measurements[0].TenantID)
-	assert.Equal(t, "current_account", measurements[0].ServiceName)
-	assert.Equal(t, "AUDIT_OPERATION_INSERT", measurements[0].OperationType)
+	// Check that measurement has correct fields from the new domain model
+	assert.Equal(t, "MERIDIAN-CURRENT-ACCOUNT-OPS", measurements[0].AssetCode)
+	assert.Equal(t, "AUDIT_STREAM", measurements[0].Source)
+	assert.Equal(t, "current_account", measurements[0].Attributes["service"])
+	assert.Equal(t, "INSERT", measurements[0].Attributes["operation"])
 }
 
 func TestAuditConsumer_handleAuditEvent_InvalidProto(t *testing.T) {
-	transformer := domain.NewAuditEventTransformer()
+	transformer := newTestTransformer()
 	mockPK := newMockPositionKeepingClient()
 
 	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
@@ -235,10 +248,10 @@ func TestAuditConsumer_handleAuditEvent_InvalidProto(t *testing.T) {
 // filtering is implemented in the transformer.
 
 func TestAuditConsumer_handleAuditEvent_PositionKeepingError(t *testing.T) {
-	transformer := domain.NewAuditEventTransformer()
+	transformer := newTestTransformer()
 
 	mockPK := newMockPositionKeepingClient()
-	mockPK.recordMeasurementFunc = func(_ context.Context, _ *domain.UtilizationMeasurement) error {
+	mockPK.recordMeasurementFunc = func(_ context.Context, _ *auditdomain.Measurement) error {
 		return errPKUnavailable
 	}
 
@@ -263,7 +276,7 @@ func TestAuditConsumer_handleAuditEvent_PositionKeepingError(t *testing.T) {
 		CorrelationId: "corr-456",
 		Timestamp:     timestamppb.Now(),
 		Metadata: map[string]string{
-			"tenant_id": "tenant-test",
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
 		},
 	}
 
@@ -289,7 +302,7 @@ func TestAuditConsumer_handleAuditEvent_AllServiceTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.service, func(t *testing.T) {
-			transformer := domain.NewAuditEventTransformer()
+			transformer := newTestTransformer()
 			mockPK := newMockPositionKeepingClient()
 
 			consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
@@ -322,7 +335,7 @@ func TestAuditConsumer_handleAuditEvent_AllServiceTypes(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Len(t, mockPK.getMeasurements(), 1)
-			assert.Equal(t, tt.service, mockPK.getMeasurements()[0].ServiceName)
+			assert.Equal(t, tt.service, mockPK.getMeasurements()[0].Attributes["service"])
 		})
 	}
 }
@@ -336,7 +349,7 @@ func TestAuditConsumer_handleAuditEvent_AllOperationTypes(t *testing.T) {
 
 	for _, op := range operations {
 		t.Run(op.String(), func(t *testing.T) {
-			transformer := domain.NewAuditEventTransformer()
+			transformer := newTestTransformer()
 			mockPK := newMockPositionKeepingClient()
 
 			consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
@@ -369,15 +382,19 @@ func TestAuditConsumer_handleAuditEvent_AllOperationTypes(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Len(t, mockPK.getMeasurements(), 1)
-			assert.Equal(t, op.String(), mockPK.getMeasurements()[0].OperationType)
+			// ProtoToOperation converts the proto enum to uppercase string (e.g., "INSERT", "UPDATE")
+			expectedOp := auditdomain.ProtoToOperation(op)
+			if expectedOp != "" {
+				assert.Equal(t, expectedOp, mockPK.getMeasurements()[0].Attributes["operation"])
+			}
 		})
 	}
 }
 
 func TestAuditConsumer_handleAuditEvent_ContextCancellation(t *testing.T) {
-	transformer := domain.NewAuditEventTransformer()
+	transformer := newTestTransformer()
 	mockPK := newMockPositionKeepingClient()
-	mockPK.recordMeasurementFunc = func(ctx context.Context, _ *domain.UtilizationMeasurement) error {
+	mockPK.recordMeasurementFunc = func(ctx context.Context, _ *auditdomain.Measurement) error {
 		// Simulate slow operation that respects context cancellation
 		select {
 		case <-ctx.Done():
@@ -408,7 +425,7 @@ func TestAuditConsumer_handleAuditEvent_ContextCancellation(t *testing.T) {
 		CorrelationId: "corr-456",
 		Timestamp:     timestamppb.Now(),
 		Metadata: map[string]string{
-			"tenant_id": "tenant-test",
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
 		},
 	}
 
@@ -422,7 +439,7 @@ func TestAuditConsumer_handleAuditEvent_ContextCancellation(t *testing.T) {
 }
 
 func TestAuditConsumer_Start(t *testing.T) {
-	transformer := domain.NewAuditEventTransformer()
+	transformer := newTestTransformer()
 	mockPK := newMockPositionKeepingClient()
 
 	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
@@ -454,7 +471,7 @@ func TestAuditConsumer_Start(t *testing.T) {
 }
 
 func TestAuditConsumer_Close(t *testing.T) {
-	transformer := domain.NewAuditEventTransformer()
+	transformer := newTestTransformer()
 	mockPK := newMockPositionKeepingClient()
 
 	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
