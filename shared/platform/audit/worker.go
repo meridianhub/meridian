@@ -87,9 +87,16 @@ func WithMaxRetries(retries int) WorkerOption {
 // When the outbox is empty, the interval increases (up to maxInterval).
 // When entries are present, the interval decreases (down to minInterval).
 // This reduces database load during idle periods while maintaining responsiveness under load.
+// If minInterval > maxInterval, the values are swapped to ensure valid configuration.
 func WithAdaptivePolling(minInterval, maxInterval time.Duration) WorkerOption {
 	return func(w *Worker) {
 		w.adaptivePolling = true
+
+		// Swap if inverted to ensure valid configuration
+		if minInterval > maxInterval && maxInterval > 0 {
+			minInterval, maxInterval = maxInterval, minInterval
+		}
+
 		if minInterval > 0 {
 			w.minPollInterval = minInterval
 		}
@@ -272,6 +279,10 @@ func (w *Worker) calculateAdaptiveInterval(processedCount int) time.Duration {
 
 // resetStuckEntries resets entries that have been in 'processing' state for too long.
 // This handles cases where the worker crashed or was killed while processing.
+//
+// TODO(tm:75-async-audit.19): Consider using updated_at (processing start) instead of created_at
+// for more accurate stuck entry detection. Requires schema migration to add updated_at column.
+// See: CodeRabbit suggestion on PR #425
 func (w *Worker) resetStuckEntries(ctx context.Context) error {
 	stuckThreshold := time.Now().Add(-defaultProcessingAge)
 

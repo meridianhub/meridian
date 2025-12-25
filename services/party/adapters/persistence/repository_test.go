@@ -53,7 +53,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
 		operation VARCHAR(10) NOT NULL,
-		record_id UUID NOT NULL,
+		record_id VARCHAR(50) NOT NULL,
 		old_values TEXT,
 		new_values TEXT,
 		status VARCHAR(20) NOT NULL DEFAULT 'pending',
