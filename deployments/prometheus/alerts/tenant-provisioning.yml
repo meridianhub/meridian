@@ -19,7 +19,7 @@ groups:
         annotations:
           summary: "Tenant provisioning failures detected for {{ $labels.service_name }}"
           description: "Service {{ $labels.service_name }} has experienced more than 5 provisioning failures in the last 15 minutes. This indicates a persistent issue preventing tenant onboarding. Current failure count: {{ $value }}. Investigate service health, configuration, and resource availability immediately."
-          runbook_url: "https://docs.meridian.io/runbooks/tenant-provisioning-failed"
+          runbook_url: "https://docs.meridianhub.cloud/runbooks/tenant-provisioning-failed"
 
       # High provisioning failure rate - warning when failures exceed 20% of attempts
       - alert: TenantProvisioningHighFailureRate
@@ -34,7 +34,7 @@ groups:
         annotations:
           summary: "High provisioning failure rate for {{ $labels.service_name }}"
           description: "Service {{ $labels.service_name }} has a provisioning failure rate exceeding 20% over the last 10 minutes. Current rate: {{ $value | humanizePercentage }}. This may indicate degraded service availability or resource constraints."
-          runbook_url: "https://docs.meridian.io/runbooks/tenant-provisioning-high-failure-rate"
+          runbook_url: "https://docs.meridianhub.cloud/runbooks/tenant-provisioning-high-failure-rate"
 
       # Provisioning queue buildup - warning when pending tenants accumulate
       - alert: TenantProvisioningQueueBacklog
@@ -46,7 +46,7 @@ groups:
         annotations:
           summary: "Tenant provisioning queue has {{ $value }} pending tenants"
           description: "The tenant provisioning queue has more than 10 pending tenants for over 10 minutes. This may indicate provisioning throughput issues or worker capacity constraints. Current queue depth: {{ $value }}"
-          runbook_url: "https://docs.meridian.io/runbooks/tenant-provisioning-queue-backlog"
+          runbook_url: "https://docs.meridianhub.cloud/runbooks/tenant-provisioning-queue-backlog"
 
       # Excessive retry activity - info alert for visibility into retry load
       - alert: TenantProvisioningHighRetryRate
@@ -58,7 +58,7 @@ groups:
         annotations:
           summary: "High tenant provisioning retry rate detected"
           description: "Tenant provisioning is experiencing more than 0.5 retries per second over the last 15 minutes. Current rate: {{ $value }}. While retries are expected for transient failures, sustained high retry rates may indicate underlying service instability."
-          runbook_url: "https://docs.meridian.io/runbooks/tenant-provisioning-high-retry-rate"
+          runbook_url: "https://docs.meridianhub.cloud/runbooks/tenant-provisioning-high-retry-rate"
 
       # Slow provisioning operations - warning when p99 latency exceeds threshold
       - alert: TenantProvisioningSlowOperations
@@ -72,4 +72,4 @@ groups:
         annotations:
           summary: "Tenant provisioning operations are slow (p99 > 2 minutes)"
           description: "The p99 latency for successful tenant provisioning has exceeded 2 minutes for the last 15 minutes. Current p99: {{ $value | humanizeDuration }}. This may indicate resource contention, slow database migrations, or external service delays."
-          runbook_url: "https://docs.meridian.io/runbooks/tenant-provisioning-slow-operations"
+          runbook_url: "https://docs.meridianhub.cloud/runbooks/tenant-provisioning-slow-operations"

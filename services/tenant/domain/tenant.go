@@ -58,7 +58,7 @@ type Tenant struct {
 	// SettlementAsset is the primary asset for this tenant (e.g., GBP, USD, GPU-HOUR).
 	SettlementAsset string
 
-	// Subdomain is the API subdomain for this tenant (e.g., acme-bank.demo.meridian.io).
+	// Subdomain is the API subdomain for this tenant (e.g., acme-bank.demo.meridianhub.cloud).
 	// Optional - not all tenants need a subdomain.
 	Subdomain string
 

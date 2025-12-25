@@ -88,7 +88,7 @@ func TestRepository_Create_WithSubdomain(t *testing.T) {
 	repo := NewRepository(db)
 	ctx := context.Background()
 	tenant := newTestTenant("acme_bank")
-	tenant.Subdomain = "acme-bank.demo.meridian.io"
+	tenant.Subdomain = "acme-bank.demo.meridianhub.cloud"
 
 	err := repo.Create(ctx, tenant)
 	require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestRepository_Create_WithSubdomain(t *testing.T) {
 	// Verify subdomain was saved
 	retrieved, err := repo.GetByID(ctx, tenant.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "acme-bank.demo.meridian.io", retrieved.Subdomain)
+	assert.Equal(t, "acme-bank.demo.meridianhub.cloud", retrieved.Subdomain)
 }
 
 func TestRepository_Create_DuplicateTenant(t *testing.T) {
@@ -126,13 +126,13 @@ func TestRepository_Create_DuplicateSubdomain(t *testing.T) {
 
 	// Create first tenant with subdomain
 	tenant1 := newTestTenant("tenant_one")
-	tenant1.Subdomain = "shared-subdomain.demo.meridian.io"
+	tenant1.Subdomain = "shared-subdomain.demo.meridianhub.cloud"
 	err := repo.Create(ctx, tenant1)
 	require.NoError(t, err)
 
 	// Create second tenant with same subdomain
 	tenant2 := newTestTenant("tenant_two")
-	tenant2.Subdomain = "shared-subdomain.demo.meridian.io"
+	tenant2.Subdomain = "shared-subdomain.demo.meridianhub.cloud"
 	err = repo.Create(ctx, tenant2)
 	assert.True(t, errors.Is(err, ErrSubdomainTaken), "Expected ErrSubdomainTaken, got %v", err)
 }
@@ -228,7 +228,7 @@ func TestRepository_GetBySlug_ReturnsAllFields(t *testing.T) {
 	// Create tenant with all fields populated
 	testTenant := newTestTenant("full_tenant")
 	testTenant.Slug = "full-tenant-slug"
-	testTenant.Subdomain = "full-tenant.demo.meridian.io"
+	testTenant.Subdomain = "full-tenant.demo.meridianhub.cloud"
 	testTenant.DisplayName = "Full Tenant Inc."
 	testTenant.SettlementAsset = "EUR"
 	testTenant.Metadata = map[string]interface{}{
@@ -245,7 +245,7 @@ func TestRepository_GetBySlug_ReturnsAllFields(t *testing.T) {
 
 	assert.Equal(t, testTenant.ID.String(), retrieved.ID.String())
 	assert.Equal(t, "full-tenant-slug", retrieved.Slug)
-	assert.Equal(t, "full-tenant.demo.meridian.io", retrieved.Subdomain)
+	assert.Equal(t, "full-tenant.demo.meridianhub.cloud", retrieved.Subdomain)
 	assert.Equal(t, "Full Tenant Inc.", retrieved.DisplayName)
 	assert.Equal(t, "EUR", retrieved.SettlementAsset)
 	assert.Equal(t, domain.StatusActive, retrieved.Status)

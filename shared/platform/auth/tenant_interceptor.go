@@ -19,7 +19,7 @@ import (
 //     trusts the x-tenant-id header without JWT validation (development/testing only).
 //
 // The x-tenant-id header is set by the API gateway's TenantResolverMiddleware based on
-// the request subdomain (e.g., "acme.api.meridian.io" -> x-tenant-id: "org_acme_uuid").
+// the request subdomain (e.g., "acme.api.meridianhub.cloud" -> x-tenant-id: "org_acme_uuid").
 //
 // Use case: Service A calls Service B with tenant in metadata. Service B
 // extracts the tenant from metadata and injects it into context, enabling multi-hop

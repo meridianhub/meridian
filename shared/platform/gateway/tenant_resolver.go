@@ -2,7 +2,7 @@
 //
 // Example usage:
 //
-//	resolver, err := NewTenantResolverMiddleware(cache, repo, "api.meridian.io", logger)
+//	resolver, err := NewTenantResolverMiddleware(cache, repo, "api.meridianhub.cloud", logger)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -171,21 +171,21 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 // extractSlug extracts the subdomain slug from a Host header value.
 //
 // The method:
-// 1. Strips any port number from the host (e.g., "acme.api.meridian.io:8080" → "acme.api.meridian.io")
+// 1. Strips any port number from the host (e.g., "acme.api.meridianhub.cloud:8080" → "acme.api.meridianhub.cloud")
 // 2. Validates the host ends with ".<baseDomain>"
 // 3. Extracts the subdomain slug by removing the base domain suffix
 //
 // Returns an empty string for:
 // - Invalid domain patterns (doesn't match base domain)
-// - No subdomain present (e.g., "api.meridian.io" when baseDomain is "api.meridian.io")
+// - No subdomain present (e.g., "api.meridianhub.cloud" when baseDomain is "api.meridianhub.cloud")
 // - Direct IP addresses (IPv4 or IPv6)
 // - localhost
 //
-// Examples (assuming baseDomain = "api.meridian.io"):
-//   - "acme.api.meridian.io" → "acme"
-//   - "acme.api.meridian.io:8080" → "acme"
-//   - "acme.staging.api.meridian.io" → "acme.staging"
-//   - "api.meridian.io" → "" (no subdomain)
+// Examples (assuming baseDomain = "api.meridianhub.cloud"):
+//   - "acme.api.meridianhub.cloud" → "acme"
+//   - "acme.api.meridianhub.cloud:8080" → "acme"
+//   - "acme.staging.api.meridianhub.cloud" → "acme.staging"
+//   - "api.meridianhub.cloud" → "" (no subdomain)
 //   - "invalid.com" → "" (wrong domain)
 //   - "192.168.1.1" → "" (IP address)
 //   - "localhost" → ""

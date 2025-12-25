@@ -1,6 +1,6 @@
 # Meridian API Gateway Ingress
 # Provides wildcard subdomain routing for multi-tenant access
-# Routes *.api.meridian.io and api.meridian.io to gateway-service
+# Routes *.api.meridianhub.cloud and api.meridianhub.cloud to gateway-service
 #
 # Features:
 # - Wildcard TLS certificate via cert-manager
@@ -28,12 +28,12 @@ spec:
   ingressClassName: nginx
   tls:
   - hosts:
-    - "*.api.meridian.io"
-    - "api.meridian.io"
+    - "*.api.meridianhub.cloud"
+    - "api.meridianhub.cloud"
     secretName: wildcard-meridian-tls
   rules:
-  # Wildcard subdomain routing (tenant1.api.meridian.io, tenant2.api.meridian.io, etc.)
-  - host: "*.api.meridian.io"
+  # Wildcard subdomain routing (tenant1.api.meridianhub.cloud, tenant2.api.meridianhub.cloud, etc.)
+  - host: "*.api.meridianhub.cloud"
     http:
       paths:
       - path: /
@@ -43,8 +43,8 @@ spec:
             name: gateway-service
             port:
               number: 8080
-  # Apex domain routing (api.meridian.io)
-  - host: "api.meridian.io"
+  # Apex domain routing (api.meridianhub.cloud)
+  - host: "api.meridianhub.cloud"
     http:
       paths:
       - path: /

@@ -131,134 +131,134 @@ func TestExtractSlug(t *testing.T) {
 	}{
 		{
 			name:       "valid single subdomain",
-			baseDomain: "api.meridian.io",
-			host:       "acme.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme.api.meridianhub.cloud",
 			want:       "acme",
 			reason:     "should extract single-level subdomain",
 		},
 		{
 			name:       "valid single subdomain with port",
-			baseDomain: "api.meridian.io",
-			host:       "acme.api.meridian.io:8080",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme.api.meridianhub.cloud:8080",
 			want:       "acme",
 			reason:     "should strip port and extract subdomain",
 		},
 		{
 			name:       "valid multi-level subdomain",
-			baseDomain: "api.meridian.io",
-			host:       "acme.staging.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme.staging.api.meridianhub.cloud",
 			want:       "acme.staging",
 			reason:     "should extract multi-level subdomain",
 		},
 		{
 			name:       "valid multi-level subdomain with port",
-			baseDomain: "api.meridian.io",
-			host:       "acme.staging.api.meridian.io:9090",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme.staging.api.meridianhub.cloud:9090",
 			want:       "acme.staging",
 			reason:     "should strip port and extract multi-level subdomain",
 		},
 		{
 			name:       "no subdomain - exact match",
-			baseDomain: "api.meridian.io",
-			host:       "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "api.meridianhub.cloud",
 			want:       "",
 			reason:     "should return empty for direct base domain access",
 		},
 		{
 			name:       "no subdomain - exact match with port",
-			baseDomain: "api.meridian.io",
-			host:       "api.meridian.io:8080",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "api.meridianhub.cloud:8080",
 			want:       "",
 			reason:     "should return empty for direct base domain access with port",
 		},
 		{
 			name:       "wrong domain",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "invalid.com",
 			want:       "",
 			reason:     "should return empty for non-matching domain",
 		},
 		{
 			name:       "wrong domain with port",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "invalid.com:8080",
 			want:       "",
 			reason:     "should return empty for non-matching domain with port",
 		},
 		{
 			name:       "IPv4 address",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "192.168.1.1",
 			want:       "",
 			reason:     "should return empty for IPv4 address",
 		},
 		{
 			name:       "IPv4 address with port",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "192.168.1.1:8080",
 			want:       "",
 			reason:     "should return empty for IPv4 address with port",
 		},
 		{
 			name:       "IPv6 address",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "[2001:db8::1]",
 			want:       "",
 			reason:     "should return empty for IPv6 address",
 		},
 		{
 			name:       "IPv6 address with port bracket notation",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "[2001:db8::1]:8080",
 			want:       "",
 			reason:     "should return empty for IPv6 address with port in bracket notation",
 		},
 		{
 			name:       "IPv6 address without brackets",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "2001:db8::1",
 			want:       "",
 			reason:     "should return empty for IPv6 address without brackets",
 		},
 		{
 			name:       "localhost",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "localhost",
 			want:       "",
 			reason:     "should return empty for localhost",
 		},
 		{
 			name:       "localhost with port",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "localhost:8080",
 			want:       "",
 			reason:     "should return empty for localhost with port",
 		},
 		{
 			name:       "empty host",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "",
 			want:       "",
 			reason:     "should return empty for empty host",
 		},
 		{
 			name:       "partial domain match",
-			baseDomain: "api.meridian.io",
-			host:       "acme.badapi.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme.badapi.meridianhub.cloud",
 			want:       "",
 			reason:     "should return empty when suffix matches but not exact base domain",
 		},
 		{
 			name:       "domain with hyphen in subdomain",
-			baseDomain: "api.meridian.io",
-			host:       "acme-corp.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme-corp.api.meridianhub.cloud",
 			want:       "acme-corp",
 			reason:     "should handle hyphens in subdomain",
 		},
 		{
 			name:       "domain with number in subdomain",
-			baseDomain: "api.meridian.io",
-			host:       "acme123.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme123.api.meridianhub.cloud",
 			want:       "acme123",
 			reason:     "should handle numbers in subdomain",
 		},
@@ -271,86 +271,86 @@ func TestExtractSlug(t *testing.T) {
 		},
 		{
 			name:       "host shorter than base domain",
-			baseDomain: "api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
 			host:       "short.io",
 			want:       "",
 			reason:     "should return empty when host is shorter than base domain",
 		},
 		{
 			name:       "high port number",
-			baseDomain: "api.meridian.io",
-			host:       "acme.api.meridian.io:65535",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme.api.meridianhub.cloud:65535",
 			want:       "acme",
 			reason:     "should handle high port numbers",
 		},
 		{
 			name:       "port with leading zeros",
-			baseDomain: "api.meridian.io",
-			host:       "acme.api.meridian.io:0080",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme.api.meridianhub.cloud:0080",
 			want:       "acme",
 			reason:     "should handle ports with leading zeros",
 		},
 		// Invalid slug format test cases (security validation)
 		{
 			name:       "slug starting with hyphen",
-			baseDomain: "api.meridian.io",
-			host:       "-acme.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "-acme.api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug starting with hyphen",
 		},
 		{
 			name:       "slug ending with hyphen",
-			baseDomain: "api.meridian.io",
-			host:       "acme-.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme-.api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug ending with hyphen",
 		},
 		{
 			name:       "slug with consecutive hyphens",
-			baseDomain: "api.meridian.io",
-			host:       "acme--corp.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme--corp.api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug with consecutive hyphens",
 		},
 		{
 			name:       "slug starting with period",
-			baseDomain: "api.meridian.io",
-			host:       ".acme.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       ".acme.api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug starting with period",
 		},
 		{
 			name:       "slug ending with period",
-			baseDomain: "api.meridian.io",
-			host:       "acme..api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme..api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug ending with period",
 		},
 		{
 			name:       "slug with uppercase letters",
-			baseDomain: "api.meridian.io",
-			host:       "ACME.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "ACME.api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug with uppercase letters",
 		},
 		{
 			name:       "slug with mixed case",
-			baseDomain: "api.meridian.io",
-			host:       "Acme-Corp.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "Acme-Corp.api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug with mixed case",
 		},
 		{
 			name:       "slug with special characters",
-			baseDomain: "api.meridian.io",
-			host:       "acme_corp.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme_corp.api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug with underscore",
 		},
 		{
 			name:       "slug with consecutive periods",
-			baseDomain: "api.meridian.io",
-			host:       "acme..staging.api.meridian.io",
+			baseDomain: "api.meridianhub.cloud",
+			host:       "acme..staging.api.meridianhub.cloud",
 			want:       "",
 			reason:     "should reject slug with consecutive periods",
 		},
@@ -401,7 +401,7 @@ func TestResolveTenant(t *testing.T) {
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
-			baseDomain: "meridian.io",
+			baseDomain: "meridianhub.cloud",
 			logger:     logger,
 		}
 
@@ -433,7 +433,7 @@ func TestResolveTenant(t *testing.T) {
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
-			baseDomain: "meridian.io",
+			baseDomain: "meridianhub.cloud",
 			logger:     logger,
 		}
 
@@ -462,7 +462,7 @@ func TestResolveTenant(t *testing.T) {
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
-			baseDomain: "meridian.io",
+			baseDomain: "meridianhub.cloud",
 			logger:     logger,
 		}
 
@@ -494,7 +494,7 @@ func TestResolveTenant(t *testing.T) {
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
-			baseDomain: "meridian.io",
+			baseDomain: "meridianhub.cloud",
 			logger:     logger,
 		}
 
@@ -524,7 +524,7 @@ func TestResolveTenant(t *testing.T) {
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
-			baseDomain: "meridian.io",
+			baseDomain: "meridianhub.cloud",
 			logger:     logger,
 		}
 
@@ -553,7 +553,7 @@ func TestResolveTenant(t *testing.T) {
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
-			baseDomain: "meridian.io",
+			baseDomain: "meridianhub.cloud",
 			logger:     logger,
 		}
 
@@ -588,7 +588,7 @@ func TestResolveTenant(t *testing.T) {
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
-			baseDomain: "meridian.io",
+			baseDomain: "meridianhub.cloud",
 			logger:     logger,
 		}
 
@@ -610,9 +610,9 @@ func TestResolveTenant(t *testing.T) {
 // slug extraction, tenant resolution, header injection, and context propagation.
 func TestServeHTTP(t *testing.T) {
 	ctx := context.Background()
-	baseDomain := "api.meridian.io"
+	baseDomain := "api.meridianhub.cloud"
 	testSlug := "acme"
-	testHost := "acme.api.meridian.io"
+	testHost := "acme.api.meridianhub.cloud"
 	testTenantID := tenant.MustNewTenantID("tenant_123")
 	testTenant := &domain.Tenant{
 		ID:          testTenantID,
@@ -688,7 +688,7 @@ func TestServeHTTP(t *testing.T) {
 		}
 
 		// Create test request with no subdomain
-		req := httptest.NewRequest(http.MethodGet, "http://api.meridian.io/api/test", nil)
+		req := httptest.NewRequest(http.MethodGet, "http://api.meridianhub.cloud/api/test", nil)
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
@@ -844,7 +844,7 @@ func TestServeHTTP(t *testing.T) {
 		logger := slog.Default()
 
 		multiLevelSlug := "acme.staging"
-		multiLevelHost := "acme.staging.api.meridian.io"
+		multiLevelHost := "acme.staging.api.meridianhub.cloud"
 		multiLevelTenantID := tenant.MustNewTenantID("tenant_456")
 
 		// Setup: Cache hit for multi-level slug

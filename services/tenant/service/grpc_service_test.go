@@ -68,12 +68,12 @@ func TestService_InitiateTenant_WithSubdomain(t *testing.T) {
 		TenantId:        "acme_bank",
 		DisplayName:     "Acme Bank",
 		SettlementAsset: "USD",
-		Subdomain:       "acme-bank.demo.meridian.io",
+		Subdomain:       "acme-bank.demo.meridianhub.cloud",
 	}
 
 	resp, err := svc.InitiateTenant(ctx, req)
 	require.NoError(t, err)
-	assert.Equal(t, "acme-bank.demo.meridian.io", resp.Tenant.Subdomain)
+	assert.Equal(t, "acme-bank.demo.meridianhub.cloud", resp.Tenant.Subdomain)
 }
 
 func TestService_InitiateTenant_WithMetadata(t *testing.T) {

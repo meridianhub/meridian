@@ -19,11 +19,11 @@ CREATE TABLE tenant (
     -- Primary settlement asset (e.g., GBP, USD, GPU-HOUR, RICE-VOUCHER)
     settlement_asset VARCHAR(20) NOT NULL,
 
-    -- API subdomain (e.g., acme-bank.demo.meridian.io)
+    -- API subdomain (e.g., acme-bank.demo.meridianhub.cloud)
     -- Optional - not all tenants need a subdomain
     subdomain VARCHAR(255),
 
-    -- URL-safe slug for branded API endpoints (e.g., acme → acme.api.meridian.io)
+    -- URL-safe slug for branded API endpoints (e.g., acme → acme.api.meridianhub.cloud)
     -- Separate from subdomain to support both legacy subdomain routing and new slug-based routing
     slug VARCHAR(63),
 
@@ -65,7 +65,7 @@ COMMENT ON TABLE tenant IS 'Multi-tenant platform registry';
 COMMENT ON COLUMN tenant.id IS 'Unique tenant identifier, used for schema routing (org_{id})';
 COMMENT ON COLUMN tenant.settlement_asset IS 'Primary asset for this tenant (ISO currency code or custom asset)';
 COMMENT ON COLUMN tenant.subdomain IS 'API subdomain for tenant-specific endpoints';
-COMMENT ON COLUMN tenant.slug IS 'URL-safe slug for branded API endpoints (e.g., acme → acme.api.meridian.io)';
+COMMENT ON COLUMN tenant.slug IS 'URL-safe slug for branded API endpoints (e.g., acme → acme.api.meridianhub.cloud)';
 COMMENT ON COLUMN tenant.party_id IS 'Reference to corresponding Party in BIAN Party Reference Data Directory (auto-populated on tenant creation)';
 COMMENT ON COLUMN tenant.metadata IS 'Flexible JSON storage for features, quotas, and tenant-specific config';
 COMMENT ON COLUMN tenant.version IS 'Optimistic locking version for concurrent updates';

@@ -13,7 +13,7 @@ type Config struct {
 	// Port is the HTTP port to listen on.
 	Port int
 
-	// BaseDomain is the base domain for tenant resolution (e.g., "api.meridian.io").
+	// BaseDomain is the base domain for tenant resolution (e.g., "api.meridianhub.cloud").
 	BaseDomain string
 
 	// Backends is a list of backend service configurations.
@@ -36,7 +36,7 @@ type BackendConfig struct {
 func LoadFromEnv() (*Config, error) {
 	port := getEnvAsInt("GATEWAY_PORT", 8080)
 
-	baseDomain := getEnvOrDefault("GATEWAY_BASE_DOMAIN", "api.meridian.io")
+	baseDomain := getEnvOrDefault("GATEWAY_BASE_DOMAIN", "api.meridianhub.cloud")
 
 	// Load backend configurations from environment
 	backends := loadBackends()

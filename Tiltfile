@@ -713,7 +713,7 @@ Services:
 Gateway:
   • Gateway (HTTP)         → http://localhost:8080
     - Local dev mode: Use X-Tenant header (e.g., curl -H "X-Tenant: acme" http://localhost:8080/accounts)
-    - Production: Subdomain routing (e.g., acme.api.meridian.io)
+    - Production: Subdomain routing (e.g., acme.api.meridianhub.cloud)
 
 Microservices:
   • Current-Account        → localhost:50051 (gRPC)

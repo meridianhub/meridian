@@ -9,10 +9,10 @@ import (
 )
 
 // TenantResolver extracts the tenant ID from the subdomain and injects it into the request context.
-// It expects hosts in the format: {tenant}.api.meridian.io
-// If no subdomain is found (e.g., api.meridian.io), it returns an error response.
+// It expects hosts in the format: {tenant}.api.meridianhub.cloud
+// If no subdomain is found (e.g., api.meridianhub.cloud), it returns an error response.
 type TenantResolver struct {
-	// BaseDomain is the base domain suffix (e.g., "api.meridian.io").
+	// BaseDomain is the base domain suffix (e.g., "api.meridianhub.cloud").
 	// Requests to this exact domain (without subdomain) are rejected.
 	BaseDomain string
 
@@ -85,7 +85,7 @@ func (tr *TenantResolver) Middleware(next http.Handler) http.Handler {
 }
 
 // extractTenant extracts the tenant identifier from the host subdomain.
-// For example: "acme.api.meridian.io" -> "acme"
+// For example: "acme.api.meridianhub.cloud" -> "acme"
 func (tr *TenantResolver) extractTenant(host string) (string, error) {
 	// Normalize to lowercase for comparison
 	hostLower := strings.ToLower(host)

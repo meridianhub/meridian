@@ -79,7 +79,7 @@ Examples:
 
   # Register with subdomain and metadata
   tenantctl register --id=test_org --name="Test Org" --settlement-asset=USD \
-    --subdomain=test.demo.meridian.io --metadata tier=enterprise
+    --subdomain=test.demo.meridianhub.cloud --metadata tier=enterprise
 
   # Register with explicit slug for API subdomain
   tenantctl register --id=acme_bank --name="Acme Bank" --settlement-asset=GBP --slug=acme-bank`,

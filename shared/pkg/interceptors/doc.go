@@ -40,7 +40,7 @@
 //   - With AUTH_ENABLED=false: Use auth.TenantExtractionInterceptor() (header extraction only)
 //
 // The x-tenant-id header is set by the API gateway's TenantResolverMiddleware based on
-// the subdomain (e.g., "acme.api.meridian.io" -> x-tenant-id: "org_acme_uuid").
+// the subdomain (e.g., "acme.api.meridianhub.cloud" -> x-tenant-id: "org_acme_uuid").
 // The auth interceptor's double-check ensures a user's JWT tenant matches the subdomain
 // they're accessing, preventing subdomain hopping attacks.
 //

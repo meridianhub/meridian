@@ -1,6 +1,6 @@
 # cert-manager ClusterIssuer for Wildcard TLS Certificates
 #
-# Purpose: Provisions wildcard TLS certificates for *.api.meridian.io using Let's Encrypt
+# Purpose: Provisions wildcard TLS certificates for *.api.meridianhub.cloud using Let's Encrypt
 #
 # Why DNS-01 Challenge?
 # - HTTP-01 challenge does NOT support wildcard certificates (*.domain.com)
@@ -32,7 +32,7 @@
 #
 # Certificate Validation Process:
 # 1. cert-manager creates Certificate resource
-# 2. ACME server requests DNS TXT record: _acme-challenge.api.meridian.io
+# 2. ACME server requests DNS TXT record: _acme-challenge.api.meridianhub.cloud
 # 3. cert-manager uses DNS provider API to create TXT record
 # 4. ACME server validates TXT record
 # 5. Certificate issued and stored in Kubernetes Secret
@@ -105,7 +105,7 @@ spec:
 
     # Email for urgent renewal and security notices
     # IMPORTANT: Replace with your actual email address
-    email: admin@meridian.io
+    email: admin@meridianhub.cloud
 
     # Secret to store ACME account private key
     privateKeySecretRef:
@@ -123,8 +123,8 @@ spec:
       selector:
         # This solver applies to both wildcard and apex domain
         dnsNames:
-        - "*.api.meridian.io"
-        - "api.meridian.io"
+        - "*.api.meridianhub.cloud"
+        - "api.meridianhub.cloud"
 
     # Alternative DNS Provider Configurations (comment out unused)
     #
@@ -138,8 +138,8 @@ spec:
     #         key: secret-access-key
     #   selector:
     #     dnsNames:
-    #     - "*.api.meridian.io"
-    #     - "api.meridian.io"
+    #     - "*.api.meridianhub.cloud"
+    #     - "api.meridianhub.cloud"
     #
     # Google Cloud DNS solver
     # - dns01:
@@ -150,15 +150,15 @@ spec:
     #         key: key.json
     #   selector:
     #     dnsNames:
-    #     - "*.api.meridian.io"
-    #     - "api.meridian.io"
+    #     - "*.api.meridianhub.cloud"
+    #     - "api.meridianhub.cloud"
     #
     # Azure DNS solver
     # - dns01:
     #     azureDNS:
     #       subscriptionID: <REPLACE_WITH_AZURE_SUBSCRIPTION_ID>
     #       resourceGroupName: <REPLACE_WITH_RESOURCE_GROUP>
-    #       hostedZoneName: meridian.io
+    #       hostedZoneName: meridianhub.cloud
     #       environment: AzurePublicCloud
     #       # Managed Identity (recommended for AKS)
     #       managedIdentity:
@@ -171,8 +171,8 @@ spec:
     #       #   key: client-secret
     #   selector:
     #     dnsNames:
-    #     - "*.api.meridian.io"
-    #     - "api.meridian.io"
+    #     - "*.api.meridianhub.cloud"
+    #     - "api.meridianhub.cloud"
 ---
 # Staging ClusterIssuer for testing (recommended before using production)
 apiVersion: cert-manager.io/v1
@@ -185,7 +185,7 @@ spec:
     # Higher rate limits, certificates NOT trusted by browsers (for testing only)
     server: https://acme-staging-v02.api.letsencrypt.org/directory
 
-    email: admin@meridian.io
+    email: admin@meridianhub.cloud
 
     privateKeySecretRef:
       name: letsencrypt-staging-account-key
@@ -198,8 +198,8 @@ spec:
             key: api-token
       selector:
         dnsNames:
-        - "*.api.meridian.io"
-        - "api.meridian.io"
+        - "*.api.meridianhub.cloud"
+        - "api.meridianhub.cloud"
 ---
 # Example Certificate Resource (for testing the ClusterIssuer)
 # This resource can be used to manually test certificate issuance
@@ -216,8 +216,8 @@ spec:
 #     name: letsencrypt-prod
 #     kind: ClusterIssuer
 #   dnsNames:
-#   - "*.api.meridian.io"
-#   - "api.meridian.io"
+#   - "*.api.meridianhub.cloud"
+#   - "api.meridianhub.cloud"
 #
 # Test certificate status:
 # kubectl describe certificate wildcard-api-meridian-cert

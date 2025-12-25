@@ -20,39 +20,39 @@ func TestTenantResolver_ValidSubdomain(t *testing.T) {
 	}{
 		{
 			name:           "simple tenant",
-			host:           "acme.api.meridian.io",
+			host:           "acme.api.meridianhub.cloud",
 			expectedTenant: "acme",
 		},
 		{
 			name:           "tenant with numbers",
-			host:           "bank123.api.meridian.io",
+			host:           "bank123.api.meridianhub.cloud",
 			expectedTenant: "bank123",
 		},
 		{
 			name:           "tenant with underscore",
-			host:           "acme_bank.api.meridian.io",
+			host:           "acme_bank.api.meridianhub.cloud",
 			expectedTenant: "acme_bank",
 		},
 		{
 			name:           "uppercase tenant",
-			host:           "ACME.api.meridian.io",
+			host:           "ACME.api.meridianhub.cloud",
 			expectedTenant: "ACME",
 		},
 		{
 			name:           "mixed case tenant",
-			host:           "AcmeBank.api.meridian.io",
+			host:           "AcmeBank.api.meridianhub.cloud",
 			expectedTenant: "AcmeBank",
 		},
 		{
 			name:           "host with port",
-			host:           "acme.api.meridian.io:8080",
+			host:           "acme.api.meridianhub.cloud:8080",
 			expectedTenant: "acme",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolver := middleware.NewTenantResolver("api.meridian.io", nil)
+			resolver := middleware.NewTenantResolver("api.meridianhub.cloud", nil)
 
 			var capturedTenant tenant.TenantID
 			var tenantFound bool
@@ -81,17 +81,17 @@ func TestTenantResolver_MissingTenant(t *testing.T) {
 	}{
 		{
 			name: "base domain only",
-			host: "api.meridian.io",
+			host: "api.meridianhub.cloud",
 		},
 		{
 			name: "base domain with port",
-			host: "api.meridian.io:8080",
+			host: "api.meridianhub.cloud:8080",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolver := middleware.NewTenantResolver("api.meridian.io", nil)
+			resolver := middleware.NewTenantResolver("api.meridianhub.cloud", nil)
 
 			handler := resolver.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 				t.Error("handler should not be called when tenant is missing")
@@ -121,7 +121,7 @@ func TestTenantResolver_InvalidHost(t *testing.T) {
 		},
 		{
 			name: "partial match",
-			host: "acme.meridian.io",
+			host: "acme.meridianhub.cloud",
 		},
 		{
 			name: "different TLD",
@@ -131,7 +131,7 @@ func TestTenantResolver_InvalidHost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolver := middleware.NewTenantResolver("api.meridian.io", nil)
+			resolver := middleware.NewTenantResolver("api.meridianhub.cloud", nil)
 
 			handler := resolver.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 				t.Error("handler should not be called for invalid host")
@@ -157,17 +157,17 @@ func TestTenantResolver_InvalidTenantID(t *testing.T) {
 	}{
 		{
 			name: "tenant with hyphen",
-			host: "acme-bank.api.meridian.io",
+			host: "acme-bank.api.meridianhub.cloud",
 		},
 		{
 			name: "tenant with special chars",
-			host: "acme@bank.api.meridian.io",
+			host: "acme@bank.api.meridianhub.cloud",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolver := middleware.NewTenantResolver("api.meridian.io", nil)
+			resolver := middleware.NewTenantResolver("api.meridianhub.cloud", nil)
 
 			handler := resolver.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 				t.Error("handler should not be called for invalid tenant ID")
@@ -213,7 +213,7 @@ func TestTenantResolver_AllowedHosts(t *testing.T) {
 		},
 		{
 			name:         "non-allowed host requires tenant",
-			host:         "api.meridian.io",
+			host:         "api.meridianhub.cloud",
 			allowedHosts: []string{"localhost"},
 			expectBypass: false,
 		},
@@ -221,7 +221,7 @@ func TestTenantResolver_AllowedHosts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolver := middleware.NewTenantResolver("api.meridian.io", tt.allowedHosts)
+			resolver := middleware.NewTenantResolver("api.meridianhub.cloud", tt.allowedHosts)
 
 			handlerCalled := false
 			handler := resolver.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -251,7 +251,7 @@ func TestTenantResolver_AllowedHosts(t *testing.T) {
 }
 
 func TestTenantResolver_SetsHeader(t *testing.T) {
-	resolver := middleware.NewTenantResolver("api.meridian.io", nil)
+	resolver := middleware.NewTenantResolver("api.meridianhub.cloud", nil)
 
 	var capturedHeader string
 	handler := resolver.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -259,7 +259,7 @@ func TestTenantResolver_SetsHeader(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.Host = "acme.api.meridian.io"
+	req.Host = "acme.api.meridianhub.cloud"
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -270,7 +270,7 @@ func TestTenantResolver_SetsHeader(t *testing.T) {
 
 func TestTenantResolver_NestedSubdomain(t *testing.T) {
 	// When there are multiple subdomains, only the first one is used as tenant
-	resolver := middleware.NewTenantResolver("api.meridian.io", nil)
+	resolver := middleware.NewTenantResolver("api.meridianhub.cloud", nil)
 
 	var capturedTenant tenant.TenantID
 	handler := resolver.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -278,7 +278,7 @@ func TestTenantResolver_NestedSubdomain(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.Host = "team.acme.api.meridian.io"
+	req.Host = "team.acme.api.meridianhub.cloud"
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
