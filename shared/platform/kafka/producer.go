@@ -170,6 +170,21 @@ func (p *ProtoProducer) Close() {
 	p.producer.Close()
 }
 
+// Produce sends a raw Kafka message asynchronously with delivery report.
+// This is a low-level method that exposes the underlying Kafka producer's Produce method,
+// allowing callers to receive delivery confirmations via the deliveryChan.
+// This method is used by the event outbox worker to publish pre-serialized event payloads.
+//
+// Parameters:
+// - msg: Pre-built Kafka message with topic, key, value, and optional headers
+// - deliveryChan: Channel to receive delivery confirmation events
+//
+// Returns an error if the message cannot be enqueued for delivery.
+// Note: A nil return does not guarantee delivery - check the deliveryChan for confirmation.
+func (p *ProtoProducer) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
+	return p.producer.Produce(msg, deliveryChan)
+}
+
 // PublishWithTenant sends a protobuf message with tenant context to the specified Kafka topic.
 // The tenant ID is extracted from the context and injected as a Kafka header (x-tenant-id).
 // This ensures tenant isolation for multi-tenant event processing.

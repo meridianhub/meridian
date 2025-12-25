@@ -12,6 +12,7 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/redis/go-redis/v9"
@@ -35,6 +36,9 @@ type Container struct {
 
 	// Repository
 	PositionLogRepository domain.FinancialPositionLogRepository
+
+	// Event Outbox
+	OutboxRepository *events.PgxOutboxRepository
 }
 
 // NewContainer creates and initializes a new dependency injection container
@@ -66,6 +70,8 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 	container.initializeEventPublisher()
 
 	container.initializeRepositories()
+
+	container.initializeOutboxRepository()
 
 	logger.Info("dependency container initialized successfully")
 
@@ -308,6 +314,24 @@ func (c *Container) initializeRepositories() {
 	c.PositionLogRepository = persistence.NewPostgresRepository(c.DBPool)
 
 	c.Logger.Info("repositories initialized")
+}
+
+// initializeOutboxRepository initializes the event outbox repository for transactional publishing.
+// The repository is always initialized regardless of Kafka availability because:
+// 1. Domain services use it transactionally to persist events alongside state changes
+// 2. When Kafka is disabled, events remain in the outbox until Kafka becomes available
+// 3. This enables graceful degradation - the system continues operating without message broker
+func (c *Container) initializeOutboxRepository() {
+	// TODO(tm:bian-alignment.14): Consider exposing outbox depth as a health check metric
+	// to alert operators when the outbox is backing up (e.g., Kafka unavailable).
+	c.OutboxRepository = events.NewPgxOutboxRepository(c.DBPool)
+	c.Logger.Info("event outbox repository initialized")
+}
+
+// KafkaProducer returns the Kafka producer for use by components that need
+// direct Kafka access (e.g., the event outbox worker). Returns nil if Kafka is disabled.
+func (c *Container) KafkaProducer() *kafka.ProtoProducer {
+	return c.kafkaProducer
 }
 
 // Close gracefully closes all resources in the container

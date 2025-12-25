@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/google/uuid"
 )
 
 // Worker errors.
@@ -47,6 +48,26 @@ type KafkaPublisher interface {
 	Flush(timeoutMs int) int
 	// Close closes the producer.
 	Close()
+}
+
+// WorkerRepository defines the interface for repository operations used by the Worker.
+// This is a subset of OutboxRepository that excludes Insert, allowing both GORM-based
+// (PostgresOutboxRepository) and pgx-based (PgxOutboxRepository) implementations to be used.
+type WorkerRepository interface {
+	// FetchAndLockForProcessing atomically fetches pending entries and marks them as processing.
+	FetchAndLockForProcessing(ctx context.Context, serviceName string, limit int) ([]EventOutbox, error)
+
+	// MarkCompleted marks an entry as successfully processed.
+	MarkCompleted(ctx context.Context, id uuid.UUID) error
+
+	// MarkFailed increments retry count and updates error message.
+	MarkFailed(ctx context.Context, id uuid.UUID, err error, maxRetries int) error
+
+	// GetPendingCount returns the number of pending entries for observability.
+	GetPendingCount(ctx context.Context, serviceName string) (int64, error)
+
+	// ResetStuckEntries resets entries stuck in 'processing' state for too long.
+	ResetStuckEntries(ctx context.Context, serviceName string, olderThan time.Duration) (int64, error)
 }
 
 // WorkerConfig contains configuration for the event outbox worker.
@@ -90,7 +111,7 @@ func DefaultWorkerConfig(serviceName string) WorkerConfig {
 // Worker is a background processor that publishes events from the outbox to Kafka.
 // It implements graceful shutdown and handles retries with exponential backoff.
 type Worker struct {
-	repository   OutboxRepository
+	repository   WorkerRepository
 	publisher    KafkaPublisher
 	config       WorkerConfig
 	logger       *slog.Logger
@@ -109,7 +130,7 @@ type Worker struct {
 //
 // Returns a configured Worker ready to start processing.
 func NewWorker(
-	repository OutboxRepository,
+	repository WorkerRepository,
 	publisher KafkaPublisher,
 	config WorkerConfig,
 	logger *slog.Logger,
