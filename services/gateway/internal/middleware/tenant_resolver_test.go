@@ -125,7 +125,7 @@ func TestTenantResolver_InvalidHost(t *testing.T) {
 		},
 		{
 			name: "different TLD",
-			host: "acme.api.meridian.com",
+			host: "acme.api.example.com",
 		},
 	}
 
