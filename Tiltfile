@@ -416,6 +416,47 @@ k8s_resource(
 )
 
 # =============================================================================
+# Utilization Metering Consumer
+# =============================================================================
+
+# Standard build args for utilization-metering-consumer
+utilization_metering_build_args = {
+  'VERSION': 'dev',
+  'COMMIT': local('git rev-parse --short HEAD'),
+  'BUILD_DATE': get_build_date(),
+}
+
+# Build utilization-metering-consumer Docker image
+docker_build(
+  'utilization-metering-consumer',
+  context='.',
+  dockerfile='services/utilization-metering-consumer/cmd/Dockerfile',
+  build_args=utilization_metering_build_args,
+)
+
+# Deploy utilization-metering-consumer K8s manifests
+k8s_yaml('services/utilization-metering-consumer/k8s/configmap.yaml')
+k8s_yaml('services/utilization-metering-consumer/k8s/deployment.yaml')
+k8s_yaml('services/utilization-metering-consumer/k8s/service.yaml')
+
+# Configure utilization-metering-consumer resource
+k8s_resource(
+  'utilization-metering-consumer',
+  port_forwards=[
+    '8081:8080',  # HTTP/metrics (using 8081 to avoid conflict with audit-worker)
+  ],
+  resource_deps=[
+    'generate-proto',  # Ensures proto files are generated before building
+    'kafka-cluster',   # Needs Kafka to consume audit events
+    'position-keeping', # Needs Position Keeping gRPC endpoint
+  ],
+  labels=['infrastructure'],
+  objects=[
+    'utilization-metering-consumer-config:configmap',
+  ],
+)
+
+# =============================================================================
 # Microservices
 # =============================================================================
 

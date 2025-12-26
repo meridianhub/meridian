@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: utilization-metering-consumer-config
+  labels:
+    app: utilization-metering-consumer
+    component: consumer
+data:
+  # Logging configuration
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+
+  # HTTP server configuration
+  HTTP_PORT: "8080"
+
+  # Kafka consumer configuration
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  CONSUMER_GROUP_ID: "utilization-metering-consumer"
+
+  # Kafka consumer performance tuning
+  # Max messages to fetch per poll (higher = more throughput, higher memory)
+  KAFKA_MAX_POLL_RECORDS: "500"
+  # Session timeout - consumer removed from group if no heartbeat within this time
+  KAFKA_SESSION_TIMEOUT_MS: "30000"
+  # Heartbeat interval - should be < session timeout / 3
+  KAFKA_HEARTBEAT_INTERVAL_MS: "3000"
+  # Max time between poll() calls before consumer considered failed
+  KAFKA_MAX_POLL_INTERVAL_MS: "300000"
+
+  # Position Keeping gRPC endpoint
+  # Format: service-name:port (Kubernetes DNS resolution)
+  POSITION_KEEPING_ENDPOINT: "position-keeping:50053"
+
+  # gRPC client configuration
+  GRPC_TIMEOUT_SECONDS: "10"
+  GRPC_MAX_RETRIES: "3"
+  GRPC_RETRY_BACKOFF_MS: "100"
+
+  # Tenant Zero configuration
+  # This is Meridian's platform billing tenant where utilization measurements are recorded
+  # WARNING: This should be set via Secret in production, not ConfigMap
+  TENANT_ZERO_ID: "00000000-0000-0000-0000-000000000000"
+
+  # OpenTelemetry configuration
+  OTEL_SERVICE_NAME: "utilization-metering-consumer"
+  OTEL_SAMPLING_RATE: "0.1"
+
+  # Metrics collection interval (for consumer lag, pool stats, etc.)
+  METRICS_COLLECTION_INTERVAL_SECONDS: "10"
