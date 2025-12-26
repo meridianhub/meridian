@@ -125,7 +125,8 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 	// Transform audit event to utilization measurement
 	measurement, err := ac.transformer.Transform(event)
 	if err != nil {
-		return fmt.Errorf("failed to transform audit event: %w", err)
+		domain.RecordTransformationError(event.SchemaName, "transformation_failed")
+		return fmt.Errorf("failed to transform audit event %s: %w", event.EventId, err)
 	}
 
 	// If transformer returns nil, this event should not be metered (e.g., internal operations)
@@ -138,7 +139,8 @@ func (ac *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Au
 
 	// Send measurement to Position Keeping service
 	if err := ac.pkClient.RecordMeasurement(ctx, measurement); err != nil {
-		return fmt.Errorf("failed to record measurement: %w", err)
+		domain.RecordPositionKeepingAPIError("record_measurement_failed")
+		return fmt.Errorf("failed to record measurement for event %s: %w", event.EventId, err)
 	}
 
 	// Record successful measurement metric

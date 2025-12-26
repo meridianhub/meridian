@@ -129,16 +129,18 @@ func run(logger *slog.Logger) error {
 		if _, err := fmt.Sscanf(config.PositionKeepingEndpoint[lastColon:], ":%d", &pkPort); err != nil || pkPort == 0 {
 			// Default to 50053 if parsing fails
 			pkPort = 50053
-			logger.Warn("failed to parse port from POSITION_KEEPING_ENDPOINT, using default",
+			logger.Warn("failed to parse port from POSITION_KEEPING_ENDPOINT, using default - verify endpoint format is 'host:port'",
 				"endpoint", config.PositionKeepingEndpoint,
-				"default_port", pkPort)
+				"default_port", pkPort,
+				"implication", "gRPC connection may fail if Position Keeping service uses a different port")
 		}
 	} else {
 		// No colon found, use default port
 		pkPort = 50053
-		logger.Warn("no port found in POSITION_KEEPING_ENDPOINT, using default",
+		logger.Warn("no port found in POSITION_KEEPING_ENDPOINT, using default - verify endpoint includes port number",
 			"endpoint", config.PositionKeepingEndpoint,
-			"default_port", pkPort)
+			"default_port", pkPort,
+			"implication", "gRPC connection may fail if Position Keeping service uses a different port")
 	}
 
 	pkClient, err := grpc.NewPositionKeepingClient(&grpc.ClientConfig{
@@ -207,7 +209,12 @@ func run(logger *slog.Logger) error {
 			return
 		}
 
-		// Mark consumer as initialized for readiness probe after successful start
+		// Mark consumer as initialized for readiness probe after successful start.
+		// NOTE: For MVP, we set readiness after Subscribe() returns successfully.
+		// This doesn't guarantee actual Kafka connectivity, but indicates the
+		// consumer is ready to process messages when Kafka becomes available.
+		// In production, consider using consumer.Assignment() callback or metrics
+		// to verify actual partition assignment before marking ready.
 		readinessMu.Lock()
 		readiness.consumerInitialized = true
 		readinessMu.Unlock()

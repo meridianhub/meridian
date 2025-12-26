@@ -13,8 +13,6 @@ import (
 var (
 	// ErrKafkaBootstrapServersRequired is returned when KAFKA_BOOTSTRAP_SERVERS is not set
 	ErrKafkaBootstrapServersRequired = errors.New("KAFKA_BOOTSTRAP_SERVERS environment variable is required")
-	// ErrConsumerGroupIDRequired is returned when CONSUMER_GROUP_ID is not set
-	ErrConsumerGroupIDRequired = errors.New("CONSUMER_GROUP_ID environment variable is required")
 	// ErrPositionKeepingEndpointRequired is returned when POSITION_KEEPING_ENDPOINT is not set
 	ErrPositionKeepingEndpointRequired = errors.New("POSITION_KEEPING_ENDPOINT environment variable is required")
 	// ErrTenantZeroIDRequired is returned when TENANT_ZERO_ID is not set
@@ -64,9 +62,7 @@ func LoadConfig() (*Config, error) {
 	if config.KafkaBootstrapServers == "" {
 		return nil, ErrKafkaBootstrapServersRequired
 	}
-	if config.ConsumerGroupID == "" {
-		return nil, ErrConsumerGroupIDRequired
-	}
+	// Note: ConsumerGroupID validation removed - it has a default value so can never be empty
 	if config.PositionKeepingEndpoint == "" {
 		return nil, ErrPositionKeepingEndpointRequired
 	}

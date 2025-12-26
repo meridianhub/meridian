@@ -144,7 +144,9 @@ func (c *PositionKeepingGRPCClient) RecordMeasurement(ctx context.Context, measu
 	// Propagate context metadata (will be used when real gRPC call is implemented)
 	ctx = sharedclients.PropagateCorrelationID(ctx)
 	ctx = sharedclients.PropagateOrganization(ctx)
-	_ = ctx // Suppress linter warning until real gRPC call is implemented (see TODO below)
+	// TODO: Remove this suppression when RecordMeasurement endpoint is implemented
+	// and the ctx variable is used in the actual gRPC call below
+	_ = ctx // Suppress linter warning until real gRPC call is implemented
 
 	if c.simulationMode {
 		// Simulation mode: log what would be sent

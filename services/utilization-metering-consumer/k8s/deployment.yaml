@@ -38,9 +38,6 @@ spec:
         - name: http
           containerPort: 8080
           protocol: TCP
-        - name: metrics
-          containerPort: 8080
-          protocol: TCP
         envFrom:
         - configMapRef:
             name: utilization-metering-consumer-config
