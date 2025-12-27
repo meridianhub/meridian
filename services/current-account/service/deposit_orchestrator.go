@@ -48,19 +48,19 @@ type DepositOrchestratorConfig struct {
 }
 
 // NewDepositOrchestrator creates a new deposit orchestrator with the given dependencies.
-// Panics if required dependencies (Logger, Repo, PosKeepingClient, FinAcctClient) are nil.
-func NewDepositOrchestrator(cfg DepositOrchestratorConfig) *DepositOrchestrator {
+// Returns an error if required dependencies (Logger, Repo, PosKeepingClient, FinAcctClient) are nil.
+func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator, error) {
 	if cfg.Logger == nil {
-		panic("deposit orchestrator: logger cannot be nil")
+		return nil, ErrOrchestratorLoggerNil
 	}
 	if cfg.Repo == nil {
-		panic("deposit orchestrator: repository cannot be nil")
+		return nil, ErrOrchestratorRepositoryNil
 	}
 	if cfg.PosKeepingClient == nil {
-		panic("deposit orchestrator: position keeping client cannot be nil")
+		return nil, ErrOrchestratorPosKeepingClientNil
 	}
 	if cfg.FinAcctClient == nil {
-		panic("deposit orchestrator: financial accounting client cannot be nil")
+		return nil, ErrOrchestratorFinAcctClientNil
 	}
 	return &DepositOrchestrator{
 		logger:           cfg.Logger,
@@ -68,7 +68,7 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) *DepositOrchestrator 
 		posKeepingClient: cfg.PosKeepingClient,
 		finAcctClient:    cfg.FinAcctClient,
 		accountConfig:    cfg.AccountConfig,
-	}
+	}, nil
 }
 
 // Orchestrate executes the deposit saga with compensation on failure.
