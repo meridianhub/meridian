@@ -669,14 +669,19 @@ func testGatewayAccountConfig() *config.GatewayAccountConfig {
 
 // testOrchestrator creates a PaymentOrchestrator with the provided dependencies for testing.
 // This helper ensures tests that directly construct Service{} also get an orchestrator.
+// Panics on error since test setup failures should fail fast.
 func testOrchestrator(repo persistence.Repository, caClient CurrentAccountClient, faClient FinancialAccountingClient, gwConfig *config.GatewayAccountConfig) *PaymentOrchestrator {
-	return NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	o, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:                    testLogger(),
 		Repo:                      repo,
 		CurrentAccountClient:      caClient,
 		FinancialAccountingClient: faClient,
 		GatewayAccountConfig:      gwConfig,
 	})
+	if err != nil {
+		panic(fmt.Sprintf("testOrchestrator: %v", err))
+	}
+	return o
 }
 
 // Test InitiatePaymentOrder
@@ -2053,12 +2058,13 @@ func TestSagaOrchestration_HappyPath(t *testing.T) {
 	}
 
 	// Create orchestrator with all dependencies
-	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwMock,
 	})
+	require.NoError(t, err)
 
 	// Create service with all dependencies configured
 	svc := &Service{
@@ -2123,12 +2129,13 @@ func TestSagaOrchestration_LienFailure(t *testing.T) {
 	gwMock := &MockPaymentGateway{}
 
 	// Create orchestrator with dependencies
-	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwMock,
 	})
+	require.NoError(t, err)
 
 	svc := &Service{
 		repo:                    repo,
@@ -2190,12 +2197,13 @@ func TestSagaOrchestration_GatewayFailure(t *testing.T) {
 	}
 
 	// Create orchestrator with dependencies
-	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwMock,
 	})
+	require.NoError(t, err)
 
 	svc := &Service{
 		repo:                    repo,
@@ -2283,12 +2291,13 @@ func TestSagaOrchestration_Timeout(t *testing.T) {
 	gwMock := &MockPaymentGateway{}
 
 	// Create orchestrator with dependencies
-	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwMock,
 	})
+	require.NoError(t, err)
 
 	// Configure very short saga timeout to trigger timeout
 	svc := &Service{
@@ -2444,12 +2453,13 @@ func TestSagaOrchestration_MalformedLienResponse(t *testing.T) {
 	gwClient := &MockPaymentGateway{}
 
 	// Create orchestrator with dependencies
-	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwClient,
 	})
+	require.NoError(t, err)
 
 	// Create service directly to avoid kafka producer requirement
 	svc := &Service{
@@ -2509,12 +2519,13 @@ func TestSagaOrchestration_GatewayPending(t *testing.T) {
 	}
 
 	// Create orchestrator with dependencies
-	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:               slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Repo:                 repo,
 		CurrentAccountClient: caClient,
 		PaymentGateway:       gwClient,
 	})
+	require.NoError(t, err)
 
 	// Create service directly to avoid kafka producer requirement
 	svc := &Service{
