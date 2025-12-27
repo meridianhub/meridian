@@ -44,19 +44,25 @@ func createTestWithdrawalRequest(accountID string, units int64, nanos int32) *pb
 }
 
 // testWithdrawalOrchestrator creates a WithdrawalOrchestrator for testing.
+// Panics if orchestrator creation fails (indicates test setup problem).
 func testWithdrawalOrchestrator(repo *persistence.Repository, posKeeping *mockPositionKeepingClient, finAcct *mockFinancialAccountingClient) *WithdrawalOrchestrator {
 	return testWithdrawalOrchestratorWithConfig(repo, posKeeping, finAcct, nil)
 }
 
 // testWithdrawalOrchestratorWithConfig creates a WithdrawalOrchestrator with optional AccountConfig.
+// Panics if orchestrator creation fails (indicates test setup problem).
 func testWithdrawalOrchestratorWithConfig(repo *persistence.Repository, posKeeping *mockPositionKeepingClient, finAcct *mockFinancialAccountingClient, acctConfig *config.AccountConfig) *WithdrawalOrchestrator {
-	return NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
+	orchestrator, err := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
 		Logger:           testLogger(),
 		Repo:             repo,
 		PosKeepingClient: posKeeping,
 		FinAcctClient:    finAcct,
 		AccountConfig:    acctConfig,
 	})
+	if err != nil {
+		panic("test setup failed: " + err.Error())
+	}
+	return orchestrator
 }
 
 // =============================================================================

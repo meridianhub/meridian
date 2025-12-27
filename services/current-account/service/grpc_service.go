@@ -170,13 +170,16 @@ func NewServiceWithExistingClients(
 	}
 
 	// Create withdrawal orchestrator
-	withdrawalOrchestrator := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
+	withdrawalOrchestrator, err := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
 		Logger:           logger,
 		Repo:             repo,
 		PosKeepingClient: posKeepingClient,
 		FinAcctClient:    finAcctClient,
 		AccountConfig:    accountConfig,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
+	}
 
 	return &Service{
 		repo:                   repo,
@@ -289,13 +292,16 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	}
 
 	// Create withdrawal orchestrator
-	withdrawalOrchestrator := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
+	withdrawalOrchestrator, err := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
 		Logger:           logger,
 		Repo:             config.Repository,
 		PosKeepingClient: resilientPosKeepingClient,
 		FinAcctClient:    resilientFinAcctClient,
 		AccountConfig:    nil, // Not passed in Config - will use defaults
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
+	}
 
 	return &Service{
 		repo:                   config.Repository,

@@ -48,19 +48,19 @@ type WithdrawalOrchestratorConfig struct {
 }
 
 // NewWithdrawalOrchestrator creates a new withdrawal orchestrator with the given dependencies.
-// Panics if required dependencies (Logger, Repo, PosKeepingClient, FinAcctClient) are nil.
-func NewWithdrawalOrchestrator(cfg WithdrawalOrchestratorConfig) *WithdrawalOrchestrator {
+// Returns an error if required dependencies (Logger, Repo, PosKeepingClient, FinAcctClient) are nil.
+func NewWithdrawalOrchestrator(cfg WithdrawalOrchestratorConfig) (*WithdrawalOrchestrator, error) {
 	if cfg.Logger == nil {
-		panic("withdrawal orchestrator: logger cannot be nil")
+		return nil, ErrOrchestratorLoggerNil
 	}
 	if cfg.Repo == nil {
-		panic("withdrawal orchestrator: repository cannot be nil")
+		return nil, ErrOrchestratorRepositoryNil
 	}
 	if cfg.PosKeepingClient == nil {
-		panic("withdrawal orchestrator: position keeping client cannot be nil")
+		return nil, ErrOrchestratorPosKeepingClientNil
 	}
 	if cfg.FinAcctClient == nil {
-		panic("withdrawal orchestrator: financial accounting client cannot be nil")
+		return nil, ErrOrchestratorFinAcctClientNil
 	}
 	return &WithdrawalOrchestrator{
 		logger:           cfg.Logger,
@@ -68,7 +68,7 @@ func NewWithdrawalOrchestrator(cfg WithdrawalOrchestratorConfig) *WithdrawalOrch
 		posKeepingClient: cfg.PosKeepingClient,
 		finAcctClient:    cfg.FinAcctClient,
 		accountConfig:    cfg.AccountConfig,
-	}
+	}, nil
 }
 
 // Orchestrate executes the withdrawal saga with compensation on failure.

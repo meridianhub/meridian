@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/meridianhub/meridian/services/current-account/clients"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 )
 
 // Service-level sentinel errors for validation and state checks
@@ -15,12 +16,20 @@ var (
 	ErrHealthCheckerRepositoryNil = errors.New("health checker requires non-nil repository")
 )
 
-// Orchestrator dependency validation errors
+// Orchestrator configuration errors for nil dependency validation.
+// Re-exported from shared/pkg/clients for backward compatibility.
+// These errors are returned by orchestrator constructors instead of panicking,
+// allowing callers to handle initialization failures gracefully.
+//
+// When service startup fails due to these errors, the application will:
+// 1. Exit with a non-zero status code
+// 2. Log the specific error with context about which dependency is missing
+// 3. Enter crash loop backoff in Kubernetes until the configuration is fixed
 var (
-	ErrOrchestratorLoggerNil           = errors.New("deposit orchestrator: logger cannot be nil")
-	ErrOrchestratorRepositoryNil       = errors.New("deposit orchestrator: repository cannot be nil")
-	ErrOrchestratorPosKeepingClientNil = errors.New("deposit orchestrator: position keeping client cannot be nil")
-	ErrOrchestratorFinAcctClientNil    = errors.New("deposit orchestrator: financial accounting client cannot be nil")
+	ErrOrchestratorLoggerNil           = sharedclients.ErrConfigLoggerNil
+	ErrOrchestratorRepositoryNil       = sharedclients.ErrConfigRepositoryNil
+	ErrOrchestratorPosKeepingClientNil = sharedclients.ErrConfigPositionKeepingClientNil
+	ErrOrchestratorFinAcctClientNil    = sharedclients.ErrConfigFinancialAccountingClientNil
 )
 
 // Saga orchestration errors for compensation and state tracking
