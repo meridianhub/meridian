@@ -30,6 +30,8 @@ import (
 
 // Orchestrator configuration errors.
 var (
+	ErrOrchestratorLoggerNil           = errors.New("payment orchestrator: logger cannot be nil")
+	ErrOrchestratorRepoNil             = errors.New("payment orchestrator: repository cannot be nil")
 	ErrGatewayAccountConfigNotSet      = errors.New("gateway account config not configured")
 	ErrFinancialAccountingClientNotSet = errors.New("financial accounting client not configured")
 	ErrNilBookingLogResponse           = errors.New("financial accounting returned nil booking log")
@@ -62,14 +64,14 @@ type PaymentOrchestratorConfig struct {
 }
 
 // NewPaymentOrchestrator creates a new payment orchestrator with the given dependencies.
-// Panics if required dependencies (Logger, Repo) are nil. CurrentAccountClient and
+// Returns an error if required dependencies (Logger, Repo) are nil. CurrentAccountClient and
 // PaymentGateway are validated at runtime in Orchestrate() with graceful error handling.
-func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) *PaymentOrchestrator {
+func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator, error) {
 	if cfg.Logger == nil {
-		panic("payment orchestrator: logger cannot be nil")
+		return nil, ErrOrchestratorLoggerNil
 	}
 	if cfg.Repo == nil {
-		panic("payment orchestrator: repository cannot be nil")
+		return nil, ErrOrchestratorRepoNil
 	}
 	return &PaymentOrchestrator{
 		logger:                    cfg.Logger,
@@ -80,7 +82,7 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) *PaymentOrchestrator 
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
 		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
-	}
+	}, nil
 }
 
 // Orchestrate executes the payment saga with compensation on failure.

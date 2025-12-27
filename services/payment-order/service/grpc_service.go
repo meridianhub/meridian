@@ -213,10 +213,13 @@ func NewService(repo persistence.Repository, idempotencyService idempotency.Serv
 
 	// Create minimal orchestrator for testing - external clients may be nil
 	// but orchestrator methods check for nil before use
-	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger: logger,
 		Repo:   repo,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create payment orchestrator: %w", err)
+	}
 
 	return &Service{
 		repo:                    repo,
@@ -282,7 +285,7 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 	}
 
 	// Create the payment orchestrator with all dependencies
-	orchestrator := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:                    logger,
 		Repo:                      cfg.Repository,
 		CurrentAccountClient:      cfg.CurrentAccountClient,
@@ -292,6 +295,9 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		KafkaPublisher:            cfg.KafkaPublisher,
 		LienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create payment orchestrator: %w", err)
+	}
 
 	return &Service{
 		repo:                      cfg.Repository,
