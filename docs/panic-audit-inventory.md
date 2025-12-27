@@ -191,6 +191,112 @@ panic usage.
 
 ---
 
+## Approval Status: Startup and Initialization Panics
+
+**Reviewed**: 2025-12-27
+**Subtask**: tech-debt-cleanup.25.2
+
+This section provides detailed approval rationale for all startup/initialization
+panics and Must* function variants identified in the inventory.
+
+### Approval Criteria
+
+Startup panics are **APPROVED** when they meet ALL of the following criteria:
+
+1. **Fail-fast timing**: Panic occurs during service initialization, before handling any requests
+2. **Critical dependency**: The nil/empty value would make the service non-functional
+3. **No recovery possible**: Returning an error would just propagate up to main() anyway
+4. **Clear messaging**: Panic message identifies which dependency is missing
+
+### Category A: Startup/Constructor Panics - APPROVED
+
+All 13 startup panics are **APPROVED** with the following rationale:
+
+#### Health Check Constructors (4 panics)
+
+| # | Location | Rationale |
+|---|----------|-----------|
+| 1 | `NewHTTPHandler(aggregator)` | Without aggregator, health endpoints cannot report component status. Service would appear healthy when it cannot verify dependencies. **APPROVED - STARTUP** |
+| 2 | `NewDatabaseChecker(pool)` | Database health checker is useless without a connection pool. Called once at startup when wiring dependencies. **APPROVED - STARTUP** |
+| 3 | `NewRedisChecker(client)` | Redis health checker is useless without a client. Called once at startup when wiring dependencies. **APPROVED - STARTUP** |
+| 4 | `NewKafkaChecker(checkFunc)` | Kafka health checker is useless without a check function. Called once at startup when wiring dependencies. **APPROVED - STARTUP** |
+
+**Pattern justification**: Health checkers are instantiated once during service startup in main.go
+or dependency injection setup. A nil pool/client/function indicates a wiring bug in the startup
+code - the service should not start in this broken state.
+
+#### Service-Specific Health Checkers (2 panics)
+
+| # | Location | Rationale |
+|---|----------|-----------|
+| 5 | `party/NewHealthChecker(repository)` | Party service health check requires repository to verify data layer. **APPROVED - STARTUP** |
+| 6 | `position-keeping/NewRedisChecker(client)` | Position-keeping specific Redis checker. **APPROVED - STARTUP** |
+| 7 | `position-keeping/NewPgxPoolChecker(pool)` | Position-keeping specific Postgres checker. **APPROVED - STARTUP** |
+
+**Pattern justification**: Service-specific health checkers follow the same pattern as shared ones.
+They are constructed during dependency injection and a nil dependency indicates a wiring bug.
+
+#### Event Publisher Constructors (2 panics)
+
+| # | Location | Rationale |
+|---|----------|-----------|
+| 8 | `NewOutboxPublisher(serviceName)` | Empty service name would cause malformed event metadata, making event correlation impossible. Service name is a compile-time constant. **APPROVED - STARTUP** |
+| 9 | `NewPgxOutboxPublisher(serviceName, ...)` | Same rationale as above - service name is required for event tracing. **APPROVED - STARTUP** |
+
+**Pattern justification**: Service name is passed from main.go and should be a non-empty constant.
+An empty service name indicates a configuration bug that should fail deployment, not silently
+produce broken events.
+
+#### Saga Orchestrator Constructors (4 panics)
+
+| # | Location | Rationale |
+|---|----------|-----------|
+| 10 | `NewWithdrawalOrchestrator(cfg.Logger)` | Logger is required for audit trail of financial operations. **APPROVED - STARTUP** |
+| 11 | `NewWithdrawalOrchestrator(cfg.Repo)` | Repository is required to persist account state changes. **APPROVED - STARTUP** |
+| 12 | `NewWithdrawalOrchestrator(cfg.PosKeepingClient)` | Position-keeping client is required for the saga workflow. **APPROVED - STARTUP** |
+| 13 | `NewWithdrawalOrchestrator(cfg.FinAcctClient)` | Financial accounting client is required for the saga workflow. **APPROVED - STARTUP** |
+
+**Pattern justification**: The withdrawal orchestrator implements a financial saga that coordinates
+multiple services. All four dependencies are mandatory for the saga to function. These are
+validated at service startup when the gRPC server is being wired. A nil dependency indicates
+incomplete dependency injection.
+
+### Category B: Must* Function Variants - APPROVED
+
+All 6 Must* functions are **APPROVED** with the following rationale:
+
+| # | Function | Usage Pattern | Rationale |
+|---|----------|---------------|-----------|
+| 14 | `money.MustNew` | Tests and compile-time constants | Explicitly named with `Must` prefix. Alternative `New` exists for runtime use. Used in test fixtures and constant initialization. **APPROVED - MUST PATTERN** |
+| 15 | `measurement.MustPeriod` | Tests and initialization | Same Must pattern. Used when period validity is known at compile time. **APPROVED - MUST PATTERN** |
+| 16 | `tenant.MustFromContext` | After middleware validation | Called only in code paths where tenant middleware has already validated context. Comment in source documents this is a "programming error" detector. **APPROVED - MUST PATTERN** |
+| 17 | `tenant.MustNewTenantID` | Compile-time tenant constants | Used for system-level tenant IDs that are compile-time constants. Alternative `NewTenantID` exists. **APPROVED - MUST PATTERN** |
+| 18 | `db.MustWithGormTenantScope` | After middleware validation | Called in code paths where tenant context is guaranteed by middleware. **APPROVED - MUST PATTERN** |
+| 19 | `db.MustWithTenantScope` | After middleware validation | Same pattern as above. **APPROVED - MUST PATTERN** |
+
+**Pattern justification**: The `Must` prefix is a Go convention (see `regexp.MustCompile`,
+`template.Must`) that clearly signals "this function panics on error". Each `Must` function has
+a corresponding non-panicking variant. Usage is appropriate:
+
+- Test code: Panics are acceptable to fail fast on test setup errors
+- Compile-time constants: Values are known-valid at code review time
+- Post-middleware: Middleware has already validated the precondition
+
+### Summary of Approvals
+
+| Category | Count | Status |
+|----------|-------|--------|
+| Health check constructors | 7 | APPROVED - STARTUP |
+| Event publisher constructors | 2 | APPROVED - STARTUP |
+| Saga orchestrator constructors | 4 | APPROVED - STARTUP |
+| Must* function variants | 6 | APPROVED - MUST PATTERN |
+| **Total reviewed** | **19** | **All APPROVED** |
+
+All startup/initialization panics follow established Go patterns for fail-fast
+initialization and are acceptable. No refactoring is required.
+
+---
+
 ## Files by Panic Count
 
 | File | Count | Cat |
