@@ -15,12 +15,14 @@ var (
 	ErrHealthCheckerRepositoryNil = errors.New("health checker requires non-nil repository")
 )
 
-// Orchestrator dependency validation errors
+// Orchestrator configuration errors for nil dependency validation.
+// Constructors return these errors instead of panicking to allow callers
+// to handle initialization failures gracefully.
 var (
-	ErrOrchestratorLoggerNil           = errors.New("deposit orchestrator: logger cannot be nil")
-	ErrOrchestratorRepositoryNil       = errors.New("deposit orchestrator: repository cannot be nil")
-	ErrOrchestratorPosKeepingClientNil = errors.New("deposit orchestrator: position keeping client cannot be nil")
-	ErrOrchestratorFinAcctClientNil    = errors.New("deposit orchestrator: financial accounting client cannot be nil")
+	ErrOrchestratorLoggerNil           = errors.New("orchestrator: logger cannot be nil")
+	ErrOrchestratorRepositoryNil       = errors.New("orchestrator: repository cannot be nil")
+	ErrOrchestratorPosKeepingClientNil = errors.New("orchestrator: position keeping client cannot be nil")
+	ErrOrchestratorFinAcctClientNil    = errors.New("orchestrator: financial accounting client cannot be nil")
 )
 
 // Saga orchestration errors for compensation and state tracking
