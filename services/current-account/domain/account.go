@@ -3,6 +3,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -125,7 +126,10 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 	}
 
 	now := time.Now()
-	newAvailableBalance := calculateAvailableBalance(newBalance, a.overdraftLimit, a.overdraftEnabled)
+	newAvailableBalance, err := calculateAvailableBalance(newBalance, a.overdraftLimit, a.overdraftEnabled)
+	if err != nil {
+		return CurrentAccount{}, err
+	}
 
 	return CurrentAccount{
 		id:                    a.id,
@@ -179,7 +183,10 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 	}
 
 	now := time.Now()
-	newAvailableBalance := calculateAvailableBalance(newBalance, a.overdraftLimit, a.overdraftEnabled)
+	newAvailableBalance, err := calculateAvailableBalance(newBalance, a.overdraftLimit, a.overdraftEnabled)
+	if err != nil {
+		return CurrentAccount{}, err
+	}
 
 	return CurrentAccount{
 		id:                    a.id,
@@ -201,19 +208,21 @@ func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {
 	}, nil
 }
 
-// calculateAvailableBalance is a pure function that computes available balance
-// based on current balance and overdraft settings.
-func calculateAvailableBalance(balance, overdraftLimit Money, overdraftEnabled bool) Money {
+// ErrAvailableBalanceCalculation indicates a failure to calculate available balance,
+// typically due to currency mismatch or overflow between balance and overdraft limit.
+var ErrAvailableBalanceCalculation = errors.New("failed to calculate available balance")
+
+// calculateAvailableBalance computes available balance based on current balance and overdraft settings.
+// Returns an error if the addition fails (currency mismatch or overflow).
+func calculateAvailableBalance(balance, overdraftLimit Money, overdraftEnabled bool) (Money, error) {
 	if overdraftEnabled {
-		// Use immutable Add method; should never fail if SetOverdraftLimit validated correctly
 		newAvail, err := balance.Add(overdraftLimit)
 		if err != nil {
-			// This indicates a bug: either currency mismatch or overflow that bypassed validation
-			panic("BUG: OverdraftLimit currency mismatch or overflow detected in calculateAvailableBalance: " + err.Error())
+			return Money{}, fmt.Errorf("%w: %w", ErrAvailableBalanceCalculation, err)
 		}
-		return newAvail
+		return newAvail, nil
 	}
-	return balance
+	return balance, nil
 }
 
 // withStatusChange creates a new CurrentAccount with the status changed and history recorded.
@@ -368,7 +377,10 @@ func (a CurrentAccount) SetOverdraftLimit(limit Money, rate float64, enabled boo
 		}
 	}
 
-	newAvailableBalance := calculateAvailableBalance(a.balance, limit, enabled)
+	newAvailableBalance, err := calculateAvailableBalance(a.balance, limit, enabled)
+	if err != nil {
+		return CurrentAccount{}, err
+	}
 
 	return CurrentAccount{
 		id:                    a.id,

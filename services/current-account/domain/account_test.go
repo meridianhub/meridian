@@ -712,8 +712,9 @@ func TestCalculateAvailableBalance(t *testing.T) {
 		balance, _ := NewMoney("GBP", 10000)
 		overdraft, _ := NewMoney("GBP", 5000)
 
-		result := calculateAvailableBalance(balance, overdraft, false)
+		result, err := calculateAvailableBalance(balance, overdraft, false)
 
+		require.NoError(t, err)
 		assert.Equal(t, balance, result)
 	})
 
@@ -721,8 +722,9 @@ func TestCalculateAvailableBalance(t *testing.T) {
 		balance, _ := NewMoney("GBP", 10000)
 		overdraft, _ := NewMoney("GBP", 5000)
 
-		result := calculateAvailableBalance(balance, overdraft, true)
+		result, err := calculateAvailableBalance(balance, overdraft, true)
 
+		require.NoError(t, err)
 		assert.Equal(t, int64(15000), result.AmountCents())
 	})
 
@@ -730,9 +732,20 @@ func TestCalculateAvailableBalance(t *testing.T) {
 		balance, _ := NewMoney("GBP", -3000)
 		overdraft, _ := NewMoney("GBP", 5000)
 
-		result := calculateAvailableBalance(balance, overdraft, true)
+		result, err := calculateAvailableBalance(balance, overdraft, true)
 
+		require.NoError(t, err)
 		assert.Equal(t, int64(2000), result.AmountCents())
+	})
+
+	t.Run("currency mismatch returns error", func(t *testing.T) {
+		balance, _ := NewMoney("GBP", 10000)
+		overdraft, _ := NewMoney("USD", 5000)
+
+		_, err := calculateAvailableBalance(balance, overdraft, true)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrAvailableBalanceCalculation)
 	})
 }
 
