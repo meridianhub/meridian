@@ -39,6 +39,7 @@ type InMemorySlugCache struct {
 	cleanupInterval time.Duration
 	stopCleanup     chan struct{}
 	cleanupDone     chan struct{}
+	stopOnce        sync.Once
 }
 
 // InMemoryCacheOption is a functional option for configuring InMemorySlugCache.
@@ -146,14 +147,9 @@ func (c *InMemorySlugCache) Set(ctx context.Context, slug string, tenantID tenan
 // It blocks until the cleanup goroutine has exited.
 // Safe to call multiple times.
 func (c *InMemorySlugCache) Stop() {
-	select {
-	case <-c.stopCleanup:
-		// Already stopped
-		return
-	default:
+	c.stopOnce.Do(func() {
 		close(c.stopCleanup)
-	}
-
+	})
 	// Wait for cleanup goroutine to finish
 	<-c.cleanupDone
 }

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -306,8 +307,8 @@ func TestInMemorySlugCache_ConcurrentAccess(t *testing.T) {
 			go func(idx int) {
 				defer wg.Done()
 
-				slug := "slug_" + string(rune('a'+idx%26))
-				tenantID := tenant.MustNewTenantID("tenant_" + string(rune('0'+idx%10)))
+				slug := fmt.Sprintf("slug_%d", idx)
+				tenantID := tenant.MustNewTenantID(fmt.Sprintf("tenant_%d", idx))
 
 				err := cache.Set(ctx, slug, tenantID)
 				assert.NoError(t, err)
@@ -360,13 +361,16 @@ func TestInMemorySlugCache_Size(t *testing.T) {
 
 		assert.Equal(t, 0, cache.Size())
 
-		cache.Set(ctx, "a", tenant.MustNewTenantID("t1"))
+		err := cache.Set(ctx, "a", tenant.MustNewTenantID("t1"))
+		require.NoError(t, err)
 		assert.Equal(t, 1, cache.Size())
 
-		cache.Set(ctx, "b", tenant.MustNewTenantID("t2"))
+		err = cache.Set(ctx, "b", tenant.MustNewTenantID("t2"))
+		require.NoError(t, err)
 		assert.Equal(t, 2, cache.Size())
 
-		cache.Set(ctx, "c", tenant.MustNewTenantID("t3"))
+		err = cache.Set(ctx, "c", tenant.MustNewTenantID("t3"))
+		require.NoError(t, err)
 		assert.Equal(t, 3, cache.Size())
 	})
 }
