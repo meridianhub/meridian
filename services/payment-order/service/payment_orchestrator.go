@@ -29,9 +29,19 @@ import (
 )
 
 // Orchestrator configuration errors.
+// Core errors are re-exported from shared/pkg/clients for consistency across services.
+// When service startup fails due to these errors, the application will:
+// 1. Exit with a non-zero status code
+// 2. Log the specific error with context about which dependency is missing
+// 3. Enter crash loop backoff in Kubernetes until the configuration is fixed
 var (
-	ErrOrchestratorLoggerNil           = errors.New("payment orchestrator: logger cannot be nil")
-	ErrOrchestratorRepoNil             = errors.New("payment orchestrator: repository cannot be nil")
+	ErrOrchestratorLoggerNil = sharedclients.ErrConfigLoggerNil
+	ErrOrchestratorRepoNil   = sharedclients.ErrConfigRepositoryNil
+)
+
+// Runtime configuration errors for optional dependencies.
+// These are checked at runtime during Orchestrate() with graceful error handling.
+var (
 	ErrGatewayAccountConfigNotSet      = errors.New("gateway account config not configured")
 	ErrFinancialAccountingClientNotSet = errors.New("financial accounting client not configured")
 	ErrNilBookingLogResponse           = errors.New("financial accounting returned nil booking log")
