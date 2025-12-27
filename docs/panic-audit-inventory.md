@@ -349,7 +349,7 @@ occur during runtime request handling and require refactoring.
 
 ### Scope
 
-From the 48 total panics:
+From the 47 total panics:
 
 - **Startup panics (Category A)**: 13 - Already approved in subtask 25.2
 - **Must* functions (Category B)**: 6 - Already approved in subtask 25.2
