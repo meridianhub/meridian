@@ -97,6 +97,34 @@ func TestLoadConfig_InvalidBackendRoutesJSON(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidBackendsJSON)
 }
 
+func TestLoadConfig_BackendRouteEmptyPrefix(t *testing.T) {
+	cleanup := setEnvVars(t, map[string]string{
+		"BASE_DOMAIN":    "api.example.com",
+		"DATABASE_URL":   "postgres://user@localhost/db",
+		"BACKEND_ROUTES": `[{"prefix":"","target":"service:8080"}]`,
+	})
+	defer cleanup()
+
+	_, err := LoadConfig()
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidBackendRoute)
+}
+
+func TestLoadConfig_BackendRouteEmptyTarget(t *testing.T) {
+	cleanup := setEnvVars(t, map[string]string{
+		"BASE_DOMAIN":    "api.example.com",
+		"DATABASE_URL":   "postgres://user@localhost/db",
+		"BACKEND_ROUTES": `[{"prefix":"/v1/api","target":""}]`,
+	})
+	defer cleanup()
+
+	_, err := LoadConfig()
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidBackendRoute)
+}
+
 func TestLoadConfig_EmptyBackendRoutes(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
 		"BASE_DOMAIN":  "api.example.com",
@@ -214,6 +242,36 @@ func TestConfig_Validate(t *testing.T) {
 				DatabaseURL: "postgres://localhost/db",
 			},
 			wantError: ErrInvalidPort,
+		},
+		{
+			name: "backend route with empty prefix",
+			config: Config{
+				Port:        8080,
+				BaseDomain:  "api.example.com",
+				DatabaseURL: "postgres://localhost/db",
+				Backends:    []BackendRoute{{Prefix: "", Target: "service:8080"}},
+			},
+			wantError: ErrInvalidBackendRoute,
+		},
+		{
+			name: "backend route with empty target",
+			config: Config{
+				Port:        8080,
+				BaseDomain:  "api.example.com",
+				DatabaseURL: "postgres://localhost/db",
+				Backends:    []BackendRoute{{Prefix: "/v1/api", Target: ""}},
+			},
+			wantError: ErrInvalidBackendRoute,
+		},
+		{
+			name: "valid backend routes",
+			config: Config{
+				Port:        8080,
+				BaseDomain:  "api.example.com",
+				DatabaseURL: "postgres://localhost/db",
+				Backends:    []BackendRoute{{Prefix: "/v1/api", Target: "service:8080"}},
+			},
+			wantError: nil,
 		},
 	}
 

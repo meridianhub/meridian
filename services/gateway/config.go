@@ -56,6 +56,9 @@ var (
 
 	// ErrInvalidBackendsJSON is returned when BACKEND_ROUTES contains invalid JSON.
 	ErrInvalidBackendsJSON = errors.New("BACKEND_ROUTES must be valid JSON array")
+
+	// ErrInvalidBackendRoute is returned when a backend route has empty prefix or target.
+	ErrInvalidBackendRoute = errors.New("backend route must have non-empty prefix and target")
 )
 
 // LoadConfig loads configuration from environment variables.
@@ -99,6 +102,13 @@ func (c *Config) Validate() error {
 
 	if c.Port < 1 || c.Port > 65535 {
 		return ErrInvalidPort
+	}
+
+	// Validate backend routes
+	for _, backend := range c.Backends {
+		if backend.Prefix == "" || backend.Target == "" {
+			return ErrInvalidBackendRoute
+		}
 	}
 
 	return nil
