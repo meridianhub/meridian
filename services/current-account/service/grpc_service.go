@@ -158,13 +158,16 @@ func NewServiceWithExistingClients(
 	}
 
 	// Create deposit orchestrator
-	depositOrchestrator := NewDepositOrchestrator(DepositOrchestratorConfig{
+	depositOrchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:           logger,
 		Repo:             repo,
 		PosKeepingClient: posKeepingClient,
 		FinAcctClient:    finAcctClient,
 		AccountConfig:    accountConfig,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
+	}
 
 	// Create withdrawal orchestrator
 	withdrawalOrchestrator := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
@@ -274,13 +277,16 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	}
 
 	// Create deposit orchestrator
-	depositOrchestrator := NewDepositOrchestrator(DepositOrchestratorConfig{
+	depositOrchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:           logger,
 		Repo:             config.Repository,
 		PosKeepingClient: resilientPosKeepingClient,
 		FinAcctClient:    resilientFinAcctClient,
 		AccountConfig:    nil, // Not passed in Config - will use defaults
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
+	}
 
 	// Create withdrawal orchestrator
 	withdrawalOrchestrator := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{

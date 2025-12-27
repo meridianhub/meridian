@@ -15,6 +15,14 @@ var (
 	ErrHealthCheckerRepositoryNil = errors.New("health checker requires non-nil repository")
 )
 
+// Orchestrator dependency validation errors
+var (
+	ErrOrchestratorLoggerNil           = errors.New("deposit orchestrator: logger cannot be nil")
+	ErrOrchestratorRepositoryNil       = errors.New("deposit orchestrator: repository cannot be nil")
+	ErrOrchestratorPosKeepingClientNil = errors.New("deposit orchestrator: position keeping client cannot be nil")
+	ErrOrchestratorFinAcctClientNil    = errors.New("deposit orchestrator: financial accounting client cannot be nil")
+)
+
 // Saga orchestration errors for compensation and state tracking
 var (
 	ErrOriginalAccountStateNotFound = errors.New("original account state not available for compensation")

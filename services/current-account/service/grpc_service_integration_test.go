@@ -372,19 +372,25 @@ func testLogger() *slog.Logger {
 }
 
 // testDepositOrchestrator creates a DepositOrchestrator for testing with the provided dependencies.
+// Panics if orchestrator creation fails (acceptable in test helpers).
 func testDepositOrchestrator(repo *persistence.Repository, posKeeping clients.PositionKeepingClient, finAcct clients.FinancialAccountingClient) *DepositOrchestrator {
 	return testDepositOrchestratorWithConfig(repo, posKeeping, finAcct, nil)
 }
 
 // testDepositOrchestratorWithConfig creates a DepositOrchestrator with optional AccountConfig.
+// Panics if orchestrator creation fails (acceptable in test helpers).
 func testDepositOrchestratorWithConfig(repo *persistence.Repository, posKeeping clients.PositionKeepingClient, finAcct clients.FinancialAccountingClient, acctConfig *config.AccountConfig) *DepositOrchestrator {
-	return NewDepositOrchestrator(DepositOrchestratorConfig{
+	orchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:           testLogger(),
 		Repo:             repo,
 		PosKeepingClient: posKeeping,
 		FinAcctClient:    finAcct,
 		AccountConfig:    acctConfig,
 	})
+	if err != nil {
+		panic(fmt.Sprintf("testDepositOrchestratorWithConfig: %v", err))
+	}
+	return orchestrator
 }
 
 // Test 1: Successful saga execution with all services
