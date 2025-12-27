@@ -297,6 +297,128 @@ initialization and are acceptable. No refactoring is required.
 
 ---
 
+## Runtime Panic Analysis
+
+**Reviewed**: 2025-12-27
+**Subtask**: tech-debt-cleanup.25.3
+
+This section analyzes the remaining non-startup, non-Must* panics to determine if any
+occur during runtime request handling and require refactoring.
+
+### Scope
+
+From the 48 total panics:
+- **Startup panics (Category A)**: 13 - Already approved in subtask 25.2
+- **Must* functions (Category B)**: 6 - Already approved in subtask 25.2
+- **Test fixtures (Category F)**: 11 - Acceptable for test code
+- **Test files**: 15 - Acceptable for test code
+- **Remaining to analyze**: 2 (Categories C and D)
+
+### Category C: Bug Detection Panic - APPROVED
+
+**Location**: `services/current-account/domain/account.go:212`
+**Function**: `calculateAvailableBalance`
+
+```go
+func calculateAvailableBalance(balance, overdraftLimit Money, overdraftEnabled bool) Money {
+    if overdraftEnabled {
+        newAvail, err := balance.Add(overdraftLimit)
+        if err != nil {
+            // This indicates a bug: either currency mismatch or overflow that bypassed validation
+            panic("BUG: OverdraftLimit currency mismatch or overflow detected...")
+        }
+        return newAvail
+    }
+    return balance
+}
+```
+
+**Analysis**:
+
+| Criterion | Assessment |
+|-----------|------------|
+| **Why it panics** | `Money.Add()` fails due to currency mismatch or integer overflow |
+| **When it would trigger** | Only if upstream validation is broken (balance and overdraftLimit have different currencies, or sum exceeds int64 bounds) |
+| **Is this a runtime panic?** | Technically yes - it could be called during a request. However... |
+| **Can it actually be triggered?** | No - `SetOverdraftLimit` validates currency match and reasonable limits at account creation/update |
+| **Proper approach** | The panic is appropriate defensive programming |
+| **Impact if triggered** | Request fails (panic recovered by gRPC interceptor), indicates serious data corruption bug |
+| **Priority** | N/A - no refactoring needed |
+
+**Verdict**: **APPROVED - BUG DETECTION**
+
+This is an *invariant assertion*, not error handling. The panic:
+1. Detects impossible states that indicate a programming bug
+2. Provides clear diagnostic message with "BUG:" prefix
+3. Would only trigger if account validation is broken elsewhere
+4. Is a valid use of panic per Go philosophy: "Don't use panic for normal error handling"
+
+The correct fix if this ever triggers is to fix the upstream validation bug, not to change
+this to an error return. Returning an error would hide the bug and potentially allow
+corrupted data to propagate.
+
+### Category D: Panic Propagation - APPROVED
+
+**Location**: `shared/platform/db/transaction.go:84`
+**Function**: `WithTransaction` (defer block)
+
+```go
+defer func() {
+    if p := recover(); p != nil {
+        // Panic occurred, rollback and re-panic
+        _ = txWrapper.Rollback()
+        panic(p)
+    } else if err != nil {
+        // Function returned error, rollback
+        if rbErr := txWrapper.Rollback(); rbErr != nil {
+            err = fmt.Errorf("%w (rollback failed: %w)", err, rbErr)
+        }
+    }
+}()
+```
+
+**Analysis**:
+
+| Criterion | Assessment |
+|-----------|------------|
+| **Why it panics** | Re-throws original panic after transaction cleanup |
+| **When it would trigger** | When code inside the transaction panics |
+| **Is this a runtime panic?** | Yes, but it's re-propagating an existing panic, not creating one |
+| **Proper approach** | This IS the proper approach |
+| **Impact if triggered** | Original panic continues up the stack with transaction rolled back |
+| **Priority** | N/A - no refactoring needed |
+
+**Verdict**: **APPROVED - PANIC PROPAGATION**
+
+This is the standard Go pattern for cleanup during panic recovery:
+1. Catch panic with `recover()`
+2. Perform cleanup (rollback transaction)
+3. Re-panic with original value to preserve stack trace
+
+This pattern is documented in Go's official blog post "Defer, Panic, and Recover" and
+is necessary to ensure database transactions are properly rolled back even when code panics.
+The gRPC interceptor will ultimately catch and convert this to an error response.
+
+### Summary: No Runtime Panics Requiring Refactoring
+
+| Category | Count | Status | Rationale |
+|----------|-------|--------|-----------|
+| Bug Detection (C) | 1 | APPROVED | Invariant assertion for impossible states |
+| Panic Propagation (D) | 1 | APPROVED | Standard cleanup-and-rethrow pattern |
+
+**Conclusion**: Neither of the remaining panics are "runtime panics requiring refactoring"
+in the sense described in Tasks 20-23 (where panics were used for error conditions that
+should return errors instead).
+
+- The **bug detection panic** is a defensive assertion that should never trigger in
+  correctly validated code. It detects data corruption, not handle business errors.
+- The **panic propagation** is infrastructure code that preserves panic semantics
+  while ensuring proper cleanup.
+
+**No refactoring is required.** All 48 panics in the codebase follow Go best practices.
+
+---
+
 ## Files by Panic Count
 
 | File | Count | Cat |
