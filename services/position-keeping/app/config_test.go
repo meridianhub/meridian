@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/env"
 )
 
 func TestLoadConfig_Defaults(t *testing.T) {
@@ -410,22 +412,22 @@ func TestValidate_InvalidSamplingRateTooHigh(t *testing.T) {
 
 func TestGetEnvAsSlice_SingleValue(t *testing.T) {
 	t.Setenv("TEST_SLICE", "value1")
-	result := getEnvAsSlice("TEST_SLICE", []string{"default"})
+	result := env.GetEnvAsSlice("TEST_SLICE", []string{"default"})
 	if len(result) != 1 || result[0] != "value1" {
-		t.Errorf("getEnvAsSlice() = %v, want [value1]", result)
+		t.Errorf("env.GetEnvAsSlice() = %v, want [value1]", result)
 	}
 }
 
 func TestGetEnvAsSlice_MultipleValues(t *testing.T) {
 	t.Setenv("TEST_SLICE", "value1,value2,value3")
-	result := getEnvAsSlice("TEST_SLICE", []string{"default"})
+	result := env.GetEnvAsSlice("TEST_SLICE", []string{"default"})
 	expected := []string{"value1", "value2", "value3"}
 	if len(result) != len(expected) {
-		t.Errorf("getEnvAsSlice() length = %d, want %d", len(result), len(expected))
+		t.Errorf("env.GetEnvAsSlice() length = %d, want %d", len(result), len(expected))
 	}
 	for i, v := range expected {
 		if result[i] != v {
-			t.Errorf("getEnvAsSlice()[%d] = %s, want %s", i, result[i], v)
+			t.Errorf("env.GetEnvAsSlice()[%d] = %s, want %s", i, result[i], v)
 		}
 	}
 }
@@ -433,9 +435,9 @@ func TestGetEnvAsSlice_MultipleValues(t *testing.T) {
 func TestGetEnvAsSlice_EmptyValue(t *testing.T) {
 	t.Setenv("TEST_SLICE", "")
 	defaultVal := []string{"default1", "default2"}
-	result := getEnvAsSlice("TEST_SLICE", defaultVal)
+	result := env.GetEnvAsSlice("TEST_SLICE", defaultVal)
 	if len(result) != len(defaultVal) {
-		t.Errorf("getEnvAsSlice() length = %d, want %d", len(result), len(defaultVal))
+		t.Errorf("env.GetEnvAsSlice() length = %d, want %d", len(result), len(defaultVal))
 	}
 }
 
@@ -444,9 +446,9 @@ func TestGetEnvAsBool_True(t *testing.T) {
 	for _, val := range tests {
 		t.Run(val, func(t *testing.T) {
 			t.Setenv("TEST_BOOL", val)
-			result := getEnvAsBool("TEST_BOOL", false)
+			result := env.GetEnvAsBool("TEST_BOOL", false)
 			if !result {
-				t.Errorf("getEnvAsBool(%s) = false, want true", val)
+				t.Errorf("env.GetEnvAsBool(%s) = false, want true", val)
 			}
 		})
 	}
@@ -457,9 +459,9 @@ func TestGetEnvAsBool_False(t *testing.T) {
 	for _, val := range tests {
 		t.Run(val, func(t *testing.T) {
 			t.Setenv("TEST_BOOL", val)
-			result := getEnvAsBool("TEST_BOOL", true)
+			result := env.GetEnvAsBool("TEST_BOOL", true)
 			if result {
-				t.Errorf("getEnvAsBool(%s) = true, want false", val)
+				t.Errorf("env.GetEnvAsBool(%s) = true, want false", val)
 			}
 		})
 	}
@@ -467,17 +469,17 @@ func TestGetEnvAsBool_False(t *testing.T) {
 
 func TestGetEnvAsFloat_Valid(t *testing.T) {
 	t.Setenv("TEST_FLOAT", "0.75")
-	result := getEnvAsFloat("TEST_FLOAT", 0.0)
+	result := env.GetEnvAsFloat("TEST_FLOAT", 0.0)
 	if result != 0.75 {
-		t.Errorf("getEnvAsFloat() = %f, want 0.75", result)
+		t.Errorf("env.GetEnvAsFloat() = %f, want 0.75", result)
 	}
 }
 
 func TestGetEnvAsFloat_Invalid(t *testing.T) {
 	t.Setenv("TEST_FLOAT", "invalid")
-	result := getEnvAsFloat("TEST_FLOAT", 0.5)
+	result := env.GetEnvAsFloat("TEST_FLOAT", 0.5)
 	if result != 0.5 {
-		t.Errorf("getEnvAsFloat() = %f, want 0.5 (default)", result)
+		t.Errorf("env.GetEnvAsFloat() = %f, want 0.5 (default)", result)
 	}
 }
 
@@ -512,14 +514,14 @@ func TestGetEnvAsSlice_WithWhitespace(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("TEST_SLICE", tt.value)
-			result := getEnvAsSlice("TEST_SLICE", []string{"default"})
+			result := env.GetEnvAsSlice("TEST_SLICE", []string{"default"})
 			if len(result) != len(tt.expected) {
-				t.Errorf("getEnvAsSlice() length = %d, want %d", len(result), len(tt.expected))
+				t.Errorf("env.GetEnvAsSlice() length = %d, want %d", len(result), len(tt.expected))
 				return
 			}
 			for i, v := range result {
 				if v != tt.expected[i] {
-					t.Errorf("getEnvAsSlice()[%d] = %s, want %s", i, v, tt.expected[i])
+					t.Errorf("env.GetEnvAsSlice()[%d] = %s, want %s", i, v, tt.expected[i])
 				}
 			}
 		})
