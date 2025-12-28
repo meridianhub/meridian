@@ -3,8 +3,6 @@ package app
 
 import (
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -133,7 +131,7 @@ func loadServerConfig() ServerConfig {
 // loadDatabaseConfig loads database configuration from environment variables
 func loadDatabaseConfig() DatabaseConfig {
 	return DatabaseConfig{
-		URL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")), // Required - no default to avoid hardcoded credentials
+		URL:                 env.GetEnvOrDefault("DATABASE_URL", ""), // Required - no default to avoid hardcoded credentials
 		MaxOpenConns:        env.GetEnvAsInt("DB_MAX_OPEN_CONNS", 25),
 		MaxIdleConns:        env.GetEnvAsInt("DB_MAX_IDLE_CONNS", 5),
 		ConnMaxLifetime:     env.GetEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
