@@ -3,10 +3,9 @@ package app
 
 import (
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/env"
 )
 
 // Config holds all configuration for the position-keeping service
@@ -124,73 +123,73 @@ func LoadConfig() (*Config, error) {
 // loadServerConfig loads server configuration from environment variables
 func loadServerConfig() ServerConfig {
 	return ServerConfig{
-		Port:                    getEnvOrDefault("GRPC_PORT", "50053"),
-		GracefulShutdownTimeout: getEnvAsDuration("GRACEFUL_SHUTDOWN_TIMEOUT", 30*time.Second),
+		Port:                    env.GetEnvOrDefault("GRPC_PORT", "50053"),
+		GracefulShutdownTimeout: env.GetEnvAsDuration("GRACEFUL_SHUTDOWN_TIMEOUT", 30*time.Second),
 	}
 }
 
 // loadDatabaseConfig loads database configuration from environment variables
 func loadDatabaseConfig() DatabaseConfig {
 	return DatabaseConfig{
-		URL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")), // Required - no default to avoid hardcoded credentials
-		MaxOpenConns:        getEnvAsInt("DB_MAX_OPEN_CONNS", 25),
-		MaxIdleConns:        getEnvAsInt("DB_MAX_IDLE_CONNS", 5),
-		ConnMaxLifetime:     getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
-		ConnMaxIdleTime:     getEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute),
-		HealthCheckInterval: getEnvAsDuration("DB_HEALTH_CHECK_INTERVAL", 30*time.Second),
+		URL:                 env.GetEnvOrDefault("DATABASE_URL", ""), // Required - no default to avoid hardcoded credentials
+		MaxOpenConns:        env.GetEnvAsInt("DB_MAX_OPEN_CONNS", 25),
+		MaxIdleConns:        env.GetEnvAsInt("DB_MAX_IDLE_CONNS", 5),
+		ConnMaxLifetime:     env.GetEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
+		ConnMaxIdleTime:     env.GetEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute),
+		HealthCheckInterval: env.GetEnvAsDuration("DB_HEALTH_CHECK_INTERVAL", 30*time.Second),
 	}
 }
 
 // loadKafkaConfig loads Kafka configuration from environment variables
 func loadKafkaConfig() KafkaConfig {
-	brokers := getEnvAsSlice("KAFKA_BROKERS", []string{"kafka:9092"})
-	enabled := getEnvAsBool("KAFKA_ENABLED", true)
+	brokers := env.GetEnvAsSlice("KAFKA_BROKERS", []string{"kafka:9092"})
+	enabled := env.GetEnvAsBool("KAFKA_ENABLED", true)
 
 	return KafkaConfig{
 		Brokers:         brokers,
-		Topic:           getEnvOrDefault("KAFKA_TOPIC", "position-keeping-events"),
+		Topic:           env.GetEnvOrDefault("KAFKA_TOPIC", "position-keeping-events"),
 		Enabled:         enabled,
-		ProducerTimeout: getEnvAsDuration("KAFKA_PRODUCER_TIMEOUT", 10*time.Second),
+		ProducerTimeout: env.GetEnvAsDuration("KAFKA_PRODUCER_TIMEOUT", 10*time.Second),
 	}
 }
 
 // loadRedisConfig loads Redis configuration from environment variables
 func loadRedisConfig() RedisConfig {
-	enabled := getEnvAsBool("REDIS_ENABLED", false)
+	enabled := env.GetEnvAsBool("REDIS_ENABLED", false)
 
 	return RedisConfig{
-		Address:         getEnvOrDefault("REDIS_ADDRESS", "redis:6379"),
-		Password:        os.Getenv("REDIS_PASSWORD"),
-		DB:              getEnvAsInt("REDIS_DB", 0),
+		Address:         env.GetEnvOrDefault("REDIS_ADDRESS", "redis:6379"),
+		Password:        env.GetEnvOrDefault("REDIS_PASSWORD", ""),
+		DB:              env.GetEnvAsInt("REDIS_DB", 0),
 		Enabled:         enabled,
-		PoolSize:        getEnvAsInt("REDIS_POOL_SIZE", 10),
-		ConnMaxIdleTime: getEnvAsDuration("REDIS_CONN_MAX_IDLE_TIME", 5*time.Minute),
+		PoolSize:        env.GetEnvAsInt("REDIS_POOL_SIZE", 10),
+		ConnMaxIdleTime: env.GetEnvAsDuration("REDIS_CONN_MAX_IDLE_TIME", 5*time.Minute),
 	}
 }
 
 // loadAuthConfig loads JWT authentication configuration from environment variables
 func loadAuthConfig() AuthConfig {
-	enabled := getEnvAsBool("AUTH_ENABLED", false)
+	enabled := env.GetEnvAsBool("AUTH_ENABLED", false)
 
 	return AuthConfig{
 		Enabled:        enabled,
-		JWKSURL:        getEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs"),
-		JWKSCacheTTL:   getEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour),
-		JWKSRefreshTTL: getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute),
+		JWKSURL:        env.GetEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs"),
+		JWKSCacheTTL:   env.GetEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour),
+		JWKSRefreshTTL: env.GetEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute),
 	}
 }
 
 // loadObservabilityConfig loads observability configuration from environment variables
 func loadObservabilityConfig() ObservabilityConfig {
 	return ObservabilityConfig{
-		ServiceName:    getEnvOrDefault("SERVICE_NAME", "position-keeping-service"),
-		ServiceVersion: getEnvOrDefault("SERVICE_VERSION", "dev"),
-		Environment:    getEnvOrDefault("ENVIRONMENT", "development"),
-		OTLPEndpoint:   getEnvOrDefault("OTLP_ENDPOINT", ""),
-		SamplingRate:   getEnvAsFloat("SAMPLING_RATE", 1.0),
-		LogLevel:       getEnvOrDefault("LOG_LEVEL", "info"),
-		MetricsEnabled: getEnvAsBool("METRICS_ENABLED", true),
-		MetricsPort:    getEnvOrDefault("METRICS_PORT", "9090"),
+		ServiceName:    env.GetEnvOrDefault("SERVICE_NAME", "position-keeping-service"),
+		ServiceVersion: env.GetEnvOrDefault("SERVICE_VERSION", "dev"),
+		Environment:    env.GetEnvOrDefault("ENVIRONMENT", "development"),
+		OTLPEndpoint:   env.GetEnvOrDefault("OTLP_ENDPOINT", ""),
+		SamplingRate:   env.GetEnvAsFloat("SAMPLING_RATE", 1.0),
+		LogLevel:       env.GetEnvOrDefault("LOG_LEVEL", "info"),
+		MetricsEnabled: env.GetEnvAsBool("METRICS_ENABLED", true),
+		MetricsPort:    env.GetEnvOrDefault("METRICS_PORT", "9090"),
 	}
 }
 
@@ -243,94 +242,4 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
-}
-
-// Helper functions for environment variable parsing
-
-// getEnvOrDefault returns the environment variable value or default
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsInt returns the environment variable value as int or default
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsFloat returns the environment variable value as float64 or default
-func getEnvAsFloat(key string, defaultValue float64) float64 {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.ParseFloat(valueStr, 64)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsBool returns the environment variable value as bool or default
-func getEnvAsBool(key string, defaultValue bool) bool {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.ParseBool(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsDuration returns the environment variable value as duration or default
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := time.ParseDuration(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsSlice returns the environment variable value as string slice or default
-// Expects comma-separated values with whitespace trimming
-func getEnvAsSlice(key string, defaultValue []string) []string {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	var result []string
-	parts := strings.Split(valueStr, ",")
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-
-	if len(result) == 0 {
-		return defaultValue
-	}
-	return result
 }

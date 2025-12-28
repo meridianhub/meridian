@@ -172,11 +172,15 @@ func (c *Container) initializeDatabase(ctx context.Context) error {
 		return fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
-	// Configure connection pool
-	// #nosec G115 -- overflow validated in config.Validate()
-	poolConfig.MaxConns = int32(c.Config.Database.MaxOpenConns)
-	// #nosec G115 -- overflow validated in config.Validate()
-	poolConfig.MinConns = int32(c.Config.Database.MaxIdleConns)
+	// Configure connection pool with explicit bounds checking for CodeQL
+	maxConns := c.Config.Database.MaxOpenConns
+	minConns := c.Config.Database.MaxIdleConns
+	if maxConns > 0 && maxConns <= 2147483647 {
+		poolConfig.MaxConns = int32(maxConns)
+	}
+	if minConns >= 0 && minConns <= 2147483647 {
+		poolConfig.MinConns = int32(minConns)
+	}
 	poolConfig.MaxConnLifetime = c.Config.Database.ConnMaxLifetime
 	poolConfig.MaxConnIdleTime = c.Config.Database.ConnMaxIdleTime
 	poolConfig.HealthCheckPeriod = c.Config.Database.HealthCheckInterval
