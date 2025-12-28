@@ -161,7 +161,7 @@ func loadRedisConfig() RedisConfig {
 
 	return RedisConfig{
 		Address:         env.GetEnvOrDefault("REDIS_ADDRESS", "redis:6379"),
-		Password:        os.Getenv("REDIS_PASSWORD"),
+		Password:        env.GetEnvOrDefault("REDIS_PASSWORD", ""),
 		DB:              env.GetEnvAsInt("REDIS_DB", 0),
 		Enabled:         enabled,
 		PoolSize:        env.GetEnvAsInt("REDIS_POOL_SIZE", 10),
