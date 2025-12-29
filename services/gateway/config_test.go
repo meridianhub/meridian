@@ -160,6 +160,10 @@ func TestLoadConfig_MultipleBackendRoutes(t *testing.T) {
 }
 
 func TestLoadConfig_LocalDevModeVariations(t *testing.T) {
+	// Note: shared/platform/env.GetEnvAsBool uses strconv.ParseBool which accepts:
+	// true: "1", "t", "T", "true", "TRUE", "True"
+	// false: "0", "f", "F", "false", "FALSE", "False"
+	// It does NOT accept "yes"/"no" (those will fall back to default).
 	testCases := []struct {
 		name     string
 		value    string
@@ -167,12 +171,16 @@ func TestLoadConfig_LocalDevModeVariations(t *testing.T) {
 	}{
 		{"true lowercase", "true", true},
 		{"TRUE uppercase", "TRUE", true},
+		{"True mixed case", "True", true},
 		{"1", "1", true},
-		{"yes", "yes", true},
+		{"t lowercase", "t", true},
+		{"T uppercase", "T", true},
 		{"false lowercase", "false", false},
 		{"FALSE uppercase", "FALSE", false},
+		{"False mixed case", "False", false},
 		{"0", "0", false},
-		{"no", "no", false},
+		{"f lowercase", "f", false},
+		{"F uppercase", "F", false},
 		{"invalid defaults to false", "invalid", false},
 		{"empty defaults to false", "", false},
 	}
