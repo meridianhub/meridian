@@ -8,24 +8,29 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 )
 
 // Server is the HTTP server for the gateway service.
 type Server struct {
-	config     *Config
-	logger     *slog.Logger
-	httpServer *http.Server
-	mux        *http.ServeMux
+	config         *Config
+	logger         *slog.Logger
+	httpServer     *http.Server
+	mux            *http.ServeMux
+	tenantResolver *platformgateway.TenantResolverMiddleware
 }
 
 // NewServer creates a new gateway HTTP server with the given configuration.
-func NewServer(config *Config, logger *slog.Logger) *Server {
+// The tenantResolver parameter is optional - if nil, all routes bypass tenant resolution.
+func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgateway.TenantResolverMiddleware) *Server {
 	mux := http.NewServeMux()
 
 	s := &Server{
-		config: config,
-		logger: logger,
-		mux:    mux,
+		config:         config,
+		logger:         logger,
+		mux:            mux,
+		tenantResolver: tenantResolver,
 	}
 
 	// Register routes
@@ -35,39 +40,62 @@ func NewServer(config *Config, logger *slog.Logger) *Server {
 }
 
 // registerRoutes sets up the HTTP routes for the gateway.
+//
+// CRITICAL: Health endpoints (/health, /ready) are registered directly on the main mux
+// WITHOUT tenant middleware. This is required for K8s probes which do not provide
+// tenant context (no subdomain/Host header).
+//
+// API routes go through tenant middleware to resolve and inject tenant context.
 func (s *Server) registerRoutes() {
-	// Health check endpoints
-	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
-	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+	// Health check endpoints - NO tenant middleware (required for K8s probes)
+	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /ready", s.handleReady)
 
-	// Root handler for API routing (placeholder for future implementation)
-	s.mux.HandleFunc("/", s.handleRoot)
+	// Legacy health endpoints for backwards compatibility
+	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /readyz", s.handleReady)
+
+	// API routes - WITH tenant middleware (if tenant resolver is configured)
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("/", s.handleAPI)
+
+	if s.tenantResolver != nil {
+		// Wrap API routes with tenant resolution middleware
+		s.mux.Handle("/api/", s.tenantResolver.Handler(http.StripPrefix("/api", apiMux)))
+	} else {
+		// No tenant resolver - direct routing (useful for testing or dev mode)
+		s.mux.Handle("/api/", http.StripPrefix("/api", apiMux))
+	}
 }
 
-// handleHealthz is the liveness probe endpoint.
-func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+// handleHealth is the liveness probe endpoint.
+// Returns 200 OK if the server is alive.
+// This endpoint does NOT require tenant context.
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("OK"))
 }
 
-// handleReadyz is the readiness probe endpoint.
-func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
+// handleReady is the readiness probe endpoint.
+// Returns 200 OK if the server is ready to accept traffic.
+// This endpoint does NOT require tenant context.
+func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 	// TODO: Add actual readiness checks (database, redis, backends)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("OK"))
+	_, _ = w.Write([]byte("READY"))
 }
 
-// handleRoot is a placeholder handler for the root path.
+// handleAPI is a placeholder handler for API routes.
 // This will be replaced with actual routing logic in future tasks.
-func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	s.logger.Debug("received request",
+func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
+	s.logger.Debug("received API request",
 		"method", r.Method,
 		"path", r.URL.Path,
 		"host", r.Host)
 
-	// Placeholder response - actual routing will be implemented in Task 88
+	// Placeholder response - actual routing will be implemented in future tasks
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusNotImplemented)
 	_, _ = w.Write([]byte(`{"error":"gateway routing not yet implemented"}`))
