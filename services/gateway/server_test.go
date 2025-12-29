@@ -135,11 +135,19 @@ func TestHealthEndpoints_InvalidSubdomain(t *testing.T) {
 // TestHealthEndpoints_BypassTenantMiddleware verifies that health endpoints
 // bypass the tenant resolver middleware entirely.
 func TestHealthEndpoints_BypassTenantMiddleware(t *testing.T) {
-	// This test verifies the critical requirement:
+	// This test verifies the critical architectural requirement:
 	// Health endpoints must NOT go through tenant middleware.
 	//
-	// We test this by creating a mock tenant resolver that would fail
-	// if called, and verifying health endpoints still succeed.
+	// The server architecture guarantees this by design:
+	// - Health endpoints are registered directly on the main mux
+	// - API routes are registered on a sub-mux wrapped with tenant middleware
+	// - This separation ensures health probes work without valid tenant context
+	//
+	// We pass nil for the tenant resolver because:
+	// 1. Health endpoints don't use the resolver (architectural guarantee)
+	// 2. The concrete type (*gateway.TenantResolverMiddleware) prevents mocking
+	// 3. Other tests (TestHealthEndpoints_NoTenantContext, _InvalidSubdomain)
+	//    verify health endpoints work without tenant context
 
 	config := &Config{
 		Port:        8080,
@@ -148,9 +156,9 @@ func TestHealthEndpoints_BypassTenantMiddleware(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	// Create server without tenant resolver (nil)
-	// In production, even with tenant resolver configured,
-	// health endpoints should bypass it.
+	// Create server without tenant resolver (nil).
+	// Health endpoints are architecturally separated from tenant middleware,
+	// registered directly on the main mux without any middleware wrapping.
 	server := NewServer(config, logger, nil)
 
 	endpoints := []string{"/health", "/ready", "/healthz", "/readyz"}
