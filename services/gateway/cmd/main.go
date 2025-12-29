@@ -58,7 +58,10 @@ func run(logger *slog.Logger) error {
 		"backend_routes", len(config.Backends))
 
 	// Create server
-	server := gateway.NewServer(config, logger)
+	// Note: Tenant resolver will be initialized in a future task when database connection is available.
+	// For now, pass nil to allow the server to start without tenant resolution.
+	// Health endpoints will work regardless of tenant resolver configuration.
+	server := gateway.NewServer(config, logger, nil)
 
 	// Start server in background
 	serverErrors := make(chan error, 1)
