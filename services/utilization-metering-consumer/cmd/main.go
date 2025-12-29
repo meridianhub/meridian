@@ -21,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -145,7 +146,7 @@ func run(logger *slog.Logger) error {
 
 	pkClient, err := grpc.NewPositionKeepingClient(&grpc.ClientConfig{
 		ServiceName:    "position-keeping",
-		Namespace:      getEnvOrDefault("K8S_NAMESPACE", "default"),
+		Namespace:      env.GetEnvOrDefault("K8S_NAMESPACE", "default"),
 		Port:           pkPort,
 		Timeout:        10 * time.Second,
 		Logger:         logger,
@@ -254,13 +255,4 @@ func run(logger *slog.Logger) error {
 	}
 
 	return nil
-}
-
-// getEnvOrDefault returns the value of an environment variable or a default value.
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
 }

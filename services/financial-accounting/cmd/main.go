@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -65,7 +65,7 @@ func main() {
 		"build_date", BuildDate)
 
 	// Log environment for operational visibility
-	environment := getEnvOrDefault("ENVIRONMENT", "production")
+	environment := env.GetEnvOrDefault("ENVIRONMENT", "production")
 	logger.Info("service environment configured", "environment", environment)
 
 	// Run the service
@@ -141,7 +141,7 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Kafka producer for outbox worker (optional - depends on KAFKA_BOOTSTRAP_SERVERS)
 	var kafkaProducer *kafka.Producer
-	bootstrapServers := getEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
 	if bootstrapServers != "" {
 		producer, err := kafka.NewProducer(&kafka.ConfigMap{
 			"bootstrap.servers": bootstrapServers,
@@ -175,7 +175,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Validate bank cash account ID is configured
-	bankCashAccountID := getEnvOrDefault("BANK_CASH_ACCOUNT_ID", "")
+	bankCashAccountID := env.GetEnvOrDefault("BANK_CASH_ACCOUNT_ID", "")
 	if bankCashAccountID == "" {
 		return ErrBankCashAccountIDRequired
 	}
@@ -290,9 +290,9 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get ports from environment
-	port := getEnvOrDefault("GRPC_PORT", "50052")
+	port := env.GetEnvOrDefault("GRPC_PORT", "50052")
 	address := fmt.Sprintf(":%s", port)
-	metricsPort := getEnvOrDefault("METRICS_PORT", "8082")
+	metricsPort := env.GetEnvOrDefault("METRICS_PORT", "8082")
 
 	// Create listener
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
@@ -413,7 +413,7 @@ func run(logger *slog.Logger) error {
 
 // initDatabase initializes the database connection with connection pooling
 func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
-	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian_financial_accounting_user@cockroachdb:26257/meridian_financial_accounting?sslmode=disable")
+	dsn := env.GetEnvOrDefault("DATABASE_URL", "postgres://meridian_financial_accounting_user@cockroachdb:26257/meridian_financial_accounting?sslmode=disable")
 
 	// Open database connection
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -434,10 +434,10 @@ func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
 	}
 
 	// Connection pool settings
-	maxOpenConns := getEnvAsInt("DB_MAX_OPEN_CONNS", 25)
-	maxIdleConns := getEnvAsInt("DB_MAX_IDLE_CONNS", 5)
-	connMaxLifetime := getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
-	connMaxIdleTime := getEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute)
+	maxOpenConns := env.GetEnvAsInt("DB_MAX_OPEN_CONNS", 25)
+	maxIdleConns := env.GetEnvAsInt("DB_MAX_IDLE_CONNS", 5)
+	connMaxLifetime := env.GetEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
+	connMaxIdleTime := env.GetEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute)
 
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetMaxIdleConns(maxIdleConns)
@@ -476,43 +476,6 @@ func closeDatabase(db *gorm.DB, logger *slog.Logger) {
 	}
 }
 
-// getEnvOrDefault returns the environment variable value or default
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsInt returns the environment variable value as int or default
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	var value int
-	if _, err := fmt.Sscanf(valueStr, "%d", &value); err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsDuration returns the environment variable value as duration or default
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := time.ParseDuration(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
 // createRedisClient creates and validates a Redis client connection.
 // Environment variables:
 //   - REDIS_URL: Redis connection URL (default: redis://localhost:6379)
@@ -521,11 +484,11 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 //   - REDIS_POOL_SIZE: Connection pool size (default: 10)
 //   - REDIS_MIN_IDLE_CONNS: Minimum idle connections (default: 2)
 func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
-	redisURL := getEnvOrDefault("REDIS_URL", "redis://localhost:6379")
-	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
-	redisDB := getEnvAsInt("REDIS_DB", 0)
-	poolSize := getEnvAsInt("REDIS_POOL_SIZE", 10)
-	minIdleConns := getEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
+	redisURL := env.GetEnvOrDefault("REDIS_URL", "redis://localhost:6379")
+	redisPassword := env.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDB := env.GetEnvAsInt("REDIS_DB", 0)
+	poolSize := env.GetEnvAsInt("REDIS_POOL_SIZE", 10)
+	minIdleConns := env.GetEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
 
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
@@ -616,23 +579,6 @@ func (p *noopEventPublisher) PublishBatch(_ context.Context, _ []service.DomainE
 	return nil
 }
 
-// getEnvAsBool returns the environment variable value as bool or default
-func getEnvAsBool(key string, defaultValue bool) bool {
-	valueStr := strings.TrimSpace(os.Getenv(key))
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	switch strings.ToLower(valueStr) {
-	case "true", "1", "yes":
-		return true
-	case "false", "0", "no":
-		return false
-	default:
-		return defaultValue
-	}
-}
-
 // initAuth initializes the JWT authentication interceptor if enabled.
 // Returns nil if AUTH_ENABLED is false (default), allowing unauthenticated requests.
 //
@@ -648,19 +594,19 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 // existing pattern in other services (e.g., position-keeping) where the provider
 // is not explicitly closed during shutdown, relying on process termination.
 func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, error) {
-	enabled := getEnvAsBool("AUTH_ENABLED", false)
+	enabled := env.GetEnvAsBool("AUTH_ENABLED", false)
 	if !enabled {
 		logger.Info("auth disabled (set AUTH_ENABLED=true to enable)")
 		return nil, nil //nolint:nilnil // Disabled mode intentionally returns no interceptor and no error
 	}
 
 	// Load JWKS configuration
-	jwksURL := getEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
-	cacheTTL := getEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour)
-	refreshTTL := getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
+	jwksURL := env.GetEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
+	cacheTTL := env.GetEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour)
+	refreshTTL := env.GetEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
 
 	// Create JWKS provider with HTTP client
-	httpTimeout := getEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
+	httpTimeout := env.GetEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
 	httpClient := &http.Client{
 		Timeout: httpTimeout,
 	}
@@ -719,13 +665,13 @@ func initAuditPublisher(logger *slog.Logger) (*audit.Publisher, error) {
 	// Set schema name for audit events
 	audit.SetSchemaName("financial_accounting")
 
-	bootstrapServers := getEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
 	if bootstrapServers == "" {
 		logger.Info("audit Kafka publisher disabled: KAFKA_BOOTSTRAP_SERVERS not set")
 		return nil, nil //nolint:nilnil // Intentionally returns nil when Kafka is not configured
 	}
 
-	topic := getEnvOrDefault("KAFKA_AUDIT_TOPIC", "audit.events")
+	topic := env.GetEnvOrDefault("KAFKA_AUDIT_TOPIC", "audit.events")
 
 	config := audit.PublisherConfig{
 		BootstrapServers: bootstrapServers,

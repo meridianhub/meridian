@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -144,7 +144,7 @@ func run(logger *slog.Logger) error {
 		"sampling_rate", tracerConfig.SamplingRate)
 
 	// Start metrics server with /metrics and /healthz endpoints
-	metricsPort := getEnvOrDefault("METRICS_PORT", "9090")
+	metricsPort := env.GetEnvOrDefault("METRICS_PORT", "9090")
 	metricsAddr := fmt.Sprintf(":%s", metricsPort)
 
 	// Create context for metrics server lifecycle
@@ -222,7 +222,7 @@ func run(logger *slog.Logger) error {
 
 	// Initialize schema provisioner (optional - skipped if SCHEMA_PROVISIONING_ENABLED is not "true")
 	var schemaProvisioner provisioner.SchemaProvisioner
-	provisioningEnabled := getEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false")
+	provisioningEnabled := env.GetEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false")
 	if provisioningEnabled == envValueTrue {
 		config := provisioner.DefaultConfig()
 
@@ -251,8 +251,8 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Party client (optional - skipped if PARTY_SERVICE_ENABLED is not "true")
 	var partyClient clients.PartyClient
-	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
-	partyEnabled := getEnvOrDefault("PARTY_SERVICE_ENABLED", envValueTrue) == envValueTrue
+	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
+	partyEnabled := env.GetEnvOrDefault("PARTY_SERVICE_ENABLED", envValueTrue) == envValueTrue
 	if partyEnabled {
 		pc, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
 			ServiceName: "party",
@@ -281,7 +281,7 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Redis client and slug cache (optional - skipped if REDIS_ENABLED is not "true")
 	var slugCache *service.SlugCache
-	redisEnabled := getEnvOrDefault("REDIS_ENABLED", envValueTrue) == envValueTrue
+	redisEnabled := env.GetEnvOrDefault("REDIS_ENABLED", envValueTrue) == envValueTrue
 	if redisEnabled {
 		redisClient, err := createRedisClient(logger)
 		if err != nil {
@@ -350,15 +350,15 @@ func run(logger *slog.Logger) error {
 	// In production, set AUTH_JWKS_URL to enable platform-admin authentication.
 	var authInterceptor *auth.Interceptor
 	var jwksProvider *auth.JWKSProvider
-	authEnabled := getEnvOrDefault("AUTH_ENABLED", "false") == envValueTrue
+	authEnabled := env.GetEnvOrDefault("AUTH_ENABLED", "false") == envValueTrue
 	if authEnabled {
-		jwksURL := getEnvOrDefault("AUTH_JWKS_URL", "")
+		jwksURL := env.GetEnvOrDefault("AUTH_JWKS_URL", "")
 		if jwksURL == "" {
 			return ErrJWKSURLRequired
 		}
 
 		// JWKS refresh TTL - configurable for key rotation scenarios
-		jwksRefreshTTL := getEnvAsDuration("AUTH_JWKS_REFRESH_TTL", 5*time.Minute)
+		jwksRefreshTTL := env.GetEnvAsDuration("AUTH_JWKS_REFRESH_TTL", 5*time.Minute)
 
 		// HTTP client with explicit timeout for JWKS fetches
 		httpClient := &http.Client{
@@ -463,7 +463,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get port from environment
-	port := getEnvOrDefault("GRPC_PORT", "50056")
+	port := env.GetEnvOrDefault("GRPC_PORT", "50056")
 	address := fmt.Sprintf(":%s", port)
 
 	// Create listener
@@ -529,7 +529,7 @@ func run(logger *slog.Logger) error {
 
 // initDatabase initializes the database connection with connection pooling.
 func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
-	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian_platform_user@cockroachdb:26257/meridian_platform?sslmode=disable")
+	dsn := env.GetEnvOrDefault("DATABASE_URL", "postgres://meridian_platform_user@cockroachdb:26257/meridian_platform?sslmode=disable")
 
 	// Open database connection
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -550,10 +550,10 @@ func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
 	}
 
 	// Connection pool settings
-	maxOpenConns := getEnvAsInt("DB_MAX_OPEN_CONNS", 25)
-	maxIdleConns := getEnvAsInt("DB_MAX_IDLE_CONNS", 5)
-	connMaxLifetime := getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
-	connMaxIdleTime := getEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute)
+	maxOpenConns := env.GetEnvAsInt("DB_MAX_OPEN_CONNS", 25)
+	maxIdleConns := env.GetEnvAsInt("DB_MAX_IDLE_CONNS", 5)
+	connMaxLifetime := env.GetEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
+	connMaxIdleTime := env.GetEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute)
 
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetMaxIdleConns(maxIdleConns)
@@ -592,92 +592,15 @@ func closeDatabase(db *gorm.DB, logger *slog.Logger) {
 	}
 }
 
-// getEnvOrDefault returns the environment variable value or default.
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsInt returns the environment variable value as int or default.
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	var value int
-	if _, err := fmt.Sscanf(valueStr, "%d", &value); err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsDuration returns the environment variable value as duration or default.
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := time.ParseDuration(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvDuration returns the environment variable value as duration or default with logging.
-// Logs a warning via slog.Warn when falling back to default value.
-func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := time.ParseDuration(valueStr)
-	if err != nil {
-		slog.Warn("invalid duration environment variable, using default",
-			"key", key,
-			"value", valueStr,
-			"error", err,
-			"default", defaultValue)
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvInt returns the environment variable value as int or default with logging.
-// Logs a warning via slog.Warn when falling back to default value.
-func getEnvInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		slog.Warn("invalid int environment variable, using default",
-			"key", key,
-			"value", valueStr,
-			"error", err,
-			"default", defaultValue)
-		return defaultValue
-	}
-	return value
-}
-
 // loadWorkerConfig loads worker configuration from environment variables with defaults.
 // It validates the configuration and returns an error if any value is invalid.
 func loadWorkerConfig() (WorkerConfig, error) {
 	config := WorkerConfig{
-		PollInterval:   getEnvDuration("PROVISIONING_WORKER_POLL_INTERVAL", 10*time.Second),
-		MaxRetries:     getEnvInt("PROVISIONING_MAX_RETRIES", 5),
-		RetryBaseDelay: getEnvDuration("PROVISIONING_RETRY_BASE_DELAY", 2*time.Second),
-		RetryMaxDelay:  getEnvDuration("PROVISIONING_RETRY_MAX_DELAY", 30*time.Second),
-		MaxConcurrent:  getEnvInt("PROVISIONING_MAX_CONCURRENT", 5),
+		PollInterval:   env.GetEnvAsDuration("PROVISIONING_WORKER_POLL_INTERVAL", 10*time.Second),
+		MaxRetries:     env.GetEnvAsInt("PROVISIONING_MAX_RETRIES", 5),
+		RetryBaseDelay: env.GetEnvAsDuration("PROVISIONING_RETRY_BASE_DELAY", 2*time.Second),
+		RetryMaxDelay:  env.GetEnvAsDuration("PROVISIONING_RETRY_MAX_DELAY", 30*time.Second),
+		MaxConcurrent:  env.GetEnvAsInt("PROVISIONING_MAX_CONCURRENT", 5),
 	}
 
 	// Validate configuration
@@ -711,11 +634,11 @@ func getConfigSource(key string) string {
 
 // createRedisClient creates and initializes a Redis client from environment configuration.
 func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
-	redisURL := getEnvOrDefault("REDIS_URL", "redis://localhost:6379")
-	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
-	redisDB := getEnvAsInt("REDIS_DB", 0)
-	poolSize := getEnvAsInt("REDIS_POOL_SIZE", 10)
-	minIdleConns := getEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
+	redisURL := env.GetEnvOrDefault("REDIS_URL", "redis://localhost:6379")
+	redisPassword := env.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDB := env.GetEnvAsInt("REDIS_DB", 0)
+	poolSize := env.GetEnvAsInt("REDIS_POOL_SIZE", 10)
+	minIdleConns := env.GetEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
 
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
