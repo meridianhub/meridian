@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -271,8 +272,11 @@ func TestServer_StartAndShutdown(t *testing.T) {
 		}
 	}()
 
-	// Give server time to start
-	// Note: In production tests, use await package instead of select
+	// Give server time to start and bind the port.
+	// We use a small sleep here because this is a unit test verifying lifecycle.
+	// The mutex in Server ensures thread-safety regardless of timing.
+	time.Sleep(50 * time.Millisecond)
+
 	select {
 	case err := <-serverErr:
 		t.Fatalf("server failed to start: %v", err)

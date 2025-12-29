@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
@@ -17,6 +18,7 @@ type Server struct {
 	config         *Config
 	logger         *slog.Logger
 	httpServer     *http.Server
+	httpServerMu   sync.RWMutex // Guards httpServer field
 	mux            *http.ServeMux
 	tenantResolver *platformgateway.TenantResolverMiddleware
 }
@@ -106,7 +108,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Start(ctx context.Context) error {
 	address := fmt.Sprintf(":%d", s.config.Port)
 
-	s.httpServer = &http.Server{
+	httpServer := &http.Server{
 		Addr:              address,
 		Handler:           s.mux,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -114,6 +116,11 @@ func (s *Server) Start(ctx context.Context) error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+
+	// Store httpServer with mutex protection
+	s.httpServerMu.Lock()
+	s.httpServer = httpServer
+	s.httpServerMu.Unlock()
 
 	// Create listener first to ensure port binding before signaling ready
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", address)
@@ -127,7 +134,7 @@ func (s *Server) Start(ctx context.Context) error {
 		"base_domain", s.config.BaseDomain,
 		"backend_routes", len(s.config.Backends))
 
-	if err := s.httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("HTTP server error: %w", err)
 	}
 
@@ -136,13 +143,17 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Shutdown gracefully shuts down the HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.httpServer == nil {
+	s.httpServerMu.RLock()
+	httpServer := s.httpServer
+	s.httpServerMu.RUnlock()
+
+	if httpServer == nil {
 		return nil
 	}
 
 	s.logger.Info("shutting down HTTP server...")
 
-	if err := s.httpServer.Shutdown(ctx); err != nil {
+	if err := httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %w", err)
 	}
 
