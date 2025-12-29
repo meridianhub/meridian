@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
+
+	"github.com/meridianhub/meridian/shared/platform/env"
 )
 
 // Config holds the configuration for the gateway service.
@@ -65,9 +65,9 @@ var (
 // It validates required fields and returns an error if validation fails.
 func LoadConfig() (*Config, error) {
 	config := &Config{
-		Port:         getEnvAsInt("PORT", 8080),
+		Port:         env.GetEnvAsInt("PORT", 8080),
 		BaseDomain:   os.Getenv("BASE_DOMAIN"),
-		LocalDevMode: getEnvAsBool("LOCAL_DEV_MODE", false),
+		LocalDevMode: env.GetEnvAsBool("LOCAL_DEV_MODE", false),
 		DatabaseURL:  os.Getenv("DATABASE_URL"),
 		RedisURL:     os.Getenv("REDIS_URL"),
 	}
@@ -112,35 +112,4 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
-}
-
-// getEnvAsInt returns the environment variable value as int or default.
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsBool returns the environment variable value as bool or default.
-func getEnvAsBool(key string, defaultValue bool) bool {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	switch strings.ToLower(valueStr) {
-	case "true", "1", "yes":
-		return true
-	case "false", "0", "no":
-		return false
-	default:
-		return defaultValue
-	}
 }

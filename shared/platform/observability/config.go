@@ -3,9 +3,9 @@ package observability
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
-	"strings"
+
+	"github.com/meridianhub/meridian/shared/platform/env"
 )
 
 var (
@@ -38,12 +38,12 @@ var (
 //	}
 //	tracer, err := observability.NewTracer(ctx, cfg)
 func DefaultConfig() (TracerConfig, error) {
-	serviceName := getEnvOrDefault("OTEL_SERVICE_NAME", "")
+	serviceName := env.GetEnvOrDefault("OTEL_SERVICE_NAME", "")
 	if serviceName == "" {
 		return TracerConfig{}, ErrServiceNameRequired
 	}
 
-	environment := getEnvOrDefault("OTEL_ENVIRONMENT", "development")
+	environment := env.GetEnvOrDefault("OTEL_ENVIRONMENT", "development")
 
 	// Default sampling rate based on environment
 	defaultSamplingRate := "1.0" // 100% for development
@@ -51,7 +51,7 @@ func DefaultConfig() (TracerConfig, error) {
 		defaultSamplingRate = "0.1" // 10% for production/staging
 	}
 
-	samplingRateStr := getEnvOrDefault("OTEL_TRACES_SAMPLER_ARG", defaultSamplingRate)
+	samplingRateStr := env.GetEnvOrDefault("OTEL_TRACES_SAMPLER_ARG", defaultSamplingRate)
 	samplingRate, err := strconv.ParseFloat(samplingRateStr, 64)
 	if err != nil {
 		return TracerConfig{}, fmt.Errorf("invalid OTEL_TRACES_SAMPLER_ARG: %w", err)
@@ -61,7 +61,7 @@ func DefaultConfig() (TracerConfig, error) {
 		return TracerConfig{}, fmt.Errorf("%w: got %f", ErrInvalidSamplingRate, samplingRate)
 	}
 
-	enabledStr := getEnvOrDefault("OTEL_TRACES_ENABLED", "true")
+	enabledStr := env.GetEnvOrDefault("OTEL_TRACES_ENABLED", "true")
 	enabled, err := strconv.ParseBool(enabledStr)
 	if err != nil {
 		return TracerConfig{}, fmt.Errorf("invalid OTEL_TRACES_ENABLED: %w", err)
@@ -75,7 +75,7 @@ func DefaultConfig() (TracerConfig, error) {
 		defaultInsecure = "false" // Production requires TLS
 	}
 
-	insecureStr := getEnvOrDefault("OTEL_EXPORTER_OTLP_INSECURE", defaultInsecure)
+	insecureStr := env.GetEnvOrDefault("OTEL_EXPORTER_OTLP_INSECURE", defaultInsecure)
 	insecure, err := strconv.ParseBool(insecureStr)
 	if err != nil {
 		return TracerConfig{}, fmt.Errorf("invalid OTEL_EXPORTER_OTLP_INSECURE: %w", err)
@@ -83,25 +83,13 @@ func DefaultConfig() (TracerConfig, error) {
 
 	return TracerConfig{
 		ServiceName:    serviceName,
-		ServiceVersion: getEnvOrDefault("OTEL_SERVICE_VERSION", "unknown"),
+		ServiceVersion: env.GetEnvOrDefault("OTEL_SERVICE_VERSION", "unknown"),
 		Environment:    environment,
-		OTLPEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "alloy:4317"),
+		OTLPEndpoint:   env.GetEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "alloy:4317"),
 		SamplingRate:   samplingRate,
 		UseTLS:         !insecure, // Convert insecure flag to useTLS
 		Enabled:        enabled,
 	}, nil
-}
-
-// getEnvOrDefault returns the environment variable value or a default if not set
-// Trims whitespace from the value before returning
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	// Trim whitespace to handle cases like "   " being treated as empty
-	value = strings.TrimSpace(value)
-	if value != "" {
-		return value
-	}
-	return defaultValue
 }
 
 // WithServiceName returns a config with the service name set

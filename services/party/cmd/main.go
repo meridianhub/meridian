@@ -18,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/services/party/service"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -161,7 +162,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get port from environment (default 50055 per task spec)
-	port := getEnvOrDefault("GRPC_PORT", "50055")
+	port := env.GetEnvOrDefault("GRPC_PORT", "50055")
 	address := fmt.Sprintf(":%s", port)
 
 	// Create listener
@@ -218,7 +219,7 @@ func run(logger *slog.Logger) error {
 
 // initDatabase initializes the database connection with connection pooling
 func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
-	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable")
+	dsn := env.GetEnvOrDefault("DATABASE_URL", "postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable")
 
 	// Open database connection
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -239,10 +240,10 @@ func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
 	}
 
 	// Connection pool settings
-	maxOpenConns := getEnvAsInt("DB_MAX_OPEN_CONNS", 25)
-	maxIdleConns := getEnvAsInt("DB_MAX_IDLE_CONNS", 5)
-	connMaxLifetime := getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
-	connMaxIdleTime := getEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute)
+	maxOpenConns := env.GetEnvAsInt("DB_MAX_OPEN_CONNS", 25)
+	maxIdleConns := env.GetEnvAsInt("DB_MAX_IDLE_CONNS", 5)
+	connMaxLifetime := env.GetEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
+	connMaxIdleTime := env.GetEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute)
 
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetMaxIdleConns(maxIdleConns)
@@ -281,43 +282,6 @@ func closeDatabase(db *gorm.DB, logger *slog.Logger) {
 	}
 }
 
-// getEnvOrDefault returns the environment variable value or default
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsInt returns the environment variable value as int or default
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	var value int
-	if _, err := fmt.Sscanf(valueStr, "%d", &value); err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsDuration returns the environment variable value as duration or default
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := time.ParseDuration(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
 // parseLogLevel converts a string log level to slog.Level.
 // Supports: debug, info, warn, error (case-insensitive). Defaults to info.
 func parseLogLevel(levelStr string) slog.Level {
@@ -330,23 +294,6 @@ func parseLogLevel(levelStr string) slog.Level {
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
-	}
-}
-
-// getEnvAsBool returns the environment variable value as bool or default
-func getEnvAsBool(key string, defaultValue bool) bool {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	switch strings.ToLower(valueStr) {
-	case "true", "1", "yes":
-		return true
-	case "false", "0", "no":
-		return false
-	default:
-		return defaultValue
 	}
 }
 
@@ -365,19 +312,19 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 // existing pattern in other services (e.g., position-keeping) where the provider
 // is not explicitly closed during shutdown, relying on process termination.
 func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, error) {
-	enabled := getEnvAsBool("AUTH_ENABLED", false)
+	enabled := env.GetEnvAsBool("AUTH_ENABLED", false)
 	if !enabled {
 		logger.Info("auth disabled (set AUTH_ENABLED=true to enable)")
 		return nil, nil //nolint:nilnil // Disabled mode intentionally returns no interceptor and no error
 	}
 
 	// Load JWKS configuration
-	jwksURL := getEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
-	cacheTTL := getEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour)
-	refreshTTL := getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
+	jwksURL := env.GetEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
+	cacheTTL := env.GetEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour)
+	refreshTTL := env.GetEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
 
 	// Create JWKS provider with HTTP client
-	httpTimeout := getEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
+	httpTimeout := env.GetEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
 	httpClient := &http.Client{
 		Timeout: httpTimeout,
 	}

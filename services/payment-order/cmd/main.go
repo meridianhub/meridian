@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +24,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/redis/go-redis/v9"
@@ -109,7 +108,7 @@ func run(logger *slog.Logger) error {
 	repo := persistence.NewPaymentOrderRepository(db)
 
 	// Get Kubernetes namespace from environment
-	namespace := getEnvOrDefault("K8S_NAMESPACE", "default")
+	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 
 	// Create external clients
 	currentAccountClient, caCleanup, err := createCurrentAccountClient(namespace, logger)
@@ -211,7 +210,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Create HTTP webhook handler
-	hmacSecret := []byte(getEnvOrDefault("WEBHOOK_HMAC_SECRET", ""))
+	hmacSecret := []byte(env.GetEnvOrDefault("WEBHOOK_HMAC_SECRET", ""))
 	if len(hmacSecret) == 0 {
 		return ErrMissingHMACSecret
 	}
@@ -229,20 +228,20 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create HTTP server
-	httpPort := getEnvAsInt("HTTP_PORT", 8080)
+	httpPort := env.GetEnvAsInt("HTTP_PORT", 8080)
 	httpServer, err := webhookhttp.NewServer(webhookhttp.ServerConfig{
 		Port:               httpPort,
 		WebhookHandler:     webhookHandler,
 		Logger:             logger,
-		RateLimitPerSecond: getEnvAsFloat("HTTP_RATE_LIMIT_PER_SECOND", 100),
-		RateLimitBurst:     getEnvAsInt("HTTP_RATE_LIMIT_BURST", 200),
+		RateLimitPerSecond: env.GetEnvAsFloat("HTTP_RATE_LIMIT_PER_SECOND", 100),
+		RateLimitBurst:     env.GetEnvAsInt("HTTP_RATE_LIMIT_BURST", 200),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP server: %w", err)
 	}
 
 	// Get gRPC port
-	grpcPort := getEnvOrDefault("GRPC_PORT", "50054")
+	grpcPort := env.GetEnvOrDefault("GRPC_PORT", "50054")
 	grpcAddress := fmt.Sprintf(":%s", grpcPort)
 
 	// Create gRPC listener
@@ -361,17 +360,17 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.
 	resilientConfig := sharedclients.ResilientClientConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "current-account",
-		CircuitBreakerTimeout:  getEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval: getEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
-		MaxRequests:            getEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
-		FailureThreshold:       getEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval: env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		MaxRequests:            env.GetEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       env.GetEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
 
 		// Retry settings
-		MaxRetries:          getEnvAsInt("CURRENT_ACCOUNT_MAX_RETRIES", 3),
-		InitialInterval:     getEnvAsDuration("CURRENT_ACCOUNT_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
-		MaxInterval:         getEnvAsDuration("CURRENT_ACCOUNT_RETRY_MAX_INTERVAL", 5*time.Second),
-		Multiplier:          getEnvAsFloat("CURRENT_ACCOUNT_RETRY_MULTIPLIER", 2.0),
-		RandomizationFactor: getEnvAsFloat("CURRENT_ACCOUNT_RETRY_RANDOMIZATION", 0.5),
+		MaxRetries:          env.GetEnvAsInt("CURRENT_ACCOUNT_MAX_RETRIES", 3),
+		InitialInterval:     env.GetEnvAsDuration("CURRENT_ACCOUNT_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
+		MaxInterval:         env.GetEnvAsDuration("CURRENT_ACCOUNT_RETRY_MAX_INTERVAL", 5*time.Second),
+		Multiplier:          env.GetEnvAsFloat("CURRENT_ACCOUNT_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: env.GetEnvAsFloat("CURRENT_ACCOUNT_RETRY_RANDOMIZATION", 0.5),
 
 		Logger: logger,
 	}
@@ -412,17 +411,17 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger) (ser
 	resilientConfig := sharedclients.ResilientClientConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "financial-accounting",
-		CircuitBreakerTimeout:  getEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval: getEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
-		MaxRequests:            getEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
-		FailureThreshold:       getEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval: env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		MaxRequests:            env.GetEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       env.GetEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
 
 		// Retry settings
-		MaxRetries:          getEnvAsInt("FINANCIAL_ACCOUNTING_MAX_RETRIES", 3),
-		InitialInterval:     getEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
-		MaxInterval:         getEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_MAX_INTERVAL", 5*time.Second),
-		Multiplier:          getEnvAsFloat("FINANCIAL_ACCOUNTING_RETRY_MULTIPLIER", 2.0),
-		RandomizationFactor: getEnvAsFloat("FINANCIAL_ACCOUNTING_RETRY_RANDOMIZATION", 0.5),
+		MaxRetries:          env.GetEnvAsInt("FINANCIAL_ACCOUNTING_MAX_RETRIES", 3),
+		InitialInterval:     env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
+		MaxInterval:         env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_MAX_INTERVAL", 5*time.Second),
+		Multiplier:          env.GetEnvAsFloat("FINANCIAL_ACCOUNTING_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: env.GetEnvAsFloat("FINANCIAL_ACCOUNTING_RETRY_RANDOMIZATION", 0.5),
 
 		Logger: logger,
 	}
@@ -447,7 +446,7 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger) (ser
 // createPaymentGateway creates the payment gateway client with resilience patterns.
 // The gateway is wrapped with circuit breaker, rate limiting, and retry logic.
 func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
-	gatewayURL := getEnvOrDefault("PAYMENT_GATEWAY_URL", "")
+	gatewayURL := env.GetEnvOrDefault("PAYMENT_GATEWAY_URL", "")
 
 	var baseGateway gateway.PaymentGateway
 	if gatewayURL == "" {
@@ -466,21 +465,21 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 	resilientConfig := gateway.ResilientGatewayConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "payment-gateway",
-		CircuitBreakerTimeout:  getEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval: getEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
-		MaxRequests:            getEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
-		FailureThreshold:       getEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval: env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		MaxRequests:            env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
 
 		// Rate limiting settings
-		RateLimit:      getEnvAsFloat("GATEWAY_RATE_LIMIT", 100.0),
-		RateLimitBurst: getEnvAsInt("GATEWAY_RATE_LIMIT_BURST", 10),
+		RateLimit:      env.GetEnvAsFloat("GATEWAY_RATE_LIMIT", 100.0),
+		RateLimitBurst: env.GetEnvAsInt("GATEWAY_RATE_LIMIT_BURST", 10),
 
 		// Retry settings
-		MaxRetries:          getEnvAsInt("GATEWAY_MAX_RETRIES", 3),
-		InitialInterval:     getEnvAsDuration("GATEWAY_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
-		MaxInterval:         getEnvAsDuration("GATEWAY_RETRY_MAX_INTERVAL", 5*time.Second),
-		Multiplier:          getEnvAsFloat("GATEWAY_RETRY_MULTIPLIER", 2.0),
-		RandomizationFactor: getEnvAsFloat("GATEWAY_RETRY_RANDOMIZATION", 0.5),
+		MaxRetries:          env.GetEnvAsInt("GATEWAY_MAX_RETRIES", 3),
+		InitialInterval:     env.GetEnvAsDuration("GATEWAY_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
+		MaxInterval:         env.GetEnvAsDuration("GATEWAY_RETRY_MAX_INTERVAL", 5*time.Second),
+		Multiplier:          env.GetEnvAsFloat("GATEWAY_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: env.GetEnvAsFloat("GATEWAY_RETRY_RANDOMIZATION", 0.5),
 
 		Logger: logger,
 	}
@@ -498,7 +497,7 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 
 // createKafkaProducer creates the Kafka producer.
 func createKafkaProducer(logger *slog.Logger) (*kafka.ProtoProducer, error) {
-	brokers := getEnvOrDefault("KAFKA_BROKERS", "kafka:9092")
+	brokers := env.GetEnvOrDefault("KAFKA_BROKERS", "kafka:9092")
 	logger.Info("connecting to Kafka", "brokers", brokers)
 	return kafka.NewProtoProducer(kafka.ProducerConfig{
 		BootstrapServers: brokers,
@@ -514,11 +513,11 @@ func createKafkaProducer(logger *slog.Logger) (*kafka.ProtoProducer, error) {
 //   - REDIS_POOL_SIZE: Connection pool size (default: 10)
 //   - REDIS_MIN_IDLE_CONNS: Minimum idle connections (default: 2)
 func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
-	redisURL := getEnvOrDefault("REDIS_URL", "redis://localhost:6379")
-	redisPassword := getEnvOrDefault("REDIS_PASSWORD", "")
-	redisDB := getEnvAsInt("REDIS_DB", 0)
-	poolSize := getEnvAsInt("REDIS_POOL_SIZE", 10)
-	minIdleConns := getEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
+	redisURL := env.GetEnvOrDefault("REDIS_URL", "redis://localhost:6379")
+	redisPassword := env.GetEnvOrDefault("REDIS_PASSWORD", "")
+	redisDB := env.GetEnvAsInt("REDIS_DB", 0)
+	poolSize := env.GetEnvAsInt("REDIS_POOL_SIZE", 10)
+	minIdleConns := env.GetEnvAsInt("REDIS_MIN_IDLE_CONNS", 2)
 
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
@@ -555,7 +554,7 @@ func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
 
 // initDatabase initializes the database connection with connection pooling.
 func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
-	dsn := getEnvOrDefault("DATABASE_URL", "postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable")
+	dsn := env.GetEnvOrDefault("DATABASE_URL", "postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable")
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		SkipDefaultTransaction: true,
@@ -571,10 +570,10 @@ func initDatabase(logger *slog.Logger) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to get database instance: %w", err)
 	}
 
-	maxOpenConns := getEnvAsInt("DB_MAX_OPEN_CONNS", 25)
-	maxIdleConns := getEnvAsInt("DB_MAX_IDLE_CONNS", 5)
-	connMaxLifetime := getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
-	connMaxIdleTime := getEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute)
+	maxOpenConns := env.GetEnvAsInt("DB_MAX_OPEN_CONNS", 25)
+	maxIdleConns := env.GetEnvAsInt("DB_MAX_IDLE_CONNS", 5)
+	connMaxLifetime := env.GetEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute)
+	connMaxIdleTime := env.GetEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute)
 
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetMaxIdleConns(maxIdleConns)
@@ -610,85 +609,6 @@ func closeDatabase(db *gorm.DB, logger *slog.Logger) {
 	}
 }
 
-// Environment variable helpers
-
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-func getEnvAsUint32(key string, defaultValue uint32) uint32 {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.ParseUint(valueStr, 10, 32)
-	if err != nil {
-		return defaultValue
-	}
-	return uint32(value)
-}
-
-func getEnvAsFloat(key string, defaultValue float64) float64 {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.ParseFloat(valueStr, 64)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := time.ParseDuration(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsBool returns the environment variable value as bool or default
-func getEnvAsBool(key string, defaultValue bool) bool {
-	valueStr := strings.TrimSpace(os.Getenv(key))
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	switch strings.ToLower(valueStr) {
-	case "true", "1", "yes":
-		return true
-	case "false", "0", "no":
-		return false
-	default:
-		return defaultValue
-	}
-}
-
 // initAuth initializes the JWT authentication interceptor if enabled.
 // Returns nil if AUTH_ENABLED is false (default), allowing unauthenticated requests.
 //
@@ -704,19 +624,19 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 // existing pattern in other services (e.g., position-keeping) where the provider
 // is not explicitly closed during shutdown, relying on process termination.
 func initAuth(ctx context.Context, logger *slog.Logger) (*auth.Interceptor, error) {
-	enabled := getEnvAsBool("AUTH_ENABLED", false)
+	enabled := env.GetEnvAsBool("AUTH_ENABLED", false)
 	if !enabled {
 		logger.Info("auth disabled (set AUTH_ENABLED=true to enable)")
 		return nil, nil //nolint:nilnil // Disabled mode intentionally returns no interceptor and no error
 	}
 
 	// Load JWKS configuration
-	jwksURL := getEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
-	cacheTTL := getEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour)
-	refreshTTL := getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
+	jwksURL := env.GetEnvOrDefault("JWKS_URL", "http://localhost:18080/realms/meridian/protocol/openid-connect/certs")
+	cacheTTL := env.GetEnvAsDuration("JWKS_CACHE_TTL", 1*time.Hour)
+	refreshTTL := env.GetEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
 
 	// Create JWKS provider with HTTP client
-	httpTimeout := getEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
+	httpTimeout := env.GetEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
 	httpClient := &http.Client{
 		Timeout: httpTimeout,
 	}

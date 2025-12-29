@@ -4,9 +4,9 @@ package app
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/env"
 )
 
 // Configuration validation errors
@@ -50,12 +50,12 @@ func LoadConfig() (*Config, error) {
 	}
 
 	config := &Config{
-		KafkaBootstrapServers:   getEnv("KAFKA_BOOTSTRAP_SERVERS"),
-		ConsumerGroupID:         getEnvOrDefault("CONSUMER_GROUP_ID", "utilization-metering-consumer"),
+		KafkaBootstrapServers:   env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", ""),
+		ConsumerGroupID:         env.GetEnvOrDefault("CONSUMER_GROUP_ID", "utilization-metering-consumer"),
 		AuditTopics:             defaultAuditTopics, // Use default topics
-		PositionKeepingEndpoint: getEnv("POSITION_KEEPING_ENDPOINT"),
-		TenantZeroID:            getEnv("TENANT_ZERO_ID"),
-		HTTPPort:                getEnvOrDefault("HTTP_PORT", "8080"),
+		PositionKeepingEndpoint: env.GetEnvOrDefault("POSITION_KEEPING_ENDPOINT", ""),
+		TenantZeroID:            env.GetEnvOrDefault("TENANT_ZERO_ID", ""),
+		HTTPPort:                env.GetEnvOrDefault("HTTP_PORT", "8080"),
 	}
 
 	// Validate required configuration
@@ -76,18 +76,4 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return config, nil
-}
-
-// getEnv returns the value of an environment variable.
-func getEnv(key string) string {
-	return os.Getenv(key)
-}
-
-// getEnvOrDefault returns the value of an environment variable or a default value.
-func getEnvOrDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
 }
