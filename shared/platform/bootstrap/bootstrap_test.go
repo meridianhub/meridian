@@ -290,8 +290,8 @@ func TestCloseDatabase(t *testing.T) {
 		CloseDatabase(nil, nil)
 	})
 
-	t.Run("handles nil logger with nil database gracefully", func(_ *testing.T) {
-		// Verify passing nil logger doesn't cause panic when database is also nil.
+	t.Run("handles nil database with logger gracefully", func(_ *testing.T) {
+		// Verify passing a non-nil logger with nil database doesn't cause panic.
 		// Testing with a real *gorm.DB would require testcontainers.
 		logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 		CloseDatabase(nil, logger)
