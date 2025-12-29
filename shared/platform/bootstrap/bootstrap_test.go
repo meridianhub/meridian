@@ -14,12 +14,12 @@ import (
 
 func TestDefaultDatabaseConfig(t *testing.T) {
 	t.Run("uses defaults when environment variables not set", func(t *testing.T) {
-		// Clear relevant env vars
-		os.Unsetenv("DATABASE_URL")
-		os.Unsetenv("DB_MAX_OPEN_CONNS")
-		os.Unsetenv("DB_MAX_IDLE_CONNS")
-		os.Unsetenv("DB_CONN_MAX_LIFETIME")
-		os.Unsetenv("DB_CONN_MAX_IDLE_TIME")
+		// Clear relevant env vars using t.Setenv for automatic restoration
+		t.Setenv("DATABASE_URL", "")
+		t.Setenv("DB_MAX_OPEN_CONNS", "")
+		t.Setenv("DB_MAX_IDLE_CONNS", "")
+		t.Setenv("DB_CONN_MAX_LIFETIME", "")
+		t.Setenv("DB_CONN_MAX_IDLE_TIME", "")
 
 		cfg := DefaultDatabaseConfig()
 
@@ -100,12 +100,12 @@ func TestNewDatabase_PoolConfiguration(t *testing.T) {
 
 func TestDefaultRedisConfig(t *testing.T) {
 	t.Run("uses defaults when environment variables not set", func(t *testing.T) {
-		// Clear relevant env vars
-		os.Unsetenv("REDIS_URL")
-		os.Unsetenv("REDIS_PASSWORD")
-		os.Unsetenv("REDIS_DB")
-		os.Unsetenv("REDIS_POOL_SIZE")
-		os.Unsetenv("REDIS_MIN_IDLE_CONNS")
+		// Clear relevant env vars using t.Setenv for automatic restoration
+		t.Setenv("REDIS_URL", "")
+		t.Setenv("REDIS_PASSWORD", "")
+		t.Setenv("REDIS_DB", "")
+		t.Setenv("REDIS_POOL_SIZE", "")
+		t.Setenv("REDIS_MIN_IDLE_CONNS", "")
 
 		cfg := DefaultRedisConfig()
 
@@ -286,13 +286,14 @@ func TestNewRedisClient_PasswordOverride(t *testing.T) {
 
 func TestCloseDatabase(t *testing.T) {
 	t.Run("handles nil database gracefully", func(_ *testing.T) {
-		// Should not panic
+		// Should not panic when both database and logger are nil
 		CloseDatabase(nil, nil)
 	})
 
-	t.Run("handles nil logger gracefully", func(_ *testing.T) {
-		// Create a mock DB that will fail - we can't easily test this without
-		// an actual database connection, but we verify it doesn't panic
-		CloseDatabase(nil, nil)
+	t.Run("handles nil logger with nil database gracefully", func(_ *testing.T) {
+		// Verify passing nil logger doesn't cause panic when database is also nil.
+		// Testing with a real *gorm.DB would require testcontainers.
+		logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+		CloseDatabase(nil, logger)
 	})
 }
