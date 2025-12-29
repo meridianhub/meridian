@@ -8,6 +8,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/env"
 )
 
 func TestGetEnvAsBool(t *testing.T) {
@@ -54,8 +56,8 @@ func TestGetEnvAsBool(t *testing.T) {
 			want:         true,
 		},
 		{
-			name:         "returns true for 'yes'",
-			envValue:     "yes",
+			name:         "returns true for 't'",
+			envValue:     "t",
 			setEnv:       true,
 			defaultValue: false,
 			want:         true,
@@ -75,8 +77,8 @@ func TestGetEnvAsBool(t *testing.T) {
 			want:         false,
 		},
 		{
-			name:         "returns false for 'no'",
-			envValue:     "no",
+			name:         "returns false for 'f'",
+			envValue:     "f",
 			setEnv:       true,
 			defaultValue: true,
 			want:         false,
@@ -99,7 +101,7 @@ func TestGetEnvAsBool(t *testing.T) {
 				_ = os.Unsetenv(testKey)
 			}
 
-			got := getEnvAsBool(testKey, tt.defaultValue)
+			got := env.GetEnvAsBool(testKey, tt.defaultValue)
 			if got != tt.want {
 				t.Errorf("getEnvAsBool(%q, %v) = %v, want %v", testKey, tt.defaultValue, got, tt.want)
 			}
@@ -191,21 +193,21 @@ func TestInitAuth_UsesConfiguredValues(t *testing.T) {
 	t.Setenv("JWKS_HTTP_TIMEOUT", "15s")
 
 	// Verify environment variables are read correctly
-	if jwksURL := getEnvOrDefault("JWKS_URL", ""); jwksURL != "http://localhost:18080/realms/meridian/protocol/openid-connect/certs" {
+	if jwksURL := env.GetEnvOrDefault("JWKS_URL", ""); jwksURL != "http://localhost:18080/realms/meridian/protocol/openid-connect/certs" {
 		t.Errorf("JWKS_URL = %q, want configured value", jwksURL)
 	}
 
-	cacheTTL := getEnvAsDuration("JWKS_CACHE_TTL", time.Hour)
+	cacheTTL := env.GetEnvAsDuration("JWKS_CACHE_TTL", time.Hour)
 	if cacheTTL != 2*time.Hour {
 		t.Errorf("JWKS_CACHE_TTL = %v, want 2h", cacheTTL)
 	}
 
-	refreshTTL := getEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
+	refreshTTL := env.GetEnvAsDuration("JWKS_REFRESH_TTL", 30*time.Minute)
 	if refreshTTL != 45*time.Minute {
 		t.Errorf("JWKS_REFRESH_TTL = %v, want 45m", refreshTTL)
 	}
 
-	httpTimeout := getEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
+	httpTimeout := env.GetEnvAsDuration("JWKS_HTTP_TIMEOUT", 10*time.Second)
 	if httpTimeout != 15*time.Second {
 		t.Errorf("JWKS_HTTP_TIMEOUT = %v, want 15s", httpTimeout)
 	}
@@ -271,9 +273,9 @@ func TestGetEnvOrDefault(t *testing.T) {
 				t.Setenv(testKey, tt.envValue)
 			}
 
-			got := getEnvOrDefault(testKey, tt.defaultValue)
+			got := env.GetEnvOrDefault(testKey, tt.defaultValue)
 			if got != tt.want {
-				t.Errorf("getEnvOrDefault(%q, %q) = %q, want %q", testKey, tt.defaultValue, got, tt.want)
+				t.Errorf("GetEnvOrDefault(%q, %q) = %q, want %q", testKey, tt.defaultValue, got, tt.want)
 			}
 		})
 	}
@@ -317,9 +319,9 @@ func TestGetEnvAsInt(t *testing.T) {
 				t.Setenv(testKey, tt.envValue)
 			}
 
-			got := getEnvAsInt(testKey, tt.defaultValue)
+			got := env.GetEnvAsInt(testKey, tt.defaultValue)
 			if got != tt.want {
-				t.Errorf("getEnvAsInt(%q, %d) = %d, want %d", testKey, tt.defaultValue, got, tt.want)
+				t.Errorf("GetEnvAsInt(%q, %d) = %d, want %d", testKey, tt.defaultValue, got, tt.want)
 			}
 		})
 	}
@@ -370,9 +372,9 @@ func TestGetEnvAsDuration(t *testing.T) {
 				t.Setenv(testKey, tt.envValue)
 			}
 
-			got := getEnvAsDuration(testKey, tt.defaultValue)
+			got := env.GetEnvAsDuration(testKey, tt.defaultValue)
 			if got != tt.want {
-				t.Errorf("getEnvAsDuration(%q, %v) = %v, want %v", testKey, tt.defaultValue, got, tt.want)
+				t.Errorf("GetEnvAsDuration(%q, %v) = %v, want %v", testKey, tt.defaultValue, got, tt.want)
 			}
 		})
 	}
