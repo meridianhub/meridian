@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -342,46 +341,6 @@ func parseLogLevel(levelStr string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// getEnvDuration returns the environment variable value as duration or default with logging.
-// Logs a warning via slog.Warn when falling back to default value.
-func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := time.ParseDuration(valueStr)
-	if err != nil {
-		slog.Warn("invalid duration environment variable, using default",
-			"key", key,
-			"value", valueStr,
-			"error", err,
-			"default", defaultValue)
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvInt returns the environment variable value as int or default with logging.
-// Logs a warning via slog.Warn when falling back to default value.
-func getEnvInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		slog.Warn("invalid int environment variable, using default",
-			"key", key,
-			"value", valueStr,
-			"error", err,
-			"default", defaultValue)
-		return defaultValue
-	}
-	return value
 }
 
 // loadWorkerConfig loads worker configuration from environment variables with defaults.
