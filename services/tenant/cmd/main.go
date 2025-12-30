@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -35,12 +36,12 @@ const envValueTrue = "true"
 
 // Errors returned during configuration and startup.
 var (
-	ErrInvalidPollInterval    = fmt.Errorf("poll interval must be >= 1s")
-	ErrInvalidMaxRetries      = fmt.Errorf("max retries must be >= 0 and <= 20")
-	ErrInvalidRetryBaseDelay  = fmt.Errorf("retry base delay must be > 0")
-	ErrInvalidRetryMaxDelay   = fmt.Errorf("retry max delay must be > 0")
-	ErrInvalidRetryDelayRange = fmt.Errorf("retry base delay must be < retry max delay")
-	ErrInvalidMaxConcurrent   = fmt.Errorf("max concurrent must be >= 1 and <= 100")
+	ErrInvalidPollInterval    = errors.New("poll interval must be >= 1s")
+	ErrInvalidMaxRetries      = errors.New("max retries must be >= 0 and <= 20")
+	ErrInvalidRetryBaseDelay  = errors.New("retry base delay must be > 0")
+	ErrInvalidRetryMaxDelay   = errors.New("retry max delay must be > 0")
+	ErrInvalidRetryDelayRange = errors.New("retry base delay must be < retry max delay")
+	ErrInvalidMaxConcurrent   = errors.New("max concurrent must be >= 1 and <= 100")
 )
 
 // WorkerConfig holds configuration for the provisioning worker behavior.
