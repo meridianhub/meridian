@@ -18,14 +18,12 @@ data:
 
   # Backend routes (JSON array)
   # Each route maps a URL prefix to a backend gRPC service
-  BACKEND_ROUTES: |
+  BACKENDS: |
     [
       {"prefix": "/v1/party", "target": "party:50055"},
-      {"prefix": "/v1/current-account", "target": "current-account:50051"},
-      {"prefix": "/v1/tenant", "target": "tenant:50056"},
-      {"prefix": "/v1/payment-order", "target": "payment-order:50053"},
-      {"prefix": "/v1/position-keeping", "target": "position-keeping:50052"},
-      {"prefix": "/v1/financial-accounting", "target": "financial-accounting:50054"}
+      {"prefix": "/v1/account", "target": "current-account:50051"},
+      {"prefix": "/v1/payment-order", "target": "payment-order:50054"},
+      {"prefix": "/v1/position", "target": "position-keeping:50053"}
     ]
 
   # OpenTelemetry configuration

@@ -16,7 +16,7 @@ func TestLoadConfig_Success(t *testing.T) {
 		"LOCAL_DEV_MODE": "true",
 		"DATABASE_URL":   "postgres://user@localhost/db",
 		"REDIS_URL":      "redis://localhost:6379",
-		"BACKEND_ROUTES": `[{"prefix":"/v1/party","target":"party:50055"}]`,
+		"BACKENDS":       `[{"prefix":"/v1/party","target":"party:50055"}]`,
 	})
 	defer cleanup()
 
@@ -85,9 +85,9 @@ func TestLoadConfig_RequiresDatabaseURL(t *testing.T) {
 
 func TestLoadConfig_InvalidBackendRoutesJSON(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
-		"BASE_DOMAIN":    "api.example.com",
-		"DATABASE_URL":   "postgres://user@localhost/db",
-		"BACKEND_ROUTES": "not valid json",
+		"BASE_DOMAIN":  "api.example.com",
+		"DATABASE_URL": "postgres://user@localhost/db",
+		"BACKENDS":     "not valid json",
 	})
 	defer cleanup()
 
@@ -99,9 +99,9 @@ func TestLoadConfig_InvalidBackendRoutesJSON(t *testing.T) {
 
 func TestLoadConfig_BackendRouteEmptyPrefix(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
-		"BASE_DOMAIN":    "api.example.com",
-		"DATABASE_URL":   "postgres://user@localhost/db",
-		"BACKEND_ROUTES": `[{"prefix":"","target":"service:8080"}]`,
+		"BASE_DOMAIN":  "api.example.com",
+		"DATABASE_URL": "postgres://user@localhost/db",
+		"BACKENDS":     `[{"prefix":"","target":"service:8080"}]`,
 	})
 	defer cleanup()
 
@@ -113,9 +113,9 @@ func TestLoadConfig_BackendRouteEmptyPrefix(t *testing.T) {
 
 func TestLoadConfig_BackendRouteEmptyTarget(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
-		"BASE_DOMAIN":    "api.example.com",
-		"DATABASE_URL":   "postgres://user@localhost/db",
-		"BACKEND_ROUTES": `[{"prefix":"/v1/api","target":""}]`,
+		"BASE_DOMAIN":  "api.example.com",
+		"DATABASE_URL": "postgres://user@localhost/db",
+		"BACKENDS":     `[{"prefix":"/v1/api","target":""}]`,
 	})
 	defer cleanup()
 
@@ -142,7 +142,7 @@ func TestLoadConfig_MultipleBackendRoutes(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
 		"BASE_DOMAIN":  "api.example.com",
 		"DATABASE_URL": "postgres://user@localhost/db",
-		"BACKEND_ROUTES": `[
+		"BACKENDS": `[
 			{"prefix":"/v1/party","target":"party:50055"},
 			{"prefix":"/v1/accounts","target":"current-account:50051"},
 			{"prefix":"/v1/payments","target":"payment-order:50053"}
@@ -412,7 +412,7 @@ func setEnvVars(t *testing.T, vars map[string]string) func() {
 	// Clear all gateway-related env vars first
 	envsToClear := []string{
 		"PORT", "BASE_DOMAIN", "LOCAL_DEV_MODE",
-		"DATABASE_URL", "REDIS_URL", "BACKEND_ROUTES",
+		"DATABASE_URL", "REDIS_URL", "BACKENDS",
 	}
 	for _, key := range envsToClear {
 		if val, ok := os.LookupEnv(key); ok {

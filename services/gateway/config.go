@@ -55,8 +55,8 @@ var (
 	// ErrInvalidPort is returned when PORT is not a valid integer.
 	ErrInvalidPort = errors.New("PORT must be a valid integer between 1 and 65535")
 
-	// ErrInvalidBackendsJSON is returned when BACKEND_ROUTES contains invalid JSON.
-	ErrInvalidBackendsJSON = errors.New("BACKEND_ROUTES must be valid JSON array")
+	// ErrInvalidBackendsJSON is returned when BACKENDS contains invalid JSON.
+	ErrInvalidBackendsJSON = errors.New("BACKENDS must be valid JSON array")
 
 	// ErrInvalidBackendRoute is returned when a backend route has empty prefix or target.
 	ErrInvalidBackendRoute = errors.New("backend route must have non-empty prefix and target")
@@ -77,7 +77,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Parse backend routes from JSON
-	backendsJSON := os.Getenv("BACKEND_ROUTES")
+	backendsJSON := os.Getenv("BACKENDS")
 	if backendsJSON != "" {
 		var backends []BackendRoute
 		if err := json.Unmarshal([]byte(backendsJSON), &backends); err != nil {
