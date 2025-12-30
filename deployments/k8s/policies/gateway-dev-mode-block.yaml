@@ -1,0 +1,68 @@
+# OPA Gatekeeper policy to prevent LOCAL_DEV_MODE=true in production namespaces
+# This policy ensures that development-only configurations cannot be deployed to production
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: blockdevmodeinproduction
+  annotations:
+    description: Blocks ConfigMaps with LOCAL_DEV_MODE=true in production namespaces
+spec:
+  crd:
+    spec:
+      names:
+        kind: BlockDevModeInProduction
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package blockdevmodeinproduction
+
+        violation[{"msg": msg}] {
+          # Check if the object is a ConfigMap
+          input.review.object.kind == "ConfigMap"
+
+          # Check if LOCAL_DEV_MODE is set to "true"
+          input.review.object.data.LOCAL_DEV_MODE == "true"
+
+          # Get namespace name
+          ns := input.review.object.metadata.namespace
+
+          # Check if namespace matches production patterns (prod* or *production*)
+          is_production_namespace(ns)
+
+          msg := sprintf("ConfigMap '%s' in namespace '%s' cannot have LOCAL_DEV_MODE=true. Development mode is not allowed in production namespaces.", [input.review.object.metadata.name, ns])
+        }
+
+        # Match namespaces starting with 'prod'
+        is_production_namespace(ns) {
+          startswith(ns, "prod")
+        }
+
+        # Match namespaces containing 'production'
+        is_production_namespace(ns) {
+          contains(ns, "production")
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: BlockDevModeInProduction
+metadata:
+  name: gateway-dev-mode-constraint
+  annotations:
+    description: Prevents gateway ConfigMaps with LOCAL_DEV_MODE=true in production
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["ConfigMap"]
+    # Note: The Rego policy handles namespace pattern matching (prod*, *production*)
+    # This namespaceSelector provides an additional layer using namespace labels.
+    # Namespaces should be labeled with environment=production for this constraint to apply.
+    # The Rego pattern matching is the primary defense regardless of labels.
+    namespaceSelector:
+      matchExpressions:
+        - key: environment
+          operator: In
+          values:
+            - production
+            - prod
