@@ -46,8 +46,17 @@ func HeaderPropagationMiddleware(next http.Handler) http.Handler {
 
 // getClientIP extracts the client IP address from the request.
 // It prioritizes X-Real-IP (typically set by ingress/load balancer) over RemoteAddr.
+//
+// SECURITY: This function trusts X-Real-IP unconditionally. This is safe because:
+//   - The gateway MUST run behind a trusted ingress controller (nginx-ingress, Envoy)
+//   - The ingress MUST set X-Real-IP from the actual client connection
+//   - The gateway MUST NOT be directly exposed to untrusted clients
+//   - Kubernetes NetworkPolicy should restrict direct access to the gateway pod
+//
+// If these conditions are not met, attackers could spoof X-Real-IP to bypass
+// IP-based rate limiting or access controls in downstream services.
 func getClientIP(r *http.Request) string {
-	// Trust X-Real-IP from ingress (set by nginx-ingress, Envoy, etc.)
+	// Trust X-Real-IP from ingress (nginx-ingress, Envoy set this from the actual client)
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
 		return ip
 	}
