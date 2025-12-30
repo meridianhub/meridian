@@ -503,6 +503,50 @@ grpc_microservice(
 )
 
 # =============================================================================
+# Gateway Service
+# =============================================================================
+# HTTP gateway for tenant-aware routing via subdomain resolution.
+# Routes requests to backend gRPC services using Connect protocol.
+
+# Standard build args for gateway
+gateway_build_args = {
+    'VERSION': 'dev',
+    'COMMIT': local('git rev-parse --short HEAD'),
+    'BUILD_DATE': get_build_date(),
+}
+
+# Build gateway Docker image
+docker_build(
+    'gateway',
+    context='.',
+    dockerfile='services/gateway/cmd/Dockerfile',
+    build_args=gateway_build_args,
+)
+
+# Deploy gateway K8s manifests
+k8s_yaml('services/gateway/k8s/secret.yaml')
+k8s_yaml('services/gateway/k8s/configmap.yaml')
+k8s_yaml('services/gateway/k8s/deployment.yaml')
+k8s_yaml('services/gateway/k8s/service.yaml')
+k8s_yaml('services/gateway/k8s/ingress.yaml')
+
+# Configure gateway resource
+k8s_resource(
+    'gateway',
+    port_forwards=['8090:8080'],  # HTTP gateway (8090 to avoid conflict with audit-worker)
+    resource_deps=[
+        'generate-proto',       # Ensures proto files are generated before building
+        'redis',                # For slug cache (optional, can use in-memory)
+        'tenant',               # For tenant resolution
+        'current-account',      # Backend service
+        'party',                # Backend service
+        'payment-order',        # Backend service
+        'position-keeping',     # Backend service
+    ],
+    labels=['gateway'],
+)
+
+# =============================================================================
 # Resource Configuration
 # =============================================================================
 
@@ -721,6 +765,11 @@ Microservices:
   • Payment-Order          → localhost:50054 (gRPC)
   • Party                  → localhost:50055 (gRPC)
   • Tenant                 → localhost:50056 (gRPC)
+
+Gateway:
+  • HTTP Gateway           → localhost:8090 (subdomain routing)
+    - Tenant resolution via TenantResolverMiddleware
+    - Proxies to gRPC backends via Connect protocol
 
 Backing Services:
   • CockroachDB            → localhost:26257
