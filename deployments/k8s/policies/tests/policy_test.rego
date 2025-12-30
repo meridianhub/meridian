@@ -131,6 +131,70 @@ test_violation_local_dev_mode_true_in_prod_eu {
 }
 
 # =============================================================================
+# Test: Case-insensitive LOCAL_DEV_MODE value checking
+# =============================================================================
+
+test_violation_local_dev_mode_True_in_prod {
+    input := {
+        "review": {
+            "object": {
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "gateway-config",
+                    "namespace": "prod"
+                },
+                "data": {
+                    "LOCAL_DEV_MODE": "True"
+                }
+            }
+        }
+    }
+
+    violations := violation with input as input
+    count(violations) == 1
+}
+
+test_violation_local_dev_mode_TRUE_in_prod {
+    input := {
+        "review": {
+            "object": {
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "gateway-config",
+                    "namespace": "prod"
+                },
+                "data": {
+                    "LOCAL_DEV_MODE": "TRUE"
+                }
+            }
+        }
+    }
+
+    violations := violation with input as input
+    count(violations) == 1
+}
+
+test_violation_local_dev_mode_TrUe_in_prod {
+    input := {
+        "review": {
+            "object": {
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "gateway-config",
+                    "namespace": "prod"
+                },
+                "data": {
+                    "LOCAL_DEV_MODE": "TrUe"
+                }
+            }
+        }
+    }
+
+    violations := violation with input as input
+    count(violations) == 1
+}
+
+# =============================================================================
 # Test: ConfigMap with LOCAL_DEV_MODE=true in dev/staging should be allowed
 # =============================================================================
 
@@ -248,6 +312,27 @@ test_no_violation_empty_configmap_in_prod {
                     "namespace": "prod"
                 },
                 "data": {}
+            }
+        }
+    }
+
+    violations := violation with input as input
+    count(violations) == 0
+}
+
+# Test: ConfigMap with only binaryData (no data field) should not trigger violations
+test_no_violation_configmap_with_only_binarydata_in_prod {
+    input := {
+        "review": {
+            "object": {
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "gateway-config",
+                    "namespace": "prod"
+                },
+                "binaryData": {
+                    "config.bin": "YmluYXJ5IGRhdGE="
+                }
             }
         }
     }

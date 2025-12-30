@@ -8,8 +8,11 @@ violation[{"msg": msg}] {
     # Check if the object is a ConfigMap
     input.review.object.kind == "ConfigMap"
 
-    # Check if LOCAL_DEV_MODE is set to "true"
-    input.review.object.data.LOCAL_DEV_MODE == "true"
+    # Check if data field exists
+    input.review.object.data
+
+    # Check if LOCAL_DEV_MODE is set to "true" (case-insensitive)
+    lower(input.review.object.data.LOCAL_DEV_MODE) == "true"
 
     # Get namespace name
     ns := input.review.object.metadata.namespace
