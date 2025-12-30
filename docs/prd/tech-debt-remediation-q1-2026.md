@@ -117,22 +117,97 @@ This PRD defines the technical debt remediation work identified during a compreh
 
 ### Stream 3: Code Consolidation (P2)
 
-#### 3.1 PartyClient Consolidation
+#### 3.1 Standardized Service Client Library
 
-**Problem:** Duplicate PartyClient implementations exist despite shared package.
+**Problem:** Inter-service gRPC clients are duplicated across services with inconsistent patterns.
 
-**Files Affected:**
-- `services/current-account/clients/party_client.go` (duplicate)
-- `services/tenant/clients/party_client.go` (duplicate)
-- `shared/pkg/clients/party.go` (canonical)
+**Current State:**
+```
+services/current-account/clients/
+  ├── party_client.go           # duplicate
+  ├── positionkeeping_client.go # service-specific
+  ├── financialaccounting_client.go
+  └── resilient_client.go
+
+services/payment-order/clients/
+  ├── current_account_client.go # service-specific
+  └── financialaccounting_client.go  # duplicate
+
+services/tenant/clients/
+  └── party_client.go           # duplicate
+
+shared/pkg/clients/
+  ├── party.go                  # only Party consolidated
+  ├── circuitbreaker.go         # resilience patterns ✓
+  ├── retry.go                  # resilience patterns ✓
+  ├── resilient.go              # resilience patterns ✓
+  └── saga.go                   # resilience patterns ✓
+```
+
+**Proposed Solution:** Consolidate all service clients to `shared/pkg/clients/`:
+
+```
+shared/pkg/clients/
+  ├── doc.go                    # existing - patterns documentation
+  ├── circuitbreaker.go         # existing
+  ├── retry.go                  # existing
+  ├── resilient.go              # existing
+  ├── saga.go                   # existing
+  ├── errors.go                 # existing
+  ├── common.go                 # existing
+  │
+  ├── party.go                  # existing - Party service client
+  ├── position_keeping.go       # NEW - PositionKeeping service client
+  ├── financial_accounting.go   # NEW - FinancialAccounting service client
+  ├── current_account.go        # NEW - CurrentAccount service client
+  └── tenant.go                 # NEW - Tenant service client (if needed)
+```
+
+**Standard Client Pattern:**
+
+```go
+// Each client follows this structure:
+type <Service>Client struct {
+    conn      *grpc.ClientConn
+    client    <service>v1.<Service>ServiceClient
+    resilient *ResilientClient
+    tracer    *observability.Tracer
+    timeout   time.Duration
+}
+
+type <Service>ClientConfig struct {
+    ServiceName string        // Required: k8s service name
+    Namespace   string        // Defaults to "default"
+    Port        int           // Service-specific default
+    Timeout     time.Duration // Defaults to 30s
+    Tracer      *observability.Tracer
+    Resilience  *ResilientClientConfig // Optional circuit breaker/retry
+}
+
+func New<Service>Client(cfg <Service>ClientConfig) (*<Service>Client, func(), error)
+```
+
+**Files to Migrate:**
+| Source | Destination | Action |
+|--------|-------------|--------|
+| `current-account/clients/party_client.go` | `shared/pkg/clients/party.go` | Delete, use shared |
+| `tenant/clients/party_client.go` | `shared/pkg/clients/party.go` | Delete, use shared |
+| `current-account/clients/positionkeeping_client.go` | `shared/pkg/clients/position_keeping.go` | Move |
+| `current-account/clients/financialaccounting_client.go` | `shared/pkg/clients/financial_accounting.go` | Move & merge |
+| `payment-order/clients/financialaccounting_client.go` | `shared/pkg/clients/financial_accounting.go` | Delete, use shared |
+| `payment-order/clients/current_account_client.go` | `shared/pkg/clients/current_account.go` | Move |
 
 **Acceptance Criteria:**
-- [ ] Both services use `shared/pkg/clients/party.go`
-- [ ] Service-specific error types extracted to interfaces
-- [ ] Duplicate files removed
-- [ ] No breaking changes to existing functionality
+- [ ] All service clients consolidated to `shared/pkg/clients/`
+- [ ] Consistent config pattern across all clients
+- [ ] Built-in resilience (circuit breaker + retry) via composition
+- [ ] DNS-based load balancing for all clients
+- [ ] Trace context propagation standard
+- [ ] Service-specific interfaces remain in consuming services
+- [ ] Deprecated stubs in old locations for migration path
+- [ ] 100% test coverage for shared clients
 
-**Estimated Effort:** 1 day
+**Estimated Effort:** 3-4 days
 
 ---
 
@@ -288,7 +363,7 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 | 1.2 | Idempotency Gap Fix | P0 | 2-3d | None |
 | 2.1 | Account Lifecycle Events | P1 | 2-3d | None |
 | 2.2 | Utilization Metering Endpoint | P1 | 3-4d | None |
-| 3.1 | PartyClient Consolidation | P2 | 1d | None |
+| 3.1 | Standardized Service Client Library | P2 | 3-4d | None |
 | 3.2 | Timeout Constants | P2 | 1d | None |
 | 3.3 | Port Centralization | P2 | 0.5d | None |
 | 4.1 | Alerting Integration | P2 | 2-3d | None |
@@ -296,7 +371,7 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 | 5.1 | Double-Wrapped Error | P3 | 0.5h | None |
 | 5.2 | Auth Context Extraction | P3 | 0.5d | None |
 
-**Total Estimated Effort:** 19-26 days
+**Total Estimated Effort:** 21-29 days
 
 ---
 
@@ -335,9 +410,17 @@ services/gateway/proxy.go (1 TODO)
 services/gateway/server.go (1 TODO)
 ```
 
-### Duplicate code locations:
+### Service clients to consolidate:
 ```
-services/current-account/clients/party_client.go
-services/tenant/clients/party_client.go
-→ Consolidate to: shared/pkg/clients/party.go
+services/current-account/clients/
+  ├── party_client.go              → DELETE (use shared/pkg/clients/party.go)
+  ├── positionkeeping_client.go    → MOVE to shared/pkg/clients/position_keeping.go
+  └── financialaccounting_client.go → MOVE to shared/pkg/clients/financial_accounting.go
+
+services/payment-order/clients/
+  ├── current_account_client.go    → MOVE to shared/pkg/clients/current_account.go
+  └── financialaccounting_client.go → DELETE (use shared)
+
+services/tenant/clients/
+  └── party_client.go              → DELETE (use shared/pkg/clients/party.go)
 ```
