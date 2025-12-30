@@ -79,6 +79,7 @@ func TestNewTenantResolverMiddleware(t *testing.T) {
 				tt.tenantRepo,
 				tt.baseDomain,
 				tt.logger,
+				false, // localDevMode
 			)
 
 			if tt.wantErr != nil {
@@ -93,6 +94,7 @@ func TestNewTenantResolverMiddleware(t *testing.T) {
 				assert.NotNil(t, middleware.tenantRepo)
 				assert.Equal(t, tt.baseDomain, middleware.baseDomain)
 				assert.Equal(t, tt.logger, middleware.logger)
+				assert.False(t, middleware.localDevMode)
 			}
 		})
 	}
@@ -109,6 +111,7 @@ func TestNewTenantResolverMiddleware_FieldInitialization(t *testing.T) {
 		tenantRepo,
 		baseDomain,
 		logger,
+		true, // localDevMode
 	)
 
 	require.NoError(t, err)
@@ -119,6 +122,7 @@ func TestNewTenantResolverMiddleware_FieldInitialization(t *testing.T) {
 	assert.NotNil(t, middleware.tenantRepo, "tenantRepo field should be set")
 	assert.Equal(t, baseDomain, middleware.baseDomain, "baseDomain should match input")
 	assert.NotNil(t, middleware.logger, "logger field should be set")
+	assert.True(t, middleware.localDevMode, "localDevMode should be true")
 }
 
 func TestExtractSlug(t *testing.T) {
@@ -921,5 +925,272 @@ func TestServeHTTP(t *testing.T) {
 
 		mockCache.AssertExpectations(t)
 		mockRepo.AssertExpectations(t)
+	})
+}
+
+// TestLocalDevMode tests the X-Tenant-Slug header support in local development mode.
+func TestLocalDevMode(t *testing.T) {
+	ctx := context.Background()
+	baseDomain := "api.meridian.io"
+	testSlug := "acme"
+	testTenantID := tenant.MustNewTenantID("tenant_123")
+
+	t.Run("LOCAL_DEV_MODE=true with X-Tenant-Slug header works", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache hit for the header-provided slug
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+
+		// Create middleware with localDevMode enabled
+		middleware := &TenantResolverMiddleware{
+			slugCache:    mockCache,
+			tenantRepo:   mockRepo,
+			baseDomain:   baseDomain,
+			logger:       logger,
+			localDevMode: true,
+		}
+
+		// Create test request with X-Tenant-Slug header (no valid subdomain)
+		req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/test", nil)
+		req.Header.Set(TenantSlugHeader, testSlug)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		var capturedTenantID tenant.TenantID
+		var capturedTenantOk bool
+
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedTenantID, capturedTenantOk = tenant.FromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		// Execute
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		// Assert
+		assert.Equal(t, http.StatusOK, rec.Code, "should return 200 OK")
+		assert.True(t, capturedTenantOk, "tenant should be in context")
+		assert.Equal(t, testTenantID, capturedTenantID, "tenant ID should match")
+		mockCache.AssertExpectations(t)
+	})
+
+	t.Run("LOCAL_DEV_MODE=false ignores X-Tenant-Slug header", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Create middleware with localDevMode disabled
+		middleware := &TenantResolverMiddleware{
+			slugCache:    mockCache,
+			tenantRepo:   mockRepo,
+			baseDomain:   baseDomain,
+			logger:       logger,
+			localDevMode: false,
+		}
+
+		// Create test request with X-Tenant-Slug header but no valid subdomain
+		req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/test", nil)
+		req.Header.Set(TenantSlugHeader, testSlug)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		// Execute
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		// Assert: Should fail because header is ignored and no valid subdomain
+		assert.Equal(t, http.StatusNotFound, rec.Code, "should return 404 when header is ignored")
+		assert.Contains(t, rec.Body.String(), "Invalid subdomain")
+		assert.False(t, nextCalled, "next handler should not be called")
+		mockCache.AssertNotCalled(t, "Get")
+	})
+
+	t.Run("header takes precedence over subdomain when both present", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		headerSlug := "header-tenant"
+		headerTenantID := tenant.MustNewTenantID("tenant_header")
+
+		// Setup: Cache hit for header slug (NOT subdomain slug)
+		mockCache.On("Get", ctx, headerSlug).Return(headerTenantID, nil)
+
+		// Create middleware with localDevMode enabled
+		middleware := &TenantResolverMiddleware{
+			slugCache:    mockCache,
+			tenantRepo:   mockRepo,
+			baseDomain:   baseDomain,
+			logger:       logger,
+			localDevMode: true,
+		}
+
+		// Create test request with BOTH valid subdomain AND header
+		req := httptest.NewRequest(http.MethodGet, "http://acme.api.meridian.io/api/test", nil)
+		req.Header.Set(TenantSlugHeader, headerSlug)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		var capturedTenantID tenant.TenantID
+
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedTenantID, _ = tenant.FromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		// Execute
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		// Assert: Header tenant should be used, not subdomain tenant
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, headerTenantID, capturedTenantID,
+			"header tenant ID should be used, not subdomain tenant ID")
+		mockCache.AssertExpectations(t)
+		// Verify only header slug was looked up
+		mockCache.AssertCalled(t, "Get", ctx, headerSlug)
+	})
+
+	t.Run("falls back to subdomain when header is empty", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		subdomainSlug := "acme"
+		subdomainTenantID := tenant.MustNewTenantID("tenant_subdomain")
+
+		// Setup: Cache hit for subdomain slug
+		mockCache.On("Get", ctx, subdomainSlug).Return(subdomainTenantID, nil)
+
+		// Create middleware with localDevMode enabled
+		middleware := &TenantResolverMiddleware{
+			slugCache:    mockCache,
+			tenantRepo:   mockRepo,
+			baseDomain:   baseDomain,
+			logger:       logger,
+			localDevMode: true,
+		}
+
+		// Create test request with valid subdomain but no header
+		req := httptest.NewRequest(http.MethodGet, "http://acme.api.meridian.io/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		var capturedTenantID tenant.TenantID
+
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedTenantID, _ = tenant.FromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		// Execute
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		// Assert: Should use subdomain tenant
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, subdomainTenantID, capturedTenantID)
+		mockCache.AssertExpectations(t)
+	})
+
+	t.Run("invalid slug in header returns 400 Bad Request", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Create middleware with localDevMode enabled
+		middleware := &TenantResolverMiddleware{
+			slugCache:    mockCache,
+			tenantRepo:   mockRepo,
+			baseDomain:   baseDomain,
+			logger:       logger,
+			localDevMode: true,
+		}
+
+		invalidSlugs := []string{
+			"UPPERCASE",
+			"-invalid",
+			"invalid-",
+			"invalid--slug",
+			"with_underscore",
+			"with spaces",
+		}
+
+		for _, invalidSlug := range invalidSlugs {
+			t.Run(invalidSlug, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/test", nil)
+				req.Header.Set(TenantSlugHeader, invalidSlug)
+				req = req.WithContext(ctx)
+				rec := httptest.NewRecorder()
+
+				nextCalled := false
+				next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+					nextCalled = true
+				})
+
+				handler := middleware.Handler(next)
+				handler.ServeHTTP(rec, req)
+
+				assert.Equal(t, http.StatusBadRequest, rec.Code,
+					"should return 400 for invalid slug: %s", invalidSlug)
+				assert.Contains(t, rec.Body.String(), "Invalid tenant slug")
+				assert.False(t, nextCalled, "next handler should not be called")
+			})
+		}
+	})
+
+	t.Run("valid slug formats in header work", func(t *testing.T) {
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		validSlugTenantID := tenant.MustNewTenantID("tenant_valid")
+
+		validSlugs := []string{
+			"acme",
+			"acme123",
+			"acme-corp",
+			"my-company",
+			"tenant1",
+		}
+
+		for _, validSlug := range validSlugs {
+			t.Run(validSlug, func(t *testing.T) {
+				mockCache := new(MockSlugCache)
+				mockCache.On("Get", ctx, validSlug).Return(validSlugTenantID, nil)
+
+				middleware := &TenantResolverMiddleware{
+					slugCache:    mockCache,
+					tenantRepo:   mockRepo,
+					baseDomain:   baseDomain,
+					logger:       logger,
+					localDevMode: true,
+				}
+
+				req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/test", nil)
+				req.Header.Set(TenantSlugHeader, validSlug)
+				req = req.WithContext(ctx)
+				rec := httptest.NewRecorder()
+
+				next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusOK)
+				})
+
+				handler := middleware.Handler(next)
+				handler.ServeHTTP(rec, req)
+
+				assert.Equal(t, http.StatusOK, rec.Code,
+					"should accept valid slug: %s", validSlug)
+				mockCache.AssertExpectations(t)
+			})
+		}
 	})
 }
