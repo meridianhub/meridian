@@ -50,10 +50,17 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// Production safety check: LOCAL_DEV_MODE must not be enabled in production namespaces
+	namespace := os.Getenv("POD_NAMESPACE")
+	if err := config.ValidateForNamespace(namespace); err != nil {
+		return err
+	}
+
 	logger.Info("configuration loaded",
 		"port", config.Port,
 		"base_domain", config.BaseDomain,
 		"local_dev_mode", config.LocalDevMode,
+		"namespace", namespace,
 		"redis_enabled", config.RedisURL != "",
 		"backend_routes", len(config.Backends))
 

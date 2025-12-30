@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/meridianhub/meridian/shared/platform/env"
 )
@@ -59,6 +60,9 @@ var (
 
 	// ErrInvalidBackendRoute is returned when a backend route has empty prefix or target.
 	ErrInvalidBackendRoute = errors.New("backend route must have non-empty prefix and target")
+
+	// ErrLocalDevModeInProduction is returned when LOCAL_DEV_MODE is enabled in a production namespace.
+	ErrLocalDevModeInProduction = errors.New("LOCAL_DEV_MODE cannot be enabled in production namespace")
 )
 
 // LoadConfig loads configuration from environment variables.
@@ -111,5 +115,14 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// ValidateForNamespace checks if the configuration is safe for the given namespace.
+// Returns an error if LOCAL_DEV_MODE is enabled in a production namespace.
+func (c *Config) ValidateForNamespace(namespace string) error {
+	if c.LocalDevMode && strings.HasPrefix(namespace, "prod") {
+		return fmt.Errorf("%w: %s", ErrLocalDevModeInProduction, namespace)
+	}
 	return nil
 }

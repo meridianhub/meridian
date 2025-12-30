@@ -24,6 +24,11 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
+// TenantSlugHeader is the header name used for local development mode.
+// When LOCAL_DEV_MODE is enabled, this header can be used to specify
+// the tenant slug directly, bypassing subdomain-based resolution.
+const TenantSlugHeader = "X-Tenant-Slug"
+
 // Configuration errors.
 var (
 	ErrNilSlugCache    = errors.New("slug cache cannot be nil")
@@ -65,24 +70,31 @@ type tenantRepository interface {
 // and injects the tenant ID into the request context.
 //
 // It follows this resolution flow:
-// 1. Extract subdomain slug from Host header (e.g., "acme" from "acme.meridian.com")
-// 2. Check slug cache for tenant ID
-// 3. On cache miss, query tenant repository and populate cache
-// 4. Inject tenant ID into request context via x-tenant-id header
+// 1. In LOCAL_DEV_MODE, check for X-Tenant-Slug header first
+// 2. Extract subdomain slug from Host header (e.g., "acme" from "acme.meridian.com")
+// 3. Check slug cache for tenant ID
+// 4. On cache miss, query tenant repository and populate cache
+// 5. Inject tenant ID into request context via x-tenant-id header
 type TenantResolverMiddleware struct {
-	slugCache  slugCache
-	tenantRepo tenantRepository
-	baseDomain string
-	logger     *slog.Logger
+	slugCache    slugCache
+	tenantRepo   tenantRepository
+	baseDomain   string
+	logger       *slog.Logger
+	localDevMode bool
 }
 
 // NewTenantResolverMiddleware creates a new tenant resolver middleware.
-// All parameters are required and validated.
+// All parameters except localDevMode are required and validated.
+//
+// When localDevMode is true, the middleware will accept the X-Tenant-Slug header
+// for tenant identification, which is useful for local development and testing.
+// In production, this should always be false.
 func NewTenantResolverMiddleware(
 	slugCache slugCache,
 	tenantRepo tenantRepository,
 	baseDomain string,
 	logger *slog.Logger,
+	localDevMode bool,
 ) (*TenantResolverMiddleware, error) {
 	if slugCache == nil {
 		return nil, ErrNilSlugCache
@@ -97,23 +109,53 @@ func NewTenantResolverMiddleware(
 		return nil, ErrNilLogger
 	}
 
+	if localDevMode {
+		logger.Warn("local dev mode enabled - X-Tenant-Slug header will be accepted",
+			slog.String("header", TenantSlugHeader))
+	}
+
 	return &TenantResolverMiddleware{
-		slugCache:  slugCache,
-		tenantRepo: tenantRepo,
-		baseDomain: baseDomain,
-		logger:     logger,
+		slugCache:    slugCache,
+		tenantRepo:   tenantRepo,
+		baseDomain:   baseDomain,
+		logger:       logger,
+		localDevMode: localDevMode,
 	}, nil
 }
 
 // Handler returns an http.Handler that performs tenant resolution.
 // This method will extract the tenant slug from the Host header,
 // resolve it to a tenant ID, and inject it into the request context.
+//
+// In local dev mode (LOCAL_DEV_MODE=true), the X-Tenant-Slug header is checked first.
+// If the header is present, it takes precedence over subdomain-based resolution.
 func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		// Step 1: Extract slug from Host header
-		slug := m.extractSlug(r.Host)
+		// Step 1: Check for X-Tenant-Slug header in local dev mode
+		var slug string
+		if m.localDevMode {
+			slug = r.Header.Get(TenantSlugHeader)
+			if slug != "" {
+				// Validate the slug from header
+				if !isValidSlug(slug) {
+					m.logger.Warn("invalid slug in X-Tenant-Slug header",
+						slog.String("slug", slug),
+					)
+					http.Error(w, "Invalid tenant slug", http.StatusBadRequest)
+					return
+				}
+				m.logger.Debug("using X-Tenant-Slug header (LOCAL_DEV_MODE)",
+					slog.String("slug", slug))
+			}
+		}
+
+		// Step 2: Fall back to subdomain extraction if no header slug
+		if slug == "" {
+			slug = m.extractSlug(r.Host)
+		}
+
 		if slug == "" {
 			m.logger.Warn("invalid subdomain in request",
 				slog.String("host", r.Host),
@@ -122,7 +164,7 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Step 2: Resolve tenant ID (cache-first with DB fallback)
+		// Step 3: Resolve tenant ID (cache-first with DB fallback)
 		startTime := time.Now()
 		tenantID, err := m.resolveTenant(ctx, slug)
 		resolutionTimeMs := time.Since(startTime).Milliseconds()
@@ -147,23 +189,23 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Step 3: Log successful resolution
+		// Step 4: Log successful resolution
 		m.logger.Debug("tenant resolved successfully",
 			slog.String("tenant_slug", slug),
 			slog.String("tenant_id", tenantID.String()),
 			slog.Int64("resolution_time_ms", resolutionTimeMs),
 		)
 
-		// Step 4: Inject tenant ID into request header
+		// Step 5: Inject tenant ID into request header
 		r.Header.Set(tenant.TenantIDKey, string(tenantID))
 
-		// Step 5: Add tenant to context
+		// Step 6: Add tenant to context
 		ctx = tenant.WithTenant(ctx, tenantID)
 
-		// Step 6: Update request with new context
+		// Step 7: Update request with new context
 		r = r.WithContext(ctx)
 
-		// Step 7: Call next handler
+		// Step 8: Call next handler
 		next.ServeHTTP(w, r)
 	})
 }

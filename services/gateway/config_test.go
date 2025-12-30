@@ -296,6 +296,111 @@ func TestConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestConfig_ValidateForNamespace(t *testing.T) {
+	testCases := []struct {
+		name         string
+		localDevMode bool
+		namespace    string
+		wantError    bool
+	}{
+		// LOCAL_DEV_MODE=true tests
+		{
+			name:         "LOCAL_DEV_MODE=true in production namespace",
+			localDevMode: true,
+			namespace:    "production",
+			wantError:    true,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=true in prod namespace",
+			localDevMode: true,
+			namespace:    "prod",
+			wantError:    true,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=true in prod-eu namespace",
+			localDevMode: true,
+			namespace:    "prod-eu",
+			wantError:    true,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=true in prod-us namespace",
+			localDevMode: true,
+			namespace:    "prod-us",
+			wantError:    true,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=true in staging namespace",
+			localDevMode: true,
+			namespace:    "staging",
+			wantError:    false,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=true in development namespace",
+			localDevMode: true,
+			namespace:    "development",
+			wantError:    false,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=true in dev namespace",
+			localDevMode: true,
+			namespace:    "dev",
+			wantError:    false,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=true with empty namespace",
+			localDevMode: true,
+			namespace:    "",
+			wantError:    false,
+		},
+		// LOCAL_DEV_MODE=false tests (should always pass)
+		{
+			name:         "LOCAL_DEV_MODE=false in production namespace",
+			localDevMode: false,
+			namespace:    "production",
+			wantError:    false,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=false in prod namespace",
+			localDevMode: false,
+			namespace:    "prod",
+			wantError:    false,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=false in staging namespace",
+			localDevMode: false,
+			namespace:    "staging",
+			wantError:    false,
+		},
+		{
+			name:         "LOCAL_DEV_MODE=false with empty namespace",
+			localDevMode: false,
+			namespace:    "",
+			wantError:    false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &Config{
+				Port:         8080,
+				BaseDomain:   "api.example.com",
+				DatabaseURL:  "postgres://localhost/db",
+				LocalDevMode: tc.localDevMode,
+			}
+
+			err := config.ValidateForNamespace(tc.namespace)
+
+			if tc.wantError {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, ErrLocalDevModeInProduction)
+				assert.Contains(t, err.Error(), tc.namespace)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 // setEnvVars sets environment variables and returns a cleanup function.
 func setEnvVars(t *testing.T, vars map[string]string) func() {
 	t.Helper()
