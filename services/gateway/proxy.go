@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -30,19 +31,22 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 	for _, b := range backends {
 		target, err := url.Parse(fmt.Sprintf("http://%s", b.Target))
 		if err != nil {
-			// Skip invalid backend URLs - validation should catch this earlier
+			slog.Warn("skipping invalid backend URL",
+				"prefix", b.Prefix,
+				"target", b.Target,
+				"error", err)
 			continue
 		}
 
 		proxy := httputil.NewSingleHostReverseProxy(target)
 
-		// Configure the proxy director to preserve Connect protocol headers
+		// Configure the proxy director to add X-Forwarded-Host.
+		// Connect protocol headers (Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms)
+		// are standard headers (not hop-by-hop) and are preserved by httputil.ReverseProxy.
 		originalDirector := proxy.Director
 		proxy.Director = func(req *http.Request) {
 			originalDirector(req)
-			// Preserve Connect protocol headers
-			// The Connect protocol uses standard HTTP headers that are preserved by default
-			// We ensure the original Host header is forwarded if needed
+			// Set X-Forwarded-Host so backends know the original Host header
 			if req.Header.Get("X-Forwarded-Host") == "" {
 				req.Header.Set("X-Forwarded-Host", req.Host)
 			}
