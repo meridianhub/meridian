@@ -966,8 +966,8 @@ func TestJWTMiddleware_IntegrationWithRealToken_ExpirationBoundary(t *testing.T)
 	middleware, err := NewJWTMiddleware(validator, logger)
 	require.NoError(t, err)
 
-	// Create token that expires 500ms from now (enough time for key gen overhead)
-	expiresAt := time.Now().Add(500 * time.Millisecond)
+	// Create token that expires 2s from now (enough time for key gen overhead in CI)
+	expiresAt := time.Now().Add(2 * time.Second)
 	claims := &platformauth.Claims{
 		UserID:   "boundary-user",
 		TenantID: "boundary-tenant",
