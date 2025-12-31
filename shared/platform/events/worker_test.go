@@ -411,7 +411,8 @@ func TestWorker_GracefulShutdown(t *testing.T) {
 	ctx := context.Background()
 	worker.Start(ctx)
 
-	// Give the worker time to start
+	// Intentional sleep: Give worker time to start its run loop.
+	// The worker doesn't expose a "started" state we can poll.
 	time.Sleep(50 * time.Millisecond)
 
 	// Stop should complete without hanging
@@ -441,7 +442,8 @@ func TestWorker_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
 
-	// Give the worker time to start
+	// Intentional sleep: Give worker time to start its run loop.
+	// The worker doesn't expose a "started" state we can poll.
 	time.Sleep(50 * time.Millisecond)
 
 	// Cancel context

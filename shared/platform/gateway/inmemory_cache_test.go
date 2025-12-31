@@ -247,7 +247,8 @@ func TestInMemorySlugCache_BackgroundCleanup(t *testing.T) {
 		err := cache.Set(ctx, "acme", tenantID)
 		require.NoError(t, err)
 
-		// Wait for multiple cleanup cycles
+		// Intentional sleep: Wait for multiple cleanup cycles to run (50ms interval x 3 = 150ms)
+		// to verify they don't remove entries that haven't expired (1 hour TTL).
 		time.Sleep(150 * time.Millisecond)
 
 		// Entry should still exist

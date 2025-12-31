@@ -11,6 +11,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -466,7 +467,10 @@ func TestHealthChecker_Watch(t *testing.T) {
 	}()
 
 	// Wait for initial response and a few updates
-	time.Sleep(250 * time.Millisecond)
+	awaitErr := await.AtMost(1 * time.Second).PollInterval(20 * time.Millisecond).Until(func() bool {
+		return len(stream.responses) >= 2
+	})
+	require.NoError(t, awaitErr, "should receive at least 2 health check responses")
 
 	// Cancel context to stop watch
 	cancel()
