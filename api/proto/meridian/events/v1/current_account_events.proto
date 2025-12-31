@@ -152,6 +152,115 @@ message AccountStatusChangedEvent {
   map<string, string> metadata = 12;
 }
 
+// AccountFrozenEvent represents a temporary suspension of an account facility.
+// Published when an account transitions from ACTIVE to FROZEN status.
+// This is a reversible operation - the account can be unfrozen later.
+message AccountFrozenEvent {
+  // event_id uniquely identifies this event instance
+  string event_id = 1 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // account_id uniquely identifies the current account facility
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // reason explains why the account was frozen
+  string reason = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // frozen_at is the timestamp when the account was frozen
+  google.protobuf.Timestamp frozen_at = 4 [(buf.validate.field).required = true];
+
+  // frozen_by identifies who froze the account
+  string frozen_by = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 8 [(buf.validate.field).required = true];
+
+  // version is the aggregate version for optimistic locking
+  int64 version = 9 [(buf.validate.field).int64 = {gte: 1}];
+
+  // idempotency_key for deduplication (optional)
+  string idempotency_key = 10 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // metadata for tracing and debugging
+  map<string, string> metadata = 11;
+}
+
+// AccountUnfrozenEvent represents the restoration of a frozen account to active status.
+// Published when an account transitions from FROZEN to ACTIVE status.
+message AccountUnfrozenEvent {
+  // event_id uniquely identifies this event instance
+  string event_id = 1 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // account_id uniquely identifies the current account facility
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // unfrozen_at is the timestamp when the account was unfrozen
+  google.protobuf.Timestamp unfrozen_at = 3 [(buf.validate.field).required = true];
+
+  // unfrozen_by identifies who unfroze the account
+  string unfrozen_by = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 7 [(buf.validate.field).required = true];
+
+  // version is the aggregate version for optimistic locking
+  int64 version = 8 [(buf.validate.field).int64 = {gte: 1}];
+
+  // idempotency_key for deduplication (optional)
+  string idempotency_key = 9 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // metadata for tracing and debugging
+  map<string, string> metadata = 10;
+}
+
 // AccountClosedEvent represents a terminal state where an account facility
 // is permanently closed. This is an irreversible operation.
 message AccountClosedEvent {
