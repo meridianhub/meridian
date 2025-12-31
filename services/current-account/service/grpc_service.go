@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/current-account/config"
@@ -20,6 +21,7 @@ import (
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -67,6 +69,33 @@ const (
 	idempotencyResultTTL = 24 * time.Hour
 )
 
+// Kafka topic constants for account lifecycle events
+const (
+	// TopicAccountFrozen is the Kafka topic for account frozen events
+	TopicAccountFrozen = "current-account.account-frozen.v1"
+	// TopicAccountUnfrozen is the Kafka topic for account unfrozen events
+	TopicAccountUnfrozen = "current-account.account-unfrozen.v1"
+	// TopicAccountClosed is the Kafka topic for account closed events
+	TopicAccountClosed = "current-account.account-closed.v1"
+)
+
+// AccountEventPublisher defines the interface for publishing account lifecycle events.
+// Implementations should handle serialization, delivery, and error handling.
+type AccountEventPublisher interface {
+	// PublishWithTenant publishes a protobuf message with tenant context to a Kafka topic.
+	// The key is used for partitioning - events with the same key go to the same partition.
+	PublishWithTenant(ctx context.Context, topic, key string, msg proto.Message) error
+}
+
+// NoOpAccountEventPublisher is a no-operation implementation of AccountEventPublisher.
+// Useful for testing and scenarios where event publishing is not configured.
+type NoOpAccountEventPublisher struct{}
+
+// PublishWithTenant does nothing and always returns nil.
+func (p *NoOpAccountEventPublisher) PublishWithTenant(_ context.Context, _, _ string, _ proto.Message) error {
+	return nil
+}
+
 // Service implements the CurrentAccountService gRPC service
 type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
@@ -77,6 +106,7 @@ type Service struct {
 	partyClient            clients.PartyClient
 	accountConfig          *config.AccountConfig
 	idempotencyService     idempotency.Service
+	eventPublisher         AccountEventPublisher // Optional: publishes lifecycle events to Kafka
 	logger                 *slog.Logger
 	tracer                 *observability.Tracer
 	depositOrchestrator    *DepositOrchestrator    // Handles deposit saga orchestration
@@ -1467,12 +1497,10 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
 	}
 
-	// TODO: Emit Kafka events for account lifecycle changes
-	// Events to emit based on action:
-	// - FREEZE: account.frozen with reason and timestamp
-	// - UNFREEZE: account.unfrozen with timestamp
-	// - CLOSE: account.closed with reason and timestamp
-	// This requires Kafka producer integration (future task)
+	// Emit Kafka events for account lifecycle changes (fire-and-forget pattern)
+	// Event publishing errors are logged but don't fail the operation to ensure
+	// the business operation completes successfully regardless of messaging issues.
+	s.publishControlActionEvent(ctx, req, &account, actionTimestamp)
 
 	// TODO: Emit webhook notifications for FREEZE and CLOSE actions (regulatory compliance)
 	// This requires webhook integration (future task)
@@ -1487,4 +1515,113 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 		Facility:        toProtoFacility(account),
 		ActionTimestamp: timestamppb.New(actionTimestamp),
 	}, nil
+}
+
+// publishControlActionEvent emits lifecycle events to Kafka based on the control action.
+// This method uses fire-and-forget semantics - errors are logged but don't fail the operation.
+// The account balance and reason information is captured from the domain object and request.
+func (s *Service) publishControlActionEvent(
+	ctx context.Context,
+	req *pb.ControlCurrentAccountRequest,
+	account *domain.CurrentAccount,
+	actionTimestamp time.Time,
+) {
+	// Skip if event publisher is not configured
+	if s.eventPublisher == nil {
+		return
+	}
+
+	// Extract actor identity from auth context (falls back to "system" if not available)
+	actorID := "system"
+	if userID, ok := auth.GetUserIDFromContext(ctx); ok && userID != "" {
+		actorID = userID
+	}
+
+	// Generate correlation ID for event tracing
+	correlationID := uuid.New().String()
+
+	// Generate event timestamp
+	now := time.Now().UTC()
+
+	// Use AccountID() which returns the business account ID as string
+	accountID := account.AccountID()
+
+	switch req.ControlAction {
+	case pb.ControlAction_CONTROL_ACTION_FREEZE:
+		event := &eventsv1.AccountFrozenEvent{
+			EventId:       uuid.New().String(),
+			AccountId:     accountID,
+			Reason:        req.Reason,
+			FrozenAt:      timestamppb.New(actionTimestamp),
+			FrozenBy:      actorID,
+			CorrelationId: correlationID,
+			Timestamp:     timestamppb.New(now),
+			Version:       account.Version(),
+		}
+		if err := s.eventPublisher.PublishWithTenant(ctx, TopicAccountFrozen, accountID, event); err != nil {
+			s.logger.Error("failed to publish account frozen event",
+				"account_id", accountID,
+				"error", err)
+		} else {
+			s.logger.Debug("published account frozen event",
+				"account_id", accountID,
+				"event_id", event.EventId,
+				"correlation_id", correlationID)
+		}
+
+	case pb.ControlAction_CONTROL_ACTION_UNFREEZE:
+		event := &eventsv1.AccountUnfrozenEvent{
+			EventId:       uuid.New().String(),
+			AccountId:     accountID,
+			UnfrozenAt:    timestamppb.New(actionTimestamp),
+			UnfrozenBy:    actorID,
+			CorrelationId: correlationID,
+			Timestamp:     timestamppb.New(now),
+			Version:       account.Version(),
+		}
+		if err := s.eventPublisher.PublishWithTenant(ctx, TopicAccountUnfrozen, accountID, event); err != nil {
+			s.logger.Error("failed to publish account unfrozen event",
+				"account_id", accountID,
+				"error", err)
+		} else {
+			s.logger.Debug("published account unfrozen event",
+				"account_id", accountID,
+				"event_id", event.EventId,
+				"correlation_id", correlationID)
+		}
+
+	case pb.ControlAction_CONTROL_ACTION_CLOSE:
+		// Convert domain balance to google.type.Money
+		balanceCents, _ := account.Balance().ToMinorUnits()
+		closingBalance := &money.Money{
+			CurrencyCode: account.Balance().CurrencyCode(),
+			Units:        balanceCents / 100,
+			Nanos:        int32((balanceCents % 100) * 10000000),
+		}
+
+		event := &eventsv1.AccountClosedEvent{
+			EventId:        uuid.New().String(),
+			AccountId:      accountID,
+			ClosingBalance: closingBalance,
+			ClosureReason:  req.Reason,
+			ClosedBy:       actorID,
+			ClosureDate:    timestamppb.New(actionTimestamp),
+			CorrelationId:  correlationID,
+			Timestamp:      timestamppb.New(now),
+			Version:        account.Version(),
+		}
+		if err := s.eventPublisher.PublishWithTenant(ctx, TopicAccountClosed, accountID, event); err != nil {
+			s.logger.Error("failed to publish account closed event",
+				"account_id", accountID,
+				"error", err)
+		} else {
+			s.logger.Debug("published account closed event",
+				"account_id", accountID,
+				"event_id", event.EventId,
+				"correlation_id", correlationID)
+		}
+
+	case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		// No event for unspecified action (validation catches this earlier)
+	}
 }
