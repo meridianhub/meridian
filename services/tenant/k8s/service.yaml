@@ -1,3 +1,5 @@
+# Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
+# This service uses ports.Tenant for gRPC and ports.HTTPMetrics for Prometheus.
 apiVersion: v1
 kind: Service
 metadata:
