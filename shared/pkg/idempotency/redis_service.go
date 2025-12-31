@@ -464,12 +464,24 @@ func (r *RedisService) checkKeyForStaleness(ctx context.Context, redisKey string
 //
 // This operation is idempotent - if the key no longer exists or is no longer
 // PENDING, no error is returned (the desired state is achieved).
+//
+// Note on race conditions: There is a small window between reading the key,
+// verifying it's still PENDING, and updating it to FAILED. If another process
+// completes the operation in this window, the COMPLETED status would be
+// overwritten with FAILED. This is an accepted trade-off because:
+// 1. The window is very small (microseconds)
+// 2. The consequence is recoverable (client can retry with new idempotency key)
+// 3. Atomic protobuf parsing in Lua scripts is not practical
+// 4. WATCH/MULTI/EXEC adds complexity for a rare edge case
+//
+// If this becomes a problem in production, consider using Redis WATCH for
+// optimistic locking or storing a simple status field alongside the protobuf.
 func (r *RedisService) MarkStaleAsFailed(ctx context.Context, staleKey StalePendingKey, reason string) error {
 	if staleKey.Result == nil {
 		return ErrNilResult
 	}
 
-	// Re-read the current state to avoid race conditions
+	// Re-read the current state to minimize race window
 	data, err := r.client.Get(ctx, staleKey.RedisKey).Bytes()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {

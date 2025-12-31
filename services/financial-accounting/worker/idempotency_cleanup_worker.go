@@ -30,6 +30,7 @@ type IdempotencyCleanupWorker struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
 	running bool
+	stopped bool // guards wg.Add/Wait race
 }
 
 // Errors returned by the cleanup worker.
@@ -138,10 +139,16 @@ func (w *IdempotencyCleanupWorker) Start(ctx context.Context) error {
 			w.markStopped()
 			return nil
 		case <-ticker.C:
-			// Add to WaitGroup before calling to prevent race with Stop()
-			w.wg.Add(1)
-			w.runCleanupIteration(ctx)
-			w.wg.Done()
+			// Use tryStartIteration to safely add to WaitGroup only if not stopped
+			if w.tryStartIteration() {
+				w.runCleanupIteration(ctx)
+				w.wg.Done()
+			} else {
+				// Worker is stopping, exit the loop
+				w.logger.Info("idempotency cleanup worker stopped: explicit shutdown")
+				w.markStopped()
+				return nil
+			}
 		}
 	}
 }
@@ -153,18 +160,42 @@ func (w *IdempotencyCleanupWorker) markStopped() {
 	w.mu.Unlock()
 }
 
+// tryStartIteration attempts to start a new cleanup iteration.
+// Returns true if the iteration can proceed (wg.Add(1) was called).
+// Returns false if the worker is stopping (do not proceed with iteration).
+// This method prevents the race between wg.Add and wg.Wait.
+func (w *IdempotencyCleanupWorker) tryStartIteration() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.stopped {
+		return false
+	}
+	w.wg.Add(1)
+	return true
+}
+
 // Stop signals the worker to shut down gracefully.
 // It waits for the current cleanup iteration to complete.
 // It is safe to call Stop multiple times.
 func (w *IdempotencyCleanupWorker) Stop() {
-	select {
-	case <-w.done:
-		// Already closed
-	default:
-		close(w.done)
+	// Mark as stopped under lock to prevent new iterations from starting
+	w.mu.Lock()
+	alreadyStopped := w.stopped
+	w.stopped = true
+	w.mu.Unlock()
+
+	if !alreadyStopped {
+		select {
+		case <-w.done:
+			// Already closed
+		default:
+			close(w.done)
+		}
 	}
 
 	// Wait for in-flight cleanup operations to complete
+	// This is safe because tryStartIteration won't call wg.Add after stopped=true
 	w.wg.Wait()
 	w.logger.Info("idempotency cleanup worker shutdown complete")
 }
@@ -252,7 +283,9 @@ func (w *IdempotencyCleanupWorker) runCleanupIteration(ctx context.Context) {
 		}
 	}
 
-	// Update stale pending gauge with remaining unprocessed stale keys
+	// Update stale pending gauge with remaining unprocessed stale keys.
+	// The gauge represents keys found minus keys successfully processed in this iteration.
+	// Failed keys remain in the count and will be retried in the next iteration.
 	w.updateStaleGauges(staleCountByService)
 	w.logIterationComplete(start, totalProcessed, totalFailed, iterationErrors)
 }

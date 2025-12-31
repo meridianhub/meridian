@@ -220,6 +220,9 @@ type StalePendingKey struct {
 }
 
 // CleanupResult contains the outcome of a cleanup batch operation.
+// Reserved for future use: This type is defined for a planned batch cleanup API
+// that would allow callers to process multiple stale keys and receive aggregate results.
+// Currently, the IdempotencyCleanupWorker tracks these metrics internally.
 type CleanupResult struct {
 	// Processed is the number of stale keys that were processed
 	Processed int

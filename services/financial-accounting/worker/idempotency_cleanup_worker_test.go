@@ -262,8 +262,8 @@ func TestCleanupWorker_GracefulShutdown(t *testing.T) {
 		key := idempotency.Key{
 			Namespace: "test",
 			Operation: "shutdown-test",
-			EntityID:  "account-shutdown-" + string(rune('0'+i)),
-			RequestID: "req-shutdown-" + string(rune('0'+i)),
+			EntityID:  "account-shutdown-" + formatInt(i),
+			RequestID: "req-shutdown-" + formatInt(i),
 		}
 		err := redisSvc.MarkPending(ctx, key, time.Hour)
 		require.NoError(t, err)
