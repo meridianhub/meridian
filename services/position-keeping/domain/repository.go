@@ -78,3 +78,19 @@ type PositionLogFilter struct {
 	Limit  int // Maximum number of results (required, must be > 0)
 	Offset int // Number of results to skip (default: 0)
 }
+
+// MeasurementRepository defines the contract for persisting and retrieving
+// Measurement entities. All methods accept a context for cancellation and deadline control.
+type MeasurementRepository interface {
+	// Create persists a new Measurement to the database.
+	// Returns ErrConflict if a measurement with the same ID already exists.
+	Create(ctx context.Context, measurement *Measurement) error
+
+	// FindByID retrieves a Measurement by its ID.
+	// Returns ErrNotFound if the measurement doesn't exist.
+	FindByID(ctx context.Context, id uuid.UUID) (*Measurement, error)
+
+	// FindByPositionLogID retrieves all Measurements for a specific financial position log.
+	// Returns an empty slice if no measurements exist for the log.
+	FindByPositionLogID(ctx context.Context, positionLogID uuid.UUID) ([]*Measurement, error)
+}

@@ -310,13 +310,14 @@ func TestStartMetricsServer(t *testing.T) {
 		}
 	}()
 
-	// Give server time to start
+	// Intentional sleep: Give metrics server time to start.
+	// The server doesn't expose a "started" state we can poll.
 	time.Sleep(100 * time.Millisecond)
 
 	// Cancel context to shutdown server
 	cancel()
 
-	// Wait a bit for shutdown
+	// Intentional sleep: Allow time for graceful shutdown to complete.
 	time.Sleep(100 * time.Millisecond)
 
 	// Check if there were any errors

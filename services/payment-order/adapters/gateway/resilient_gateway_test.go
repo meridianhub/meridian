@@ -15,6 +15,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 // Test sentinel errors for resilient gateway tests.
@@ -214,7 +215,10 @@ func TestResilientPaymentGateway_CircuitBreaker_RecoverAfterTimeout(t *testing.T
 	assert.Equal(t, gobreaker.StateOpen, resilient.CircuitBreakerState())
 
 	// Wait for circuit to transition to half-open
-	time.Sleep(60 * time.Millisecond)
+	err := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return resilient.CircuitBreakerState() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, err, "circuit should transition to half-open")
 
 	// Make the stub succeed now
 	stub.shouldFail = false
@@ -253,12 +257,12 @@ func TestResilientPaymentGateway_RateLimiting(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, gateway.ErrRateLimited)
 
-	// Wait for rate limiter to refill
-	time.Sleep(250 * time.Millisecond)
-
-	// Should be able to make another request
-	_, err = resilient.SendPayment(context.Background(), req)
-	require.NoError(t, err)
+	// Wait for rate limiter to refill and request to succeed
+	err = await.AtMost(1 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		_, sendErr := resilient.SendPayment(context.Background(), req)
+		return sendErr == nil
+	})
+	require.NoError(t, err, "rate limiter should eventually allow requests")
 }
 
 func TestResilientPaymentGateway_ContextCancellation(t *testing.T) {

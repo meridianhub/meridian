@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/spf13/cobra"
 )
 
@@ -173,7 +174,7 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return &Config{
-		Target:    "localhost:50051",
+		Target:    fmt.Sprintf("localhost:%d", ports.CurrentAccount),
 		TenantID:  "demo", // Default tenant matching demo.sh
 		Timeout:   30 * time.Millisecond,
 		Amount:    10000, // GBP 100.00 in pence

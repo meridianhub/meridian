@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/cmd/tenantctl/client"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +61,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&serviceURL, "service-url", getEnvOrDefault("TENANT_SERVICE_URL", "localhost:50056"), "Tenant service URL")
+	rootCmd.PersistentFlags().StringVar(&serviceURL, "service-url", getEnvOrDefault("TENANT_SERVICE_URL", fmt.Sprintf("localhost:%d", ports.Tenant)), "Tenant service URL")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "gRPC call timeout")
 }
 

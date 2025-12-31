@@ -36,6 +36,7 @@ type Container struct {
 
 	// Repository
 	PositionLogRepository domain.FinancialPositionLogRepository
+	MeasurementRepository domain.MeasurementRepository
 
 	// Event Outbox
 	OutboxRepository *events.PgxOutboxRepository
@@ -314,8 +315,9 @@ func (c *Container) initializeEventPublisher() {
 
 // initializeRepositories initializes domain repositories
 func (c *Container) initializeRepositories() {
-	// Create PostgreSQL repository
+	// Create PostgreSQL repositories
 	c.PositionLogRepository = persistence.NewPostgresRepository(c.DBPool)
+	c.MeasurementRepository = persistence.NewMeasurementRepository(c.DBPool)
 
 	c.Logger.Info("repositories initialized")
 }

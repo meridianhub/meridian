@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -100,8 +102,8 @@ func run(logger *slog.Logger) error {
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 
 	logger.Info("external service configuration",
-		"position_keeping", "position-keeping."+namespace+".svc.cluster.local:50053",
-		"financial_accounting", "financial-accounting."+namespace+".svc.cluster.local:50052",
+		"position_keeping", fmt.Sprintf("position-keeping.%s.svc.cluster.local:%d", namespace, ports.PositionKeeping),
+		"financial_accounting", fmt.Sprintf("financial-accounting.%s.svc.cluster.local:%d", namespace, ports.FinancialAccounting),
 		"load_balancing", "DNS-based round_robin")
 
 	// Create service with external clients and capture the clients for health checking
@@ -159,7 +161,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get port from environment
-	port := env.GetEnvOrDefault("GRPC_PORT", "50051")
+	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.CurrentAccount))
 	address := fmt.Sprintf(":%s", port)
 
 	// Create listener
@@ -254,7 +256,7 @@ func createServiceWithClients(
 	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
 		ServiceName: "position-keeping",
 		Namespace:   namespace,
-		Port:        50053,
+		Port:        ports.PositionKeeping,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
 	})
@@ -274,7 +276,7 @@ func createServiceWithClients(
 	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
 		ServiceName: "financial-accounting",
 		Namespace:   namespace,
-		Port:        50052,
+		Port:        ports.FinancialAccounting,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
 	})
@@ -294,7 +296,7 @@ func createServiceWithClients(
 	partyGRPCClient, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
 		ServiceName: "party",
 		Namespace:   namespace,
-		Port:        50055, // Party service port (see services/party/k8s/service.yaml)
+		Port:        ports.Party,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
 	})

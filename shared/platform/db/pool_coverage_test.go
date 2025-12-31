@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,7 +56,7 @@ func TestPostgresPool_Integration_CloseWithContext(t *testing.T) {
 		closeCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
 		defer cancel()
 
-		// Allow context to definitely expire
+		// Intentional sleep: Allow context to definitely expire before testing close behavior
 		time.Sleep(10 * time.Millisecond)
 
 		err := tempPool.CloseWithContext(closeCtx)
@@ -105,8 +106,12 @@ func TestPostgresPool_Integration_DrainConnections(t *testing.T) {
 			}
 		}()
 
-		// Wait a bit to ensure query starts
-		time.Sleep(100 * time.Millisecond)
+		// Wait for query to start (connection becomes in-use)
+		awaitErr := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+			stats := tempPool.Stats()
+			return stats.InUse > 0
+		})
+		require.NoError(t, awaitErr, "query should start and acquire a connection")
 
 		// Try to drain with short timeout
 		drainCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -137,8 +142,12 @@ func TestPostgresPool_Integration_DrainConnections(t *testing.T) {
 			}
 		}()
 
-		// Wait for query to start
-		time.Sleep(100 * time.Millisecond)
+		// Wait for query to start (connection becomes in-use)
+		awaitErr := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+			stats := tempPool.Stats()
+			return stats.InUse > 0
+		})
+		require.NoError(t, awaitErr, "query should start and acquire a connection")
 
 		// Create and immediately cancel context
 		drainCtx, cancel := context.WithCancel(ctx)
@@ -406,10 +415,10 @@ func TestHealthChecker_Integration(t *testing.T) {
 		go checker.PeriodicHealthCheck()
 
 		// Wait for first check to complete
-		time.Sleep(150 * time.Millisecond)
-
-		// Should be healthy
-		assert.True(t, checker.IsHealthy())
+		err := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+			return checker.IsHealthy()
+		})
+		require.NoError(t, err, "checker should become healthy after first check")
 
 		// Should have last check time
 		lastCheckTime := checker.GetLastCheckTime()
@@ -420,9 +429,6 @@ func TestHealthChecker_Integration(t *testing.T) {
 
 		// Stop the checker
 		checker.Stop()
-
-		// Wait a bit after stop
-		time.Sleep(50 * time.Millisecond)
 	})
 
 	t.Run("PeriodicHealthCheck stops on context cancellation", func(t *testing.T) {
@@ -435,7 +441,10 @@ func TestHealthChecker_Integration(t *testing.T) {
 		go checker.PeriodicHealthCheck()
 
 		// Wait for at least one check
-		time.Sleep(150 * time.Millisecond)
+		err := await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+			return checker.IsHealthy()
+		})
+		require.NoError(t, err, "checker should become healthy after first check")
 
 		// Stop should complete quickly
 		done := make(chan bool)
@@ -468,12 +477,16 @@ func TestHealthChecker_Integration(t *testing.T) {
 			CheckTimeout:  5 * time.Millisecond,
 		})
 
-		// Start and immediately stop to get one check
+		// Start and wait for one check
 		go checker.PeriodicHealthCheck()
-		time.Sleep(20 * time.Millisecond)
+		err := await.AtMost(2 * time.Second).PollInterval(5 * time.Millisecond).Until(func() bool {
+			return checker.IsHealthy()
+		})
+		require.NoError(t, err, "checker should become healthy after first check")
 		checker.Stop()
 
-		// Wait for checks to become stale (2x interval)
+		// Intentional sleep: Wait for checks to become stale (2x interval).
+		// We need actual time to pass for staleness detection to trigger.
 		time.Sleep(30 * time.Millisecond)
 
 		// Should now be unhealthy due to staleness

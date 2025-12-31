@@ -1010,8 +1010,9 @@ func callToProtoFinancialPositionLog(log *domain.FinancialPositionLog) *position
 
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
+	mockMeasurementRepo := new(MockMeasurementRepository)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
 	if err != nil {
 		return nil
 	}

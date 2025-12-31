@@ -240,7 +240,7 @@ func TestProvisioningWorker_Start_ContextCancellation(t *testing.T) {
 		close(done)
 	}()
 
-	// Let it run for a bit
+	// Intentional sleep: Let it run through at least one poll interval before stopping
 	time.Sleep(100 * time.Millisecond)
 
 	// Cancel context
@@ -277,7 +277,7 @@ func TestProvisioningWorker_Start_ExplicitStop(t *testing.T) {
 		close(done)
 	}()
 
-	// Let it run for a bit
+	// Intentional sleep: Let it run through at least one poll interval before stopping
 	time.Sleep(100 * time.Millisecond)
 
 	// Call Stop()
@@ -647,8 +647,8 @@ func TestProvisioningWorker_GracefulShutdown(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.Create(ctx, tenant1))
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with properly initialized mock (NewMockProvisioner initializes all internal maps)
+	prov := provisioner.NewMockProvisioner(nil)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(50*time.Millisecond), logger)
 	require.NoError(t, err)
@@ -661,8 +661,12 @@ func TestProvisioningWorker_GracefulShutdown(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for one processing cycle to spawn goroutines
-	time.Sleep(100 * time.Millisecond)
+	// Wait for tenant to be provisioned (processing cycle spawns goroutines)
+	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		t, _ := repo.GetByID(context.Background(), tenant1.ID)
+		return t != nil && t.Status == domain.StatusActive
+	})
+	require.NoError(t, err, "tenant should be provisioned")
 
 	// Stop the worker - should wait for in-flight goroutines
 	cancel()
@@ -694,8 +698,8 @@ func TestProvisioningWorker_NoGoroutineLeaks(t *testing.T) {
 		require.NoError(t, repo.Create(context.Background(), tenant))
 	}
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with properly initialized mock (NewMockProvisioner initializes all internal maps)
+	prov := provisioner.NewMockProvisioner(nil)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(50*time.Millisecond), logger)
 	require.NoError(t, err)
@@ -708,8 +712,19 @@ func TestProvisioningWorker_NoGoroutineLeaks(t *testing.T) {
 		close(done)
 	}()
 
-	// Let it run through a processing cycle
-	time.Sleep(100 * time.Millisecond)
+	// Wait for at least one tenant to be provisioned (processing cycle completes)
+	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		// Check if any tenant has been provisioned
+		for i := 0; i < 5; i++ {
+			tenantID := "tenant" + string(rune('a'+i))
+			t, _ := repo.GetByID(context.Background(), tenant.MustNewTenantID(tenantID))
+			if t != nil && t.Status == domain.StatusActive {
+				return true
+			}
+		}
+		return false
+	})
+	require.NoError(t, err, "at least one tenant should be provisioned")
 
 	// Stop the worker
 	cancel()
@@ -717,9 +732,6 @@ func TestProvisioningWorker_NoGoroutineLeaks(t *testing.T) {
 
 	// Wait for worker to fully stop
 	<-done
-
-	// Give a moment for cleanup
-	time.Sleep(50 * time.Millisecond)
 
 	// At this point, all goroutines should be cleaned up
 	// We can't easily verify exact goroutine count, but the test passing
@@ -960,10 +972,13 @@ func TestProvisionTenantWithRetry_ContextCancellation(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for first attempt and backoff to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for first attempt to occur (mock will be called at least once)
+	err = await.AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return mockProv.GetCallCount() >= 1
+	})
+	require.NoError(t, err, "first provisioning attempt should occur")
 
-	// Cancel context
+	// Cancel context during backoff
 	cancel()
 
 	// Should stop within a reasonable time (less than full retry cycle)
@@ -1489,7 +1504,7 @@ func TestProcessPendingTenants_ConcurrentClaimSkipped(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		// Small delay to create race condition
+		// Intentional sleep: Small delay to create race condition for concurrent claim testing
 		time.Sleep(1 * time.Millisecond)
 		worker.processPendingTenants(ctx)
 	}()
