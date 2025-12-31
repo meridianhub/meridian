@@ -122,7 +122,10 @@ func (w *IdempotencyCleanupWorker) Start(ctx context.Context) error {
 	defer ticker.Stop()
 
 	// Run initial cleanup immediately
+	// Add to WaitGroup before calling to prevent race with Stop()
+	w.wg.Add(1)
 	w.runCleanupIteration(ctx)
+	w.wg.Done()
 
 	for {
 		select {
@@ -135,7 +138,10 @@ func (w *IdempotencyCleanupWorker) Start(ctx context.Context) error {
 			w.markStopped()
 			return nil
 		case <-ticker.C:
+			// Add to WaitGroup before calling to prevent race with Stop()
+			w.wg.Add(1)
 			w.runCleanupIteration(ctx)
+			w.wg.Done()
 		}
 	}
 }
@@ -165,10 +171,8 @@ func (w *IdempotencyCleanupWorker) Stop() {
 
 // runCleanupIteration performs one cleanup pass.
 // It scans for stale PENDING keys and marks them as FAILED.
+// The caller must manage WaitGroup to prevent races with Stop().
 func (w *IdempotencyCleanupWorker) runCleanupIteration(ctx context.Context) {
-	w.wg.Add(1)
-	defer w.wg.Done()
-
 	// Check for context cancellation before starting
 	select {
 	case <-ctx.Done():
