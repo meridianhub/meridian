@@ -480,6 +480,22 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 
 ---
 
+#### 5.3 Audit Worker Fallback DSN
+
+**Problem:** Hardcoded localhost DSN used as fallback if `DATABASE_URL` not set.
+
+**File:** `services/audit-worker/main.go:86`
+
+**Risk:** Silent failure in production if environment variable missing—service connects to localhost instead of failing fast.
+
+**Acceptance Criteria:**
+- [ ] Require `DATABASE_URL` or fail fast with clear error
+- [ ] Remove hardcoded localhost fallback
+
+**Estimated Effort:** 0.5 hours
+
+---
+
 ## Summary Table
 
 | ID | Work Item | Priority | Effort | Dependencies |
@@ -497,6 +513,7 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 | 4.2 | KYC/AML Interface | P2 | 3-4d | ADR required |
 | 5.1 | Double-Wrapped Error | P3 | 0.5h | None |
 | 5.2 | Auth Context Extraction | P3 | 0.5d | None |
+| 5.3 | Audit Worker Fallback DSN | P3 | 0.5h | None |
 
 **Total Estimated Effort:** 27-38 days
 
