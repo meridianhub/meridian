@@ -8,6 +8,28 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/meridianhub/meridian/services/gateway/auth"
+)
+
+// Identity headers forwarded to backend services.
+// These headers are set by the gateway after successful authentication
+// and can be trusted by backend services.
+const (
+	// HeaderUserID contains the authenticated user identifier from JWT claims.
+	HeaderUserID = "X-User-ID"
+	// HeaderTenantID contains the tenant identifier from JWT claims or API key metadata.
+	HeaderTenantID = "X-Tenant-ID"
+	// HeaderAuthMethod indicates the authentication method used ("jwt" or "apikey").
+	HeaderAuthMethod = "X-Auth-Method"
+	// HeaderAuthRoles contains comma-separated roles from JWT claims (optional).
+	HeaderAuthRoles = "X-Auth-Roles"
+)
+
+// AuthMethod constants for the X-Auth-Method header.
+const (
+	AuthMethodJWT    = "jwt"
+	AuthMethodAPIKey = "apikey"
 )
 
 // ProxyHandler routes incoming HTTP requests to backend gRPC services
@@ -44,7 +66,7 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 		// Consider: ResponseHeaderTimeout, IdleConnTimeout, MaxIdleConnsPerHost
 		// See: https://github.com/meridianhub/meridian/pull/439#discussion_r1901972279
 
-		// Configure the proxy director to add X-Forwarded-Host.
+		// Configure the proxy director to add X-Forwarded-Host and identity headers.
 		// Connect protocol headers (Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms)
 		// are standard headers (not hop-by-hop) and are preserved by httputil.ReverseProxy.
 		originalDirector := proxy.Director
@@ -54,6 +76,16 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 			if req.Header.Get("X-Forwarded-Host") == "" {
 				req.Header.Set("X-Forwarded-Host", req.Host)
 			}
+
+			// SECURITY: Strip any incoming identity headers to prevent spoofing.
+			// These headers are set only by the gateway after successful authentication.
+			req.Header.Del(HeaderUserID)
+			req.Header.Del(HeaderTenantID)
+			req.Header.Del(HeaderAuthMethod)
+			req.Header.Del(HeaderAuthRoles)
+
+			// Add identity headers if the request was authenticated
+			addIdentityHeaders(req)
 		}
 
 		routes = append(routes, proxyRoute{
@@ -101,4 +133,51 @@ func (h *ProxyHandler) MatchRoute(path string) string {
 // RouteCount returns the number of configured routes.
 func (h *ProxyHandler) RouteCount() int {
 	return len(h.routes)
+}
+
+// addIdentityHeaders extracts authenticated identity from request context
+// and adds the corresponding headers to the outgoing request.
+//
+// For JWT authentication, it adds:
+//   - X-User-ID: user identifier from JWT claims
+//   - X-Tenant-ID: tenant identifier from JWT claims
+//   - X-Auth-Method: "jwt"
+//   - X-Auth-Roles: comma-separated roles from JWT claims (if present)
+//
+// For API key authentication, it adds:
+//   - X-User-ID: API key identity (e.g., "service-a")
+//   - X-Auth-Method: "apikey"
+//
+// If the request is not authenticated (no identity in context), no headers are added.
+func addIdentityHeaders(req *http.Request) {
+	ctx := req.Context()
+
+	// Check for JWT authentication first
+	if userID, ok := auth.GetUserIDFromContext(ctx); ok && userID != "" {
+		req.Header.Set(HeaderUserID, userID)
+		req.Header.Set(HeaderAuthMethod, AuthMethodJWT)
+
+		// Add tenant ID if present
+		if tenantID, ok := auth.GetTenantIDFromContext(ctx); ok && tenantID != "" {
+			req.Header.Set(HeaderTenantID, tenantID)
+		}
+
+		// Add roles if present (comma-separated)
+		if roles, ok := auth.GetRolesFromContext(ctx); ok && len(roles) > 0 {
+			req.Header.Set(HeaderAuthRoles, strings.Join(roles, ","))
+		}
+
+		return
+	}
+
+	// Check for API key authentication
+	if identity := auth.GetAPIKeyIdentity(ctx); identity != "" {
+		req.Header.Set(HeaderUserID, identity)
+		req.Header.Set(HeaderAuthMethod, AuthMethodAPIKey)
+		// Note: API keys don't have tenant ID in the current implementation
+		// Tenant context may be resolved separately by TenantResolverMiddleware
+		return
+	}
+
+	// No authenticated identity - headers remain unset
 }
