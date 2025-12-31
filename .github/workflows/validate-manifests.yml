@@ -176,17 +176,29 @@ jobs:
           # Get standalone Rego, skipping the header comments
           STANDALONE_REGO=$(sed -n '/^package blockdevmodeinproduction/,$p' "$REGO_FILE")
 
-          # Compare the two (normalize whitespace for comparison)
-          EMBEDDED_NORMALIZED=$(echo "$EMBEDDED_REGO" | sed '/^$/d' | sed 's/[[:space:]]*$//')
-          STANDALONE_NORMALIZED=$(echo "$STANDALONE_REGO" | sed '/^$/d' | sed 's/[[:space:]]*$//')
+          # Normalize for comparison:
+          # 1. Remove blank lines
+          # 2. Normalize all leading whitespace to single spaces for each indentation level
+          # 3. Remove trailing whitespace
+          normalize_rego() {
+            sed '/^$/d' | \
+            sed 's/^[[:space:]]*//' | \
+            sed 's/[[:space:]]*$//'
+          }
+
+          EMBEDDED_NORMALIZED=$(echo "$EMBEDDED_REGO" | normalize_rego)
+          STANDALONE_NORMALIZED=$(echo "$STANDALONE_REGO" | normalize_rego)
 
           if [ "$EMBEDDED_NORMALIZED" != "$STANDALONE_NORMALIZED" ]; then
             echo "ERROR: Rego policy in ConstraintTemplate differs from standalone test file!"
             echo ""
             echo "The Rego embedded in $CONSTRAINT_TEMPLATE must match $REGO_FILE"
-            echo "(excluding header comments)"
+            echo "(excluding header comments and indentation differences)"
             echo ""
-            echo "To fix: Update both files to have identical Rego policy content."
+            echo "To fix: Update both files to have identical Rego policy logic."
+            echo ""
+            echo "=== Differences (ignoring indentation) ==="
+            diff <(echo "$EMBEDDED_NORMALIZED") <(echo "$STANDALONE_NORMALIZED") | head -30 || true
             exit 1
           fi
 
