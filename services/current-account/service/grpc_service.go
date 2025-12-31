@@ -941,6 +941,10 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	}
 
 	// Mark pending withdrawal as completed (if executing a pending withdrawal)
+	// TODO(tm:tech-debt-cleanup.33): This represents an eventual consistency tradeoff - if the
+	// status update fails after funds transfer, the withdrawal record remains in PENDING status
+	// even though the transfer completed. Consider implementing the Outbox Pattern to ensure
+	// atomicity between the funds transfer and status update.
 	if pendingWithdrawal != nil && s.withdrawalRepo != nil {
 		if err := pendingWithdrawal.Complete(); err != nil {
 			// Log warning but don't fail - the withdrawal has already executed
@@ -1055,13 +1059,10 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 			fmt.Sprintf("Warning: requested amount (%d cents) exceeds current available balance (%d cents)", amountCents, availCents))
 	}
 
-	// Generate withdrawal reference (business ID)
-	withdrawalReference := fmt.Sprintf("WTH-%s", uuid.New().String()[:8])
-
-	// Use provided reference if available, otherwise use generated reference
+	// Use provided reference if available, otherwise generate one
 	reference := req.Reference
 	if reference == "" {
-		reference = withdrawalReference
+		reference = fmt.Sprintf("WTH-%s", uuid.New().String()[:8])
 	}
 
 	// Create domain Money from amount cents
@@ -1303,9 +1304,11 @@ func (s *Service) RetrieveWithdrawal(ctx context.Context, req *pb.RetrieveWithdr
 			if req.Pagination.PageToken != "" {
 				// Page token contains the offset
 				var offset int
-				if _, err := fmt.Sscanf(req.Pagination.PageToken, "%d", &offset); err == nil {
-					pagination.Offset = offset
+				if _, err := fmt.Sscanf(req.Pagination.PageToken, "%d", &offset); err != nil {
+					operationStatus = opStatusRetrieveFailed
+					return nil, status.Errorf(codes.InvalidArgument, "invalid page token: %s", req.Pagination.PageToken)
 				}
+				pagination.Offset = offset
 			}
 		}
 

@@ -70,6 +70,36 @@ func createTestWithdrawal(t *testing.T, accountID uuid.UUID, amountCents int64, 
 	return withdrawal
 }
 
+// createTestWithdrawalWithTimestamp creates a test withdrawal with an explicit timestamp.
+// This enables deterministic ordering in tests without relying on time.Sleep.
+func createTestWithdrawalWithTimestamp(t *testing.T, accountID uuid.UUID, amountCents int64, reference string, createdAt time.Time) *domain.Withdrawal {
+	t.Helper()
+	withdrawal := createTestWithdrawal(t, accountID, amountCents, reference)
+	withdrawal.CreatedAt = createdAt
+	withdrawal.UpdatedAt = createdAt
+	return withdrawal
+}
+
+// createWithdrawalTableInSchema creates the withdrawal table in the specified schema.
+// This helper reduces duplication in tests that need multiple tenant schemas.
+func createWithdrawalTableInSchema(t *testing.T, db *gorm.DB, schemaName string) {
+	t.Helper()
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	require.NoError(t, err)
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.withdrawal (
+		id UUID PRIMARY KEY,
+		account_id UUID NOT NULL,
+		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
+		currency VARCHAR(3) NOT NULL,
+		status VARCHAR(20) NOT NULL,
+		reference VARCHAR(255) NOT NULL UNIQUE,
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		version BIGINT NOT NULL DEFAULT 1
+	)`, schemaName)).Error
+	require.NoError(t, err)
+}
+
 // --- Create Tests ---
 
 func TestWithdrawalRepository_Create_Success(t *testing.T) {
@@ -256,12 +286,12 @@ func TestWithdrawalRepository_List_Pagination(t *testing.T) {
 	repo := NewWithdrawalRepository(db)
 	accountID := uuid.New()
 
-	// Create 5 withdrawals with slight delay to ensure different created_at
+	// Create 5 withdrawals with explicit monotonically increasing timestamps
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
-		withdrawal := createTestWithdrawal(t, accountID, int64(10000+i*1000), fmt.Sprintf("WD-LIST-%03d", i))
+		timestamp := baseTime.Add(time.Duration(i) * time.Second)
+		withdrawal := createTestWithdrawalWithTimestamp(t, accountID, int64(10000+i*1000), fmt.Sprintf("WD-LIST-%03d", i), timestamp)
 		require.NoError(t, repo.Create(ctx, withdrawal))
-		// Small delay to ensure ordering by created_at is deterministic
-		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Test page 1 (limit 2)
@@ -336,39 +366,11 @@ func TestWithdrawalRepository_TenantIsolation(t *testing.T) {
 
 	// Setup tenant A
 	tenantA := tenant.TenantID("tenant_a")
-	schemaA := tenantA.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaA)).Error
-	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.withdrawal (
-		id UUID PRIMARY KEY,
-		account_id UUID NOT NULL,
-		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
-		currency VARCHAR(3) NOT NULL,
-		status VARCHAR(20) NOT NULL,
-		reference VARCHAR(255) NOT NULL UNIQUE,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		version BIGINT NOT NULL DEFAULT 1
-	)`, schemaA)).Error
-	require.NoError(t, err)
+	createWithdrawalTableInSchema(t, db, tenantA.SchemaName())
 
 	// Setup tenant B
 	tenantB := tenant.TenantID("tenant_b")
-	schemaB := tenantB.SchemaName()
-	err = db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaB)).Error
-	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.withdrawal (
-		id UUID PRIMARY KEY,
-		account_id UUID NOT NULL,
-		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
-		currency VARCHAR(3) NOT NULL,
-		status VARCHAR(20) NOT NULL,
-		reference VARCHAR(255) NOT NULL UNIQUE,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		version BIGINT NOT NULL DEFAULT 1
-	)`, schemaB)).Error
-	require.NoError(t, err)
+	createWithdrawalTableInSchema(t, db, tenantB.SchemaName())
 
 	repo := NewWithdrawalRepository(db)
 	accountID := uuid.New()
@@ -376,7 +378,7 @@ func TestWithdrawalRepository_TenantIsolation(t *testing.T) {
 	// Create withdrawal in tenant A
 	ctxA := tenant.WithTenant(context.Background(), tenantA)
 	withdrawalA := createTestWithdrawal(t, accountID, 10000, "WD-TENANT-A")
-	err = repo.Create(ctxA, withdrawalA)
+	err := repo.Create(ctxA, withdrawalA)
 	require.NoError(t, err)
 
 	// Verify withdrawal is visible in tenant A
