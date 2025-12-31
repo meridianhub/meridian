@@ -14,7 +14,7 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Deprecated package still needed during migration
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
@@ -218,7 +218,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	}
 
 	// Create Position Keeping client with DNS-based load balancing
-	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
+	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{ //nolint:staticcheck // Deprecated, migration in progress
 		ServiceName: config.PositionKeepingServiceName,
 		Namespace:   config.Namespace,
 		Port:        config.PositionKeepingPort,
@@ -238,7 +238,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	)
 
 	// Create Financial Accounting client with DNS-based load balancing
-	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
+	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{ //nolint:staticcheck // Deprecated, migration in progress
 		ServiceName: config.FinancialAccountingServiceName,
 		Namespace:   config.Namespace,
 		Port:        config.FinancialAccountingPort,
@@ -260,7 +260,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	// Create Party client (optional - nil client provides backward compatibility)
 	var resilientPartyClient clients.PartyClient
 	if config.PartyServiceName != "" {
-		partyGRPCClient, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
+		partyGRPCClient, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{ //nolint:staticcheck // Deprecated, migration in progress
 			ServiceName: config.PartyServiceName,
 			Namespace:   config.Namespace,
 			Port:        config.PartyPort,

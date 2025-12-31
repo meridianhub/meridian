@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Deprecated package still needed during migration
 	"github.com/meridianhub/meridian/services/current-account/service"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

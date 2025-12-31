@@ -14,7 +14,7 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Deprecated package still needed during migration
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"

@@ -10,7 +10,7 @@ import (
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	"github.com/meridianhub/meridian/services/tenant/clients"
+	"github.com/meridianhub/meridian/services/tenant/clients" //nolint:staticcheck // Deprecated package still needed during migration
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/auth"

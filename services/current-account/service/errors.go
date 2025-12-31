@@ -3,7 +3,7 @@ package service
 import (
 	"errors"
 
-	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Deprecated package still needed during migration
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 )
 
