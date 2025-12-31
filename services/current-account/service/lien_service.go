@@ -15,6 +15,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -115,7 +116,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	var account *domain.CurrentAccount
 	var availableBalance int64
 
-	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	txErr := db.WithGormTenantTransaction(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
 		txLienRepo := s.lienRepo.WithTx(tx)
 
@@ -336,7 +337,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	// Execute atomically in a transaction with pessimistic locking to prevent race conditions.
 	// We lock both the lien and account to prevent concurrent execute/terminate operations.
 	var account *domain.CurrentAccount
-	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	txErr := db.WithGormTenantTransaction(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
 		txLienRepo := s.lienRepo.WithTx(tx)
 
@@ -529,7 +530,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 
 	// Terminate atomically in a transaction with pessimistic locking to prevent race conditions.
 	// Without FOR UPDATE, concurrent TerminateLien calls could both pass CanTerminate() checks.
-	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	txErr := db.WithGormTenantTransaction(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txLienRepo := s.lienRepo.WithTx(tx)
 
 		// Retrieve lien with FOR UPDATE lock to prevent concurrent modifications
