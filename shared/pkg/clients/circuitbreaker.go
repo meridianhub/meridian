@@ -34,8 +34,8 @@ func DefaultCircuitBreakerConfig(name string) CircuitBreakerConfig {
 	return CircuitBreakerConfig{
 		Name:        name,
 		MaxRequests: 1,
-		Interval:    defaults.DefaultCircuitBreakerTimeout,
-		Timeout:     defaults.DefaultRPCTimeout,
+		Interval:    defaults.DefaultCircuitBreakerInterval,
+		Timeout:     defaults.DefaultCircuitBreakerOpenTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			// Trip circuit after 5 consecutive failures
 			return counts.ConsecutiveFailures >= 5

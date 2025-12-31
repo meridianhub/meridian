@@ -38,8 +38,8 @@ type ResilientClientConfig struct {
 func DefaultResilientClientConfig(name string) ResilientClientConfig {
 	return ResilientClientConfig{
 		CircuitBreakerName:     name,
-		CircuitBreakerTimeout:  defaults.DefaultRPCTimeout,
-		CircuitBreakerInterval: defaults.DefaultCircuitBreakerTimeout,
+		CircuitBreakerTimeout:  defaults.DefaultCircuitBreakerOpenTimeout,
+		CircuitBreakerInterval: defaults.DefaultCircuitBreakerInterval,
 		MaxRequests:            1,
 		FailureThreshold:       5,
 		MaxRetries:             3,
@@ -87,10 +87,10 @@ func applyConfigDefaults(config *ResilientClientConfig) (CircuitBreakerConfig, R
 		config.CircuitBreakerName = "default"
 	}
 	if config.CircuitBreakerTimeout == 0 {
-		config.CircuitBreakerTimeout = defaults.DefaultRPCTimeout
+		config.CircuitBreakerTimeout = defaults.DefaultCircuitBreakerOpenTimeout
 	}
 	if config.CircuitBreakerInterval == 0 {
-		config.CircuitBreakerInterval = defaults.DefaultCircuitBreakerTimeout
+		config.CircuitBreakerInterval = defaults.DefaultCircuitBreakerInterval
 	}
 	if config.MaxRequests == 0 {
 		config.MaxRequests = 1

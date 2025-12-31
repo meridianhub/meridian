@@ -251,7 +251,7 @@ func TestGetTimeoutBoundaryValues(t *testing.T) {
 	})
 }
 
-// TestGetTimeoutVariosDurationFormats tests that various valid Go duration formats are accepted.
+// TestGetTimeoutVariousDurationFormats tests that various valid Go duration formats are accepted.
 func TestGetTimeoutVariousDurationFormats(t *testing.T) {
 	formats := []struct {
 		input    string

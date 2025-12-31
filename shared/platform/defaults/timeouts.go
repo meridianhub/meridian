@@ -57,22 +57,42 @@ const (
 // Circuit Breaker Timeouts
 //
 // Circuit breakers prevent cascading failures by temporarily stopping calls
-// to failing services. These timeouts control how long circuits stay open
-// before allowing recovery attempts.
+// to failing services. These timeouts control circuit breaker behavior for
+// state transitions and counting intervals.
 const (
-	// DefaultCircuitBreakerTimeout is how long a circuit breaker stays open
+	// DefaultCircuitBreakerOpenTimeout is how long a circuit breaker stays open
 	// before transitioning to half-open state to attempt recovery.
 	//
-	// This value (60s) provides a balance:
+	// This value (30s) provides a balance:
 	//   - Long enough for transient failures to resolve (network blips, restarts)
-	//   - Short enough to detect recovery reasonably quickly
+	//   - Short enough to attempt recovery reasonably quickly
+	//   - Shorter than the interval to allow faster recovery detection
+	//
+	// Override for:
+	//   - External services with slow recovery: Increase to 60-120 seconds
+	//   - Internal services with fast failover: Decrease to 15 seconds
+	//   - Critical paths: Consider shorter timeouts with more retry attempts
+	DefaultCircuitBreakerOpenTimeout = 30 * time.Second
+
+	// DefaultCircuitBreakerInterval is the cyclic period for clearing failure counts
+	// when the circuit breaker is in closed state.
+	//
+	// This value (60s) provides a balance:
+	//   - Long enough to accumulate meaningful failure statistics
+	//   - Short enough to recover from temporary error spikes
 	//   - Matches common service restart and scaling times
 	//
 	// Override for:
-	//   - External services with slow recovery: Increase to 2-5 minutes
-	//   - Internal services with fast failover: Decrease to 15-30 seconds
-	//   - Critical paths: Consider shorter timeouts with more retry attempts
-	DefaultCircuitBreakerTimeout = 60 * time.Second
+	//   - High-throughput services: Decrease to 30s for faster response
+	//   - Low-traffic services: Increase to 120s to accumulate enough data
+	DefaultCircuitBreakerInterval = 60 * time.Second
+
+	// DefaultCircuitBreakerTimeout is an alias for DefaultCircuitBreakerInterval
+	// for backward compatibility.
+	//
+	// Deprecated: Use DefaultCircuitBreakerInterval for count clearing intervals,
+	// or DefaultCircuitBreakerOpenTimeout for open-to-half-open transitions.
+	DefaultCircuitBreakerTimeout = DefaultCircuitBreakerInterval
 )
 
 // Lifecycle Timeouts

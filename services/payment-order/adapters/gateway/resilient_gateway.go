@@ -52,8 +52,8 @@ func DefaultResilientGatewayConfig() ResilientGatewayConfig {
 	return ResilientGatewayConfig{
 		// Circuit breaker: trip after 5 failures, stay open for 30s
 		CircuitBreakerName:     "payment-gateway",
-		CircuitBreakerTimeout:  defaults.DefaultRPCTimeout,
-		CircuitBreakerInterval: defaults.DefaultCircuitBreakerTimeout,
+		CircuitBreakerTimeout:  defaults.DefaultCircuitBreakerOpenTimeout,
+		CircuitBreakerInterval: defaults.DefaultCircuitBreakerInterval,
 		MaxRequests:            1,
 		FailureThreshold:       5,
 
