@@ -12,6 +12,9 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
+// Default service name for metrics when namespace cannot be determined.
+const defaultMetricsServiceName = "financial-accounting"
+
 // IdempotencyCleanupWorker is a background worker that detects and marks
 // timed-out PENDING idempotency keys as FAILED.
 //
@@ -22,6 +25,7 @@ type IdempotencyCleanupWorker struct {
 	cleaner idempotency.Cleaner
 	config  config.IdempotencyCleanupConfig
 	logger  *slog.Logger
+	metrics *idempotency.MetricsCollector
 	done    chan struct{}
 	wg      sync.WaitGroup
 	mu      sync.Mutex
@@ -51,6 +55,24 @@ func NewIdempotencyCleanupWorker(
 	cfg config.IdempotencyCleanupConfig,
 	logger *slog.Logger,
 ) (*IdempotencyCleanupWorker, error) {
+	return NewIdempotencyCleanupWorkerWithMetrics(cleaner, cfg, logger, nil)
+}
+
+// NewIdempotencyCleanupWorkerWithMetrics creates a new cleanup worker with Prometheus metrics.
+//
+// Parameters:
+//   - cleaner: The idempotency cleaner (typically RedisService)
+//   - cfg: Worker configuration
+//   - logger: Structured logger
+//   - metrics: Optional metrics collector (nil disables metrics)
+//
+// Returns an error if any required parameter is invalid.
+func NewIdempotencyCleanupWorkerWithMetrics(
+	cleaner idempotency.Cleaner,
+	cfg config.IdempotencyCleanupConfig,
+	logger *slog.Logger,
+	metrics *idempotency.MetricsCollector,
+) (*IdempotencyCleanupWorker, error) {
 	if cleaner == nil {
 		return nil, ErrNilCleaner
 	}
@@ -71,6 +93,7 @@ func NewIdempotencyCleanupWorker(
 		cleaner: cleaner,
 		config:  cfg,
 		logger:  logger.With("component", "idempotency_cleanup_worker"),
+		metrics: metrics,
 		done:    make(chan struct{}),
 	}, nil
 }
@@ -160,14 +183,19 @@ func (w *IdempotencyCleanupWorker) runCleanupIteration(ctx context.Context) {
 	var totalProcessed, totalFailed int
 	var iterationErrors []error
 
+	// Track stale key count by service for gauge update
+	staleCountByService := make(map[string]int)
+
 	// Process in batches until no more stale keys found
 	for {
 		// Check for shutdown signal
 		select {
 		case <-ctx.Done():
+			w.updateStaleGauges(staleCountByService)
 			w.logIterationComplete(start, totalProcessed, totalFailed, iterationErrors)
 			return
 		case <-w.done:
+			w.updateStaleGauges(staleCountByService)
 			w.logIterationComplete(start, totalProcessed, totalFailed, iterationErrors)
 			return
 		default:
@@ -195,6 +223,12 @@ func (w *IdempotencyCleanupWorker) runCleanupIteration(ctx context.Context) {
 			"count", len(staleKeys),
 			"batch_size", w.config.BatchSize)
 
+		// Count stale keys by service for metrics
+		for _, staleKey := range staleKeys {
+			service := w.getServiceFromKey(staleKey)
+			staleCountByService[service]++
+		}
+
 		// Process each stale key
 		for _, staleKey := range staleKeys {
 			if err := w.processStaleKey(ctx, staleKey); err != nil {
@@ -202,6 +236,9 @@ func (w *IdempotencyCleanupWorker) runCleanupIteration(ctx context.Context) {
 				iterationErrors = append(iterationErrors, err)
 			} else {
 				totalProcessed++
+				// Decrement stale count since we successfully processed it
+				service := w.getServiceFromKey(staleKey)
+				staleCountByService[service]--
 			}
 		}
 
@@ -211,6 +248,8 @@ func (w *IdempotencyCleanupWorker) runCleanupIteration(ctx context.Context) {
 		}
 	}
 
+	// Update stale pending gauge with remaining unprocessed stale keys
+	w.updateStaleGauges(staleCountByService)
 	w.logIterationComplete(start, totalProcessed, totalFailed, iterationErrors)
 }
 
@@ -226,6 +265,15 @@ func (w *IdempotencyCleanupWorker) processStaleKey(ctx context.Context, staleKey
 		return err
 	}
 
+	// Record cleanup metric
+	service := w.getServiceFromKey(staleKey)
+	if w.metrics != nil {
+		w.metrics.RecordCleanedUp(service)
+	} else {
+		// Use global function if no collector is configured
+		idempotency.RecordIdempotencyCleanedUp(service)
+	}
+
 	w.logger.Info("marked stale PENDING key as FAILED",
 		"redis_key", staleKey.RedisKey,
 		"age", staleKey.Age,
@@ -234,6 +282,34 @@ func (w *IdempotencyCleanupWorker) processStaleKey(ctx context.Context, staleKey
 		"entity_id", staleKey.Result.Key.EntityID)
 
 	return nil
+}
+
+// getServiceFromKey extracts the service name from a stale key.
+// Falls back to default service name if namespace is not available.
+func (w *IdempotencyCleanupWorker) getServiceFromKey(staleKey idempotency.StalePendingKey) string {
+	if staleKey.Result != nil && staleKey.Result.Key.Namespace != "" {
+		return staleKey.Result.Key.Namespace
+	}
+	return defaultMetricsServiceName
+}
+
+// updateStaleGauges updates the stale pending gauge for each service.
+func (w *IdempotencyCleanupWorker) updateStaleGauges(countByService map[string]int) {
+	if w.metrics == nil {
+		// Use global function if no collector is configured
+		for service, count := range countByService {
+			if count > 0 {
+				idempotency.SetIdempotencyStalePendingCount(service, count)
+			}
+		}
+		return
+	}
+
+	for service, count := range countByService {
+		if count > 0 {
+			w.metrics.SetStalePendingCount(service, count)
+		}
+	}
 }
 
 // logIterationComplete logs the summary of a cleanup iteration.

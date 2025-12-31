@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // Test-specific sentinel errors for linter compliance (err113)
@@ -504,4 +506,115 @@ func (r *retryTrackingChecker) MarkPending(ctx context.Context, key Key, ttl tim
 		return errTestTransientError
 	}
 	return r.mockChecker.MarkPending(ctx, key, ttl)
+}
+
+func TestExecutorWithMetrics_RecordsPendingAndCompleted(t *testing.T) {
+	checker := newMockChecker()
+	metrics := NewMetricsCollector("executor-test-service")
+	executor := NewExecutorWithMetrics(checker, nil, metrics)
+
+	// Get initial counts
+	initialPending := testutil.ToFloat64(ExposeMetricsForTesting.KeysPendingTotal.WithLabelValues("executor-test-service", "create"))
+	initialCompleted := testutil.ToFloat64(ExposeMetricsForTesting.KeysCompletedTotal.WithLabelValues("executor-test-service", "create"))
+
+	key := Key{
+		Namespace: "test",
+		Operation: "create",
+		EntityID:  "metrics-test-123",
+	}
+
+	result, err := executor.Execute(context.Background(), key, time.Hour, func(_ context.Context) ([]byte, error) {
+		return []byte("result"), nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.FromCache {
+		t.Error("expected fresh result, not cached")
+	}
+
+	// Verify metrics were recorded
+	newPending := testutil.ToFloat64(ExposeMetricsForTesting.KeysPendingTotal.WithLabelValues("executor-test-service", "create"))
+	newCompleted := testutil.ToFloat64(ExposeMetricsForTesting.KeysCompletedTotal.WithLabelValues("executor-test-service", "create"))
+
+	if newPending != initialPending+1 {
+		t.Errorf("expected pending counter to increment by 1, got %v -> %v", initialPending, newPending)
+	}
+	if newCompleted != initialCompleted+1 {
+		t.Errorf("expected completed counter to increment by 1, got %v -> %v", initialCompleted, newCompleted)
+	}
+}
+
+func TestExecutorWithMetrics_ExecuteWithFailedState_RecordsFailure(t *testing.T) {
+	checker := newMockChecker()
+	metrics := NewMetricsCollector("executor-failed-test")
+	executor := NewExecutorWithMetrics(checker, nil, metrics)
+
+	// Get initial counts
+	initialPending := testutil.ToFloat64(ExposeMetricsForTesting.KeysPendingTotal.WithLabelValues("executor-failed-test", "withdraw"))
+	initialFailed := testutil.ToFloat64(ExposeMetricsForTesting.KeysFailedTotal.WithLabelValues("executor-failed-test", "withdraw", MetricReasonInternal))
+
+	key := Key{
+		Namespace: "test",
+		Operation: "withdraw",
+		EntityID:  "metrics-fail-456",
+	}
+
+	_, err := executor.ExecuteWithFailedState(context.Background(), key, time.Hour, func(_ context.Context) ([]byte, error) {
+		return nil, errTestInsufficientFunds
+	})
+
+	if err == nil {
+		t.Fatal("expected error from operation")
+	}
+
+	// Verify metrics were recorded
+	newPending := testutil.ToFloat64(ExposeMetricsForTesting.KeysPendingTotal.WithLabelValues("executor-failed-test", "withdraw"))
+	newFailed := testutil.ToFloat64(ExposeMetricsForTesting.KeysFailedTotal.WithLabelValues("executor-failed-test", "withdraw", MetricReasonInternal))
+
+	if newPending != initialPending+1 {
+		t.Errorf("expected pending counter to increment by 1, got %v -> %v", initialPending, newPending)
+	}
+	if newFailed != initialFailed+1 {
+		t.Errorf("expected failed counter to increment by 1, got %v -> %v", initialFailed, newFailed)
+	}
+}
+
+func TestExecutorWithMetrics_CachedResult_NoMetrics(t *testing.T) {
+	checker := newMockChecker()
+	metrics := NewMetricsCollector("executor-cache-test")
+	executor := NewExecutorWithMetrics(checker, nil, metrics)
+
+	key := Key{
+		Namespace: "test",
+		Operation: "cached-op",
+		EntityID:  "cache-123",
+	}
+
+	// Pre-populate with completed result
+	checker.results[key.String()] = &Result{
+		Key:    key,
+		Status: StatusCompleted,
+		Data:   []byte("cached"),
+	}
+
+	// Get initial counts
+	initialPending := testutil.ToFloat64(ExposeMetricsForTesting.KeysPendingTotal.WithLabelValues("executor-cache-test", "cached-op"))
+
+	result, err := executor.Execute(context.Background(), key, time.Hour, func(_ context.Context) ([]byte, error) {
+		t.Error("operation should not be called for cached result")
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.FromCache {
+		t.Error("expected FromCache to be true")
+	}
+
+	// Verify no new pending metrics were recorded (cached hit doesn't increment pending)
+	newPending := testutil.ToFloat64(ExposeMetricsForTesting.KeysPendingTotal.WithLabelValues("executor-cache-test", "cached-op"))
+	if newPending != initialPending {
+		t.Errorf("expected no change in pending counter for cached result, got %v -> %v", initialPending, newPending)
+	}
 }

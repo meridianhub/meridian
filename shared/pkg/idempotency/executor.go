@@ -76,6 +76,7 @@ type Executor struct {
 	checker      Checker
 	stateMachine *StateMachine
 	config       ExecutorConfig
+	metrics      *MetricsCollector
 }
 
 // NewExecutor creates a new idempotency executor.
@@ -93,7 +94,20 @@ func NewExecutor(checker Checker, config *ExecutorConfig) *Executor {
 		checker:      checker,
 		stateMachine: NewStateMachine(nil),
 		config:       *config,
+		metrics:      nil, // No metrics by default for backward compatibility
 	}
+}
+
+// NewExecutorWithMetrics creates a new idempotency executor with Prometheus metrics.
+//
+// Parameters:
+//   - checker: The idempotency checker/storer (typically RedisService)
+//   - config: Optional configuration (nil uses DefaultExecutorConfig)
+//   - metrics: Metrics collector for recording operation metrics
+func NewExecutorWithMetrics(checker Checker, config *ExecutorConfig, metrics *MetricsCollector) *Executor {
+	e := NewExecutor(checker, config)
+	e.metrics = metrics
+	return e
 }
 
 // ExecuteResult contains the outcome of an Execute call.
@@ -152,14 +166,25 @@ func (e *Executor) Execute(ctx context.Context, key Key, ttl time.Duration, fn O
 	}
 
 	// Step 2: Mark as pending with retry for deadlocks
+	pendingStart := time.Now()
 	if err := e.markPendingWithRetry(ctx, key, ttl); err != nil {
 		return nil, err
+	}
+
+	// Record pending metric
+	if e.metrics != nil {
+		e.metrics.RecordPending(key.Operation)
 	}
 
 	// Step 3: Execute business logic with cleanup on failure
 	resultData, execErr := fn(ctx)
 
 	if execErr != nil {
+		// Record pending duration and failure (key is deleted, not marked failed)
+		if e.metrics != nil {
+			e.metrics.RecordPendingDuration(key.Operation, time.Since(pendingStart))
+		}
+
 		// Business logic failed - clean up PENDING state
 		// We delete rather than mark FAILED to allow retries with the same key
 		if deleteErr := e.checker.Delete(ctx, key); deleteErr != nil {
@@ -170,6 +195,12 @@ func (e *Executor) Execute(ctx context.Context, key Key, ttl time.Duration, fn O
 				"cleanup_error", deleteErr.Error())
 		}
 		return nil, execErr
+	}
+
+	// Record pending duration and completion
+	if e.metrics != nil {
+		e.metrics.RecordPendingDuration(key.Operation, time.Since(pendingStart))
+		e.metrics.RecordCompleted(key.Operation)
 	}
 
 	// Step 4: Store successful result
@@ -277,14 +308,26 @@ func (e *Executor) ExecuteWithFailedState(ctx context.Context, key Key, ttl time
 	}
 
 	// Step 2: Mark as pending
+	pendingStart := time.Now()
 	if err := e.markPendingWithRetry(ctx, key, ttl); err != nil {
 		return nil, err
+	}
+
+	// Record pending metric
+	if e.metrics != nil {
+		e.metrics.RecordPending(key.Operation)
 	}
 
 	// Step 3: Execute business logic
 	resultData, execErr := fn(ctx)
 
 	if execErr != nil {
+		// Record pending duration and failure
+		if e.metrics != nil {
+			e.metrics.RecordPendingDuration(key.Operation, time.Since(pendingStart))
+			e.metrics.RecordFailed(key.Operation, MetricReasonInternal)
+		}
+
 		// Mark as FAILED instead of deleting
 		failedResult := Result{
 			Key:         key,
@@ -302,6 +345,12 @@ func (e *Executor) ExecuteWithFailedState(ctx context.Context, key Key, ttl time
 		}
 
 		return nil, execErr
+	}
+
+	// Record pending duration and completion
+	if e.metrics != nil {
+		e.metrics.RecordPendingDuration(key.Operation, time.Since(pendingStart))
+		e.metrics.RecordCompleted(key.Operation)
 	}
 
 	// Step 4: Store successful result

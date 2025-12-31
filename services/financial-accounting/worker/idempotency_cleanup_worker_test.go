@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/worker"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -394,4 +395,87 @@ func TestCleanupWorker_ValidationErrors(t *testing.T) {
 			assert.ErrorIs(t, err, tc.expectedErr)
 		})
 	}
+}
+
+// TestCleanupWorker_MetricsRecorded tests that the cleanup worker correctly
+// records Prometheus metrics when processing stale keys.
+func TestCleanupWorker_MetricsRecorded(t *testing.T) {
+	redisSvc, _, cleanup := setupTestRedis(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	logger := testLogger()
+
+	// Get initial cleanup counter value
+	initialCleanedUp := testutil.ToFloat64(
+		idempotency.ExposeMetricsForTesting.KeysCleanedUpTotal.WithLabelValues("metrics-test"),
+	)
+
+	// Create some PENDING keys with a unique namespace for metrics isolation
+	numKeys := 5
+	keys := make([]idempotency.Key, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = idempotency.Key{
+			Namespace: "metrics-test",
+			Operation: "payment",
+			EntityID:  "account-metrics-" + formatInt(i),
+			RequestID: "req-metrics-" + formatInt(i),
+		}
+		err := redisSvc.MarkPending(ctx, keys[i], time.Hour)
+		require.NoError(t, err)
+	}
+
+	// Wait for keys to become stale
+	time.Sleep(50 * time.Millisecond)
+
+	// Configure worker with short threshold
+	cfg := config.IdempotencyCleanupConfig{
+		Enabled:        true,
+		StaleThreshold: 10 * time.Millisecond,
+		RunInterval:    100 * time.Millisecond,
+		BatchSize:      100,
+		KeyPattern:     "idempotency:result:*",
+	}
+
+	// Create worker with metrics collector
+	metrics := idempotency.NewMetricsCollector("cleanup-worker-test")
+	w, err := worker.NewIdempotencyCleanupWorkerWithMetrics(redisSvc, cfg, logger, metrics)
+	require.NoError(t, err)
+
+	// Start worker in background
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+
+	go func() {
+		_ = w.Start(workerCtx)
+	}()
+
+	// Wait for all keys to be processed
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			failedCount := 0
+			for _, key := range keys {
+				result, checkErr := redisSvc.Check(ctx, key)
+				if checkErr == nil && result != nil && result.Status == idempotency.StatusFailed {
+					failedCount++
+				}
+			}
+			return failedCount == numKeys
+		})
+
+	require.NoError(t, err, "expected all keys to be marked as FAILED")
+
+	// Verify cleanup counter was incremented for the namespace
+	newCleanedUp := testutil.ToFloat64(
+		idempotency.ExposeMetricsForTesting.KeysCleanedUpTotal.WithLabelValues("metrics-test"),
+	)
+
+	// The cleanup counter should have increased by at least numKeys
+	assert.GreaterOrEqual(t, newCleanedUp, initialCleanedUp+float64(numKeys),
+		"cleanup counter should be incremented for each processed key")
+
+	// Stop worker
+	w.Stop()
 }
