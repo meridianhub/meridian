@@ -34,6 +34,9 @@ var (
 
 	// ErrUnexpectedRedisResponse indicates Redis returned an unexpected response type
 	ErrUnexpectedRedisResponse = errors.New("unexpected redis response type")
+
+	// ErrNilResult indicates a nil result was provided where one was required
+	ErrNilResult = errors.New("result cannot be nil")
 )
 
 // Key represents an idempotency key with namespace and operation context
@@ -112,6 +115,10 @@ type Result struct {
 
 	// Error contains error message if Status is StatusFailed
 	Error string
+
+	// CreatedAt is when the operation started (set when status becomes PENDING)
+	// Used by cleanup workers to detect stale PENDING keys
+	CreatedAt time.Time
 
 	// CompletedAt is when the operation finished
 	CompletedAt time.Time
@@ -197,4 +204,50 @@ type Locker interface {
 type Service interface {
 	Checker
 	Locker
+}
+
+// StalePendingKey represents a PENDING idempotency key that has exceeded
+// the stale timeout threshold and is eligible for cleanup.
+type StalePendingKey struct {
+	// RedisKey is the full Redis key (e.g., "idempotency:result:ns:op:entity")
+	RedisKey string
+
+	// Result is the parsed idempotency result
+	Result *Result
+
+	// Age is how long the key has been in PENDING state
+	Age time.Duration
+}
+
+// CleanupResult contains the outcome of a cleanup batch operation.
+type CleanupResult struct {
+	// Processed is the number of stale keys that were processed
+	Processed int
+
+	// Failed is the number of keys that failed to be marked as FAILED
+	Failed int
+
+	// Errors contains any errors encountered during cleanup
+	Errors []error
+}
+
+// Cleaner provides capabilities for detecting and cleaning up stale PENDING keys.
+// This is used by background workers to prevent keys from being stuck in PENDING
+// state indefinitely when the original request failed without completing.
+type Cleaner interface {
+	// ScanStalePendingKeys scans for PENDING keys older than the threshold.
+	// It returns up to `limit` stale keys in each call.
+	// The pattern parameter filters keys (e.g., "idempotency:result:*").
+	// Returns empty slice if no stale keys found.
+	ScanStalePendingKeys(ctx context.Context, pattern string, threshold time.Duration, limit int) ([]StalePendingKey, error)
+
+	// MarkStaleAsFailed updates a stale PENDING key to FAILED status with a timeout reason.
+	// This allows the operation to be retried with a new idempotency key.
+	MarkStaleAsFailed(ctx context.Context, key StalePendingKey, reason string) error
+}
+
+// CleanableService combines Service with Cleaner for full cleanup support.
+type CleanableService interface {
+	Service
+	Cleaner
 }
