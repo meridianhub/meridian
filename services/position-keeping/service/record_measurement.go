@@ -15,6 +15,7 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -97,10 +98,7 @@ func (s *PositionKeepingService) RecordMeasurement(
 	}
 
 	// Get user from context for audit
-	userID := "system"
-	if tenantID, ok := tenant.FromContext(ctx); ok {
-		userID = string(tenantID)
-	}
+	userID := audit.GetUserFromContext(ctx)
 
 	// Create measurement domain object
 	measurement, err := domain.NewMeasurement(
