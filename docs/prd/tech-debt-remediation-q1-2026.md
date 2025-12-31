@@ -74,6 +74,66 @@ This PRD defines the technical debt remediation work identified during a compreh
 
 ---
 
+#### 1.3 LienRepository Tenant Isolation Bug (CRITICAL)
+
+**Problem:** Several `LienRepository` methods do not accept `context.Context` and therefore cannot enforce tenant isolation. These methods query without setting the PostgreSQL `search_path`, potentially accessing data across tenant schemas.
+
+**Root Cause:** Transactions in `lien_service.go` are started with `s.repo.DB().Transaction()` without first setting tenant scope. Methods without context cannot call `withTenantTransaction()`.
+
+**Files Affected:**
+- `services/current-account/adapters/persistence/lien_repository.go`
+  - `Create(lien *domain.Lien)` - Line 47
+  - `FindByIDForUpdate(id uuid.UUID)` - Line 78
+  - `FindByAccountID(accountID uuid.UUID)` - Line 96
+  - `FindActiveByAccountID(accountID uuid.UUID)` - Line 118
+  - `Update(lien *domain.Lien)` - Line 166
+
+- `services/current-account/service/lien_service.go`
+  - Transaction without tenant scope - Lines 118, 339, 532
+
+**Risk:** Cross-tenant data leakage in lien operations. A request from Tenant A could potentially read/write Tenant B's liens.
+
+**Acceptance Criteria:**
+- [ ] All `LienRepository` methods accept `context.Context` as first parameter
+- [ ] All methods use `withTenantTransaction()` for tenant-scoped queries
+- [ ] Transactions in `lien_service.go` use `db.WithGormTenantTransaction()`
+- [ ] Integration tests verify tenant isolation (query from Tenant A returns no Tenant B data)
+- [ ] Audit existing data for any cross-tenant contamination
+
+**Estimated Effort:** 2-3 days
+
+---
+
+#### 1.4 Gateway Authentication Gap
+
+**Problem:** The gateway service forwards HTTP requests to backend gRPC services without any authentication or authorization. The tenant middleware resolves tenant identity from subdomain, but there's no verification that the caller is authorized.
+
+**Files Affected:**
+- `services/gateway/proxy.go` - `ServeHTTP` method just forwards requests
+- `services/gateway/server.go` - No auth middleware in chain
+
+**Current Flow:**
+```
+Client → Gateway → Backend (no auth check)
+```
+
+**Required Flow:**
+```
+Client → Gateway (JWT/API key validation) → Backend (with verified identity)
+```
+
+**Acceptance Criteria:**
+- [ ] JWT validation middleware in gateway
+- [ ] API key authentication as alternative for service-to-service
+- [ ] Reject unauthenticated requests with 401
+- [ ] Pass verified identity to backends via headers/metadata
+- [ ] Rate limiting per authenticated identity
+- [ ] Integration tests for auth flows
+
+**Estimated Effort:** 3-4 days
+
+---
+
 ### Stream 2: Event Infrastructure (P1)
 
 #### 2.1 Account Lifecycle Events
@@ -426,6 +486,8 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 |----|-----------|----------|--------|--------------|
 | 1.1 | Withdrawal Persistence | P0 | 3-5d | None |
 | 1.2 | Idempotency Gap Fix | P0 | 2-3d | None |
+| 1.3 | **LienRepository Tenant Isolation Bug** | P0 | 2-3d | None |
+| 1.4 | **Gateway Authentication** | P0 | 3-4d | None |
 | 2.1 | Account Lifecycle Events | P1 | 2-3d | None |
 | 2.2 | Utilization Metering Endpoint | P1 | 3-4d | None |
 | 3.1 | Standardized Service Client Library | P2 | 4-5d | None |
@@ -436,25 +498,27 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 | 5.1 | Double-Wrapped Error | P3 | 0.5h | None |
 | 5.2 | Auth Context Extraction | P3 | 0.5d | None |
 
-**Total Estimated Effort:** 22-31 days
+**Total Estimated Effort:** 27-38 days
 
 ---
 
 ## Success Metrics
 
-1. **P0 Complete:** All critical production blockers resolved
-2. **Test Coverage:** No regression in test coverage
-3. **Build Clean:** Zero new linter warnings
-4. **Documentation:** All new patterns documented
+1. **P0 Complete:** All critical production blockers resolved (including tenant isolation)
+2. **Security:** Gateway authenticates all requests before forwarding
+3. **Test Coverage:** No regression in test coverage
+4. **Build Clean:** Zero new linter warnings
+5. **Documentation:** All new patterns documented
 
 ---
 
 ## Rollout Plan
 
-**Phase 1 (Week 1-2):** P0 items (1.1, 1.2)
-**Phase 2 (Week 3-4):** P1 items (2.1, 2.2)
-**Phase 3 (Week 5-6):** P2 items (3.x, 4.x)
-**Phase 4 (Ongoing):** P3 items as capacity allows
+**Phase 1 (Week 1-2):** P0 Critical - Tenant isolation (1.3), Gateway auth (1.4)
+**Phase 2 (Week 3-4):** P0 Remaining - Withdrawal (1.1), Idempotency (1.2)
+**Phase 3 (Week 5-6):** P1 items (2.1, 2.2)
+**Phase 4 (Week 7-8):** P2 items (3.x, 4.x)
+**Phase 5 (Ongoing):** P3 items as capacity allows
 
 ---
 
