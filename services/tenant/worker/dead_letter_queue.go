@@ -106,9 +106,11 @@ func (q *AlertDeadLetterQueue) Enqueue(alert FailedAlert) {
 
 	q.alerts = append(q.alerts, alert)
 
-	// Invoke callback outside of lock to prevent deadlocks
+	// Invoke callback outside of lock to prevent deadlocks.
+	// Pass a copy of the alert to avoid race conditions with slice operations.
 	if q.onEnqueue != nil {
-		go q.onEnqueue(alert)
+		alertCopy := alert
+		go q.onEnqueue(alertCopy)
 	}
 }
 

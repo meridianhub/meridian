@@ -25,6 +25,16 @@ const (
 	AlertTypeSlack     = "slack"
 )
 
+// Error message truncation constants.
+// PagerDuty Events API v2 has a 1024 character limit for the summary field.
+// We use a conservative limit to leave room for the tenant ID prefix.
+const (
+	// maxErrorMessageLength is the maximum length for error messages in alert summaries.
+	maxErrorMessageLength = 200
+	// truncatedErrorMessageLength is the length to truncate to (leaving room for "...").
+	truncatedErrorMessageLength = 197
+)
+
 // ErrRateLimited is returned when an alert is blocked by rate limiting.
 var ErrRateLimited = errors.New("alert rate limited")
 
@@ -140,6 +150,11 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 
 	// Process alerts for each failed tenant
 	for _, tenant := range failedTenants {
+		// Check for context cancellation to enable graceful shutdown
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		a.logger.Warn("tenant provisioning failure alert",
 			"alert", "tenant_provisioning_failed",
 			"tenant_id", tenant.ID,
@@ -334,8 +349,8 @@ func (a *AlertManager) buildAlertPayload(tenant *domain.Tenant) AlertPayload {
 	summary := fmt.Sprintf("Tenant provisioning failed: %s", tenant.ID)
 	if tenant.ErrorMessage != "" {
 		errMsg := tenant.ErrorMessage
-		if len(errMsg) > 200 {
-			errMsg = errMsg[:197] + "..."
+		if len(errMsg) > maxErrorMessageLength {
+			errMsg = errMsg[:truncatedErrorMessageLength] + "..."
 		}
 		summary = fmt.Sprintf("Tenant provisioning failed: %s - %s", tenant.ID, errMsg)
 	}
@@ -391,8 +406,8 @@ func (a *AlertManager) sendPagerDutyAlert(ctx context.Context, tenant *domain.Te
 	if tenant.ErrorMessage != "" {
 		// Truncate error message if too long (PagerDuty has summary limits)
 		errMsg := tenant.ErrorMessage
-		if len(errMsg) > 200 {
-			errMsg = errMsg[:197] + "..."
+		if len(errMsg) > maxErrorMessageLength {
+			errMsg = errMsg[:truncatedErrorMessageLength] + "..."
 		}
 		summary = fmt.Sprintf("Tenant provisioning failed: %s - %s", tenant.ID, errMsg)
 	}

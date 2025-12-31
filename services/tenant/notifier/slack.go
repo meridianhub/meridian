@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -66,8 +67,10 @@ func NewSlackNotifier(cfg SlackNotifierConfig) *SlackNotifier {
 
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
+		// Use 30s timeout to match PagerDuty client - external services may have
+		// variable latency, especially under load or during incidents.
 		httpClient = &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 30 * time.Second,
 		}
 	}
 
@@ -224,14 +227,23 @@ func (s *SlackNotifier) buildPayload(alert Alert, alertID string) slackPayload {
 		details += fmt.Sprintf("\n\n*Error:*\n```%s```", alert.Message)
 	}
 
-	// Add metadata fields if present
+	// Add metadata fields if present, sorted by key for deterministic ordering
 	var metadataFields []slackTextObj
-	for key, value := range alert.Metadata {
-		if value != "" {
-			metadataFields = append(metadataFields, slackTextObj{
-				Type: "mrkdwn",
-				Text: fmt.Sprintf("*%s:* %s", key, value),
-			})
+	if len(alert.Metadata) > 0 {
+		keys := make([]string, 0, len(alert.Metadata))
+		for key := range alert.Metadata {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+
+		for _, key := range keys {
+			value := alert.Metadata[key]
+			if value != "" {
+				metadataFields = append(metadataFields, slackTextObj{
+					Type: "mrkdwn",
+					Text: fmt.Sprintf("*%s:* %s", key, value),
+				})
+			}
 		}
 	}
 

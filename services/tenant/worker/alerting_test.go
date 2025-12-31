@@ -748,7 +748,7 @@ func TestCheckFailedProvisioningAlerts_RateLimiting(t *testing.T) {
 	// Create 15 failed tenants
 	ctx := context.Background()
 	for i := 1; i <= 15; i++ {
-		tenant := &domain.Tenant{
+		testTenant := &domain.Tenant{
 			ID:              tenant.TenantID(fmt.Sprintf("rate_limit_tenant_%d", i)),
 			DisplayName:     fmt.Sprintf("Tenant %d", i),
 			SettlementAsset: "USD",
@@ -757,9 +757,9 @@ func TestCheckFailedProvisioningAlerts_RateLimiting(t *testing.T) {
 			CreatedAt:       time.Now().Add(-2 * time.Hour),
 			Version:         1,
 		}
-		err := repo.Create(ctx, tenant)
+		err := repo.Create(ctx, testTenant)
 		require.NoError(t, err)
-		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", testTenant.ID.String()).Error
 		require.NoError(t, err)
 	}
 
@@ -810,7 +810,7 @@ func TestCheckFailedProvisioningAlerts_RateLimitMetric(t *testing.T) {
 	// Create 5 failed tenants
 	ctx := context.Background()
 	for i := 1; i <= 5; i++ {
-		tenant := &domain.Tenant{
+		testTenant := &domain.Tenant{
 			ID:              tenant.TenantID(fmt.Sprintf("metric_tenant_%d", i)),
 			DisplayName:     fmt.Sprintf("Tenant %d", i),
 			SettlementAsset: "USD",
@@ -819,9 +819,9 @@ func TestCheckFailedProvisioningAlerts_RateLimitMetric(t *testing.T) {
 			CreatedAt:       time.Now().Add(-2 * time.Hour),
 			Version:         1,
 		}
-		err := repo.Create(ctx, tenant)
+		err := repo.Create(ctx, testTenant)
 		require.NoError(t, err)
-		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", testTenant.ID.String()).Error
 		require.NoError(t, err)
 	}
 
