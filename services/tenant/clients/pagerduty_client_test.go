@@ -351,7 +351,7 @@ func TestPagerDutyClient_TriggerAlert_ContextCancellation(t *testing.T) {
 }
 
 func TestPagerDutyClient_TriggerAlert_InvalidJSONResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`not valid json`))
 	}))
