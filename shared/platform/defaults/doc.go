@@ -30,6 +30,10 @@
 //	longRunningCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 //	defer cancel()
 //
+//	// Use Get* functions for environment-configurable timeouts
+//	ctx, cancel := context.WithTimeout(ctx, defaults.GetRPCTimeout())
+//	defer cancel()
+//
 // # Categories
 //
 // The constants are organized into categories:
@@ -37,5 +41,42 @@
 //   - Health check timeouts: For probe responsiveness
 //   - Circuit breaker timeouts: For failure recovery
 //   - Lifecycle timeouts: For graceful shutdown and startup
+//   - HTTP server timeouts: For request handling and connection management
 //   - Retry timings: For backoff and retry logic
+//
+// # Environment Variable Overrides
+//
+// Each timeout has a corresponding Get* function that checks for an environment
+// variable override before returning the default value. This allows runtime
+// configuration without code changes.
+//
+// Supported environment variables:
+//
+//	TIMEOUT_RPC                - Override DefaultRPCTimeout (valid: 1s-5m)
+//	TIMEOUT_HEALTH_CHECK       - Override DefaultHealthCheckTimeout (valid: 1s-5m)
+//	TIMEOUT_CIRCUIT_BREAKER    - Override DefaultCircuitBreakerTimeout (valid: 1s-5m)
+//	TIMEOUT_GRACEFUL_SHUTDOWN  - Override DefaultGracefulShutdown (valid: 1s-5m)
+//	TIMEOUT_CONTEXT            - Override DefaultContextTimeout (valid: 1s-5m)
+//	TIMEOUT_RETRY_DELAY        - Override DefaultRetryDelay (valid: 10ms-1m)
+//	TIMEOUT_MAX_RETRY_INTERVAL - Override DefaultMaxRetryInterval (valid: 10ms-1m)
+//	TIMEOUT_HTTP_READ_HEADER   - Override DefaultHTTPReadHeaderTimeout (valid: 1s-5m)
+//	TIMEOUT_HTTP_READ          - Override DefaultHTTPReadTimeout (valid: 1s-5m)
+//	TIMEOUT_HTTP_WRITE         - Override DefaultHTTPWriteTimeout (valid: 1s-5m)
+//	TIMEOUT_HTTP_IDLE          - Override DefaultHTTPIdleTimeout (valid: 1s-5m)
+//
+// Values must be valid Go duration strings (e.g., "30s", "2m", "500ms").
+// Invalid or out-of-range values are logged and the default is used instead.
+//
+// # Example Environment Override
+//
+//	# In Kubernetes deployment or docker-compose
+//	env:
+//	  - name: TIMEOUT_RPC
+//	    value: "60s"
+//	  - name: TIMEOUT_GRACEFUL_SHUTDOWN
+//	    value: "45s"
+//
+//	# In shell
+//	export TIMEOUT_RPC=60s
+//	export TIMEOUT_GRACEFUL_SHUTDOWN=45s
 package defaults
