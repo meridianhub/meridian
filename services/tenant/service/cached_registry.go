@@ -37,7 +37,7 @@ type CachedRegistryConfig struct {
 // DefaultCachedRegistryConfig returns the default configuration.
 func DefaultCachedRegistryConfig() CachedRegistryConfig {
 	return CachedRegistryConfig{
-		RefreshInterval: defaults.DefaultCircuitBreakerTimeout,
+		RefreshInterval: defaults.DefaultCircuitBreakerInterval,
 		RefreshTimeout:  defaults.DefaultRPCTimeout,
 		Logger:          slog.Default(),
 	}
@@ -46,7 +46,7 @@ func DefaultCachedRegistryConfig() CachedRegistryConfig {
 // NewCachedRegistry creates a new cached tenant registry.
 func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig) *CachedRegistry {
 	if config.RefreshInterval <= 0 {
-		config.RefreshInterval = defaults.DefaultCircuitBreakerTimeout
+		config.RefreshInterval = defaults.DefaultCircuitBreakerInterval
 	}
 	if config.RefreshTimeout <= 0 {
 		config.RefreshTimeout = defaults.DefaultRPCTimeout
