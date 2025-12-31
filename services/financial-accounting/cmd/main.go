@@ -18,8 +18,10 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	"github.com/meridianhub/meridian/services/financial-accounting/config"
 	serviceobs "github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
+	"github.com/meridianhub/meridian/services/financial-accounting/worker"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -41,7 +43,8 @@ var (
 
 // Package-level variables for lifecycle management
 var (
-	outboxWorker *events.Worker
+	outboxWorker             *events.Worker
+	idempotencyCleanupWorker *worker.IdempotencyCleanupWorker
 )
 
 // Static errors for configuration validation
@@ -181,6 +184,7 @@ func run(logger *slog.Logger) error {
 
 	// Create Redis client and idempotency service
 	var idempotencySvc idempotency.Service
+	var redisSvc *idempotency.RedisService // Keep reference for cleanup worker
 	redisClient, err := createRedisClient(logger)
 	if err != nil {
 		// Non-fatal: fall back to noop service for development/testing
@@ -188,13 +192,41 @@ func run(logger *slog.Logger) error {
 			"error", err)
 		idempotencySvc = newNoopIdempotencyService()
 	} else {
-		idempotencySvc = idempotency.NewRedisService(redisClient)
+		redisSvc = idempotency.NewRedisService(redisClient)
+		idempotencySvc = redisSvc
 		logger.Info("idempotency service initialized with Redis")
 		defer func() {
 			if err := redisClient.Close(); err != nil {
 				logger.Error("failed to close Redis client", "error", err)
 			}
 		}()
+	}
+
+	// Initialize idempotency cleanup worker (only if Redis is available)
+	cleanupConfig := config.LoadIdempotencyCleanupConfig()
+	if redisSvc != nil && cleanupConfig.Enabled {
+		var workerErr error
+		idempotencyCleanupWorker, workerErr = worker.NewIdempotencyCleanupWorker(
+			redisSvc,
+			cleanupConfig,
+			logger,
+		)
+		if workerErr != nil {
+			logger.Error("failed to create idempotency cleanup worker", "error", workerErr)
+		} else {
+			// Start cleanup worker in background
+			go func() {
+				if err := idempotencyCleanupWorker.Start(ctx); err != nil {
+					logger.Error("idempotency cleanup worker error", "error", err)
+				}
+			}()
+			logger.Info("idempotency cleanup worker started",
+				"stale_threshold", cleanupConfig.StaleThreshold,
+				"run_interval", cleanupConfig.RunInterval,
+				"batch_size", cleanupConfig.BatchSize)
+		}
+	} else if !cleanupConfig.Enabled {
+		logger.Info("idempotency cleanup worker disabled by configuration")
 	}
 
 	// Create event publisher (noop for now - Kafka implementation for production)
@@ -330,6 +362,13 @@ func run(logger *slog.Logger) error {
 
 	// Close database connection during shutdown
 	defer bootstrap.CloseDatabase(db, logger)
+
+	// Stop idempotency cleanup worker
+	if idempotencyCleanupWorker != nil {
+		logger.Info("stopping idempotency cleanup worker...")
+		idempotencyCleanupWorker.Stop()
+		logger.Info("idempotency cleanup worker stopped")
+	}
 
 	// Stop outbox worker first (stop processing before closing Kafka producer)
 	if outboxWorker != nil {

@@ -73,6 +73,7 @@ func (r *RedisService) MarkPending(ctx context.Context, key Key, ttl time.Durati
 		Status:      StatusPending,
 		Data:        nil,
 		Error:       "",
+		CreatedAt:   time.Now(),  // Track when PENDING state started for cleanup
 		CompletedAt: time.Time{}, // Zero time for pending operations
 		TTL:         ttl,
 	}
@@ -272,6 +273,11 @@ func (r *RedisService) lockKey(key Key) string {
 
 // toProto converts Result to protobuf
 func toProto(result Result) *platformv1.IdempotencyResult {
+	var createdAt *timestamppb.Timestamp
+	if !result.CreatedAt.IsZero() {
+		createdAt = timestamppb.New(result.CreatedAt)
+	}
+
 	var completedAt *timestamppb.Timestamp
 	if !result.CompletedAt.IsZero() {
 		completedAt = timestamppb.New(result.CompletedAt)
@@ -285,6 +291,7 @@ func toProto(result Result) *platformv1.IdempotencyResult {
 		Status:      statusToProto(result.Status),
 		Data:        result.Data,
 		Error:       result.Error,
+		CreatedAt:   createdAt,
 		CompletedAt: completedAt,
 		TtlSeconds:  int64(result.TTL.Seconds()),
 	}
@@ -292,6 +299,11 @@ func toProto(result Result) *platformv1.IdempotencyResult {
 
 // fromProto converts protobuf to Result
 func fromProto(pb *platformv1.IdempotencyResult) (*Result, error) {
+	var createdAt time.Time
+	if pb.CreatedAt != nil {
+		createdAt = pb.CreatedAt.AsTime()
+	}
+
 	var completedAt time.Time
 	if pb.CompletedAt != nil {
 		completedAt = pb.CompletedAt.AsTime()
@@ -314,6 +326,7 @@ func fromProto(pb *platformv1.IdempotencyResult) (*Result, error) {
 		Status:      status,
 		Data:        pb.Data,
 		Error:       pb.Error,
+		CreatedAt:   createdAt,
 		CompletedAt: completedAt,
 		TTL:         time.Duration(pb.TtlSeconds) * time.Second,
 	}, nil
@@ -347,4 +360,173 @@ func statusFromProto(status platformv1.OperationStatus) OperationStatus {
 	default:
 		return ""
 	}
+}
+
+// ScanStalePendingKeys scans for PENDING keys older than the threshold.
+// It uses Redis SCAN to iterate through keys matching the pattern and checks
+// each one for PENDING status with age exceeding the threshold.
+//
+// Parameters:
+//   - pattern: Redis key pattern to scan (e.g., "idempotency:result:*")
+//   - threshold: How long a PENDING key must exist before considered stale
+//   - limit: Maximum number of stale keys to return (batch size)
+//
+// Returns stale keys found, up to the limit. Returns empty slice if none found.
+func (r *RedisService) ScanStalePendingKeys(ctx context.Context, pattern string, threshold time.Duration, limit int) ([]StalePendingKey, error) {
+	if limit <= 0 {
+		limit = 100 // Default batch size
+	}
+
+	now := time.Now()
+	var staleKeys []StalePendingKey
+	var cursor uint64
+
+	// Scan through Redis keys matching the pattern
+	for {
+		if err := ctx.Err(); err != nil {
+			return staleKeys, err
+		}
+
+		// SCAN returns a cursor and a batch of keys
+		keys, nextCursor, err := r.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan keys: %w", err)
+		}
+
+		// Process each key in this batch
+		staleKeys = r.processKeyBatch(ctx, keys, staleKeys, threshold, now, limit)
+		if len(staleKeys) >= limit {
+			return staleKeys, nil
+		}
+
+		// Move to next cursor position
+		cursor = nextCursor
+		if cursor == 0 {
+			// Completed full scan
+			break
+		}
+	}
+
+	return staleKeys, nil
+}
+
+// processKeyBatch processes a batch of Redis keys and appends stale PENDING keys to the result.
+func (r *RedisService) processKeyBatch(ctx context.Context, keys []string, staleKeys []StalePendingKey, threshold time.Duration, now time.Time, limit int) []StalePendingKey {
+	for _, redisKey := range keys {
+		if len(staleKeys) >= limit {
+			return staleKeys
+		}
+
+		staleKey := r.checkKeyForStaleness(ctx, redisKey, threshold, now)
+		if staleKey != nil {
+			staleKeys = append(staleKeys, *staleKey)
+		}
+	}
+	return staleKeys
+}
+
+// checkKeyForStaleness checks if a single key is a stale PENDING key.
+// Returns nil if the key is not stale or cannot be checked.
+func (r *RedisService) checkKeyForStaleness(ctx context.Context, redisKey string, threshold time.Duration, now time.Time) *StalePendingKey {
+	data, err := r.client.Get(ctx, redisKey).Bytes()
+	if err != nil {
+		return nil // Key deleted or error - skip
+	}
+
+	var pbResult platformv1.IdempotencyResult
+	if err := proto.Unmarshal(data, &pbResult); err != nil {
+		return nil // Malformed entry - skip
+	}
+
+	result, err := fromProto(&pbResult)
+	if err != nil {
+		return nil // Invalid entry - skip
+	}
+
+	if result.Status != StatusPending || result.CreatedAt.IsZero() {
+		return nil // Not pending or legacy key without CreatedAt
+	}
+
+	age := now.Sub(result.CreatedAt)
+	if age <= threshold {
+		return nil // Not stale yet
+	}
+
+	return &StalePendingKey{
+		RedisKey: redisKey,
+		Result:   result,
+		Age:      age,
+	}
+}
+
+// MarkStaleAsFailed updates a stale PENDING key to FAILED status.
+// It preserves the original TTL and adds the failure reason.
+//
+// This operation is idempotent - if the key no longer exists or is no longer
+// PENDING, no error is returned (the desired state is achieved).
+//
+// Note on race conditions: There is a small window between reading the key,
+// verifying it's still PENDING, and updating it to FAILED. If another process
+// completes the operation in this window, the COMPLETED status would be
+// overwritten with FAILED. This is an accepted trade-off because:
+// 1. The window is very small (microseconds)
+// 2. The consequence is recoverable (client can retry with new idempotency key)
+// 3. Atomic protobuf parsing in Lua scripts is not practical
+// 4. WATCH/MULTI/EXEC adds complexity for a rare edge case
+//
+// If this becomes a problem in production, consider using Redis WATCH for
+// optimistic locking or storing a simple status field alongside the protobuf.
+func (r *RedisService) MarkStaleAsFailed(ctx context.Context, staleKey StalePendingKey, reason string) error {
+	if staleKey.Result == nil {
+		return ErrNilResult
+	}
+
+	// Re-read the current state to minimize race window
+	data, err := r.client.Get(ctx, staleKey.RedisKey).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			// Key was deleted - desired state achieved
+			return nil
+		}
+		return fmt.Errorf("failed to read key for update: %w", err)
+	}
+
+	var pbResult platformv1.IdempotencyResult
+	if err := proto.Unmarshal(data, &pbResult); err != nil {
+		return fmt.Errorf("failed to deserialize key: %w", err)
+	}
+
+	// Verify still PENDING (avoid overwriting completed operations)
+	if pbResult.Status != platformv1.OperationStatus_OPERATION_STATUS_PENDING {
+		// No longer pending - skip update (not an error)
+		return nil
+	}
+
+	// Get remaining TTL to preserve it
+	ttl, err := r.client.TTL(ctx, staleKey.RedisKey).Result()
+	if err != nil {
+		return fmt.Errorf("failed to get TTL: %w", err)
+	}
+
+	// If TTL is -2, key doesn't exist; if -1, no expiry set
+	if ttl < 0 {
+		ttl = time.Hour // Default fallback TTL
+	}
+
+	// Update to FAILED status
+	pbResult.Status = platformv1.OperationStatus_OPERATION_STATUS_FAILED
+	pbResult.Error = reason
+	pbResult.CompletedAt = timestamppb.Now()
+
+	// Serialize and store
+	updatedData, err := proto.Marshal(&pbResult)
+	if err != nil {
+		return fmt.Errorf("failed to serialize updated result: %w", err)
+	}
+
+	if err := r.client.Set(ctx, staleKey.RedisKey, updatedData, ttl).Err(); err != nil {
+		return fmt.Errorf("failed to update key: %w", err)
+	}
+
+	return nil
 }

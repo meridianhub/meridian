@@ -105,6 +105,11 @@ type FinancialAccountingService struct {
 	// idempotency ensures exactly-once processing of requests with idempotency keys
 	idempotency idempotency.Service
 
+	// idempotencyExecutor wraps business logic with atomic idempotency handling.
+	// This ensures that PENDING state is cleaned up if the operation fails,
+	// eliminating the gap between MarkPending and StoreResult.
+	idempotencyExecutor *idempotency.Executor
+
 	// outboxPublisher publishes events through the transactional outbox pattern
 	// for guaranteed at-least-once delivery of audit-critical control operation events
 	outboxPublisher *events.OutboxPublisher
@@ -163,12 +168,16 @@ func NewFinancialAccountingService(
 		return nil, ErrOutboxRepositoryNil
 	}
 
+	// Create the idempotency executor with default configuration
+	executor := idempotency.NewExecutor(idempotencySvc, nil)
+
 	return &FinancialAccountingService{
-		repository:      repository,
-		eventPublisher:  eventPublisher,
-		idempotency:     idempotencySvc,
-		outboxPublisher: outboxPublisher,
-		outboxRepo:      outboxRepo,
+		repository:          repository,
+		eventPublisher:      eventPublisher,
+		idempotency:         idempotencySvc,
+		idempotencyExecutor: executor,
+		outboxPublisher:     outboxPublisher,
+		outboxRepo:          outboxRepo,
 	}, nil
 }
 
@@ -641,40 +650,81 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check idempotency - defensive nil check (constructor requires non-nil service)
-	// TODO(ledger-integrity#15): If an error occurs after MarkPending but before StoreResult,
-	// the pending marker is left orphaned until TTL expiry. Consider adding cleanup on error.
-	if s.idempotency != nil {
-		result, err := s.idempotency.Check(ctx, idempotencyKey)
-		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
-					// Deserialize cached response from protobuf
-					var cachedResponse financialaccountingv1.UpdateLedgerPostingResponse
-					if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
-						slog.Error("failed to deserialize cached idempotency response",
-							"error", unmarshalErr,
-							"idempotency_key", req.IdempotencyKey.Key,
-							"operation", "update-posting")
-						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-					}
-					slog.Info("returning cached idempotent response",
-						"idempotency_key", req.IdempotencyKey.Key,
-						"operation", "update-posting",
-						"posting_id", req.GetId())
-					return &cachedResponse, nil
-				}
-				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-			}
-			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
-		}
-
-		// Mark as pending to prevent concurrent processing
-		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
-		}
+	// Determine TTL for idempotency key
+	ttl := defaultIdempotencyTTL
+	if req.IdempotencyKey.TtlSeconds > 0 {
+		ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
 	}
 
+	// Use idempotency executor to wrap business logic with atomic PENDING cleanup.
+	// This ensures orphaned PENDING keys are cleaned up if the operation fails.
+	var response *financialaccountingv1.UpdateLedgerPostingResponse
+
+	execResult, err := s.idempotencyExecutor.Execute(ctx, idempotencyKey, ttl, func(ctx context.Context) ([]byte, error) {
+		// Execute business logic
+		resp, execErr := s.executeUpdateLedgerPosting(ctx, req)
+		if execErr != nil {
+			return nil, execErr
+		}
+
+		// Serialize response for idempotency cache
+		responseData, marshalErr := proto.Marshal(resp)
+		if marshalErr != nil {
+			slog.Error("failed to serialize response for idempotency cache",
+				"error", marshalErr,
+				"idempotency_key", req.IdempotencyKey.Key,
+				"operation", "update-posting")
+			// Still return success - the operation completed, just caching failed
+			responseData = nil
+		}
+
+		response = resp
+		return responseData, nil
+	})
+	if err != nil {
+		// Handle specific idempotency errors
+		if errors.Is(err, idempotency.ErrOperationInProgress) {
+			return nil, status.Error(codes.Aborted, "operation already in progress")
+		}
+		// ExecutorErrors wrap idempotency layer errors - return as Internal
+		var execErr *idempotency.ExecutorError
+		if errors.As(err, &execErr) {
+			return nil, status.Errorf(codes.Internal, "idempotency error: %v", err)
+		}
+		// Business logic errors from the fn() callback pass through directly
+		// These are already gRPC status errors, so return as-is
+		return nil, err
+	}
+
+	// Handle cached result
+	if execResult.FromCache {
+		if len(execResult.Data) > 0 {
+			var cachedResponse financialaccountingv1.UpdateLedgerPostingResponse
+			if unmarshalErr := proto.Unmarshal(execResult.Data, &cachedResponse); unmarshalErr != nil {
+				slog.Error("failed to deserialize cached idempotency response",
+					"error", unmarshalErr,
+					"idempotency_key", req.IdempotencyKey.Key,
+					"operation", "update-posting")
+				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+			}
+			slog.Info("returning cached idempotent response",
+				"idempotency_key", req.IdempotencyKey.Key,
+				"operation", "update-posting",
+				"posting_id", req.GetId())
+			return &cachedResponse, nil
+		}
+		return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+	}
+
+	return response, nil
+}
+
+// executeUpdateLedgerPosting contains the core business logic for UpdateLedgerPosting.
+// This is separated from the main method to allow the idempotency executor to wrap it.
+func (s *FinancialAccountingService) executeUpdateLedgerPosting(
+	ctx context.Context,
+	req *financialaccountingv1.UpdateLedgerPostingRequest,
+) (*financialaccountingv1.UpdateLedgerPostingResponse, error) {
 	// Parse posting ID
 	postingID, err := parseUUID(req.GetId())
 	if err != nil {
@@ -782,43 +832,9 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 	}
 
 	// Convert to proto response
-	response := &financialaccountingv1.UpdateLedgerPostingResponse{
+	return &financialaccountingv1.UpdateLedgerPostingResponse{
 		LedgerPosting: toProtoLedgerPosting(posting),
-	}
-
-	// Store idempotency result (only if service configured)
-	if s.idempotency != nil {
-		ttl := defaultIdempotencyTTL
-		if req.IdempotencyKey.TtlSeconds > 0 {
-			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
-		}
-
-		// Serialize response using protobuf for idempotent storage
-		responseData, marshalErr := proto.Marshal(response)
-		if marshalErr != nil {
-			slog.Error("failed to serialize response for idempotency cache",
-				"error", marshalErr,
-				"idempotency_key", req.IdempotencyKey.Key,
-				"operation", "update-posting")
-		} else {
-			result := idempotency.Result{
-				Key:         idempotencyKey,
-				Status:      idempotency.StatusCompleted,
-				Data:        responseData,
-				CompletedAt: time.Now(),
-				TTL:         ttl,
-			}
-
-			if storeErr := s.idempotency.StoreResult(ctx, result); storeErr != nil {
-				slog.Error("failed to store idempotency result",
-					"error", storeErr,
-					"idempotency_key", req.IdempotencyKey.Key,
-					"operation", "update-posting")
-			}
-		}
-	}
-
-	return response, nil
+	}, nil
 }
 
 // isValidCurrencyCode validates that a currency code matches ISO 4217 format.
@@ -1047,40 +1063,81 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check idempotency - defensive nil check (constructor requires non-nil service)
-	// TODO(ledger-integrity#15): If an error occurs after MarkPending but before StoreResult,
-	// the pending marker is left orphaned until TTL expiry. Consider adding cleanup on error.
-	if s.idempotency != nil {
-		result, err := s.idempotency.Check(ctx, idempotencyKey)
-		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
-					// Deserialize cached response from protobuf
-					var cachedResponse financialaccountingv1.UpdateFinancialBookingLogResponse
-					if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
-						slog.Error("failed to deserialize cached idempotency response",
-							"error", unmarshalErr,
-							"idempotency_key", req.IdempotencyKey.Key,
-							"operation", "update-booking-log")
-						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-					}
-					slog.Info("returning cached idempotent response",
-						"idempotency_key", req.IdempotencyKey.Key,
-						"operation", "update-booking-log",
-						"booking_log_id", req.GetId())
-					return &cachedResponse, nil
-				}
-				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-			}
-			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
-		}
-
-		// Mark as pending to prevent concurrent processing
-		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
-		}
+	// Determine TTL for idempotency key
+	ttl := defaultIdempotencyTTL
+	if req.IdempotencyKey.TtlSeconds > 0 {
+		ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
 	}
 
+	// Use idempotency executor to wrap business logic with atomic PENDING cleanup.
+	// This ensures orphaned PENDING keys are cleaned up if the operation fails.
+	var response *financialaccountingv1.UpdateFinancialBookingLogResponse
+
+	execResult, err := s.idempotencyExecutor.Execute(ctx, idempotencyKey, ttl, func(ctx context.Context) ([]byte, error) {
+		// Execute business logic
+		resp, execErr := s.executeUpdateFinancialBookingLog(ctx, req)
+		if execErr != nil {
+			return nil, execErr
+		}
+
+		// Serialize response for idempotency cache
+		responseData, marshalErr := proto.Marshal(resp)
+		if marshalErr != nil {
+			slog.Error("failed to serialize response for idempotency cache",
+				"error", marshalErr,
+				"idempotency_key", req.IdempotencyKey.Key,
+				"operation", "update-booking-log")
+			// Still return success - the operation completed, just caching failed
+			responseData = nil
+		}
+
+		response = resp
+		return responseData, nil
+	})
+	if err != nil {
+		// Handle specific idempotency errors
+		if errors.Is(err, idempotency.ErrOperationInProgress) {
+			return nil, status.Error(codes.Aborted, "operation already in progress")
+		}
+		// ExecutorErrors wrap idempotency layer errors - return as Internal
+		var execErr *idempotency.ExecutorError
+		if errors.As(err, &execErr) {
+			return nil, status.Errorf(codes.Internal, "idempotency error: %v", err)
+		}
+		// Business logic errors from the fn() callback pass through directly
+		// These are already gRPC status errors, so return as-is
+		return nil, err
+	}
+
+	// Handle cached result
+	if execResult.FromCache {
+		if len(execResult.Data) > 0 {
+			var cachedResponse financialaccountingv1.UpdateFinancialBookingLogResponse
+			if unmarshalErr := proto.Unmarshal(execResult.Data, &cachedResponse); unmarshalErr != nil {
+				slog.Error("failed to deserialize cached idempotency response",
+					"error", unmarshalErr,
+					"idempotency_key", req.IdempotencyKey.Key,
+					"operation", "update-booking-log")
+				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+			}
+			slog.Info("returning cached idempotent response",
+				"idempotency_key", req.IdempotencyKey.Key,
+				"operation", "update-booking-log",
+				"booking_log_id", req.GetId())
+			return &cachedResponse, nil
+		}
+		return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+	}
+
+	return response, nil
+}
+
+// executeUpdateFinancialBookingLog contains the core business logic for UpdateFinancialBookingLog.
+// This is separated from the main method to allow the idempotency executor to wrap it.
+func (s *FinancialAccountingService) executeUpdateFinancialBookingLog(
+	ctx context.Context,
+	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
+) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
 	// Parse booking log ID
 	bookingLogID, err := parseUUID(req.GetId())
 	if err != nil {
@@ -1218,43 +1275,9 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 	}
 
 	// Convert to proto response
-	response := &financialaccountingv1.UpdateFinancialBookingLogResponse{
+	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
 		FinancialBookingLog: toProtoFinancialBookingLog(&updated),
-	}
-
-	// Store idempotency result (only if service configured)
-	if s.idempotency != nil {
-		ttl := defaultIdempotencyTTL
-		if req.IdempotencyKey.TtlSeconds > 0 {
-			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
-		}
-
-		// Serialize response using protobuf for idempotent storage
-		responseData, marshalErr := proto.Marshal(response)
-		if marshalErr != nil {
-			slog.Error("failed to serialize response for idempotency cache",
-				"error", marshalErr,
-				"idempotency_key", req.IdempotencyKey.Key,
-				"operation", "update-booking-log")
-		} else {
-			result := idempotency.Result{
-				Key:         idempotencyKey,
-				Status:      idempotency.StatusCompleted,
-				Data:        responseData,
-				CompletedAt: time.Now(),
-				TTL:         ttl,
-			}
-
-			if storeErr := s.idempotency.StoreResult(ctx, result); storeErr != nil {
-				slog.Error("failed to store idempotency result",
-					"error", storeErr,
-					"idempotency_key", req.IdempotencyKey.Key,
-					"operation", "update-booking-log")
-			}
-		}
-	}
-
-	return response, nil
+	}, nil
 }
 
 // isValidBookingLogTransition validates that a status transition is allowed.
