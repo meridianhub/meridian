@@ -23,3 +23,15 @@ data:
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "current-account-service"
   OTEL_SAMPLING_RATE: "0.1"
+
+  # Kafka configuration for event publishing
+  # Bootstrap servers should be overridden per environment
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  KAFKA_PRODUCER_ACKS: "all"
+  KAFKA_PRODUCER_RETRIES: "3"
+
+  # Webhook notification configuration
+  # Timeout for individual webhook HTTP requests
+  WEBHOOK_REQUEST_TIMEOUT: "5s"
+  # Maximum retry attempts for failed webhook deliveries
+  WEBHOOK_MAX_RETRIES: "3"
