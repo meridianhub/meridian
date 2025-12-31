@@ -159,7 +159,7 @@ export API_KEYS="sk_prod_abc123:payments-service,sk_prod_def456:reporting-servic
 ### Usage
 
 ```bash
-curl -H "X-API-Key: sk_prod_abc123" https://acme.api.meridianhub.cloud/api/v1/accounts
+curl -H "X-API-Key: $API_KEY" https://acme.api.meridianhub.cloud/api/v1/accounts
 ```
 
 ### Rate Limiting
