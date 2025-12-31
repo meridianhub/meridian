@@ -77,13 +77,12 @@ func getPort() string {
 	return port
 }
 
-// getDBConnectionString returns database connection string from environment
+// getDBConnectionString returns database connection string from environment.
+// DATABASE_URL is required - the service will fail fast if not provided.
 func getDBConnectionString() string {
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
-		// Default for local development (matches Tiltfile)
-		// #nosec G101 -- Local development credential only, overridden by DATABASE_URL in production
-		connStr = "postgres://meridian_platform_user@localhost:26257/meridian_platform?sslmode=disable"
+		log.Fatal("DATABASE_URL environment variable is required")
 	}
 	return connStr
 }
