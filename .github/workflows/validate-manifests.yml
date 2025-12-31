@@ -1,0 +1,216 @@
+name: Validate Kubernetes Manifests
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'deployments/k8s/**'
+      - 'services/*/k8s/**'
+      - '.github/workflows/validate-manifests.yml'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'deployments/k8s/**'
+      - 'services/*/k8s/**'
+      - '.github/workflows/validate-manifests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-production-safety:
+    name: Production Safety Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for LOCAL_DEV_MODE in production manifests
+        run: |
+          echo "Checking for LOCAL_DEV_MODE=true in production manifests..."
+          echo ""
+
+          # Define production directories to scan
+          PROD_DIRS=(
+            "deployments/k8s/overlays/production"
+            "deployments/k8s/overlays/prod"
+          )
+
+          # Also check service-level production manifests
+          SERVICE_PROD_PATTERNS=(
+            "services/*/k8s/production"
+            "services/*/k8s/prod"
+            "services/*/k8s/overlays/production"
+            "services/*/k8s/overlays/prod"
+          )
+
+          VIOLATIONS_FOUND=0
+
+          # Check production overlay directories
+          for dir in "${PROD_DIRS[@]}"; do
+            if [ -d "$dir" ]; then
+              echo "Scanning: $dir"
+              # Search for LOCAL_DEV_MODE set to true in YAML files
+              # Match patterns like: LOCAL_DEV_MODE: "true", LOCAL_DEV_MODE=true, value: "true" after LOCAL_DEV_MODE
+              if grep -rn --include="*.yaml" --include="*.yml" -E 'LOCAL_DEV_MODE[[:space:]]*[:=][[:space:]]*"?true"?' "$dir"; then
+                echo ""
+                echo "ERROR: Found LOCAL_DEV_MODE=true in production manifests!"
+                VIOLATIONS_FOUND=1
+              fi
+            fi
+          done
+
+          # Check service-level production directories using glob patterns
+          # Enable nullglob so patterns that don't match any files expand to nothing
+          shopt -s nullglob
+          for pattern in "${SERVICE_PROD_PATTERNS[@]}"; do
+            # Expand glob into array for safe iteration
+            dirs=($pattern)
+            for dir in "${dirs[@]}"; do
+              if [ -d "$dir" ]; then
+                echo "Scanning: $dir"
+                if grep -rn --include="*.yaml" --include="*.yml" -E 'LOCAL_DEV_MODE[[:space:]]*[:=][[:space:]]*"?true"?' "$dir"; then
+                  echo ""
+                  echo "ERROR: Found LOCAL_DEV_MODE=true in production manifests!"
+                  VIOLATIONS_FOUND=1
+                fi
+              fi
+            done
+          done
+
+          # Also scan for ConfigMap entries that might set LOCAL_DEV_MODE in staging
+          # (staging should also not have LOCAL_DEV_MODE=true as a security measure)
+          STAGING_DIRS=(
+            "deployments/k8s/overlays/staging"
+          )
+
+          for dir in "${STAGING_DIRS[@]}"; do
+            if [ -d "$dir" ]; then
+              echo "Scanning staging: $dir"
+              if grep -rn --include="*.yaml" --include="*.yml" -E 'LOCAL_DEV_MODE[[:space:]]*[:=][[:space:]]*"?true"?' "$dir"; then
+                echo ""
+                echo "WARNING: Found LOCAL_DEV_MODE=true in staging manifests"
+                echo "This is allowed but should be reviewed for security implications."
+              fi
+            fi
+          done
+
+          echo ""
+          if [ $VIOLATIONS_FOUND -eq 1 ]; then
+            echo "=============================================="
+            echo "ERROR: LOCAL_DEV_MODE=true detected in production manifests!"
+            echo "=============================================="
+            echo ""
+            echo "LOCAL_DEV_MODE is a development-only setting that bypasses"
+            echo "tenant resolution security checks. It must NEVER be enabled"
+            echo "in production environments."
+            echo ""
+            echo "To fix:"
+            echo "  1. Remove LOCAL_DEV_MODE from production ConfigMaps, or"
+            echo "  2. Set LOCAL_DEV_MODE to 'false' explicitly"
+            echo ""
+            exit 1
+          fi
+
+          echo "All production manifests are safe - no LOCAL_DEV_MODE violations found."
+
+      - name: Validate YAML syntax in production manifests
+        run: |
+          echo "Validating YAML syntax in production manifests..."
+          pip install --quiet pyyaml
+
+          # Create a simple YAML validator script
+          cat > /tmp/validate_yaml.py << 'PYTHON'
+          import sys
+          import yaml
+
+          errors = []
+          for filepath in sys.argv[1:]:
+              try:
+                  with open(filepath, 'r') as f:
+                      list(yaml.safe_load_all(f))
+              except yaml.YAMLError as e:
+                  errors.append(f"ERROR: {filepath}: {e}")
+              except Exception as e:
+                  errors.append(f"ERROR: {filepath}: {e}")
+
+          if errors:
+              for error in errors:
+                  print(error)
+              sys.exit(1)
+          print(f"Validated {len(sys.argv[1:])} YAML files successfully.")
+          PYTHON
+
+          # Find YAML files in production directories
+          # Use -print0 and xargs -0 to safely handle filenames with spaces
+          if ! find deployments/k8s/overlays/production deployments/k8s/overlays/staging \( -name "*.yaml" -o -name "*.yml" \) -print0 2>/dev/null | xargs -0 python3 /tmp/validate_yaml.py; then
+            # Check if directories don't exist (find returns empty)
+            if [ ! -d "deployments/k8s/overlays/production" ] && [ ! -d "deployments/k8s/overlays/staging" ]; then
+              echo "No production YAML files found to validate"
+              exit 0
+            fi
+            exit 1
+          fi
+
+      - name: Install OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: '1.12.1'
+
+      - name: Verify Rego policy sync
+        run: |
+          echo "Verifying Rego policy files are in sync..."
+
+          CONSTRAINT_TEMPLATE="deployments/k8s/policies/gateway-dev-mode-block.yaml"
+          REGO_FILE="deployments/k8s/policies/tests/blockdevmodeinproduction.rego"
+
+          if [ ! -f "$CONSTRAINT_TEMPLATE" ]; then
+            echo "ConstraintTemplate not found: $CONSTRAINT_TEMPLATE"
+            exit 1
+          fi
+
+          if [ ! -f "$REGO_FILE" ]; then
+            echo "Rego test file not found: $REGO_FILE"
+            exit 1
+          fi
+
+          # Extract Rego from ConstraintTemplate (between 'rego: |' and the next '---')
+          # Skip comment lines at the top of the standalone .rego file for comparison
+          YAML_REGO_FILE=$(mktemp)
+          sed -n '/rego: |/,/^---$/p' "$CONSTRAINT_TEMPLATE" | \
+            sed '1d;$d' | \
+            sed 's/^        //' > "$YAML_REGO_FILE"
+
+          # Get standalone Rego, skipping the header comments
+          TEST_REGO_FILE=$(mktemp)
+          sed -n '/^package blockdevmodeinproduction/,$p' "$REGO_FILE" > "$TEST_REGO_FILE"
+
+          # Use opa fmt to normalize both files before comparing
+          # This is more robust than sed-based normalization
+          opa fmt "$YAML_REGO_FILE" > /tmp/yaml_rego_formatted.rego
+          opa fmt "$TEST_REGO_FILE" > /tmp/test_rego_formatted.rego
+
+          if ! diff /tmp/yaml_rego_formatted.rego /tmp/test_rego_formatted.rego > /dev/null; then
+            echo "ERROR: Rego policy in ConstraintTemplate differs from standalone test file!"
+            echo ""
+            echo "The Rego embedded in $CONSTRAINT_TEMPLATE must match $REGO_FILE"
+            echo "(excluding header comments and formatting differences)"
+            echo ""
+            echo "To fix: Update both files to have identical Rego policy logic."
+            echo ""
+            echo "=== Differences (after opa fmt normalization) ==="
+            diff /tmp/yaml_rego_formatted.rego /tmp/test_rego_formatted.rego | head -30 || true
+            exit 1
+          fi
+
+          echo "Rego policy files are in sync."
+
+      - name: Run OPA policy tests
+        run: |
+          echo "Running OPA policy tests..."
+
+          # Run tests with v0-compatible flag for Gatekeeper compatibility
+          opa test deployments/k8s/policies/tests/ -v --v0-compatible
+
+          echo "All OPA policy tests passed."
