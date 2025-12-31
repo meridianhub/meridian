@@ -54,8 +54,8 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the liens table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.liens (
+	// Create the lien table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.lien (
 		id UUID PRIMARY KEY,
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
