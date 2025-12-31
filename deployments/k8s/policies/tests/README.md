@@ -152,7 +152,7 @@ Add to your CI pipeline:
 - name: Install OPA
   uses: open-policy-agent/setup-opa@v2
   with:
-    version: '0.71.0'
+    version: '1.12.1'
 
 - name: Test OPA Gatekeeper Policies
   run: |
