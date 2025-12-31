@@ -53,6 +53,36 @@ func TestTimeoutConstants(t *testing.T) {
 			want:     100 * time.Millisecond,
 			category: "Retry",
 		},
+		{
+			name:     "DefaultMaxRetryInterval",
+			got:      defaults.DefaultMaxRetryInterval,
+			want:     5 * time.Second,
+			category: "Retry",
+		},
+		{
+			name:     "DefaultHTTPReadHeaderTimeout",
+			got:      defaults.DefaultHTTPReadHeaderTimeout,
+			want:     10 * time.Second,
+			category: "HTTP",
+		},
+		{
+			name:     "DefaultHTTPReadTimeout",
+			got:      defaults.DefaultHTTPReadTimeout,
+			want:     30 * time.Second,
+			category: "HTTP",
+		},
+		{
+			name:     "DefaultHTTPWriteTimeout",
+			got:      defaults.DefaultHTTPWriteTimeout,
+			want:     30 * time.Second,
+			category: "HTTP",
+		},
+		{
+			name:     "DefaultHTTPIdleTimeout",
+			got:      defaults.DefaultHTTPIdleTimeout,
+			want:     60 * time.Second,
+			category: "HTTP",
+		},
 	}
 
 	for _, tt := range tests {

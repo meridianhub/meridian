@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"golang.org/x/time/rate"
 )
 
@@ -61,9 +62,9 @@ func DefaultServerConfig() ServerConfig {
 		RateLimitBurst:      200,
 		RateLimitMaxEntries: 10000,
 		TrustProxyHeaders:   false,
-		ReadTimeout:         10 * time.Second,
-		WriteTimeout:        30 * time.Second,
-		IdleTimeout:         60 * time.Second,
+		ReadTimeout:         defaults.DefaultHTTPReadHeaderTimeout,
+		WriteTimeout:        defaults.DefaultHTTPWriteTimeout,
+		IdleTimeout:         defaults.DefaultHTTPIdleTimeout,
 	}
 }
 
@@ -92,13 +93,13 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		cfg.RateLimitMaxEntries = 10000
 	}
 	if cfg.ReadTimeout <= 0 {
-		cfg.ReadTimeout = 10 * time.Second
+		cfg.ReadTimeout = defaults.DefaultHTTPReadHeaderTimeout
 	}
 	if cfg.WriteTimeout <= 0 {
-		cfg.WriteTimeout = 30 * time.Second
+		cfg.WriteTimeout = defaults.DefaultHTTPWriteTimeout
 	}
 	if cfg.IdleTimeout <= 0 {
-		cfg.IdleTimeout = 60 * time.Second
+		cfg.IdleTimeout = defaults.DefaultHTTPIdleTimeout
 	}
 
 	// Create rate limiter with max entries to prevent unbounded growth

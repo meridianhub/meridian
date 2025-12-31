@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 )
 
 var (
@@ -34,10 +36,10 @@ var (
 )
 
 // defaultHTTPClient returns an HTTP client with reasonable timeout settings.
-// This prevents hanging requests by setting a 30-second timeout for auth operations.
+// This prevents hanging requests by setting a timeout for auth operations.
 func defaultHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: defaults.DefaultRPCTimeout,
 	}
 }
 

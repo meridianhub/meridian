@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/sony/gobreaker/v2"
 )
 
@@ -37,13 +38,13 @@ type ResilientClientConfig struct {
 func DefaultResilientClientConfig(name string) ResilientClientConfig {
 	return ResilientClientConfig{
 		CircuitBreakerName:     name,
-		CircuitBreakerTimeout:  30 * time.Second,
-		CircuitBreakerInterval: 60 * time.Second,
+		CircuitBreakerTimeout:  defaults.DefaultRPCTimeout,
+		CircuitBreakerInterval: defaults.DefaultCircuitBreakerTimeout,
 		MaxRequests:            1,
 		FailureThreshold:       5,
 		MaxRetries:             3,
-		InitialInterval:        100 * time.Millisecond,
-		MaxInterval:            5 * time.Second,
+		InitialInterval:        defaults.DefaultRetryDelay,
+		MaxInterval:            defaults.DefaultMaxRetryInterval,
 		Multiplier:             2.0,
 		RandomizationFactor:    0.5,
 		Logger:                 nil, // Will use slog.Default()
@@ -86,10 +87,10 @@ func applyConfigDefaults(config *ResilientClientConfig) (CircuitBreakerConfig, R
 		config.CircuitBreakerName = "default"
 	}
 	if config.CircuitBreakerTimeout == 0 {
-		config.CircuitBreakerTimeout = 30 * time.Second
+		config.CircuitBreakerTimeout = defaults.DefaultRPCTimeout
 	}
 	if config.CircuitBreakerInterval == 0 {
-		config.CircuitBreakerInterval = 60 * time.Second
+		config.CircuitBreakerInterval = defaults.DefaultCircuitBreakerTimeout
 	}
 	if config.MaxRequests == 0 {
 		config.MaxRequests = 1
@@ -120,10 +121,10 @@ func applyConfigDefaults(config *ResilientClientConfig) (CircuitBreakerConfig, R
 		config.MaxRetries = 3
 	}
 	if config.InitialInterval == 0 {
-		config.InitialInterval = 100 * time.Millisecond
+		config.InitialInterval = defaults.DefaultRetryDelay
 	}
 	if config.MaxInterval == 0 {
-		config.MaxInterval = 5 * time.Second
+		config.MaxInterval = defaults.DefaultMaxRetryInterval
 	}
 	if config.Multiplier == 0 {
 		config.Multiplier = 2.0

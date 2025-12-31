@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
 )
@@ -130,10 +131,10 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 		config.AutoOffsetReset = "earliest"
 	}
 	if config.PollTimeout == 0 {
-		config.PollTimeout = 100 * time.Millisecond
+		config.PollTimeout = defaults.DefaultRetryDelay
 	}
 	if config.HandlerTimeout == 0 {
-		config.HandlerTimeout = 30 * time.Second
+		config.HandlerTimeout = defaults.DefaultRPCTimeout
 	}
 
 	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{

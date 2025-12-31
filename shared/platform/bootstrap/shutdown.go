@@ -8,11 +8,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/grpc"
 )
 
 // DefaultShutdownTimeout is the default timeout for graceful shutdown.
-const DefaultShutdownTimeout = 30 * time.Second
+// Deprecated: Use defaults.DefaultGracefulShutdown instead.
+var DefaultShutdownTimeout = defaults.DefaultGracefulShutdown
 
 // ShutdownOrchestrator coordinates graceful shutdown of a gRPC service.
 // It handles OS signals (SIGINT, SIGTERM), executes cleanup functions in reverse order,

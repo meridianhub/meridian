@@ -97,6 +97,57 @@ const (
 	DefaultGracefulShutdown = 30 * time.Second
 )
 
+// HTTP Server Timeouts
+//
+// These timeouts control HTTP server behavior for request handling and
+// connection management. They protect against slow clients, resource exhaustion,
+// and denial-of-service attacks.
+const (
+	// DefaultHTTPReadHeaderTimeout is the maximum time to read request headers.
+	//
+	// This value (10s) protects against slowloris attacks:
+	//   - Short enough to prevent connection exhaustion
+	//   - Long enough for legitimate slow networks
+	//
+	// Override for:
+	//   - High-security environments: Decrease to 5s
+	//   - Slow networks: Increase cautiously (max 30s)
+	DefaultHTTPReadHeaderTimeout = 10 * time.Second
+
+	// DefaultHTTPReadTimeout is the maximum time to read the entire request.
+	//
+	// This value (30s) accommodates various request sizes:
+	//   - Long enough for large file uploads
+	//   - Short enough to free resources from slow clients
+	//
+	// Override for:
+	//   - File upload endpoints: Increase to minutes
+	//   - API endpoints: Can decrease to 10-15s
+	DefaultHTTPReadTimeout = 30 * time.Second
+
+	// DefaultHTTPWriteTimeout is the maximum time to write the response.
+	//
+	// This value (30s) handles typical response times:
+	//   - Long enough for complex queries and data aggregation
+	//   - Short enough to detect unresponsive clients
+	//
+	// Override for:
+	//   - Streaming endpoints: Increase significantly
+	//   - Simple JSON APIs: Can decrease to 10-15s
+	DefaultHTTPWriteTimeout = 30 * time.Second
+
+	// DefaultHTTPIdleTimeout is the maximum time for keep-alive connections.
+	//
+	// This value (60s) balances connection reuse with resource efficiency:
+	//   - Long enough to benefit from HTTP keep-alive
+	//   - Short enough to free unused connections
+	//
+	// Override for:
+	//   - High-traffic services: Can decrease to 30s
+	//   - Low-traffic services: Can increase to 120s
+	DefaultHTTPIdleTimeout = 60 * time.Second
+)
+
 // Retry Timings
 //
 // These timings control retry behavior for transient failures. They work
@@ -118,4 +169,15 @@ const (
 	//   - Database reconnection: Use 500ms-1s for connection pool recovery
 	//   - External APIs: Match provider recommendations
 	DefaultRetryDelay = 100 * time.Millisecond
+
+	// DefaultMaxRetryInterval is the maximum delay between retry attempts.
+	//
+	// This value (5s) caps exponential backoff growth:
+	//   - Prevents excessive delays after many retries
+	//   - Still allows time for transient issues to resolve
+	//
+	// Override for:
+	//   - Rate-limited APIs: Match rate limit window
+	//   - External services: Increase to 30s for slow recovery
+	DefaultMaxRetryInterval = 5 * time.Second
 )

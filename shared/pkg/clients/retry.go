@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -33,8 +34,8 @@ type RetryConfig struct {
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
 		MaxRetries:          3,
-		InitialInterval:     100 * time.Millisecond,
-		MaxInterval:         10 * time.Second,
+		InitialInterval:     defaults.DefaultRetryDelay,
+		MaxInterval:         2 * defaults.DefaultMaxRetryInterval, // 10s max interval
 		Multiplier:          2.0,
 		RandomizationFactor: 0.5, // ±50% jitter
 	}
