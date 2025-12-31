@@ -647,8 +647,8 @@ func TestProvisioningWorker_GracefulShutdown(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.Create(ctx, tenant1))
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with properly initialized mock (NewMockProvisioner initializes all internal maps)
+	prov := provisioner.NewMockProvisioner(nil)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(50*time.Millisecond), logger)
 	require.NoError(t, err)
@@ -698,8 +698,8 @@ func TestProvisioningWorker_NoGoroutineLeaks(t *testing.T) {
 		require.NoError(t, repo.Create(context.Background(), tenant))
 	}
 
-	// Create worker
-	prov := &provisioner.MockProvisioner{}
+	// Create worker with properly initialized mock (NewMockProvisioner initializes all internal maps)
+	prov := provisioner.NewMockProvisioner(nil)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	worker, err := NewProvisioningWorker(repo, prov, testWorkerConfig(50*time.Millisecond), logger)
 	require.NoError(t, err)
