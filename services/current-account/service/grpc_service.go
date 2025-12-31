@@ -51,6 +51,7 @@ const (
 	opStatusMissingIdentifier       = "missing_identifier"
 	opStatusNotImplemented          = "not_implemented"
 	opStatusWithdrawalFailed        = "withdrawal_failed"
+	opStatusWithdrawalNotFound      = "withdrawal_not_found"
 	opStatusSagaFailed              = "saga_failed"
 	opStatusInvalidStatusTransition = "invalid_status_transition"
 )
@@ -72,6 +73,7 @@ type Service struct {
 	pb.UnimplementedCurrentAccountServiceServer
 	repo                   *persistence.Repository
 	lienRepo               *persistence.LienRepository
+	withdrawalRepo         *persistence.WithdrawalRepository
 	posKeepingClient       clients.PositionKeepingClient
 	finAcctClient          clients.FinancialAccountingClient
 	partyClient            clients.PartyClient
@@ -85,8 +87,9 @@ type Service struct {
 
 // Config contains configuration for creating a new Service with external clients
 type Config struct {
-	Repository     *persistence.Repository
-	LienRepository *persistence.LienRepository
+	Repository           *persistence.Repository
+	LienRepository       *persistence.LienRepository
+	WithdrawalRepository *persistence.WithdrawalRepository
 	// Namespace is the Kubernetes namespace for service discovery (e.g., "default")
 	Namespace string
 	// PositionKeepingServiceName is the Kubernetes service name (e.g., "position-keeping")
@@ -140,6 +143,7 @@ func NewServiceWithIdempotency(repo *persistence.Repository, lienRepo *persisten
 func NewServiceWithExistingClients(
 	repo *persistence.Repository,
 	lienRepo *persistence.LienRepository,
+	withdrawalRepo *persistence.WithdrawalRepository,
 	posKeepingClient clients.PositionKeepingClient,
 	finAcctClient clients.FinancialAccountingClient,
 	partyClient clients.PartyClient,
@@ -184,6 +188,7 @@ func NewServiceWithExistingClients(
 	return &Service{
 		repo:                   repo,
 		lienRepo:               lienRepo,
+		withdrawalRepo:         withdrawalRepo,
 		posKeepingClient:       posKeepingClient,
 		finAcctClient:          finAcctClient,
 		partyClient:            partyClient,
@@ -306,6 +311,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 	return &Service{
 		repo:                   config.Repository,
 		lienRepo:               config.LienRepository,
+		withdrawalRepo:         config.WithdrawalRepository,
 		posKeepingClient:       resilientPosKeepingClient,
 		finAcctClient:          resilientFinAcctClient,
 		partyClient:            resilientPartyClient,
@@ -662,25 +668,67 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	// Determine which account to use - either from withdrawal_id lookup or direct account_id
 	var accountID string
 	var reqAmount *commonpb.MoneyAmount
+	var pendingWithdrawal *domain.Withdrawal
 
 	if req.WithdrawalId != "" {
-		// TODO: In a full implementation, we would look up the pending withdrawal
-		// and get the account_id and amount from there. For now, require direct execution.
-		operationStatus = "withdrawal_id_not_implemented"
-		return nil, status.Error(codes.Unimplemented, "executing pending withdrawals by withdrawal_id is not yet implemented; use direct withdrawal with account_id and amount")
-	}
+		// Look up pending withdrawal by reference
+		if s.withdrawalRepo == nil {
+			operationStatus = opStatusNotImplemented
+			return nil, status.Error(codes.Unimplemented, "withdrawal persistence not configured")
+		}
 
-	// Direct withdrawal mode
-	if req.AccountId == "" {
-		operationStatus = opStatusMissingAccountID
-		return nil, status.Error(codes.InvalidArgument, "account_id is required for direct withdrawal")
+		var err error
+		pendingWithdrawal, err = s.withdrawalRepo.FindByReference(ctx, req.WithdrawalId)
+		if err != nil {
+			if errors.Is(err, persistence.ErrWithdrawalNotFound) {
+				operationStatus = opStatusWithdrawalNotFound
+				return nil, status.Errorf(codes.NotFound, "withdrawal not found: %s", req.WithdrawalId)
+			}
+			operationStatus = opStatusRetrieveFailed
+			s.logger.Error("failed to retrieve withdrawal",
+				"withdrawal_id", req.WithdrawalId,
+				"error", err)
+			return nil, status.Errorf(codes.Internal, "failed to retrieve withdrawal: %v", err)
+		}
+
+		// Verify withdrawal is in pending status
+		if !pendingWithdrawal.IsPending() {
+			operationStatus = "withdrawal_not_pending"
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"withdrawal %s is not pending (status: %s)", req.WithdrawalId, pendingWithdrawal.Status)
+		}
+
+		// Get account by UUID to retrieve the business account ID
+		account, err := s.repo.FindByUUID(ctx, pendingWithdrawal.AccountID)
+		if err != nil {
+			if errors.Is(err, persistence.ErrAccountNotFound) {
+				operationStatus = opStatusAccountNotFound
+				return nil, status.Errorf(codes.NotFound, "account not found for withdrawal: %s", req.WithdrawalId)
+			}
+			operationStatus = opStatusRetrieveFailed
+			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+		}
+
+		accountID = account.AccountID()
+		// Convert domain Money to proto MoneyAmount
+		reqAmount = toMoneyAmount(pendingWithdrawal.Amount)
+
+		s.logger.Info("executing pending withdrawal",
+			"withdrawal_id", req.WithdrawalId,
+			"account_id", accountID)
+	} else {
+		// Direct withdrawal mode
+		if req.AccountId == "" {
+			operationStatus = opStatusMissingAccountID
+			return nil, status.Error(codes.InvalidArgument, "account_id is required for direct withdrawal")
+		}
+		if req.Amount == nil || req.Amount.Amount == nil {
+			operationStatus = opStatusMissingAmount
+			return nil, status.Error(codes.InvalidArgument, "amount is required for direct withdrawal")
+		}
+		accountID = req.AccountId
+		reqAmount = req.Amount
 	}
-	if req.Amount == nil || req.Amount.Amount == nil {
-		operationStatus = opStatusMissingAmount
-		return nil, status.Error(codes.InvalidArgument, "amount is required for direct withdrawal")
-	}
-	accountID = req.AccountId
-	reqAmount = req.Amount
 
 	// Get idempotency key if provided
 	var idempotencyKey string
@@ -892,6 +940,23 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 	}
 
+	// Mark pending withdrawal as completed (if executing a pending withdrawal)
+	if pendingWithdrawal != nil && s.withdrawalRepo != nil {
+		if err := pendingWithdrawal.Complete(); err != nil {
+			// Log warning but don't fail - the withdrawal has already executed
+			s.logger.Warn("failed to transition withdrawal to completed status",
+				"withdrawal_id", pendingWithdrawal.Reference,
+				"error", err)
+		} else {
+			if err := s.withdrawalRepo.Update(ctx, pendingWithdrawal); err != nil {
+				// Log warning but don't fail - the withdrawal has already executed
+				s.logger.Warn("failed to persist withdrawal completion",
+					"withdrawal_id", pendingWithdrawal.Reference,
+					"error", err)
+			}
+		}
+	}
+
 	// Store successful result in Redis for future idempotency checks
 	if idempotencyKey != "" && s.idempotencyService != nil {
 		responseData, marshalErr := proto.Marshal(resp)
@@ -990,30 +1055,50 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 			fmt.Sprintf("Warning: requested amount (%d cents) exceeds current available balance (%d cents)", amountCents, availCents))
 	}
 
-	// Generate withdrawal ID
-	withdrawalID := fmt.Sprintf("WTH-%s", uuid.New().String()[:8])
-	now := timestamppb.Now()
+	// Generate withdrawal reference (business ID)
+	withdrawalReference := fmt.Sprintf("WTH-%s", uuid.New().String()[:8])
 
-	// Create withdrawal record
-	withdrawal := &pb.Withdrawal{
-		WithdrawalId: withdrawalID,
-		AccountId:    req.AccountId,
-		Amount:       req.Amount,
-		Status:       pb.WithdrawalStatus_WITHDRAWAL_STATUS_INITIATED,
-		Description:  req.Description,
-		Reference:    req.Reference,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+	// Use provided reference if available, otherwise use generated reference
+	reference := req.Reference
+	if reference == "" {
+		reference = withdrawalReference
 	}
 
-	// TODO: Persist withdrawal to database
-	// For now, we return the withdrawal without persistence (in-memory only)
-	// A full implementation would save to a withdrawals table
+	// Create domain Money from amount cents
+	amount, err := domain.NewMoney(req.Amount.Amount.CurrencyCode, amountCents)
+	if err != nil {
+		operationStatus = operationStatusInvalidCurrency
+		return nil, status.Errorf(codes.InvalidArgument, "invalid currency: %v", err)
+	}
+
+	// Create domain withdrawal
+	domainWithdrawal, err := domain.NewWithdrawal(account.ID(), amount, reference)
+	if err != nil {
+		operationStatus = opStatusWithdrawalFailed
+		return nil, status.Errorf(codes.InvalidArgument, "failed to create withdrawal: %v", err)
+	}
+
+	// Persist withdrawal to database (if repository is configured)
+	if s.withdrawalRepo != nil {
+		if err := s.withdrawalRepo.Create(ctx, domainWithdrawal); err != nil {
+			operationStatus = opStatusSaveFailed
+			s.logger.Error("failed to persist withdrawal",
+				"withdrawal_id", domainWithdrawal.ID,
+				"account_id", req.AccountId,
+				"error", err)
+			return nil, status.Errorf(codes.Internal, "failed to persist withdrawal: %v", err)
+		}
+	}
 
 	s.logger.Info("withdrawal initiated",
-		"withdrawal_id", withdrawalID,
+		"withdrawal_id", domainWithdrawal.ID,
+		"withdrawal_reference", reference,
 		"account_id", req.AccountId,
 		"amount_cents", amountCents)
+
+	// Convert domain withdrawal to proto
+	withdrawal := toProtoWithdrawal(domainWithdrawal, req.AccountId)
+	withdrawal.Description = req.Description // Add description from request
 
 	return &pb.InitiateWithdrawalResponse{
 		Withdrawal:         withdrawal,
@@ -1024,7 +1109,9 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 
 // UpdateWithdrawal modifies a pending withdrawal before execution.
 // Only withdrawals with INITIATED status can be updated.
-func (s *Service) UpdateWithdrawal(_ context.Context, req *pb.UpdateWithdrawalRequest) (*pb.UpdateWithdrawalResponse, error) {
+// Note: Currently supports retrieval and validation only. Field updates (amount, description)
+// are not yet supported as the domain model treats these as immutable.
+func (s *Service) UpdateWithdrawal(ctx context.Context, req *pb.UpdateWithdrawalRequest) (*pb.UpdateWithdrawalResponse, error) {
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
@@ -1036,10 +1123,74 @@ func (s *Service) UpdateWithdrawal(_ context.Context, req *pb.UpdateWithdrawalRe
 		return nil, status.Error(codes.InvalidArgument, "withdrawal_id is required")
 	}
 
-	// TODO: Implement withdrawal lookup and update from database
-	// For now, return unimplemented as we don't have withdrawal persistence yet
-	operationStatus = opStatusNotImplemented
-	return nil, status.Error(codes.Unimplemented, "UpdateWithdrawal is not yet implemented - withdrawal persistence required")
+	// Check if withdrawal repository is configured
+	if s.withdrawalRepo == nil {
+		operationStatus = opStatusNotImplemented
+		return nil, status.Error(codes.Unimplemented, "withdrawal persistence not configured")
+	}
+
+	// Lookup withdrawal by reference
+	withdrawal, err := s.withdrawalRepo.FindByReference(ctx, req.WithdrawalId)
+	if err != nil {
+		if errors.Is(err, persistence.ErrWithdrawalNotFound) {
+			operationStatus = opStatusWithdrawalNotFound
+			return nil, status.Errorf(codes.NotFound, "withdrawal not found: %s", req.WithdrawalId)
+		}
+		operationStatus = opStatusRetrieveFailed
+		s.logger.Error("failed to retrieve withdrawal",
+			"withdrawal_id", req.WithdrawalId,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve withdrawal: %v", err)
+	}
+
+	// Only pending withdrawals can be updated
+	if !withdrawal.IsPending() {
+		operationStatus = "withdrawal_not_pending"
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"cannot update withdrawal %s: not in pending status (current: %s)",
+			req.WithdrawalId, withdrawal.Status)
+	}
+
+	// Get account to retrieve business account ID for response
+	account, err := s.repo.FindByUUID(ctx, withdrawal.AccountID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found for withdrawal")
+		}
+		operationStatus = opStatusRetrieveFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	var validationMessages []string
+
+	// Note: Field updates (amount, description, reference) are not yet implemented
+	// as the domain model treats these as immutable after creation.
+	// This would require domain model enhancements.
+	if req.Amount != nil {
+		validationMessages = append(validationMessages,
+			"Warning: amount updates are not yet supported; withdrawal amount unchanged")
+	}
+	if req.Description != "" {
+		validationMessages = append(validationMessages,
+			"Warning: description updates are not yet supported")
+	}
+	if req.Reference != "" && req.Reference != withdrawal.Reference {
+		validationMessages = append(validationMessages,
+			"Warning: reference updates are not yet supported")
+	}
+
+	s.logger.Info("withdrawal update requested",
+		"withdrawal_id", req.WithdrawalId,
+		"has_amount_update", req.Amount != nil,
+		"has_description_update", req.Description != "",
+		"warnings", len(validationMessages))
+
+	return &pb.UpdateWithdrawalResponse{
+		Withdrawal:         toProtoWithdrawal(withdrawal, account.AccountID()),
+		ValidationPassed:   len(validationMessages) == 0,
+		ValidationMessages: validationMessages,
+	}, nil
 }
 
 // RetrieveWithdrawal gets withdrawal details by ID or lists withdrawals by account.
@@ -1052,16 +1203,21 @@ func (s *Service) RetrieveWithdrawal(ctx context.Context, req *pb.RetrieveWithdr
 		caobservability.RecordOperationDuration("retrieve_withdrawal", operationStatus, time.Since(start))
 	}()
 
-	// Single withdrawal lookup
-	if req.WithdrawalId != "" {
-		// TODO: Implement withdrawal lookup from database
-		operationStatus = opStatusNotImplemented
-		return nil, status.Error(codes.Unimplemented, "RetrieveWithdrawal by withdrawal_id is not yet implemented - withdrawal persistence required")
+	// Validate that at least one identifier is provided first
+	if req.WithdrawalId == "" && req.AccountId == "" {
+		operationStatus = opStatusMissingIdentifier
+		return nil, status.Error(codes.InvalidArgument, "either withdrawal_id or account_id is required")
 	}
 
-	// List withdrawals by account
-	if req.AccountId != "" {
-		// Validate account exists
+	// Check if withdrawal repository is configured
+	if s.withdrawalRepo == nil {
+		// For backward compatibility, return empty list when listing by account ID
+		// but error when looking up by withdrawal ID
+		if req.WithdrawalId != "" {
+			operationStatus = opStatusNotImplemented
+			return nil, status.Error(codes.Unimplemented, "withdrawal persistence not configured")
+		}
+		// Validate account exists before returning empty list
 		_, err := s.repo.FindByID(ctx, req.AccountId)
 		if err != nil {
 			if errors.Is(err, persistence.ErrAccountNotFound) {
@@ -1071,14 +1227,121 @@ func (s *Service) RetrieveWithdrawal(ctx context.Context, req *pb.RetrieveWithdr
 			operationStatus = opStatusRetrieveFailed
 			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 		}
-
-		// TODO: Implement withdrawal listing from database
-		// For now, return empty list
+		// Return empty list for account queries when repo not configured
 		return &pb.RetrieveWithdrawalResponse{
 			Withdrawals: []*pb.Withdrawal{},
 			Pagination: &commonpb.PaginationResponse{
 				NextPageToken: "",
 				TotalCount:    0,
+			},
+		}, nil
+	}
+
+	// Single withdrawal lookup by ID
+	if req.WithdrawalId != "" {
+		withdrawal, err := s.withdrawalRepo.FindByReference(ctx, req.WithdrawalId)
+		if err != nil {
+			if errors.Is(err, persistence.ErrWithdrawalNotFound) {
+				operationStatus = opStatusWithdrawalNotFound
+				return nil, status.Errorf(codes.NotFound, "withdrawal not found: %s", req.WithdrawalId)
+			}
+			operationStatus = opStatusRetrieveFailed
+			s.logger.Error("failed to retrieve withdrawal",
+				"withdrawal_id", req.WithdrawalId,
+				"error", err)
+			return nil, status.Errorf(codes.Internal, "failed to retrieve withdrawal: %v", err)
+		}
+
+		// Get account to retrieve business account ID for response
+		account, err := s.repo.FindByUUID(ctx, withdrawal.AccountID)
+		if err != nil {
+			if errors.Is(err, persistence.ErrAccountNotFound) {
+				operationStatus = opStatusAccountNotFound
+				return nil, status.Errorf(codes.NotFound, "account not found for withdrawal")
+			}
+			operationStatus = opStatusRetrieveFailed
+			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+		}
+
+		s.logger.Debug("withdrawal retrieved",
+			"withdrawal_id", req.WithdrawalId,
+			"account_id", account.AccountID(),
+			"status", withdrawal.Status)
+
+		return &pb.RetrieveWithdrawalResponse{
+			Withdrawals: []*pb.Withdrawal{toProtoWithdrawal(withdrawal, account.AccountID())},
+			Pagination: &commonpb.PaginationResponse{
+				TotalCount: 1,
+			},
+		}, nil
+	}
+
+	// List withdrawals by account
+	if req.AccountId != "" {
+		// Validate account exists and get the internal UUID
+		account, err := s.repo.FindByID(ctx, req.AccountId)
+		if err != nil {
+			if errors.Is(err, persistence.ErrAccountNotFound) {
+				operationStatus = opStatusAccountNotFound
+				return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+			}
+			operationStatus = opStatusRetrieveFailed
+			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+		}
+
+		// Parse pagination parameters
+		pagination := persistence.PaginationParams{
+			Limit:  50, // Default limit
+			Offset: 0,
+		}
+		if req.Pagination != nil {
+			if req.Pagination.PageSize > 0 {
+				pagination.Limit = int(req.Pagination.PageSize)
+			}
+			// Simple offset-based pagination from page token
+			// In production, consider cursor-based pagination for better performance
+			if req.Pagination.PageToken != "" {
+				// Page token contains the offset
+				var offset int
+				if _, err := fmt.Sscanf(req.Pagination.PageToken, "%d", &offset); err == nil {
+					pagination.Offset = offset
+				}
+			}
+		}
+
+		// List withdrawals for the account
+		withdrawals, err := s.withdrawalRepo.List(ctx, account.ID(), pagination)
+		if err != nil {
+			operationStatus = opStatusRetrieveFailed
+			s.logger.Error("failed to list withdrawals",
+				"account_id", req.AccountId,
+				"error", err)
+			return nil, status.Errorf(codes.Internal, "failed to list withdrawals: %v", err)
+		}
+
+		// Convert domain withdrawals to proto
+		protoWithdrawals := make([]*pb.Withdrawal, 0, len(withdrawals))
+		for _, w := range withdrawals {
+			protoWithdrawals = append(protoWithdrawals, toProtoWithdrawal(w, req.AccountId))
+		}
+
+		// Build pagination response
+		var nextPageToken string
+		if len(withdrawals) == pagination.Limit {
+			// There might be more results
+			nextPageToken = fmt.Sprintf("%d", pagination.Offset+pagination.Limit)
+		}
+
+		s.logger.Debug("withdrawals listed",
+			"account_id", req.AccountId,
+			"count", len(withdrawals),
+			"has_more", nextPageToken != "")
+
+		return &pb.RetrieveWithdrawalResponse{
+			Withdrawals: protoWithdrawals,
+			Pagination: &commonpb.PaginationResponse{
+				NextPageToken: nextPageToken,
+				TotalCount:    int64(len(withdrawals)),
 			},
 		}, nil
 	}
@@ -1148,6 +1411,37 @@ func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 			Units:        units,
 			Nanos:        nanos,
 		},
+	}
+}
+
+// toProtoWithdrawal converts a domain Withdrawal to a proto Withdrawal.
+// Note: accountID is the business account ID (e.g., "ACC-xxx") which is passed separately
+// since the domain withdrawal only stores the internal UUID.
+func toProtoWithdrawal(w *domain.Withdrawal, accountID string) *pb.Withdrawal {
+	return &pb.Withdrawal{
+		WithdrawalId: w.Reference, // Reference is the business ID (e.g., "WTH-xxx")
+		AccountId:    accountID,
+		Amount:       toMoneyAmount(w.Amount),
+		Status:       mapWithdrawalStatusToProto(w.Status),
+		Reference:    w.Reference,
+		CreatedAt:    timestamppb.New(w.CreatedAt),
+		UpdatedAt:    timestamppb.New(w.UpdatedAt),
+	}
+}
+
+// mapWithdrawalStatusToProto converts domain WithdrawalStatus to proto WithdrawalStatus
+func mapWithdrawalStatusToProto(status domain.WithdrawalStatus) pb.WithdrawalStatus {
+	switch status {
+	case domain.WithdrawalStatusPending:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_INITIATED
+	case domain.WithdrawalStatusCompleted:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_COMPLETED
+	case domain.WithdrawalStatusFailed:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_FAILED
+	case domain.WithdrawalStatusCancelled:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_CANCELLED
+	default:
+		return pb.WithdrawalStatus_WITHDRAWAL_STATUS_UNSPECIFIED
 	}
 }
 

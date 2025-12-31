@@ -81,6 +81,7 @@ func run(logger *slog.Logger) error {
 	// Create repositories
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
+	withdrawalRepo := persistence.NewWithdrawalRepository(db)
 
 	// Create Redis client and idempotency service (optional - graceful degradation)
 	var idempotencyService idempotency.Service
@@ -107,6 +108,7 @@ func run(logger *slog.Logger) error {
 	currentAccountService, svcClients, err := createServiceWithClients(
 		repo,
 		lienRepo,
+		withdrawalRepo,
 		namespace,
 		logger,
 		tracer,
@@ -229,6 +231,7 @@ type serviceClients struct {
 func createServiceWithClients(
 	repo *persistence.Repository,
 	lienRepo *persistence.LienRepository,
+	withdrawalRepo *persistence.WithdrawalRepository,
 	namespace string,
 	logger *slog.Logger,
 	tracer *observability.Tracer,
@@ -311,6 +314,7 @@ func createServiceWithClients(
 	svc, err := service.NewServiceWithExistingClients(
 		repo,
 		lienRepo,
+		withdrawalRepo,
 		resilientPosKeepingClient,
 		resilientFinAcctClient,
 		resilientPartyClient,
