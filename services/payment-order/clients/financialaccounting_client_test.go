@@ -178,8 +178,9 @@ func TestResilientFinancialAccountingClient_CircuitBreakerIntegration(t *testing
 	beforeOpenCount := callCount.Load()
 	assert.Equal(t, int32(3), beforeOpenCount)
 
-	// Circuit breaker should now be open, next calls should fail fast
-	time.Sleep(100 * time.Millisecond) // Allow circuit breaker to transition
+	// Intentional sleep: Allow any async state updates in the circuit breaker to complete.
+	// The resilient client doesn't expose circuit breaker state, so we can't poll for it.
+	time.Sleep(100 * time.Millisecond)
 
 	_, err := resilientClient.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{})
 	assert.Error(t, err)
@@ -267,7 +268,7 @@ func TestResilientFinancialAccountingClient_ContextCancellation(t *testing.T) {
 
 	mockClient := &mockFinancialAccountingGRPCClient{
 		initiateFinancialBookingLogFn: func(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
-			// Simulate slow operation
+			// Intentional sleep: Simulate slow operation to test context deadline handling
 			time.Sleep(100 * time.Millisecond)
 			return &financialaccountingv1.InitiateFinancialBookingLogResponse{}, nil
 		},

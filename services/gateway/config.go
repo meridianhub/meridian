@@ -81,7 +81,7 @@ func LoadConfig() (*Config, error) {
 	if backendsJSON != "" {
 		var backends []BackendRoute
 		if err := json.Unmarshal([]byte(backendsJSON), &backends); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidBackendsJSON, err)
+			return nil, errors.Join(ErrInvalidBackendsJSON, err)
 		}
 		config.Backends = backends
 	}

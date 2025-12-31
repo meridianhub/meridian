@@ -94,7 +94,11 @@ func TestLoadConfig_InvalidBackendRoutesJSON(t *testing.T) {
 	_, err := LoadConfig()
 
 	require.Error(t, err)
+	// Verify errors.Is() correctly identifies the sentinel error.
+	// This validates the fix for double %w wrapping which broke errors.Is().
 	assert.ErrorIs(t, err, ErrInvalidBackendsJSON)
+	// Also verify the underlying JSON error details are preserved in the message
+	assert.Contains(t, err.Error(), "invalid character")
 }
 
 func TestLoadConfig_BackendRouteEmptyPrefix(t *testing.T) {

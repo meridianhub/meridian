@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/sony/gobreaker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -436,8 +437,11 @@ func TestBreakerBehavior_HalfOpenStateTransition(t *testing.T) {
 	// Verify breaker is open
 	assert.Equal(t, gobreaker.StateOpen, breaker.State())
 
-	// Wait for timeout to elapse
-	time.Sleep(150 * time.Millisecond)
+	// Wait for timeout to transition to half-open
+	err := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return breaker.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, err, "circuit should transition to half-open")
 
 	// Next request should be allowed (half-open state allows test requests)
 	// The gobreaker library transitions to half-open lazily on the next request
@@ -472,8 +476,11 @@ func TestBreakerBehavior_HalfOpenFailure(t *testing.T) {
 	}
 	assert.Equal(t, gobreaker.StateOpen, breaker.State())
 
-	// Wait for timeout
-	time.Sleep(150 * time.Millisecond)
+	// Wait for timeout to transition to half-open
+	err := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return breaker.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, err, "circuit should transition to half-open")
 
 	// Try a request that fails in half-open state
 	_, _ = breaker.Execute(func() (any, error) {
@@ -504,8 +511,11 @@ func TestBreakerBehavior_HalfOpenMaxRequests(t *testing.T) {
 		})
 	}
 
-	// Wait for timeout
-	time.Sleep(150 * time.Millisecond)
+	// Wait for timeout to transition to half-open
+	err := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return breaker.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, err, "circuit should transition to half-open")
 
 	// Start concurrent requests to test MaxRequests limiting
 	// Use a WaitGroup to synchronize
@@ -517,11 +527,12 @@ func TestBreakerBehavior_HalfOpenMaxRequests(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := breaker.Execute(func() (any, error) {
-				time.Sleep(50 * time.Millisecond) // Simulate slow operation
+			_, execErr := breaker.Execute(func() (any, error) {
+				// Intentional sleep: Hold the slot to test MaxRequests limiting
+				time.Sleep(50 * time.Millisecond)
 				return "success", nil
 			})
-			results <- err
+			results <- execErr
 		}()
 	}
 
@@ -579,7 +590,10 @@ func TestBreakerBehavior_RecoverySequence(t *testing.T) {
 	assert.ErrorIs(t, err, gobreaker.ErrOpenState)
 
 	// Phase 4: Wait for timeout and transition to half-open
-	time.Sleep(150 * time.Millisecond)
+	awaitErr := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return breaker.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, awaitErr, "circuit should transition to half-open")
 
 	// Phase 5: Successful execution in half-open closes the breaker
 	result, err = breaker.Execute(func() (any, error) {
@@ -624,8 +638,11 @@ func TestBreakerBehavior_ReopenAfterHalfOpenFailures(t *testing.T) {
 
 	// Multiple cycles of: wait -> half-open -> fail -> reopen
 	for cycle := 0; cycle < 3; cycle++ {
-		// Wait for timeout
-		time.Sleep(150 * time.Millisecond)
+		// Wait for timeout to transition to half-open
+		err := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+			return breaker.State() == gobreaker.StateHalfOpen
+		})
+		require.NoError(t, err, "cycle %d: circuit should transition to half-open", cycle)
 
 		// Fail in half-open state
 		_, _ = breaker.Execute(func() (any, error) {
@@ -637,8 +654,11 @@ func TestBreakerBehavior_ReopenAfterHalfOpenFailures(t *testing.T) {
 			"cycle %d: breaker should reopen after half-open failure", cycle)
 	}
 
-	// Finally recover
-	time.Sleep(150 * time.Millisecond)
+	// Finally recover - wait for transition to half-open
+	err := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return breaker.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, err, "circuit should transition to half-open for recovery")
 	result, err := breaker.Execute(func() (any, error) {
 		return "finally recovered", nil
 	})

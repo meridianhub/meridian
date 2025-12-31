@@ -272,9 +272,9 @@ func TestServer_StartAndShutdown(t *testing.T) {
 		}
 	}()
 
-	// Give server time to start and bind the port.
-	// We use a small sleep here because this is a unit test verifying lifecycle.
-	// The mutex in Server ensures thread-safety regardless of timing.
+	// Intentional sleep: Give server time to start and bind the port.
+	// The server doesn't expose a "started" state we can poll. This is a unit test
+	// verifying lifecycle; the mutex in Server ensures thread-safety regardless of timing.
 	time.Sleep(50 * time.Millisecond)
 
 	select {

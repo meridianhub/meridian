@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -154,5 +157,64 @@ func TestCreateServer(t *testing.T) {
 				t.Errorf("IdleTimeout = %v, want 120s", server.IdleTimeout)
 			}
 		})
+	}
+}
+
+func TestGetDBConnectionString_RequiresDatabaseURL(t *testing.T) {
+	// Save original value
+	originalValue := os.Getenv("DATABASE_URL")
+	defer func() {
+		if originalValue != "" {
+			_ = os.Setenv("DATABASE_URL", originalValue)
+		} else {
+			_ = os.Unsetenv("DATABASE_URL")
+		}
+	}()
+
+	// Set DATABASE_URL and verify it's returned
+	testURL := "postgres://test:test@testhost:5432/testdb"
+	_ = os.Setenv("DATABASE_URL", testURL)
+
+	got := getDBConnectionString()
+	if got != testURL {
+		t.Errorf("getDBConnectionString() = %q, want %q", got, testURL)
+	}
+}
+
+func TestGetDBConnectionString_FailsFastWhenMissing(t *testing.T) {
+	// This test verifies that the binary fails fast when DATABASE_URL is missing.
+	// We use a subprocess test pattern because log.Fatal calls os.Exit(1).
+	if os.Getenv("TEST_SUBPROCESS") == "1" {
+		// We're in the subprocess - unset DATABASE_URL and call the function
+		_ = os.Unsetenv("DATABASE_URL")
+		getDBConnectionString() // This should call log.Fatal
+		return
+	}
+
+	// We're in the parent test - run ourselves as a subprocess
+	ctx := context.Background()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestGetDBConnectionString_FailsFastWhenMissing")
+	cmd.Env = append(os.Environ(), "TEST_SUBPROCESS=1")
+
+	// Ensure DATABASE_URL is not set in subprocess
+	var filteredEnv []string
+	for _, env := range cmd.Env {
+		if !strings.HasPrefix(env, "DATABASE_URL=") {
+			filteredEnv = append(filteredEnv, env)
+		}
+	}
+	cmd.Env = filteredEnv
+
+	output, err := cmd.CombinedOutput()
+
+	// Expect the subprocess to exit with non-zero status
+	if err == nil {
+		t.Fatal("Expected process to exit with error when DATABASE_URL is missing, but it succeeded")
+	}
+
+	// Verify the error message explicitly mentions DATABASE_URL requirement
+	outputStr := string(output)
+	if !strings.Contains(outputStr, "DATABASE_URL environment variable is required") {
+		t.Errorf("Expected error message to mention 'DATABASE_URL environment variable is required', got: %s", outputStr)
 	}
 }

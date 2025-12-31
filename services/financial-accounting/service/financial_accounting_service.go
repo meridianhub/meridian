@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/events"
 )
 
@@ -1201,7 +1202,7 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		PreviousStatus:       toProtoTransactionStatus(previousStatus),
 		ChartOfAccountsRules: updated.ChartOfAccountsRules,
 		Reason:               fmt.Sprintf("Status updated from %s to %s", previousStatus, newStatus),
-		UpdatedBy:            "system", // TODO: Extract from auth context when available
+		UpdatedBy:            extractUserFromContext(ctx),
 		CorrelationId:        correlationID,
 		CausationId:          correlationID, // Request caused this event
 		Timestamp:            timestamppb.Now(),
@@ -1462,7 +1463,7 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 			PreviousStatus: toProtoTransactionStatus(previousStatus),
 			NewStatus:      toProtoTransactionStatus(newStatus),
 			Reason:         req.Reason,
-			ControlledBy:   "system", // TODO: Extract from auth context when available
+			ControlledBy:   extractUserFromContext(ctx),
 			CorrelationId:  correlationID,
 			CausationId:    correlationID,
 			Timestamp:      timestamppb.New(controlledAt),
@@ -1550,4 +1551,15 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 	}
 
 	return response, nil
+}
+
+// extractUserFromContext extracts the user ID from the authentication context.
+// If the auth context is present and contains a valid user ID, it returns that user ID.
+// Otherwise, it falls back to "system" for operations without authentication context
+// (e.g., system-initiated operations, background jobs, or legacy code paths).
+func extractUserFromContext(ctx context.Context) string {
+	if userID, ok := auth.GetUserIDFromContext(ctx); ok && userID != "" {
+		return userID
+	}
+	return "system"
 }
