@@ -143,6 +143,8 @@ metadata:
   annotations:
     description: Prevents LOCAL_DEV_MODE=true in ConfigMaps and container env vars in production
 spec:
+  # For gradual rollout, use 'dryrun' (audit only) or 'warn' (allow but warn)
+  # before switching to 'deny' (block) in production
   enforcementAction: deny
   match:
     kinds:

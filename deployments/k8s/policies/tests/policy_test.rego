@@ -3,9 +3,6 @@
 
 package blockdevmodeinproduction
 
-# Import the policy module
-import data.blockdevmodeinproduction
-
 # =============================================================================
 # Test: Production namespace detection
 # =============================================================================

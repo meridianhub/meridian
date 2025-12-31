@@ -149,10 +149,25 @@ The `blockdevmodeinproduction.rego` file is extracted from the ConstraintTemplat
 Add to your CI pipeline:
 
 ```yaml
+- name: Install OPA
+  uses: open-policy-agent/setup-opa@v2
+  with:
+    version: '0.71.0'
+
 - name: Test OPA Gatekeeper Policies
   run: |
-    curl -L -o /usr/local/bin/opa https://github.com/open-policy-agent/opa/releases/download/v1.12.1/opa_linux_amd64_static
-    chmod +x /usr/local/bin/opa
     # --v0-compatible is required because Gatekeeper uses Rego v0 syntax
     opa test deployments/k8s/policies/tests/ --v0-compatible -v
 ```
+
+## Known Limitations
+
+1. **`envFrom` references are not checked at the Pod/Deployment level**: When a container uses
+   `envFrom` to reference a ConfigMap, the policy cannot detect `LOCAL_DEV_MODE=true` at the
+   workload level. However, the ConfigMap itself is validated when created/updated, providing
+   defense-in-depth.
+
+2. **"product" namespace prefix matches are intentional**: Namespaces like `product-catalog` will
+   be flagged as production due to the `prod*` prefix match. This is by design - false positives
+   are safer than false negatives for security policies. If needed, adjust the namespace matching
+   logic in the Rego policy.

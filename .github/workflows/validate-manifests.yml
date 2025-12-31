@@ -153,6 +153,11 @@ jobs:
             exit 1
           fi
 
+      - name: Install OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: '0.71.0'
+
       - name: Verify Rego policy sync
         run: |
           echo "Verifying Rego policy files are in sync..."
@@ -172,36 +177,30 @@ jobs:
 
           # Extract Rego from ConstraintTemplate (between 'rego: |' and the next '---')
           # Skip comment lines at the top of the standalone .rego file for comparison
-          EMBEDDED_REGO=$(sed -n '/rego: |/,/^---$/p' "$CONSTRAINT_TEMPLATE" | \
+          YAML_REGO_FILE=$(mktemp)
+          sed -n '/rego: |/,/^---$/p' "$CONSTRAINT_TEMPLATE" | \
             sed '1d;$d' | \
-            sed 's/^        //')
+            sed 's/^        //' > "$YAML_REGO_FILE"
 
           # Get standalone Rego, skipping the header comments
-          STANDALONE_REGO=$(sed -n '/^package blockdevmodeinproduction/,$p' "$REGO_FILE")
+          TEST_REGO_FILE=$(mktemp)
+          sed -n '/^package blockdevmodeinproduction/,$p' "$REGO_FILE" > "$TEST_REGO_FILE"
 
-          # Normalize for comparison:
-          # 1. Remove blank lines
-          # 2. Normalize all leading whitespace to single spaces for each indentation level
-          # 3. Remove trailing whitespace
-          normalize_rego() {
-            sed '/^$/d' | \
-            sed 's/^[[:space:]]*//' | \
-            sed 's/[[:space:]]*$//'
-          }
+          # Use opa fmt to normalize both files before comparing
+          # This is more robust than sed-based normalization
+          opa fmt "$YAML_REGO_FILE" > /tmp/yaml_rego_formatted.rego
+          opa fmt "$TEST_REGO_FILE" > /tmp/test_rego_formatted.rego
 
-          EMBEDDED_NORMALIZED=$(echo "$EMBEDDED_REGO" | normalize_rego)
-          STANDALONE_NORMALIZED=$(echo "$STANDALONE_REGO" | normalize_rego)
-
-          if [ "$EMBEDDED_NORMALIZED" != "$STANDALONE_NORMALIZED" ]; then
+          if ! diff /tmp/yaml_rego_formatted.rego /tmp/test_rego_formatted.rego > /dev/null; then
             echo "ERROR: Rego policy in ConstraintTemplate differs from standalone test file!"
             echo ""
             echo "The Rego embedded in $CONSTRAINT_TEMPLATE must match $REGO_FILE"
-            echo "(excluding header comments and indentation differences)"
+            echo "(excluding header comments and formatting differences)"
             echo ""
             echo "To fix: Update both files to have identical Rego policy logic."
             echo ""
-            echo "=== Differences (ignoring indentation) ==="
-            diff <(echo "$EMBEDDED_NORMALIZED") <(echo "$STANDALONE_NORMALIZED") | head -30 || true
+            echo "=== Differences (after opa fmt normalization) ==="
+            diff /tmp/yaml_rego_formatted.rego /tmp/test_rego_formatted.rego | head -30 || true
             exit 1
           fi
 
@@ -211,11 +210,7 @@ jobs:
         run: |
           echo "Running OPA policy tests..."
 
-          # Install OPA
-          curl -L -o /tmp/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
-          chmod +x /tmp/opa
-
           # Run tests with v0-compatible flag for Gatekeeper compatibility
-          /tmp/opa test deployments/k8s/policies/tests/ -v --v0-compatible
+          opa test deployments/k8s/policies/tests/ -v --v0-compatible
 
           echo "All OPA policy tests passed."
