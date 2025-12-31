@@ -247,7 +247,7 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown
 	logger.Info("shutting down servers...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultRPCTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
 	defer cancel()
 
 	// Close database connection during shutdown
@@ -327,7 +327,7 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.
 	resilientConfig := sharedclients.ResilientClientConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "current-account",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultRPCTimeout),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultCircuitBreakerOpenTimeout),
 		CircuitBreakerInterval: env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerInterval),
 		MaxRequests:            env.GetEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
 		FailureThreshold:       env.GetEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
@@ -378,7 +378,7 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger) (ser
 	resilientConfig := sharedclients.ResilientClientConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "financial-accounting",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultRPCTimeout),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultCircuitBreakerOpenTimeout),
 		CircuitBreakerInterval: env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerInterval),
 		MaxRequests:            env.GetEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
 		FailureThreshold:       env.GetEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
@@ -432,7 +432,7 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 	resilientConfig := gateway.ResilientGatewayConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "payment-gateway",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultRPCTimeout),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultCircuitBreakerOpenTimeout),
 		CircuitBreakerInterval: env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerInterval),
 		MaxRequests:            env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
 		FailureThreshold:       env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
