@@ -3,13 +3,20 @@ package worker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/clients"
+	"github.com/meridianhub/meridian/services/tenant/config"
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/services/tenant/notifier"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -312,4 +319,400 @@ func TestCheckFailedProvisioningAlerts_LogsContainAlertLabel(t *testing.T) {
 		strings.Contains(logs, "alert=tenant_provisioning_failed") ||
 			strings.Contains(logs, `alert="tenant_provisioning_failed"`),
 		"logs should contain alert label")
+}
+
+func TestNewAlertManager_WithSlackNotifier(t *testing.T) {
+	_, repo := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	slackNotifier := notifier.NewSlackNotifier(notifier.SlackNotifierConfig{
+		Config: config.SlackConfig{
+			Enabled:     true,
+			WebhookURL:  "https://hooks.slack.com/services/test",
+			ServiceName: "test-service",
+		},
+	})
+
+	am := NewAlertManager(repo, logger, WithSlackNotifier(slackNotifier))
+
+	require.NotNil(t, am)
+	assert.NotNil(t, am.slackNotifier)
+}
+
+func TestCheckFailedProvisioningAlerts_WithSlackNotifier(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Create a mock Slack server
+	var receivedPayloads []map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]interface{}
+		_ = json.Unmarshal(body, &payload)
+		receivedPayloads = append(receivedPayloads, payload)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	slackNotifier := notifier.NewSlackNotifier(notifier.SlackNotifierConfig{
+		Config: config.SlackConfig{
+			Enabled:     true,
+			WebhookURL:  server.URL,
+			ServiceName: "tenant-service",
+		},
+		HTTPClient: server.Client(),
+		Logger:     logger,
+	})
+
+	am := NewAlertManager(repo, logger, WithSlackNotifier(slackNotifier))
+
+	ctx := context.Background()
+
+	// Create a failed tenant
+	failedTenant := &domain.Tenant{
+		ID:              tenant.TenantID("slack_test_tenant"),
+		DisplayName:     "Slack Test Tenant",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "database connection timeout",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, failedTenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", failedTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	threshold := 1 * time.Hour
+
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Verify Slack received the alert
+	require.Len(t, receivedPayloads, 1, "Slack should receive exactly one alert")
+
+	payload := receivedPayloads[0]
+	assert.Contains(t, payload["text"].(string), "slack_test_tenant")
+	assert.Contains(t, payload["text"].(string), "Tenant Provisioning Failed")
+
+	// Verify blocks structure
+	blocks, ok := payload["blocks"].([]interface{})
+	require.True(t, ok, "blocks should be an array")
+	assert.GreaterOrEqual(t, len(blocks), 2, "should have at least header and details blocks")
+
+	// Verify success log
+	logs := logBuf.String()
+	assert.Contains(t, logs, "slack alert sent successfully")
+}
+
+func TestCheckFailedProvisioningAlerts_SlackErrorHandling(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Create a mock Slack server that returns errors
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer server.Close()
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	slackNotifier := notifier.NewSlackNotifier(notifier.SlackNotifierConfig{
+		Config: config.SlackConfig{
+			Enabled:     true,
+			WebhookURL:  server.URL,
+			ServiceName: "tenant-service",
+		},
+		HTTPClient: server.Client(),
+		Logger:     logger,
+	})
+
+	am := NewAlertManager(repo, logger, WithSlackNotifier(slackNotifier))
+
+	ctx := context.Background()
+
+	// Create a failed tenant
+	failedTenant := &domain.Tenant{
+		ID:              tenant.TenantID("slack_error_tenant"),
+		DisplayName:     "Slack Error Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "test error",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, failedTenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", failedTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	threshold := 1 * time.Hour
+
+	// CheckFailedProvisioningAlerts should NOT return error even if Slack fails
+	// (Slack failures are logged but don't block the alert loop)
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Verify error was logged
+	logs := logBuf.String()
+	assert.Contains(t, logs, "failed to send Slack alert")
+	assert.Contains(t, logs, "slack_error_tenant")
+}
+
+// =============================================================================
+// PagerDuty Integration Tests
+// =============================================================================
+
+func TestNewAlertManager_WithPagerDutyClient(t *testing.T) {
+	_, repo := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	pdClient := clients.NewPagerDutyClient(config.PagerDutyConfig{
+		Enabled:    true,
+		RoutingKey: "test-key",
+		Source:     "test-source",
+	})
+
+	am := NewAlertManager(repo, logger, WithPagerDutyClient(pdClient))
+
+	require.NotNil(t, am)
+	assert.Equal(t, pdClient, am.pagerdutyClient)
+}
+
+func TestCheckFailedProvisioningAlerts_SendsPagerDutyAlert(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Track received PagerDuty events
+	var receivedEvents []clients.PagerDutyEvent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var event clients.PagerDutyEvent
+		err = json.Unmarshal(body, &event)
+		require.NoError(t, err)
+		receivedEvents = append(receivedEvents, event)
+
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(`{"status":"success","message":"Event processed"}`))
+	}))
+	defer server.Close()
+
+	// Create PagerDuty client with test server
+	pdClient := clients.NewPagerDutyClient(
+		config.PagerDutyConfig{
+			Enabled:    true,
+			RoutingKey: "test-routing-key",
+			Source:     "tenant-service-test",
+		},
+		clients.WithEventsURL(server.URL),
+	)
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	am := NewAlertManager(repo, logger, WithPagerDutyClient(pdClient))
+
+	ctx := context.Background()
+
+	// Create a failed tenant
+	failedTenant := &domain.Tenant{
+		ID:              tenant.TenantID("pd_test_tenant"),
+		DisplayName:     "PagerDuty Test Tenant",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "database schema creation failed",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, failedTenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", failedTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	threshold := 1 * time.Hour
+
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Verify PagerDuty was called
+	require.Len(t, receivedEvents, 1)
+
+	event := receivedEvents[0]
+	assert.Equal(t, "test-routing-key", event.RoutingKey)
+	assert.Equal(t, clients.EventActionTrigger, event.EventAction)
+	assert.Contains(t, event.DedupKey, "tenant-provisioning-failed-pd_test_tenant")
+	assert.Contains(t, event.Payload.Summary, "pd_test_tenant")
+	assert.Contains(t, event.Payload.Summary, "database schema creation failed")
+	assert.Equal(t, "critical", event.Payload.Severity)
+	assert.Equal(t, "tenant-service-test", event.Payload.Source)
+
+	// Verify custom details
+	customDetails := event.Payload.CustomDetails
+	assert.Equal(t, "pd_test_tenant", customDetails["tenant_id"])
+	assert.Equal(t, "PagerDuty Test Tenant", customDetails["display_name"])
+	assert.Equal(t, "provisioning_failed", customDetails["status"])
+	assert.Equal(t, "database schema creation failed", customDetails["error_message"])
+}
+
+func TestCheckFailedProvisioningAlerts_PagerDutyError_ContinuesProcessing(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Create a server that returns errors
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"status":"error","message":"Internal server error"}`))
+	}))
+	defer server.Close()
+
+	pdClient := clients.NewPagerDutyClient(
+		config.PagerDutyConfig{
+			Enabled:    true,
+			RoutingKey: "test-key",
+			Source:     "test-source",
+		},
+		clients.WithEventsURL(server.URL),
+	)
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	am := NewAlertManager(repo, logger, WithPagerDutyClient(pdClient))
+
+	ctx := context.Background()
+
+	// Create two failed tenants
+	for i := 1; i <= 2; i++ {
+		tenantObj := &domain.Tenant{
+			ID:              tenant.TenantID("pd_tenant_" + string(rune('a'+i-1))),
+			DisplayName:     "Test Tenant",
+			SettlementAsset: "USD",
+			Status:          domain.StatusProvisioningFailed,
+			ErrorMessage:    "error",
+			CreatedAt:       time.Now().Add(-2 * time.Hour),
+			Version:         1,
+		}
+		err := repo.Create(ctx, tenantObj)
+		require.NoError(t, err)
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenantObj.ID.String()).Error
+		require.NoError(t, err)
+	}
+
+	threshold := 1 * time.Hour
+
+	// Should not return an error even when PagerDuty fails
+	err := am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Should have attempted to send alerts for both tenants
+	assert.Equal(t, 2, callCount)
+
+	// Should have logged the errors
+	logs := logBuf.String()
+	assert.Contains(t, logs, "failed to send PagerDuty alert")
+}
+
+func TestCheckFailedProvisioningAlerts_NoPagerDutyClient_LogsOnly(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Create AlertManager without PagerDuty client
+	am := NewAlertManager(repo, logger)
+
+	ctx := context.Background()
+
+	// Create a failed tenant
+	failedTenant := &domain.Tenant{
+		ID:              tenant.TenantID("log_only_tenant"),
+		DisplayName:     "Log Only Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "test error",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, failedTenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", failedTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	threshold := 1 * time.Hour
+
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Should log the alert
+	logs := logBuf.String()
+	assert.Contains(t, logs, "tenant provisioning failure alert")
+	assert.Contains(t, logs, "log_only_tenant")
+
+	// Should NOT attempt to send PagerDuty alert (no error logs about PagerDuty)
+	assert.NotContains(t, logs, "failed to send PagerDuty alert")
+}
+
+func TestCheckFailedProvisioningAlerts_TruncatesLongErrorMessage(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	var receivedEvent clients.PagerDutyEvent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		err = json.Unmarshal(body, &receivedEvent)
+		require.NoError(t, err)
+
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(`{"status":"success"}`))
+	}))
+	defer server.Close()
+
+	pdClient := clients.NewPagerDutyClient(
+		config.PagerDutyConfig{
+			Enabled:    true,
+			RoutingKey: "test-key",
+			Source:     "test-source",
+		},
+		clients.WithEventsURL(server.URL),
+	)
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	am := NewAlertManager(repo, logger, WithPagerDutyClient(pdClient))
+
+	ctx := context.Background()
+
+	// Create a tenant with a very long error message (>200 chars)
+	longErrorMsg := strings.Repeat("x", 300)
+	failedTenant := &domain.Tenant{
+		ID:              tenant.TenantID("long_error_tenant"),
+		DisplayName:     "Long Error Tenant",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    longErrorMsg,
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, failedTenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", failedTenant.ID.String()).Error
+	require.NoError(t, err)
+
+	threshold := 1 * time.Hour
+
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Verify the summary was truncated (should end with "...")
+	assert.LessOrEqual(t, len(receivedEvent.Payload.Summary), 300, "summary should be truncated")
+	assert.Contains(t, receivedEvent.Payload.Summary, "...")
+
+	// Verify the full error message is still in custom_details
+	assert.Equal(t, longErrorMsg, receivedEvent.Payload.CustomDetails["error_message"])
 }
