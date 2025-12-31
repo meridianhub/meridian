@@ -496,6 +496,31 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 
 ---
 
+#### 5.4 Replace Test Sleeps with Await Functions
+
+**Problem:** ~75 instances of `time.Sleep` in test files cause flaky tests and slow test suites. The codebase has `shared/platform/await/` with proper polling utilities, but many tests still use raw sleeps.
+
+**Files Affected:** ~25 test files including:
+- `shared/pkg/clients/circuitbreaker_test.go` (12 instances)
+- `services/tenant/worker/provisioning_worker_test.go` (7 instances)
+- `shared/platform/db/pool_coverage_test.go` (6 instances)
+- `shared/platform/audit/worker_test.go` (5 instances)
+- Various other `*_test.go` files
+
+**Existing Infrastructure:**
+- `shared/platform/await/await.go` - `Until()`, `UntilNoError()` utilities
+- Some tests already follow guidelines (see `withdrawal_test.go:599`)
+
+**Acceptance Criteria:**
+- [ ] Replace `time.Sleep` with `await.Until` or `await.UntilNoError` where polling a condition
+- [ ] For circuit breaker state transitions, use condition-based waits
+- [ ] Document await usage in testing guidelines
+- [ ] Add linter rule to flag new `time.Sleep` in test files
+
+**Estimated Effort:** 2 days
+
+---
+
 ## Summary Table
 
 | ID | Work Item | Priority | Effort | Dependencies |
@@ -514,8 +539,9 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 | 5.1 | Double-Wrapped Error | P3 | 0.5h | None |
 | 5.2 | Auth Context Extraction | P3 | 0.5d | None |
 | 5.3 | Audit Worker Fallback DSN | P3 | 0.5h | None |
+| 5.4 | Replace Test Sleeps with Await | P3 | 2d | None |
 
-**Total Estimated Effort:** 27-38 days
+**Total Estimated Effort:** 29-40 days
 
 ---
 
