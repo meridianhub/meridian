@@ -15,6 +15,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -115,7 +116,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	var account *domain.CurrentAccount
 	var availableBalance int64
 
-	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	txErr := db.WithGormTenantTransaction(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
 		txLienRepo := s.lienRepo.WithTx(tx)
 
@@ -166,7 +167,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Persist lien (within the transaction)
-		if err := txLienRepo.Create(lien); err != nil {
+		if err := txLienRepo.Create(ctx, lien); err != nil {
 			return fmt.Errorf("%w: %v", errTxSaveLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
@@ -336,13 +337,13 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	// Execute atomically in a transaction with pessimistic locking to prevent race conditions.
 	// We lock both the lien and account to prevent concurrent execute/terminate operations.
 	var account *domain.CurrentAccount
-	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	txErr := db.WithGormTenantTransaction(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
 		txLienRepo := s.lienRepo.WithTx(tx)
 
 		// Retrieve lien with FOR UPDATE lock to prevent concurrent modifications
 		var txErr error
-		lien, txErr = txLienRepo.FindByIDForUpdate(lienID)
+		lien, txErr = txLienRepo.FindByIDForUpdate(ctx, lienID)
 		if txErr != nil {
 			return txErr
 		}
@@ -376,7 +377,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		account = &accountResult
 
 		// Update lien status
-		if err := txLienRepo.Update(lien); err != nil {
+		if err := txLienRepo.Update(ctx, lien); err != nil {
 			return fmt.Errorf("%w: %v", errTxUpdateLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
@@ -529,11 +530,11 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 
 	// Terminate atomically in a transaction with pessimistic locking to prevent race conditions.
 	// Without FOR UPDATE, concurrent TerminateLien calls could both pass CanTerminate() checks.
-	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+	txErr := db.WithGormTenantTransaction(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txLienRepo := s.lienRepo.WithTx(tx)
 
 		// Retrieve lien with FOR UPDATE lock to prevent concurrent modifications
-		lien, err = txLienRepo.FindByIDForUpdate(lienID)
+		lien, err = txLienRepo.FindByIDForUpdate(ctx, lienID)
 		if err != nil {
 			return err
 		}
@@ -554,7 +555,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		}
 
 		// Update lien status
-		if err := txLienRepo.Update(lien); err != nil {
+		if err := txLienRepo.Update(ctx, lien); err != nil {
 			return fmt.Errorf("%w: %v", errTxUpdateLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 

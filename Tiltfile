@@ -459,46 +459,60 @@ k8s_resource(
 # =============================================================================
 # Microservices
 # =============================================================================
+# PORT CONFIGURATION: The canonical source for port numbers is shared/platform/ports/ports.go
+# This Tiltfile uses hardcoded values because Starlark cannot import Go constants.
+# If updating ports here, ensure shared/platform/ports/ports.go is also updated.
+#
+# Port assignments:
+#   - CurrentAccount:      50051
+#   - FinancialAccounting: 50052
+#   - PositionKeeping:     50053
+#   - PaymentOrder:        50054
+#   - Party:               50055
+#   - Tenant:              50056
+#   - Gateway (HTTP):      8080
+#   - HTTPHealth:          8081
+#   - HTTPMetrics:         9090
 
 # Current-Account Service - gRPC microservice for customer and account management
 grpc_microservice(
     'current-account',
-    grpc_port=50051,
+    grpc_port=50051,  # ports.CurrentAccount
     resource_deps=['cockroachdb', 'migrate-current-account'],
 )
 
 # Financial-Accounting Service - gRPC microservice for ledger and booking operations
 grpc_microservice(
     'financial-accounting',
-    grpc_port=50052,
+    grpc_port=50052,  # ports.FinancialAccounting
     resource_deps=['cockroachdb', 'migrate-financial-accounting'],
 )
 
 # Position-Keeping Service - gRPC microservice for transaction position management
 grpc_microservice(
     'position-keeping',
-    grpc_port=50053,
+    grpc_port=50053,  # ports.PositionKeeping
     resource_deps=['cockroachdb', 'migrate-position-keeping'],
 )
 
 # Payment-Order Service - gRPC microservice for payment order management with saga orchestration
 grpc_microservice(
     'payment-order',
-    grpc_port=50054,
+    grpc_port=50054,  # ports.PaymentOrder
     resource_deps=['cockroachdb', 'kafka-cluster', 'current-account', 'migrate-payment-order'],
 )
 
 # Tenant Service - gRPC microservice for platform tenant registry
 grpc_microservice(
     'tenant',
-    grpc_port=50056,
+    grpc_port=50056,  # ports.Tenant
     resource_deps=['cockroachdb', 'migrate-tenant'],
 )
 
 # Party Service - gRPC microservice for party reference data management
 grpc_microservice(
     'party',
-    grpc_port=50055,
+    grpc_port=50055,  # ports.Party
     resource_deps=['cockroachdb', 'migrate-party'],
 )
 

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -192,7 +194,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create HTTP server
-	httpPort := env.GetEnvAsInt("HTTP_PORT", 8080)
+	httpPort := env.GetEnvAsInt("HTTP_PORT", ports.Gateway)
 	httpServer, err := webhookhttp.NewServer(webhookhttp.ServerConfig{
 		Port:               httpPort,
 		WebhookHandler:     webhookHandler,
@@ -205,7 +207,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Get gRPC port
-	grpcPort := env.GetEnvOrDefault("GRPC_PORT", "50054")
+	grpcPort := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.PaymentOrder))
 	grpcAddress := fmt.Sprintf(":%s", grpcPort)
 
 	// Create gRPC listener
@@ -315,7 +317,7 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger, tracer *o
 	logger.Info("connecting to current-account service",
 		"service", currentaccountclient.ServiceName,
 		"namespace", namespace,
-		"port", currentaccountclient.DefaultPort)
+		"port", ports.CurrentAccount)
 
 	// Configure resilience settings from environment
 	resilientConfig := &sharedclients.ResilientClientConfig{
@@ -346,7 +348,7 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger, tracer *o
 	client, cleanup, err := currentaccountclient.New(currentaccountclient.Config{
 		ServiceName: currentaccountclient.ServiceName,
 		Namespace:   namespace,
-		Port:        currentaccountclient.DefaultPort,
+		Port:        ports.CurrentAccount,
 		Timeout:     env.GetEnvAsDuration("CURRENT_ACCOUNT_TIMEOUT", currentaccountclient.DefaultTimeout),
 		Tracer:      tracer,
 		Resilience:  resilientConfig,
@@ -365,7 +367,7 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger, trac
 	logger.Info("connecting to financial-accounting service",
 		"service", financialaccountingclient.ServiceName,
 		"namespace", namespace,
-		"port", financialaccountingclient.DefaultPort)
+		"port", ports.FinancialAccounting)
 
 	// Configure resilience settings from environment
 	resilientConfig := &sharedclients.ResilientClientConfig{
@@ -396,7 +398,7 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger, trac
 	client, cleanup, err := financialaccountingclient.New(financialaccountingclient.Config{
 		ServiceName: financialaccountingclient.ServiceName,
 		Namespace:   namespace,
-		Port:        financialaccountingclient.DefaultPort,
+		Port:        ports.FinancialAccounting,
 		Timeout:     env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_TIMEOUT", financialaccountingclient.DefaultTimeout),
 		Tracer:      tracer,
 		Resilience:  resilientConfig,

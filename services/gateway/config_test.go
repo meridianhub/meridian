@@ -3,6 +3,7 @@ package gateway
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -94,7 +95,11 @@ func TestLoadConfig_InvalidBackendRoutesJSON(t *testing.T) {
 	_, err := LoadConfig()
 
 	require.Error(t, err)
+	// Verify errors.Is() correctly identifies the sentinel error.
+	// This validates the fix for double %w wrapping which broke errors.Is().
 	assert.ErrorIs(t, err, ErrInvalidBackendsJSON)
+	// Also verify the underlying JSON error details are preserved in the message
+	assert.Contains(t, err.Error(), "invalid character")
 }
 
 func TestLoadConfig_BackendRouteEmptyPrefix(t *testing.T) {
@@ -432,6 +437,205 @@ func setEnvVars(t *testing.T, vars map[string]string) func() {
 	// Return cleanup function
 	return func() {
 		for _, key := range envsToClear {
+			if wasSet[key] {
+				os.Setenv(key, originals[key])
+			} else {
+				os.Unsetenv(key)
+			}
+		}
+	}
+}
+
+func TestConfig_Validate_AuthEnabled(t *testing.T) {
+	testCases := []struct {
+		name      string
+		config    Config
+		wantError error
+	}{
+		{
+			name: "auth enabled without JWKS URL fails",
+			config: Config{
+				Port:        8080,
+				BaseDomain:  "api.example.com",
+				DatabaseURL: "postgres://localhost/db",
+				Auth: AuthConfig{
+					Enabled: true,
+					JWKSURL: "",
+				},
+			},
+			wantError: ErrJWKSURLRequired,
+		},
+		{
+			name: "auth enabled with JWKS URL succeeds",
+			config: Config{
+				Port:        8080,
+				BaseDomain:  "api.example.com",
+				DatabaseURL: "postgres://localhost/db",
+				Auth: AuthConfig{
+					Enabled: true,
+					JWKSURL: "https://auth.example.com/.well-known/jwks.json",
+				},
+			},
+			wantError: nil,
+		},
+		{
+			name: "auth disabled without JWKS URL succeeds",
+			config: Config{
+				Port:        8080,
+				BaseDomain:  "api.example.com",
+				DatabaseURL: "postgres://localhost/db",
+				Auth: AuthConfig{
+					Enabled: false,
+					JWKSURL: "",
+				},
+			},
+			wantError: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Validate()
+
+			if tc.wantError != nil {
+				assert.ErrorIs(t, err, tc.wantError)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestLoadAuthConfig_Defaults(t *testing.T) {
+	// Clear all auth-related env vars
+	authEnvVars := []string{
+		"AUTH_ENABLED", "JWKS_URL", "JWKS_CACHE_TTL", "JWKS_REFRESH_TTL",
+		"JWT_ISSUER", "JWT_AUDIENCE", "API_KEYS",
+		"API_KEY_RATE_LIMIT_PER_SECOND", "API_KEY_RATE_LIMIT_BURST",
+	}
+	for _, key := range authEnvVars {
+		os.Unsetenv(key)
+	}
+
+	config := loadAuthConfig()
+
+	assert.False(t, config.Enabled)
+	assert.Empty(t, config.JWKSURL)
+	assert.Equal(t, 24*time.Hour, config.JWKSCacheTTL)
+	assert.Equal(t, 1*time.Hour, config.JWKSRefreshTTL)
+	assert.Empty(t, config.Issuer)
+	assert.Empty(t, config.Audience)
+	assert.Nil(t, config.APIKeys)
+	assert.Equal(t, float64(100), config.RateLimitPerSecond)
+	assert.Equal(t, 200, config.RateLimitBurst)
+}
+
+func TestLoadAuthConfig_FullConfiguration(t *testing.T) {
+	// Set all auth-related env vars
+	cleanup := setAuthEnvVars(t, map[string]string{
+		"AUTH_ENABLED":                  "true",
+		"JWKS_URL":                      "https://auth.example.com/.well-known/jwks.json",
+		"JWKS_CACHE_TTL":                "12h",
+		"JWKS_REFRESH_TTL":              "30m",
+		"JWT_ISSUER":                    "https://auth.example.com",
+		"JWT_AUDIENCE":                  "api.example.com",
+		"API_KEYS":                      "key1:service-a,key2:service-b",
+		"API_KEY_RATE_LIMIT_PER_SECOND": "50",
+		"API_KEY_RATE_LIMIT_BURST":      "100",
+	})
+	defer cleanup()
+
+	config := loadAuthConfig()
+
+	assert.True(t, config.Enabled)
+	assert.Equal(t, "https://auth.example.com/.well-known/jwks.json", config.JWKSURL)
+	assert.Equal(t, 12*time.Hour, config.JWKSCacheTTL)
+	assert.Equal(t, 30*time.Minute, config.JWKSRefreshTTL)
+	assert.Equal(t, "https://auth.example.com", config.Issuer)
+	assert.Equal(t, "api.example.com", config.Audience)
+	require.Len(t, config.APIKeys, 2)
+	assert.Equal(t, "service-a", config.APIKeys["key1"])
+	assert.Equal(t, "service-b", config.APIKeys["key2"])
+	assert.Equal(t, float64(50), config.RateLimitPerSecond)
+	assert.Equal(t, 100, config.RateLimitBurst)
+}
+
+func TestParseAPIKeysEnv(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected map[string]string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: map[string]string{},
+		},
+		{
+			name:     "single key",
+			input:    "key1:identity1",
+			expected: map[string]string{"key1": "identity1"},
+		},
+		{
+			name:     "multiple keys",
+			input:    "key1:identity1,key2:identity2,key3:identity3",
+			expected: map[string]string{"key1": "identity1", "key2": "identity2", "key3": "identity3"},
+		},
+		{
+			name:     "with spaces",
+			input:    " key1 : identity1 , key2 : identity2 ",
+			expected: map[string]string{"key1": "identity1", "key2": "identity2"},
+		},
+		{
+			name:     "ignores invalid entries",
+			input:    "key1:identity1,invalid,key2:identity2",
+			expected: map[string]string{"key1": "identity1", "key2": "identity2"},
+		},
+		{
+			name:     "ignores empty key or identity",
+			input:    "key1:identity1,:identity2,key3:",
+			expected: map[string]string{"key1": "identity1"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parseAPIKeysEnv(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+// setAuthEnvVars sets auth-related environment variables and returns a cleanup function.
+func setAuthEnvVars(t *testing.T, vars map[string]string) func() {
+	t.Helper()
+
+	authEnvVars := []string{
+		"AUTH_ENABLED", "JWKS_URL", "JWKS_CACHE_TTL", "JWKS_REFRESH_TTL",
+		"JWT_ISSUER", "JWT_AUDIENCE", "API_KEYS",
+		"API_KEY_RATE_LIMIT_PER_SECOND", "API_KEY_RATE_LIMIT_BURST",
+	}
+
+	// Store original values
+	originals := make(map[string]string)
+	wasSet := make(map[string]bool)
+
+	for _, key := range authEnvVars {
+		if val, ok := os.LookupEnv(key); ok {
+			originals[key] = val
+			wasSet[key] = true
+		}
+		os.Unsetenv(key)
+	}
+
+	// Set new values
+	for key, value := range vars {
+		os.Setenv(key, value)
+	}
+
+	// Return cleanup function
+	return func() {
+		for _, key := range authEnvVars {
 			if wasSet[key] {
 				os.Setenv(key, originals[key])
 			} else {

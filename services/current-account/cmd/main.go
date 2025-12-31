@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -105,8 +107,8 @@ func run(logger *slog.Logger) error {
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 
 	logger.Info("external service configuration",
-		"position_keeping", "position-keeping."+namespace+".svc.cluster.local:50053",
-		"financial_accounting", "financial-accounting."+namespace+".svc.cluster.local:50052",
+		"position_keeping", fmt.Sprintf("position-keeping.%s.svc.cluster.local:%d", namespace, ports.PositionKeeping),
+		"financial_accounting", fmt.Sprintf("financial-accounting.%s.svc.cluster.local:%d", namespace, ports.FinancialAccounting),
 		"load_balancing", "DNS-based round_robin")
 
 	// Create service with external clients and capture the clients for health checking
@@ -163,7 +165,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get port from environment
-	port := env.GetEnvOrDefault("GRPC_PORT", "50051")
+	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.CurrentAccount))
 	address := fmt.Sprintf(":%s", port)
 
 	// Create listener
@@ -270,7 +272,7 @@ func createServiceWithClients(
 	posKeepingClient, posKeepingCleanup, err := poskeepingclient.New(poskeepingclient.Config{
 		ServiceName: poskeepingclient.ServiceName,
 		Namespace:   namespace,
-		Port:        poskeepingclient.DefaultPort,
+		Port:        ports.PositionKeeping,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
 		Resilience: &sharedclients.ResilientClientConfig{
@@ -287,7 +289,7 @@ func createServiceWithClients(
 	finAcctClient, finAcctCleanup, err := finacctclient.New(finacctclient.Config{
 		ServiceName: finacctclient.ServiceName,
 		Namespace:   namespace,
-		Port:        finacctclient.DefaultPort,
+		Port:        ports.FinancialAccounting,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
 		Resilience: &sharedclients.ResilientClientConfig{
@@ -309,7 +311,7 @@ func createServiceWithClients(
 	partyBaseClient, partyCleanup, err := partyclient.New(partyclient.Config{
 		ServiceName: partyclient.ServiceName,
 		Namespace:   namespace,
-		Port:        partyclient.DefaultPort,
+		Port:        ports.Party,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
 		Resilience: &sharedclients.ResilientClientConfig{

@@ -25,7 +25,8 @@ import (
 // Accepts testing.TB to work with both *testing.T and *testing.B.
 func mustNewPositionKeepingService(tb testing.TB, repo domain.FinancialPositionLogRepository, publisher domain.EventPublisher, idempotencySvc idempotency.Service) *service.PositionKeepingService {
 	tb.Helper()
-	svc, err := service.NewPositionKeepingService(repo, publisher, idempotencySvc)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	svc, err := service.NewPositionKeepingService(repo, mockMeasurementRepo, publisher, idempotencySvc)
 	require.NoError(tb, err, "unexpected error creating service")
 	return svc
 }
@@ -128,6 +129,32 @@ func (m *MockIdempotencyService) Refresh(ctx context.Context, key idempotency.Ke
 func (m *MockIdempotencyService) IsHeld(ctx context.Context, key idempotency.Key) (bool, error) {
 	args := m.Called(ctx, key)
 	return args.Bool(0), args.Error(1)
+}
+
+// MockMeasurementRepository is a mock implementation of MeasurementRepository
+type MockMeasurementRepository struct {
+	mock.Mock
+}
+
+func (m *MockMeasurementRepository) Create(ctx context.Context, measurement *domain.Measurement) error {
+	args := m.Called(ctx, measurement)
+	return args.Error(0)
+}
+
+func (m *MockMeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Measurement, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Measurement), args.Error(1)
+}
+
+func (m *MockMeasurementRepository) FindByPositionLogID(ctx context.Context, positionLogID uuid.UUID) ([]*domain.Measurement, error) {
+	args := m.Called(ctx, positionLogID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.Measurement), args.Error(1)
 }
 
 func TestInitiateFinancialPositionLog_Success(t *testing.T) {

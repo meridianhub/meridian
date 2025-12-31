@@ -178,8 +178,9 @@ func TestResilientCurrentAccountClient_CircuitBreakerIntegration(t *testing.T) {
 	beforeOpenCount := callCount.Load()
 	assert.Equal(t, int32(3), beforeOpenCount)
 
-	// Circuit breaker should now be open, next calls should fail fast
-	time.Sleep(100 * time.Millisecond) // Allow circuit breaker to transition
+	// Intentional sleep: Allow any async state updates in the circuit breaker to complete.
+	// The resilient client doesn't expose circuit breaker state, so we can't poll for it.
+	time.Sleep(100 * time.Millisecond)
 
 	_, err := resilientClient.InitiateLien(ctx, &currentaccountv1.InitiateLienRequest{})
 	assert.Error(t, err)
@@ -267,7 +268,7 @@ func TestResilientCurrentAccountClient_ContextCancellation(t *testing.T) {
 
 	mockClient := &mockCurrentAccountGRPCClient{
 		initiateLienFn: func(_ context.Context, _ *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
-			// Simulate slow operation
+			// Intentional sleep: Simulate slow operation to test context deadline handling
 			time.Sleep(100 * time.Millisecond)
 			return &currentaccountv1.InitiateLienResponse{}, nil
 		},

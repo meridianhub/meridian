@@ -54,8 +54,8 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
-	// Create the liens table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.liens (
+	// Create the lien table in the tenant schema
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.lien (
 		id UUID PRIMARY KEY,
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
@@ -274,7 +274,7 @@ func TestExecuteLien_Success(t *testing.T) {
 	require.NoError(t, err)
 	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-127", nil)
 	require.NoError(t, err)
-	require.NoError(t, lienRepo.Create(lien))
+	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	// Execute the lien
 	req := &pb.ExecuteLienRequest{
@@ -306,7 +306,7 @@ func TestExecuteLien_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-128", nil)
 	require.NoError(t, err)
-	require.NoError(t, lienRepo.Create(lien))
+	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	req := &pb.ExecuteLienRequest{LienId: lien.ID.String()}
 
@@ -357,7 +357,7 @@ func TestTerminateLien_Success(t *testing.T) {
 	require.NoError(t, err)
 	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-129", nil)
 	require.NoError(t, err)
-	require.NoError(t, lienRepo.Create(lien))
+	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	// Terminate the lien
 	req := &pb.TerminateLienRequest{
@@ -389,7 +389,7 @@ func TestTerminateLien_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-130", nil)
 	require.NoError(t, err)
-	require.NoError(t, lienRepo.Create(lien))
+	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	req := &pb.TerminateLienRequest{
 		LienId: lien.ID.String(),
@@ -423,7 +423,7 @@ func TestRetrieveLien_Success(t *testing.T) {
 	require.NoError(t, err)
 	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-131", nil)
 	require.NoError(t, err)
-	require.NoError(t, lienRepo.Create(lien))
+	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	// Retrieve the lien
 	req := &pb.RetrieveLienRequest{
@@ -699,7 +699,7 @@ func TestExecuteLien_IdempotencyReturnsCachedResponse(t *testing.T) {
 	require.NoError(t, err)
 	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-1", nil)
 	require.NoError(t, err)
-	require.NoError(t, lienRepo.Create(lien))
+	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	// Pre-populate cached response
 	idempKey := idempotency.Key{
@@ -753,7 +753,7 @@ func TestExecuteLien_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
 	require.NoError(t, err)
 	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-2", nil)
 	require.NoError(t, err)
-	require.NoError(t, lienRepo.Create(lien))
+	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	// Mark operation as pending
 	idempKey := idempotency.Key{
@@ -796,7 +796,7 @@ func TestExecuteLien_IdempotencyProceedsWithoutKey(t *testing.T) {
 	require.NoError(t, err)
 	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-3", nil)
 	require.NoError(t, err)
-	require.NoError(t, lienRepo.Create(lien))
+	require.NoError(t, lienRepo.Create(ctx, lien))
 
 	// Execute lien without idempotency key
 	req := &pb.ExecuteLienRequest{

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
@@ -175,7 +177,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("party client initialized",
 			"service_name", partyclient.ServiceName,
 			"namespace", namespace,
-			"port", partyclient.DefaultPort)
+			"port", ports.Party)
 	} else {
 		logger.Warn("party client not configured - tenant creation will not register parties",
 			"hint", "set PARTY_SERVICE_ENABLED=true to enable party registration")
@@ -283,7 +285,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get port from environment
-	port := env.GetEnvOrDefault("GRPC_PORT", "50056")
+	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.Tenant))
 	address := fmt.Sprintf(":%s", port)
 
 	// Create listener
@@ -387,7 +389,7 @@ func createPartyClient(namespace string, logger *slog.Logger, tracer *observabil
 	logger.Info("connecting to party service",
 		"service", partyclient.ServiceName,
 		"namespace", namespace,
-		"port", partyclient.DefaultPort)
+		"port", ports.Party)
 
 	// Configure resilience settings from environment
 	resilientConfig := &sharedclients.ResilientClientConfig{
@@ -418,7 +420,7 @@ func createPartyClient(namespace string, logger *slog.Logger, tracer *observabil
 	pc, cleanup, err := partyclient.New(partyclient.Config{
 		ServiceName: partyclient.ServiceName,
 		Namespace:   namespace,
-		Port:        partyclient.DefaultPort,
+		Port:        ports.Party,
 		Timeout:     env.GetEnvAsDuration("PARTY_TIMEOUT", partyclient.DefaultTimeout),
 		Tracer:      tracer,
 		Resilience:  resilientConfig,

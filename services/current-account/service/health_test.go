@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -466,7 +468,10 @@ func TestHealthChecker_Watch(t *testing.T) {
 	}()
 
 	// Wait for initial response and a few updates
-	time.Sleep(250 * time.Millisecond)
+	awaitErr := await.AtMost(1 * time.Second).PollInterval(20 * time.Millisecond).Until(func() bool {
+		return stream.responseCount() >= 2
+	})
+	require.NoError(t, awaitErr, "should receive at least 2 health check responses")
 
 	// Cancel context to stop watch
 	cancel()
@@ -476,10 +481,11 @@ func TestHealthChecker_Watch(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 
 	// Verify we received at least 2 responses (initial + periodic updates)
-	assert.GreaterOrEqual(t, len(stream.responses), 2)
+	responses := stream.getResponses()
+	assert.GreaterOrEqual(t, len(responses), 2)
 
 	// Verify all responses are SERVING
-	for _, resp := range stream.responses {
+	for _, resp := range responses {
 		assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
 	}
 }
@@ -489,14 +495,32 @@ type mockHealthWatchServer struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	responses []*grpc_health_v1.HealthCheckResponse
+	mu        sync.Mutex
 }
 
 func (m *mockHealthWatchServer) Send(resp *grpc_health_v1.HealthCheckResponse) error {
 	if m.ctx.Err() != nil {
 		return fmt.Errorf("stream context error: %w", m.ctx.Err())
 	}
+	m.mu.Lock()
 	m.responses = append(m.responses, resp)
+	m.mu.Unlock()
 	return nil
+}
+
+func (m *mockHealthWatchServer) responseCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.responses)
+}
+
+func (m *mockHealthWatchServer) getResponses() []*grpc_health_v1.HealthCheckResponse {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Return a copy to avoid races when iterating
+	result := make([]*grpc_health_v1.HealthCheckResponse, len(m.responses))
+	copy(result, m.responses)
+	return result
 }
 
 func (m *mockHealthWatchServer) Context() context.Context {
