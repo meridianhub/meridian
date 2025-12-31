@@ -1,3 +1,5 @@
+# Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
+# This service uses ports.PaymentOrder (50054) for gRPC.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

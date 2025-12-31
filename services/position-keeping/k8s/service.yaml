@@ -1,3 +1,5 @@
+# Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
+# This service uses ports.PositionKeeping (50053) for gRPC.
 apiVersion: v1
 kind: Service
 metadata:
