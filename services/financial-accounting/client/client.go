@@ -202,12 +202,20 @@ func New(cfg Config) (*Client, func(), error) {
 }
 
 // InitiateFinancialBookingLog creates a new financial booking log.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) InitiateFinancialBookingLog(ctx context.Context, req *financialaccountingv1.InitiateFinancialBookingLogRequest) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "InitiateFinancialBookingLog", func() (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+			return c.financialAccounting.InitiateFinancialBookingLog(ctx, req)
+		})
+	}
 
 	resp, err := c.financialAccounting.InitiateFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -218,12 +226,20 @@ func (c *Client) InitiateFinancialBookingLog(ctx context.Context, req *financial
 }
 
 // UpdateFinancialBookingLog updates an existing booking log.
+// Updates are idempotent when using version-based concurrency, so retry is enabled.
 func (c *Client) UpdateFinancialBookingLog(ctx context.Context, req *financialaccountingv1.UpdateFinancialBookingLogRequest) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent update)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "UpdateFinancialBookingLog", func() (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+			return c.financialAccounting.UpdateFinancialBookingLog(ctx, req)
+		})
+	}
 
 	resp, err := c.financialAccounting.UpdateFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -234,12 +250,20 @@ func (c *Client) UpdateFinancialBookingLog(ctx context.Context, req *financialac
 }
 
 // RetrieveFinancialBookingLog retrieves a specific booking log.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveFinancialBookingLog(ctx context.Context, req *financialaccountingv1.RetrieveFinancialBookingLogRequest) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "RetrieveFinancialBookingLog", func() (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
+			return c.financialAccounting.RetrieveFinancialBookingLog(ctx, req)
+		})
+	}
 
 	resp, err := c.financialAccounting.RetrieveFinancialBookingLog(ctx, req)
 	if err != nil {
@@ -250,12 +274,20 @@ func (c *Client) RetrieveFinancialBookingLog(ctx context.Context, req *financial
 }
 
 // ListFinancialBookingLogs lists booking logs with optional filtering.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) ListFinancialBookingLogs(ctx context.Context, req *financialaccountingv1.ListFinancialBookingLogsRequest) (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "ListFinancialBookingLogs", func() (*financialaccountingv1.ListFinancialBookingLogsResponse, error) {
+			return c.financialAccounting.ListFinancialBookingLogs(ctx, req)
+		})
+	}
 
 	resp, err := c.financialAccounting.ListFinancialBookingLogs(ctx, req)
 	if err != nil {
@@ -266,12 +298,20 @@ func (c *Client) ListFinancialBookingLogs(ctx context.Context, req *financialacc
 }
 
 // CaptureLedgerPosting creates a new ledger posting.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) CaptureLedgerPosting(ctx context.Context, req *financialaccountingv1.CaptureLedgerPostingRequest) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "CaptureLedgerPosting", func() (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+			return c.financialAccounting.CaptureLedgerPosting(ctx, req)
+		})
+	}
 
 	resp, err := c.financialAccounting.CaptureLedgerPosting(ctx, req)
 	if err != nil {
@@ -282,12 +322,20 @@ func (c *Client) CaptureLedgerPosting(ctx context.Context, req *financialaccount
 }
 
 // UpdateLedgerPosting updates an existing ledger posting.
+// Updates are idempotent when using version-based concurrency, so retry is enabled.
 func (c *Client) UpdateLedgerPosting(ctx context.Context, req *financialaccountingv1.UpdateLedgerPostingRequest) (*financialaccountingv1.UpdateLedgerPostingResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent update)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "UpdateLedgerPosting", func() (*financialaccountingv1.UpdateLedgerPostingResponse, error) {
+			return c.financialAccounting.UpdateLedgerPosting(ctx, req)
+		})
+	}
 
 	resp, err := c.financialAccounting.UpdateLedgerPosting(ctx, req)
 	if err != nil {
@@ -298,12 +346,20 @@ func (c *Client) UpdateLedgerPosting(ctx context.Context, req *financialaccounti
 }
 
 // RetrieveLedgerPosting retrieves a specific posting.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveLedgerPosting(ctx context.Context, req *financialaccountingv1.RetrieveLedgerPostingRequest) (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "RetrieveLedgerPosting", func() (*financialaccountingv1.RetrieveLedgerPostingResponse, error) {
+			return c.financialAccounting.RetrieveLedgerPosting(ctx, req)
+		})
+	}
 
 	resp, err := c.financialAccounting.RetrieveLedgerPosting(ctx, req)
 	if err != nil {
@@ -314,12 +370,20 @@ func (c *Client) RetrieveLedgerPosting(ctx context.Context, req *financialaccoun
 }
 
 // ListLedgerPostings lists ledger postings with optional filtering.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) ListLedgerPostings(ctx context.Context, req *financialaccountingv1.ListLedgerPostingsRequest) (*financialaccountingv1.ListLedgerPostingsResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "ListLedgerPostings", func() (*financialaccountingv1.ListLedgerPostingsResponse, error) {
+			return c.financialAccounting.ListLedgerPostings(ctx, req)
+		})
+	}
 
 	resp, err := c.financialAccounting.ListLedgerPostings(ctx, req)
 	if err != nil {

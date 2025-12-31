@@ -203,12 +203,20 @@ func New(cfg Config) (*Client, func(), error) {
 }
 
 // InitiateCurrentAccount creates a new current account facility.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) InitiateCurrentAccount(ctx context.Context, req *currentaccountv1.InitiateCurrentAccountRequest) (*currentaccountv1.InitiateCurrentAccountResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "InitiateCurrentAccount", func() (*currentaccountv1.InitiateCurrentAccountResponse, error) {
+			return c.currentAccount.InitiateCurrentAccount(ctx, req)
+		})
+	}
 
 	resp, err := c.currentAccount.InitiateCurrentAccount(ctx, req)
 	if err != nil {
@@ -219,12 +227,20 @@ func (c *Client) InitiateCurrentAccount(ctx context.Context, req *currentaccount
 }
 
 // ExecuteDeposit processes a deposit transaction (Behavior Qualifier).
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) ExecuteDeposit(ctx context.Context, req *currentaccountv1.ExecuteDepositRequest) (*currentaccountv1.ExecuteDepositResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "ExecuteDeposit", func() (*currentaccountv1.ExecuteDepositResponse, error) {
+			return c.currentAccount.ExecuteDeposit(ctx, req)
+		})
+	}
 
 	resp, err := c.currentAccount.ExecuteDeposit(ctx, req)
 	if err != nil {
@@ -235,12 +251,20 @@ func (c *Client) ExecuteDeposit(ctx context.Context, req *currentaccountv1.Execu
 }
 
 // RetrieveCurrentAccount gets current account details.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveCurrentAccount(ctx context.Context, req *currentaccountv1.RetrieveCurrentAccountRequest) (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "RetrieveCurrentAccount", func() (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
+			return c.currentAccount.RetrieveCurrentAccount(ctx, req)
+		})
+	}
 
 	resp, err := c.currentAccount.RetrieveCurrentAccount(ctx, req)
 	if err != nil {
@@ -252,12 +276,20 @@ func (c *Client) RetrieveCurrentAccount(ctx context.Context, req *currentaccount
 
 // InitiateLien creates a fund reservation on an account.
 // Used by Payment Order to reserve funds before external payment execution.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) InitiateLien(ctx context.Context, req *currentaccountv1.InitiateLienRequest) (*currentaccountv1.InitiateLienResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "InitiateLien", func() (*currentaccountv1.InitiateLienResponse, error) {
+			return c.currentAccount.InitiateLien(ctx, req)
+		})
+	}
 
 	resp, err := c.currentAccount.InitiateLien(ctx, req)
 	if err != nil {
@@ -269,12 +301,20 @@ func (c *Client) InitiateLien(ctx context.Context, req *currentaccountv1.Initiat
 
 // ExecuteLien converts a reservation to an actual debit atomically.
 // Called when the external payment is confirmed as settled.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) ExecuteLien(ctx context.Context, req *currentaccountv1.ExecuteLienRequest) (*currentaccountv1.ExecuteLienResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "ExecuteLien", func() (*currentaccountv1.ExecuteLienResponse, error) {
+			return c.currentAccount.ExecuteLien(ctx, req)
+		})
+	}
 
 	resp, err := c.currentAccount.ExecuteLien(ctx, req)
 	if err != nil {
@@ -286,12 +326,20 @@ func (c *Client) ExecuteLien(ctx context.Context, req *currentaccountv1.ExecuteL
 
 // TerminateLien releases a reservation without executing.
 // Called when the external payment fails or is cancelled.
+// Lien termination is idempotent (can be called multiple times safely).
 func (c *Client) TerminateLien(ctx context.Context, req *currentaccountv1.TerminateLienRequest) (*currentaccountv1.TerminateLienResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent operation)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "TerminateLien", func() (*currentaccountv1.TerminateLienResponse, error) {
+			return c.currentAccount.TerminateLien(ctx, req)
+		})
+	}
 
 	resp, err := c.currentAccount.TerminateLien(ctx, req)
 	if err != nil {
@@ -302,12 +350,20 @@ func (c *Client) TerminateLien(ctx context.Context, req *currentaccountv1.Termin
 }
 
 // RetrieveLien gets lien details.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveLien(ctx context.Context, req *currentaccountv1.RetrieveLienRequest) (*currentaccountv1.RetrieveLienResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "RetrieveLien", func() (*currentaccountv1.RetrieveLienResponse, error) {
+			return c.currentAccount.RetrieveLien(ctx, req)
+		})
+	}
 
 	resp, err := c.currentAccount.RetrieveLien(ctx, req)
 	if err != nil {

@@ -202,12 +202,20 @@ func New(cfg Config) (*Client, func(), error) {
 }
 
 // RegisterParty creates a new party in the reference data directory.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) RegisterParty(ctx context.Context, req *partyv1.RegisterPartyRequest) (*partyv1.RegisterPartyResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "RegisterParty", func() (*partyv1.RegisterPartyResponse, error) {
+			return c.party.RegisterParty(ctx, req)
+		})
+	}
 
 	resp, err := c.party.RegisterParty(ctx, req)
 	if err != nil {
@@ -218,12 +226,20 @@ func (c *Client) RegisterParty(ctx context.Context, req *partyv1.RegisterPartyRe
 }
 
 // RetrieveParty gets party details by ID.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveParty(ctx context.Context, req *partyv1.RetrievePartyRequest) (*partyv1.RetrievePartyResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "RetrieveParty", func() (*partyv1.RetrievePartyResponse, error) {
+			return c.party.RetrieveParty(ctx, req)
+		})
+	}
 
 	resp, err := c.party.RetrieveParty(ctx, req)
 	if err != nil {

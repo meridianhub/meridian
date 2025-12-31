@@ -206,12 +206,20 @@ func New(cfg Config) (*Client, func(), error) {
 //
 // This operation may complete synchronously or asynchronously depending on system load.
 // Always check the provisioning_hint field in the response to determine next steps.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) InitiateTenant(ctx context.Context, req *tenantv1.InitiateTenantRequest) (*tenantv1.InitiateTenantResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	// Note: Tenant service may not have tenant context yet during bootstrap
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "InitiateTenant", func() (*tenantv1.InitiateTenantResponse, error) {
+			return c.tenant.InitiateTenant(ctx, req)
+		})
+	}
 
 	resp, err := c.tenant.InitiateTenant(ctx, req)
 	if err != nil {
@@ -226,11 +234,19 @@ func (c *Client) InitiateTenant(ctx context.Context, req *tenantv1.InitiateTenan
 // This endpoint is used for:
 // 1. Retrieving current tenant details
 // 2. Polling provisioning status when InitiateTenant returns provisioning_hint="pending"
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveTenant(ctx context.Context, req *tenantv1.RetrieveTenantRequest) (*tenantv1.RetrieveTenantResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "RetrieveTenant", func() (*tenantv1.RetrieveTenantResponse, error) {
+			return c.tenant.RetrieveTenant(ctx, req)
+		})
+	}
 
 	resp, err := c.tenant.RetrieveTenant(ctx, req)
 	if err != nil {
@@ -241,11 +257,19 @@ func (c *Client) RetrieveTenant(ctx context.Context, req *tenantv1.RetrieveTenan
 }
 
 // UpdateTenantStatus changes the lifecycle status of a tenant (BIAN: Update).
+// Status updates are idempotent when using version-based concurrency, so retry is enabled.
 func (c *Client) UpdateTenantStatus(ctx context.Context, req *tenantv1.UpdateTenantStatusRequest) (*tenantv1.UpdateTenantStatusResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent update)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "UpdateTenantStatus", func() (*tenantv1.UpdateTenantStatusResponse, error) {
+			return c.tenant.UpdateTenantStatus(ctx, req)
+		})
+	}
 
 	resp, err := c.tenant.UpdateTenantStatus(ctx, req)
 	if err != nil {
@@ -256,11 +280,19 @@ func (c *Client) UpdateTenantStatus(ctx context.Context, req *tenantv1.UpdateTen
 }
 
 // ListTenants returns all tenants with optional status filter (BIAN: Control).
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) ListTenants(ctx context.Context, req *tenantv1.ListTenantsRequest) (*tenantv1.ListTenantsResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "ListTenants", func() (*tenantv1.ListTenantsResponse, error) {
+			return c.tenant.ListTenants(ctx, req)
+		})
+	}
 
 	resp, err := c.tenant.ListTenants(ctx, req)
 	if err != nil {
@@ -274,11 +306,19 @@ func (c *Client) ListTenants(ctx context.Context, req *tenantv1.ListTenantsReque
 // When services add new migrations after tenants are created, existing tenant
 // schemas may be missing these migrations. This operation detects and applies
 // new migrations to bring tenant schemas up to date.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) ReconcileMigrations(ctx context.Context, req *tenantv1.ReconcileMigrationsRequest) (*tenantv1.ReconcileMigrationsResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "ReconcileMigrations", func() (*tenantv1.ReconcileMigrationsResponse, error) {
+			return c.tenant.ReconcileMigrations(ctx, req)
+		})
+	}
 
 	resp, err := c.tenant.ReconcileMigrations(ctx, req)
 	if err != nil {
@@ -290,11 +330,19 @@ func (c *Client) ReconcileMigrations(ctx context.Context, req *tenantv1.Reconcil
 
 // GetTenantProvisioningStatus retrieves detailed provisioning status for a tenant.
 // Returns per-service provisioning progress including migration versions and error details.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) GetTenantProvisioningStatus(ctx context.Context, req *tenantv1.GetTenantProvisioningStatusRequest) (*tenantv1.GetTenantProvisioningStatusResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "GetTenantProvisioningStatus", func() (*tenantv1.GetTenantProvisioningStatusResponse, error) {
+			return c.tenant.GetTenantProvisioningStatus(ctx, req)
+		})
+	}
 
 	resp, err := c.tenant.GetTenantProvisioningStatus(ctx, req)
 	if err != nil {

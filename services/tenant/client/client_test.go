@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -107,4 +108,30 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, 30*time.Second, DefaultTimeout)
 	assert.Equal(t, "default", DefaultNamespace)
 	assert.Equal(t, "tenant", ServiceName)
+}
+
+func TestNew_WithResilience(t *testing.T) {
+	resilienceConfig := clients.DefaultResilientClientConfig("tenant-client")
+	client, cleanup, err := New(Config{
+		Target:     "localhost:50056",
+		Resilience: &resilienceConfig,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	defer cleanup()
+
+	// Verify resilient client was created
+	assert.NotNil(t, client.resilient)
+}
+
+func TestNew_WithoutResilience(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50056",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	defer cleanup()
+
+	// Verify resilient client was not created
+	assert.Nil(t, client.resilient)
 }

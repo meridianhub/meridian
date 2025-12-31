@@ -203,12 +203,20 @@ func New(cfg Config) (*Client, func(), error) {
 }
 
 // InitiateFinancialPositionLog creates a new financial position log.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) InitiateFinancialPositionLog(ctx context.Context, req *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "InitiateFinancialPositionLog", func() (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
+			return c.positionKeeping.InitiateFinancialPositionLog(ctx, req)
+		})
+	}
 
 	resp, err := c.positionKeeping.InitiateFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -219,12 +227,20 @@ func (c *Client) InitiateFinancialPositionLog(ctx context.Context, req *position
 }
 
 // InitiateFinancialPositionLogBatch creates multiple logs atomically in a single transaction.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) InitiateFinancialPositionLogBatch(ctx context.Context, req *positionkeepingv1.InitiateFinancialPositionLogBatchRequest) (*positionkeepingv1.InitiateFinancialPositionLogBatchResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "InitiateFinancialPositionLogBatch", func() (*positionkeepingv1.InitiateFinancialPositionLogBatchResponse, error) {
+			return c.positionKeeping.InitiateFinancialPositionLogBatch(ctx, req)
+		})
+	}
 
 	resp, err := c.positionKeeping.InitiateFinancialPositionLogBatch(ctx, req)
 	if err != nil {
@@ -235,12 +251,20 @@ func (c *Client) InitiateFinancialPositionLogBatch(ctx context.Context, req *pos
 }
 
 // UpdateFinancialPositionLog updates an existing financial position log.
+// Updates are idempotent when using version-based concurrency, so retry is enabled.
 func (c *Client) UpdateFinancialPositionLog(ctx context.Context, req *positionkeepingv1.UpdateFinancialPositionLogRequest) (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent update)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "UpdateFinancialPositionLog", func() (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
+			return c.positionKeeping.UpdateFinancialPositionLog(ctx, req)
+		})
+	}
 
 	resp, err := c.positionKeeping.UpdateFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -251,12 +275,20 @@ func (c *Client) UpdateFinancialPositionLog(ctx context.Context, req *positionke
 }
 
 // RetrieveFinancialPositionLog retrieves a specific financial position log.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) RetrieveFinancialPositionLog(ctx context.Context, req *positionkeepingv1.RetrieveFinancialPositionLogRequest) (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "RetrieveFinancialPositionLog", func() (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
+			return c.positionKeeping.RetrieveFinancialPositionLog(ctx, req)
+		})
+	}
 
 	resp, err := c.positionKeeping.RetrieveFinancialPositionLog(ctx, req)
 	if err != nil {
@@ -267,12 +299,20 @@ func (c *Client) RetrieveFinancialPositionLog(ctx context.Context, req *position
 }
 
 // BulkImportTransactions imports multiple transactions into a log at once.
+// This is a non-idempotent operation, so it uses circuit breaker without retry.
 func (c *Client) BulkImportTransactions(ctx context.Context, req *positionkeepingv1.BulkImportTransactionsRequest) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (no retry for non-idempotent operations)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "BulkImportTransactions", func() (*positionkeepingv1.BulkImportTransactionsResponse, error) {
+			return c.positionKeeping.BulkImportTransactions(ctx, req)
+		})
+	}
 
 	resp, err := c.positionKeeping.BulkImportTransactions(ctx, req)
 	if err != nil {
@@ -283,12 +323,20 @@ func (c *Client) BulkImportTransactions(ctx context.Context, req *positionkeepin
 }
 
 // ListFinancialPositionLogs lists financial position logs with filtering.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
 func (c *Client) ListFinancialPositionLogs(ctx context.Context, req *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
 	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "ListFinancialPositionLogs", func() (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
+			return c.positionKeeping.ListFinancialPositionLogs(ctx, req)
+		})
+	}
 
 	resp, err := c.positionKeeping.ListFinancialPositionLogs(ctx, req)
 	if err != nil {
