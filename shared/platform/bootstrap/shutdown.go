@@ -13,6 +13,7 @@ import (
 )
 
 // DefaultShutdownTimeout is the default timeout for graceful shutdown.
+//
 // Deprecated: Use defaults.DefaultGracefulShutdown instead.
 var DefaultShutdownTimeout = defaults.DefaultGracefulShutdown
 
