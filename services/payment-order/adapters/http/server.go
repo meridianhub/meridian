@@ -93,7 +93,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		cfg.RateLimitMaxEntries = 10000
 	}
 	if cfg.ReadTimeout <= 0 {
-		cfg.ReadTimeout = defaults.DefaultHTTPReadHeaderTimeout
+		cfg.ReadTimeout = defaults.DefaultHTTPReadTimeout
 	}
 	if cfg.WriteTimeout <= 0 {
 		cfg.WriteTimeout = defaults.DefaultHTTPWriteTimeout
