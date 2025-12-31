@@ -523,3 +523,358 @@ func TestLienRepository_Update_NonExistent_ReturnsError(t *testing.T) {
 	// Should fail with version conflict (no rows affected)
 	assert.True(t, errors.Is(err, ErrLienVersionConflict))
 }
+
+// =============================================================================
+// Tenant Isolation Integration Tests
+// =============================================================================
+//
+// These tests verify that cross-tenant data leakage is prevented at the
+// repository level. The repository uses withTenantTransaction which sets
+// the PostgreSQL search_path to the tenant's schema, ensuring complete
+// data isolation between tenants.
+
+// setupMultiTenantLienTestDB creates a PostgreSQL container with multiple tenant schemas
+// and returns contexts for each tenant.
+func setupMultiTenantLienTestDB(t *testing.T, tenantIDs ...string) (*gorm.DB, map[string]context.Context, func()) {
+	t.Helper()
+	// Pass nil models to avoid auto-migration to public schema
+	db, cleanup := testdb.SetupPostgres(t, nil)
+
+	contexts := make(map[string]context.Context)
+	for _, tenantID := range tenantIDs {
+		tid := tenant.TenantID(tenantID)
+		schemaName := tid.SchemaName()
+
+		// Create the tenant schema
+		err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+		require.NoError(t, err)
+
+		// Create the lien table in the tenant schema (matches LienEntity.TableName() = "lien")
+		err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.lien (
+			id UUID PRIMARY KEY,
+			account_id UUID NOT NULL,
+			amount_cents BIGINT NOT NULL,
+			currency VARCHAR(3) NOT NULL,
+			status VARCHAR(20) NOT NULL,
+			payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
+			termination_reason TEXT,
+			expires_at TIMESTAMP WITH TIME ZONE,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			version INT NOT NULL DEFAULT 1
+		)`, schemaName)).Error
+		require.NoError(t, err)
+
+		// Create context with tenant
+		contexts[tenantID] = tenant.WithTenant(context.Background(), tid)
+	}
+
+	return db, contexts, cleanup
+}
+
+func TestLienRepository_TenantIsolation_FindByID_CrossTenantReturnsNotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, contexts, cleanup := setupMultiTenantLienTestDB(t, "org_123", "org_456")
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	ctxOrg123 := contexts["org_123"]
+	ctxOrg456 := contexts["org_456"]
+
+	// Create lien in org_123 schema
+	accountID := uuid.New()
+	amount, err := domain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	lien, err := domain.NewLien(accountID, amount, "PO-CROSS-TENANT-001", nil)
+	require.NoError(t, err)
+
+	err = repo.Create(ctxOrg123, lien)
+	require.NoError(t, err, "Failed to create lien in org_123")
+
+	// Verify lien exists in org_123
+	retrieved, err := repo.FindByID(ctxOrg123, lien.ID)
+	require.NoError(t, err)
+	assert.Equal(t, lien.ID, retrieved.ID)
+
+	// Query from org_456 context should return ErrLienNotFound
+	_, err = repo.FindByID(ctxOrg456, lien.ID)
+	assert.ErrorIs(t, err, ErrLienNotFound,
+		"Query from org_456 should not find lien created in org_123")
+}
+
+func TestLienRepository_TenantIsolation_FindActiveByAccountID_OnlyReturnsTenantData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, contexts, cleanup := setupMultiTenantLienTestDB(t, "tenant_alpha", "tenant_beta")
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	ctxAlpha := contexts["tenant_alpha"]
+	ctxBeta := contexts["tenant_beta"]
+
+	// Use the same account ID in both tenants (simulating same logical account ID)
+	sharedAccountID := uuid.New()
+	amount, err := domain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	// Create liens in tenant_alpha
+	lienAlpha1, err := domain.NewLien(sharedAccountID, amount, "PO-ALPHA-001", nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctxAlpha, lienAlpha1))
+
+	lienAlpha2, err := domain.NewLien(sharedAccountID, amount, "PO-ALPHA-002", nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctxAlpha, lienAlpha2))
+
+	// Create liens in tenant_beta with same account ID
+	lienBeta1, err := domain.NewLien(sharedAccountID, amount, "PO-BETA-001", nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctxBeta, lienBeta1))
+
+	lienBeta2, err := domain.NewLien(sharedAccountID, amount, "PO-BETA-002", nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctxBeta, lienBeta2))
+
+	lienBeta3, err := domain.NewLien(sharedAccountID, amount, "PO-BETA-003", nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctxBeta, lienBeta3))
+
+	// Query from tenant_alpha context should only return alpha's liens
+	liensFromAlpha, err := repo.FindActiveByAccountID(ctxAlpha, sharedAccountID)
+	require.NoError(t, err)
+	assert.Len(t, liensFromAlpha, 2, "tenant_alpha should only see its 2 liens")
+
+	// Verify the IDs are the ones we created for alpha
+	alphaIDs := map[uuid.UUID]bool{lienAlpha1.ID: true, lienAlpha2.ID: true}
+	for _, lien := range liensFromAlpha {
+		assert.True(t, alphaIDs[lien.ID], "Lien %s should belong to tenant_alpha", lien.ID)
+	}
+
+	// Query from tenant_beta context should only return beta's liens
+	liensFromBeta, err := repo.FindActiveByAccountID(ctxBeta, sharedAccountID)
+	require.NoError(t, err)
+	assert.Len(t, liensFromBeta, 3, "tenant_beta should only see its 3 liens")
+
+	// Verify the IDs are the ones we created for beta
+	betaIDs := map[uuid.UUID]bool{lienBeta1.ID: true, lienBeta2.ID: true, lienBeta3.ID: true}
+	for _, lien := range liensFromBeta {
+		assert.True(t, betaIDs[lien.ID], "Lien %s should belong to tenant_beta", lien.ID)
+	}
+}
+
+func TestLienRepository_TenantIsolation_FindByIDForUpdate_WrongTenantReturnsNotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, contexts, cleanup := setupMultiTenantLienTestDB(t, "owner_tenant", "other_tenant")
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	ctxOwner := contexts["owner_tenant"]
+	ctxOther := contexts["other_tenant"]
+
+	// Create lien in owner_tenant schema
+	accountID := uuid.New()
+	amount, err := domain.NewMoney("GBP", 50000)
+	require.NoError(t, err)
+
+	lien, err := domain.NewLien(accountID, amount, "PO-LOCKED-001", nil)
+	require.NoError(t, err)
+
+	err = repo.Create(ctxOwner, lien)
+	require.NoError(t, err, "Failed to create lien in owner_tenant")
+
+	// Verify lien can be locked by owner
+	retrieved, err := repo.FindByIDForUpdate(ctxOwner, lien.ID)
+	require.NoError(t, err)
+	assert.Equal(t, lien.ID, retrieved.ID)
+
+	// Attempt to lock from other_tenant should return ErrLienNotFound
+	// even though the lien exists in a different schema
+	_, err = repo.FindByIDForUpdate(ctxOther, lien.ID)
+	assert.ErrorIs(t, err, ErrLienNotFound,
+		"FindByIDForUpdate from wrong tenant should return ErrLienNotFound")
+}
+
+func TestLienRepository_TenantIsolation_Update_WrongTenantCannotModify(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, contexts, cleanup := setupMultiTenantLienTestDB(t, "data_owner", "malicious_tenant")
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	ctxOwner := contexts["data_owner"]
+	ctxMalicious := contexts["malicious_tenant"]
+
+	// Create lien in data_owner schema
+	accountID := uuid.New()
+	amount, err := domain.NewMoney("GBP", 25000)
+	require.NoError(t, err)
+
+	lien, err := domain.NewLien(accountID, amount, "PO-PROTECTED-001", nil)
+	require.NoError(t, err)
+
+	err = repo.Create(ctxOwner, lien)
+	require.NoError(t, err, "Failed to create lien in data_owner")
+
+	// Load the lien as the owner to get the current version
+	originalLien, err := repo.FindByID(ctxOwner, lien.ID)
+	require.NoError(t, err)
+	originalVersion := originalLien.Version
+
+	// Attempt to update from malicious_tenant context
+	// First, we need to construct a lien object with the same ID but different context
+	maliciousLien := &domain.Lien{
+		ID:                    lien.ID,
+		AccountID:             accountID,
+		Amount:                amount,
+		Status:                domain.LienStatusTerminated, // Trying to terminate
+		PaymentOrderReference: lien.PaymentOrderReference,
+		TerminationReason:     "Malicious termination attempt",
+		Version:               originalVersion,
+		CreatedAt:             lien.CreatedAt,
+		UpdatedAt:             time.Now(),
+	}
+
+	// Update with wrong tenant context should fail (no rows affected = version conflict)
+	err = repo.Update(ctxMalicious, maliciousLien)
+	assert.ErrorIs(t, err, ErrLienVersionConflict,
+		"Update from wrong tenant should fail as no rows match in that tenant's schema")
+
+	// Verify the original lien was NOT modified
+	afterAttempt, err := repo.FindByID(ctxOwner, lien.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.LienStatusActive, afterAttempt.Status,
+		"Lien status should remain ACTIVE after failed cross-tenant update attempt")
+	assert.Equal(t, originalVersion, afterAttempt.Version,
+		"Lien version should remain unchanged after failed cross-tenant update attempt")
+	assert.Empty(t, afterAttempt.TerminationReason,
+		"Lien termination reason should remain empty")
+}
+
+func TestLienRepository_TenantIsolation_SumActiveAmount_OnlyCountsTenantData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, contexts, cleanup := setupMultiTenantLienTestDB(t, "sum_tenant_a", "sum_tenant_b")
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	ctxA := contexts["sum_tenant_a"]
+	ctxB := contexts["sum_tenant_b"]
+
+	// Use the same account ID in both tenants
+	sharedAccountID := uuid.New()
+
+	// Create liens in tenant A: 100 + 200 = 300 GBP
+	amountA1, _ := domain.NewMoney("GBP", 10000) // 100 GBP
+	lienA1, _ := domain.NewLien(sharedAccountID, amountA1, "PO-SUM-A-001", nil)
+	require.NoError(t, repo.Create(ctxA, lienA1))
+
+	amountA2, _ := domain.NewMoney("GBP", 20000) // 200 GBP
+	lienA2, _ := domain.NewLien(sharedAccountID, amountA2, "PO-SUM-A-002", nil)
+	require.NoError(t, repo.Create(ctxA, lienA2))
+
+	// Create liens in tenant B: 500 + 750 = 1250 GBP
+	amountB1, _ := domain.NewMoney("GBP", 50000) // 500 GBP
+	lienB1, _ := domain.NewLien(sharedAccountID, amountB1, "PO-SUM-B-001", nil)
+	require.NoError(t, repo.Create(ctxB, lienB1))
+
+	amountB2, _ := domain.NewMoney("GBP", 75000) // 750 GBP
+	lienB2, _ := domain.NewLien(sharedAccountID, amountB2, "PO-SUM-B-002", nil)
+	require.NoError(t, repo.Create(ctxB, lienB2))
+
+	// Sum from tenant A should be 30000 cents (300 GBP)
+	sumA, err := repo.SumActiveAmountByAccountID(ctxA, sharedAccountID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(30000), sumA,
+		"Tenant A sum should be 30000 cents (10000 + 20000)")
+
+	// Sum from tenant B should be 125000 cents (1250 GBP)
+	sumB, err := repo.SumActiveAmountByAccountID(ctxB, sharedAccountID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(125000), sumB,
+		"Tenant B sum should be 125000 cents (50000 + 75000)")
+}
+
+func TestLienRepository_TenantIsolation_CountActive_OnlyCountsTenantData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, contexts, cleanup := setupMultiTenantLienTestDB(t, "count_tenant_x", "count_tenant_y")
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	ctxX := contexts["count_tenant_x"]
+	ctxY := contexts["count_tenant_y"]
+
+	// Use the same account ID in both tenants
+	sharedAccountID := uuid.New()
+	amount, _ := domain.NewMoney("GBP", 10000)
+
+	// Create 2 liens in tenant X
+	lienX1, _ := domain.NewLien(sharedAccountID, amount, "PO-COUNT-X-001", nil)
+	require.NoError(t, repo.Create(ctxX, lienX1))
+
+	lienX2, _ := domain.NewLien(sharedAccountID, amount, "PO-COUNT-X-002", nil)
+	require.NoError(t, repo.Create(ctxX, lienX2))
+
+	// Create 5 liens in tenant Y
+	for i := 1; i <= 5; i++ {
+		lien, _ := domain.NewLien(sharedAccountID, amount, fmt.Sprintf("PO-COUNT-Y-%03d", i), nil)
+		require.NoError(t, repo.Create(ctxY, lien))
+	}
+
+	// Count from tenant X should be 2
+	countX, err := repo.CountActiveByAccountID(ctxX, sharedAccountID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), countX, "Tenant X should count 2 liens")
+
+	// Count from tenant Y should be 5
+	countY, err := repo.CountActiveByAccountID(ctxY, sharedAccountID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), countY, "Tenant Y should count 5 liens")
+}
+
+func TestLienRepository_TenantIsolation_FindByPaymentOrderReference_CrossTenantNotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, contexts, cleanup := setupMultiTenantLienTestDB(t, "po_owner", "po_stranger")
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	ctxOwner := contexts["po_owner"]
+	ctxStranger := contexts["po_stranger"]
+
+	// Create lien with specific payment order reference in owner tenant
+	accountID := uuid.New()
+	amount, _ := domain.NewMoney("GBP", 10000)
+	paymentOrderRef := "PO-UNIQUE-CROSS-TENANT-REF"
+
+	lien, _ := domain.NewLien(accountID, amount, paymentOrderRef, nil)
+	require.NoError(t, repo.Create(ctxOwner, lien))
+
+	// Owner can find by payment order reference
+	found, err := repo.FindByPaymentOrderReference(ctxOwner, paymentOrderRef)
+	require.NoError(t, err)
+	assert.Equal(t, lien.ID, found.ID)
+
+	// Stranger tenant should not find it
+	_, err = repo.FindByPaymentOrderReference(ctxStranger, paymentOrderRef)
+	assert.ErrorIs(t, err, ErrLienNotFound,
+		"FindByPaymentOrderReference from wrong tenant should return ErrLienNotFound")
+}
