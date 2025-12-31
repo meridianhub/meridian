@@ -65,7 +65,9 @@ jobs:
           # Enable nullglob so patterns that don't match any files expand to nothing
           shopt -s nullglob
           for pattern in "${SERVICE_PROD_PATTERNS[@]}"; do
-            for dir in $pattern; do
+            # Expand glob into array for safe iteration
+            dirs=($pattern)
+            for dir in "${dirs[@]}"; do
               if [ -d "$dir" ]; then
                 echo "Scanning: $dir"
                 if grep -rn --include="*.yaml" --include="*.yml" -E 'LOCAL_DEV_MODE[[:space:]]*[:=][[:space:]]*"?true"?' "$dir"; then
@@ -141,14 +143,15 @@ jobs:
           PYTHON
 
           # Find YAML files in production directories
-          YAML_FILES=$(find deployments/k8s/overlays/production deployments/k8s/overlays/staging -name "*.yaml" -o -name "*.yml" 2>/dev/null || true)
-
-          if [ -z "$YAML_FILES" ]; then
-            echo "No production YAML files found to validate"
-            exit 0
+          # Use -print0 and xargs -0 to safely handle filenames with spaces
+          if ! find deployments/k8s/overlays/production deployments/k8s/overlays/staging \( -name "*.yaml" -o -name "*.yml" \) -print0 2>/dev/null | xargs -0 python3 /tmp/validate_yaml.py; then
+            # Check if directories don't exist (find returns empty)
+            if [ ! -d "deployments/k8s/overlays/production" ] && [ ! -d "deployments/k8s/overlays/staging" ]; then
+              echo "No production YAML files found to validate"
+              exit 0
+            fi
+            exit 1
           fi
-
-          python3 /tmp/validate_yaml.py $YAML_FILES
 
       - name: Verify Rego policy sync
         run: |
