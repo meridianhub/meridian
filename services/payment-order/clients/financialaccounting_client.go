@@ -1,7 +1,12 @@
 // Package clients provides gRPC client wrappers with resilience patterns.
 //
-// This package provides resilient client wrappers that delegate to the shared
-// implementation in github.com/meridianhub/meridian/shared/pkg/clients.
+// Deprecated: This package is deprecated. Use the service-owned client packages instead:
+//   - For CurrentAccount: github.com/meridianhub/meridian/services/current-account/client
+//   - For FinancialAccounting: github.com/meridianhub/meridian/services/financial-accounting/client
+//
+// The service-owned client packages provide standardized client creation with built-in
+// DNS-based load balancing, tracing, and resilience patterns. This package will be
+// removed in a future release once all consumers have migrated.
 package clients
 
 import (

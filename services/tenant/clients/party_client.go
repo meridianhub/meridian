@@ -1,4 +1,25 @@
 // Package clients provides gRPC client wrappers for external service communication.
+//
+// Deprecated: The PartyGRPCClient and NewPartyClient in this package are deprecated.
+// Use github.com/meridianhub/meridian/services/party/client instead, with the
+// PartyClientAdapter for compatibility with the tenant-specific PartyClient interface.
+//
+// The PartyClient interface and PartyClientAdapter remain for use with the new
+// service-owned client package. See party_client_adapter.go for the adapter pattern.
+//
+// Migration example:
+//
+//	// Old (deprecated):
+//	client, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{...})
+//
+//	// New (preferred):
+//	pc, cleanup, err := partyclient.New(partyclient.Config{
+//	    ServiceName: "party",
+//	    Namespace:   namespace,
+//	    Tracer:      tracer,
+//	})
+//	adapter := clients.NewPartyClientAdapter(pc, cleanup)
+//	defer adapter.Close()
 package clients
 
 import (

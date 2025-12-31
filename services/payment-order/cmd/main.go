@@ -17,7 +17,6 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	webhookhttp "github.com/meridianhub/meridian/services/payment-order/adapters/http"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
-	payclients "github.com/meridianhub/meridian/services/payment-order/clients"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/service"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
@@ -25,11 +24,14 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+
+	// Service-owned clients (standardized client packages from each service)
+	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
+	financialaccountingclient "github.com/meridianhub/meridian/services/financial-accounting/client"
 )
 
 // Build information set via ldflags during compilation.
@@ -95,14 +97,14 @@ func run(logger *slog.Logger) error {
 	// Get Kubernetes namespace from environment
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 
-	// Create external clients
-	currentAccountClient, caCleanup, err := createCurrentAccountClient(namespace, logger)
+	// Create external clients using service-owned client packages
+	currentAccountClient, caCleanup, err := createCurrentAccountClient(namespace, logger, tracer)
 	if err != nil {
 		return fmt.Errorf("failed to create current account client: %w", err)
 	}
 	defer caCleanup()
 
-	financialAccountingClient, faCleanup, err := createFinancialAccountingClient(namespace, logger)
+	financialAccountingClient, faCleanup, err := createFinancialAccountingClient(namespace, logger, tracer)
 	if err != nil {
 		return fmt.Errorf("failed to create financial accounting client: %w", err)
 	}
@@ -307,22 +309,16 @@ func (s *simpleHealthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, server 
 }
 
 // createCurrentAccountClient creates the CurrentAccount gRPC client with resilience patterns.
-// The client is wrapped with circuit breaker and retry logic using shared/pkg/clients.
-func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.CurrentAccountClient, func(), error) {
-	target := fmt.Sprintf("dns:///current-account.%s.svc.cluster.local:50051", namespace)
-	logger.Info("connecting to current-account service", "target", target)
-
-	conn, err := grpc.NewClient(
-		target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to connect to current-account service: %w", err)
-	}
+// Uses the service-owned client package from services/current-account/client for standardized
+// client creation with built-in tracing and resilience patterns.
+func createCurrentAccountClient(namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.CurrentAccountClient, func(), error) {
+	logger.Info("connecting to current-account service",
+		"service", currentaccountclient.ServiceName,
+		"namespace", namespace,
+		"port", currentaccountclient.DefaultPort)
 
 	// Configure resilience settings from environment
-	resilientConfig := sharedclients.ResilientClientConfig{
+	resilientConfig := &sharedclients.ResilientClientConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "current-account",
 		CircuitBreakerTimeout:  env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
@@ -346,34 +342,33 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.
 		"max_retries", resilientConfig.MaxRetries,
 	)
 
-	client := payclients.NewResilientCurrentAccountClient(conn, resilientConfig)
-
-	cleanup := func() {
-		if err := client.Close(); err != nil {
-			logger.Error("failed to close current-account client", "error", err)
-		}
+	// Use the service-owned client package with DNS-based load balancing
+	client, cleanup, err := currentaccountclient.New(currentaccountclient.Config{
+		ServiceName: currentaccountclient.ServiceName,
+		Namespace:   namespace,
+		Port:        currentaccountclient.DefaultPort,
+		Timeout:     env.GetEnvAsDuration("CURRENT_ACCOUNT_TIMEOUT", currentaccountclient.DefaultTimeout),
+		Tracer:      tracer,
+		Resilience:  resilientConfig,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create current-account client: %w", err)
 	}
 
 	return client, cleanup, nil
 }
 
 // createFinancialAccountingClient creates the FinancialAccounting gRPC client with resilience patterns.
-// The client is wrapped with circuit breaker and retry logic using shared/pkg/clients.
-func createFinancialAccountingClient(namespace string, logger *slog.Logger) (service.FinancialAccountingClient, func(), error) {
-	target := fmt.Sprintf("dns:///financial-accounting.%s.svc.cluster.local:50051", namespace)
-	logger.Info("connecting to financial-accounting service", "target", target)
-
-	conn, err := grpc.NewClient(
-		target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to connect to financial-accounting service: %w", err)
-	}
+// Uses the service-owned client package from services/financial-accounting/client for standardized
+// client creation with built-in tracing and resilience patterns.
+func createFinancialAccountingClient(namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.FinancialAccountingClient, func(), error) {
+	logger.Info("connecting to financial-accounting service",
+		"service", financialaccountingclient.ServiceName,
+		"namespace", namespace,
+		"port", financialaccountingclient.DefaultPort)
 
 	// Configure resilience settings from environment
-	resilientConfig := sharedclients.ResilientClientConfig{
+	resilientConfig := &sharedclients.ResilientClientConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "financial-accounting",
 		CircuitBreakerTimeout:  env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
@@ -397,12 +392,17 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger) (ser
 		"max_retries", resilientConfig.MaxRetries,
 	)
 
-	client := payclients.NewResilientFinancialAccountingClient(conn, resilientConfig)
-
-	cleanup := func() {
-		if err := client.Close(); err != nil {
-			logger.Error("failed to close financial-accounting client", "error", err)
-		}
+	// Use the service-owned client package with DNS-based load balancing
+	client, cleanup, err := financialaccountingclient.New(financialaccountingclient.Config{
+		ServiceName: financialaccountingclient.ServiceName,
+		Namespace:   namespace,
+		Port:        financialaccountingclient.DefaultPort,
+		Timeout:     env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_TIMEOUT", financialaccountingclient.DefaultTimeout),
+		Tracer:      tracer,
+		Resilience:  resilientConfig,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create financial-accounting client: %w", err)
 	}
 
 	return client, cleanup, nil
