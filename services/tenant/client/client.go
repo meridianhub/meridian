@@ -61,6 +61,7 @@ var ErrTargetRequired = errors.New("either Target or ServiceName must be provide
 type Config struct {
 	// Target is the gRPC server address (e.g., "localhost:50056" or "tenant:50056").
 	// If set, overrides Kubernetes DNS-based discovery.
+	//
 	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
 	Target string
 
