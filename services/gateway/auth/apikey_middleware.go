@@ -140,11 +140,12 @@ func parseAPIKeys(env string) map[string]string {
 
 // APIKeyMiddleware provides API key authentication with per-key rate limiting.
 type APIKeyMiddleware struct {
-	config   APIKeyConfig
-	limiters sync.Map // map[string]*rateLimiterEntry
-	logger   *slog.Logger
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
+	config    APIKeyConfig
+	limiters  sync.Map // map[string]*rateLimiterEntry
+	logger    *slog.Logger
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // rateLimiterEntry holds a rate limiter and its last access time.
@@ -190,9 +191,12 @@ func NewAPIKeyMiddleware(config APIKeyConfig) *APIKeyMiddleware {
 }
 
 // Close stops the background cleanup goroutine.
+// This method is idempotent and safe to call multiple times.
 func (m *APIKeyMiddleware) Close() {
-	close(m.stopCh)
-	m.wg.Wait()
+	m.closeOnce.Do(func() {
+		close(m.stopCh)
+		m.wg.Wait()
+	})
 }
 
 // cleanupLoop periodically removes idle rate limiters to prevent memory leaks.
