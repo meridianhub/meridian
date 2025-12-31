@@ -133,9 +133,9 @@ func (r *LienRepository) FindByAccountID(ctx context.Context, accountID uuid.UUI
 // In multi-org mode, this query is scoped to the organization from context.
 func (r *LienRepository) FindActiveByAccountID(ctx context.Context, accountID uuid.UUID) ([]*domain.Lien, error) {
 	var entities []LienEntity
-	now := time.Now()
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		now := time.Now()
 		result := tx.Where(
 			"account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
 			accountID, string(domain.LienStatusActive), now,
