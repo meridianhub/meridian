@@ -271,6 +271,112 @@ See [ADR-0009](../docs/adr/0009-application-level-audit-logging.md) for architec
 - **No Lost Audits**: Dual-path ensures delivery even during Kafka outages
 - **Eventual Consistency**: Audit records appear in `audit_log` within ~100ms
 
+## Service-Owned Client Libraries
+
+Each service exports a client library for other services to use. This follows the idiomatic Go pattern
+where the service is responsible for maintaining its own client, rather than each consumer implementing
+their own client.
+
+### Directory Structure
+
+```text
+services/<service-name>/
+├── client/                 # Service-owned client library (NEW)
+│   ├── client.go           # Client implementation
+│   └── client_test.go      # Client tests
+├── clients/                # Consumer-specific interfaces (DEPRECATED)
+│   ├── DEPRECATED.md       # Migration guide
+│   └── interfaces.go       # Interface definitions for testing
+└── ...
+```
+
+### Using a Service Client
+
+```go
+import (
+    partyclient "github.com/meridianhub/meridian/services/party/client"
+    sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
+)
+
+// Create client with DNS-based load balancing and resilience patterns
+client, cleanup, err := partyclient.New(partyclient.Config{
+    ServiceName: partyclient.ServiceName,       // "party"
+    Namespace:   "default",
+    Port:        partyclient.DefaultPort,       // 50055
+    Timeout:     30 * time.Second,
+    Tracer:      tracer,                        // OpenTelemetry tracer
+    Resilience: &sharedclients.ResilientClientConfig{
+        Logger:             logger,
+        CircuitBreakerName: "party",
+    },
+})
+if err != nil {
+    return fmt.Errorf("failed to create party client: %w", err)
+}
+defer cleanup()
+
+// Use the client
+resp, err := client.RetrieveParty(ctx, &partyv1.RetrievePartyRequest{
+    PartyId: partyID,
+})
+```
+
+### Client Config Reference
+
+All service clients follow a standard `Config` struct:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ServiceName` | `string` | Yes* | Kubernetes service name for DNS discovery |
+| `Target` | `string` | Yes* | Direct address (e.g., `localhost:50055`) - deprecated |
+| `Namespace` | `string` | No | Kubernetes namespace (default: `"default"`) |
+| `Port` | `int` | No | Service port (each client has a default) |
+| `Timeout` | `time.Duration` | No | RPC timeout (default: 30s) |
+| `Tracer` | `*observability.Tracer` | No | OpenTelemetry tracer for distributed tracing |
+| `Resilience` | `*clients.ResilientClientConfig` | No | Circuit breaker and retry configuration |
+| `DialOptions` | `[]grpc.DialOption` | No | Custom gRPC dial options |
+
+*Either `ServiceName` or `Target` is required. Prefer `ServiceName` for production.
+
+### Built-in Resilience
+
+When `Resilience` is configured, clients automatically include:
+
+1. **Circuit Breaker**: Fails fast when downstream service is unhealthy
+   - Opens after 5 consecutive failures
+   - Half-open state after 60 seconds
+   - Trips on gRPC UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED
+
+2. **Retry with Backoff**: Retries transient failures for idempotent operations
+   - 3 retries with exponential backoff
+   - Initial backoff: 100ms, max: 5s
+   - Jitter: 0-100ms random addition
+   - Only retries idempotent operations (reads)
+
+3. **Trace Context Propagation**: Automatic correlation ID and trace propagation
+
+### Available Service Clients
+
+| Service | Import Path | Default Port |
+|---------|-------------|--------------|
+| Party | `services/party/client` | 50055 |
+| PositionKeeping | `services/position-keeping/client` | 50053 |
+| FinancialAccounting | `services/financial-accounting/client` | 50052 |
+| CurrentAccount | `services/current-account/client` | 50057 |
+| Tenant | `services/tenant/client` | 50056 |
+
+### Migration from Old Clients
+
+The old `services/<service>/clients/` directories are deprecated. See the `DEPRECATED.md` file
+in each directory for migration guidance. Key changes:
+
+| Old Pattern | New Pattern |
+|-------------|-------------|
+| Consumer creates/owns client | Service exports its own client |
+| `clients.NewXxxClient()` | `xxxclient.New()` |
+| Separate resilience wrapper | Built-in via `Config.Resilience` |
+| Manual connection management | Cleanup function returned by `New()` |
+
 ## Service Directory Structure
 
 Each service follows hexagonal architecture:
@@ -285,7 +391,8 @@ services/<service-name>/
 │   ├── persistence/        # Database repositories
 │   ├── messaging/          # Kafka producers/consumers
 │   └── http/               # HTTP handlers (if applicable)
-├── clients/                # gRPC clients for upstream services
+├── client/                 # Service-owned client library (for other services)
+├── clients/                # Consumer-specific interfaces (DEPRECATED)
 ├── migrations/             # Database migrations
 └── k8s/                    # Kubernetes manifests
 ```
