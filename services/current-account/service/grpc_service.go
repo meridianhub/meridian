@@ -1592,6 +1592,7 @@ func (s *Service) publishControlActionEvent(
 			FrozenAt:      timestamppb.New(actionTimestamp),
 			FrozenBy:      actorID,
 			CorrelationId: correlationID,
+			CausationId:   correlationID,
 			Timestamp:     timestamppb.New(now),
 			Version:       account.Version(),
 		}
@@ -1613,6 +1614,7 @@ func (s *Service) publishControlActionEvent(
 			UnfrozenAt:    timestamppb.New(actionTimestamp),
 			UnfrozenBy:    actorID,
 			CorrelationId: correlationID,
+			CausationId:   correlationID,
 			Timestamp:     timestamppb.New(now),
 			Version:       account.Version(),
 		}
@@ -1644,6 +1646,7 @@ func (s *Service) publishControlActionEvent(
 			ClosedBy:       actorID,
 			ClosureDate:    timestamppb.New(actionTimestamp),
 			CorrelationId:  correlationID,
+			CausationId:    correlationID,
 			Timestamp:      timestamppb.New(now),
 			Version:        account.Version(),
 		}

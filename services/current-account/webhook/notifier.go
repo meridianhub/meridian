@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,9 @@ var (
 
 	// ErrInvalidWebhookResponse is returned when the webhook endpoint returns a non-2xx status.
 	ErrInvalidWebhookResponse = errors.New("webhook endpoint returned non-2xx status")
+
+	// ErrInsecureWebhookURL is returned when a webhook URL uses HTTP instead of HTTPS.
+	ErrInsecureWebhookURL = errors.New("webhook URL must use HTTPS")
 )
 
 // EventType represents the type of account lifecycle event.
@@ -301,7 +305,17 @@ func (n *HTTPNotifier) getWebhookURL(ctx context.Context, payload Payload) (stri
 	if webhookURL == "" {
 		n.logger.Debug("no webhook URL configured, skipping notification",
 			"tenant_id", payload.TenantID, "event_type", payload.EventType)
+		return "", nil
 	}
+
+	// Enforce HTTPS for security - HTTP URLs are rejected per security policy
+	if !strings.HasPrefix(webhookURL, "https://") {
+		n.logger.Error("webhook URL must use HTTPS",
+			"tenant_id", payload.TenantID,
+			"url", webhookURL)
+		return "", ErrInsecureWebhookURL
+	}
+
 	return webhookURL, nil
 }
 

@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -38,9 +39,20 @@ func (m *mockDeliveryRecorder) RecordDelivery(_ context.Context, record *Deliver
 	return nil
 }
 
+// tlsClient returns an HTTP client that trusts test server certificates.
+func tlsClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // Test server uses self-signed cert
+			},
+		},
+	}
+}
+
 func TestHTTPNotifier_NotifyAccountFrozen_Success(t *testing.T) {
-	// Create test server that returns 200 OK
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create TLS test server that returns 200 OK
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		assert.Equal(t, "Meridian-Webhook/1.0", r.Header.Get("User-Agent"))
@@ -72,6 +84,7 @@ func TestHTTPNotifier_NotifyAccountFrozen_Success(t *testing.T) {
 		DeliveryRecorder: recorder,
 		MaxRetries:       3,
 		RequestTimeout:   5 * time.Second,
+		HTTPClient:       tlsClient(),
 	})
 
 	ctx := context.Background()
@@ -88,7 +101,7 @@ func TestHTTPNotifier_NotifyAccountFrozen_Success(t *testing.T) {
 }
 
 func TestHTTPNotifier_NotifyAccountClosed_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload Payload
 		err := json.NewDecoder(r.Body).Decode(&payload)
 		require.NoError(t, err)
@@ -111,6 +124,7 @@ func TestHTTPNotifier_NotifyAccountClosed_Success(t *testing.T) {
 
 	notifier := NewHTTPNotifier(Config{
 		URLProvider: urlProvider,
+		HTTPClient:  tlsClient(),
 	})
 
 	ctx := context.Background()
@@ -144,7 +158,7 @@ func TestHTTPNotifier_NoWebhookURL_SkipsSilently(t *testing.T) {
 func TestHTTPNotifier_RetryOnServerError(t *testing.T) {
 	var attemptCount atomic.Int32
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		count := attemptCount.Add(1)
 		if count < 3 {
 			// First two attempts fail with 500
@@ -168,6 +182,7 @@ func TestHTTPNotifier_RetryOnServerError(t *testing.T) {
 		URLProvider:      urlProvider,
 		DeliveryRecorder: recorder,
 		MaxRetries:       3,
+		HTTPClient:       tlsClient(),
 		// Use short delays for testing
 		RetryDelays: []time.Duration{
 			10 * time.Millisecond,
@@ -189,7 +204,7 @@ func TestHTTPNotifier_RetryOnServerError(t *testing.T) {
 }
 
 func TestHTTPNotifier_FailAfterMaxRetries(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Always fail
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
@@ -207,6 +222,7 @@ func TestHTTPNotifier_FailAfterMaxRetries(t *testing.T) {
 		URLProvider:      urlProvider,
 		DeliveryRecorder: recorder,
 		MaxRetries:       2,
+		HTTPClient:       tlsClient(),
 		RetryDelays: []time.Duration{
 			10 * time.Millisecond,
 			10 * time.Millisecond,
@@ -228,7 +244,7 @@ func TestHTTPNotifier_FailAfterMaxRetries(t *testing.T) {
 
 func TestHTTPNotifier_ContextCancellation(t *testing.T) {
 	// Server that waits longer than the context timeout
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(1 * time.Second)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -243,6 +259,7 @@ func TestHTTPNotifier_ContextCancellation(t *testing.T) {
 	notifier := NewHTTPNotifier(Config{
 		URLProvider:    urlProvider,
 		RequestTimeout: 50 * time.Millisecond,
+		HTTPClient:     tlsClient(),
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -265,6 +282,31 @@ func TestNoOpNotifier(t *testing.T) {
 
 	err = notifier.NotifyAccountClosed(ctx, "tenant", "account", "reason", nil, time.Now())
 	assert.NoError(t, err)
+}
+
+func TestHTTPNotifier_RejectsHTTPURLs(t *testing.T) {
+	// Use HTTP URL (not HTTPS) - should be rejected
+	urlProvider := &mockURLProvider{
+		urls: map[string]string{
+			"tenant-456": "http://example.com/webhook",
+		},
+	}
+
+	recorder := &mockDeliveryRecorder{}
+
+	notifier := NewHTTPNotifier(Config{
+		URLProvider:      urlProvider,
+		DeliveryRecorder: recorder,
+	})
+
+	ctx := context.Background()
+	err := notifier.NotifyAccountFrozen(ctx, "tenant-456", "account-123", "reason", time.Now())
+
+	// Should fail because HTTP URLs are not allowed
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInsecureWebhookURL)
+	// No delivery records should be created for invalid URLs
+	assert.Empty(t, recorder.records)
 }
 
 func TestHTTPNotifier_DefaultConfig(t *testing.T) {
