@@ -12,7 +12,6 @@ import (
 	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
-	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Using clients package for interfaces and errors only
 	"github.com/meridianhub/meridian/services/current-account/config"
@@ -26,10 +25,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/grpc/status"
 )
 
 // Build information set via ldflags during compilation
@@ -367,59 +364,4 @@ func createServiceWithClients(
 	return svc, svcClients, nil
 }
 
-// PartyClientWrapper wraps the service-owned party client with CurrentAccount-specific methods.
-//
-// The service-owned party client provides raw gRPC operations (RetrieveParty, RegisterParty),
-// but CurrentAccount needs higher-level convenience methods (ValidateParty, GetParty) that
-// handle status checking and error translation.
-//
-// This wrapper implements the clients.PartyClient interface expected by the service layer.
-type PartyClientWrapper struct {
-	client *partyclient.Client
-}
-
-// NewPartyClientWrapper creates a new wrapper around the service-owned party client.
-func NewPartyClientWrapper(client *partyclient.Client) *PartyClientWrapper {
-	return &PartyClientWrapper{client: client}
-}
-
-// ValidateParty checks if a party exists and is active.
-//
-// Returns nil if the party exists and has ACTIVE status.
-// Returns clients.ErrPartyNotFound if the party does not exist.
-// Returns clients.ErrPartyNotActive if the party exists but is not ACTIVE.
-func (w *PartyClientWrapper) ValidateParty(ctx context.Context, partyID string) error {
-	party, err := w.GetParty(ctx, partyID)
-	if err != nil {
-		return err
-	}
-
-	if party.Status != partyv1.PartyStatus_PARTY_STATUS_ACTIVE {
-		return clients.ErrPartyNotActive
-	}
-
-	return nil
-}
-
-// GetParty retrieves full party details by ID.
-//
-// Returns the party data if found, or an error if not found.
-func (w *PartyClientWrapper) GetParty(ctx context.Context, partyID string) (*partyv1.Party, error) {
-	resp, err := w.client.RetrieveParty(ctx, &partyv1.RetrievePartyRequest{
-		PartyId: partyID,
-	})
-	if err != nil {
-		// Check for NOT_FOUND status
-		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
-			return nil, clients.ErrPartyNotFound
-		}
-		return nil, fmt.Errorf("failed to retrieve party: %w", err)
-	}
-
-	return resp.Party, nil
-}
-
-// Close terminates the client connection gracefully.
-func (w *PartyClientWrapper) Close() error {
-	return w.client.Close()
-}
+// PartyClientWrapper is defined in party_wrapper.go
