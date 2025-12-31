@@ -1,5 +1,5 @@
 # Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
-# This service uses ports.Party (50055) for gRPC.
+# This service uses ports.Party for gRPC.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

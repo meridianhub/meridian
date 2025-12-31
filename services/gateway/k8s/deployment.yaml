@@ -1,5 +1,5 @@
 # Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
-# This service uses ports.Gateway (8080) for HTTP/Connect.
+# This service uses ports.Gateway for HTTP/Connect.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

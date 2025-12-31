@@ -3,9 +3,11 @@ package app
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 )
 
 // Config holds all configuration for the position-keeping service
@@ -123,7 +125,7 @@ func LoadConfig() (*Config, error) {
 // loadServerConfig loads server configuration from environment variables
 func loadServerConfig() ServerConfig {
 	return ServerConfig{
-		Port:                    env.GetEnvOrDefault("GRPC_PORT", "50053"),
+		Port:                    env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.PositionKeeping)),
 		GracefulShutdownTimeout: env.GetEnvAsDuration("GRACEFUL_SHUTDOWN_TIMEOUT", 30*time.Second),
 	}
 }

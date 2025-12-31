@@ -1,5 +1,5 @@
 # Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
-# This service uses ports.Gateway (8080) for HTTP health/metrics endpoints.
+# This service uses ports.Gateway for HTTP health/metrics endpoints.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
