@@ -146,12 +146,11 @@ func run(logger *slog.Logger) error {
 	}
 
 	pkClient, err := grpc.NewPositionKeepingClient(&grpc.ClientConfig{
-		ServiceName:    "position-keeping",
-		Namespace:      env.GetEnvOrDefault("K8S_NAMESPACE", "default"),
-		Port:           pkPort,
-		Timeout:        10 * time.Second,
-		Logger:         logger,
-		SimulationMode: true, // TODO: Set to false when RecordMeasurement endpoint exists
+		ServiceName: "position-keeping",
+		Namespace:   env.GetEnvOrDefault("K8S_NAMESPACE", "default"),
+		Port:        pkPort,
+		Timeout:     5 * time.Second,
+		Logger:      logger,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create position keeping client: %w", err)
