@@ -166,7 +166,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Persist lien (within the transaction)
-		if err := txLienRepo.Create(lien); err != nil {
+		if err := txLienRepo.Create(ctx, lien); err != nil {
 			return fmt.Errorf("%w: %v", errTxSaveLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
@@ -342,7 +342,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 
 		// Retrieve lien with FOR UPDATE lock to prevent concurrent modifications
 		var txErr error
-		lien, txErr = txLienRepo.FindByIDForUpdate(lienID)
+		lien, txErr = txLienRepo.FindByIDForUpdate(ctx, lienID)
 		if txErr != nil {
 			return txErr
 		}
@@ -376,7 +376,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		account = &accountResult
 
 		// Update lien status
-		if err := txLienRepo.Update(lien); err != nil {
+		if err := txLienRepo.Update(ctx, lien); err != nil {
 			return fmt.Errorf("%w: %v", errTxUpdateLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
@@ -533,7 +533,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		txLienRepo := s.lienRepo.WithTx(tx)
 
 		// Retrieve lien with FOR UPDATE lock to prevent concurrent modifications
-		lien, err = txLienRepo.FindByIDForUpdate(lienID)
+		lien, err = txLienRepo.FindByIDForUpdate(ctx, lienID)
 		if err != nil {
 			return err
 		}
@@ -554,7 +554,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		}
 
 		// Update lien status
-		if err := txLienRepo.Update(lien); err != nil {
+		if err := txLienRepo.Update(ctx, lien); err != nil {
 			return fmt.Errorf("%w: %v", errTxUpdateLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 

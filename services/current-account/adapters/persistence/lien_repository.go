@@ -43,10 +43,13 @@ func (r *LienRepository) withTenantTransaction(ctx context.Context, fn func(tx *
 	return db.WithGormTenantTransaction(ctx, r.db, fn)
 }
 
-// Create inserts a new lien
-func (r *LienRepository) Create(lien *domain.Lien) error {
+// Create inserts a new lien.
+// In multi-org mode, this operation is scoped to the organization from context.
+func (r *LienRepository) Create(ctx context.Context, lien *domain.Lien) error {
 	entity := toLienEntity(lien)
-	return r.db.Create(entity).Error
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Create(entity).Error
+	})
 }
 
 // FindByID retrieves a lien by its UUID.
@@ -75,30 +78,42 @@ func (r *LienRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Li
 
 // FindByIDForUpdate retrieves a lien by its UUID with a pessimistic lock.
 // Use this within a transaction when you need to prevent concurrent modifications.
-func (r *LienRepository) FindByIDForUpdate(id uuid.UUID) (*domain.Lien, error) {
+// In multi-org mode, this query is scoped to the organization from context.
+func (r *LienRepository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.Lien, error) {
 	var entity LienEntity
-	result := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ?", id).
-		First(&entity)
+	var queryErr error
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrLienNotFound
-	}
-
-	if result.Error != nil {
-		return nil, result.Error
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", id).
+			First(&entity)
+		if result.Error != nil {
+			queryErr = result.Error
+			return result.Error
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			return nil, ErrLienNotFound
+		}
+		return nil, err
 	}
 
 	return toLienDomain(&entity)
 }
 
-// FindByAccountID retrieves all liens for an account
-func (r *LienRepository) FindByAccountID(accountID uuid.UUID) ([]*domain.Lien, error) {
+// FindByAccountID retrieves all liens for an account.
+// In multi-org mode, this query is scoped to the organization from context.
+func (r *LienRepository) FindByAccountID(ctx context.Context, accountID uuid.UUID) ([]*domain.Lien, error) {
 	var entities []LienEntity
-	result := r.db.Where("account_id = ?", accountID).Find(&entities)
 
-	if result.Error != nil {
-		return nil, result.Error
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		result := tx.Where("account_id = ?", accountID).Find(&entities)
+		return result.Error
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	liens := make([]*domain.Lien, 0, len(entities))
@@ -115,15 +130,20 @@ func (r *LienRepository) FindByAccountID(accountID uuid.UUID) ([]*domain.Lien, e
 
 // FindActiveByAccountID retrieves all active non-expired liens for an account.
 // Liens with status ACTIVE but past their expires_at are excluded.
-func (r *LienRepository) FindActiveByAccountID(accountID uuid.UUID) ([]*domain.Lien, error) {
+// In multi-org mode, this query is scoped to the organization from context.
+func (r *LienRepository) FindActiveByAccountID(ctx context.Context, accountID uuid.UUID) ([]*domain.Lien, error) {
 	var entities []LienEntity
-	result := r.db.Where(
-		"account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
-		accountID, string(domain.LienStatusActive), time.Now(),
-	).Find(&entities)
+	now := time.Now()
 
-	if result.Error != nil {
-		return nil, result.Error
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		result := tx.Where(
+			"account_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+			accountID, string(domain.LienStatusActive), now,
+		).Find(&entities)
+		return result.Error
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	liens := make([]*domain.Lien, 0, len(entities))
@@ -162,25 +182,33 @@ func (r *LienRepository) FindByPaymentOrderReference(ctx context.Context, refere
 	return toLienDomain(&entity)
 }
 
-// Update updates an existing lien with optimistic locking
-func (r *LienRepository) Update(lien *domain.Lien) error {
+// Update updates an existing lien with optimistic locking.
+// In multi-org mode, this operation is scoped to the organization from context.
+func (r *LienRepository) Update(ctx context.Context, lien *domain.Lien) error {
 	entity := toLienEntity(lien)
+	var rowsAffected int64
 
-	// Optimistic locking: use WHERE clause with version check
-	result := r.db.Model(&LienEntity{}).
-		Where("id = ? AND version = ?", entity.ID, lien.Version).
-		Updates(map[string]interface{}{
-			"status":             entity.Status,
-			"termination_reason": entity.TerminationReason,
-			"updated_at":         entity.UpdatedAt,
-			"version":            lien.Version + 1,
-		})
-
-	if result.Error != nil {
-		return result.Error
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Optimistic locking: use WHERE clause with version check
+		result := tx.Model(&LienEntity{}).
+			Where("id = ? AND version = ?", entity.ID, lien.Version).
+			Updates(map[string]interface{}{
+				"status":             entity.Status,
+				"termination_reason": entity.TerminationReason,
+				"updated_at":         entity.UpdatedAt,
+				"version":            lien.Version + 1,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		rowsAffected = result.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
-	if result.RowsAffected == 0 {
+	if rowsAffected == 0 {
 		return ErrLienVersionConflict
 	}
 

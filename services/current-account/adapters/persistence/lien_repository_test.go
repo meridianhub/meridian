@@ -69,7 +69,7 @@ func TestLienRepository_Create(t *testing.T) {
 	lien, err := domain.NewLien(accountID, amount, "PO-001", nil)
 	require.NoError(t, err)
 
-	err = repo.Create(lien)
+	err = repo.Create(ctx, lien)
 	require.NoError(t, err)
 
 	// Verify lien was saved
@@ -97,7 +97,7 @@ func TestLienRepository_FindByID_NotFound(t *testing.T) {
 }
 
 func TestLienRepository_FindByAccountID(t *testing.T) {
-	db, _, cleanup := setupLienTestDB(t)
+	db, ctx, cleanup := setupLienTestDB(t)
 	defer cleanup()
 
 	repo := NewLienRepository(db)
@@ -108,26 +108,26 @@ func TestLienRepository_FindByAccountID(t *testing.T) {
 	// Create two liens for same account
 	lien1, err := domain.NewLien(accountID, amount, "PO-001", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(lien1))
+	require.NoError(t, repo.Create(ctx, lien1))
 
 	lien2, err := domain.NewLien(accountID, amount, "PO-002", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(lien2))
+	require.NoError(t, repo.Create(ctx, lien2))
 
 	// Create lien for different account
 	otherAccountID := uuid.New()
 	lien3, err := domain.NewLien(otherAccountID, amount, "PO-003", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(lien3))
+	require.NoError(t, repo.Create(ctx, lien3))
 
-	liens, err := repo.FindByAccountID(accountID)
+	liens, err := repo.FindByAccountID(ctx, accountID)
 	require.NoError(t, err)
 
 	assert.Len(t, liens, 2)
 }
 
 func TestLienRepository_FindActiveByAccountID(t *testing.T) {
-	db, _, cleanup := setupLienTestDB(t)
+	db, ctx, cleanup := setupLienTestDB(t)
 	defer cleanup()
 
 	repo := NewLienRepository(db)
@@ -138,24 +138,24 @@ func TestLienRepository_FindActiveByAccountID(t *testing.T) {
 	// Create active lien
 	activeLien, err := domain.NewLien(accountID, amount, "PO-001", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(activeLien))
+	require.NoError(t, repo.Create(ctx, activeLien))
 
 	// Create and execute a lien
 	executedLien, err := domain.NewLien(accountID, amount, "PO-002", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(executedLien))
+	require.NoError(t, repo.Create(ctx, executedLien))
 	require.NoError(t, executedLien.Execute())
-	require.NoError(t, repo.Update(executedLien))
+	require.NoError(t, repo.Update(ctx, executedLien))
 
 	// Create and terminate a lien
 	terminatedLien, err := domain.NewLien(accountID, amount, "PO-003", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(terminatedLien))
+	require.NoError(t, repo.Create(ctx, terminatedLien))
 	require.NoError(t, terminatedLien.Terminate("Cancelled"))
-	require.NoError(t, repo.Update(terminatedLien))
+	require.NoError(t, repo.Update(ctx, terminatedLien))
 
 	// Only active lien should be returned
-	liens, err := repo.FindActiveByAccountID(accountID)
+	liens, err := repo.FindActiveByAccountID(ctx, accountID)
 	require.NoError(t, err)
 
 	assert.Len(t, liens, 1)
@@ -163,7 +163,7 @@ func TestLienRepository_FindActiveByAccountID(t *testing.T) {
 }
 
 func TestLienRepository_FindActiveByAccountID_ExcludesExpired(t *testing.T) {
-	db, _, cleanup := setupLienTestDB(t)
+	db, ctx, cleanup := setupLienTestDB(t)
 	defer cleanup()
 
 	repo := NewLienRepository(db)
@@ -174,16 +174,16 @@ func TestLienRepository_FindActiveByAccountID_ExcludesExpired(t *testing.T) {
 	// Create active lien without expiration
 	activeLien, err := domain.NewLien(accountID, amount, "PO-001", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(activeLien))
+	require.NoError(t, repo.Create(ctx, activeLien))
 
 	// Create active lien with past expiration (should be excluded)
 	past := time.Now().Add(-1 * time.Hour)
 	expiredLien, err := domain.NewLien(accountID, amount, "PO-002", &past)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(expiredLien))
+	require.NoError(t, repo.Create(ctx, expiredLien))
 
 	// Only non-expired active lien should be returned
-	liens, err := repo.FindActiveByAccountID(accountID)
+	liens, err := repo.FindActiveByAccountID(ctx, accountID)
 	require.NoError(t, err)
 
 	assert.Len(t, liens, 1)
@@ -201,7 +201,7 @@ func TestLienRepository_FindByPaymentOrderReference(t *testing.T) {
 
 	lien, err := domain.NewLien(accountID, amount, "PO-UNIQUE-123", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(lien))
+	require.NoError(t, repo.Create(ctx, lien))
 
 	retrieved, err := repo.FindByPaymentOrderReference(ctx, "PO-UNIQUE-123")
 	require.NoError(t, err)
@@ -230,11 +230,11 @@ func TestLienRepository_Update_Execute(t *testing.T) {
 
 	lien, err := domain.NewLien(accountID, amount, "PO-001", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(lien))
+	require.NoError(t, repo.Create(ctx, lien))
 
 	// Execute the lien
 	require.NoError(t, lien.Execute())
-	require.NoError(t, repo.Update(lien))
+	require.NoError(t, repo.Update(ctx, lien))
 
 	// Verify status was updated
 	retrieved, err := repo.FindByID(ctx, lien.ID)
@@ -255,11 +255,11 @@ func TestLienRepository_Update_Terminate(t *testing.T) {
 
 	lien, err := domain.NewLien(accountID, amount, "PO-001", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(lien))
+	require.NoError(t, repo.Create(ctx, lien))
 
 	// Terminate the lien
 	require.NoError(t, lien.Terminate("Payment failed"))
-	require.NoError(t, repo.Update(lien))
+	require.NoError(t, repo.Update(ctx, lien))
 
 	// Verify status and reason were updated
 	retrieved, err := repo.FindByID(ctx, lien.ID)
@@ -282,7 +282,7 @@ func TestLienRepository_OptimisticLocking(t *testing.T) {
 	// Create initial lien
 	lien, err := domain.NewLien(accountID, amount, "PO-001", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(lien))
+	require.NoError(t, repo.Create(ctx, lien))
 
 	// Load same lien twice (simulating concurrent access)
 	lien1, err := repo.FindByID(ctx, lien.ID)
@@ -293,11 +293,11 @@ func TestLienRepository_OptimisticLocking(t *testing.T) {
 
 	// First update succeeds
 	require.NoError(t, lien1.Execute())
-	require.NoError(t, repo.Update(lien1))
+	require.NoError(t, repo.Update(ctx, lien1))
 
 	// Second update fails due to version conflict
 	require.NoError(t, lien2.Terminate("Should fail"))
-	err = repo.Update(lien2)
+	err = repo.Update(ctx, lien2)
 	assert.ErrorIs(t, err, ErrLienVersionConflict)
 
 	// Verify first transaction's changes persisted
@@ -318,18 +318,18 @@ func TestLienRepository_SumActiveAmountByAccountID(t *testing.T) {
 	// Create active liens
 	amount1, _ := domain.NewMoney("GBP", 20000) // £200
 	lien1, _ := domain.NewLien(accountID, amount1, "PO-001", nil)
-	require.NoError(t, repo.Create(lien1))
+	require.NoError(t, repo.Create(ctx, lien1))
 
 	amount2, _ := domain.NewMoney("GBP", 15000) // £150
 	lien2, _ := domain.NewLien(accountID, amount2, "PO-002", nil)
-	require.NoError(t, repo.Create(lien2))
+	require.NoError(t, repo.Create(ctx, lien2))
 
 	// Create and execute a lien (should not be counted)
 	amount3, _ := domain.NewMoney("GBP", 10000)
 	lien3, _ := domain.NewLien(accountID, amount3, "PO-003", nil)
-	require.NoError(t, repo.Create(lien3))
+	require.NoError(t, repo.Create(ctx, lien3))
 	require.NoError(t, lien3.Execute())
-	require.NoError(t, repo.Update(lien3))
+	require.NoError(t, repo.Update(ctx, lien3))
 
 	// Sum should only include active non-expired liens
 	total, err := repo.SumActiveAmountByAccountID(ctx, accountID)
@@ -348,13 +348,13 @@ func TestLienRepository_SumActiveAmountByAccountID_ExcludesExpired(t *testing.T)
 	// Create active lien
 	amount1, _ := domain.NewMoney("GBP", 20000)
 	lien1, _ := domain.NewLien(accountID, amount1, "PO-001", nil)
-	require.NoError(t, repo.Create(lien1))
+	require.NoError(t, repo.Create(ctx, lien1))
 
 	// Create expired active lien (should not be counted)
 	past := time.Now().Add(-1 * time.Hour)
 	amount2, _ := domain.NewMoney("GBP", 15000)
 	lien2, _ := domain.NewLien(accountID, amount2, "PO-002", &past)
-	require.NoError(t, repo.Create(lien2))
+	require.NoError(t, repo.Create(ctx, lien2))
 
 	// Sum should only include non-expired active liens
 	total, err := repo.SumActiveAmountByAccountID(ctx, accountID)
@@ -373,7 +373,7 @@ func TestLienRepository_SumActiveAmountByAccountID_CurrencyInconsistency(t *test
 	// Create active lien in GBP
 	amount1, _ := domain.NewMoney("GBP", 20000)
 	lien1, _ := domain.NewLien(accountID, amount1, "PO-001", nil)
-	require.NoError(t, repo.Create(lien1))
+	require.NoError(t, repo.Create(ctx, lien1))
 
 	// Manually insert lien with different currency (simulating data corruption)
 	corruptedEntity := &LienEntity{
@@ -419,7 +419,7 @@ func TestLienRepository_CreateWithExpiration(t *testing.T) {
 
 	lien, err := domain.NewLien(accountID, amount, "PO-001", &expiresAt)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(lien))
+	require.NoError(t, repo.Create(ctx, lien))
 
 	retrieved, err := repo.FindByID(ctx, lien.ID)
 	require.NoError(t, err)
@@ -476,7 +476,7 @@ func TestLienRepository_FindByID_CorruptedData_ReturnsError(t *testing.T) {
 }
 
 func TestLienRepository_FindByAccountID_PartialCorruption_ReturnsError(t *testing.T) {
-	db, _, cleanup := setupLienTestDB(t)
+	db, ctx, cleanup := setupLienTestDB(t)
 	defer cleanup()
 
 	repo := NewLienRepository(db)
@@ -485,7 +485,7 @@ func TestLienRepository_FindByAccountID_PartialCorruption_ReturnsError(t *testin
 	// Create valid lien
 	validAmount, _ := domain.NewMoney("GBP", 10000)
 	validLien, _ := domain.NewLien(accountID, validAmount, "PO-001", nil)
-	require.NoError(t, repo.Create(validLien))
+	require.NoError(t, repo.Create(ctx, validLien))
 
 	// Manually insert corrupted lien for same account
 	corruptedEntity := &LienEntity{
@@ -501,14 +501,14 @@ func TestLienRepository_FindByAccountID_PartialCorruption_ReturnsError(t *testin
 	}
 	require.NoError(t, db.Create(corruptedEntity).Error)
 
-	_, err := repo.FindByAccountID(accountID)
+	_, err := repo.FindByAccountID(ctx, accountID)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "database")
 }
 
 func TestLienRepository_Update_NonExistent_ReturnsError(t *testing.T) {
-	db, _, cleanup := setupLienTestDB(t)
+	db, ctx, cleanup := setupLienTestDB(t)
 	defer cleanup()
 
 	repo := NewLienRepository(db)
@@ -518,7 +518,7 @@ func TestLienRepository_Update_NonExistent_ReturnsError(t *testing.T) {
 	lien, _ := domain.NewLien(uuid.New(), amount, "PO-001", nil)
 
 	// Try to update non-existent lien
-	err := repo.Update(lien)
+	err := repo.Update(ctx, lien)
 
 	// Should fail with version conflict (no rows affected)
 	assert.True(t, errors.Is(err, ErrLienVersionConflict))
