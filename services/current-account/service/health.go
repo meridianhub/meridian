@@ -10,6 +10,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -61,7 +62,7 @@ func NewHealthChecker(config HealthCheckerConfig) (*HealthChecker, error) {
 		config.ServiceName = "current-account"
 	}
 	if config.CheckTimeout == 0 {
-		config.CheckTimeout = 5 * time.Second
+		config.CheckTimeout = defaults.DefaultHealthCheckTimeout
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()

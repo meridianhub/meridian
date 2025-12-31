@@ -8,6 +8,7 @@ import (
 
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	sharedgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -48,7 +49,7 @@ func DefaultConfig() Config {
 		ServiceName: "tenant",
 		Namespace:   "default",
 		Port:        50056,
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 	}
 }
 
@@ -56,7 +57,7 @@ func DefaultConfig() Config {
 func NewTenantClient(ctx context.Context, cfg Config) (*TenantClient, error) {
 	// Apply defaults
 	if cfg.Timeout == 0 {
-		cfg.Timeout = 30 * time.Second
+		cfg.Timeout = defaults.DefaultRPCTimeout
 	}
 	if cfg.Port == 0 {
 		cfg.Port = 50056

@@ -9,6 +9,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -50,7 +51,7 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 		config.ServiceName = "party"
 	}
 	if config.CheckTimeout == 0 {
-		config.CheckTimeout = 5 * time.Second
+		config.CheckTimeout = defaults.DefaultHealthCheckTimeout
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()

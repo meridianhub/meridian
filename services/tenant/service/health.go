@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -29,7 +30,7 @@ type HealthCheckerConfig struct {
 // NewHealthChecker creates a new health checker.
 func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 	if config.Timeout <= 0 {
-		config.Timeout = 5 * time.Second
+		config.Timeout = defaults.DefaultHealthCheckTimeout
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()

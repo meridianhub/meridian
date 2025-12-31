@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
@@ -18,6 +17,7 @@ import (
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -144,7 +144,7 @@ func run(logger *slog.Logger) error {
 		FinancialAccountingHealthClient: svcClients.financialAccountingHealth,
 		Logger:                          logger,
 		ServiceName:                     "current-account",
-		CheckTimeout:                    5 * time.Second,
+		CheckTimeout:                    defaults.DefaultHealthCheckTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create health checker: %w", err)
@@ -252,7 +252,7 @@ func createServiceWithClients(
 		ServiceName: "position-keeping",
 		Namespace:   namespace,
 		Port:        50053,
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
 	})
 	if err != nil {
@@ -272,7 +272,7 @@ func createServiceWithClients(
 		ServiceName: "financial-accounting",
 		Namespace:   namespace,
 		Port:        50052,
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
 	})
 	if err != nil {
@@ -292,7 +292,7 @@ func createServiceWithClients(
 		ServiceName: "party",
 		Namespace:   namespace,
 		Port:        50055, // Party service port (see services/party/k8s/service.yaml)
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
 	})
 	if err != nil {

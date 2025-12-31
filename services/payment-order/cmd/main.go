@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
@@ -23,6 +22,7 @@ import (
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/redis/go-redis/v9"
@@ -245,7 +245,7 @@ func run(logger *slog.Logger) error {
 	// Graceful shutdown
 	logger.Info("shutting down servers...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultRPCTimeout)
 	defer cancel()
 
 	// Close database connection during shutdown
@@ -325,15 +325,15 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.
 	resilientConfig := sharedclients.ResilientClientConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "current-account",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval: env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultRPCTimeout),
+		CircuitBreakerInterval: env.GetEnvAsDuration("CURRENT_ACCOUNT_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerTimeout),
 		MaxRequests:            env.GetEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
 		FailureThreshold:       env.GetEnvAsUint32("CURRENT_ACCOUNT_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
 
 		// Retry settings
 		MaxRetries:          env.GetEnvAsInt("CURRENT_ACCOUNT_MAX_RETRIES", 3),
-		InitialInterval:     env.GetEnvAsDuration("CURRENT_ACCOUNT_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
-		MaxInterval:         env.GetEnvAsDuration("CURRENT_ACCOUNT_RETRY_MAX_INTERVAL", 5*time.Second),
+		InitialInterval:     env.GetEnvAsDuration("CURRENT_ACCOUNT_RETRY_INITIAL_INTERVAL", defaults.DefaultRetryDelay),
+		MaxInterval:         env.GetEnvAsDuration("CURRENT_ACCOUNT_RETRY_MAX_INTERVAL", defaults.DefaultMaxRetryInterval),
 		Multiplier:          env.GetEnvAsFloat("CURRENT_ACCOUNT_RETRY_MULTIPLIER", 2.0),
 		RandomizationFactor: env.GetEnvAsFloat("CURRENT_ACCOUNT_RETRY_RANDOMIZATION", 0.5),
 
@@ -376,15 +376,15 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger) (ser
 	resilientConfig := sharedclients.ResilientClientConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "financial-accounting",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval: env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultRPCTimeout),
+		CircuitBreakerInterval: env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerTimeout),
 		MaxRequests:            env.GetEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
 		FailureThreshold:       env.GetEnvAsUint32("FINANCIAL_ACCOUNTING_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
 
 		// Retry settings
 		MaxRetries:          env.GetEnvAsInt("FINANCIAL_ACCOUNTING_MAX_RETRIES", 3),
-		InitialInterval:     env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
-		MaxInterval:         env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_MAX_INTERVAL", 5*time.Second),
+		InitialInterval:     env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_INITIAL_INTERVAL", defaults.DefaultRetryDelay),
+		MaxInterval:         env.GetEnvAsDuration("FINANCIAL_ACCOUNTING_RETRY_MAX_INTERVAL", defaults.DefaultMaxRetryInterval),
 		Multiplier:          env.GetEnvAsFloat("FINANCIAL_ACCOUNTING_RETRY_MULTIPLIER", 2.0),
 		RandomizationFactor: env.GetEnvAsFloat("FINANCIAL_ACCOUNTING_RETRY_RANDOMIZATION", 0.5),
 
@@ -421,7 +421,7 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 		// Note: MaxRetries is 0 because the ResilientPaymentGateway wrapper handles retries.
 		// Setting retries on both layers would create nested retry behavior (3x3 = 9 attempts).
 		baseGateway = gateway.New(gateway.Config{
-			Timeout:    30 * time.Second,
+			Timeout:    defaults.DefaultRPCTimeout,
 			MaxRetries: 0,
 		})
 	}
@@ -430,8 +430,8 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 	resilientConfig := gateway.ResilientGatewayConfig{
 		// Circuit breaker settings
 		CircuitBreakerName:     "payment-gateway",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval: env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultRPCTimeout),
+		CircuitBreakerInterval: env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerTimeout),
 		MaxRequests:            env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
 		FailureThreshold:       env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
 
@@ -441,8 +441,8 @@ func createPaymentGateway(logger *slog.Logger) gateway.PaymentGateway {
 
 		// Retry settings
 		MaxRetries:          env.GetEnvAsInt("GATEWAY_MAX_RETRIES", 3),
-		InitialInterval:     env.GetEnvAsDuration("GATEWAY_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
-		MaxInterval:         env.GetEnvAsDuration("GATEWAY_RETRY_MAX_INTERVAL", 5*time.Second),
+		InitialInterval:     env.GetEnvAsDuration("GATEWAY_RETRY_INITIAL_INTERVAL", defaults.DefaultRetryDelay),
+		MaxInterval:         env.GetEnvAsDuration("GATEWAY_RETRY_MAX_INTERVAL", defaults.DefaultMaxRetryInterval),
 		Multiplier:          env.GetEnvAsFloat("GATEWAY_RETRY_MULTIPLIER", 2.0),
 		RandomizationFactor: env.GetEnvAsFloat("GATEWAY_RETRY_RANDOMIZATION", 0.5),
 
@@ -500,7 +500,7 @@ func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
 	client := redis.NewClient(opt)
 
 	// Verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.DefaultHealthCheckTimeout)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {

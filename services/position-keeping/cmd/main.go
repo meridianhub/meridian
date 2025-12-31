@@ -21,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -391,7 +392,7 @@ func (h *healthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, stream grpc_h
 	ctx := stream.Context()
 
 	// Send initial status with timeout
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, defaults.DefaultHealthCheckTimeout)
 	resp, _ := h.Check(checkCtx, nil)
 	cancel()
 	if err := stream.Send(resp); err != nil {
@@ -407,7 +408,7 @@ func (h *healthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, stream grpc_h
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			checkCtx, cancel := context.WithTimeout(ctx, defaults.DefaultHealthCheckTimeout)
 			resp, _ := h.Check(checkCtx, nil)
 			cancel()
 			if err := stream.Send(resp); err != nil {

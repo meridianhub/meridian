@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/sony/gobreaker/v2"
 	"golang.org/x/time/rate"
 )
@@ -51,8 +52,8 @@ func DefaultResilientGatewayConfig() ResilientGatewayConfig {
 	return ResilientGatewayConfig{
 		// Circuit breaker: trip after 5 failures, stay open for 30s
 		CircuitBreakerName:     "payment-gateway",
-		CircuitBreakerTimeout:  30 * time.Second,
-		CircuitBreakerInterval: 60 * time.Second,
+		CircuitBreakerTimeout:  defaults.DefaultRPCTimeout,
+		CircuitBreakerInterval: defaults.DefaultCircuitBreakerTimeout,
 		MaxRequests:            1,
 		FailureThreshold:       5,
 
@@ -62,8 +63,8 @@ func DefaultResilientGatewayConfig() ResilientGatewayConfig {
 
 		// Retry: 3 retries with exponential backoff
 		MaxRetries:          3,
-		InitialInterval:     100 * time.Millisecond,
-		MaxInterval:         5 * time.Second,
+		InitialInterval:     defaults.DefaultRetryDelay,
+		MaxInterval:         defaults.DefaultMaxRetryInterval,
 		Multiplier:          2.0,
 		RandomizationFactor: 0.5,
 

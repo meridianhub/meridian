@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/sony/gobreaker/v2"
 )
 
@@ -16,7 +17,7 @@ const (
 
 	// BreakerInterval is the cyclic period of the closed state for clearing
 	// internal Counts. If 0, the internal Counts are never cleared while in closed state.
-	BreakerInterval = 60 * time.Second
+	BreakerInterval = defaults.DefaultCircuitBreakerTimeout
 
 	// BreakerTimeout is the period of the open state, after which the circuit breaker
 	// transitions to half-open state to allow test requests through.

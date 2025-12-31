@@ -24,6 +24,7 @@ import (
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/samber/lo"
@@ -129,7 +130,7 @@ const (
 	// lienStatusUpdateBackoffBase is the base duration for exponential backoff between retries.
 	lienStatusUpdateBackoffBase = 100 * time.Millisecond
 	// lienStatusUpdateTimeout is the timeout for the entire status update operation.
-	lienStatusUpdateTimeout = 30 * time.Second
+	lienStatusUpdateTimeout = defaults.DefaultRPCTimeout
 )
 
 // Money conversion constants for Google Money proto (nanos have 9 decimal places)
