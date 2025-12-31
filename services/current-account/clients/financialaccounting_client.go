@@ -1,5 +1,25 @@
 package clients
 
+// This file contains the old FinancialAccounting client implementation.
+// Deprecated: Use services/financial-accounting/client.New() instead, which provides:
+//   - Built-in resilience patterns (circuit breaker + retry)
+//   - DNS-based client-side load balancing
+//   - Standardized configuration via client.Config
+//
+// Migration example:
+//
+//	// Old pattern:
+//	client, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{...})
+//	resilient := clients.NewResilientFinancialAccountingClient(client, config)
+//
+//	// New pattern:
+//	import finacctclient "github.com/meridianhub/meridian/services/financial-accounting/client"
+//	client, cleanup, err := finacctclient.New(finacctclient.Config{
+//	    ServiceName: finacctclient.ServiceName,
+//	    Resilience: &sharedclients.ResilientClientConfig{...},
+//	})
+//	defer cleanup()
+
 import (
 	"context"
 	"errors"
@@ -16,7 +36,9 @@ import (
 // ErrFinancialAccountingServiceNameRequired is returned when ServiceName is not provided
 var ErrFinancialAccountingServiceNameRequired = errors.New("ServiceName is required for financial accounting client")
 
-// FinancialAccountingGRPCClient implements FinancialAccountingClient using gRPC
+// FinancialAccountingGRPCClient implements FinancialAccountingClient using gRPC.
+//
+// Deprecated: Use services/financial-accounting/client.Client instead.
 type FinancialAccountingGRPCClient struct {
 	conn    *grpc.ClientConn
 	client  financialaccountingv1.FinancialAccountingServiceClient
@@ -24,7 +46,9 @@ type FinancialAccountingGRPCClient struct {
 	timeout time.Duration
 }
 
-// FinancialAccountingClientConfig holds configuration for the FinancialAccounting client
+// FinancialAccountingClientConfig holds configuration for the FinancialAccounting client.
+//
+// Deprecated: Use services/financial-accounting/client.Config instead.
 type FinancialAccountingClientConfig struct {
 	// ServiceName is the Kubernetes service name (e.g., "financial-accounting").
 	// Required. Enables DNS-based client-side load balancing via pkg/platform/grpc.
@@ -53,6 +77,8 @@ type FinancialAccountingClientConfig struct {
 }
 
 // NewFinancialAccountingClient creates a new FinancialAccounting gRPC client using DNS-based load balancing.
+//
+// Deprecated: Use services/financial-accounting/client.New() instead.
 //
 // Example:
 //

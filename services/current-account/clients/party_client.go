@@ -20,29 +20,11 @@ var (
 	ErrPartyNotActive = errors.New("party not active")
 )
 
-// PartyClient defines the interface for communicating with the Party service.
-//
-// The Party service manages party reference data (customers, counterparties,
-// legal entities). CurrentAccount uses this service to validate party ownership
-// before account operations.
-type PartyClient interface {
-	// ValidateParty checks if a party exists and is active.
-	//
-	// Returns nil if the party exists and has ACTIVE status.
-	// Returns ErrPartyNotFound if the party does not exist.
-	// Returns ErrPartyNotActive if the party exists but is not ACTIVE.
-	ValidateParty(ctx context.Context, partyID string) error
-
-	// GetParty retrieves full party details by ID.
-	//
-	// Returns the party data if found, or an error if not found.
-	GetParty(ctx context.Context, partyID string) (*partyv1.Party, error)
-
-	// Close terminates the client connection gracefully.
-	Close() error
-}
-
 // PartyGRPCClient implements PartyClient using gRPC.
+//
+// Deprecated: Use services/party/client.Client directly with a wrapper for
+// CurrentAccount-specific methods (ValidateParty, GetParty). See cmd/main.go
+// for the PartyClientWrapper implementation.
 //
 // This client embeds the shared BasePartyClient for connection management
 // and adds current-account-specific error handling for party validation operations.
@@ -51,6 +33,9 @@ type PartyGRPCClient struct {
 }
 
 // NewPartyClient creates a new Party gRPC client using DNS-based load balancing.
+//
+// Deprecated: Use services/party/client.New() instead with a PartyClientWrapper.
+// See cmd/main.go for the recommended pattern.
 //
 // Example:
 //

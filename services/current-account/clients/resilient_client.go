@@ -1,9 +1,15 @@
 // Package clients provides gRPC client wrappers with resilience patterns.
 //
-// This package provides service-specific resilient client wrappers that delegate
-// to the shared implementation in github.com/meridianhub/meridian/shared/pkg/clients.
+// Deprecated: This file contains resilient wrappers for the old client implementations.
+// The new service-owned client packages have built-in resilience patterns:
+//   - services/position-keeping/client (with Config.Resilience)
+//   - services/financial-accounting/client (with Config.Resilience)
+//   - services/party/client (with Config.Resilience)
 //
-// # Service-Specific Wrappers
+// Migration: Pass a sharedclients.ResilientClientConfig to the new client's Config.Resilience
+// field instead of wrapping with these types.
+//
+// # Service-Specific Wrappers (deprecated)
 //
 // Each wrapper maintains the domain-specific client interface while using the shared
 // ResilientClient for all resilience logic (circuit breaker, retry, etc.):

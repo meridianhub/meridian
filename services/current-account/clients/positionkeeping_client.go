@@ -1,5 +1,25 @@
 package clients
 
+// This file contains the old PositionKeeping client implementation.
+// Deprecated: Use services/position-keeping/client.New() instead, which provides:
+//   - Built-in resilience patterns (circuit breaker + retry)
+//   - DNS-based client-side load balancing
+//   - Standardized configuration via client.Config
+//
+// Migration example:
+//
+//	// Old pattern:
+//	client, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{...})
+//	resilient := clients.NewResilientPositionKeepingClient(client, config)
+//
+//	// New pattern:
+//	import poskeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
+//	client, cleanup, err := poskeepingclient.New(poskeepingclient.Config{
+//	    ServiceName: poskeepingclient.ServiceName,
+//	    Resilience: &sharedclients.ResilientClientConfig{...},
+//	})
+//	defer cleanup()
+
 import (
 	"context"
 	"errors"
@@ -16,7 +36,9 @@ import (
 // ErrPositionKeepingServiceNameRequired is returned when ServiceName is not provided
 var ErrPositionKeepingServiceNameRequired = errors.New("ServiceName is required for position keeping client")
 
-// PositionKeepingGRPCClient implements PositionKeepingClient using gRPC
+// PositionKeepingGRPCClient implements PositionKeepingClient using gRPC.
+//
+// Deprecated: Use services/position-keeping/client.Client instead.
 type PositionKeepingGRPCClient struct {
 	conn    *grpc.ClientConn
 	client  positionkeepingv1.PositionKeepingServiceClient
@@ -24,7 +46,9 @@ type PositionKeepingGRPCClient struct {
 	timeout time.Duration
 }
 
-// PositionKeepingClientConfig holds configuration for the PositionKeeping client
+// PositionKeepingClientConfig holds configuration for the PositionKeeping client.
+//
+// Deprecated: Use services/position-keeping/client.Config instead.
 type PositionKeepingClientConfig struct {
 	// ServiceName is the Kubernetes service name (e.g., "position-keeping").
 	// Required. Enables DNS-based client-side load balancing via pkg/platform/grpc.
@@ -53,6 +77,8 @@ type PositionKeepingClientConfig struct {
 }
 
 // NewPositionKeepingClient creates a new PositionKeeping gRPC client using DNS-based load balancing.
+//
+// Deprecated: Use services/position-keeping/client.New() instead.
 //
 // Example:
 //

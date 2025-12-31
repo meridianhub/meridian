@@ -11,17 +11,23 @@ import (
 	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
+	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Using clients package for interfaces and errors only
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/service"
+	finacctclient "github.com/meridianhub/meridian/services/financial-accounting/client"
+	partyclient "github.com/meridianhub/meridian/services/party/client"
+	poskeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 )
 
 // Build information set via ldflags during compilation
@@ -216,16 +222,25 @@ func parseLogLevel(levelStr string) slog.Level {
 type serviceClients struct {
 	positionKeeping     clients.PositionKeepingClient
 	financialAccounting clients.FinancialAccountingClient
+	party               clients.PartyClient
 	// Health clients bypass the circuit breaker for health checks
 	positionKeepingHealth     grpc_health_v1.HealthClient
 	financialAccountingHealth grpc_health_v1.HealthClient
+	// Cleanup functions for graceful shutdown
+	cleanupFuncs []func()
 }
 
 // createServiceWithClients creates the service and returns it along with the external clients
 // for use in health checking. This approach creates the clients once and shares them between
 // the service and health checker to avoid duplicate connections.
 //
-// Uses DNS-based client-side load balancing for inter-service gRPC communication.
+// Uses the new service-owned client packages with built-in resilience patterns:
+//   - services/position-keeping/client
+//   - services/financial-accounting/client
+//   - services/party/client
+//
+// Each client is configured with DNS-based client-side load balancing and optional
+// circuit breaker + retry resilience.
 func createServiceWithClients(
 	repo *persistence.Repository,
 	lienRepo *persistence.LienRepository,
@@ -247,90 +262,162 @@ func createServiceWithClients(
 			"deposit_clearing_account_id", accountConfig.DepositClearingAccountID)
 	}
 
-	// Create Position Keeping client with DNS-based load balancing
-	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
-		ServiceName: "position-keeping",
+	// Track cleanup functions for graceful shutdown
+	var cleanupFuncs []func()
+
+	// Create Position Keeping client using service-owned client package
+	// The new client has built-in resilience patterns (circuit breaker + retry)
+	posKeepingClient, posKeepingCleanup, err := poskeepingclient.New(poskeepingclient.Config{
+		ServiceName: poskeepingclient.ServiceName,
 		Namespace:   namespace,
-		Port:        50053,
+		Port:        poskeepingclient.DefaultPort,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "position-keeping",
+		},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create position keeping client: %w", err)
 	}
+	cleanupFuncs = append(cleanupFuncs, posKeepingCleanup)
 
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientPosKeepingClient := clients.NewResilientPositionKeepingClient(
-		posKeepingGRPCClient,
-		sharedclients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
-
-	// Create Financial Accounting client with DNS-based load balancing
-	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
-		ServiceName: "financial-accounting",
+	// Create Financial Accounting client using service-owned client package
+	finAcctClient, finAcctCleanup, err := finacctclient.New(finacctclient.Config{
+		ServiceName: finacctclient.ServiceName,
 		Namespace:   namespace,
-		Port:        50052,
+		Port:        finacctclient.DefaultPort,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "financial-accounting",
+		},
 	})
 	if err != nil {
+		// Cleanup already created clients before returning
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
 		return nil, nil, fmt.Errorf("failed to create financial accounting client: %w", err)
 	}
+	cleanupFuncs = append(cleanupFuncs, finAcctCleanup)
 
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientFinAcctClient := clients.NewResilientFinancialAccountingClient(
-		finAcctGRPCClient,
-		sharedclients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
-
-	// Create Party client with DNS-based load balancing
-	partyGRPCClient, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
-		ServiceName: "party",
+	// Create Party client using service-owned client package
+	// PartyClient requires a wrapper for ValidateParty/GetParty methods
+	partyBaseClient, partyCleanup, err := partyclient.New(partyclient.Config{
+		ServiceName: partyclient.ServiceName,
 		Namespace:   namespace,
-		Port:        50055, // Party service port (see services/party/k8s/service.yaml)
+		Port:        partyclient.DefaultPort,
 		Timeout:     30 * time.Second,
 		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "party",
+		},
 	})
 	if err != nil {
+		// Cleanup already created clients before returning
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
 		return nil, nil, fmt.Errorf("failed to create party client: %w", err)
 	}
+	cleanupFuncs = append(cleanupFuncs, partyCleanup)
 
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientPartyClient := clients.NewResilientPartyClient(
-		partyGRPCClient,
-		sharedclients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
+	// Wrap the party client with CurrentAccount-specific methods (ValidateParty, GetParty)
+	partyClientWrapper := NewPartyClientWrapper(partyBaseClient)
 
 	// Create service with the pre-created clients
+	// The new service-owned clients implement the same interfaces as the old clients,
+	// so they can be passed directly to the service constructor
 	svc, err := service.NewServiceWithExistingClients(
 		repo,
 		lienRepo,
-		resilientPosKeepingClient,
-		resilientFinAcctClient,
-		resilientPartyClient,
+		posKeepingClient,   // *poskeepingclient.Client implements clients.PositionKeepingClient
+		finAcctClient,      // *finacctclient.Client implements clients.FinancialAccountingClient
+		partyClientWrapper, // *PartyClientWrapper implements clients.PartyClient
 		accountConfig,
 		idempotencyService,
 		logger,
 		tracer,
 	)
 	if err != nil {
+		// Cleanup all clients before returning
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
 		return nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
 	}
 
 	// Create health clients from the underlying gRPC connections
 	// These bypass the circuit breaker to avoid health checks tripping business operation circuit breakers
-	clients := &serviceClients{
-		positionKeeping:           resilientPosKeepingClient,
-		financialAccounting:       resilientFinAcctClient,
-		positionKeepingHealth:     grpc_health_v1.NewHealthClient(posKeepingGRPCClient.Conn()),
-		financialAccountingHealth: grpc_health_v1.NewHealthClient(finAcctGRPCClient.Conn()),
+	svcClients := &serviceClients{
+		positionKeeping:           posKeepingClient,
+		financialAccounting:       finAcctClient,
+		party:                     partyClientWrapper,
+		positionKeepingHealth:     grpc_health_v1.NewHealthClient(posKeepingClient.Conn()),
+		financialAccountingHealth: grpc_health_v1.NewHealthClient(finAcctClient.Conn()),
+		cleanupFuncs:              cleanupFuncs,
 	}
 
-	return svc, clients, nil
+	return svc, svcClients, nil
+}
+
+// PartyClientWrapper wraps the service-owned party client with CurrentAccount-specific methods.
+//
+// The service-owned party client provides raw gRPC operations (RetrieveParty, RegisterParty),
+// but CurrentAccount needs higher-level convenience methods (ValidateParty, GetParty) that
+// handle status checking and error translation.
+//
+// This wrapper implements the clients.PartyClient interface expected by the service layer.
+type PartyClientWrapper struct {
+	client *partyclient.Client
+}
+
+// NewPartyClientWrapper creates a new wrapper around the service-owned party client.
+func NewPartyClientWrapper(client *partyclient.Client) *PartyClientWrapper {
+	return &PartyClientWrapper{client: client}
+}
+
+// ValidateParty checks if a party exists and is active.
+//
+// Returns nil if the party exists and has ACTIVE status.
+// Returns clients.ErrPartyNotFound if the party does not exist.
+// Returns clients.ErrPartyNotActive if the party exists but is not ACTIVE.
+func (w *PartyClientWrapper) ValidateParty(ctx context.Context, partyID string) error {
+	party, err := w.GetParty(ctx, partyID)
+	if err != nil {
+		return err
+	}
+
+	if party.Status != partyv1.PartyStatus_PARTY_STATUS_ACTIVE {
+		return clients.ErrPartyNotActive
+	}
+
+	return nil
+}
+
+// GetParty retrieves full party details by ID.
+//
+// Returns the party data if found, or an error if not found.
+func (w *PartyClientWrapper) GetParty(ctx context.Context, partyID string) (*partyv1.Party, error) {
+	resp, err := w.client.RetrieveParty(ctx, &partyv1.RetrievePartyRequest{
+		PartyId: partyID,
+	})
+	if err != nil {
+		// Check for NOT_FOUND status
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			return nil, clients.ErrPartyNotFound
+		}
+		return nil, fmt.Errorf("failed to retrieve party: %w", err)
+	}
+
+	return resp.Party, nil
+}
+
+// Close terminates the client connection gracefully.
+func (w *PartyClientWrapper) Close() error {
+	return w.client.Close()
 }

@@ -402,3 +402,9 @@ func (c *Client) Close() error {
 	}
 	return nil
 }
+
+// Conn returns the underlying gRPC connection for creating additional clients
+// (e.g., health check clients that bypass the business client's circuit breaker).
+func (c *Client) Conn() *grpc.ClientConn {
+	return c.conn
+}
