@@ -740,6 +740,8 @@ func TestMeta_VerifyConcurrencyTestDetectsRaces(t *testing.T) {
 
 // brokenConcurrencyChecker is a deliberately broken mock that doesn't
 // properly handle concurrent access, used for meta-testing.
+// The "broken" behavior: MarkPending always succeeds without checking if key exists,
+// allowing multiple concurrent requests to all believe they acquired the lock.
 type brokenConcurrencyChecker struct {
 	results map[string]*idempotency.Result
 	mu      sync.Mutex
@@ -760,14 +762,21 @@ func (b *brokenConcurrencyChecker) Check(_ context.Context, key idempotency.Key)
 }
 
 func (b *brokenConcurrencyChecker) MarkPending(_ context.Context, key idempotency.Key, ttl time.Duration) error {
-	// DELIBERATELY BROKEN: No proper locking/checking for existing key
-	// This allows multiple concurrent requests to proceed
+	// DELIBERATELY BROKEN: Always returns success without checking if key already exists.
+	// This simulates a check-then-act race where multiple requests all pass the Check
+	// (seeing no result) and then all proceed to MarkPending.
+	//
+	// A proper implementation would use atomic compare-and-set (like Redis SETNX),
+	// but this broken version just overwrites, allowing multiple executions.
+
+	// Add delay BEFORE locking to create race window where multiple goroutines
+	// can all pass Check() before any of them complete MarkPending()
+	time.Sleep(5 * time.Millisecond)
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Simulate a race window by not checking if key exists
-	time.Sleep(time.Millisecond) // Create race opportunity
-
+	// No check for existing key - just overwrite (this is the bug)
 	b.results[key.String()] = &idempotency.Result{
 		Key:    key,
 		Status: idempotency.StatusPending,
