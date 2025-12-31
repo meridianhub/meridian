@@ -137,10 +137,12 @@ func New(cfg Config) (*Client, func(), error) {
 		dialOpts := cfg.DialOptions
 
 		// Add tracing interceptors if tracer is provided
+		// Use WithChainUnaryInterceptor/WithChainStreamInterceptor to properly chain
+		// multiple interceptors instead of overwriting them
 		if cfg.Tracer != nil {
 			dialOpts = append(dialOpts,
-				grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
+				grpc.WithChainUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
+				grpc.WithChainStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
 			)
 		}
 
@@ -164,10 +166,12 @@ func New(cfg Config) (*Client, func(), error) {
 		}
 
 		// Add tracing interceptors if tracer is provided
+		// Use WithChainUnaryInterceptor/WithChainStreamInterceptor to properly chain
+		// multiple interceptors instead of overwriting them
 		if cfg.Tracer != nil {
 			dialOpts = append(dialOpts,
-				grpc.WithUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
+				grpc.WithChainUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
+				grpc.WithChainStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
 			)
 		}
 

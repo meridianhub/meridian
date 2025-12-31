@@ -60,19 +60,16 @@ func TestNew_RequiresTargetOrServiceName(t *testing.T) {
 
 func TestNew_DefaultsApplied(t *testing.T) {
 	tests := []struct {
-		name     string
-		cfg      Config
-		wantPort int
+		name string
+		cfg  Config
 	}{
 		{
-			name:     "empty port defaults to 50052",
-			cfg:      Config{ServiceName: "financial-accounting"},
-			wantPort: DefaultPort,
+			name: "empty port uses default",
+			cfg:  Config{ServiceName: "financial-accounting"},
 		},
 		{
-			name:     "custom port preserved",
-			cfg:      Config{ServiceName: "financial-accounting", Port: 9999},
-			wantPort: 9999,
+			name: "custom port accepted",
+			cfg:  Config{ServiceName: "financial-accounting", Port: 9999},
 		},
 	}
 

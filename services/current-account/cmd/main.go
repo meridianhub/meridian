@@ -183,7 +183,16 @@ func run(logger *slog.Logger) error {
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Register cleanup functions (LIFO order - Redis before database)
+	// Register cleanup functions (LIFO order - external clients, then Redis, then database)
+	// Register external client cleanup functions first (they get called last in LIFO)
+	for _, cleanup := range svcClients.cleanupFuncs {
+		fn := cleanup // capture for closure
+		orchestrator.AddCleanup(func() error {
+			fn()
+			return nil
+		})
+	}
+
 	if redisClient != nil {
 		orchestrator.AddCleanup(func() error {
 			if err := redisClient.Close(); err != nil {
