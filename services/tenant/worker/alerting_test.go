@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -430,7 +431,17 @@ func TestCheckFailedProvisioningAlerts_SlackErrorHandling(t *testing.T) {
 		Logger:     logger,
 	})
 
-	am := NewAlertManager(repo, logger, WithSlackNotifier(slackNotifier))
+	// Use no-retry config to preserve original test behavior (fast test)
+	retryConfig := config.AlertRetryConfig{
+		MaxRetries:     0, // No retries - just initial attempt
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     50 * time.Millisecond,
+	}
+
+	am := NewAlertManager(repo, logger,
+		WithSlackNotifier(slackNotifier),
+		WithRetryConfig(retryConfig),
+	)
 
 	ctx := context.Background()
 
@@ -582,7 +593,17 @@ func TestCheckFailedProvisioningAlerts_PagerDutyError_ContinuesProcessing(t *tes
 	var logBuf safeBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	am := NewAlertManager(repo, logger, WithPagerDutyClient(pdClient))
+	// Use no-retry config to preserve original test behavior
+	retryConfig := config.AlertRetryConfig{
+		MaxRetries:     0, // No retries - just initial attempt
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     50 * time.Millisecond,
+	}
+
+	am := NewAlertManager(repo, logger,
+		WithPagerDutyClient(pdClient),
+		WithRetryConfig(retryConfig),
+	)
 
 	ctx := context.Background()
 
@@ -609,7 +630,7 @@ func TestCheckFailedProvisioningAlerts_PagerDutyError_ContinuesProcessing(t *tes
 	err := am.CheckFailedProvisioningAlerts(ctx, threshold)
 	require.NoError(t, err)
 
-	// Should have attempted to send alerts for both tenants
+	// Should have attempted to send alerts for both tenants (1 attempt each, no retries)
 	assert.Equal(t, 2, callCount)
 
 	// Should have logged the errors
@@ -715,4 +736,440 @@ func TestCheckFailedProvisioningAlerts_TruncatesLongErrorMessage(t *testing.T) {
 
 	// Verify the full error message is still in custom_details
 	assert.Equal(t, longErrorMsg, receivedEvent.Payload.CustomDetails["error_message"])
+}
+
+// =============================================================================
+// Rate Limiting Integration Tests
+// =============================================================================
+
+func TestCheckFailedProvisioningAlerts_RateLimiting(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Create 15 failed tenants
+	ctx := context.Background()
+	for i := 1; i <= 15; i++ {
+		tenant := &domain.Tenant{
+			ID:              tenant.TenantID(fmt.Sprintf("rate_limit_tenant_%d", i)),
+			DisplayName:     fmt.Sprintf("Tenant %d", i),
+			SettlementAsset: "USD",
+			Status:          domain.StatusProvisioningFailed,
+			ErrorMessage:    "test error",
+			CreatedAt:       time.Now().Add(-2 * time.Hour),
+			Version:         1,
+		}
+		err := repo.Create(ctx, tenant)
+		require.NoError(t, err)
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+		require.NoError(t, err)
+	}
+
+	// Track received PagerDuty events
+	var receivedCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		receivedCount++
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"success"}`))
+	}))
+	defer server.Close()
+
+	pdClient := clients.NewPagerDutyClient(
+		config.PagerDutyConfig{
+			Enabled:    true,
+			RoutingKey: "test-key",
+			Source:     "test-source",
+		},
+		clients.WithEventsURL(server.URL),
+	)
+
+	// Create rate limiter with max 10 alerts per minute
+	rateLimiter := NewAlertRateLimiter(10, 10)
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	am := NewAlertManager(repo, logger,
+		WithPagerDutyClient(pdClient),
+		WithRateLimiter(rateLimiter),
+	)
+
+	threshold := 1 * time.Hour
+	err := am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Should have sent exactly 10 alerts (rate limited the rest)
+	assert.Equal(t, 10, receivedCount)
+
+	// Should have rate limit warnings in logs
+	logs := logBuf.String()
+	assert.Contains(t, logs, "rate limited")
+}
+
+func TestCheckFailedProvisioningAlerts_RateLimitMetric(t *testing.T) {
+	db, repo := setupTestDB(t)
+
+	// Create 5 failed tenants
+	ctx := context.Background()
+	for i := 1; i <= 5; i++ {
+		tenant := &domain.Tenant{
+			ID:              tenant.TenantID(fmt.Sprintf("metric_tenant_%d", i)),
+			DisplayName:     fmt.Sprintf("Tenant %d", i),
+			SettlementAsset: "USD",
+			Status:          domain.StatusProvisioningFailed,
+			ErrorMessage:    "test error",
+			CreatedAt:       time.Now().Add(-2 * time.Hour),
+			Version:         1,
+		}
+		err := repo.Create(ctx, tenant)
+		require.NoError(t, err)
+		err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+		require.NoError(t, err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"success"}`))
+	}))
+	defer server.Close()
+
+	pdClient := clients.NewPagerDutyClient(
+		config.PagerDutyConfig{
+			Enabled:    true,
+			RoutingKey: "test-key",
+			Source:     "test-source",
+		},
+		clients.WithEventsURL(server.URL),
+	)
+
+	// Track rate limit hits
+	var rateLimitHits int
+	rateLimiter := NewAlertRateLimiter(3, 3, WithRateLimitCallback(func(_ string) {
+		rateLimitHits++
+	}))
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	am := NewAlertManager(repo, logger,
+		WithPagerDutyClient(pdClient),
+		WithRateLimiter(rateLimiter),
+	)
+
+	threshold := 1 * time.Hour
+	err := am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Should have 2 rate limit hits (5 tenants - 3 allowed = 2 blocked)
+	assert.Equal(t, 2, rateLimitHits)
+}
+
+// =============================================================================
+// Retry Logic Integration Tests
+// =============================================================================
+
+func TestCheckFailedProvisioningAlerts_RetryOnFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping timing-sensitive test in short mode")
+	}
+
+	db, repo := setupTestDB(t)
+
+	ctx := context.Background()
+	tenant := &domain.Tenant{
+		ID:              tenant.TenantID("retry_test_tenant"),
+		DisplayName:     "Retry Test Tenant",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "test error",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Create a server that fails twice then succeeds
+	var attemptCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attemptCount++
+		if attemptCount < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"status":"error","message":"server error"}`))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"success"}`))
+	}))
+	defer server.Close()
+
+	pdClient := clients.NewPagerDutyClient(
+		config.PagerDutyConfig{
+			Enabled:    true,
+			RoutingKey: "test-key",
+			Source:     "test-source",
+		},
+		clients.WithEventsURL(server.URL),
+	)
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Use fast retry config for tests
+	retryConfig := config.AlertRetryConfig{
+		MaxRetries:     4,
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     50 * time.Millisecond,
+	}
+
+	am := NewAlertManager(repo, logger,
+		WithPagerDutyClient(pdClient),
+		WithRetryConfig(retryConfig),
+	)
+
+	threshold := 1 * time.Hour
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Server should have been called 3 times (2 failures + 1 success)
+	assert.Equal(t, 3, attemptCount)
+
+	// Logs should show retry attempts
+	logs := logBuf.String()
+	assert.Contains(t, logs, "attempt failed")
+}
+
+func TestCheckFailedProvisioningAlerts_RetryExhausted_SendsToDLQ(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping timing-sensitive test in short mode")
+	}
+
+	db, repo := setupTestDB(t)
+
+	ctx := context.Background()
+	tenant := &domain.Tenant{
+		ID:              tenant.TenantID("dlq_test_tenant"),
+		DisplayName:     "DLQ Test Tenant",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "test error for DLQ",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Create a server that always fails
+	var attemptCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attemptCount++
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"status":"error","message":"persistent failure"}`))
+	}))
+	defer server.Close()
+
+	pdClient := clients.NewPagerDutyClient(
+		config.PagerDutyConfig{
+			Enabled:    true,
+			RoutingKey: "test-key",
+			Source:     "test-source",
+		},
+		clients.WithEventsURL(server.URL),
+	)
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Use fast retry config with 4 retries
+	retryConfig := config.AlertRetryConfig{
+		MaxRetries:     4,
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     50 * time.Millisecond,
+	}
+
+	dlq := NewAlertDeadLetterQueue()
+
+	am := NewAlertManager(repo, logger,
+		WithPagerDutyClient(pdClient),
+		WithRetryConfig(retryConfig),
+		WithDeadLetterQueue(dlq),
+	)
+
+	threshold := 1 * time.Hour
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Server should have been called 5 times (initial + 4 retries)
+	assert.Equal(t, 5, attemptCount)
+
+	// Alert should be in DLQ
+	assert.Equal(t, 1, dlq.Len())
+
+	alerts := dlq.List()
+	assert.Equal(t, AlertTypePagerDuty, alerts[0].AlertType)
+	assert.Equal(t, "dlq_test_tenant", alerts[0].TenantID)
+	assert.Contains(t, alerts[0].ErrorMessage, "error")
+	assert.Equal(t, 5, alerts[0].AttemptCount)
+
+	// Logs should indicate DLQ storage
+	logs := logBuf.String()
+	assert.Contains(t, logs, "sent to DLQ")
+}
+
+// =============================================================================
+// DLQ Integration Tests
+// =============================================================================
+
+func TestCheckFailedProvisioningAlerts_NoDLQ_OnlyLogsError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping timing-sensitive test in short mode")
+	}
+
+	db, repo := setupTestDB(t)
+
+	ctx := context.Background()
+	tenant := &domain.Tenant{
+		ID:              tenant.TenantID("no_dlq_tenant"),
+		DisplayName:     "No DLQ Tenant",
+		SettlementAsset: "EUR",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "error without dlq",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Always-failing server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"status":"error"}`))
+	}))
+	defer server.Close()
+
+	pdClient := clients.NewPagerDutyClient(
+		config.PagerDutyConfig{
+			Enabled:    true,
+			RoutingKey: "test-key",
+			Source:     "test-source",
+		},
+		clients.WithEventsURL(server.URL),
+	)
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	retryConfig := config.AlertRetryConfig{
+		MaxRetries:     1,
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     50 * time.Millisecond,
+	}
+
+	// No DLQ configured
+	am := NewAlertManager(repo, logger,
+		WithPagerDutyClient(pdClient),
+		WithRetryConfig(retryConfig),
+	)
+
+	threshold := 1 * time.Hour
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Should log the final error but not crash
+	logs := logBuf.String()
+	assert.Contains(t, logs, "failed to send PagerDuty alert after retries")
+	// Should NOT contain DLQ message since DLQ is not configured
+	assert.NotContains(t, logs, "sent to DLQ")
+}
+
+func TestAlertManager_DeadLetterQueue_Accessor(t *testing.T) {
+	_, repo := setupTestDB(t)
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	t.Run("returns nil when not configured", func(t *testing.T) {
+		am := NewAlertManager(repo, logger)
+		assert.Nil(t, am.DeadLetterQueue())
+	})
+
+	t.Run("returns DLQ when configured", func(t *testing.T) {
+		dlq := NewAlertDeadLetterQueue()
+		am := NewAlertManager(repo, logger, WithDeadLetterQueue(dlq))
+		assert.Equal(t, dlq, am.DeadLetterQueue())
+	})
+}
+
+func TestCheckFailedProvisioningAlerts_SlackWithRetryAndDLQ(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping timing-sensitive test in short mode")
+	}
+
+	db, repo := setupTestDB(t)
+
+	ctx := context.Background()
+	tenant := &domain.Tenant{
+		ID:              tenant.TenantID("slack_dlq_tenant"),
+		DisplayName:     "Slack DLQ Tenant",
+		SettlementAsset: "USD",
+		Status:          domain.StatusProvisioningFailed,
+		ErrorMessage:    "slack test error",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		Version:         1,
+	}
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+	require.NoError(t, err)
+
+	// Always-failing Slack server
+	var slackAttempts int
+	slackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		slackAttempts++
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer slackServer.Close()
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	slackNotifier := notifier.NewSlackNotifier(notifier.SlackNotifierConfig{
+		Config: config.SlackConfig{
+			Enabled:     true,
+			WebhookURL:  slackServer.URL,
+			ServiceName: "tenant-service",
+		},
+		HTTPClient: slackServer.Client(),
+		Logger:     logger,
+	})
+
+	retryConfig := config.AlertRetryConfig{
+		MaxRetries:     2,
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     50 * time.Millisecond,
+	}
+
+	dlq := NewAlertDeadLetterQueue()
+
+	am := NewAlertManager(repo, logger,
+		WithSlackNotifier(slackNotifier),
+		WithRetryConfig(retryConfig),
+		WithDeadLetterQueue(dlq),
+	)
+
+	threshold := 1 * time.Hour
+	err = am.CheckFailedProvisioningAlerts(ctx, threshold)
+	require.NoError(t, err)
+
+	// Should have attempted 3 times (initial + 2 retries)
+	assert.Equal(t, 3, slackAttempts)
+
+	// Should be in DLQ
+	assert.Equal(t, 1, dlq.Len())
+	alerts := dlq.List()
+	assert.Equal(t, AlertTypeSlack, alerts[0].AlertType)
+	assert.Equal(t, "slack_dlq_tenant", alerts[0].TenantID)
 }

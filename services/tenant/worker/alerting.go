@@ -3,24 +3,46 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/clients"
+	"github.com/meridianhub/meridian/services/tenant/config"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/notifier"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
+
+// Alert type constants for rate limiting.
+const (
+	AlertTypePagerDuty = "pagerduty"
+	AlertTypeSlack     = "slack"
+)
+
+// ErrRateLimited is returned when an alert is blocked by rate limiting.
+var ErrRateLimited = errors.New("alert rate limited")
 
 // AlertManager monitors and alerts on tenant provisioning failures.
 // It identifies tenants stuck in provisioning_failed state and logs alerts
 // for integration with external alerting systems (PagerDuty, Slack, etc.).
+//
+// Features:
+// - Rate limiting: Token bucket algorithm to prevent alert storms
+// - Retry logic: Exponential backoff with configurable retries
+// - Dead-letter queue: Failed alerts are stored for manual review
 type AlertManager struct {
 	repo            *persistence.Repository
 	logger          *slog.Logger
 	pagerdutyClient *clients.PagerDutyClient
 	slackNotifier   *notifier.SlackNotifier
+	rateLimiter     *AlertRateLimiter
+	dlq             *AlertDeadLetterQueue
+	retryConfig     config.AlertRetryConfig
 }
 
 // AlertManagerOption configures the AlertManager.
@@ -40,11 +62,35 @@ func WithSlackNotifier(slack *notifier.SlackNotifier) AlertManagerOption {
 	}
 }
 
+// WithRateLimiter configures alert rate limiting.
+func WithRateLimiter(limiter *AlertRateLimiter) AlertManagerOption {
+	return func(a *AlertManager) {
+		a.rateLimiter = limiter
+	}
+}
+
+// WithDeadLetterQueue configures the dead-letter queue for failed alerts.
+func WithDeadLetterQueue(dlq *AlertDeadLetterQueue) AlertManagerOption {
+	return func(a *AlertManager) {
+		a.dlq = dlq
+	}
+}
+
+// WithRetryConfig configures the retry behavior for failed alerts.
+func WithRetryConfig(cfg config.AlertRetryConfig) AlertManagerOption {
+	return func(a *AlertManager) {
+		a.retryConfig = cfg
+	}
+}
+
 // NewAlertManager creates a new AlertManager.
+// By default, rate limiting and DLQ are disabled. Use WithRateLimiter and
+// WithDeadLetterQueue options to enable them.
 func NewAlertManager(repo *persistence.Repository, logger *slog.Logger, opts ...AlertManagerOption) *AlertManager {
 	am := &AlertManager{
-		repo:   repo,
-		logger: logger,
+		repo:        repo,
+		logger:      logger,
+		retryConfig: config.DefaultAlertRetryConfig(),
 	}
 
 	for _, opt := range opts {
@@ -52,6 +98,12 @@ func NewAlertManager(repo *persistence.Repository, logger *slog.Logger, opts ...
 	}
 
 	return am
+}
+
+// DeadLetterQueue returns the DLQ for external inspection/processing.
+// Returns nil if DLQ is not configured.
+func (a *AlertManager) DeadLetterQueue() *AlertDeadLetterQueue {
+	return a.dlq
 }
 
 // CheckFailedProvisioningAlerts queries for tenants in provisioning_failed state
@@ -66,6 +118,12 @@ func NewAlertManager(repo *persistence.Repository, logger *slog.Logger, opts ...
 // until the provisioning issue is resolved. PagerDuty deduplication is based on tenant_id
 // to avoid alert fatigue (the dedup_key ensures repeated calls for the same tenant
 // update the existing incident rather than creating new ones).
+//
+// Rate limiting: Alerts are rate limited per alert type (PagerDuty, Slack) to prevent
+// alert storms. When rate limited, alerts are logged but not sent.
+//
+// Retry: Failed alerts are retried with exponential backoff (1s, 2s, 4s, 8s).
+// After max retries, alerts are sent to the dead-letter queue for manual review.
 func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, threshold time.Duration) error {
 	// Calculate cutoff time for failed tenants
 	cutoffTime := time.Now().Add(-threshold)
@@ -95,24 +153,12 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 
 		// Send alert to PagerDuty if configured
 		if a.pagerdutyClient != nil && a.pagerdutyClient.IsEnabled() {
-			if err := a.sendPagerDutyAlert(ctx, tenant); err != nil {
-				// Log error but continue processing other tenants
-				// PagerDuty failures should not block the alert loop
-				a.logger.Error("failed to send PagerDuty alert",
-					"tenant_id", tenant.ID,
-					"error", err)
-			}
+			a.sendPagerDutyAlertWithRetry(ctx, tenant)
 		}
 
 		// Send alert to Slack if configured
 		if a.slackNotifier != nil {
-			if err := a.slackNotifier.NotifyProvisioningFailure(ctx, tenant); err != nil {
-				// Log error but continue processing other tenants
-				// Slack failures should not block the alert loop
-				a.logger.Error("failed to send Slack alert",
-					"tenant_id", tenant.ID,
-					"error", err)
-			}
+			a.sendSlackAlertWithRetry(ctx, tenant)
 		}
 	}
 
@@ -123,6 +169,187 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 	}
 
 	return nil
+}
+
+// sendPagerDutyAlertWithRetry sends a PagerDuty alert with rate limiting, retry, and DLQ.
+func (a *AlertManager) sendPagerDutyAlertWithRetry(ctx context.Context, tenant *domain.Tenant) {
+	// Check rate limit
+	if a.rateLimiter != nil && !a.rateLimiter.Allow(AlertTypePagerDuty) {
+		a.logger.Warn("PagerDuty alert rate limited",
+			"tenant_id", tenant.ID,
+			"alert_type", AlertTypePagerDuty)
+		return
+	}
+
+	// Build alert payload for potential DLQ storage
+	payload := a.buildAlertPayload(tenant)
+	firstAttempt := time.Now()
+
+	// Create retry config using the shared retry package pattern
+	retryConfig := sharedclients.RetryConfig{
+		MaxRetries:          a.retryConfig.MaxRetries,
+		InitialInterval:     a.retryConfig.InitialBackoff,
+		MaxInterval:         a.retryConfig.MaxBackoff,
+		Multiplier:          2.0,
+		RandomizationFactor: 0.1, // Small jitter
+	}
+
+	attemptCount := 0
+	var lastErr error
+
+	err := sharedclients.Retry(ctx, retryConfig, func() error {
+		attemptCount++
+		lastErr = a.sendPagerDutyAlert(ctx, tenant)
+		if lastErr != nil {
+			a.logger.Warn("PagerDuty alert attempt failed",
+				"tenant_id", tenant.ID,
+				"attempt", attemptCount,
+				"error", lastErr)
+			// Mark as retryable for the retry logic
+			return a.wrapAsRetryable(lastErr)
+		}
+		return nil
+	})
+	if err != nil {
+		a.logger.Error("failed to send PagerDuty alert after retries",
+			"tenant_id", tenant.ID,
+			"attempts", attemptCount,
+			"error", lastErr)
+
+		// Send to DLQ if configured
+		if a.dlq != nil {
+			a.dlq.Enqueue(FailedAlert{
+				AlertType:      AlertTypePagerDuty,
+				TenantID:       tenant.ID.String(),
+				Payload:        payload,
+				ErrorMessage:   lastErr.Error(),
+				FirstAttemptAt: firstAttempt,
+				LastAttemptAt:  time.Now(),
+				AttemptCount:   attemptCount,
+			})
+			a.logger.Info("PagerDuty alert sent to DLQ",
+				"tenant_id", tenant.ID,
+				"attempts", attemptCount)
+		}
+	}
+}
+
+// sendSlackAlertWithRetry sends a Slack alert with rate limiting, retry, and DLQ.
+func (a *AlertManager) sendSlackAlertWithRetry(ctx context.Context, tenant *domain.Tenant) {
+	// Check rate limit
+	if a.rateLimiter != nil && !a.rateLimiter.Allow(AlertTypeSlack) {
+		a.logger.Warn("Slack alert rate limited",
+			"tenant_id", tenant.ID,
+			"alert_type", AlertTypeSlack)
+		return
+	}
+
+	// Build alert payload for potential DLQ storage
+	payload := a.buildAlertPayload(tenant)
+	firstAttempt := time.Now()
+
+	// Create retry config using the shared retry package pattern
+	retryConfig := sharedclients.RetryConfig{
+		MaxRetries:          a.retryConfig.MaxRetries,
+		InitialInterval:     a.retryConfig.InitialBackoff,
+		MaxInterval:         a.retryConfig.MaxBackoff,
+		Multiplier:          2.0,
+		RandomizationFactor: 0.1, // Small jitter
+	}
+
+	attemptCount := 0
+	var lastErr error
+
+	err := sharedclients.Retry(ctx, retryConfig, func() error {
+		attemptCount++
+		lastErr = a.slackNotifier.NotifyProvisioningFailure(ctx, tenant)
+		if lastErr != nil {
+			a.logger.Warn("Slack alert attempt failed",
+				"tenant_id", tenant.ID,
+				"attempt", attemptCount,
+				"error", lastErr)
+			// Mark as retryable for the retry logic
+			return a.wrapAsRetryable(lastErr)
+		}
+		return nil
+	})
+	if err != nil {
+		a.logger.Error("failed to send Slack alert after retries",
+			"tenant_id", tenant.ID,
+			"attempts", attemptCount,
+			"error", lastErr)
+
+		// Send to DLQ if configured
+		if a.dlq != nil {
+			a.dlq.Enqueue(FailedAlert{
+				AlertType:      AlertTypeSlack,
+				TenantID:       tenant.ID.String(),
+				Payload:        payload,
+				ErrorMessage:   lastErr.Error(),
+				FirstAttemptAt: firstAttempt,
+				LastAttemptAt:  time.Now(),
+				AttemptCount:   attemptCount,
+			})
+			a.logger.Info("Slack alert sent to DLQ",
+				"tenant_id", tenant.ID,
+				"attempts", attemptCount)
+		}
+	}
+}
+
+// buildAlertPayload creates an AlertPayload from a tenant for DLQ storage.
+func (a *AlertManager) buildAlertPayload(tenant *domain.Tenant) AlertPayload {
+	summary := fmt.Sprintf("Tenant provisioning failed: %s", tenant.ID)
+	if tenant.ErrorMessage != "" {
+		errMsg := tenant.ErrorMessage
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:197] + "..."
+		}
+		summary = fmt.Sprintf("Tenant provisioning failed: %s - %s", tenant.ID, errMsg)
+	}
+
+	return AlertPayload{
+		Summary:  summary,
+		DedupKey: fmt.Sprintf("tenant-provisioning-failed-%s", tenant.ID),
+		Severity: string(clients.SeverityCritical),
+		CustomDetails: map[string]any{
+			"tenant_id":     tenant.ID.String(),
+			"display_name":  tenant.DisplayName,
+			"status":        string(tenant.Status),
+			"error_message": tenant.ErrorMessage,
+			"created_at":    tenant.CreatedAt.Format(time.RFC3339),
+		},
+	}
+}
+
+// wrapAsRetryable wraps an error to make it retryable by the shared retry logic.
+// The shared retry.go uses gRPC status codes to determine retryability.
+// For HTTP-based alerts (PagerDuty, Slack), we wrap the error with gRPC Unavailable status.
+func (a *AlertManager) wrapAsRetryable(err error) error {
+	// The shared retry package uses gRPC codes to determine retryability.
+	// For HTTP errors, we wrap them as gRPC Unavailable to trigger retries.
+	// This allows us to reuse the existing retry logic without modification.
+	return grpcUnavailableError{underlying: err}
+}
+
+// grpcUnavailableError wraps an HTTP error as a gRPC Unavailable error
+// so that the shared retry logic treats it as retryable.
+type grpcUnavailableError struct {
+	underlying error
+}
+
+func (e grpcUnavailableError) Error() string {
+	return e.underlying.Error()
+}
+
+func (e grpcUnavailableError) Unwrap() error {
+	return e.underlying
+}
+
+// GRPCStatus implements the interface expected by status.FromError
+// to return a gRPC status that indicates the error is retryable.
+func (e grpcUnavailableError) GRPCStatus() *grpcstatus.Status {
+	return grpcstatus.New(codes.Unavailable, e.underlying.Error())
 }
 
 // sendPagerDutyAlert sends a provisioning failure alert to PagerDuty.

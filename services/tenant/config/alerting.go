@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"strconv"
+	"time"
 )
 
 // AlertingConfig holds configuration for the alerting subsystem.
@@ -14,6 +16,35 @@ type AlertingConfig struct {
 
 	// Slack configures Slack incoming webhook integration for team notifications.
 	Slack SlackConfig
+
+	// RateLimit configures rate limiting for alert delivery.
+	RateLimit AlertRateLimitConfig
+}
+
+// AlertRateLimitConfig holds configuration for alert rate limiting using token bucket algorithm.
+type AlertRateLimitConfig struct {
+	// MaxAlertsPerMinute is the maximum number of alerts per alert type per minute.
+	// Defaults to 10 if not set.
+	MaxAlertsPerMinute int
+
+	// BurstSize is the maximum number of alerts that can be sent in a burst.
+	// Defaults to MaxAlertsPerMinute if not set.
+	BurstSize int
+}
+
+// AlertRetryConfig holds configuration for alert retry logic.
+type AlertRetryConfig struct {
+	// MaxRetries is the maximum number of retry attempts.
+	// Defaults to 4 if not set.
+	MaxRetries int
+
+	// InitialBackoff is the initial backoff duration before first retry.
+	// Defaults to 1 second if not set.
+	InitialBackoff time.Duration
+
+	// MaxBackoff is the maximum backoff duration between retries.
+	// Defaults to 8 seconds if not set.
+	MaxBackoff time.Duration
 }
 
 // PagerDutyConfig holds configuration for PagerDuty Events API v2 integration.
@@ -62,6 +93,23 @@ var (
 	ErrSlackWebhookURLNotHTTPS = errors.New("SLACK_WEBHOOK_URL must use HTTPS")
 )
 
+// DefaultAlertRateLimitConfig returns the default rate limit configuration.
+func DefaultAlertRateLimitConfig() AlertRateLimitConfig {
+	return AlertRateLimitConfig{
+		MaxAlertsPerMinute: 10,
+		BurstSize:          10,
+	}
+}
+
+// DefaultAlertRetryConfig returns the default retry configuration.
+func DefaultAlertRetryConfig() AlertRetryConfig {
+	return AlertRetryConfig{
+		MaxRetries:     4,
+		InitialBackoff: 1 * time.Second,
+		MaxBackoff:     8 * time.Second,
+	}
+}
+
 // LoadAlertingConfig loads alerting configuration from environment variables.
 func LoadAlertingConfig() (*AlertingConfig, error) {
 	config := &AlertingConfig{
@@ -75,6 +123,7 @@ func LoadAlertingConfig() (*AlertingConfig, error) {
 			WebhookURL:  os.Getenv("SLACK_WEBHOOK_URL"),
 			ServiceName: os.Getenv("SERVICE_NAME"),
 		},
+		RateLimit: DefaultAlertRateLimitConfig(),
 	}
 
 	// Set default source if not provided
@@ -85,6 +134,15 @@ func LoadAlertingConfig() (*AlertingConfig, error) {
 	// Set default service name if not provided
 	if config.Slack.ServiceName == "" {
 		config.Slack.ServiceName = "tenant-service"
+	}
+
+	// Override rate limit from environment if set
+	if maxAlerts := os.Getenv("ALERT_RATE_LIMIT_PER_MINUTE"); maxAlerts != "" {
+		if n, err := strconv.Atoi(maxAlerts); err == nil && n > 0 {
+			config.RateLimit.MaxAlertsPerMinute = n
+			// Set burst size to match if not explicitly configured
+			config.RateLimit.BurstSize = n
+		}
 	}
 
 	// Validate configuration
