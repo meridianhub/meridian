@@ -3,6 +3,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -201,11 +202,12 @@ func tenantsMatch(jwtTenantID string, resolvedTenant tenant.TenantID) bool {
 	return strings.EqualFold(jwtTenantID, resolvedTenant.String())
 }
 
-// writeForbidden writes a 403 Forbidden response with the given message.
+// writeForbidden writes a 403 Forbidden response with the given message
+// using proper JSON encoding to prevent injection attacks.
 func writeForbidden(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
-	_, _ = w.Write([]byte(`{"error":"` + message + `"}`))
+	_ = json.NewEncoder(w).Encode(errorResponse{Error: message})
 }
 
 // JWTValidatorWithContext is an adapter that wraps JWTValidatorWithJWKS to implement JWTValidator.

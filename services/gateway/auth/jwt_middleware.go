@@ -14,6 +14,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -233,13 +234,13 @@ func injectClaimsToContext(ctx context.Context, claims *platformauth.Claims) con
 	return ctx
 }
 
-// writeUnauthorized writes a 401 Unauthorized response with the given message.
+// writeUnauthorized writes a 401 Unauthorized response with the given message
+// using proper JSON encoding to prevent injection attacks.
 func writeUnauthorized(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("WWW-Authenticate", `Bearer realm="api"`)
 	w.WriteHeader(http.StatusUnauthorized)
-	// Use simple JSON format for consistency
-	_, _ = w.Write([]byte(`{"error":"` + message + `"}`))
+	_ = json.NewEncoder(w).Encode(errorResponse{Error: message})
 }
 
 // GetUserIDFromContext extracts the user ID from the request context.

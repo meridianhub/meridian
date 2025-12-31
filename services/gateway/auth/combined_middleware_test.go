@@ -527,7 +527,8 @@ func TestWriteForbidden(t *testing.T) {
 
 		writeForbidden(rr, "access denied")
 
-		assert.Equal(t, `{"error":"access denied"}`, rr.Body.String())
+		// json.Encoder.Encode adds a trailing newline
+		assert.Equal(t, "{\"error\":\"access denied\"}\n", rr.Body.String())
 	})
 }
 

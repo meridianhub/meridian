@@ -699,7 +699,8 @@ func TestWriteUnauthorized(t *testing.T) {
 
 		writeUnauthorized(rr, "token expired")
 
-		assert.Equal(t, `{"error":"token expired"}`, rr.Body.String())
+		// json.Encoder.Encode adds a trailing newline
+		assert.Equal(t, "{\"error\":\"token expired\"}\n", rr.Body.String())
 	})
 }
 

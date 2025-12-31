@@ -3,6 +3,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -319,12 +320,16 @@ func (m *APIKeyMiddleware) allowRequest(apiKey string) bool {
 	return entry.limiter.Allow()
 }
 
-// writeJSONError writes a JSON error response.
+// errorResponse is the JSON structure for error responses.
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+// writeJSONError writes a JSON error response using proper JSON encoding.
 func writeJSONError(w http.ResponseWriter, message string, statusCode int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(statusCode)
-	// Using simple string concatenation to avoid json.Marshal overhead
-	_, _ = w.Write([]byte(`{"error":"` + message + `"}`))
+	_ = json.NewEncoder(w).Encode(errorResponse{Error: message})
 }
 
 // LimiterCount returns the number of active rate limiters (for testing).
