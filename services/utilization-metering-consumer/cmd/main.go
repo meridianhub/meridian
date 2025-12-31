@@ -23,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -128,8 +129,8 @@ func run(logger *slog.Logger) error {
 	var pkPort int
 	if lastColon := strings.LastIndex(config.PositionKeepingEndpoint, ":"); lastColon != -1 {
 		if _, err := fmt.Sscanf(config.PositionKeepingEndpoint[lastColon:], ":%d", &pkPort); err != nil || pkPort == 0 {
-			// Default to 50053 if parsing fails
-			pkPort = 50053
+			// Default to ports.PositionKeeping if parsing fails
+			pkPort = ports.PositionKeeping
 			logger.Warn("failed to parse port from POSITION_KEEPING_ENDPOINT, using default - verify endpoint format is 'host:port'",
 				"endpoint", config.PositionKeepingEndpoint,
 				"default_port", pkPort,
@@ -137,7 +138,7 @@ func run(logger *slog.Logger) error {
 		}
 	} else {
 		// No colon found, use default port
-		pkPort = 50053
+		pkPort = ports.PositionKeeping
 		logger.Warn("no port found in POSITION_KEEPING_ENDPOINT, using default - verify endpoint includes port number",
 			"endpoint", config.PositionKeepingEndpoint,
 			"default_port", pkPort,

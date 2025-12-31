@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -164,7 +166,7 @@ func run(logger *slog.Logger) error {
 		pc, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
 			ServiceName: "party",
 			Namespace:   namespace,
-			Port:        50055,
+			Port:        ports.Party,
 			Timeout:     30 * time.Second,
 			Tracer:      tracer,
 		})
@@ -180,7 +182,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("party client initialized",
 			"service_name", "party",
 			"namespace", namespace,
-			"port", 50055)
+			"port", ports.Party)
 	} else {
 		logger.Warn("party client not configured - tenant creation will not register parties",
 			"hint", "set PARTY_SERVICE_ENABLED=true to enable party registration")
@@ -288,7 +290,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get port from environment
-	port := env.GetEnvOrDefault("GRPC_PORT", "50056")
+	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.Tenant))
 	address := fmt.Sprintf(":%s", port)
 
 	// Create listener
