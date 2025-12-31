@@ -1,12 +1,13 @@
 # OPA Gatekeeper policy to prevent LOCAL_DEV_MODE=true in production namespaces
 # This policy ensures that development-only configurations cannot be deployed to production
+# It checks both ConfigMaps and container environment variables in all workload types.
 ---
 apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
 metadata:
   name: blockdevmodeinproduction
   annotations:
-    description: Blocks ConfigMaps with LOCAL_DEV_MODE=true in production namespaces
+    description: Blocks LOCAL_DEV_MODE=true in ConfigMaps and container env vars in production namespaces
 spec:
   crd:
     spec:
@@ -16,6 +17,10 @@ spec:
     - target: admission.k8s.gatekeeper.sh
       rego: |
         package blockdevmodeinproduction
+
+        # =============================================================================
+        # ConfigMap violation rule
+        # =============================================================================
 
         violation[{"msg": msg}] {
           # Check if the object is a ConfigMap
@@ -36,6 +41,91 @@ spec:
           msg := sprintf("ConfigMap '%s' in namespace '%s' cannot have LOCAL_DEV_MODE=true. Development mode is not allowed in production namespaces.", [input.review.object.metadata.name, ns])
         }
 
+        # =============================================================================
+        # Pod/workload environment variable violation rules
+        # Check for LOCAL_DEV_MODE=true in container env vars for:
+        # - Pods, Deployments, StatefulSets, DaemonSets, Jobs, CronJobs
+        # =============================================================================
+
+        # Supported workload kinds that can contain container specs
+        workload_kinds := {"Pod", "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "ReplicaSet"}
+
+        # Helper to get the pod spec from different workload types
+        get_pod_spec(obj) = spec {
+          obj.kind == "Pod"
+          spec := obj.spec
+        }
+
+        get_pod_spec(obj) = spec {
+          workload_kinds[obj.kind]
+          obj.kind != "Pod"
+          obj.kind != "CronJob"
+          spec := obj.spec.template.spec
+        }
+
+        get_pod_spec(obj) = spec {
+          obj.kind == "CronJob"
+          spec := obj.spec.jobTemplate.spec.template.spec
+        }
+
+        # Check containers for LOCAL_DEV_MODE=true env var
+        violation[{"msg": msg}] {
+          obj := input.review.object
+          workload_kinds[obj.kind]
+
+          pod_spec := get_pod_spec(obj)
+          container := pod_spec.containers[_]
+          env_var := container.env[_]
+
+          env_var.name == "LOCAL_DEV_MODE"
+          lower(env_var.value) == "true"
+
+          ns := obj.metadata.namespace
+          is_production_namespace(ns)
+
+          msg := sprintf("%s '%s' in namespace '%s' has container '%s' with LOCAL_DEV_MODE=true environment variable. Development mode is not allowed in production namespaces.", [obj.kind, obj.metadata.name, ns, container.name])
+        }
+
+        # Check initContainers for LOCAL_DEV_MODE=true env var
+        violation[{"msg": msg}] {
+          obj := input.review.object
+          workload_kinds[obj.kind]
+
+          pod_spec := get_pod_spec(obj)
+          container := pod_spec.initContainers[_]
+          env_var := container.env[_]
+
+          env_var.name == "LOCAL_DEV_MODE"
+          lower(env_var.value) == "true"
+
+          ns := obj.metadata.namespace
+          is_production_namespace(ns)
+
+          msg := sprintf("%s '%s' in namespace '%s' has initContainer '%s' with LOCAL_DEV_MODE=true environment variable. Development mode is not allowed in production namespaces.", [obj.kind, obj.metadata.name, ns, container.name])
+        }
+
+        # Check ephemeralContainers for LOCAL_DEV_MODE=true env var
+        violation[{"msg": msg}] {
+          obj := input.review.object
+          workload_kinds[obj.kind]
+
+          pod_spec := get_pod_spec(obj)
+          container := pod_spec.ephemeralContainers[_]
+          env_var := container.env[_]
+
+          env_var.name == "LOCAL_DEV_MODE"
+          lower(env_var.value) == "true"
+
+          ns := obj.metadata.namespace
+          is_production_namespace(ns)
+
+          msg := sprintf("%s '%s' in namespace '%s' has ephemeralContainer '%s' with LOCAL_DEV_MODE=true environment variable. Development mode is not allowed in production namespaces.", [obj.kind, obj.metadata.name, ns, container.name])
+        }
+
+        # =============================================================================
+        # Namespace detection helpers
+        # =============================================================================
+
         # Match namespaces starting with 'prod'
         is_production_namespace(ns) {
           startswith(ns, "prod")
@@ -51,21 +141,20 @@ kind: BlockDevModeInProduction
 metadata:
   name: gateway-dev-mode-constraint
   annotations:
-    description: Prevents gateway ConfigMaps with LOCAL_DEV_MODE=true in production
+    description: Prevents LOCAL_DEV_MODE=true in ConfigMaps and container env vars in production
 spec:
   enforcementAction: deny
   match:
     kinds:
       - apiGroups: [""]
         kinds: ["ConfigMap"]
-    # Note: The Rego policy handles namespace pattern matching (prod*, *production*)
-    # This namespaceSelector provides an additional layer using namespace labels.
-    # Namespaces should be labeled with environment=production for this constraint to apply.
-    # The Rego pattern matching is the primary defense regardless of labels.
-    namespaceSelector:
-      matchExpressions:
-        - key: environment
-          operator: In
-          values:
-            - production
-            - prod
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job", "CronJob"]
+    # Note: Namespace matching is handled entirely by the Rego policy using name patterns
+    # (prod* or *production*). This approach allows flexible matching without requiring
+    # specific namespace labels, and the policy will correctly identify production
+    # namespaces regardless of their labels.

@@ -6,11 +6,13 @@ on:
     paths:
       - 'deployments/k8s/**'
       - 'services/*/k8s/**'
+      - '.github/workflows/validate-manifests.yml'
   pull_request:
     branches: [develop, main]
     paths:
       - 'deployments/k8s/**'
       - 'services/*/k8s/**'
+      - '.github/workflows/validate-manifests.yml'
 
 permissions:
   contents: read
@@ -60,6 +62,8 @@ jobs:
           done
 
           # Check service-level production directories using glob patterns
+          # Enable nullglob so patterns that don't match any files expand to nothing
+          shopt -s nullglob
           for pattern in "${SERVICE_PROD_PATTERNS[@]}"; do
             for dir in $pattern; do
               if [ -d "$dir" ]; then
@@ -145,3 +149,58 @@ jobs:
           fi
 
           python3 /tmp/validate_yaml.py $YAML_FILES
+
+      - name: Verify Rego policy sync
+        run: |
+          echo "Verifying Rego policy files are in sync..."
+
+          CONSTRAINT_TEMPLATE="deployments/k8s/policies/gateway-dev-mode-block.yaml"
+          REGO_FILE="deployments/k8s/policies/tests/blockdevmodeinproduction.rego"
+
+          if [ ! -f "$CONSTRAINT_TEMPLATE" ]; then
+            echo "ConstraintTemplate not found: $CONSTRAINT_TEMPLATE"
+            exit 1
+          fi
+
+          if [ ! -f "$REGO_FILE" ]; then
+            echo "Rego test file not found: $REGO_FILE"
+            exit 1
+          fi
+
+          # Extract Rego from ConstraintTemplate (between 'rego: |' and the next '---')
+          # Skip comment lines at the top of the standalone .rego file for comparison
+          EMBEDDED_REGO=$(sed -n '/rego: |/,/^---$/p' "$CONSTRAINT_TEMPLATE" | \
+            sed '1d;$d' | \
+            sed 's/^        //')
+
+          # Get standalone Rego, skipping the header comments
+          STANDALONE_REGO=$(sed -n '/^package blockdevmodeinproduction/,$p' "$REGO_FILE")
+
+          # Compare the two (normalize whitespace for comparison)
+          EMBEDDED_NORMALIZED=$(echo "$EMBEDDED_REGO" | sed '/^$/d' | sed 's/[[:space:]]*$//')
+          STANDALONE_NORMALIZED=$(echo "$STANDALONE_REGO" | sed '/^$/d' | sed 's/[[:space:]]*$//')
+
+          if [ "$EMBEDDED_NORMALIZED" != "$STANDALONE_NORMALIZED" ]; then
+            echo "ERROR: Rego policy in ConstraintTemplate differs from standalone test file!"
+            echo ""
+            echo "The Rego embedded in $CONSTRAINT_TEMPLATE must match $REGO_FILE"
+            echo "(excluding header comments)"
+            echo ""
+            echo "To fix: Update both files to have identical Rego policy content."
+            exit 1
+          fi
+
+          echo "Rego policy files are in sync."
+
+      - name: Run OPA policy tests
+        run: |
+          echo "Running OPA policy tests..."
+
+          # Install OPA
+          curl -L -o /tmp/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+          chmod +x /tmp/opa
+
+          # Run tests with v0-compatible flag for Gatekeeper compatibility
+          /tmp/opa test deployments/k8s/policies/tests/ -v --v0-compatible
+
+          echo "All OPA policy tests passed."
