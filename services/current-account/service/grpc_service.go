@@ -91,6 +91,40 @@ type AccountEventPublisher interface {
 // Useful for testing and scenarios where event publishing is not configured.
 type NoOpAccountEventPublisher struct{}
 
+// WebhookNotifier defines the interface for sending webhook notifications.
+// Used for regulatory compliance notifications on account lifecycle events.
+type WebhookNotifier interface {
+	// NotifyAccountFrozen sends a webhook notification for an account freeze event.
+	// Returns nil if the tenant has no webhook URL configured (not an error case).
+	NotifyAccountFrozen(ctx context.Context, tenantID, accountID, reason string, timestamp time.Time) error
+
+	// NotifyAccountClosed sends a webhook notification for an account closure event.
+	// Returns nil if the tenant has no webhook URL configured (not an error case).
+	NotifyAccountClosed(ctx context.Context, tenantID, accountID, reason string, balance *WebhookBalanceInfo, timestamp time.Time) error
+}
+
+// WebhookBalanceInfo contains account balance details for webhook payloads.
+type WebhookBalanceInfo struct {
+	// Amount is the balance amount in minor units (e.g., cents).
+	Amount int64
+	// CurrencyCode is the ISO 4217 currency code.
+	CurrencyCode string
+}
+
+// NoOpWebhookNotifier is a no-operation implementation of WebhookNotifier.
+// Useful for testing and scenarios where webhook notifications are not configured.
+type NoOpWebhookNotifier struct{}
+
+// NotifyAccountFrozen does nothing and always returns nil.
+func (n *NoOpWebhookNotifier) NotifyAccountFrozen(_ context.Context, _, _, _ string, _ time.Time) error {
+	return nil
+}
+
+// NotifyAccountClosed does nothing and always returns nil.
+func (n *NoOpWebhookNotifier) NotifyAccountClosed(_ context.Context, _, _, _ string, _ *WebhookBalanceInfo, _ time.Time) error {
+	return nil
+}
+
 // PublishWithTenant does nothing and always returns nil.
 func (p *NoOpAccountEventPublisher) PublishWithTenant(_ context.Context, _, _ string, _ proto.Message) error {
 	return nil
@@ -107,6 +141,7 @@ type Service struct {
 	accountConfig          *config.AccountConfig
 	idempotencyService     idempotency.Service
 	eventPublisher         AccountEventPublisher // Optional: publishes lifecycle events to Kafka
+	webhookNotifier        WebhookNotifier       // Optional: sends webhook notifications for lifecycle events
 	logger                 *slog.Logger
 	tracer                 *observability.Tracer
 	depositOrchestrator    *DepositOrchestrator    // Handles deposit saga orchestration
@@ -1502,8 +1537,10 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 	// the business operation completes successfully regardless of messaging issues.
 	s.publishControlActionEvent(ctx, req, &account, actionTimestamp)
 
-	// TODO: Emit webhook notifications for FREEZE and CLOSE actions (regulatory compliance)
-	// This requires webhook integration (future task)
+	// Emit webhook notifications for FREEZE and CLOSE actions (regulatory compliance)
+	// Webhooks are sent asynchronously with retry logic - errors are logged but don't fail the operation.
+	// Note: UNFREEZE does not require webhook notification per regulatory requirements.
+	s.sendControlActionWebhook(ctx, req, &account, actionTimestamp)
 
 	s.logger.Info("control action executed successfully",
 		"account_id", req.AccountId,
@@ -1623,5 +1660,101 @@ func (s *Service) publishControlActionEvent(
 
 	case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
 		// No event for unspecified action (validation catches this earlier)
+	}
+}
+
+// sendControlActionWebhook sends webhook notifications for regulatory compliance events.
+// This method uses fire-and-forget semantics with async delivery - errors are logged but don't fail the operation.
+// Only FREEZE and CLOSE actions trigger webhooks per regulatory requirements (UNFREEZE does not).
+func (s *Service) sendControlActionWebhook(
+	ctx context.Context,
+	req *pb.ControlCurrentAccountRequest,
+	account *domain.CurrentAccount,
+	actionTimestamp time.Time,
+) {
+	// Skip if webhook notifier is not configured
+	if s.webhookNotifier == nil {
+		return
+	}
+
+	// Extract tenant ID from context
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok || tenantID.String() == "" {
+		s.logger.Warn("cannot send webhook: no tenant ID in context",
+			"account_id", req.AccountId,
+			"action", req.ControlAction.String())
+		return
+	}
+
+	// Use AccountID() which returns the business account ID as string
+	accountID := account.AccountID()
+
+	switch req.ControlAction {
+	case pb.ControlAction_CONTROL_ACTION_FREEZE:
+		// Send webhook notification asynchronously (fire-and-forget)
+		// Using background context intentionally - webhook delivery must complete
+		// even if the original request context is cancelled
+		//nolint:contextcheck // Intentionally using background context for async webhook delivery
+		go s.sendFreezeWebhook(tenantID.String(), accountID, req.Reason, actionTimestamp)
+
+	case pb.ControlAction_CONTROL_ACTION_CLOSE:
+		// Capture balance info for the webhook payload
+		balanceCents, _ := account.Balance().ToMinorUnits()
+		balanceInfo := &WebhookBalanceInfo{
+			Amount:       balanceCents,
+			CurrencyCode: account.Balance().CurrencyCode(),
+		}
+
+		// Send webhook notification asynchronously (fire-and-forget)
+		// Using background context intentionally - webhook delivery must complete
+		// even if the original request context is cancelled
+		//nolint:contextcheck // Intentionally using background context for async webhook delivery
+		go s.sendCloseWebhook(tenantID.String(), accountID, req.Reason, balanceInfo, actionTimestamp)
+
+	case pb.ControlAction_CONTROL_ACTION_UNFREEZE:
+		// No webhook for unfreeze action per regulatory requirements
+		s.logger.Debug("skipping webhook for unfreeze action (not required)",
+			"account_id", accountID)
+
+	case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		// No webhook for unspecified action (validation catches this earlier)
+	}
+}
+
+// sendFreezeWebhook sends a webhook notification for an account freeze event.
+// This is a helper method to avoid inline goroutines which cause contextcheck linter issues.
+// Uses background context intentionally to ensure delivery continues after request completes.
+func (s *Service) sendFreezeWebhook(tenantID, accountID, reason string, timestamp time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := s.webhookNotifier.NotifyAccountFrozen(ctx, tenantID, accountID, reason, timestamp); err != nil {
+		s.logger.Error("failed to send account frozen webhook",
+			"account_id", accountID,
+			"tenant_id", tenantID,
+			"error", err)
+	} else {
+		s.logger.Debug("account frozen webhook sent successfully",
+			"account_id", accountID,
+			"tenant_id", tenantID)
+	}
+}
+
+// sendCloseWebhook sends a webhook notification for an account close event.
+// This is a helper method to avoid inline goroutines which cause contextcheck linter issues.
+// Uses background context intentionally to ensure delivery continues after request completes.
+func (s *Service) sendCloseWebhook(tenantID, accountID, reason string, balance *WebhookBalanceInfo, timestamp time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := s.webhookNotifier.NotifyAccountClosed(ctx, tenantID, accountID, reason, balance, timestamp); err != nil {
+		s.logger.Error("failed to send account closed webhook",
+			"account_id", accountID,
+			"tenant_id", tenantID,
+			"error", err)
+	} else {
+		s.logger.Debug("account closed webhook sent successfully",
+			"account_id", accountID,
+			"tenant_id", tenantID)
 	}
 }
