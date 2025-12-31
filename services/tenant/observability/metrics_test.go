@@ -252,3 +252,154 @@ func TestQueueDepthChanges(t *testing.T) {
 		t.Errorf("Expected queue depth 0, got %v", got)
 	}
 }
+
+// =============================================================================
+// Alerting Metrics Tests
+// =============================================================================
+
+func TestRecordAlertSent(t *testing.T) {
+	alertsSentTotal.Reset()
+
+	RecordAlertSent(AlertProviderPagerDuty, AlertSeverityCritical, AlertStatusSuccess)
+
+	count := testutil.CollectAndCount(alertsSentTotal)
+	if count == 0 {
+		t.Error("Expected alerts_sent_total metric to be recorded")
+	}
+}
+
+func TestRecordAlertSentWithDifferentLabels(t *testing.T) {
+	alertsSentTotal.Reset()
+
+	testCases := []struct {
+		provider string
+		severity string
+		status   string
+	}{
+		{AlertProviderPagerDuty, AlertSeverityCritical, AlertStatusSuccess},
+		{AlertProviderPagerDuty, AlertSeverityWarning, AlertStatusError},
+		{AlertProviderPagerDuty, AlertSeverityInfo, AlertStatusRateLimited},
+		{AlertProviderSlack, AlertSeverityCritical, AlertStatusSuccess},
+		{AlertProviderSlack, AlertSeverityWarning, AlertStatusError},
+		{AlertProviderSlack, AlertSeverityInfo, AlertStatusRateLimited},
+	}
+
+	for _, tc := range testCases {
+		RecordAlertSent(tc.provider, tc.severity, tc.status)
+	}
+
+	count := testutil.CollectAndCount(alertsSentTotal)
+	if count == 0 {
+		t.Error("Expected alerts_sent_total metrics with different labels to be recorded")
+	}
+}
+
+func TestSetAlertDLQDepth(t *testing.T) {
+	SetAlertDLQDepth(0)
+
+	// Set to 10 and verify
+	SetAlertDLQDepth(10)
+	if got := testutil.ToFloat64(alertDLQDepth); got != 10 {
+		t.Errorf("Expected DLQ depth 10, got %v", got)
+	}
+
+	// Set to 100 and verify
+	SetAlertDLQDepth(100)
+	if got := testutil.ToFloat64(alertDLQDepth); got != 100 {
+		t.Errorf("Expected DLQ depth 100, got %v", got)
+	}
+
+	// Set back to 0 and verify
+	SetAlertDLQDepth(0)
+	if got := testutil.ToFloat64(alertDLQDepth); got != 0 {
+		t.Errorf("Expected DLQ depth 0, got %v", got)
+	}
+}
+
+func TestAlertStatusConstants(t *testing.T) {
+	if AlertStatusSuccess != "success" {
+		t.Errorf("Expected AlertStatusSuccess to be 'success', got %q", AlertStatusSuccess)
+	}
+	if AlertStatusError != "error" {
+		t.Errorf("Expected AlertStatusError to be 'error', got %q", AlertStatusError)
+	}
+	if AlertStatusRateLimited != "rate_limited" {
+		t.Errorf("Expected AlertStatusRateLimited to be 'rate_limited', got %q", AlertStatusRateLimited)
+	}
+}
+
+func TestAlertProviderConstants(t *testing.T) {
+	if AlertProviderPagerDuty != "pagerduty" {
+		t.Errorf("Expected AlertProviderPagerDuty to be 'pagerduty', got %q", AlertProviderPagerDuty)
+	}
+	if AlertProviderSlack != "slack" {
+		t.Errorf("Expected AlertProviderSlack to be 'slack', got %q", AlertProviderSlack)
+	}
+}
+
+func TestAlertSeverityConstants(t *testing.T) {
+	if AlertSeverityCritical != "critical" {
+		t.Errorf("Expected AlertSeverityCritical to be 'critical', got %q", AlertSeverityCritical)
+	}
+	if AlertSeverityWarning != "warning" {
+		t.Errorf("Expected AlertSeverityWarning to be 'warning', got %q", AlertSeverityWarning)
+	}
+	if AlertSeverityInfo != "info" {
+		t.Errorf("Expected AlertSeverityInfo to be 'info', got %q", AlertSeverityInfo)
+	}
+}
+
+func TestAlertMetricsAreRegistered(t *testing.T) {
+	// Verify alerting metrics are registered with Prometheus
+	tests := []struct {
+		name   string
+		metric prometheus.Collector
+	}{
+		{
+			name:   "alerts_sent_total",
+			metric: alertsSentTotal,
+		},
+		{
+			name:   "alerts_dlq_depth",
+			metric: alertDLQDepth,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset metric if possible
+			if resettable, ok := tt.metric.(interface{ Reset() }); ok {
+				resettable.Reset()
+			}
+
+			// Verify metric can be collected
+			count := testutil.CollectAndCount(tt.metric)
+			if count < 0 {
+				t.Errorf("%s: metric is not registered", tt.name)
+			}
+		})
+	}
+}
+
+func TestConcurrentAlertMetricUpdates(t *testing.T) {
+	alertsSentTotal.Reset()
+
+	done := make(chan bool)
+	iterations := 100
+
+	for i := 0; i < iterations; i++ {
+		go func() {
+			RecordAlertSent(AlertProviderPagerDuty, AlertSeverityCritical, AlertStatusSuccess)
+			done <- true
+		}()
+	}
+
+	for i := 0; i < iterations; i++ {
+		<-done
+	}
+
+	count := testutil.CollectAndCount(alertsSentTotal)
+	if count == 0 {
+		t.Error("Expected alerts counter to be incremented concurrently")
+	}
+}

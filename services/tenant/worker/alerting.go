@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/config"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/notifier"
+	"github.com/meridianhub/meridian/services/tenant/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -173,17 +174,27 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 
 // sendPagerDutyAlertWithRetry sends a PagerDuty alert with rate limiting, retry, and DLQ.
 func (a *AlertManager) sendPagerDutyAlertWithRetry(ctx context.Context, tenant *domain.Tenant) {
+	severity := observability.AlertSeverityCritical // Provisioning failures are critical
+
 	// Check rate limit
 	if a.rateLimiter != nil && !a.rateLimiter.Allow(AlertTypePagerDuty) {
 		a.logger.Warn("PagerDuty alert rate limited",
 			"tenant_id", tenant.ID,
 			"alert_type", AlertTypePagerDuty)
+		observability.RecordAlertSent(observability.AlertProviderPagerDuty, severity, observability.AlertStatusRateLimited)
 		return
 	}
 
 	// Build alert payload for potential DLQ storage
 	payload := a.buildAlertPayload(tenant)
 	firstAttempt := time.Now()
+
+	// Log payload at DEBUG level for troubleshooting
+	a.logger.Debug("sending PagerDuty alert",
+		"tenant_id", tenant.ID,
+		"summary", payload.Summary,
+		"dedup_key", payload.DedupKey,
+		"severity", payload.Severity)
 
 	// Create retry config using the shared retry package pattern
 	retryConfig := sharedclients.RetryConfig{
@@ -215,6 +226,7 @@ func (a *AlertManager) sendPagerDutyAlertWithRetry(ctx context.Context, tenant *
 			"tenant_id", tenant.ID,
 			"attempts", attemptCount,
 			"error", lastErr)
+		observability.RecordAlertSent(observability.AlertProviderPagerDuty, severity, observability.AlertStatusError)
 
 		// Send to DLQ if configured
 		if a.dlq != nil {
@@ -230,23 +242,37 @@ func (a *AlertManager) sendPagerDutyAlertWithRetry(ctx context.Context, tenant *
 			a.logger.Info("PagerDuty alert sent to DLQ",
 				"tenant_id", tenant.ID,
 				"attempts", attemptCount)
+			// Update DLQ depth metric
+			observability.SetAlertDLQDepth(a.dlq.Len())
 		}
+	} else {
+		// Success
+		observability.RecordAlertSent(observability.AlertProviderPagerDuty, severity, observability.AlertStatusSuccess)
 	}
 }
 
 // sendSlackAlertWithRetry sends a Slack alert with rate limiting, retry, and DLQ.
 func (a *AlertManager) sendSlackAlertWithRetry(ctx context.Context, tenant *domain.Tenant) {
+	severity := observability.AlertSeverityCritical // Provisioning failures are critical
+
 	// Check rate limit
 	if a.rateLimiter != nil && !a.rateLimiter.Allow(AlertTypeSlack) {
 		a.logger.Warn("Slack alert rate limited",
 			"tenant_id", tenant.ID,
 			"alert_type", AlertTypeSlack)
+		observability.RecordAlertSent(observability.AlertProviderSlack, severity, observability.AlertStatusRateLimited)
 		return
 	}
 
 	// Build alert payload for potential DLQ storage
 	payload := a.buildAlertPayload(tenant)
 	firstAttempt := time.Now()
+
+	// Log payload at DEBUG level for troubleshooting
+	a.logger.Debug("sending Slack alert",
+		"tenant_id", tenant.ID,
+		"summary", payload.Summary,
+		"severity", payload.Severity)
 
 	// Create retry config using the shared retry package pattern
 	retryConfig := sharedclients.RetryConfig{
@@ -278,6 +304,7 @@ func (a *AlertManager) sendSlackAlertWithRetry(ctx context.Context, tenant *doma
 			"tenant_id", tenant.ID,
 			"attempts", attemptCount,
 			"error", lastErr)
+		observability.RecordAlertSent(observability.AlertProviderSlack, severity, observability.AlertStatusError)
 
 		// Send to DLQ if configured
 		if a.dlq != nil {
@@ -293,7 +320,12 @@ func (a *AlertManager) sendSlackAlertWithRetry(ctx context.Context, tenant *doma
 			a.logger.Info("Slack alert sent to DLQ",
 				"tenant_id", tenant.ID,
 				"attempts", attemptCount)
+			// Update DLQ depth metric
+			observability.SetAlertDLQDepth(a.dlq.Len())
 		}
+	} else {
+		// Success
+		observability.RecordAlertSent(observability.AlertProviderSlack, severity, observability.AlertStatusSuccess)
 	}
 }
 

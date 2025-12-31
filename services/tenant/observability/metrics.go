@@ -25,6 +25,26 @@ const (
 	StatusError   = "error"
 )
 
+// Alert status constants for alert metrics.
+const (
+	AlertStatusSuccess     = "success"
+	AlertStatusError       = "error"
+	AlertStatusRateLimited = "rate_limited"
+)
+
+// Alert provider constants.
+const (
+	AlertProviderPagerDuty = "pagerduty"
+	AlertProviderSlack     = "slack"
+)
+
+// Alert severity constants.
+const (
+	AlertSeverityCritical = "critical"
+	AlertSeverityWarning  = "warning"
+	AlertSeverityInfo     = "info"
+)
+
 var (
 	// Provisioning duration histogram with exponential buckets from 0.5s to ~34 minutes
 	// Buckets: 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024 seconds
@@ -64,6 +84,27 @@ var (
 			Help: "Total number of provisioning retry attempts across all tenants",
 		},
 	)
+
+	// Counter for alerts sent to external providers (PagerDuty, Slack).
+	// Labels:
+	//   - provider: "pagerduty", "slack"
+	//   - severity: "critical", "warning", "info"
+	//   - status: "success", "error", "rate_limited"
+	alertsSentTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "alerts_sent_total",
+			Help: "Total number of alerts sent to external providers",
+		},
+		[]string{"provider", "severity", "status"},
+	)
+
+	// Gauge for the number of alerts in the dead-letter queue.
+	alertDLQDepth = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "alerts_dlq_depth",
+			Help: "Number of alerts currently in the dead-letter queue awaiting manual review",
+		},
+	)
 )
 
 // RecordProvisioningDuration records the duration of a tenant provisioning operation.
@@ -87,4 +128,17 @@ func IncrementServiceFailure(serviceName string) {
 // IncrementRetryAttempt increments the retry counter for tenant provisioning operations.
 func IncrementRetryAttempt() {
 	provisioningRetries.Inc()
+}
+
+// RecordAlertSent increments the alerts_sent_total counter.
+// provider: "pagerduty" or "slack"
+// severity: "critical", "warning", or "info"
+// status: "success", "error", or "rate_limited"
+func RecordAlertSent(provider, severity, status string) {
+	alertsSentTotal.WithLabelValues(provider, severity, status).Inc()
+}
+
+// SetAlertDLQDepth sets the current depth of the alert dead-letter queue.
+func SetAlertDLQDepth(depth int) {
+	alertDLQDepth.Set(float64(depth))
 }

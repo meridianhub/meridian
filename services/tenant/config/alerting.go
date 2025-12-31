@@ -10,6 +10,19 @@ import (
 )
 
 // AlertingConfig holds configuration for the alerting subsystem.
+//
+// Environment Variables:
+//
+//	PAGERDUTY_ENABLED        - Set to "true" to enable PagerDuty alerting
+//	PAGERDUTY_ROUTING_KEY    - PagerDuty integration/routing key (required if enabled)
+//	PAGERDUTY_SOURCE         - Alert source identifier (default: "tenant-service")
+//	SLACK_WEBHOOK_URL        - Slack incoming webhook URL (presence enables Slack alerts)
+//	SERVICE_NAME             - Service name for Slack alerts (default: "tenant-service")
+//	ALERT_RATE_LIMIT_PER_MINUTE - Max alerts per type per minute (default: 10)
+//	ALERT_DLQ_MAX_SIZE       - Max entries in dead-letter queue (default: 1000)
+//	ALERT_RETRY_MAX_RETRIES  - Max retry attempts (default: 4)
+//	ALERT_RETRY_INITIAL_BACKOFF - Initial retry backoff in seconds (default: 1)
+//	ALERT_RETRY_MAX_BACKOFF  - Max retry backoff in seconds (default: 8)
 type AlertingConfig struct {
 	// PagerDuty configures PagerDuty integration for critical alerts.
 	PagerDuty PagerDutyConfig
@@ -19,6 +32,12 @@ type AlertingConfig struct {
 
 	// RateLimit configures rate limiting for alert delivery.
 	RateLimit AlertRateLimitConfig
+
+	// Retry configures retry behavior for failed alerts.
+	Retry AlertRetryConfig
+
+	// DLQ configures the dead-letter queue for failed alerts.
+	DLQ AlertDLQConfig
 }
 
 // AlertRateLimitConfig holds configuration for alert rate limiting using token bucket algorithm.
@@ -45,6 +64,19 @@ type AlertRetryConfig struct {
 	// MaxBackoff is the maximum backoff duration between retries.
 	// Defaults to 8 seconds if not set.
 	MaxBackoff time.Duration
+}
+
+// AlertDLQConfig holds configuration for the alert dead-letter queue.
+type AlertDLQConfig struct {
+	// Enabled indicates whether the dead-letter queue is active.
+	// When true, failed alerts are stored for manual review.
+	// Defaults to true.
+	Enabled bool
+
+	// MaxSize is the maximum number of entries in the dead-letter queue.
+	// When exceeded, oldest entries are removed.
+	// Defaults to 1000.
+	MaxSize int
 }
 
 // PagerDutyConfig holds configuration for PagerDuty Events API v2 integration.
@@ -110,47 +142,99 @@ func DefaultAlertRetryConfig() AlertRetryConfig {
 	}
 }
 
+// DefaultAlertDLQConfig returns the default dead-letter queue configuration.
+func DefaultAlertDLQConfig() AlertDLQConfig {
+	return AlertDLQConfig{
+		Enabled: true,
+		MaxSize: 1000,
+	}
+}
+
+// getEnvInt parses an environment variable as an integer.
+// Returns the default value if the variable is empty or invalid.
+func getEnvInt(key string, defaultVal int, minVal int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n < minVal {
+		return defaultVal
+	}
+	return n
+}
+
 // LoadAlertingConfig loads alerting configuration from environment variables.
 func LoadAlertingConfig() (*AlertingConfig, error) {
 	config := &AlertingConfig{
-		PagerDuty: PagerDutyConfig{
-			Enabled:    os.Getenv("PAGERDUTY_ENABLED") == "true",
-			RoutingKey: os.Getenv("PAGERDUTY_ROUTING_KEY"),
-			Source:     os.Getenv("PAGERDUTY_SOURCE"),
-		},
-		Slack: SlackConfig{
-			Enabled:     os.Getenv("SLACK_WEBHOOK_URL") != "",
-			WebhookURL:  os.Getenv("SLACK_WEBHOOK_URL"),
-			ServiceName: os.Getenv("SERVICE_NAME"),
-		},
-		RateLimit: DefaultAlertRateLimitConfig(),
+		PagerDuty: loadPagerDutyConfig(),
+		Slack:     loadSlackConfig(),
+		RateLimit: loadRateLimitConfig(),
+		Retry:     loadRetryConfig(),
+		DLQ:       loadDLQConfig(),
 	}
 
-	// Set default source if not provided
-	if config.PagerDuty.Source == "" {
-		config.PagerDuty.Source = "tenant-service"
-	}
-
-	// Set default service name if not provided
-	if config.Slack.ServiceName == "" {
-		config.Slack.ServiceName = "tenant-service"
-	}
-
-	// Override rate limit from environment if set
-	if maxAlerts := os.Getenv("ALERT_RATE_LIMIT_PER_MINUTE"); maxAlerts != "" {
-		if n, err := strconv.Atoi(maxAlerts); err == nil && n > 0 {
-			config.RateLimit.MaxAlertsPerMinute = n
-			// Set burst size to match if not explicitly configured
-			config.RateLimit.BurstSize = n
-		}
-	}
-
-	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 
 	return config, nil
+}
+
+// loadPagerDutyConfig loads PagerDuty configuration from environment variables.
+func loadPagerDutyConfig() PagerDutyConfig {
+	source := os.Getenv("PAGERDUTY_SOURCE")
+	if source == "" {
+		source = "tenant-service"
+	}
+	return PagerDutyConfig{
+		Enabled:    os.Getenv("PAGERDUTY_ENABLED") == "true",
+		RoutingKey: os.Getenv("PAGERDUTY_ROUTING_KEY"),
+		Source:     source,
+	}
+}
+
+// loadSlackConfig loads Slack configuration from environment variables.
+func loadSlackConfig() SlackConfig {
+	serviceName := os.Getenv("SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "tenant-service"
+	}
+	webhookURL := os.Getenv("SLACK_WEBHOOK_URL")
+	return SlackConfig{
+		Enabled:     webhookURL != "",
+		WebhookURL:  webhookURL,
+		ServiceName: serviceName,
+	}
+}
+
+// loadRateLimitConfig loads rate limit configuration from environment variables.
+func loadRateLimitConfig() AlertRateLimitConfig {
+	cfg := DefaultAlertRateLimitConfig()
+	maxAlerts := getEnvInt("ALERT_RATE_LIMIT_PER_MINUTE", cfg.MaxAlertsPerMinute, 1)
+	cfg.MaxAlertsPerMinute = maxAlerts
+	cfg.BurstSize = maxAlerts
+	return cfg
+}
+
+// loadRetryConfig loads retry configuration from environment variables.
+func loadRetryConfig() AlertRetryConfig {
+	cfg := DefaultAlertRetryConfig()
+	cfg.MaxRetries = getEnvInt("ALERT_RETRY_MAX_RETRIES", cfg.MaxRetries, 0)
+	if initialSec := getEnvInt("ALERT_RETRY_INITIAL_BACKOFF", 0, 1); initialSec > 0 {
+		cfg.InitialBackoff = time.Duration(initialSec) * time.Second
+	}
+	if maxSec := getEnvInt("ALERT_RETRY_MAX_BACKOFF", 0, 1); maxSec > 0 {
+		cfg.MaxBackoff = time.Duration(maxSec) * time.Second
+	}
+	return cfg
+}
+
+// loadDLQConfig loads dead-letter queue configuration from environment variables.
+func loadDLQConfig() AlertDLQConfig {
+	cfg := DefaultAlertDLQConfig()
+	cfg.MaxSize = getEnvInt("ALERT_DLQ_MAX_SIZE", cfg.MaxSize, 1)
+	return cfg
 }
 
 // Validate checks that the alerting configuration is valid.
