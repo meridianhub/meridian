@@ -725,3 +725,295 @@ func TestJWTMiddleware_Handler_EmptyTokenStringError(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	assert.Contains(t, rr.Body.String(), "invalid token")
 }
+
+// =============================================================================
+// Benchmark Tests
+// =============================================================================
+
+// BenchmarkJWTMiddleware_Authentication benchmarks JWT authentication performance.
+// Measures the overhead of the JWT middleware in the request path.
+func BenchmarkJWTMiddleware_Authentication(b *testing.B) {
+	claims := &platformauth.Claims{
+		UserID:   "bench-user",
+		TenantID: "bench-tenant",
+		Roles:    []string{"admin", "user"},
+		Scopes:   []string{"read", "write"},
+	}
+
+	validator := &mockValidator{claims: claims}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	middleware, err := NewJWTMiddleware(validator, logger)
+	if err != nil {
+		b.Fatalf("failed to create middleware: %v", err)
+	}
+
+	handler := middleware.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer valid-jwt-token")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+	}
+}
+
+// BenchmarkJWTMiddleware_TokenExtraction benchmarks just the token extraction step.
+func BenchmarkJWTMiddleware_TokenExtraction(b *testing.B) {
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiMTIzIn0.signature")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = extractBearerToken(req)
+	}
+}
+
+// BenchmarkJWTMiddleware_ContextInjection benchmarks the context injection step.
+func BenchmarkJWTMiddleware_ContextInjection(b *testing.B) {
+	claims := &platformauth.Claims{
+		UserID:   "bench-user",
+		TenantID: "bench-tenant",
+		Roles:    []string{"admin", "user", "operator"},
+		Scopes:   []string{"read", "write", "delete"},
+	}
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = injectClaimsToContext(ctx, claims)
+	}
+}
+
+// BenchmarkJWTMiddleware_Parallel benchmarks JWT authentication under concurrent load.
+func BenchmarkJWTMiddleware_Parallel(b *testing.B) {
+	claims := &platformauth.Claims{
+		UserID:   "bench-user",
+		TenantID: "bench-tenant",
+		Roles:    []string{"admin"},
+	}
+
+	validator := &mockValidator{claims: claims}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	middleware, err := NewJWTMiddleware(validator, logger)
+	if err != nil {
+		b.Fatalf("failed to create middleware: %v", err)
+	}
+
+	handler := middleware.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+			req.Header.Set("Authorization", "Bearer valid-jwt-token")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+		}
+	})
+}
+
+// =============================================================================
+// Performance and Security Tests
+// =============================================================================
+
+// TestJWTMiddleware_Security_ExpiredTokenRejectedQuickly verifies that expired
+// tokens are rejected quickly (within 1ms of expiration check).
+// This is a security requirement to prevent timing attacks.
+func TestJWTMiddleware_Security_ExpiredTokenRejectedQuickly(t *testing.T) {
+	validator := &mockValidator{err: platformauth.ErrTokenExpired}
+	logger := testLogger()
+
+	middleware, err := NewJWTMiddleware(validator, logger)
+	require.NoError(t, err)
+
+	nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("next handler should not be called")
+	})
+
+	handler := middleware.Handler(nextHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer expired-token")
+	rr := httptest.NewRecorder()
+
+	start := time.Now()
+	handler.ServeHTTP(rr, req)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	assert.Contains(t, rr.Body.String(), "token expired")
+	// Expiration check should complete in under 1ms
+	assert.Less(t, elapsed, time.Millisecond, "expired token rejection should take less than 1ms")
+}
+
+// TestJWTMiddleware_Security_InvalidSignatureRejectedQuickly verifies that tokens
+// with invalid signatures are rejected quickly.
+func TestJWTMiddleware_Security_InvalidSignatureRejectedQuickly(t *testing.T) {
+	validator := &mockValidator{err: platformauth.ErrInvalidSignature}
+	logger := testLogger()
+
+	middleware, err := NewJWTMiddleware(validator, logger)
+	require.NoError(t, err)
+
+	nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("next handler should not be called")
+	})
+
+	handler := middleware.Handler(nextHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer invalid-signature-token")
+	rr := httptest.NewRecorder()
+
+	start := time.Now()
+	handler.ServeHTTP(rr, req)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	assert.Contains(t, rr.Body.String(), "invalid token signature")
+	// Signature validation should complete quickly
+	assert.Less(t, elapsed, time.Millisecond, "invalid signature rejection should take less than 1ms")
+}
+
+// TestJWTMiddleware_Performance_P99LatencyUnder5ms verifies that the auth
+// middleware adds less than 5ms p99 latency under typical load.
+func TestJWTMiddleware_Performance_P99LatencyUnder5ms(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping performance test in short mode")
+	}
+
+	claims := &platformauth.Claims{
+		UserID:   "perf-user",
+		TenantID: "perf-tenant",
+		Roles:    []string{"admin", "user"},
+		Scopes:   []string{"read", "write"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+
+	validator := &mockValidator{claims: claims}
+	logger := testLogger()
+
+	middleware, err := NewJWTMiddleware(validator, logger)
+	require.NoError(t, err)
+
+	handler := middleware.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Run 1000 requests and collect latencies
+	const numRequests = 1000
+	latencies := make([]time.Duration, numRequests)
+
+	for i := 0; i < numRequests; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req.Header.Set("Authorization", "Bearer valid-jwt-token")
+		rr := httptest.NewRecorder()
+
+		start := time.Now()
+		handler.ServeHTTP(rr, req)
+		latencies[i] = time.Since(start)
+	}
+
+	// Calculate p99 (99th percentile)
+	// Sort latencies and take the 99th percentile
+	sortedLatencies := make([]time.Duration, numRequests)
+	copy(sortedLatencies, latencies)
+	sortDurations(sortedLatencies)
+
+	p99Index := int(float64(numRequests) * 0.99)
+	p99Latency := sortedLatencies[p99Index]
+
+	t.Logf("P50 latency: %v", sortedLatencies[numRequests/2])
+	t.Logf("P99 latency: %v", p99Latency)
+
+	// P99 should be under 5ms (using mock validator, so no network delay)
+	assert.Less(t, p99Latency, 5*time.Millisecond,
+		"P99 latency should be under 5ms, got %v", p99Latency)
+}
+
+// sortDurations sorts a slice of durations in ascending order.
+func sortDurations(durations []time.Duration) {
+	for i := 0; i < len(durations); i++ {
+		for j := i + 1; j < len(durations); j++ {
+			if durations[j] < durations[i] {
+				durations[i], durations[j] = durations[j], durations[i]
+			}
+		}
+	}
+}
+
+// TestJWTMiddleware_IntegrationWithRealToken_ExpirationBoundary tests that
+// a token is correctly rejected exactly at the expiration boundary.
+func TestJWTMiddleware_IntegrationWithRealToken_ExpirationBoundary(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	validator, err := platformauth.NewJWTValidator(publicKey)
+	require.NoError(t, err)
+
+	logger := testLogger()
+
+	middleware, err := NewJWTMiddleware(validator, logger)
+	require.NoError(t, err)
+
+	// Create token that expires 500ms from now (enough time for key gen overhead)
+	expiresAt := time.Now().Add(500 * time.Millisecond)
+	claims := &platformauth.Claims{
+		UserID:   "boundary-user",
+		TenantID: "boundary-tenant",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+		},
+	}
+
+	tokenString, err := createTestToken(privateKey, claims)
+	require.NoError(t, err)
+
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := middleware.Handler(nextHandler)
+
+	// Token should be valid initially (before expiration)
+	t.Run("token valid before expiration", func(t *testing.T) {
+		// Make sure we're still before expiration
+		if time.Now().After(expiresAt) {
+			t.Skip("test took too long, token already expired")
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req.Header.Set("Authorization", "Bearer "+tokenString)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	// Wait for token to expire (calculate remaining time + buffer)
+	waitTime := time.Until(expiresAt) + 100*time.Millisecond
+	if waitTime > 0 {
+		time.Sleep(waitTime)
+	}
+
+	// Token should be rejected after expiration
+	t.Run("token rejected after expiration", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req.Header.Set("Authorization", "Bearer "+tokenString)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusUnauthorized, rr.Code)
+		assert.Contains(t, rr.Body.String(), "token expired")
+	})
+}

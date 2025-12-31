@@ -612,3 +612,101 @@ func TestCombinedAuthMiddleware_Close(t *testing.T) {
 		middleware.Close()
 	})
 }
+
+// =============================================================================
+// Benchmark Tests
+// =============================================================================
+
+// BenchmarkCombinedAuthMiddleware_JWT benchmarks combined auth with JWT authentication.
+func BenchmarkCombinedAuthMiddleware_JWT(b *testing.B) {
+	claims := &platformauth.Claims{
+		UserID:   "bench-user",
+		TenantID: "bench-tenant",
+		Roles:    []string{"admin"},
+	}
+	validator := &mockValidator{claims: claims}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	config := CombinedAuthConfig{
+		JWTValidator: validator,
+		APIKeyConfig: APIKeyConfig{
+			APIKeys: map[string]string{"bench-key": "bench-service"},
+		},
+		Logger: logger,
+	}
+
+	middleware, err := NewCombinedAuthMiddleware(config)
+	if err != nil {
+		b.Fatalf("failed to create middleware: %v", err)
+	}
+	defer middleware.Close()
+
+	handler := middleware.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer valid-jwt")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+	}
+}
+
+// BenchmarkCombinedAuthMiddleware_APIKey benchmarks combined auth with API key authentication.
+func BenchmarkCombinedAuthMiddleware_APIKey(b *testing.B) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	config := CombinedAuthConfig{
+		APIKeyConfig: APIKeyConfig{
+			APIKeys:            map[string]string{"bench-key": "bench-service"},
+			RateLimitPerSecond: 1000000, // Very high to not interfere
+			RateLimitBurst:     1000000,
+		},
+		Logger: logger,
+	}
+
+	middleware, err := NewCombinedAuthMiddleware(config)
+	if err != nil {
+		b.Fatalf("failed to create middleware: %v", err)
+	}
+	defer middleware.Close()
+
+	handler := middleware.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("X-API-Key", "bench-key")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+	}
+}
+
+// BenchmarkTenantAuthorizationMiddleware benchmarks tenant authorization checks.
+func BenchmarkTenantAuthorizationMiddleware(b *testing.B) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	middleware := NewTenantAuthorizationMiddleware(logger)
+
+	handler := middleware.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Create context with matching JWT tenant and resolved tenant
+		ctx := context.WithValue(context.Background(), TenantIDContextKey, "acme_corp")
+		ctx = tenant.WithTenant(ctx, tenant.MustNewTenantID("acme_corp"))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+	}
+}

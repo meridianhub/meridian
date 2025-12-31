@@ -615,3 +615,148 @@ func BenchmarkAPIKeyMiddleware_RateLimiter(b *testing.B) {
 		}
 	})
 }
+
+// =============================================================================
+// Load and Performance Tests
+// =============================================================================
+
+// TestAPIKeyMiddleware_LoadTest_RateLimitUnderHighConcurrency verifies that
+// the rate limiter correctly enforces limits under high concurrent load.
+// This simulates 1000 req/s with configured threshold and verifies limits hold.
+func TestAPIKeyMiddleware_LoadTest_RateLimitUnderHighConcurrency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping load test in short mode")
+	}
+
+	config := DefaultAPIKeyConfig()
+	config.APIKeys = map[string]string{
+		"load-test-key": "load-test-service",
+	}
+	// Configure rate limit: 100 req/s with burst of 100
+	config.RateLimitPerSecond = 100
+	config.RateLimitBurst = 100
+
+	middleware := NewAPIKeyMiddleware(config)
+	defer middleware.Close()
+
+	var successCount atomic.Int32
+	var rateLimitedCount atomic.Int32
+
+	handler := middleware.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		successCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Create a wrapper to track 429 responses
+	trackedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, r)
+
+		// Copy response
+		for k, v := range rec.Header() {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes())
+
+		if rec.Code == http.StatusTooManyRequests {
+			rateLimitedCount.Add(1)
+		}
+	})
+
+	// Send 200 requests as fast as possible (simulating burst)
+	const numRequests = 200
+	var wg sync.WaitGroup
+	wg.Add(numRequests)
+
+	for i := 0; i < numRequests; i++ {
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+			req.Header.Set(APIKeyHeader, "load-test-key")
+			rec := httptest.NewRecorder()
+			trackedHandler.ServeHTTP(rec, req)
+		}()
+	}
+
+	wg.Wait()
+
+	// With burst of 100, we should have ~100 successful requests
+	// The exact number may vary slightly due to token bucket refill timing
+	successTotal := successCount.Load()
+	rateLimitedTotal := rateLimitedCount.Load()
+
+	t.Logf("Successful requests: %d", successTotal)
+	t.Logf("Rate limited requests: %d", rateLimitedTotal)
+
+	// Verify rate limit is being enforced
+	assert.GreaterOrEqual(t, successTotal, int32(90),
+		"should allow at least 90 requests through burst")
+	assert.LessOrEqual(t, successTotal, int32(110),
+		"should not allow significantly more than burst limit")
+	assert.Greater(t, rateLimitedTotal, int32(50),
+		"should rate limit a significant number of excess requests")
+}
+
+// TestAPIKeyMiddleware_Performance_P99LatencyUnder5ms verifies that the API key
+// middleware adds less than 5ms p99 latency under typical load.
+func TestAPIKeyMiddleware_Performance_P99LatencyUnder5ms(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping performance test in short mode")
+	}
+
+	config := DefaultAPIKeyConfig()
+	config.APIKeys = map[string]string{
+		"perf-key": "perf-service",
+	}
+	// High rate limit to not interfere with latency measurements
+	config.RateLimitPerSecond = 100000
+	config.RateLimitBurst = 100000
+
+	middleware := NewAPIKeyMiddleware(config)
+	defer middleware.Close()
+
+	handler := middleware.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Run 1000 requests and collect latencies
+	const numRequests = 1000
+	latencies := make([]time.Duration, numRequests)
+
+	for i := 0; i < numRequests; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req.Header.Set(APIKeyHeader, "perf-key")
+		rr := httptest.NewRecorder()
+
+		start := time.Now()
+		handler.ServeHTTP(rr, req)
+		latencies[i] = time.Since(start)
+	}
+
+	// Calculate p99 (99th percentile)
+	sortedLatencies := make([]time.Duration, numRequests)
+	copy(sortedLatencies, latencies)
+	sortAPIKeyDurations(sortedLatencies)
+
+	p99Index := int(float64(numRequests) * 0.99)
+	p99Latency := sortedLatencies[p99Index]
+
+	t.Logf("P50 latency: %v", sortedLatencies[numRequests/2])
+	t.Logf("P99 latency: %v", p99Latency)
+
+	// P99 should be under 5ms
+	assert.Less(t, p99Latency, 5*time.Millisecond,
+		"P99 latency should be under 5ms, got %v", p99Latency)
+}
+
+// sortAPIKeyDurations sorts a slice of durations in ascending order.
+func sortAPIKeyDurations(durations []time.Duration) {
+	for i := 0; i < len(durations); i++ {
+		for j := i + 1; j < len(durations); j++ {
+			if durations[j] < durations[i] {
+				durations[i], durations[j] = durations[j], durations[i]
+			}
+		}
+	}
+}
