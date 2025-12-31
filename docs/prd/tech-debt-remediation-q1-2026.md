@@ -119,95 +119,160 @@ This PRD defines the technical debt remediation work identified during a compreh
 
 #### 3.1 Standardized Service Client Library
 
-**Problem:** Inter-service gRPC clients are duplicated across services with inconsistent patterns.
+**Problem:** Inter-service gRPC clients are owned by consumers, not by the services they call. This creates duplication and inconsistent patterns.
 
-**Current State:**
+**Current State (Anti-pattern):**
 ```
 services/current-account/clients/
-  ├── party_client.go           # duplicate
-  ├── positionkeeping_client.go # service-specific
-  ├── financialaccounting_client.go
-  └── resilient_client.go
+  ├── party_client.go           # Consumer owns Party client (wrong)
+  ├── positionkeeping_client.go # Consumer owns PK client (wrong)
+  └── financialaccounting_client.go
 
 services/payment-order/clients/
-  ├── current_account_client.go # service-specific
-  └── financialaccounting_client.go  # duplicate
+  ├── current_account_client.go # Consumer owns CA client (wrong)
+  └── financialaccounting_client.go  # Duplicate!
 
 services/tenant/clients/
-  └── party_client.go           # duplicate
-
-shared/pkg/clients/
-  ├── party.go                  # only Party consolidated
-  ├── circuitbreaker.go         # resilience patterns ✓
-  ├── retry.go                  # resilience patterns ✓
-  ├── resilient.go              # resilience patterns ✓
-  └── saga.go                   # resilience patterns ✓
+  └── party_client.go           # Another duplicate Party client!
 ```
 
-**Proposed Solution:** Consolidate all service clients to `shared/pkg/clients/`:
+**Idiomatic Pattern:** Each service exports its own client package. The service being called owns the client, not the consumer.
 
 ```
+api/proto/meridian/<service>/v1/       # Generated gRPC stubs (low-level)
+services/<service>/client/              # High-level client (service-owned)
+```
+
+**Proposed Structure:**
+```
+services/party/
+  ├── client/                          # NEW: Party exports its client
+  │   ├── client.go                    # PartyClient with config, resilience
+  │   ├── client_test.go
+  │   └── doc.go
+  ├── service/                         # Existing server implementation
+  └── ...
+
+services/position-keeping/
+  ├── client/                          # NEW: PositionKeeping exports its client
+  │   ├── client.go
+  │   └── client_test.go
+  └── ...
+
+services/financial-accounting/
+  ├── client/                          # NEW: FinancialAccounting exports its client
+  │   ├── client.go
+  │   └── client_test.go
+  └── ...
+
+services/current-account/
+  ├── client/                          # NEW: CurrentAccount exports its client
+  │   ├── client.go
+  │   └── client_test.go
+  ├── clients/                         # DEPRECATED: Remove after migration
+  └── ...
+
 shared/pkg/clients/
-  ├── doc.go                    # existing - patterns documentation
-  ├── circuitbreaker.go         # existing
-  ├── retry.go                  # existing
-  ├── resilient.go              # existing
-  ├── saga.go                   # existing
-  ├── errors.go                 # existing
-  ├── common.go                 # existing
-  │
-  ├── party.go                  # existing - Party service client
-  ├── position_keeping.go       # NEW - PositionKeeping service client
-  ├── financial_accounting.go   # NEW - FinancialAccounting service client
-  ├── current_account.go        # NEW - CurrentAccount service client
-  └── tenant.go                 # NEW - Tenant service client (if needed)
+  ├── circuitbreaker.go               # Keep: Shared resilience patterns
+  ├── retry.go
+  ├── resilient.go
+  └── saga.go
 ```
 
 **Standard Client Pattern:**
 
 ```go
-// Each client follows this structure:
-type <Service>Client struct {
+// services/party/client/client.go
+package client
+
+import (
+    partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+    "github.com/meridianhub/meridian/shared/pkg/clients"
+)
+
+// Config holds configuration for the Party service client.
+type Config struct {
+    ServiceName string        // Required: k8s service name (e.g., "party")
+    Namespace   string        // Defaults to "default"
+    Port        int           // Defaults to 50055 (Party's port)
+    Timeout     time.Duration // Defaults to 30s
+    Tracer      *observability.Tracer
+    Resilience  *clients.ResilientClientConfig // Optional
+}
+
+// Client provides access to the Party service.
+type Client struct {
     conn      *grpc.ClientConn
-    client    <service>v1.<Service>ServiceClient
-    resilient *ResilientClient
-    tracer    *observability.Tracer
+    party     partyv1.PartyServiceClient
+    resilient *clients.ResilientClient
     timeout   time.Duration
 }
 
-type <Service>ClientConfig struct {
-    ServiceName string        // Required: k8s service name
-    Namespace   string        // Defaults to "default"
-    Port        int           // Service-specific default
-    Timeout     time.Duration // Defaults to 30s
-    Tracer      *observability.Tracer
-    Resilience  *ResilientClientConfig // Optional circuit breaker/retry
-}
+// New creates a new Party service client.
+// Returns the client and a cleanup function.
+func New(cfg Config) (*Client, func(), error)
 
-func New<Service>Client(cfg <Service>ClientConfig) (*<Service>Client, func(), error)
+// ValidateParty checks if a party exists and is active.
+func (c *Client) ValidateParty(ctx context.Context, partyID string) error
+
+// GetParty retrieves full party details by ID.
+func (c *Client) GetParty(ctx context.Context, partyID string) (*partyv1.Party, error)
 ```
 
-**Files to Migrate:**
-| Source | Destination | Action |
-|--------|-------------|--------|
-| `current-account/clients/party_client.go` | `shared/pkg/clients/party.go` | Delete, use shared |
-| `tenant/clients/party_client.go` | `shared/pkg/clients/party.go` | Delete, use shared |
-| `current-account/clients/positionkeeping_client.go` | `shared/pkg/clients/position_keeping.go` | Move |
-| `current-account/clients/financialaccounting_client.go` | `shared/pkg/clients/financial_accounting.go` | Move & merge |
-| `payment-order/clients/financialaccounting_client.go` | `shared/pkg/clients/financial_accounting.go` | Delete, use shared |
-| `payment-order/clients/current_account_client.go` | `shared/pkg/clients/current_account.go` | Move |
+**Consumer Usage:**
+```go
+// services/current-account/cmd/main.go
+import (
+    partyclient "github.com/meridianhub/meridian/services/party/client"
+)
+
+partyClient, cleanup, err := partyclient.New(partyclient.Config{
+    ServiceName: "party",
+    Namespace:   namespace,
+})
+defer cleanup()
+```
+
+**Migration Plan:**
+
+| Step | Action |
+|------|--------|
+| 1 | Create `services/<service>/client/` for each service |
+| 2 | Move client logic from consumers into service-owned packages |
+| 3 | Update consumers to import `services/<service>/client` |
+| 4 | Deprecate `services/*/clients/` directories |
+| 5 | Remove deprecated directories after migration |
+
+**Files to Create:**
+| Service | New Client Package |
+|---------|-------------------|
+| Party | `services/party/client/` |
+| PositionKeeping | `services/position-keeping/client/` |
+| FinancialAccounting | `services/financial-accounting/client/` |
+| CurrentAccount | `services/current-account/client/` |
+| Tenant | `services/tenant/client/` (if needed externally) |
+
+**Files to Remove (after migration):**
+```
+services/current-account/clients/party_client.go
+services/current-account/clients/positionkeeping_client.go
+services/current-account/clients/financialaccounting_client.go
+services/payment-order/clients/current_account_client.go
+services/payment-order/clients/financialaccounting_client.go
+services/tenant/clients/party_client.go
+```
 
 **Acceptance Criteria:**
-- [ ] All service clients consolidated to `shared/pkg/clients/`
+- [ ] Each service exports its own client in `services/<service>/client/`
 - [ ] Consistent config pattern across all clients
-- [ ] Built-in resilience (circuit breaker + retry) via composition
+- [ ] Built-in resilience (circuit breaker + retry) via composition with `shared/pkg/clients`
 - [ ] DNS-based load balancing for all clients
 - [ ] Trace context propagation standard
-- [ ] Service-specific interfaces remain in consuming services
-- [ ] Deprecated stubs in old locations for migration path
-- [ ] 100% test coverage for shared clients
+- [ ] Service-specific interfaces remain in consuming services (for mocking)
+- [ ] Consumer `clients/` directories removed
+- [ ] 100% test coverage for service client packages
 
-**Estimated Effort:** 3-4 days
+**Estimated Effort:** 4-5 days
 
 ---
 
@@ -363,7 +428,7 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 | 1.2 | Idempotency Gap Fix | P0 | 2-3d | None |
 | 2.1 | Account Lifecycle Events | P1 | 2-3d | None |
 | 2.2 | Utilization Metering Endpoint | P1 | 3-4d | None |
-| 3.1 | Standardized Service Client Library | P2 | 3-4d | None |
+| 3.1 | Standardized Service Client Library | P2 | 4-5d | None |
 | 3.2 | Timeout Constants | P2 | 1d | None |
 | 3.3 | Port Centralization | P2 | 0.5d | None |
 | 4.1 | Alerting Integration | P2 | 2-3d | None |
@@ -371,7 +436,7 @@ return nil, fmt.Errorf("%w: %v", ErrInvalidBackendsJSON, err)
 | 5.1 | Double-Wrapped Error | P3 | 0.5h | None |
 | 5.2 | Auth Context Extraction | P3 | 0.5d | None |
 
-**Total Estimated Effort:** 21-29 days
+**Total Estimated Effort:** 22-31 days
 
 ---
 
@@ -410,17 +475,24 @@ services/gateway/proxy.go (1 TODO)
 services/gateway/server.go (1 TODO)
 ```
 
-### Service clients to consolidate:
+### Service client ownership migration:
 ```
-services/current-account/clients/
-  ├── party_client.go              → DELETE (use shared/pkg/clients/party.go)
-  ├── positionkeeping_client.go    → MOVE to shared/pkg/clients/position_keeping.go
-  └── financialaccounting_client.go → MOVE to shared/pkg/clients/financial_accounting.go
-
-services/payment-order/clients/
-  ├── current_account_client.go    → MOVE to shared/pkg/clients/current_account.go
-  └── financialaccounting_client.go → DELETE (use shared)
+Current (consumer-owned):                    Target (service-owned):
+─────────────────────────────────────────    ─────────────────────────────────────────
+services/current-account/clients/            services/party/client/
+  └── party_client.go            ────────►     └── client.go (Party owns its client)
 
 services/tenant/clients/
-  └── party_client.go              → DELETE (use shared/pkg/clients/party.go)
+  └── party_client.go            ────────►   (same - use services/party/client)
+
+services/current-account/clients/            services/position-keeping/client/
+  └── positionkeeping_client.go  ────────►     └── client.go (PK owns its client)
+
+services/current-account/clients/            services/financial-accounting/client/
+  └── financialaccounting_client.go ──────►    └── client.go (FA owns its client)
+services/payment-order/clients/
+  └── financialaccounting_client.go ──────►  (same - use services/financial-accounting/client)
+
+services/payment-order/clients/              services/current-account/client/
+  └── current_account_client.go  ────────►     └── client.go (CA owns its client)
 ```
