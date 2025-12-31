@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -249,7 +251,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered")
 
 	// Get ports from environment
-	port := env.GetEnvOrDefault("GRPC_PORT", "50052")
+	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.FinancialAccounting))
 	address := fmt.Sprintf(":%s", port)
 	metricsPort := env.GetEnvOrDefault("METRICS_PORT", "8082")
 

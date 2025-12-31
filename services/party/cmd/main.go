@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
@@ -15,6 +16,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -114,8 +116,8 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("gRPC services registered")
 
-	// Get port from environment (default 50055 per task spec)
-	port := env.GetEnvOrDefault("GRPC_PORT", "50055")
+	// Get port from environment (default is centralized in shared/platform/ports)
+	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.Party))
 	address := fmt.Sprintf(":%s", port)
 
 	// Create listener

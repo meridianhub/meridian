@@ -39,7 +39,7 @@ type PartyClientConfig struct {
 	Namespace string
 
 	// Port is the service port number.
-	// Party service uses port 50055 (configured in services/party/k8s/service.yaml).
+	// Party service uses ports.Party (see shared/platform/ports/ports.go).
 	Port int
 
 	// Timeout is the default timeout for RPC calls.
@@ -76,7 +76,7 @@ type BasePartyClient struct {
 //	config := &clients.PartyClientConfig{
 //	    ServiceName: "party",
 //	    Namespace:   "default",
-//	    Port:        50055,
+//	    Port:        ports.Party, // see shared/platform/ports
 //	    Timeout:     30 * time.Second,
 //	    Tracer:      tracer,
 //	}

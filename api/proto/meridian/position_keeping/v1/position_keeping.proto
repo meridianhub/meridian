@@ -395,6 +395,68 @@ message ListFinancialPositionLogsResponse {
   meridian.common.v1.PaginationResponse pagination = 2;
 }
 
+// RecordMeasurementRequest records a physical measurement against a position state.
+// Used for multi-asset tracking (energy, compute, carbon credits, etc.).
+message RecordMeasurementRequest {
+  // measurement_type identifies what is being measured (e.g., "kWh", "GPU-Hours", "Carbon-Credits").
+  string measurement_type = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 100
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // value is the measurement value as a decimal string for precision preservation.
+  // Format: optional sign, digits, optional decimal point and fractional digits (e.g., "123.456", "-789.012").
+  string value = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 50
+      pattern: "^-?\\d+(\\.\\d+)?$"
+    }
+  ];
+
+  // unit is the unit of measurement (e.g., "kWh", "hours", "tonnes").
+  string unit = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 50
+      pattern: "^[a-zA-Z0-9_/-]+$"
+    }
+  ];
+
+  // timestamp is when the measurement occurred.
+  google.protobuf.Timestamp timestamp = 4 [(buf.validate.field).required = true];
+
+  // metadata contains optional key-value pairs for additional context.
+  map<string, string> metadata = 5 [(buf.validate.field).map.max_pairs = 50];
+
+  // position_state_id is the target position state to record the measurement against.
+  string position_state_id = 6 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 7;
+}
+
+// RecordMeasurementResponse returns the result of recording a measurement.
+message RecordMeasurementResponse {
+  // measurement_id is the unique identifier for this measurement (for idempotency and reference).
+  string measurement_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // position_state_id is the position state that was updated.
+  string position_state_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // recorded_at is the server-side timestamp when the measurement was recorded.
+  google.protobuf.Timestamp recorded_at = 3 [(buf.validate.field).required = true];
+}
+
 // PositionKeepingService provides operations for managing financial position logs.
 service PositionKeepingService {
   // InitiateFinancialPositionLog creates a new financial position log.
@@ -456,6 +518,23 @@ service PositionKeepingService {
   rpc ListFinancialPositionLogs(ListFinancialPositionLogsRequest) returns (ListFinancialPositionLogsResponse) {
     option (google.api.http) = {
       get: "/v1/position-logs"
+    };
+  }
+
+  // RecordMeasurement records a physical measurement against a position state.
+  // Used for multi-asset tracking (energy, compute, carbon credits, etc.).
+  rpc RecordMeasurement(RecordMeasurementRequest) returns (RecordMeasurementResponse) {
+    option (google.api.http) = {
+      post: "/v1/position-states/{position_state_id}/measurements"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Measurement recorded successfully"
+        }
+      }
     };
   }
 }

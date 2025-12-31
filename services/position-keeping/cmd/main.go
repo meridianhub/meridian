@@ -158,6 +158,7 @@ func run(logger *slog.Logger) error {
 	// Create gRPC service
 	positionKeepingService, err := service.NewPositionKeepingService(
 		container.PositionLogRepository,
+		container.MeasurementRepository,
 		container.EventPublisher,
 		idempotencySvc,
 	)

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -190,7 +192,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create HTTP server
-	httpPort := env.GetEnvAsInt("HTTP_PORT", 8080)
+	httpPort := env.GetEnvAsInt("HTTP_PORT", ports.Gateway)
 	httpServer, err := webhookhttp.NewServer(webhookhttp.ServerConfig{
 		Port:               httpPort,
 		WebhookHandler:     webhookHandler,
@@ -203,7 +205,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Get gRPC port
-	grpcPort := env.GetEnvOrDefault("GRPC_PORT", "50054")
+	grpcPort := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.PaymentOrder))
 	grpcAddress := fmt.Sprintf(":%s", grpcPort)
 
 	// Create gRPC listener
@@ -309,7 +311,7 @@ func (s *simpleHealthServer) Watch(_ *grpc_health_v1.HealthCheckRequest, server 
 // createCurrentAccountClient creates the CurrentAccount gRPC client with resilience patterns.
 // The client is wrapped with circuit breaker and retry logic using shared/pkg/clients.
 func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.CurrentAccountClient, func(), error) {
-	target := fmt.Sprintf("dns:///current-account.%s.svc.cluster.local:50051", namespace)
+	target := fmt.Sprintf("dns:///current-account.%s.svc.cluster.local:%d", namespace, ports.CurrentAccount)
 	logger.Info("connecting to current-account service", "target", target)
 
 	conn, err := grpc.NewClient(
@@ -360,7 +362,7 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger) (service.
 // createFinancialAccountingClient creates the FinancialAccounting gRPC client with resilience patterns.
 // The client is wrapped with circuit breaker and retry logic using shared/pkg/clients.
 func createFinancialAccountingClient(namespace string, logger *slog.Logger) (service.FinancialAccountingClient, func(), error) {
-	target := fmt.Sprintf("dns:///financial-accounting.%s.svc.cluster.local:50051", namespace)
+	target := fmt.Sprintf("dns:///financial-accounting.%s.svc.cluster.local:%d", namespace, ports.FinancialAccounting)
 	logger.Info("connecting to financial-accounting service", "target", target)
 
 	conn, err := grpc.NewClient(

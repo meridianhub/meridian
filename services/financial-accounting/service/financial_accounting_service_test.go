@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1916,5 +1917,65 @@ func TestUpdateFinancialBookingLog_IdempotencyCaching(t *testing.T) {
 		st, ok := status.FromError(err)
 		require.True(t, ok)
 		assert.Equal(t, codes.Internal, st.Code())
+	})
+}
+
+// TestExtractUserFromContext tests the auth context extraction helper function.
+// This ensures correct user attribution for audit events when auth context is present or absent.
+func TestExtractUserFromContext(t *testing.T) {
+	t.Run("returns user ID when auth context is present", func(t *testing.T) {
+		// Arrange - create context with user ID using auth package's context key
+		ctx := context.WithValue(context.Background(), auth.UserIDContextKey, "user-12345")
+
+		// Act
+		result := extractUserFromContext(ctx)
+
+		// Assert
+		assert.Equal(t, "user-12345", result)
+	})
+
+	t.Run("returns system when auth context is missing", func(t *testing.T) {
+		// Arrange - empty context without auth information
+		ctx := context.Background()
+
+		// Act
+		result := extractUserFromContext(ctx)
+
+		// Assert
+		assert.Equal(t, "system", result)
+	})
+
+	t.Run("returns system when user ID is empty string", func(t *testing.T) {
+		// Arrange - context with empty user ID
+		ctx := context.WithValue(context.Background(), auth.UserIDContextKey, "")
+
+		// Act
+		result := extractUserFromContext(ctx)
+
+		// Assert
+		assert.Equal(t, "system", result)
+	})
+
+	t.Run("returns system when user ID has wrong type", func(t *testing.T) {
+		// Arrange - context with wrong type for user ID (int instead of string)
+		ctx := context.WithValue(context.Background(), auth.UserIDContextKey, 12345)
+
+		// Act
+		result := extractUserFromContext(ctx)
+
+		// Assert
+		assert.Equal(t, "system", result)
+	})
+
+	t.Run("returns user ID with UUID format", func(t *testing.T) {
+		// Arrange - typical production user ID format
+		expectedUserID := "550e8400-e29b-41d4-a716-446655440000"
+		ctx := context.WithValue(context.Background(), auth.UserIDContextKey, expectedUserID)
+
+		// Act
+		result := extractUserFromContext(ctx)
+
+		// Assert
+		assert.Equal(t, expectedUserID, result)
 	})
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/shared/pkg/clients"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/sony/gobreaker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,7 +171,10 @@ func TestCircuitBreaker_TransitionsToHalfOpen(t *testing.T) {
 	assert.Equal(t, gobreaker.StateOpen, cb.State())
 
 	// Wait for timeout to transition to half-open
-	time.Sleep(150 * time.Millisecond)
+	awaitErr := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return cb.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, awaitErr, "circuit should transition to half-open")
 
 	// Next request should transition to half-open and execute
 	_, err := cb.Execute(ctx, func() (any, error) {
@@ -209,8 +213,11 @@ func TestCircuitBreaker_ClosesAfterSuccessInHalfOpen(t *testing.T) {
 
 	assert.Equal(t, gobreaker.StateOpen, cb.State())
 
-	// Wait for timeout
-	time.Sleep(150 * time.Millisecond)
+	// Wait for timeout to transition to half-open
+	awaitErr := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return cb.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, awaitErr, "circuit should transition to half-open")
 
 	// Execute successful requests in half-open
 	for i := 0; i < 2; i++ {
@@ -251,8 +258,11 @@ func TestCircuitBreaker_ReopensOnFailureInHalfOpen(t *testing.T) {
 
 	assert.Equal(t, gobreaker.StateOpen, cb.State())
 
-	// Wait for timeout
-	time.Sleep(150 * time.Millisecond)
+	// Wait for timeout to transition to half-open
+	awaitErr := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return cb.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, awaitErr, "circuit should transition to half-open")
 
 	// Execute failing request in half-open
 	_, err := cb.Execute(ctx, func() (any, error) {
@@ -295,7 +305,10 @@ func TestCircuitBreaker_StateChangeCallback(t *testing.T) {
 	}
 
 	// Open -> Half-Open
-	time.Sleep(150 * time.Millisecond)
+	awaitErr := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return cb.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, awaitErr, "circuit should transition to half-open")
 
 	// Half-Open -> Closed
 	_, _ = cb.Execute(ctx, func() (any, error) {
@@ -339,7 +352,8 @@ func TestCircuitBreaker_ContextTimeout(t *testing.T) {
 	defer cancel()
 
 	_, err := cb.Execute(ctx, func() (any, error) {
-		time.Sleep(100 * time.Millisecond) // Longer than timeout
+		// Intentional sleep: Simulates slow operation to trigger context deadline exceeded
+		time.Sleep(100 * time.Millisecond)
 		return "should timeout", nil
 	})
 
@@ -381,6 +395,7 @@ func TestCircuitBreaker_ConcurrentExecution(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			_, err := cb.Execute(ctx, func() (any, error) {
+				// Intentional sleep: Simulates concurrent work to test thread-safety
 				time.Sleep(10 * time.Millisecond)
 				return successString, nil
 			})
@@ -428,7 +443,9 @@ func TestCircuitBreaker_ResetAfterInterval(t *testing.T) {
 
 	assert.Equal(t, gobreaker.StateClosed, cb.State(), "should remain closed below threshold")
 
-	// Wait for interval to reset counts
+	// Wait for interval to reset counts.
+	// Intentional sleep: We need time to actually pass for the circuit breaker's internal
+	// interval timer to reset. There's no observable state change we can poll for.
 	time.Sleep(250 * time.Millisecond)
 
 	// Execute 3 more failures (should not trip because counts were reset)
@@ -517,11 +534,11 @@ func TestCircuitBreaker_MaxRequestsInHalfOpen(t *testing.T) {
 	}
 	require.Equal(t, gobreaker.StateOpen, cb.State())
 
-	// Poll for half-open state with timeout (more robust than fixed sleep under CI load)
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) && cb.State() == gobreaker.StateOpen {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Wait for half-open state
+	awaitErr := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return cb.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, awaitErr, "circuit should transition to half-open")
 
 	// Track requests that actually execute
 	var executedCount atomic.Int32
@@ -535,7 +552,8 @@ func TestCircuitBreaker_MaxRequestsInHalfOpen(t *testing.T) {
 			defer wg.Done()
 			_, err := cb.Execute(ctx, func() (any, error) {
 				executedCount.Add(1)
-				time.Sleep(50 * time.Millisecond) // Hold the slot
+				// Intentional sleep: Hold the slot to test MaxRequests limiting
+				time.Sleep(50 * time.Millisecond)
 				return successString, nil
 			})
 			if errors.Is(err, gobreaker.ErrTooManyRequests) {
@@ -632,11 +650,11 @@ func TestCircuitBreaker_ContextCancellationInHalfOpen(t *testing.T) {
 	}
 	require.Equal(t, gobreaker.StateOpen, cb.State())
 
-	// Poll for half-open state with timeout
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) && cb.State() == gobreaker.StateOpen {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Wait for half-open state
+	awaitErr := await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return cb.State() == gobreaker.StateHalfOpen
+	})
+	require.NoError(t, awaitErr, "circuit should transition to half-open")
 
 	// Create a context that will be cancelled during execution
 	ctx, cancel := context.WithCancel(context.Background())
@@ -648,13 +666,13 @@ func TestCircuitBreaker_ContextCancellationInHalfOpen(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		_, execErr = cb.Execute(ctx, func() (any, error) {
-			// Simulate a slow operation
+			// Intentional sleep: Simulate a slow operation to test context cancellation
 			time.Sleep(200 * time.Millisecond)
 			return successString, nil
 		})
 	}()
 
-	// Cancel the context while the request is in-flight
+	// Intentional sleep: Cancel the context while the request is in-flight
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 

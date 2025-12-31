@@ -23,31 +23,39 @@ var (
 	ErrEventPublisherNil = errors.New("position keeping service: event publisher cannot be nil")
 	// ErrIdempotencyServiceNil is returned when attempting to create a service with a nil idempotency service
 	ErrIdempotencyServiceNil = errors.New("position keeping service: idempotency service cannot be nil")
+	// ErrMeasurementRepoNil is returned when attempting to create a service with a nil measurement repository
+	ErrMeasurementRepoNil = errors.New("position keeping service: measurement repository cannot be nil")
 )
 
 // PositionKeepingService implements the gRPC service for Position Keeping operations.
 type PositionKeepingService struct {
 	positionkeepingv1.UnimplementedPositionKeepingServiceServer
-	repository     domain.FinancialPositionLogRepository
-	eventPublisher domain.EventPublisher
-	idempotency    idempotency.Service
+	repository      domain.FinancialPositionLogRepository
+	measurementRepo domain.MeasurementRepository
+	eventPublisher  domain.EventPublisher
+	idempotency     idempotency.Service
 }
 
 // NewPositionKeepingService creates a new PositionKeepingService with dependency injection.
 //
 // Dependencies:
 //   - repository: Persistence layer for financial position logs (must not be nil)
+//   - measurementRepo: Persistence layer for measurements (must not be nil)
 //   - eventPublisher: Publishes domain events (must not be nil)
 //   - idempotencySvc: Ensures exactly-once processing of idempotent operations (must not be nil)
 //
 // Returns an error if any dependency is nil.
 func NewPositionKeepingService(
 	repository domain.FinancialPositionLogRepository,
+	measurementRepo domain.MeasurementRepository,
 	eventPublisher domain.EventPublisher,
 	idempotencySvc idempotency.Service,
 ) (*PositionKeepingService, error) {
 	if repository == nil {
 		return nil, ErrRepositoryNil
+	}
+	if measurementRepo == nil {
+		return nil, ErrMeasurementRepoNil
 	}
 	if eventPublisher == nil {
 		return nil, ErrEventPublisherNil
@@ -57,9 +65,10 @@ func NewPositionKeepingService(
 	}
 
 	return &PositionKeepingService{
-		repository:     repository,
-		eventPublisher: eventPublisher,
-		idempotency:    idempotencySvc,
+		repository:      repository,
+		measurementRepo: measurementRepo,
+		eventPublisher:  eventPublisher,
+		idempotency:     idempotencySvc,
 	}, nil
 }
 

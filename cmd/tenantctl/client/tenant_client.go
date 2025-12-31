@@ -9,6 +9,7 @@ import (
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	sharedgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -32,7 +33,7 @@ type Config struct {
 	// Namespace is the Kubernetes namespace (defaults to "default").
 	Namespace string
 
-	// Port is the service port number (defaults to 50056).
+	// Port is the service port number (defaults to ports.Tenant).
 	Port int
 
 	// Timeout is the default timeout for gRPC calls (defaults to 30s).
@@ -45,10 +46,10 @@ type Config struct {
 // DefaultConfig returns a Config with sensible defaults for local development.
 func DefaultConfig() Config {
 	return Config{
-		ServiceURL:  "localhost:50056",
+		ServiceURL:  fmt.Sprintf("localhost:%d", ports.Tenant),
 		ServiceName: "tenant",
 		Namespace:   "default",
-		Port:        50056,
+		Port:        ports.Tenant,
 		Timeout:     defaults.DefaultRPCTimeout,
 	}
 }
@@ -60,7 +61,7 @@ func NewTenantClient(ctx context.Context, cfg Config) (*TenantClient, error) {
 		cfg.Timeout = defaults.DefaultRPCTimeout
 	}
 	if cfg.Port == 0 {
-		cfg.Port = 50056
+		cfg.Port = ports.Tenant
 	}
 
 	var conn *grpc.ClientConn

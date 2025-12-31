@@ -9,6 +9,7 @@ import (
 
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	paymentorderv1 "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -16,9 +17,10 @@ import (
 )
 
 // Default ports for services in local/Tilt environment.
+// These are aliases to the centralized port constants for package-level access.
 const (
-	CurrentAccountPort = 50051
-	PaymentOrderPort   = 50054
+	CurrentAccountPort = ports.CurrentAccount
+	PaymentOrderPort   = ports.PaymentOrder
 )
 
 // Client errors.
