@@ -147,4 +147,5 @@ jobs:
     - name: Annotate failures
       if: failure()
       run: |
-        jq -r '.[] | select(.Action == "fail") | "::error file=\(.Package | sub("github.com/meridianhub/meridian/"; "")),line=1::\(.Test) failed"' test-results.json || true
+        # gotestsum --jsonfile produces newline-delimited JSON (one object per line)
+        jq -r 'select(.Action == "fail") | "::error file=\(.Package | sub("github.com/meridianhub/meridian/"; "")),line=1::\(.Test) failed"' test-results.json || true
