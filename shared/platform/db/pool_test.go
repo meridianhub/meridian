@@ -117,3 +117,58 @@ func TestPostgresPool_BeginTx_DefaultSerializable(t *testing.T) {
 
 	_ = ctx // Suppress unused warning
 }
+
+func TestPostgresPool_CloseWithContext_CancelledContext(t *testing.T) {
+	// Test that CloseWithContext returns promptly when context is already cancelled.
+	// This verifies the errgroup-based implementation properly handles context cancellation.
+
+	// Create a pool with a mock db (we can use sql.Open without connecting)
+	db, err := sql.Open("pgx", "postgresql://user:pass@localhost:5432/db")
+	if err != nil {
+		t.Fatalf("failed to open mock db: %v", err)
+	}
+
+	pool := &PostgresPool{db: db}
+
+	// Create an already-cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// CloseWithContext should return within reasonable time even with cancelled context
+	done := make(chan error, 1)
+	go func() {
+		done <- pool.CloseWithContext(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		// We expect either a successful close or a context cancellation error
+		// The important thing is that it returned promptly
+		if err != nil && ctx.Err() == nil {
+			t.Errorf("CloseWithContext() unexpected error: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("CloseWithContext() did not return within 100ms with cancelled context")
+	}
+}
+
+func TestPostgresPool_CloseWithContext_Success(t *testing.T) {
+	// Test that CloseWithContext successfully closes the pool when context is not cancelled.
+
+	// Create a pool with a mock db
+	db, err := sql.Open("pgx", "postgresql://user:pass@localhost:5432/db")
+	if err != nil {
+		t.Fatalf("failed to open mock db: %v", err)
+	}
+
+	pool := &PostgresPool{db: db}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// CloseWithContext should succeed
+	err = pool.CloseWithContext(ctx)
+	if err != nil {
+		t.Errorf("CloseWithContext() unexpected error: %v", err)
+	}
+}
