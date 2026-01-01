@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 )
 
@@ -42,7 +43,6 @@ func TestCachedRegistry_Start_IsIdempotent(t *testing.T) {
 
 	// Get baseline goroutine count
 	runtime.GC()
-	time.Sleep(10 * time.Millisecond)
 	baselineGoroutines := runtime.NumGoroutine()
 
 	// Call Start() 3 times
@@ -50,11 +50,17 @@ func TestCachedRegistry_Start_IsIdempotent(t *testing.T) {
 	registry.Start(ctx)
 	registry.Start(ctx)
 
-	// Wait a bit for any goroutines to start
-	time.Sleep(20 * time.Millisecond)
+	// Wait for goroutine count to stabilize
+	var currentGoroutines int
+	_ = await.New().AtMost(1 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		runtime.GC()
+		currentGoroutines = runtime.NumGoroutine()
+		// Check it's within expected range (goroutine count stabilized)
+		additionalGoroutines := currentGoroutines - baselineGoroutines
+		return additionalGoroutines >= 1 && additionalGoroutines <= 2
+	})
 
 	// Check goroutine count - should only have 1 additional goroutine
-	currentGoroutines := runtime.NumGoroutine()
 	additionalGoroutines := currentGoroutines - baselineGoroutines
 
 	// Allow for 1-2 additional goroutines (the refresh loop plus potential runtime overhead)
@@ -73,7 +79,6 @@ func TestCachedRegistry_Start_ConcurrentCalls(t *testing.T) {
 
 	// Get baseline goroutine count
 	runtime.GC()
-	time.Sleep(10 * time.Millisecond)
 	baselineGoroutines := runtime.NumGoroutine()
 
 	// Spawn 10 goroutines all calling Start() concurrently
@@ -87,11 +92,17 @@ func TestCachedRegistry_Start_ConcurrentCalls(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Wait a bit for any goroutines to settle
-	time.Sleep(20 * time.Millisecond)
+	// Wait for goroutine count to stabilize
+	var currentGoroutines int
+	_ = await.New().AtMost(1 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		runtime.GC()
+		currentGoroutines = runtime.NumGoroutine()
+		// Check it's within expected range (goroutine count stabilized)
+		additionalGoroutines := currentGoroutines - baselineGoroutines
+		return additionalGoroutines >= 1 && additionalGoroutines <= 2
+	})
 
 	// Check goroutine count - should only have 1 additional goroutine from the refresh loop
-	currentGoroutines := runtime.NumGoroutine()
 	additionalGoroutines := currentGoroutines - baselineGoroutines
 
 	// Allow for 1-2 additional goroutines (the refresh loop plus potential runtime overhead)
@@ -139,13 +150,14 @@ func TestCachedRegistry_RefreshLoopRuns(t *testing.T) {
 		t.Fatal("Expected LastRefresh to be set after Start()")
 	}
 
-	// Wait for at least one refresh cycle (refresh interval is 50ms)
-	time.Sleep(100 * time.Millisecond)
-
-	// Check that refresh has run at least once more
-	latestRefresh := registry.LastRefresh()
-	if !latestRefresh.After(initialRefresh) {
-		t.Errorf("Expected LastRefresh to update after waiting; initial: %v, latest: %v",
+	// Wait for refresh to run by polling LastRefresh()
+	var latestRefresh time.Time
+	err := await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		latestRefresh = registry.LastRefresh()
+		return latestRefresh.After(initialRefresh)
+	})
+	if err != nil {
+		t.Errorf("Expected LastRefresh to update; initial: %v, latest: %v",
 			initialRefresh, latestRefresh)
 	}
 }
@@ -165,10 +177,11 @@ func TestCachedRegistry_Started_ReturnsFalseAfterContextCancelled(t *testing.T) 
 	// Cancel the context
 	cancel()
 
-	// Wait for the goroutine to exit
-	time.Sleep(100 * time.Millisecond)
-
-	if registry.Started() {
+	// Wait for the goroutine to exit by polling Started()
+	err := await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return !registry.Started()
+	})
+	if err != nil {
 		t.Error("Expected Started() to return false after context is cancelled")
 	}
 }
@@ -187,9 +200,10 @@ func TestCachedRegistry_CannotRestartAfterCancel(t *testing.T) {
 
 	// Cancel the first context and wait for goroutine to exit
 	cancel1()
-	time.Sleep(100 * time.Millisecond)
-
-	if registry.Started() {
+	err := await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return !registry.Started()
+	})
+	if err != nil {
 		t.Fatal("Expected Started() to return false after context cancelled")
 	}
 

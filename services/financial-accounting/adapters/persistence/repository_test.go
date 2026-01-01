@@ -340,7 +340,8 @@ func TestGetPostingsByBookingLogID_OrderedByCreatedAt(t *testing.T) {
 	}
 
 	require.NoError(t, repo.SavePosting(ctx, posting1))
-	time.Sleep(10 * time.Millisecond) // Ensure different timestamps
+	// Intentional sleep: Ensure different timestamps for ordering tests
+	time.Sleep(10 * time.Millisecond)
 	require.NoError(t, repo.SavePosting(ctx, posting2))
 
 	// Retrieve postings - should be ordered by created_at

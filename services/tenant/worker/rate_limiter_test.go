@@ -73,7 +73,8 @@ func TestAlertRateLimiter_Allow_TokenRefill(t *testing.T) {
 	assert.True(t, limiter.Allow(alertType))
 	assert.False(t, limiter.Allow(alertType))
 
-	// Wait for refill (slightly more than 1 second for one token)
+	// Intentional sleep: Wait for real time to pass so rate limiter can refill.
+	// Rate limiting is fundamentally time-based; we need to wait for token refill.
 	time.Sleep(1100 * time.Millisecond)
 
 	// Should have 1 token refilled

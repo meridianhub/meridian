@@ -224,7 +224,7 @@ func TestJWKSProvider_GetKey(t *testing.T) {
 		provider, err := NewJWKSProvider(ctx, cfg)
 		require.NoError(t, err)
 
-		// Wait for cache to expire
+		// Intentional sleep: Wait for cache TTL to expire to test cache refresh behavior
 		time.Sleep(10 * time.Millisecond)
 
 		key, err := provider.GetKey(ctx, "test-key-1")
@@ -259,7 +259,7 @@ func TestJWKSProvider_GetKey(t *testing.T) {
 		provider, err := NewJWKSProvider(ctx, cfg)
 		require.NoError(t, err)
 
-		// Wait for cache to expire
+		// Intentional sleep: Wait for cache TTL to expire to test stale cache behavior
 		time.Sleep(10 * time.Millisecond)
 
 		// Should still return cached key even though refresh fails
@@ -485,7 +485,7 @@ func TestJWKSProvider_Close(t *testing.T) {
 		err = provider.Close()
 		assert.NoError(t, err)
 
-		// Give time for goroutine to exit
+		// Intentional sleep: Give time for goroutine to exit after close
 		time.Sleep(200 * time.Millisecond)
 	})
 

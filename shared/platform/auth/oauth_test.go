@@ -197,7 +197,8 @@ func TestOAuth2Client_GetToken(t *testing.T) {
 		assert.Equal(t, "refreshed-token", token1)
 		assert.Equal(t, 1, requestCount)
 
-		// Wait for token to expire
+		// Intentional sleep: Wait for token to expire to test token refresh behavior.
+		// OAuth token expiration is time-based by design.
 		time.Sleep(2 * time.Second)
 
 		// Second call should refresh token

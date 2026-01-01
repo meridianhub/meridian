@@ -96,7 +96,8 @@ func TestChaos_CrashAfterMarkPending_CleanupWorkerMarksAsFailed(t *testing.T) {
 	// SIMULATED CRASH: We don't call StoreResult or Delete
 	// The key is now orphaned in PENDING state
 
-	// Wait for the key to become stale (short threshold for testing)
+	// Intentional sleep: Wait for the key to become stale (short threshold for testing).
+	// This is testing time-based staleness detection.
 	time.Sleep(100 * time.Millisecond)
 
 	// Configure cleanup worker with short threshold
@@ -444,7 +445,7 @@ func TestConcurrency_RaceBetweenCleanupAndStoreResult(t *testing.T) {
 		err := redisSvc.MarkPending(ctx, raceKey, time.Hour)
 		require.NoError(t, err)
 
-		// Wait just long enough for the key to potentially become stale
+		// Intentional sleep: Wait just long enough for the key to potentially become stale
 		time.Sleep(15 * time.Millisecond)
 
 		// Now try to store result (racing with cleanup worker)
@@ -458,7 +459,7 @@ func TestConcurrency_RaceBetweenCleanupAndStoreResult(t *testing.T) {
 
 		_ = redisSvc.StoreResult(ctx, completedResult) // Ignore error - we're testing the race
 
-		// Wait a bit and check final state
+		// Intentional sleep: Wait a bit and check final state after race condition
 		time.Sleep(50 * time.Millisecond)
 
 		result, err := redisSvc.Check(ctx, raceKey)
@@ -552,7 +553,7 @@ func TestLoad_SustainedTraffic_AllOperationsComplete(t *testing.T) {
 			}
 
 			_, err := executor.Execute(ctx, key, time.Hour, func(_ context.Context) ([]byte, error) {
-				// Simulate variable processing time
+				// Intentional sleep: Simulate variable processing time for load testing
 				time.Sleep(time.Duration(rand.Intn(30)) * time.Millisecond)
 				return []byte(`{"success":true}`), nil
 			})
@@ -630,7 +631,7 @@ func TestLoad_PendingDuration_P99Under1Second(t *testing.T) {
 
 			start := time.Now()
 			_, err := executor.Execute(ctx, key, time.Hour, func(_ context.Context) ([]byte, error) {
-				// Variable processing time: 10-100ms
+				// Intentional sleep: Variable processing time (10-100ms) for p99 latency testing
 				time.Sleep(time.Duration(10+rand.Intn(90)) * time.Millisecond)
 				return []byte(`{"success":true}`), nil
 			})
@@ -719,6 +720,7 @@ func TestMeta_VerifyConcurrencyTestDetectsRaces(t *testing.T) {
 			defer wg.Done()
 			_, _ = executor.Execute(context.Background(), key, time.Hour, func(_ context.Context) ([]byte, error) {
 				atomic.AddInt32(&executionCount, 1)
+				// Intentional sleep: Simulate work to test concurrency behavior
 				time.Sleep(10 * time.Millisecond)
 				return nil, nil
 			})
@@ -769,8 +771,8 @@ func (b *brokenConcurrencyChecker) MarkPending(_ context.Context, key idempotenc
 	// A proper implementation would use atomic compare-and-set (like Redis SETNX),
 	// but this broken version just overwrites, allowing multiple executions.
 
-	// Add delay BEFORE locking to create race window where multiple goroutines
-	// can all pass Check() before any of them complete MarkPending()
+	// Intentional sleep: Add delay BEFORE locking to create race window where multiple
+	// goroutines can all pass Check() before any of them complete MarkPending()
 	time.Sleep(5 * time.Millisecond)
 
 	b.mu.Lock()
@@ -852,7 +854,7 @@ func TestMeta_VerifyMetricsConsistency(t *testing.T) {
 
 	wg.Wait()
 
-	// Give metrics a moment to settle
+	// Intentional sleep: Give metrics a moment to settle after concurrent operations
 	time.Sleep(100 * time.Millisecond)
 
 	// Get metrics

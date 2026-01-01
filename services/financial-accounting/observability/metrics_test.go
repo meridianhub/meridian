@@ -175,7 +175,7 @@ func TestOperationTimer(t *testing.T) {
 		// Verify in-flight incremented
 		assert.Equal(t, initialInFlight+1, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationRetrieveLedgerPosting)))
 
-		// Simulate some work
+		// Intentional sleep: Simulate work to measure elapsed time in metrics
 		time.Sleep(5 * time.Millisecond)
 
 		// Record success

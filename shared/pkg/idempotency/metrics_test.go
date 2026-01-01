@@ -173,7 +173,7 @@ func TestMetricsCollector_FullWorkflow(t *testing.T) {
 	start := time.Now()
 	collector.RecordPending("payment")
 
-	// Simulate some work
+	// Intentional sleep: Simulate work to ensure non-zero duration is recorded in metrics
 	time.Sleep(10 * time.Millisecond)
 
 	// Record completion
@@ -197,7 +197,7 @@ func TestMetricsCollector_FailureWorkflow(t *testing.T) {
 	start := time.Now()
 	collector.RecordPending("refund")
 
-	// Simulate failure
+	// Intentional sleep: Simulate work before failure to ensure non-zero duration
 	time.Sleep(5 * time.Millisecond)
 
 	// Record failure

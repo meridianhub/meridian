@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 func TestNewServer(t *testing.T) {
@@ -132,14 +133,26 @@ func TestServer_HealthEndpoint(t *testing.T) {
 		close(serverDone)
 	}()
 
-	// Give server time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for server to be ready
+	client := &http.Client{Timeout: 5 * time.Second}
+	err = await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).UntilNoError(func() error {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+listener.Addr().String()+"/health", nil)
+		if reqErr != nil {
+			return reqErr
+		}
+		resp, respErr := client.Do(req)
+		if respErr != nil {
+			return respErr
+		}
+		_ = resp.Body.Close()
+		return nil
+	})
+	require.NoError(t, err, "server should become ready")
 
 	// Make request to health endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+listener.Addr().String()+"/health", nil)
 	require.NoError(t, err)
 
-	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
@@ -196,8 +209,21 @@ func TestServer_WebhookEndpoint(t *testing.T) {
 		close(serverDone)
 	}()
 
-	// Give server time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for server to be ready
+	client := &http.Client{Timeout: 5 * time.Second}
+	err = await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).UntilNoError(func() error {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+listener.Addr().String()+"/health", nil)
+		if reqErr != nil {
+			return reqErr
+		}
+		resp, respErr := client.Do(req)
+		if respErr != nil {
+			return respErr
+		}
+		_ = resp.Body.Close()
+		return nil
+	})
+	require.NoError(t, err, "server should become ready")
 
 	// Create webhook request
 	webhookReq := WebhookRequest{
@@ -210,7 +236,6 @@ func TestServer_WebhookEndpoint(t *testing.T) {
 
 	signature := GenerateWebhookSignature(body, secret)
 
-	client := &http.Client{Timeout: 5 * time.Second}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"http://"+listener.Addr().String()+"/webhook/payment-gateway",
 		&fixedReader{data: body})

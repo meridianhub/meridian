@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 // TestAPIKeyMiddleware_ValidKeyAcceptsRequest verifies that a valid API key
@@ -170,15 +172,15 @@ func TestAPIKeyMiddleware_RateLimiterResetsAfterTime(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 
-	// Wait for token refill (100ms = 1 token at 10/sec)
-	time.Sleep(150 * time.Millisecond)
-
-	// Should succeed again
-	req = httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	req.Header.Set(APIKeyHeader, "rate-limited-key")
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusOK, rec.Code, "request should succeed after rate limit reset")
+	// Wait for token refill by polling until request succeeds
+	err := await.New().AtMost(2 * time.Second).PollInterval(20 * time.Millisecond).Until(func() bool {
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req.Header.Set(APIKeyHeader, "rate-limited-key")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code == http.StatusOK
+	})
+	require.NoError(t, err, "rate limit should reset and allow request")
 }
 
 // TestAPIKeyMiddleware_MultipleKeysIndependentRateLimits verifies that
@@ -299,11 +301,11 @@ func TestAPIKeyMiddleware_CleanupRemovesIdleLimiters(t *testing.T) {
 	// Verify limiters were created
 	assert.Equal(t, 2, middleware.LimiterCount(), "should have 2 limiters")
 
-	// Wait for cleanup (idle timeout + cleanup interval + buffer)
-	time.Sleep(200 * time.Millisecond)
-
-	// Limiters should be cleaned up
-	assert.Equal(t, 0, middleware.LimiterCount(), "limiters should be cleaned up")
+	// Wait for cleanup by polling until limiters are cleaned up
+	err := await.New().AtMost(2 * time.Second).PollInterval(20 * time.Millisecond).Until(func() bool {
+		return middleware.LimiterCount() == 0
+	})
+	require.NoError(t, err, "limiters should be cleaned up")
 }
 
 // TestAPIKeyMiddleware_GetAPIKeyIdentity verifies context identity retrieval.
