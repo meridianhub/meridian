@@ -294,7 +294,9 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Start gRPC server in background
-	serverErrors := make(chan error, 1)
+	// Buffer size must match number of goroutines writing to this channel
+	// to prevent deadlock on simultaneous failures (gRPC + HTTP = 2)
+	serverErrors := make(chan error, 2)
 	go func() {
 		logger.Info("starting gRPC server", "address", address)
 		if err := grpcServer.Serve(listener); err != nil {
