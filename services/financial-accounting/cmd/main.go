@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/google/uuid"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/config"
@@ -168,8 +169,8 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Validate UUID format
-	if len(bankCashAccountID) != 36 || bankCashAccountID[8] != '-' || bankCashAccountID[13] != '-' {
-		return fmt.Errorf("%w: got %s", ErrBankCashAccountIDInvalid, bankCashAccountID)
+	if _, err := uuid.Parse(bankCashAccountID); err != nil {
+		return fmt.Errorf("%w: %w", ErrBankCashAccountIDInvalid, err)
 	}
 
 	logger.Info("bank cash account configured",
