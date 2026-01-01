@@ -363,47 +363,93 @@ func TestUUIDValidation(t *testing.T) {
 
 ### Stream 4: CI/CD Fixes (P0)
 
-#### 4.1 Nightly Workflow Failing for 9 Days
+#### 4.1 Improve Nightly Test Reporting
 
-**Problem:** The nightly GitHub Action has been failing consistently for 9 days. Root cause needs investigation from workflow run logs.
+**Problem:** Nightly workflow produces 74k lines of logs. With 2727 passed, 9 failed, 38 skipped - it's impossible to identify which 9 tests are failing without scrolling through massive output.
 
 **File:** `.github/workflows/nightly.yml`
 
-**Potential Causes to Investigate:**
-- Flaky tests in full suite (runs without `-short` flag)
-- Test timeout (15m may be insufficient for full suite with race detector)
-- Testcontainers resource issues on GitHub runners
-- Benchmark comparison failures due to missing baseline
-
-**Jobs to Check:**
-- `benchmark-comparison` - Compares HEAD against develop
-- `slow-integration-tests` - Full test suite with `-race`, no `-short`
-
-**Risk:** No nightly test coverage, benchmark regressions go undetected.
+**Current State:**
+```
+=== Test Summary ===
+Passed: 2727
+Failed: 9
+Skipped: 38
+```
 
 **Acceptance Criteria:**
-- [ ] Review last 9 days of workflow run logs to identify failure pattern
-- [ ] Fix root cause (flaky test, timeout, resource issue)
-- [ ] Add retry logic or increase timeout if needed
-- [ ] Ensure workflow passes for 3 consecutive nights
+- [ ] Failed test names prominently displayed at end of output
+- [ ] Use `gotestsum` or `go-test-json` for structured output
+- [ ] Generate JUnit XML for GitHub Actions test summary
+- [ ] Failed tests listed in workflow step summary (not buried in logs)
+
+**Implementation:**
+```yaml
+- name: Install gotestsum
+  run: go install gotest.tools/gotestsum@latest
+
+- name: Run tests with structured output
+  run: |
+    gotestsum --format testdox \
+      --junitfile test-results.xml \
+      --jsonfile test-results.json \
+      -- -race -timeout 15m ./...
+
+- name: Upload test results
+  uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: test-results
+    path: |
+      test-results.xml
+      test-results.json
+
+- name: Test Summary
+  uses: test-summary/action@v2
+  if: always()
+  with:
+    paths: test-results.xml
+```
 
 **Testing Strategy:**
 ```bash
-# Reproduce locally with same flags as nightly:
-go test -v -race -timeout 15m ./... 2>&1 | tee test-output.txt
+# Test locally:
+go install gotest.tools/gotestsum@latest
+gotestsum --format testdox -- -race ./... 2>&1 | tail -50
 
-# Check for flaky tests by running multiple times:
-for i in {1..5}; do
-  go test -race -count=1 ./path/to/flaky/package
-done
-
-# Or trigger workflow manually via GitHub CLI:
-gh workflow run nightly.yml --ref develop
-gh run list --workflow=nightly.yml --limit=5
-gh run view <run-id> --log-failed
+# Output shows clear pass/fail per test:
+# ✓ TestAccountCreate (0.02s)
+# ✓ TestAccountUpdate (0.01s)
+# ✗ TestFlakyTimeout (0.50s)
+#   Error: context deadline exceeded
 ```
 
-**Estimated Effort:** 0.5-1 day (depends on root cause)
+**Estimated Effort:** 2 hours
+
+---
+
+#### 4.2 Fix 9 Failing Nightly Tests
+
+**Problem:** 9 tests fail in nightly run (full suite without `-short` flag). These are likely timing-sensitive or flaky tests.
+
+**Depends On:** 4.1 (need to identify which tests are failing first)
+
+**Acceptance Criteria:**
+- [ ] Identify all 9 failing tests from improved reporting
+- [ ] Categorize failures (flaky, timeout, race condition, environment)
+- [ ] Fix or quarantine each failing test
+- [ ] Nightly passes for 3 consecutive nights
+
+**Testing Strategy:**
+```bash
+# Once we know which tests fail, run them in isolation:
+go test -v -race -count=10 ./path/to/package -run TestName
+
+# Check for race conditions:
+go test -race -count=100 ./path/to/flaky/package
+```
+
+**Estimated Effort:** 0.5-1 day (depends on root causes)
 
 ---
 
@@ -417,7 +463,8 @@ gh run view <run-id> --log-failed
 | 2.3 | CachedRegistry Idempotency | P1 | 0.5d | None |
 | 3.1 | HTTP Write Error Handling | P2 | 0.5d | None |
 | 3.2 | UUID Validation | P2 | 1h | None |
-| 4.1 | Nightly Workflow Fix | P0 | 0.5-1d | None |
+| 4.1 | Nightly Test Reporting | P0 | 2h | None |
+| 4.2 | Fix 9 Failing Tests | P0 | 0.5-1d | 4.1 |
 
 **Total Estimated Effort:** 2.5-3 days
 
