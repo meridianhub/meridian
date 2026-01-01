@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
@@ -25,6 +26,9 @@ type CachedRegistry struct {
 	cache       map[tenant.TenantID]*domain.Tenant
 	lastRefresh time.Time
 	refreshErr  error
+
+	startOnce sync.Once
+	started   atomic.Bool
 }
 
 // CachedRegistryConfig holds configuration for the cached registry.
@@ -66,28 +70,39 @@ func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig
 
 // Start begins the background cache refresh loop.
 // The refresh loop stops automatically when the provided context is cancelled.
+// Start is idempotent: calling it multiple times has no additional effect.
 func (r *CachedRegistry) Start(ctx context.Context) {
-	// Initial load
-	if err := r.refresh(ctx); err != nil {
-		r.logger.Error("failed initial cache load", "error", err)
-	}
+	r.startOnce.Do(func() {
+		r.started.Store(true)
 
-	// Background refresh loop
-	go func() {
-		ticker := time.NewTicker(r.refreshInterval)
-		defer ticker.Stop()
+		// Initial load
+		if err := r.refresh(ctx); err != nil {
+			r.logger.Error("failed initial cache load", "error", err)
+		}
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := r.refresh(ctx); err != nil {
-					r.logger.Error("failed to refresh tenant cache", "error", err)
+		// Background refresh loop
+		go func() {
+			ticker := time.NewTicker(r.refreshInterval)
+			defer ticker.Stop()
+			defer r.started.Store(false)
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := r.refresh(ctx); err != nil {
+						r.logger.Error("failed to refresh tenant cache", "error", err)
+					}
 				}
 			}
-		}
-	}()
+		}()
+	})
+}
+
+// Started returns true if the background refresh loop is currently running.
+func (r *CachedRegistry) Started() bool {
+	return r.started.Load()
 }
 
 // IsActive checks if a tenant exists and is active.
