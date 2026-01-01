@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
@@ -100,7 +101,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		config.DLQTopicSuffix = ".dlq" // Results in "audit.events.dlq"
 	}
 	if config.HandlerTimeout == 0 {
-		config.HandlerTimeout = 30 * time.Second
+		config.HandlerTimeout = defaults.DefaultRPCTimeout
 	}
 	if config.MaxRetries == 0 {
 		config.MaxRetries = 3

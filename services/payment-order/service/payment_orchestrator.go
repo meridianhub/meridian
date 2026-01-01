@@ -22,6 +22,7 @@ import (
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/proto"
@@ -649,7 +650,7 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 		retryConfig = &sharedclients.RetryConfig{
 			MaxRetries:          DefaultLienExecutionMaxRetries,
 			InitialInterval:     500 * time.Millisecond,
-			MaxInterval:         30 * time.Second,
+			MaxInterval:         defaults.DefaultRPCTimeout,
 			Multiplier:          2.0,
 			RandomizationFactor: 0.5,
 		}

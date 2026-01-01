@@ -22,6 +22,7 @@ import (
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -292,7 +293,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 		ServiceName: config.PositionKeepingServiceName,
 		Namespace:   config.Namespace,
 		Port:        config.PositionKeepingPort,
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      config.Tracer,
 	})
 	if err != nil {
@@ -312,7 +313,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 		ServiceName: config.FinancialAccountingServiceName,
 		Namespace:   config.Namespace,
 		Port:        config.FinancialAccountingPort,
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      config.Tracer,
 	})
 	if err != nil {
@@ -334,7 +335,7 @@ func NewServiceWithClients(config Config) (*Service, error) {
 			ServiceName: config.PartyServiceName,
 			Namespace:   config.Namespace,
 			Port:        config.PartyPort,
-			Timeout:     30 * time.Second,
+			Timeout:     defaults.DefaultRPCTimeout,
 			Tracer:      config.Tracer,
 		})
 		if err != nil {

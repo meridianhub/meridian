@@ -16,6 +16,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/observability"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -235,7 +236,7 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 const (
 	maxRetries = 5
 	baseDelay  = 2 * time.Second
-	maxDelay   = 30 * time.Second
+	maxDelay   = defaults.DefaultRPCTimeout
 )
 
 // provisionTenantWithRetry provisions a tenant's schema with exponential backoff retry logic.

@@ -20,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/services/tenant/worker"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
@@ -275,7 +276,7 @@ func run(logger *slog.Logger) error {
 		Repository:  repo,
 		Logger:      logger,
 		ServiceName: "tenant",
-		Timeout:     5 * time.Second,
+		Timeout:     defaults.DefaultHealthCheckTimeout,
 	})
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 
@@ -348,7 +349,7 @@ func loadWorkerConfig() (WorkerConfig, error) {
 		PollInterval:   env.GetEnvAsDuration("PROVISIONING_WORKER_POLL_INTERVAL", 10*time.Second),
 		MaxRetries:     env.GetEnvAsInt("PROVISIONING_MAX_RETRIES", 5),
 		RetryBaseDelay: env.GetEnvAsDuration("PROVISIONING_RETRY_BASE_DELAY", 2*time.Second),
-		RetryMaxDelay:  env.GetEnvAsDuration("PROVISIONING_RETRY_MAX_DELAY", 30*time.Second),
+		RetryMaxDelay:  env.GetEnvAsDuration("PROVISIONING_RETRY_MAX_DELAY", defaults.DefaultMaxRetryInterval),
 		MaxConcurrent:  env.GetEnvAsInt("PROVISIONING_MAX_CONCURRENT", 5),
 	}
 

@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
@@ -22,6 +21,7 @@ import (
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
@@ -151,7 +151,7 @@ func run(logger *slog.Logger) error {
 		FinancialAccountingHealthClient: svcClients.financialAccountingHealth,
 		Logger:                          logger,
 		ServiceName:                     "current-account",
-		CheckTimeout:                    5 * time.Second,
+		CheckTimeout:                    defaults.DefaultHealthCheckTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create health checker: %w", err)
@@ -282,7 +282,7 @@ func createServiceWithClients(
 		ServiceName: poskeepingclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.PositionKeeping,
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,
@@ -299,7 +299,7 @@ func createServiceWithClients(
 		ServiceName: finacctclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.FinancialAccounting,
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,
@@ -321,7 +321,7 @@ func createServiceWithClients(
 		ServiceName: partyclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.Party,
-		Timeout:     30 * time.Second,
+		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,

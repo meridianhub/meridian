@@ -10,6 +10,7 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	paymentorderv1 "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	money "google.golang.org/genproto/googleapis/type/money"
 )
 
@@ -66,7 +67,7 @@ const (
 	// DefaultRetryWait is the default wait time before retry (2 seconds allows saga completion).
 	DefaultRetryWait = 2 * time.Second
 	// DefaultRetryTimeout is the default timeout for the retry request (30 seconds is generous).
-	DefaultRetryTimeout = 30 * time.Second
+	DefaultRetryTimeout = defaults.DefaultRPCTimeout
 )
 
 // RunRetry executes the idempotency retry after waiting for saga completion.

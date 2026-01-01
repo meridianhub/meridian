@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"gorm.io/gorm"
 )
@@ -57,7 +58,7 @@ func NewHealthChecker(config HealthCheckerConfig) (*HealthChecker, error) {
 		config.ServiceName = "financial-accounting"
 	}
 	if config.CheckTimeout == 0 {
-		config.CheckTimeout = 5 * time.Second
+		config.CheckTimeout = defaults.DefaultHealthCheckTimeout
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()

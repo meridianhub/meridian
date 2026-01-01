@@ -10,6 +10,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 )
 
 // Worker errors.
@@ -33,7 +34,7 @@ var (
 // Default worker configuration values.
 const (
 	defaultBatchSize        = 100
-	defaultPollInterval     = 5 * time.Second
+	defaultPollInterval     = defaults.DefaultHealthCheckTimeout
 	defaultMaxRetries       = 5
 	defaultProcessingAge    = 5 * time.Minute
 	defaultPublishTimeoutMs = 5000

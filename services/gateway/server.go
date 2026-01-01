@@ -8,9 +8,9 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/meridianhub/meridian/services/gateway/auth"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 )
 
@@ -156,10 +156,10 @@ func (s *Server) Start(ctx context.Context) error {
 	httpServer := &http.Server{
 		Addr:              address,
 		Handler:           s.mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: defaults.DefaultHTTPReadHeaderTimeout,
+		ReadTimeout:       defaults.DefaultHTTPReadTimeout,
+		WriteTimeout:      defaults.DefaultHTTPWriteTimeout,
+		IdleTimeout:       2 * defaults.DefaultHTTPIdleTimeout, // Extended for gateway proxying
 	}
 
 	// Store httpServer with mutex protection

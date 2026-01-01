@@ -59,6 +59,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -387,7 +388,7 @@ func DefaultConfig() *Config {
 				DatabaseURL:   getServiceDatabaseURL("payment-order"),
 			},
 		},
-		ProvisioningTimeout: 30 * time.Second,
+		ProvisioningTimeout: defaults.DefaultRPCTimeout,
 		DataRetentionPeriod: 7 * 365 * 24 * time.Hour, // 7 years
 	}
 }

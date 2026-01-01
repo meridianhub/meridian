@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 )
 
 var (
@@ -159,8 +161,8 @@ type LockOptions struct {
 // DefaultLockOptions returns sensible defaults for lock acquisition
 func DefaultLockOptions() LockOptions {
 	return LockOptions{
-		TTL:        30 * time.Second,
-		RetryDelay: 100 * time.Millisecond,
+		TTL:        defaults.DefaultRPCTimeout,
+		RetryDelay: defaults.DefaultRetryDelay,
 		MaxRetries: 3,
 	}
 }

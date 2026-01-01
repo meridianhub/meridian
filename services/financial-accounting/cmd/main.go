@@ -25,6 +25,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/ports"
@@ -269,7 +270,7 @@ func run(logger *slog.Logger) error {
 		DB:           db,
 		Logger:       logger,
 		ServiceName:  "financial-accounting",
-		CheckTimeout: 5 * time.Second,
+		CheckTimeout: defaults.DefaultHealthCheckTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create health checker: %w", err)
@@ -357,7 +358,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("shutting down server...")
 
 	// Create shutdown context with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultRPCTimeout)
 	defer cancel()
 
 	// Close database connection during shutdown
@@ -443,7 +444,7 @@ func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
 	client := redis.NewClient(opt)
 
 	// Verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.DefaultHealthCheckTimeout)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {

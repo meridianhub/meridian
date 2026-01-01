@@ -21,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/ports"
@@ -239,7 +240,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("shutting down server...")
 
 	// Create shutdown context with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultRPCTimeout)
 	defer cancel()
 
 	// Stop Kafka consumer first to drain in-flight messages
