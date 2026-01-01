@@ -361,6 +361,53 @@ func TestUUIDValidation(t *testing.T) {
 
 ---
 
+### Stream 4: CI/CD Fixes (P0)
+
+#### 4.1 Nightly Workflow Failing for 9 Days
+
+**Problem:** The nightly GitHub Action has been failing consistently. Primary suspect: invalid Go version `1.25.5` specified in workflow (Go 1.25 doesn't exist).
+
+**File:** `.github/workflows/nightly.yml:31,101`
+
+```yaml
+# Current (WRONG - Go 1.25 doesn't exist)
+go-version: '1.25.5'
+
+# Fixed (use valid version)
+go-version: '1.23'
+```
+
+**Jobs Affected:**
+- `benchmark-comparison` (line 31)
+- `slow-integration-tests` (line 101)
+
+**Risk:** No nightly test coverage, benchmark regressions go undetected.
+
+**Acceptance Criteria:**
+- [ ] Fix Go version to valid release (1.22.x or 1.23.x)
+- [ ] Verify workflow runs successfully
+- [ ] Add Go version as workflow input or matrix for easier updates
+- [ ] Consider pinning to go.mod version using `go-version-file: 'go.mod'`
+
+**Testing Strategy:**
+```yaml
+# Use go.mod as source of truth for Go version
+- name: Set up Go
+  uses: actions/setup-go@v5
+  with:
+    go-version-file: 'go.mod'  # Automatically uses version from go.mod
+    cache: true
+
+# Or test with workflow_dispatch before merging:
+# 1. Push fix to branch
+# 2. Manually trigger workflow via Actions tab
+# 3. Verify all jobs pass
+```
+
+**Estimated Effort:** 1 hour
+
+---
+
 ## Summary Table
 
 | ID | Work Item | Priority | Effort | Dependencies |
@@ -371,6 +418,7 @@ func TestUUIDValidation(t *testing.T) {
 | 2.3 | CachedRegistry Idempotency | P1 | 0.5d | None |
 | 3.1 | HTTP Write Error Handling | P2 | 0.5d | None |
 | 3.2 | UUID Validation | P2 | 1h | None |
+| 4.1 | Nightly Workflow Fix | P0 | 1h | None |
 
 **Total Estimated Effort:** 2.5-3 days
 
