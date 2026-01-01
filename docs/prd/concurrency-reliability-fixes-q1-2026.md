@@ -55,6 +55,27 @@ serverErrors := make(chan error, 2)
 - [ ] Audit all services for similar patterns
 - [ ] Add comment documenting buffer size rationale
 
+**Testing Strategy:**
+```go
+func TestServerErrorChannelDoesNotDeadlock(t *testing.T) {
+    serverErrors := make(chan error, 2) // Must match goroutine count
+
+    // Simulate both servers failing simultaneously
+    go func() { serverErrors <- errors.New("grpc failed") }()
+    go func() { serverErrors <- errors.New("http failed") }()
+
+    // With correct buffer size, both sends complete without blocking
+    timeout := time.After(100 * time.Millisecond)
+    for i := 0; i < 2; i++ {
+        select {
+        case <-serverErrors:
+        case <-timeout:
+            t.Fatal("deadlock: channel send blocked")
+        }
+    }
+}
+```
+
 **Estimated Effort:** 1 hour
 
 ---
@@ -80,6 +101,39 @@ serverErrors := make(chan error, 2)
 - [ ] Add `defer signal.Stop(sigChan)` after `signal.Notify()` in all services
 - [ ] Create shared shutdown helper in `shared/platform/bootstrap/`
 
+**Testing Strategy:**
+```go
+func TestSignalHandlerCleanup(t *testing.T) {
+    // Use a subprocess to test signal handling cleanup
+    // Or verify with runtime inspection:
+
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT)
+    defer signal.Stop(sigChan) // This is what we're testing
+
+    // Send signal to self
+    syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+
+    select {
+    case <-sigChan:
+        // Good - signal received
+    case <-time.After(100 * time.Millisecond):
+        t.Fatal("signal not received")
+    }
+
+    // After Stop(), signals should not be delivered to channel
+    signal.Stop(sigChan)
+    syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+
+    select {
+    case <-sigChan:
+        t.Fatal("signal received after Stop()")
+    case <-time.After(100 * time.Millisecond):
+        // Good - signal not delivered
+    }
+}
+```
+
 **Estimated Effort:** 0.5 days
 
 ---
@@ -103,6 +157,30 @@ go func() {
 - [ ] Use sync.WaitGroup or channel coordination for cleanup
 - [ ] Add test for context cancellation during close
 
+**Testing Strategy:**
+```go
+func TestPoolCloseWithContextCancellation(t *testing.T) {
+    pool := NewPool(testConfig)
+
+    // Get baseline goroutine count
+    before := runtime.NumGoroutine()
+
+    // Cancel context immediately
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    err := pool.CloseWithContext(ctx)
+    assert.ErrorIs(t, err, context.Canceled)
+
+    // Allow time for any leaked goroutines to show up
+    time.Sleep(50 * time.Millisecond)
+
+    after := runtime.NumGoroutine()
+    // Should not have leaked goroutines (allow +/- 1 for GC)
+    assert.InDelta(t, before, after, 1, "goroutine leak detected")
+}
+```
+
 **Estimated Effort:** 0.5 days
 
 ---
@@ -119,6 +197,48 @@ go func() {
 - [ ] Use `sync.Once` to ensure single refresh loop
 - [ ] Add `Started()` method to check state
 - [ ] Add test for multiple Start() calls
+
+**Testing Strategy:**
+```go
+func TestCachedRegistryStartIsIdempotent(t *testing.T) {
+    registry := NewCachedRegistry(mockSource, 1*time.Second)
+
+    before := runtime.NumGoroutine()
+
+    // Call Start multiple times
+    registry.Start()
+    registry.Start()
+    registry.Start()
+
+    time.Sleep(50 * time.Millisecond)
+    after := runtime.NumGoroutine()
+
+    // Should only have ONE additional goroutine, not three
+    assert.Equal(t, before+1, after, "multiple refresh goroutines spawned")
+
+    // Verify Started() returns true
+    assert.True(t, registry.Started())
+
+    registry.Stop()
+}
+
+func TestCachedRegistryStartWithRaceDetector(t *testing.T) {
+    // Run with -race flag to detect concurrent map writes
+    registry := NewCachedRegistry(mockSource, 10*time.Millisecond)
+
+    var wg sync.WaitGroup
+    for i := 0; i < 10; i++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            registry.Start() // Should be safe to call concurrently
+        }()
+    }
+    wg.Wait()
+
+    registry.Stop()
+}
+```
 
 **Estimated Effort:** 0.5 days
 
@@ -149,6 +269,38 @@ if _, err := w.Write([]byte("NOT_SERVING")); err != nil {
 - [ ] Log warnings for write failures (not errors—client disconnect is normal)
 - [ ] Audit all HTTP handlers for similar patterns
 
+**Testing Strategy:**
+```go
+func TestHealthEndpointHandlesWriteError(t *testing.T) {
+    // Use a mock ResponseWriter that fails on Write
+    mockWriter := &failingResponseWriter{
+        ResponseWriter: httptest.NewRecorder(),
+        failOnWrite:    true,
+    }
+
+    handler := NewHealthHandler(logger)
+    req := httptest.NewRequest("GET", "/health", nil)
+
+    // Should not panic, should log warning
+    handler.ServeHTTP(mockWriter, req)
+
+    // Verify warning was logged (check logger mock)
+    assert.Contains(t, logBuffer.String(), "failed to write health response")
+}
+
+type failingResponseWriter struct {
+    http.ResponseWriter
+    failOnWrite bool
+}
+
+func (f *failingResponseWriter) Write(b []byte) (int, error) {
+    if f.failOnWrite {
+        return 0, errors.New("connection reset by peer")
+    }
+    return f.ResponseWriter.Write(b)
+}
+```
+
 **Estimated Effort:** 0.5 days
 
 ---
@@ -174,6 +326,36 @@ if _, err := uuid.Parse(bankCashAccountID); err != nil {
 **Acceptance Criteria:**
 - [ ] Use `uuid.Parse()` for all UUID validation
 - [ ] Consistent error messages across services
+
+**Testing Strategy:**
+```go
+func TestUUIDValidation(t *testing.T) {
+    tests := []struct {
+        name    string
+        input   string
+        wantErr bool
+    }{
+        {"valid uuid", "550e8400-e29b-41d4-a716-446655440000", false},
+        {"valid uuid uppercase", "550E8400-E29B-41D4-A716-446655440000", false},
+        {"empty string", "", true},
+        {"too short", "550e8400-e29b-41d4", true},
+        {"invalid chars", "550e8400-e29b-41d4-a716-44665544ZZZZ", true},
+        {"no dashes", "550e8400e29b41d4a716446655440000", true}, // uuid.Parse accepts this!
+        {"wrong dash positions", "550e-8400-e29b-41d4-a716446655440000", true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            _, err := uuid.Parse(tt.input)
+            if tt.wantErr {
+                assert.Error(t, err)
+            } else {
+                assert.NoError(t, err)
+            }
+        })
+    }
+}
+```
 
 **Estimated Effort:** 1 hour
 
