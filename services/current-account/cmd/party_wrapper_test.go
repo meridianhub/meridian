@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
-	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Testing the wrapper
+	"github.com/meridianhub/meridian/services/current-account/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -42,7 +42,7 @@ func (w *testablePartyWrapper) ValidateParty(ctx context.Context, partyID string
 	}
 
 	if party.Status != partyv1.PartyStatus_PARTY_STATUS_ACTIVE {
-		return clients.ErrPartyNotActive
+		return service.ErrPartyNotActive
 	}
 
 	return nil
@@ -53,7 +53,7 @@ func (w *testablePartyWrapper) GetParty(ctx context.Context, partyID string) (*p
 	resp, err := w.mock.RetrieveParty(ctx, &partyv1.RetrievePartyRequest{PartyId: partyID})
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
-			return nil, clients.ErrPartyNotFound
+			return nil, service.ErrPartyNotFound
 		}
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func TestPartyWrapper_ValidateParty_ReturnsErrPartyNotActiveForInactiveParty(t *
 			err := wrapper.ValidateParty(context.Background(), "party-123")
 
 			require.Error(t, err)
-			assert.ErrorIs(t, err, clients.ErrPartyNotActive)
+			assert.ErrorIs(t, err, service.ErrPartyNotActive)
 		})
 	}
 }
@@ -122,7 +122,7 @@ func TestPartyWrapper_GetParty_ReturnsErrPartyNotFoundForNotFoundStatus(t *testi
 
 	assert.Nil(t, party)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, clients.ErrPartyNotFound)
+	assert.ErrorIs(t, err, service.ErrPartyNotFound)
 }
 
 func TestPartyWrapper_GetParty_ReturnsPartyForExistingParty(t *testing.T) {
@@ -155,7 +155,7 @@ func TestPartyWrapper_GetParty_PassesThroughOtherErrors(t *testing.T) {
 	assert.Nil(t, party)
 	require.Error(t, err)
 	// Should not be ErrPartyNotFound
-	assert.NotErrorIs(t, err, clients.ErrPartyNotFound)
+	assert.NotErrorIs(t, err, service.ErrPartyNotFound)
 	// Should be the original gRPC error
 	st, ok := status.FromError(err)
 	require.True(t, ok)
@@ -171,5 +171,5 @@ func TestPartyWrapper_ValidateParty_ReturnsErrPartyNotFoundWhenPartyNotFound(t *
 	err := wrapper.ValidateParty(context.Background(), "nonexistent-party")
 
 	require.Error(t, err)
-	assert.ErrorIs(t, err, clients.ErrPartyNotFound)
+	assert.ErrorIs(t, err, service.ErrPartyNotFound)
 }

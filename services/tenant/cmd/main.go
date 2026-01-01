@@ -14,7 +14,6 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	"github.com/meridianhub/meridian/services/tenant/clients" //nolint:staticcheck // Using PartyClient interface and PartyClientAdapter, not the deprecated NewPartyClient
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/services/tenant/worker"
@@ -165,7 +164,7 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Party client (optional - skipped if PARTY_SERVICE_ENABLED is not "true")
 	// Uses the service-owned party client package with adapter for tenant-specific interface
-	var partyClient clients.PartyClient
+	var partyClient service.PartyClient
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 	partyEnabled := env.GetEnvOrDefault("PARTY_SERVICE_ENABLED", envValueTrue) == envValueTrue
 	if partyEnabled {
@@ -386,7 +385,7 @@ func getConfigSource(key string) string {
 // Uses the service-owned client package from services/party/client for standardized
 // client creation with built-in tracing and resilience patterns.
 // Returns a PartyClient interface adapter wrapping the underlying party client.
-func createPartyClient(namespace string, logger *slog.Logger, tracer *observability.Tracer) (clients.PartyClient, func(), error) {
+func createPartyClient(namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.PartyClient, func(), error) {
 	logger.Info("connecting to party service",
 		"service", partyclient.ServiceName,
 		"namespace", namespace,
@@ -431,7 +430,7 @@ func createPartyClient(namespace string, logger *slog.Logger, tracer *observabil
 	}
 
 	// Wrap with adapter to implement tenant-specific PartyClient interface
-	adapter := clients.NewPartyClientAdapter(pc, cleanup)
+	adapter := service.NewPartyClientAdapter(pc, cleanup)
 
 	return adapter, func() {
 		if err := adapter.Close(); err != nil {

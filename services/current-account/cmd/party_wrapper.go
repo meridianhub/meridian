@@ -6,14 +6,14 @@ import (
 	"context"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
-	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Using clients package for PartyClient interface and errors
+	"github.com/meridianhub/meridian/services/current-account/service"
 	partyclient "github.com/meridianhub/meridian/services/party/client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 // Compile-time interface assertion.
-var _ clients.PartyClient = (*PartyClientWrapper)(nil)
+var _ service.PartyClient = (*PartyClientWrapper)(nil)
 
 // PartyClientWrapper wraps the service-owned party client with CurrentAccount-specific methods.
 //
@@ -21,7 +21,7 @@ var _ clients.PartyClient = (*PartyClientWrapper)(nil)
 // but CurrentAccount needs higher-level convenience methods (ValidateParty, GetParty) that
 // handle status checking and error translation.
 //
-// This wrapper implements the clients.PartyClient interface expected by the service layer.
+// This wrapper implements the service.PartyClient interface expected by the service layer.
 type PartyClientWrapper struct {
 	client *partyclient.Client
 }
@@ -34,8 +34,8 @@ func NewPartyClientWrapper(client *partyclient.Client) *PartyClientWrapper {
 // ValidateParty checks if a party exists and is active.
 //
 // Returns nil if the party exists and has ACTIVE status.
-// Returns clients.ErrPartyNotFound if the party does not exist.
-// Returns clients.ErrPartyNotActive if the party exists but is not ACTIVE.
+// Returns service.ErrPartyNotFound if the party does not exist.
+// Returns service.ErrPartyNotActive if the party exists but is not ACTIVE.
 func (w *PartyClientWrapper) ValidateParty(ctx context.Context, partyID string) error {
 	party, err := w.GetParty(ctx, partyID)
 	if err != nil {
@@ -43,7 +43,7 @@ func (w *PartyClientWrapper) ValidateParty(ctx context.Context, partyID string) 
 	}
 
 	if party.Status != partyv1.PartyStatus_PARTY_STATUS_ACTIVE {
-		return clients.ErrPartyNotActive
+		return service.ErrPartyNotActive
 	}
 
 	return nil
@@ -61,7 +61,7 @@ func (w *PartyClientWrapper) GetParty(ctx context.Context, partyID string) (*par
 	if err != nil {
 		// Check for NOT_FOUND status and translate to domain error
 		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
-			return nil, clients.ErrPartyNotFound
+			return nil, service.ErrPartyNotFound
 		}
 		// Pass through error without re-wrapping (underlying client already wraps)
 		return nil, err

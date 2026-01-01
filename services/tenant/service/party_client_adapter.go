@@ -1,5 +1,5 @@
-// Package clients provides gRPC client wrappers for external service communication.
-package clients
+// Package service implements the TenantService gRPC server.
+package service
 
 import (
 	"context"
@@ -10,6 +10,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// Compile-time interface assertion.
+var _ PartyClient = (*PartyClientAdapter)(nil)
 
 // PartyClientAdapter wraps the service-owned party client and implements the
 // PartyClient interface expected by the tenant service.

@@ -1,5 +1,5 @@
-// Package clients provides HTTP and gRPC client wrappers for external service communication.
-package clients
+// Package pagerduty provides an HTTP client for PagerDuty Events API v2 integration.
+package pagerduty
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 )
 
 // PagerDuty Events API v2 endpoint.
-const pagerDutyEventsURL = "https://events.pagerduty.com/v2/enqueue"
+const eventsURL = "https://events.pagerduty.com/v2/enqueue"
 
 // PagerDuty event actions.
 const (
@@ -44,26 +44,26 @@ const (
 
 // PagerDuty client errors.
 var (
-	// ErrPagerDutyNotConfigured is returned when attempting to use PagerDuty without configuration.
-	ErrPagerDutyNotConfigured = errors.New("PagerDuty client not configured")
-	// ErrPagerDutyAPIError is returned when the PagerDuty API returns an error.
-	ErrPagerDutyAPIError = errors.New("PagerDuty API error")
-	// ErrPagerDutyRateLimited is returned when rate limited by PagerDuty.
-	ErrPagerDutyRateLimited = errors.New("PagerDuty rate limited")
-	// ErrPagerDutyInvalidRequest is returned when the request is malformed.
-	ErrPagerDutyInvalidRequest = errors.New("PagerDuty invalid request")
+	// ErrNotConfigured is returned when attempting to use PagerDuty without configuration.
+	ErrNotConfigured = errors.New("PagerDuty client not configured")
+	// ErrAPIError is returned when the PagerDuty API returns an error.
+	ErrAPIError = errors.New("PagerDuty API error")
+	// ErrRateLimited is returned when rate limited by PagerDuty.
+	ErrRateLimited = errors.New("PagerDuty rate limited")
+	// ErrInvalidRequest is returned when the request is malformed.
+	ErrInvalidRequest = errors.New("PagerDuty invalid request")
 )
 
-// PagerDutyEvent represents the Events API v2 request payload.
-type PagerDutyEvent struct {
-	RoutingKey  string                `json:"routing_key"`
-	EventAction string                `json:"event_action"`
-	DedupKey    string                `json:"dedup_key,omitempty"`
-	Payload     PagerDutyEventPayload `json:"payload"`
+// Event represents the Events API v2 request payload.
+type Event struct {
+	RoutingKey  string       `json:"routing_key"`
+	EventAction string       `json:"event_action"`
+	DedupKey    string       `json:"dedup_key,omitempty"`
+	Payload     EventPayload `json:"payload"`
 }
 
-// PagerDutyEventPayload contains the alert details.
-type PagerDutyEventPayload struct {
+// EventPayload contains the alert details.
+type EventPayload struct {
 	Summary       string         `json:"summary"`
 	Severity      string         `json:"severity"`
 	Source        string         `json:"source"`
@@ -74,50 +74,50 @@ type PagerDutyEventPayload struct {
 	CustomDetails map[string]any `json:"custom_details,omitempty"`
 }
 
-// PagerDutyResponse represents the Events API v2 response.
-type PagerDutyResponse struct {
+// Response represents the Events API v2 response.
+type Response struct {
 	Status   string `json:"status"`
 	Message  string `json:"message"`
 	DedupKey string `json:"dedup_key,omitempty"`
 }
 
-// PagerDutyClient sends alerts to PagerDuty using Events API v2.
-type PagerDutyClient struct {
-	config     config.PagerDutyConfig
-	httpClient *http.Client
-	eventsURL  string // Allow override for testing
+// Client sends alerts to PagerDuty using Events API v2.
+type Client struct {
+	config       config.PagerDutyConfig
+	httpClient   *http.Client
+	eventsURLVal string // Allow override for testing
 }
 
-// PagerDutyClientOption configures the PagerDuty client.
-type PagerDutyClientOption func(*PagerDutyClient)
+// ClientOption configures the PagerDuty client.
+type ClientOption func(*Client)
 
 // WithHTTPClient sets a custom HTTP client for the PagerDuty client.
-func WithHTTPClient(client *http.Client) PagerDutyClientOption {
-	return func(c *PagerDutyClient) {
+func WithHTTPClient(client *http.Client) ClientOption {
+	return func(c *Client) {
 		c.httpClient = client
 	}
 }
 
 // WithEventsURL sets a custom events URL for testing.
-func WithEventsURL(url string) PagerDutyClientOption {
-	return func(c *PagerDutyClient) {
-		c.eventsURL = url
+func WithEventsURL(url string) ClientOption {
+	return func(c *Client) {
+		c.eventsURLVal = url
 	}
 }
 
-// NewPagerDutyClient creates a new PagerDuty client.
+// NewClient creates a new PagerDuty client.
 // Returns nil if PagerDuty is not enabled in the configuration.
-func NewPagerDutyClient(cfg config.PagerDutyConfig, opts ...PagerDutyClientOption) *PagerDutyClient {
+func NewClient(cfg config.PagerDutyConfig, opts ...ClientOption) *Client {
 	if !cfg.Enabled {
 		return nil
 	}
 
-	client := &PagerDutyClient{
+	client := &Client{
 		config: cfg,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		eventsURL: pagerDutyEventsURL,
+		eventsURLVal: eventsURL,
 	}
 
 	for _, opt := range opts {
@@ -129,16 +129,16 @@ func NewPagerDutyClient(cfg config.PagerDutyConfig, opts ...PagerDutyClientOptio
 
 // TriggerAlert sends a trigger event to PagerDuty.
 // The dedupKey is used for deduplication - alerts with the same key are grouped.
-func (c *PagerDutyClient) TriggerAlert(ctx context.Context, summary, dedupKey string, severity Severity, customDetails map[string]any) error {
+func (c *Client) TriggerAlert(ctx context.Context, summary, dedupKey string, severity Severity, customDetails map[string]any) error {
 	if c == nil {
-		return ErrPagerDutyNotConfigured
+		return ErrNotConfigured
 	}
 
-	event := PagerDutyEvent{
+	event := Event{
 		RoutingKey:  c.config.RoutingKey,
 		EventAction: EventActionTrigger,
 		DedupKey:    dedupKey,
-		Payload: PagerDutyEventPayload{
+		Payload: EventPayload{
 			Summary:       summary,
 			Severity:      string(severity),
 			Source:        c.config.Source,
@@ -152,12 +152,12 @@ func (c *PagerDutyClient) TriggerAlert(ctx context.Context, summary, dedupKey st
 
 // ResolveAlert sends a resolve event to PagerDuty.
 // The dedupKey must match the original trigger event to resolve the correct incident.
-func (c *PagerDutyClient) ResolveAlert(ctx context.Context, dedupKey string) error {
+func (c *Client) ResolveAlert(ctx context.Context, dedupKey string) error {
 	if c == nil {
-		return ErrPagerDutyNotConfigured
+		return ErrNotConfigured
 	}
 
-	event := PagerDutyEvent{
+	event := Event{
 		RoutingKey:  c.config.RoutingKey,
 		EventAction: EventActionResolve,
 		DedupKey:    dedupKey,
@@ -167,13 +167,13 @@ func (c *PagerDutyClient) ResolveAlert(ctx context.Context, dedupKey string) err
 }
 
 // sendEvent sends an event to the PagerDuty Events API.
-func (c *PagerDutyClient) sendEvent(ctx context.Context, event PagerDutyEvent) error {
+func (c *Client) sendEvent(ctx context.Context, event Event) error {
 	payload, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal PagerDuty event: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.eventsURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.eventsURLVal, bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("failed to create PagerDuty request: %w", err)
 	}
@@ -192,10 +192,10 @@ func (c *PagerDutyClient) sendEvent(ctx context.Context, event PagerDutyEvent) e
 	}
 
 	// Parse response
-	var pdResp PagerDutyResponse
+	var pdResp Response
 	if err := json.Unmarshal(body, &pdResp); err != nil {
 		// Include raw body in error for debugging
-		return fmt.Errorf("%w: status %d, body: %s", ErrPagerDutyAPIError, resp.StatusCode, string(body))
+		return fmt.Errorf("%w: status %d, body: %s", ErrAPIError, resp.StatusCode, string(body))
 	}
 
 	// Handle response status codes
@@ -204,11 +204,11 @@ func (c *PagerDutyClient) sendEvent(ctx context.Context, event PagerDutyEvent) e
 		// Success
 		return nil
 	case http.StatusBadRequest:
-		return fmt.Errorf("%w: %s", ErrPagerDutyInvalidRequest, pdResp.Message)
+		return fmt.Errorf("%w: %s", ErrInvalidRequest, pdResp.Message)
 	case http.StatusTooManyRequests:
-		return ErrPagerDutyRateLimited
+		return ErrRateLimited
 	default:
-		return fmt.Errorf("%w: status %d, message: %s", ErrPagerDutyAPIError, resp.StatusCode, pdResp.Message)
+		return fmt.Errorf("%w: status %d, message: %s", ErrAPIError, resp.StatusCode, pdResp.Message)
 	}
 }
 
@@ -231,6 +231,6 @@ func MapAlertSeverity(severity string) Severity {
 }
 
 // IsEnabled returns true if the PagerDuty client is configured and enabled.
-func (c *PagerDutyClient) IsEnabled() bool {
+func (c *Client) IsEnabled() bool {
 	return c != nil && c.config.Enabled
 }

@@ -1,25 +1,21 @@
-// Package clients provides consumer-specific client interfaces for inter-service communication.
-//
-// MIGRATION NOTE: This package now re-exports interfaces that are implemented by the
-// service-owned client packages. The actual client implementations have been moved to:
-//   - github.com/meridianhub/meridian/services/position-keeping/client
-//   - github.com/meridianhub/meridian/services/financial-accounting/client
-//   - github.com/meridianhub/meridian/services/party/client
-//
-// These interfaces are kept here for:
-//  1. Backward compatibility with existing code that imports from this package
-//  2. Allowing mock implementations for testing without importing the full client packages
-//  3. Consumer-specific interface definitions (subset of methods actually used)
-//
-// For new code, prefer importing directly from the service-owned client packages.
-package clients
+// Package service implements gRPC services for the current account domain.
+package service
 
 import (
 	"context"
+	"errors"
 
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+)
+
+// Party validation errors.
+var (
+	// ErrPartyNotFound is returned when the requested party does not exist.
+	ErrPartyNotFound = errors.New("party not found")
+	// ErrPartyNotActive is returned when the party exists but is not in ACTIVE status.
+	ErrPartyNotActive = errors.New("party not active")
 )
 
 // PositionKeepingClient defines the interface for communicating with the PositionKeeping service.

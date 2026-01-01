@@ -15,14 +15,11 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Deprecated package still needed during migration
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
-	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/auth"
-	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -138,9 +135,9 @@ type Service struct {
 	repo                   *persistence.Repository
 	lienRepo               *persistence.LienRepository
 	withdrawalRepo         *persistence.WithdrawalRepository
-	posKeepingClient       clients.PositionKeepingClient
-	finAcctClient          clients.FinancialAccountingClient
-	partyClient            clients.PartyClient
+	posKeepingClient       PositionKeepingClient
+	finAcctClient          FinancialAccountingClient
+	partyClient            PartyClient
 	accountConfig          *config.AccountConfig
 	idempotencyService     idempotency.Service
 	eventPublisher         AccountEventPublisher // Optional: publishes lifecycle events to Kafka
@@ -210,9 +207,9 @@ func NewServiceWithExistingClients(
 	repo *persistence.Repository,
 	lienRepo *persistence.LienRepository,
 	withdrawalRepo *persistence.WithdrawalRepository,
-	posKeepingClient clients.PositionKeepingClient,
-	finAcctClient clients.FinancialAccountingClient,
-	partyClient clients.PartyClient,
+	posKeepingClient PositionKeepingClient,
+	finAcctClient FinancialAccountingClient,
+	partyClient PartyClient,
 	accountConfig *config.AccountConfig,
 	idempotencyService idempotency.Service,
 	logger *slog.Logger,
@@ -262,127 +259,6 @@ func NewServiceWithExistingClients(
 		idempotencyService:     idempotencyService,
 		logger:                 logger,
 		tracer:                 tracer,
-		depositOrchestrator:    depositOrchestrator,
-		withdrawalOrchestrator: withdrawalOrchestrator,
-	}, nil
-}
-
-// NewServiceWithClients creates a new current account service with full external client dependencies.
-// This factory handles client creation, wrapping with resilience patterns (circuit breaker, retry),
-// and validation of all required configuration.
-func NewServiceWithClients(config Config) (*Service, error) {
-	// Validate required dependencies
-	if config.Repository == nil {
-		return nil, ErrRepositoryNil
-	}
-	if config.PositionKeepingServiceName == "" {
-		return nil, ErrPositionKeepingServiceNameEmpty
-	}
-	if config.FinancialAccountingServiceName == "" {
-		return nil, ErrFinancialAccountingServiceNameEmpty
-	}
-
-	// Apply default logger if not provided
-	logger := config.Logger
-	if logger == nil {
-		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	}
-
-	// Create Position Keeping client with DNS-based load balancing
-	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{ //nolint:staticcheck // Deprecated, migration in progress
-		ServiceName: config.PositionKeepingServiceName,
-		Namespace:   config.Namespace,
-		Port:        config.PositionKeepingPort,
-		Timeout:     defaults.DefaultRPCTimeout,
-		Tracer:      config.Tracer,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create position keeping client: %w", err)
-	}
-
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientPosKeepingClient := clients.NewResilientPositionKeepingClient(
-		posKeepingGRPCClient,
-		sharedclients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
-
-	// Create Financial Accounting client with DNS-based load balancing
-	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{ //nolint:staticcheck // Deprecated, migration in progress
-		ServiceName: config.FinancialAccountingServiceName,
-		Namespace:   config.Namespace,
-		Port:        config.FinancialAccountingPort,
-		Timeout:     defaults.DefaultRPCTimeout,
-		Tracer:      config.Tracer,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create financial accounting client: %w", err)
-	}
-
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientFinAcctClient := clients.NewResilientFinancialAccountingClient(
-		finAcctGRPCClient,
-		sharedclients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
-
-	// Create Party client (optional - nil client provides backward compatibility)
-	var resilientPartyClient clients.PartyClient
-	if config.PartyServiceName != "" {
-		partyGRPCClient, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{ //nolint:staticcheck // Deprecated, migration in progress
-			ServiceName: config.PartyServiceName,
-			Namespace:   config.Namespace,
-			Port:        config.PartyPort,
-			Timeout:     defaults.DefaultRPCTimeout,
-			Tracer:      config.Tracer,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create party client: %w", err)
-		}
-
-		resilientPartyClient = clients.NewResilientPartyClient(
-			partyGRPCClient,
-			sharedclients.ResilientClientConfig{
-				Logger: logger,
-			},
-		)
-	}
-
-	// Create deposit orchestrator
-	depositOrchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
-		Logger:           logger,
-		Repo:             config.Repository,
-		PosKeepingClient: resilientPosKeepingClient,
-		FinAcctClient:    resilientFinAcctClient,
-		AccountConfig:    nil, // Not passed in Config - will use defaults
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
-	}
-
-	// Create withdrawal orchestrator
-	withdrawalOrchestrator, err := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
-		Logger:           logger,
-		Repo:             config.Repository,
-		PosKeepingClient: resilientPosKeepingClient,
-		FinAcctClient:    resilientFinAcctClient,
-		AccountConfig:    nil, // Not passed in Config - will use defaults
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
-	}
-
-	return &Service{
-		repo:                   config.Repository,
-		lienRepo:               config.LienRepository,
-		withdrawalRepo:         config.WithdrawalRepository,
-		posKeepingClient:       resilientPosKeepingClient,
-		finAcctClient:          resilientFinAcctClient,
-		partyClient:            resilientPartyClient,
-		logger:                 logger,
-		tracer:                 config.Tracer,
 		depositOrchestrator:    depositOrchestrator,
 		withdrawalOrchestrator: withdrawalOrchestrator,
 	}, nil

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Deprecated package still needed during migration
 	"github.com/meridianhub/meridian/services/current-account/service"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -21,8 +20,8 @@ func ExampleHealthChecker() {
 	// Create dependencies (repository, clients, etc.)
 	// In production, these would be properly initialized
 	var repo *persistence.Repository
-	var posKeepingClient clients.PositionKeepingClient
-	var finAcctClient clients.FinancialAccountingClient
+	var posKeepingClient service.PositionKeepingClient
+	var finAcctClient service.FinancialAccountingClient
 
 	// Create health checker
 	healthChecker, err := service.NewHealthChecker(service.HealthCheckerConfig{

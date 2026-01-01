@@ -12,7 +12,6 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients" //nolint:staticcheck // Using clients package for interfaces and errors only
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/service"
 	finacctclient "github.com/meridianhub/meridian/services/financial-accounting/client"
@@ -230,9 +229,9 @@ func parseLogLevel(levelStr string) slog.Level {
 
 // serviceClients holds the clients created by createServiceWithClients.
 type serviceClients struct {
-	positionKeeping     clients.PositionKeepingClient
-	financialAccounting clients.FinancialAccountingClient
-	party               clients.PartyClient
+	positionKeeping     service.PositionKeepingClient
+	financialAccounting service.FinancialAccountingClient
+	party               service.PartyClient
 	// Health clients bypass the circuit breaker for health checks
 	positionKeepingHealth     grpc_health_v1.HealthClient
 	financialAccountingHealth grpc_health_v1.HealthClient
@@ -341,15 +340,15 @@ func createServiceWithClients(
 	partyClientWrapper := NewPartyClientWrapper(partyBaseClient)
 
 	// Create service with the pre-created clients
-	// The new service-owned clients implement the same interfaces as the old clients,
-	// so they can be passed directly to the service constructor
+	// The new service-owned clients implement the same interfaces as defined in
+	// services/current-account/service/client_interfaces.go
 	svc, err := service.NewServiceWithExistingClients(
 		repo,
 		lienRepo,
 		withdrawalRepo,
-		posKeepingClient,   // *poskeepingclient.Client implements clients.PositionKeepingClient
-		finAcctClient,      // *finacctclient.Client implements clients.FinancialAccountingClient
-		partyClientWrapper, // *PartyClientWrapper implements clients.PartyClient
+		posKeepingClient,   // *poskeepingclient.Client implements service.PositionKeepingClient
+		finAcctClient,      // *finacctclient.Client implements service.FinancialAccountingClient
+		partyClientWrapper, // *PartyClientWrapper implements service.PartyClient
 		accountConfig,
 		idempotencyService,
 		logger,

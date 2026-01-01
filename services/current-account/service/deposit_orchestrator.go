@@ -15,7 +15,6 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
@@ -33,8 +32,8 @@ import (
 type DepositOrchestrator struct {
 	logger           *slog.Logger
 	repo             *persistence.Repository
-	posKeepingClient clients.PositionKeepingClient
-	finAcctClient    clients.FinancialAccountingClient
+	posKeepingClient PositionKeepingClient
+	finAcctClient    FinancialAccountingClient
 	accountConfig    *config.AccountConfig
 }
 
@@ -42,8 +41,8 @@ type DepositOrchestrator struct {
 type DepositOrchestratorConfig struct {
 	Logger           *slog.Logger
 	Repo             *persistence.Repository
-	PosKeepingClient clients.PositionKeepingClient
-	FinAcctClient    clients.FinancialAccountingClient
+	PosKeepingClient PositionKeepingClient
+	FinAcctClient    FinancialAccountingClient
 	AccountConfig    *config.AccountConfig
 }
 
