@@ -147,7 +147,6 @@ func main() {
 	// Wait for interrupt signal
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	<-sigChan
-	signalCleanup() // Stop signal handling immediately after receiving signal
 
 	logger.Info("shutdown signal received, starting graceful shutdown...")
 
@@ -164,6 +163,9 @@ func main() {
 
 	// Cancel context after all shutdown operations complete
 	cancel()
+
+	// Clean up signal handler before potential exit
+	signalCleanup()
 
 	if closeErr != nil {
 		logger.Error("container close error", "error", closeErr)
