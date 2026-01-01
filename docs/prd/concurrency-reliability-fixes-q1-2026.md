@@ -365,46 +365,45 @@ func TestUUIDValidation(t *testing.T) {
 
 #### 4.1 Nightly Workflow Failing for 9 Days
 
-**Problem:** The nightly GitHub Action has been failing consistently. Primary suspect: invalid Go version `1.25.5` specified in workflow (Go 1.25 doesn't exist).
+**Problem:** The nightly GitHub Action has been failing consistently for 9 days. Root cause needs investigation from workflow run logs.
 
-**File:** `.github/workflows/nightly.yml:31,101`
+**File:** `.github/workflows/nightly.yml`
 
-```yaml
-# Current (WRONG - Go 1.25 doesn't exist)
-go-version: '1.25.5'
+**Potential Causes to Investigate:**
+- Flaky tests in full suite (runs without `-short` flag)
+- Test timeout (15m may be insufficient for full suite with race detector)
+- Testcontainers resource issues on GitHub runners
+- Benchmark comparison failures due to missing baseline
 
-# Fixed (use valid version)
-go-version: '1.23'
-```
-
-**Jobs Affected:**
-- `benchmark-comparison` (line 31)
-- `slow-integration-tests` (line 101)
+**Jobs to Check:**
+- `benchmark-comparison` - Compares HEAD against develop
+- `slow-integration-tests` - Full test suite with `-race`, no `-short`
 
 **Risk:** No nightly test coverage, benchmark regressions go undetected.
 
 **Acceptance Criteria:**
-- [ ] Fix Go version to valid release (1.22.x or 1.23.x)
-- [ ] Verify workflow runs successfully
-- [ ] Add Go version as workflow input or matrix for easier updates
-- [ ] Consider pinning to go.mod version using `go-version-file: 'go.mod'`
+- [ ] Review last 9 days of workflow run logs to identify failure pattern
+- [ ] Fix root cause (flaky test, timeout, resource issue)
+- [ ] Add retry logic or increase timeout if needed
+- [ ] Ensure workflow passes for 3 consecutive nights
 
 **Testing Strategy:**
-```yaml
-# Use go.mod as source of truth for Go version
-- name: Set up Go
-  uses: actions/setup-go@v5
-  with:
-    go-version-file: 'go.mod'  # Automatically uses version from go.mod
-    cache: true
+```bash
+# Reproduce locally with same flags as nightly:
+go test -v -race -timeout 15m ./... 2>&1 | tee test-output.txt
 
-# Or test with workflow_dispatch before merging:
-# 1. Push fix to branch
-# 2. Manually trigger workflow via Actions tab
-# 3. Verify all jobs pass
+# Check for flaky tests by running multiple times:
+for i in {1..5}; do
+  go test -race -count=1 ./path/to/flaky/package
+done
+
+# Or trigger workflow manually via GitHub CLI:
+gh workflow run nightly.yml --ref develop
+gh run list --workflow=nightly.yml --limit=5
+gh run view <run-id> --log-failed
 ```
 
-**Estimated Effort:** 1 hour
+**Estimated Effort:** 0.5-1 day (depends on root cause)
 
 ---
 
@@ -418,7 +417,7 @@ go-version: '1.23'
 | 2.3 | CachedRegistry Idempotency | P1 | 0.5d | None |
 | 3.1 | HTTP Write Error Handling | P2 | 0.5d | None |
 | 3.2 | UUID Validation | P2 | 1h | None |
-| 4.1 | Nightly Workflow Fix | P0 | 1h | None |
+| 4.1 | Nightly Workflow Fix | P0 | 0.5-1d | None |
 
 **Total Estimated Effort:** 2.5-3 days
 
