@@ -201,3 +201,74 @@ func TestShutdownOrchestrator_Wait(t *testing.T) {
 		assert.NotNil(t, orchestrator)
 	})
 }
+
+func TestSignalHandler(t *testing.T) {
+	t.Run("returns channel and cleanup function", func(t *testing.T) {
+		sigChan, cleanup := SignalHandler()
+		defer cleanup()
+
+		assert.NotNil(t, sigChan)
+		assert.NotNil(t, cleanup)
+	})
+
+	t.Run("cleanup is idempotent", func(t *testing.T) {
+		sigChan, cleanup := SignalHandler()
+
+		// Multiple cleanup calls should not panic
+		assert.NotPanics(t, func() {
+			cleanup()
+			cleanup()
+			cleanup()
+		})
+
+		assert.NotNil(t, sigChan)
+	})
+
+	t.Run("signal channel is buffered", func(t *testing.T) {
+		sigChan, cleanup := SignalHandler()
+		defer cleanup()
+
+		// Channel should be buffered with size 1
+		assert.Equal(t, 1, cap(sigChan))
+	})
+
+	t.Run("cleanup returns proper function that can be deferred", func(t *testing.T) {
+		// This test verifies the cleanup function integrates properly with defer.
+		// We cannot safely send SIGINT/SIGTERM in tests as they would terminate
+		// the test process, so we verify the structural correctness of the API.
+
+		// Simulate the expected usage pattern with defer
+		var cleanupCalled bool
+		func() {
+			sigChan, cleanup := SignalHandler()
+			defer func() {
+				cleanup()
+				cleanupCalled = true
+			}()
+
+			// Verify channel is ready to receive
+			assert.NotNil(t, sigChan)
+			assert.Equal(t, 1, cap(sigChan), "channel should be buffered")
+		}()
+
+		assert.True(t, cleanupCalled, "cleanup should have been called via defer")
+	})
+
+	t.Run("multiple handlers can coexist independently", func(t *testing.T) {
+		// Verify that multiple SignalHandler calls create independent handlers
+		sigChan1, cleanup1 := SignalHandler()
+		sigChan2, cleanup2 := SignalHandler()
+
+		// Both channels should be valid and independently buffered
+		assert.Equal(t, 1, cap(sigChan1), "first channel should be buffered")
+		assert.Equal(t, 1, cap(sigChan2), "second channel should be buffered")
+
+		// Cleaning up one should not affect the other
+		cleanup1()
+
+		// sigChan2 should still be valid and have capacity
+		assert.Equal(t, 1, cap(sigChan2), "second channel should remain valid after first cleanup")
+
+		cleanup2()
+	})
+}

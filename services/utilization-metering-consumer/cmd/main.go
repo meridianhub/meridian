@@ -10,10 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
 	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
@@ -239,8 +238,8 @@ func run(logger *slog.Logger) error {
 	}()
 
 	// Wait for interrupt signal, server error, or consumer error
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan, signalCleanup := bootstrap.SignalHandler()
+	defer signalCleanup()
 
 	select {
 	case sig := <-sigChan:

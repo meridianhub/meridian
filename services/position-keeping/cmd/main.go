@@ -9,8 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
@@ -21,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/prometheus/client_golang/prometheus"
@@ -285,8 +284,8 @@ func run(logger *slog.Logger) error {
 	}()
 
 	// Wait for interrupt signal or server error
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan, signalCleanup := bootstrap.SignalHandler()
+	defer signalCleanup()
 
 	select {
 	case sig := <-sigChan:

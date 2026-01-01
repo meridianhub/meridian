@@ -52,6 +52,22 @@ func (s *ShutdownOrchestrator) AddCleanup(fn func() error) {
 	s.cleanupFuncs = append(s.cleanupFuncs, fn)
 }
 
+// SignalHandler creates a signal channel configured to receive SIGINT and SIGTERM.
+// Returns the channel and a cleanup function. The caller MUST defer the cleanup
+// function to prevent resource leaks.
+//
+// Example:
+//
+//	sigChan, cleanup := bootstrap.SignalHandler()
+//	defer cleanup()
+//	<-sigChan // Wait for shutdown signal
+func SignalHandler() (chan os.Signal, func()) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	cleanup := func() { signal.Stop(sigChan) }
+	return sigChan, cleanup
+}
+
 // Wait blocks until a shutdown signal is received (SIGINT, SIGTERM) or a server error occurs.
 // When triggered, it:
 //  1. Logs the trigger reason (signal or error)
@@ -62,8 +78,8 @@ func (s *ShutdownOrchestrator) AddCleanup(fn func() error) {
 // Returns the original server error if shutdown was triggered by one, nil otherwise.
 func (s *ShutdownOrchestrator) Wait(serverErrors <-chan error) error {
 	// Set up signal handling
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan, signalCleanup := SignalHandler()
+	defer signalCleanup()
 
 	// Wait for signal or error
 	var serverErr error
