@@ -8,6 +8,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // Register pgx driver
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -159,23 +160,43 @@ func (p *PostgresPool) Close() error {
 // - Context is cancelled before all connections are closed
 // - Database close operation fails
 func (p *PostgresPool) CloseWithContext(ctx context.Context) error {
-	// Channel to signal when Close() completes
-	done := make(chan error, 1)
-
-	// Close in background goroutine
-	go func() {
-		done <- p.Close()
-	}()
-
-	// Wait for close to complete or context cancellation
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		// Context cancelled before close completed
-		// Note: db.Close() will still complete in background
+	// Check if context is already cancelled before starting
+	if ctx.Err() != nil {
 		return fmt.Errorf("close operation cancelled: %w", ctx.Err())
 	}
+
+	g, _ := errgroup.WithContext(ctx)
+
+	// Channel to signal close completion
+	closeDone := make(chan struct{})
+
+	// Track close result
+	var closeErr error
+	g.Go(func() error {
+		closeErr = p.Close()
+		close(closeDone)
+		return nil // Always return nil, we track error separately
+	})
+
+	// Monitor for context cancellation - this goroutine ensures we wait
+	// for both close completion and context, preventing goroutine leaks
+	g.Go(func() error {
+		select {
+		case <-closeDone:
+			// Close completed, exit normally
+			return nil
+		case <-ctx.Done():
+			// Original context cancelled before close completed
+			return ctx.Err()
+		}
+	})
+
+	// Wait for all goroutines
+	if err := g.Wait(); err != nil {
+		// Context was cancelled
+		return fmt.Errorf("close operation cancelled: %w", err)
+	}
+	return closeErr
 }
 
 // DrainConnections waits for active connections to become idle with timeout.
