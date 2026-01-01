@@ -133,7 +133,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: test-results
+        name: nightly-test-results
         path: |
           test-results.xml
           test-results.json
