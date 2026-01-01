@@ -159,11 +159,12 @@ go func() {
 
 **Testing Strategy:**
 ```go
-func TestPoolCloseWithContextCancellation(t *testing.T) {
-    pool := NewPool(testConfig)
+import "go.uber.org/goleak"
 
-    // Get baseline goroutine count
-    before := runtime.NumGoroutine()
+func TestPoolCloseWithContextCancellation(t *testing.T) {
+    defer goleak.VerifyNone(t) // More reliable than runtime.NumGoroutine()
+
+    pool := NewPool(testConfig)
 
     // Cancel context immediately
     ctx, cancel := context.WithCancel(context.Background())
@@ -172,12 +173,7 @@ func TestPoolCloseWithContextCancellation(t *testing.T) {
     err := pool.CloseWithContext(ctx)
     assert.ErrorIs(t, err, context.Canceled)
 
-    // Allow time for any leaked goroutines to show up
-    time.Sleep(50 * time.Millisecond)
-
-    after := runtime.NumGoroutine()
-    // Should not have leaked goroutines (allow +/- 1 for GC)
-    assert.InDelta(t, before, after, 1, "goroutine leak detected")
+    // goleak will detect any lingering goroutines at test end
 }
 ```
 
@@ -238,6 +234,25 @@ func TestCachedRegistryStartWithRaceDetector(t *testing.T) {
 
     registry.Stop()
 }
+
+func TestCachedRegistryRefreshActuallyRuns(t *testing.T) {
+    callCount := atomic.Int32{}
+    mockSource := &MockSource{
+        fetchFunc: func() ([]Tenant, error) {
+            callCount.Add(1)
+            return []Tenant{{ID: "t1"}}, nil
+        },
+    }
+
+    registry := NewCachedRegistry(mockSource, 50*time.Millisecond)
+    registry.Start()
+
+    // Wait for at least 2 refresh cycles
+    time.Sleep(120 * time.Millisecond)
+    registry.Stop()
+
+    assert.GreaterOrEqual(t, callCount.Load(), int32(2), "refresh should have run multiple times")
+}
 ```
 
 **Estimated Effort:** 0.5 days
@@ -258,9 +273,12 @@ func TestCachedRegistryStartWithRaceDetector(t *testing.T) {
 // Current (WRONG)
 w.Write([]byte("NOT_SERVING"))
 
-// Fixed
+// Fixed (with context for debugging)
 if _, err := w.Write([]byte("NOT_SERVING")); err != nil {
-    logger.Warn("failed to write health response", "error", err)
+    logger.Warn("failed to write health response",
+        "error", err,
+        "endpoint", r.URL.Path,
+        "remote_addr", r.RemoteAddr)
 }
 ```
 
@@ -340,7 +358,7 @@ func TestUUIDValidation(t *testing.T) {
         {"empty string", "", true},
         {"too short", "550e8400-e29b-41d4", true},
         {"invalid chars", "550e8400-e29b-41d4-a716-44665544ZZZZ", true},
-        {"no dashes", "550e8400e29b41d4a716446655440000", true}, // uuid.Parse accepts this!
+        {"no dashes", "550e8400e29b41d4a716446655440000", false}, // Note: uuid.Parse accepts dashless format
         {"wrong dash positions", "550e-8400-e29b-41d4-a716446655440000", true},
     }
 
@@ -409,6 +427,15 @@ Skipped: 38
   if: always()
   with:
     paths: test-results.xml
+
+# Also add inline annotations for failed tests in PR diff view
+- name: Annotate failures
+  if: failure()
+  run: |
+    # Parse JSON and emit GitHub Actions annotations
+    jq -r '.[] | select(.Action == "fail") |
+      "::error file=\(.Package | sub("github.com/meridianhub/meridian/"; "")),line=1::\(.Test) failed"' \
+      test-results.json || true
 ```
 
 **Testing Strategy:**
@@ -458,15 +485,15 @@ go test -race -count=100 ./path/to/flaky/package
 | ID | Work Item | Priority | Effort | Dependencies |
 |----|-----------|----------|--------|--------------|
 | 1.1 | Channel Buffer Deadlock | P0 | 1h | None |
-| 2.1 | Missing signal.Stop() | P1 | 0.5d | None |
-| 2.2 | Pool Goroutine Leak | P1 | 0.5d | None |
-| 2.3 | CachedRegistry Idempotency | P1 | 0.5d | None |
-| 3.1 | HTTP Write Error Handling | P2 | 0.5d | None |
+| 2.1 | Missing signal.Stop() | P1 | 4h | None |
+| 2.2 | Pool Goroutine Leak | P1 | 4h | None |
+| 2.3 | CachedRegistry Idempotency | P1 | 4h | None |
+| 3.1 | HTTP Write Error Handling | P2 | 4h | None |
 | 3.2 | UUID Validation | P2 | 1h | None |
 | 4.1 | Nightly Test Reporting | P0 | 2h | None |
-| 4.2 | Fix 9 Failing Tests | P0 | 0.5-1d | 4.1 |
+| 4.2 | Fix 9 Failing Tests | P0 | 4-8h | 4.1 |
 
-**Total Estimated Effort:** 2.5-3 days
+**Total Estimated Effort:** 24-28 hours (~3-4 days)
 
 ---
 
@@ -485,8 +512,3 @@ go test -race -count=100 ./path/to/flaky/package
 **Phase 2 (Day 1-2):** P1 - Resource leak fixes
 **Phase 3 (Day 2-3):** P2 - Error visibility improvements
 
----
-
-## Related Documents
-
-- `docs/prd/tech-debt-remediation-q1-2026.md` - Broader tech debt remediation
