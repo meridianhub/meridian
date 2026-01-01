@@ -92,6 +92,30 @@ func NewProvisioningWorker(
 		alertThreshold = 1 * time.Hour
 	}
 
+	// Default max retries to 5 if not specified
+	maxRetries := config.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 5
+	}
+
+	// Default retry base delay to 2 seconds if not specified
+	retryBaseDelay := config.RetryBaseDelay
+	if retryBaseDelay <= 0 {
+		retryBaseDelay = 2 * time.Second
+	}
+
+	// Default retry max delay to RPC timeout if not specified
+	retryMaxDelay := config.RetryMaxDelay
+	if retryMaxDelay <= 0 {
+		retryMaxDelay = defaults.DefaultRPCTimeout
+	}
+
+	// Default max concurrent to 10 if not specified
+	maxConcurrent := config.MaxConcurrent
+	if maxConcurrent <= 0 {
+		maxConcurrent = 10
+	}
+
 	return &ProvisioningWorker{
 		repo:           repo,
 		provisioner:    provisioner,
@@ -99,10 +123,10 @@ func NewProvisioningWorker(
 		pollInterval:   config.PollInterval,
 		alertInterval:  alertInterval,
 		alertThreshold: alertThreshold,
-		maxRetries:     config.MaxRetries,
-		retryBaseDelay: config.RetryBaseDelay,
-		retryMaxDelay:  config.RetryMaxDelay,
-		maxConcurrent:  config.MaxConcurrent,
+		maxRetries:     maxRetries,
+		retryBaseDelay: retryBaseDelay,
+		retryMaxDelay:  retryMaxDelay,
+		maxConcurrent:  maxConcurrent,
 		logger:         logger,
 		done:           make(chan struct{}),
 	}, nil
