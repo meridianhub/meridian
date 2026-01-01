@@ -120,3 +120,91 @@ func (s *ShutdownOrchestrator) Wait(serverErrors <-chan error) error {
 
 	return serverErr
 }
+
+// ShutdownHandler is an interface for services that support graceful shutdown.
+// Any server or service that can be gracefully stopped should implement this interface.
+// Standard library servers like http.Server already implement this interface.
+type ShutdownHandler interface {
+	Shutdown(context.Context) error
+}
+
+// GracefulShutdown handles graceful shutdown of multiple servers with timeout.
+// It iterates through all servers, calling Shutdown on each with the provided context.
+// Errors are logged but shutdown continues for remaining servers to ensure all
+// resources are cleaned up. Returns the first error encountered or nil if all
+// servers shut down successfully.
+//
+// The function uses defaults.DefaultGracefulShutdown (30s) as the timeout if the
+// provided context does not have a deadline.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//	defer cancel()
+//	err := bootstrap.GracefulShutdown(ctx, logger, httpServer, grpcServer)
+func GracefulShutdown(ctx context.Context, logger *slog.Logger, servers ...ShutdownHandler) error {
+	// Ensure we have a deadline
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaults.DefaultGracefulShutdown)
+		defer cancel()
+	}
+
+	var firstErr error
+	for i, server := range servers {
+		if server == nil {
+			continue
+		}
+		logger.Info("shutting down server", "index", i, "total", len(servers))
+		if err := server.Shutdown(ctx); err != nil {
+			logger.Error("server shutdown failed", "index", i, "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+// ServerErrorChannel creates a buffered channel for collecting server errors.
+// The buffer size equals serverCount to prevent deadlocks when multiple servers
+// report errors simultaneously. This is essential for proper error handling in
+// concurrent server startup scenarios.
+//
+// Example:
+//
+//	errChan := bootstrap.ServerErrorChannel(2)
+//	go func() { errChan <- httpServer.ListenAndServe() }()
+//	go func() { errChan <- grpcServer.Serve(lis) }()
+func ServerErrorChannel(serverCount int) chan error {
+	return make(chan error, serverCount)
+}
+
+// WaitForShutdownSignal blocks until either a shutdown signal (SIGINT/SIGTERM)
+// is received or a server error occurs on the error channel. It returns nil
+// for a clean shutdown signal, or the server error if shutdown was triggered
+// by a server failure.
+//
+// This is a standalone utility for simple cases where the full ShutdownOrchestrator
+// is not needed. For more complex scenarios with cleanup functions and gRPC-specific
+// shutdown, use ShutdownOrchestrator instead.
+//
+// Example:
+//
+//	sigChan, cleanup := bootstrap.SignalHandler()
+//	defer cleanup()
+//	errChan := bootstrap.ServerErrorChannel(1)
+//	go func() { errChan <- server.ListenAndServe() }()
+//	if err := bootstrap.WaitForShutdownSignal(sigChan, errChan, logger); err != nil {
+//	    logger.Error("server error", "error", err)
+//	}
+func WaitForShutdownSignal(sigChan chan os.Signal, errChan chan error, logger *slog.Logger) error {
+	select {
+	case sig := <-sigChan:
+		logger.Info("received shutdown signal", "signal", sig)
+		return nil
+	case err := <-errChan:
+		logger.Error("server error, initiating shutdown", "error", err)
+		return err
+	}
+}
