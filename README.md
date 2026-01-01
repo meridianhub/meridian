@@ -27,7 +27,7 @@ meridian/
 │   │   ├── domain/              # Business logic and entities
 │   │   ├── adapters/            # Persistence, messaging adapters
 │   │   ├── service/             # gRPC service implementation
-│   │   ├── clients/             # Inter-service clients
+│   │   ├── client/              # Service-owned gRPC client
 │   │   ├── migrations/          # Database migrations
 │   │   ├── atlas/               # Atlas schema config
 │   │   └── k8s/                 # Kubernetes manifests
