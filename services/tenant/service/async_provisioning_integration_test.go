@@ -549,9 +549,11 @@ func TestProvisioningFailureRetry(t *testing.T) {
 	// =========================================================================
 	totalCalls := env.Provisioner.GetProvisioningCallCount()
 
-	// Should have at least 3 calls: 2 failures + 1 success
-	assert.GreaterOrEqual(t, totalCalls, 3,
-		"Should have at least 3 provisioning attempts (2 failures + 1 success), got %d", totalCalls)
+	// Should have at least 2 calls: 1 failure + 1 success after callback clears failure
+	// Note: OnProvisionAttempt callback is invoked at the START of ProvisionSchemas,
+	// so when attemptCount >= 2, the failure is cleared BEFORE the 2nd attempt runs.
+	assert.GreaterOrEqual(t, totalCalls, 2,
+		"Should have at least 2 provisioning attempts (1 failure + 1 success after clear), got %d", totalCalls)
 
 	t.Logf("Total provisioning attempts: %d (cleared failure after %d)", totalCalls, failureClearedAt)
 

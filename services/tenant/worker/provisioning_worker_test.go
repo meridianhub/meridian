@@ -218,6 +218,36 @@ func TestNewProvisioningWorker_NegativePollInterval(t *testing.T) {
 	assert.Nil(t, worker)
 }
 
+// TestNewProvisioningWorker_DefaultsApplied verifies that when Config fields are
+// zero/unset, sensible defaults are applied. This prevents issues where callers
+// forget to set MaxRetries (causing the retry loop to never execute).
+func TestNewProvisioningWorker_DefaultsApplied(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	repo := persistence.NewRepository(db)
+	prov := provisioner.NewMockProvisioner(nil)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Only set PollInterval, leave everything else at zero values
+	config := Config{
+		PollInterval: 100 * time.Millisecond,
+	}
+
+	worker, err := NewProvisioningWorker(repo, prov, config, logger)
+
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+
+	// Verify defaults were applied
+	assert.Equal(t, 5, worker.maxRetries, "maxRetries should default to 5")
+	assert.Equal(t, 2*time.Second, worker.retryBaseDelay, "retryBaseDelay should default to 2s")
+	assert.Equal(t, 10, worker.maxConcurrent, "maxConcurrent should default to 10")
+	assert.Greater(t, worker.retryMaxDelay, time.Duration(0), "retryMaxDelay should have a default")
+	assert.Equal(t, 15*time.Minute, worker.alertInterval, "alertInterval should default to 15m")
+	assert.Equal(t, 1*time.Hour, worker.alertThreshold, "alertThreshold should default to 1h")
+}
+
 func TestProvisioningWorker_Start_ContextCancellation(t *testing.T) {
 	// Setup
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
