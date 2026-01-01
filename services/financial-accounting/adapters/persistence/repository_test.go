@@ -325,7 +325,6 @@ func TestGetPostingsByBookingLogID_OrderedByCreatedAt(t *testing.T) {
 		AccountID:             "ACC-001",
 		ValueDate:             now,
 		Status:                domain.TransactionStatusPosted,
-		CreatedAt:             now,
 	}
 
 	posting2 := &domain.LedgerPosting{
@@ -336,11 +335,11 @@ func TestGetPostingsByBookingLogID_OrderedByCreatedAt(t *testing.T) {
 		AccountID:             "ACC-002",
 		ValueDate:             now,
 		Status:                domain.TransactionStatusPosted,
-		CreatedAt:             now.Add(time.Second),
 	}
 
 	require.NoError(t, repo.SavePosting(ctx, posting1))
-	// Intentional sleep: Ensure different timestamps for ordering tests
+	// Intentional sleep: DB auto-populates CreatedAt on insert; sleep ensures
+	// distinct timestamps for ordering verification (domain CreatedAt is not persisted)
 	time.Sleep(10 * time.Millisecond)
 	require.NoError(t, repo.SavePosting(ctx, posting2))
 
