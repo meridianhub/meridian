@@ -36,6 +36,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
       - name: Run tests with coverage
         env:
           SKIP_KAFKA_TESTS: "1"
@@ -46,7 +49,10 @@ jobs:
           # can be flaky due to CPU scheduler variance in CI environments.
           # Functional correctness (retry attempts, error handling) is still validated.
           # Run full test suite locally without -short for complete validation.
-          go test -short -v -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
+          gotestsum --format testdox \
+            --junitfile test-results.xml \
+            --jsonfile test-results.json \
+            -- -short -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
           echo "Filtering generated proto files from coverage..."
           grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true
 
@@ -82,3 +88,25 @@ jobs:
             exit 1
           fi
           echo "✅ Coverage ${coverage}% meets threshold"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            test-results.xml
+            test-results.json
+
+      - name: Test summary
+        uses: test-summary/action@v2
+        if: always()
+        with:
+          paths: test-results.xml
+
+      - name: Annotate failures
+        if: failure()
+        run: |
+          # gotestsum --jsonfile produces newline-delimited JSON (one object per line)
+          # Filter for test failures (not package-level) and deduplicate
+          jq -r 'select(.Action == "fail" and .Test != null) | "::error file=\(.Package | sub("github.com/meridianhub/meridian/"; "")),line=1::\(.Test) failed"' test-results.json | sort -u || true

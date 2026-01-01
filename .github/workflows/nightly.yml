@@ -112,6 +112,9 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Install gotestsum
+      run: go install gotest.tools/gotestsum@v1.13.0
+
     - name: Run full test suite (including slow tests)
       env:
         SKIP_KAFKA_TESTS: "1"
@@ -121,61 +124,29 @@ jobs:
         # Run WITHOUT -short flag to include all timing-sensitive tests
         # Regular CI runs with -short, but nightly runs the full suite
         echo "Running full test suite including timing-sensitive tests..."
-        go test -v -race -timeout 15m ./... 2>&1 | tee test-output.txt
-        TEST_EXIT_CODE=${PIPESTATUS[0]}
+        gotestsum --format testdox \
+          --junitfile test-results.xml \
+          --jsonfile test-results.json \
+          -- -race -timeout 15m ./...
 
-        # Parse test counts
-        PASS_COUNT=$(grep -c "^--- PASS" test-output.txt || echo "0")
-        FAIL_COUNT=$(grep -c "^--- FAIL" test-output.txt || echo "0")
-        SKIP_COUNT=$(grep -c "^--- SKIP" test-output.txt || echo "0")
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: nightly-test-results
+        path: |
+          test-results.xml
+          test-results.json
 
-        # Console output
-        echo ""
-        echo "=== Test Summary ==="
-        echo "Passed: $PASS_COUNT"
-        echo "Failed: $FAIL_COUNT"
-        echo "Skipped: $SKIP_COUNT"
+    - name: Test summary
+      uses: test-summary/action@v2
+      if: always()
+      with:
+        paths: test-results.xml
 
-        # Write GitHub Step Summary (markdown)
-        {
-          echo "## Nightly Integration Test Results"
-          echo ""
-          if [ "$FAIL_COUNT" -gt 0 ]; then
-            echo "| Status | Count |"
-            echo "|--------|-------|"
-            echo "| :white_check_mark: Passed | $PASS_COUNT |"
-            echo "| :x: **Failed** | **$FAIL_COUNT** |"
-            echo "| :fast_forward: Skipped | $SKIP_COUNT |"
-            echo ""
-            echo "### Failed Tests"
-            echo ""
-            echo "| Test | Package |"
-            echo "|------|---------|"
-            # Extract failed test names and their packages
-            grep "^--- FAIL:" test-output.txt | while read line; do
-              TEST_NAME=$(echo "$line" | sed 's/^--- FAIL: //' | awk '{print $1}')
-              echo "| \`$TEST_NAME\` | _(see logs)_ |"
-            done
-            echo ""
-            echo "<details>"
-            echo "<summary>Error Details (click to expand)</summary>"
-            echo ""
-            echo '```'
-            # Show context around failures
-            grep -B10 "^--- FAIL" test-output.txt | grep -v "^--$" | tail -100
-            echo '```'
-            echo "</details>"
-          else
-            echo ":white_check_mark: **All tests passed!**"
-            echo ""
-            echo "| Status | Count |"
-            echo "|--------|-------|"
-            echo "| Passed | $PASS_COUNT |"
-            echo "| Skipped | $SKIP_COUNT |"
-          fi
-        } >> $GITHUB_STEP_SUMMARY
-
-        # Exit with original test exit code
-        if [ "$FAIL_COUNT" -gt 0 ]; then
-          exit 1
-        fi
+    - name: Annotate failures
+      if: failure()
+      run: |
+        # gotestsum --jsonfile produces newline-delimited JSON (one object per line)
+        # Filter for test failures (not package-level) and deduplicate
+        jq -r 'select(.Action == "fail" and .Test != null) | "::error file=\(.Package | sub("github.com/meridianhub/meridian/"; "")),line=1::\(.Test) failed"' test-results.json | sort -u || true
