@@ -7,22 +7,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"gorm.io/gorm"
 )
 
 // Errors are defined in errors.go for centralized error management.
 // See: ErrMaxRetriesExceeded, ErrWorkerShutdown, ErrBatchProcessingFailed, ErrSimulatedProcessingFailure
 
-const (
-	// Default configuration values
+// Default configuration values
+var (
 	defaultBatchSize     = 100
-	defaultPollInterval  = 5 * time.Second
+	defaultPollInterval  = defaults.DefaultHealthCheckTimeout
 	defaultMaxRetries    = 3
 	defaultProcessingAge = 5 * time.Minute // Consider 'processing' entries stuck after this duration
 
 	// Adaptive polling configuration
-	defaultMinPollInterval = 100 * time.Millisecond // Minimum poll interval when busy
-	defaultMaxPollInterval = 30 * time.Second       // Maximum poll interval when idle
+	defaultMinPollInterval = defaults.DefaultRetryDelay // Minimum poll interval when busy
+	defaultMaxPollInterval = defaults.DefaultRPCTimeout // Maximum poll interval when idle
 )
 
 // Status and table name constants are defined in status.go for centralized management.

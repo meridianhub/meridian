@@ -12,6 +12,7 @@ import (
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
 )
@@ -23,7 +24,7 @@ var (
 )
 
 // DefaultPartyClientTimeout is the default timeout for Party service RPC calls.
-const DefaultPartyClientTimeout = 30 * time.Second
+const DefaultPartyClientTimeout = defaults.DefaultRPCTimeout
 
 // PartyClientConfig holds configuration for creating a BasePartyClient.
 type PartyClientConfig struct {

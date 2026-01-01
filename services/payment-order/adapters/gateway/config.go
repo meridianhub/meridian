@@ -1,6 +1,10 @@
 package gateway
 
-import "time"
+import (
+	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/defaults"
+)
 
 // Config holds configuration for payment gateway connections.
 // Note: Timeout, MaxRetries, and RetryBackoff are defined for the real gateway
@@ -24,7 +28,7 @@ type Config struct {
 // DefaultConfig returns sensible defaults for production use.
 func DefaultConfig() Config {
 	return Config{
-		Timeout:      30 * time.Second,
+		Timeout:      defaults.DefaultRPCTimeout,
 		MaxRetries:   3,
 		RetryBackoff: 1 * time.Second,
 		UseMock:      false,

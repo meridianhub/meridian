@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -209,7 +210,7 @@ func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]D
 	// Set default timeout if not specified
 	timeout := options.Timeout
 	if timeout == 0 {
-		timeout = 30 * time.Second
+		timeout = defaults.DefaultRPCTimeout
 	}
 
 	// Create timeout context

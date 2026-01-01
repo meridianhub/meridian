@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/sony/gobreaker/v2"
 )
 
@@ -33,8 +34,8 @@ func DefaultCircuitBreakerConfig(name string) CircuitBreakerConfig {
 	return CircuitBreakerConfig{
 		Name:        name,
 		MaxRequests: 1,
-		Interval:    60 * time.Second,
-		Timeout:     30 * time.Second,
+		Interval:    defaults.DefaultCircuitBreakerInterval,
+		Timeout:     defaults.DefaultCircuitBreakerOpenTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			// Trip circuit after 5 consecutive failures
 			return counts.ConsecutiveFailures >= 5

@@ -15,9 +15,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/meridianhub/meridian/internal/audit-consumer/app"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -37,7 +37,7 @@ func setupRoutes(mux *http.ServeMux, container *app.Container) {
 
 	// Readiness probe - checks if the application is ready to serve traffic
 	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), defaults.DefaultHealthCheckTimeout)
 		defer cancel()
 		healthy, dbErr, kafkaErr := container.HealthChecker.CheckAll(ctx)
 
@@ -53,7 +53,7 @@ func setupRoutes(mux *http.ServeMux, container *app.Container) {
 
 	// Startup probe - checks if the application has started
 	mux.HandleFunc("/health/startup", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), defaults.DefaultHealthCheckTimeout)
 		defer cancel()
 		healthy, dbErr, kafkaErr := container.HealthChecker.CheckAll(ctx)
 
@@ -81,10 +81,10 @@ func setupRoutes(mux *http.ServeMux, container *app.Container) {
 func createServer(port string) *http.Server {
 	return &http.Server{
 		Addr:              ":" + port,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: defaults.DefaultHTTPReadHeaderTimeout,
+		ReadTimeout:       defaults.DefaultHTTPReadTimeout,
+		WriteTimeout:      defaults.DefaultHTTPWriteTimeout,
+		IdleTimeout:       2 * defaults.DefaultHTTPIdleTimeout, // Extended for consumer service
 	}
 }
 

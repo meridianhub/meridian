@@ -9,12 +9,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
 	"github.com/meridianhub/meridian/services/party/service"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -107,7 +107,7 @@ func run(logger *slog.Logger) error {
 		Repository:   repo,
 		Logger:       logger,
 		ServiceName:  "party",
-		CheckTimeout: 5 * time.Second,
+		CheckTimeout: defaults.DefaultHealthCheckTimeout,
 	})
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 

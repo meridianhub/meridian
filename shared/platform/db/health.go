@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 )
 
 // HealthChecker manages health monitoring for database connection pools.
@@ -79,10 +81,10 @@ func NewHealthChecker(pool *PostgresPool, config *HealthCheckConfig) *HealthChec
 
 	// Set defaults
 	if config.CheckInterval == 0 {
-		config.CheckInterval = 30 * time.Second
+		config.CheckInterval = defaults.DefaultRPCTimeout
 	}
 	if config.CheckTimeout == 0 {
-		config.CheckTimeout = 5 * time.Second
+		config.CheckTimeout = defaults.DefaultHealthCheckTimeout
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

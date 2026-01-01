@@ -8,6 +8,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -36,8 +37,8 @@ type CachedRegistryConfig struct {
 // DefaultCachedRegistryConfig returns the default configuration.
 func DefaultCachedRegistryConfig() CachedRegistryConfig {
 	return CachedRegistryConfig{
-		RefreshInterval: 60 * time.Second,
-		RefreshTimeout:  30 * time.Second,
+		RefreshInterval: defaults.DefaultCircuitBreakerInterval,
+		RefreshTimeout:  defaults.DefaultRPCTimeout,
 		Logger:          slog.Default(),
 	}
 }
@@ -45,10 +46,10 @@ func DefaultCachedRegistryConfig() CachedRegistryConfig {
 // NewCachedRegistry creates a new cached tenant registry.
 func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig) *CachedRegistry {
 	if config.RefreshInterval <= 0 {
-		config.RefreshInterval = 60 * time.Second
+		config.RefreshInterval = defaults.DefaultCircuitBreakerInterval
 	}
 	if config.RefreshTimeout <= 0 {
-		config.RefreshTimeout = 30 * time.Second
+		config.RefreshTimeout = defaults.DefaultRPCTimeout
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()

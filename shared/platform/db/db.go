@@ -41,6 +41,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 )
 
 // DB is the core database interface that abstracts database operations.
@@ -125,10 +127,10 @@ func DefaultConfig(connectionString string) *Config {
 		ConnectionString:      connectionString,
 		MaxConnections:        50,
 		MinConnections:        5,
-		ConnectionTimeout:     30 * time.Second,
-		HealthCheckInterval:   30 * time.Second,
+		ConnectionTimeout:     defaults.DefaultRPCTimeout,
+		HealthCheckInterval:   defaults.DefaultRPCTimeout,
 		MaxConnectionLifetime: 1 * time.Hour,
 		MaxConnectionIdleTime: 10 * time.Minute,
-		StatementTimeout:      30 * time.Second,
+		StatementTimeout:      defaults.DefaultRPCTimeout,
 	}
 }

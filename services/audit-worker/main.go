@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -61,10 +62,10 @@ func setupRoutes(mux *http.ServeMux) {
 func createServer(port string) *http.Server {
 	return &http.Server{
 		Addr:              ":" + port,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: defaults.DefaultHTTPReadHeaderTimeout,
+		ReadTimeout:       defaults.DefaultHTTPReadTimeout,
+		WriteTimeout:      defaults.DefaultHTTPWriteTimeout,
+		IdleTimeout:       2 * defaults.DefaultHTTPIdleTimeout, // Extended for long-running worker
 	}
 }
 
@@ -183,7 +184,7 @@ func main() {
 	log.Println("Audit worker stopped")
 
 	// Graceful shutdown with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {

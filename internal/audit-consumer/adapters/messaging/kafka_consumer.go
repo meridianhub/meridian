@@ -13,6 +13,7 @@ import (
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
 	"github.com/meridianhub/meridian/internal/audit-consumer/domain"
 	"github.com/meridianhub/meridian/internal/audit-consumer/observability"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
@@ -103,7 +104,7 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 
 	// Apply defaults
 	if config.HandlerTimeout == 0 {
-		config.HandlerTimeout = 30 * time.Second
+		config.HandlerTimeout = defaults.DefaultRPCTimeout
 	}
 	if config.MaxRetries == 0 {
 		config.MaxRetries = 3
