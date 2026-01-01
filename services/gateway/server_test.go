@@ -304,3 +304,138 @@ func TestServer_ShutdownWithoutStart(t *testing.T) {
 	err := server.Shutdown(context.Background())
 	assert.NoError(t, err)
 }
+
+// failingResponseWriter is a mock that fails on Write to test error handling.
+type failingResponseWriter struct {
+	header     http.Header
+	statusCode int
+	writeErr   error
+}
+
+func newFailingResponseWriter(writeErr error) *failingResponseWriter {
+	return &failingResponseWriter{
+		header:   make(http.Header),
+		writeErr: writeErr,
+	}
+}
+
+func (w *failingResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *failingResponseWriter) Write(_ []byte) (int, error) {
+	return 0, w.writeErr
+}
+
+func (w *failingResponseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+}
+
+// logCapture captures log messages for testing.
+type logCapture struct {
+	entries []map[string]any
+}
+
+func (c *logCapture) Handle(_ context.Context, r slog.Record) error {
+	entry := make(map[string]any)
+	entry["level"] = r.Level.String()
+	entry["msg"] = r.Message
+	r.Attrs(func(a slog.Attr) bool {
+		entry[a.Key] = a.Value.Any()
+		return true
+	})
+	c.entries = append(c.entries, entry)
+	return nil
+}
+
+func (c *logCapture) Enabled(_ context.Context, _ slog.Level) bool {
+	return true
+}
+
+func (c *logCapture) WithAttrs(_ []slog.Attr) slog.Handler {
+	return c
+}
+
+func (c *logCapture) WithGroup(_ string) slog.Handler {
+	return c
+}
+
+// TestHealthEndpoints_WriteErrorLogging verifies that write errors are logged as warnings.
+func TestHealthEndpoints_WriteErrorLogging(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+	}{
+		{
+			name:     "/health endpoint logs write errors",
+			endpoint: "/health",
+		},
+		{
+			name:     "/ready endpoint logs write errors",
+			endpoint: "/ready",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create log capture
+			logHandler := &logCapture{}
+			logger := slog.New(logHandler)
+
+			// Create server
+			config := &Config{
+				Port:        8080,
+				BaseDomain:  "api.example.com",
+				DatabaseURL: "postgres://localhost/test",
+			}
+			server := NewServer(config, logger, nil)
+
+			// Create failing response writer
+			writeErr := io.ErrClosedPipe
+			w := newFailingResponseWriter(writeErr)
+			req := httptest.NewRequest(http.MethodGet, tt.endpoint, nil)
+			req.RemoteAddr = "192.168.1.100:54321"
+
+			// Execute - should NOT panic
+			server.mux.ServeHTTP(w, req)
+
+			// Verify warning was logged
+			require.GreaterOrEqual(t, len(logHandler.entries), 1, "expected at least one log entry")
+
+			lastEntry := logHandler.entries[len(logHandler.entries)-1]
+			assert.Equal(t, "WARN", lastEntry["level"])
+			assert.Contains(t, lastEntry["msg"].(string), "failed to write")
+			assert.Equal(t, tt.endpoint, lastEntry["endpoint"])
+			assert.Contains(t, lastEntry["remote_addr"].(string), "192.168.1.100")
+		})
+	}
+}
+
+// TestHealthEndpoints_NoPanicOnWriteError verifies handlers don't panic when Write fails.
+func TestHealthEndpoints_NoPanicOnWriteError(t *testing.T) {
+	endpoints := []string{"/health", "/ready", "/healthz", "/readyz"}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint, func(t *testing.T) {
+			config := &Config{
+				Port:        8080,
+				BaseDomain:  "api.example.com",
+				DatabaseURL: "postgres://localhost/test",
+			}
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			server := NewServer(config, logger, nil)
+
+			// Create failing response writer
+			w := newFailingResponseWriter(io.ErrUnexpectedEOF)
+			req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+
+			// Execute - should NOT panic
+			assert.NotPanics(t, func() {
+				server.mux.ServeHTTP(w, req)
+			})
+
+			// Verify WriteHeader was still called (status set before Write attempt)
+			assert.Equal(t, http.StatusOK, w.statusCode)
+		})
+	}
+}

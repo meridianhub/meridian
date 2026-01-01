@@ -168,10 +168,15 @@ func (s *Server) StartWithListener(listener net.Listener) error {
 }
 
 // healthHandler provides a simple health check endpoint.
-func healthHandler(w http.ResponseWriter, _ *http.Request) {
+func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"healthy"}`))
+	if _, err := w.Write([]byte(`{"status":"healthy"}`)); err != nil {
+		slog.Warn("failed to write health response",
+			"error", err,
+			"endpoint", r.URL.Path,
+			"remote_addr", r.RemoteAddr)
+	}
 }
 
 // Middleware types and helpers

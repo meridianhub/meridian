@@ -83,21 +83,36 @@ func run(logger *slog.Logger) error {
 	httpMux := http.NewServeMux()
 
 	// Health check endpoints
-	httpMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	httpMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			logger.Warn("failed to write health response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
 	})
 
-	httpMux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
+	httpMux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		readinessMu.RLock()
 		defer readinessMu.RUnlock()
 		if !readiness.consumerInitialized {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("NOT_READY"))
+			if _, err := w.Write([]byte("NOT_READY")); err != nil {
+				logger.Warn("failed to write readiness response",
+					"error", err,
+					"endpoint", r.URL.Path,
+					"remote_addr", r.RemoteAddr)
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("READY"))
+		if _, err := w.Write([]byte("READY")); err != nil {
+			logger.Warn("failed to write readiness response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
 	})
 
 	// Prometheus metrics endpoint
