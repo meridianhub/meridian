@@ -2,7 +2,8 @@
 
 This document describes how to use the circuit breaker pattern for inter-service gRPC calls in Meridian services.
 
-**Location**: `services/{service}/clients/` - Each service that calls other services should use circuit breakers.
+**Location**: `shared/pkg/clients/` - Resilience patterns (circuit breakers, retries) live in the shared package.
+Service-specific clients are in `services/{service}/client/`.
 
 ## Overview
 
@@ -23,7 +24,7 @@ and comprehensive logging.
 ```go
 import (
     "log/slog"
-    "github.com/meridianhub/meridian/internal/current-account/clients"
+    "github.com/meridianhub/meridian/shared/pkg/clients"
 )
 
 // Use default configuration

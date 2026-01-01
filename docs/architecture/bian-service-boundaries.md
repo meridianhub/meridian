@@ -138,7 +138,7 @@ The CurrentAccount service owns:
 - Balance queries for account operations
 - Transaction log retrieval for account history
 - Position snapshot data for reconciliation
-- **Implementation:** `internal/current-account/clients/positionkeeping_client.go`
+- **Implementation:** `services/current-account/client/positionkeeping_client.go`
 - **Proto Import:** `meridian/position_keeping/v1/position_keeping.proto`
 
 **Financial-Accounting Service (gRPC Client):**
@@ -146,7 +146,7 @@ The CurrentAccount service owns:
 - Journal entry creation for deposit transactions
 - Ledger posting operations
 - Financial booking log status queries
-- **Implementation:** `internal/current-account/clients/financialaccounting_client.go`
+- **Implementation:** `services/current-account/client/financialaccounting_client.go`
 - **Proto Import:** `meridian/financial_accounting/v1/financial_accounting.proto`
 
 **Resilience Patterns:**
@@ -154,7 +154,7 @@ The CurrentAccount service owns:
 - Circuit breaker for downstream service failures
 - Retry logic with exponential backoff
 - Graceful degradation when dependencies are unavailable
-- **Implementation:** `internal/current-account/clients/resilient_client.go`
+- **Implementation:** `services/current-account/client/resilient_client.go`
 
 **Platform Services:**
 
@@ -643,7 +643,7 @@ Platform code is currently in `internal/platform/` but is being migrated to `pkg
 - **Files:**
   - `cmd/current-account/main.go` - Service startup tracing
   - `internal/current-account/service/grpc_service.go` - Request tracing
-  - `internal/current-account/clients/` - Client-side tracing
+  - `services/current-account/client/` - Client-side tracing
   - `cmd/financial-accounting/main.go` - Service startup tracing
   - `internal/position-keeping/app/container.go` - Dependency injection with tracing
 
@@ -1483,7 +1483,7 @@ This section documents the actual communication flows between services based on 
 
 **Implementation:**
 
-- **Client:** `internal/current-account/clients/positionkeeping_client.go`
+- **Client:** `services/current-account/client/positionkeeping_client.go`
 - **Proto Import:** `meridian/position_keeping/v1/position_keeping.proto`
 - **Resilience:** Circuit breaker via `resilient_client.go`
 
@@ -1508,7 +1508,7 @@ resp, err := pkClient.ListFinancialPositionLogs(ctx, &pb.ListRequest{
 
 **Implementation:**
 
-- **Client:** `internal/current-account/clients/financialaccounting_client.go`
+- **Client:** `services/current-account/client/financialaccounting_client.go`
 - **Proto Import:** `meridian/financial_accounting/v1/financial_accounting.proto`
 - **Resilience:** Circuit breaker via `resilient_client.go`
 

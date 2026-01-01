@@ -144,9 +144,8 @@ The architecture follows proper gRPC patterns with protobuf-based communication:
 
 **Files Using gRPC Clients:**
 
-- `internal/current-account/clients/positionkeeping_client.go`
-- `internal/current-account/clients/financialaccounting_client.go`
-- `internal/current-account/clients/resilient_client.go` (circuit breaker pattern)
+- `services/current-account/client/client.go`
+- `shared/pkg/clients/resilient.go` (circuit breaker pattern)
 
 ### Asynchronous Communication (Kafka)
 
@@ -325,10 +324,8 @@ need shared platform utilities.
 - `cmd/current-account/main.go:18`
 - `cmd/financial-accounting/main.go:17`
 - `internal/current-account/service/grpc_service.go:22`
-- `internal/current-account/clients/financialaccounting_client.go:10`
-- `internal/current-account/clients/positionkeeping_client.go:10`
-- `internal/current-account/clients/financialaccounting_client_test.go:8`
-- `internal/current-account/clients/positionkeeping_client_test.go:8`
+- `services/current-account/client/client.go:10`
+- `services/current-account/client/client_test.go:8`
 - `internal/position-keeping/app/container.go:10`
 
 **Kafka (2 files):**
@@ -417,9 +414,9 @@ to changes in both position-keeping and financial-accounting.
 
 **Affected Components:**
 
-- `internal/current-account/clients/positionkeeping_client.go` (depends on position-keeping)
-- `internal/current-account/clients/financialaccounting_client.go` (depends on financial-accounting)
-- `internal/current-account/clients/resilient_client.go` (circuit breaker - partial mitigation)
+- `services/current-account/client/client.go` (depends on position-keeping and financial-accounting)
+- `shared/pkg/clients/resilient.go` (circuit breaker - partial mitigation)
+- `shared/pkg/clients/circuitbreaker.go` (circuit breaker implementation)
 
 **Solution Options:**
 
@@ -503,7 +500,7 @@ Create `DEPENDENCIES.md` in each service directory documenting:
 - **Protocol:** gRPC
 - **Proto:** `api/proto/meridian/position_keeping/v1`
 - **Usage:** Balance queries for account operations
-- **Files:** `internal/current-account/clients/positionkeeping_client.go`
+- **Files:** `services/current-account/client/client.go`
 
 ## Downstream Services (Who Calls Us)
 
