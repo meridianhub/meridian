@@ -70,7 +70,14 @@ func NewCachedRegistry(repo *persistence.Repository, config CachedRegistryConfig
 
 // Start begins the background cache refresh loop.
 // The refresh loop stops automatically when the provided context is cancelled.
+//
 // Start is idempotent: calling it multiple times has no additional effect.
+// Only the context from the first Start() call is used; subsequent calls
+// with different contexts are ignored.
+//
+// Important: Due to sync.Once semantics, the registry cannot be restarted
+// after the context is cancelled. If restart is needed, create a new
+// CachedRegistry instance.
 func (r *CachedRegistry) Start(ctx context.Context) {
 	r.startOnce.Do(func() {
 		r.started.Store(true)

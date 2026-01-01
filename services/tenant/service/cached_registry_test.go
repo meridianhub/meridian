@@ -172,3 +172,34 @@ func TestCachedRegistry_Started_ReturnsFalseAfterContextCancelled(t *testing.T) 
 		t.Error("Expected Started() to return false after context is cancelled")
 	}
 }
+
+func TestCachedRegistry_CannotRestartAfterCancel(t *testing.T) {
+	registry, cleanup := setupCachedRegistry(t)
+	defer cleanup()
+
+	// Start with first context
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	registry.Start(ctx1)
+
+	if !registry.Started() {
+		t.Fatal("Expected Started() to return true after Start()")
+	}
+
+	// Cancel the first context and wait for goroutine to exit
+	cancel1()
+	time.Sleep(100 * time.Millisecond)
+
+	if registry.Started() {
+		t.Fatal("Expected Started() to return false after context cancelled")
+	}
+
+	// Attempt to restart with a new context
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	registry.Start(ctx2)
+
+	// Verify registry cannot restart - sync.Once has already fired
+	if registry.Started() {
+		t.Error("Expected Started() to remain false after restart attempt; registry should not be restartable")
+	}
+}
