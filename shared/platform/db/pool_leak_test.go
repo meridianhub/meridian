@@ -146,7 +146,7 @@ func TestPoolCloseWithContext_TimeoutDuringClose(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
 
-	// Small delay to ensure context likely expires before/during Close
+	// Intentional sleep: Ensure context expires before/during Close to test race handling
 	time.Sleep(1 * time.Millisecond)
 
 	// CloseWithContext may succeed or fail depending on timing

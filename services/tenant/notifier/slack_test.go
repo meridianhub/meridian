@@ -328,7 +328,8 @@ func TestSendAlert_ConnectionError(t *testing.T) {
 
 func TestSendAlert_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(5 * time.Second) // Long delay
+		// Intentional sleep: Simulate slow server to test context cancellation behavior
+		time.Sleep(5 * time.Second)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

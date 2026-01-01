@@ -864,7 +864,8 @@ func TestListLedgerPostings_Integration_Success(t *testing.T) {
 			CreatedAt:             time.Now(),
 		}
 		require.NoError(t, ts.repo.SavePosting(ctx, posting))
-		time.Sleep(time.Millisecond) // Ensure different timestamps
+		// Intentional sleep: Ensure different timestamps for ordering tests
+		time.Sleep(time.Millisecond)
 	}
 
 	// List all postings
@@ -1019,6 +1020,7 @@ func TestListLedgerPostings_Integration_Pagination(t *testing.T) {
 			CreatedAt:             time.Now(),
 		}
 		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+		// Intentional sleep: Ensure different timestamps for pagination ordering
 		time.Sleep(time.Millisecond)
 	}
 

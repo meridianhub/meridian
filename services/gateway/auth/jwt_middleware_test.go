@@ -1001,7 +1001,8 @@ func TestJWTMiddleware_IntegrationWithRealToken_ExpirationBoundary(t *testing.T)
 		assert.Equal(t, http.StatusOK, rr.Code)
 	})
 
-	// Wait for token to expire (calculate remaining time + buffer)
+	// Intentional sleep: Wait for token to actually expire to test expiration behavior.
+	// This is testing real-time token expiration, not waiting for async operations.
 	waitTime := time.Until(expiresAt) + 100*time.Millisecond
 	if waitTime > 0 {
 		time.Sleep(waitTime)

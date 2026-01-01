@@ -81,7 +81,8 @@ func TestCleanupWorker_StaleKeyMarkedAsFailed(t *testing.T) {
 	err = redisSvc.MarkPending(ctx, staleKey, time.Hour)
 	require.NoError(t, err)
 
-	// Wait a bit to ensure the key is stale
+	// Intentional sleep: Wait for the key to become stale (older than threshold).
+	// This is testing time-based staleness detection, not async operations.
 	time.Sleep(50 * time.Millisecond)
 
 	// Configure worker with very short threshold
@@ -168,7 +169,9 @@ func TestCleanupWorker_FreshKeyNotMarked(t *testing.T) {
 		_ = w.Start(workerCtx)
 	}()
 
-	// Wait for a few cleanup iterations
+	// Intentional sleep: Wait for a few cleanup iterations to pass.
+	// We're testing that fresh keys are NOT modified, so we must allow time for the
+	// worker to run multiple cycles without touching them.
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify the key is still PENDING
@@ -203,7 +206,7 @@ func TestCleanupWorker_BatchProcessing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Wait a bit for keys to become stale
+	// Intentional sleep: Wait for keys to become stale (older than threshold)
 	time.Sleep(50 * time.Millisecond)
 
 	// Configure worker with batch size of 100 (so we need 2 batches)
@@ -269,7 +272,7 @@ func TestCleanupWorker_GracefulShutdown(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Wait for keys to become stale
+	// Intentional sleep: Wait for keys to become stale (older than threshold)
 	time.Sleep(50 * time.Millisecond)
 
 	// Configure worker with short intervals
@@ -296,7 +299,7 @@ func TestCleanupWorker_GracefulShutdown(t *testing.T) {
 	// Wait for worker to start
 	<-startedChan
 
-	// Let it run briefly
+	// Intentional sleep: Let worker run for a few cycles before shutting down
 	time.Sleep(100 * time.Millisecond)
 
 	// Stop the worker gracefully via context cancellation
@@ -425,7 +428,7 @@ func TestCleanupWorker_MetricsRecorded(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Wait for keys to become stale
+	// Intentional sleep: Wait for keys to become stale (older than threshold)
 	time.Sleep(50 * time.Millisecond)
 
 	// Configure worker with short threshold

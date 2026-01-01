@@ -121,6 +121,7 @@ func TestMockProvider_SimulatedDelay_RespectsContextCancellation(t *testing.T) {
 
 	// Cancel context after a short time
 	go func() {
+		// Intentional sleep: Delay before cancelling to test cancellation handling
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()

@@ -150,7 +150,7 @@ func TestPostgresOutboxRepository_FetchUnprocessed(t *testing.T) {
 	for i := range entries {
 		err := db.Create(&entries[i]).Error
 		require.NoError(t, err)
-		// Small delay to ensure different created_at timestamps
+		// Intentional sleep: Ensure different created_at timestamps for ordering tests
 		time.Sleep(10 * time.Millisecond)
 	}
 

@@ -270,7 +270,7 @@ func TestHealthServer_Watch_RespectsContext(t *testing.T) {
 		done <- healthSrv.Watch(&grpc_health_v1.HealthCheckRequest{}, mockStream)
 	}()
 
-	// Give it time to send initial status
+	// Intentional sleep: Give grpc health watch time to send initial status
 	time.Sleep(50 * time.Millisecond)
 
 	// Cancel the context
