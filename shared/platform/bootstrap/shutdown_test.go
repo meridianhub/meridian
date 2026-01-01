@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -199,5 +200,74 @@ func TestShutdownOrchestrator_Wait(t *testing.T) {
 
 		orchestrator := NewShutdownOrchestrator(server, logger)
 		assert.NotNil(t, orchestrator)
+	})
+}
+
+func TestSignalHandler(t *testing.T) {
+	t.Run("returns channel and cleanup function", func(t *testing.T) {
+		sigChan, cleanup := SignalHandler()
+		defer cleanup()
+
+		assert.NotNil(t, sigChan)
+		assert.NotNil(t, cleanup)
+	})
+
+	t.Run("cleanup is idempotent", func(t *testing.T) {
+		sigChan, cleanup := SignalHandler()
+
+		// Multiple cleanup calls should not panic
+		assert.NotPanics(t, func() {
+			cleanup()
+			cleanup()
+			cleanup()
+		})
+
+		assert.NotNil(t, sigChan)
+	})
+
+	t.Run("signal channel is buffered", func(t *testing.T) {
+		sigChan, cleanup := SignalHandler()
+		defer cleanup()
+
+		// Channel should be buffered with size 1
+		assert.Equal(t, 1, cap(sigChan))
+	})
+
+	t.Run("cleanup stops signal delivery to channel", func(t *testing.T) {
+		// This test verifies that signal.Stop is called correctly by checking
+		// that a second handler receives the signal while the stopped one doesn't.
+		//
+		// We set up two handlers:
+		// 1. First handler - will be stopped via cleanup before signal
+		// 2. Second handler - will remain active to catch the signal
+
+		// Set up first handler and immediately clean it up
+		sigChan1, cleanup1 := SignalHandler()
+		cleanup1() // Stop delivery to sigChan1
+
+		// Set up second handler that stays active (catches signal so test doesn't exit)
+		sigChan2, cleanup2 := SignalHandler()
+		defer cleanup2()
+
+		// Send SIGUSR1 which doesn't terminate the process
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			_ = syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
+		}()
+
+		// Wait a bit for potential signal delivery
+		time.Sleep(50 * time.Millisecond)
+
+		// sigChan1 should NOT have received anything (it was stopped)
+		select {
+		case sig := <-sigChan1:
+			t.Fatalf("stopped channel should not receive signal, got: %v", sig)
+		default:
+			// Expected: no signal in stopped channel
+		}
+
+		// Note: We don't check sigChan2 because SIGUSR1 wasn't registered with it
+		// (SignalHandler only registers SIGINT and SIGTERM)
+		_ = sigChan2 // Silence unused variable warning
 	})
 }

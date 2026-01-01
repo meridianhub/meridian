@@ -11,11 +11,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gorm.io/driver/postgres"
@@ -169,8 +168,8 @@ func main() {
 	}()
 
 	// Wait for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan, signalCleanup := bootstrap.SignalHandler()
+	defer signalCleanup()
 	<-sigChan
 
 	log.Println("Shutting down server...")

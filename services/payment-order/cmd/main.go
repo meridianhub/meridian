@@ -8,10 +8,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
@@ -234,8 +232,8 @@ func run(logger *slog.Logger) error {
 	}()
 
 	// Wait for interrupt signal or server error
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan, signalCleanup := bootstrap.SignalHandler()
+	defer signalCleanup()
 
 	select {
 	case sig := <-sigChan:

@@ -13,10 +13,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/meridianhub/meridian/internal/audit-consumer/app"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -146,9 +145,9 @@ func main() {
 	}()
 
 	// Wait for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan, signalCleanup := bootstrap.SignalHandler()
 	<-sigChan
+	signalCleanup() // Stop signal handling immediately after receiving signal
 
 	logger.Info("shutdown signal received, starting graceful shutdown...")
 

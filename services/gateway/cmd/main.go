@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/meridianhub/meridian/services/gateway"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 )
 
 // Build information set via ldflags during compilation.
@@ -79,8 +78,8 @@ func run(logger *slog.Logger) error {
 	}()
 
 	// Wait for interrupt signal or server error
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan, signalCleanup := bootstrap.SignalHandler()
+	defer signalCleanup()
 
 	select {
 	case sig := <-sigChan:

@@ -9,10 +9,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -344,8 +342,8 @@ func run(logger *slog.Logger) error {
 	}()
 
 	// Wait for interrupt signal or server error
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan, signalCleanup := bootstrap.SignalHandler()
+	defer signalCleanup()
 
 	select {
 	case sig := <-sigChan:
