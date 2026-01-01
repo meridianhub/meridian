@@ -1,15 +1,28 @@
-// Package clients provides gRPC client interfaces and implementations
-// for inter-service communication within the Meridian platform.
-package clients
+// Package service implements gRPC services for the current account domain.
+package service
 
 import (
 	"context"
+	"errors"
 
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 )
 
-// PositionKeepingClient defines the interface for communicating with the PositionKeeping service
+// Party validation errors.
+var (
+	// ErrPartyNotFound is returned when the requested party does not exist.
+	ErrPartyNotFound = errors.New("party not found")
+	// ErrPartyNotActive is returned when the party exists but is not in ACTIVE status.
+	ErrPartyNotActive = errors.New("party not active")
+)
+
+// PositionKeepingClient defines the interface for communicating with the PositionKeeping service.
+//
+// This interface represents the subset of PositionKeeping operations used by CurrentAccount.
+// The actual implementation is provided by services/position-keeping/client.Client which
+// implements this interface directly.
 //
 // The PositionKeeping service maintains comprehensive financial position logs,
 // capturing transaction entries, lineage, audit trails, and status tracking.
@@ -51,7 +64,11 @@ type PositionKeepingClient interface {
 	Close() error
 }
 
-// FinancialAccountingClient defines the interface for communicating with the FinancialAccounting service
+// FinancialAccountingClient defines the interface for communicating with the FinancialAccounting service.
+//
+// This interface represents the subset of FinancialAccounting operations used by CurrentAccount.
+// The actual implementation is provided by services/financial-accounting/client.Client which
+// implements this interface directly.
 //
 // The FinancialAccounting service implements double-entry bookkeeping, managing
 // financial booking logs and ledger postings. CurrentAccount uses this service
@@ -95,5 +112,32 @@ type FinancialAccountingClient interface {
 	RetrieveLedgerPosting(ctx context.Context, req *financialaccountingv1.RetrieveLedgerPostingRequest) (*financialaccountingv1.RetrieveLedgerPostingResponse, error)
 
 	// Close terminates the client connection gracefully
+	Close() error
+}
+
+// PartyClient defines the interface for communicating with the Party service.
+//
+// This interface represents the subset of Party operations used by CurrentAccount.
+// The actual implementation is provided by services/party/client.Client, but
+// CurrentAccount requires additional methods (ValidateParty, GetParty) beyond
+// the raw gRPC operations.
+//
+// The Party service manages party reference data (customers, counterparties,
+// legal entities). CurrentAccount uses this service to validate party ownership
+// before account operations.
+type PartyClient interface {
+	// ValidateParty checks if a party exists and is active.
+	//
+	// Returns nil if the party exists and has ACTIVE status.
+	// Returns ErrPartyNotFound if the party does not exist.
+	// Returns ErrPartyNotActive if the party exists but is not ACTIVE.
+	ValidateParty(ctx context.Context, partyID string) error
+
+	// GetParty retrieves full party details by ID.
+	//
+	// Returns the party data if found, or an error if not found.
+	GetParty(ctx context.Context, partyID string) (*partyv1.Party, error)
+
+	// Close terminates the client connection gracefully.
 	Close() error
 }

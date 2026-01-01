@@ -14,7 +14,6 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/services/tenant/worker"
@@ -22,9 +21,13 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+
+	// Service-owned client (standardized client package from party service)
+	partyclient "github.com/meridianhub/meridian/services/party/client"
 )
 
 // Build information set via ldflags during compilation.
@@ -160,28 +163,19 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Initialize Party client (optional - skipped if PARTY_SERVICE_ENABLED is not "true")
-	var partyClient clients.PartyClient
+	// Uses the service-owned party client package with adapter for tenant-specific interface
+	var partyClient service.PartyClient
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 	partyEnabled := env.GetEnvOrDefault("PARTY_SERVICE_ENABLED", envValueTrue) == envValueTrue
 	if partyEnabled {
-		pc, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
-			ServiceName: "party",
-			Namespace:   namespace,
-			Port:        ports.Party,
-			Timeout:     defaults.DefaultRPCTimeout,
-			Tracer:      tracer,
-		})
+		pc, cleanup, err := createPartyClient(namespace, logger, tracer)
 		if err != nil {
 			return fmt.Errorf("failed to create party client: %w", err)
 		}
 		partyClient = pc
-		defer func() {
-			if err := pc.Close(); err != nil {
-				logger.Error("failed to close party client", "error", err)
-			}
-		}()
+		defer cleanup()
 		logger.Info("party client initialized",
-			"service_name", "party",
+			"service_name", partyclient.ServiceName,
 			"namespace", namespace,
 			"port", ports.Party)
 	} else {
@@ -385,4 +379,62 @@ func getConfigSource(key string) string {
 		return "env"
 	}
 	return "default"
+}
+
+// createPartyClient creates the Party gRPC client with resilience patterns.
+// Uses the service-owned client package from services/party/client for standardized
+// client creation with built-in tracing and resilience patterns.
+// Returns a PartyClient interface adapter wrapping the underlying party client.
+func createPartyClient(namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.PartyClient, func(), error) {
+	logger.Info("connecting to party service",
+		"service", partyclient.ServiceName,
+		"namespace", namespace,
+		"port", ports.Party)
+
+	// Configure resilience settings from environment
+	resilientConfig := &sharedclients.ResilientClientConfig{
+		// Circuit breaker settings
+		CircuitBreakerName:     "party",
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("PARTY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval: env.GetEnvAsDuration("PARTY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		MaxRequests:            env.GetEnvAsUint32("PARTY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       env.GetEnvAsUint32("PARTY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+
+		// Retry settings
+		MaxRetries:          env.GetEnvAsInt("PARTY_MAX_RETRIES", 3),
+		InitialInterval:     env.GetEnvAsDuration("PARTY_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
+		MaxInterval:         env.GetEnvAsDuration("PARTY_RETRY_MAX_INTERVAL", 5*time.Second),
+		Multiplier:          env.GetEnvAsFloat("PARTY_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: env.GetEnvAsFloat("PARTY_RETRY_RANDOMIZATION", 0.5),
+
+		Logger: logger,
+	}
+
+	logger.Info("party client configured with resilience patterns",
+		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
+		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
+		"max_retries", resilientConfig.MaxRetries,
+	)
+
+	// Use the service-owned client package with DNS-based load balancing
+	pc, cleanup, err := partyclient.New(partyclient.Config{
+		ServiceName: partyclient.ServiceName,
+		Namespace:   namespace,
+		Port:        ports.Party,
+		Timeout:     env.GetEnvAsDuration("PARTY_TIMEOUT", partyclient.DefaultTimeout),
+		Tracer:      tracer,
+		Resilience:  resilientConfig,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create party client: %w", err)
+	}
+
+	// Wrap with adapter to implement tenant-specific PartyClient interface
+	adapter := service.NewPartyClientAdapter(pc, cleanup)
+
+	return adapter, func() {
+		if err := adapter.Close(); err != nil {
+			logger.Error("failed to close party client", "error", err)
+		}
+	}, nil
 }

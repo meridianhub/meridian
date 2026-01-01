@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/config"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/notifier"
+	"github.com/meridianhub/meridian/services/tenant/pagerduty"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -481,7 +481,7 @@ func TestNewAlertManager_WithPagerDutyClient(t *testing.T) {
 	_, repo := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
-	pdClient := clients.NewPagerDutyClient(config.PagerDutyConfig{
+	pdClient := pagerduty.NewClient(config.PagerDutyConfig{
 		Enabled:    true,
 		RoutingKey: "test-key",
 		Source:     "test-source",
@@ -497,12 +497,12 @@ func TestCheckFailedProvisioningAlerts_SendsPagerDutyAlert(t *testing.T) {
 	db, repo := setupTestDB(t)
 
 	// Track received PagerDuty events
-	var receivedEvents []clients.PagerDutyEvent
+	var receivedEvents []pagerduty.Event
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 
-		var event clients.PagerDutyEvent
+		var event pagerduty.Event
 		err = json.Unmarshal(body, &event)
 		require.NoError(t, err)
 		receivedEvents = append(receivedEvents, event)
@@ -513,13 +513,13 @@ func TestCheckFailedProvisioningAlerts_SendsPagerDutyAlert(t *testing.T) {
 	defer server.Close()
 
 	// Create PagerDuty client with test server
-	pdClient := clients.NewPagerDutyClient(
+	pdClient := pagerduty.NewClient(
 		config.PagerDutyConfig{
 			Enabled:    true,
 			RoutingKey: "test-routing-key",
 			Source:     "tenant-service-test",
 		},
-		clients.WithEventsURL(server.URL),
+		pagerduty.WithEventsURL(server.URL),
 	)
 
 	var logBuf safeBuffer
@@ -554,7 +554,7 @@ func TestCheckFailedProvisioningAlerts_SendsPagerDutyAlert(t *testing.T) {
 
 	event := receivedEvents[0]
 	assert.Equal(t, "test-routing-key", event.RoutingKey)
-	assert.Equal(t, clients.EventActionTrigger, event.EventAction)
+	assert.Equal(t, pagerduty.EventActionTrigger, event.EventAction)
 	assert.Contains(t, event.DedupKey, "tenant-provisioning-failed-pd_test_tenant")
 	assert.Contains(t, event.Payload.Summary, "pd_test_tenant")
 	assert.Contains(t, event.Payload.Summary, "database schema creation failed")
@@ -581,13 +581,13 @@ func TestCheckFailedProvisioningAlerts_PagerDutyError_ContinuesProcessing(t *tes
 	}))
 	defer server.Close()
 
-	pdClient := clients.NewPagerDutyClient(
+	pdClient := pagerduty.NewClient(
 		config.PagerDutyConfig{
 			Enabled:    true,
 			RoutingKey: "test-key",
 			Source:     "test-source",
 		},
-		clients.WithEventsURL(server.URL),
+		pagerduty.WithEventsURL(server.URL),
 	)
 
 	var logBuf safeBuffer
@@ -681,7 +681,7 @@ func TestCheckFailedProvisioningAlerts_NoPagerDutyClient_LogsOnly(t *testing.T) 
 func TestCheckFailedProvisioningAlerts_TruncatesLongErrorMessage(t *testing.T) {
 	db, repo := setupTestDB(t)
 
-	var receivedEvent clients.PagerDutyEvent
+	var receivedEvent pagerduty.Event
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -693,13 +693,13 @@ func TestCheckFailedProvisioningAlerts_TruncatesLongErrorMessage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	pdClient := clients.NewPagerDutyClient(
+	pdClient := pagerduty.NewClient(
 		config.PagerDutyConfig{
 			Enabled:    true,
 			RoutingKey: "test-key",
 			Source:     "test-source",
 		},
-		clients.WithEventsURL(server.URL),
+		pagerduty.WithEventsURL(server.URL),
 	)
 
 	var logBuf safeBuffer
@@ -772,13 +772,13 @@ func TestCheckFailedProvisioningAlerts_RateLimiting(t *testing.T) {
 	}))
 	defer server.Close()
 
-	pdClient := clients.NewPagerDutyClient(
+	pdClient := pagerduty.NewClient(
 		config.PagerDutyConfig{
 			Enabled:    true,
 			RoutingKey: "test-key",
 			Source:     "test-source",
 		},
-		clients.WithEventsURL(server.URL),
+		pagerduty.WithEventsURL(server.URL),
 	)
 
 	// Create rate limiter with max 10 alerts per minute
@@ -831,13 +831,13 @@ func TestCheckFailedProvisioningAlerts_RateLimitMetric(t *testing.T) {
 	}))
 	defer server.Close()
 
-	pdClient := clients.NewPagerDutyClient(
+	pdClient := pagerduty.NewClient(
 		config.PagerDutyConfig{
 			Enabled:    true,
 			RoutingKey: "test-key",
 			Source:     "test-source",
 		},
-		clients.WithEventsURL(server.URL),
+		pagerduty.WithEventsURL(server.URL),
 	)
 
 	// Track rate limit hits
@@ -874,7 +874,7 @@ func TestCheckFailedProvisioningAlerts_RetryOnFailure(t *testing.T) {
 	db, repo := setupTestDB(t)
 
 	ctx := context.Background()
-	tenant := &domain.Tenant{
+	testTenant := &domain.Tenant{
 		ID:              tenant.TenantID("retry_test_tenant"),
 		DisplayName:     "Retry Test Tenant",
 		SettlementAsset: "USD",
@@ -883,9 +883,9 @@ func TestCheckFailedProvisioningAlerts_RetryOnFailure(t *testing.T) {
 		CreatedAt:       time.Now().Add(-2 * time.Hour),
 		Version:         1,
 	}
-	err := repo.Create(ctx, tenant)
+	err := repo.Create(ctx, testTenant)
 	require.NoError(t, err)
-	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", testTenant.ID.String()).Error
 	require.NoError(t, err)
 
 	// Create a server that fails twice then succeeds
@@ -902,13 +902,13 @@ func TestCheckFailedProvisioningAlerts_RetryOnFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	pdClient := clients.NewPagerDutyClient(
+	pdClient := pagerduty.NewClient(
 		config.PagerDutyConfig{
 			Enabled:    true,
 			RoutingKey: "test-key",
 			Source:     "test-source",
 		},
-		clients.WithEventsURL(server.URL),
+		pagerduty.WithEventsURL(server.URL),
 	)
 
 	var logBuf safeBuffer
@@ -946,7 +946,7 @@ func TestCheckFailedProvisioningAlerts_RetryExhausted_SendsToDLQ(t *testing.T) {
 	db, repo := setupTestDB(t)
 
 	ctx := context.Background()
-	tenant := &domain.Tenant{
+	testTenant := &domain.Tenant{
 		ID:              tenant.TenantID("dlq_test_tenant"),
 		DisplayName:     "DLQ Test Tenant",
 		SettlementAsset: "GBP",
@@ -955,9 +955,9 @@ func TestCheckFailedProvisioningAlerts_RetryExhausted_SendsToDLQ(t *testing.T) {
 		CreatedAt:       time.Now().Add(-2 * time.Hour),
 		Version:         1,
 	}
-	err := repo.Create(ctx, tenant)
+	err := repo.Create(ctx, testTenant)
 	require.NoError(t, err)
-	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", testTenant.ID.String()).Error
 	require.NoError(t, err)
 
 	// Create a server that always fails
@@ -969,13 +969,13 @@ func TestCheckFailedProvisioningAlerts_RetryExhausted_SendsToDLQ(t *testing.T) {
 	}))
 	defer server.Close()
 
-	pdClient := clients.NewPagerDutyClient(
+	pdClient := pagerduty.NewClient(
 		config.PagerDutyConfig{
 			Enabled:    true,
 			RoutingKey: "test-key",
 			Source:     "test-source",
 		},
-		clients.WithEventsURL(server.URL),
+		pagerduty.WithEventsURL(server.URL),
 	)
 
 	var logBuf safeBuffer
@@ -1029,7 +1029,7 @@ func TestCheckFailedProvisioningAlerts_NoDLQ_OnlyLogsError(t *testing.T) {
 	db, repo := setupTestDB(t)
 
 	ctx := context.Background()
-	tenant := &domain.Tenant{
+	testTenant := &domain.Tenant{
 		ID:              tenant.TenantID("no_dlq_tenant"),
 		DisplayName:     "No DLQ Tenant",
 		SettlementAsset: "EUR",
@@ -1038,9 +1038,9 @@ func TestCheckFailedProvisioningAlerts_NoDLQ_OnlyLogsError(t *testing.T) {
 		CreatedAt:       time.Now().Add(-2 * time.Hour),
 		Version:         1,
 	}
-	err := repo.Create(ctx, tenant)
+	err := repo.Create(ctx, testTenant)
 	require.NoError(t, err)
-	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", testTenant.ID.String()).Error
 	require.NoError(t, err)
 
 	// Always-failing server
@@ -1050,13 +1050,13 @@ func TestCheckFailedProvisioningAlerts_NoDLQ_OnlyLogsError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	pdClient := clients.NewPagerDutyClient(
+	pdClient := pagerduty.NewClient(
 		config.PagerDutyConfig{
 			Enabled:    true,
 			RoutingKey: "test-key",
 			Source:     "test-source",
 		},
-		clients.WithEventsURL(server.URL),
+		pagerduty.WithEventsURL(server.URL),
 	)
 
 	var logBuf safeBuffer
@@ -1110,7 +1110,7 @@ func TestCheckFailedProvisioningAlerts_SlackWithRetryAndDLQ(t *testing.T) {
 	db, repo := setupTestDB(t)
 
 	ctx := context.Background()
-	tenant := &domain.Tenant{
+	testTenant := &domain.Tenant{
 		ID:              tenant.TenantID("slack_dlq_tenant"),
 		DisplayName:     "Slack DLQ Tenant",
 		SettlementAsset: "USD",
@@ -1119,9 +1119,9 @@ func TestCheckFailedProvisioningAlerts_SlackWithRetryAndDLQ(t *testing.T) {
 		CreatedAt:       time.Now().Add(-2 * time.Hour),
 		Version:         1,
 	}
-	err := repo.Create(ctx, tenant)
+	err := repo.Create(ctx, testTenant)
 	require.NoError(t, err)
-	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", tenant.ID.String()).Error
+	err = db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", testTenant.ID.String()).Error
 	require.NoError(t, err)
 
 	// Always-failing Slack server

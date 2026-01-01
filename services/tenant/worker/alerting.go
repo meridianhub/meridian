@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/config"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/notifier"
 	"github.com/meridianhub/meridian/services/tenant/observability"
+	"github.com/meridianhub/meridian/services/tenant/pagerduty"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -49,7 +49,7 @@ var ErrRateLimited = errors.New("alert rate limited")
 type AlertManager struct {
 	repo            *persistence.Repository
 	logger          *slog.Logger
-	pagerdutyClient *clients.PagerDutyClient
+	pagerdutyClient *pagerduty.Client
 	slackNotifier   *notifier.SlackNotifier
 	rateLimiter     *AlertRateLimiter
 	dlq             *AlertDeadLetterQueue
@@ -60,7 +60,7 @@ type AlertManager struct {
 type AlertManagerOption func(*AlertManager)
 
 // WithPagerDutyClient configures the AlertManager to send alerts to PagerDuty.
-func WithPagerDutyClient(client *clients.PagerDutyClient) AlertManagerOption {
+func WithPagerDutyClient(client *pagerduty.Client) AlertManagerOption {
 	return func(a *AlertManager) {
 		a.pagerdutyClient = client
 	}
@@ -358,7 +358,7 @@ func (a *AlertManager) buildAlertPayload(tenant *domain.Tenant) AlertPayload {
 	return AlertPayload{
 		Summary:  summary,
 		DedupKey: fmt.Sprintf("tenant-provisioning-failed-%s", tenant.ID),
-		Severity: string(clients.SeverityCritical),
+		Severity: string(pagerduty.SeverityCritical),
 		CustomDetails: map[string]any{
 			"tenant_id":     tenant.ID.String(),
 			"display_name":  tenant.DisplayName,
@@ -425,5 +425,5 @@ func (a *AlertManager) sendPagerDutyAlert(ctx context.Context, tenant *domain.Te
 	}
 
 	// Provisioning failures are critical - they block tenant onboarding
-	return a.pagerdutyClient.TriggerAlert(ctx, summary, dedupKey, clients.SeverityCritical, customDetails)
+	return a.pagerdutyClient.TriggerAlert(ctx, summary, dedupKey, pagerduty.SeverityCritical, customDetails)
 }

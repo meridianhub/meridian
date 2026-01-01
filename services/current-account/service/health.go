@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -19,8 +18,8 @@ import (
 type HealthChecker struct {
 	grpc_health_v1.UnimplementedHealthServer
 	repo             *persistence.Repository
-	posKeepingClient clients.PositionKeepingClient
-	finAcctClient    clients.FinancialAccountingClient
+	posKeepingClient PositionKeepingClient
+	finAcctClient    FinancialAccountingClient
 	logger           *slog.Logger
 	aggregator       *health.Aggregator
 	serviceName      string
@@ -30,9 +29,9 @@ type HealthChecker struct {
 // HealthCheckerConfig contains configuration for creating a new HealthChecker.
 type HealthCheckerConfig struct {
 	Repository                      *persistence.Repository
-	PositionKeepingClient           clients.PositionKeepingClient
+	PositionKeepingClient           PositionKeepingClient
 	PositionKeepingHealthClient     grpc_health_v1.HealthClient // For health checks (bypasses circuit breaker)
-	FinancialAccountingClient       clients.FinancialAccountingClient
+	FinancialAccountingClient       FinancialAccountingClient
 	FinancialAccountingHealthClient grpc_health_v1.HealthClient // For health checks (bypasses circuit breaker)
 	Logger                          *slog.Logger
 	ServiceName                     string        // Defaults to "current-account"

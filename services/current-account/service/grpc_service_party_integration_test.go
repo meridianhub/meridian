@@ -18,7 +18,6 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -76,11 +75,11 @@ func (m *mockPartyClient) ValidateParty(ctx context.Context, partyID string) err
 	}
 
 	if !partyExists {
-		return clients.ErrPartyNotFound
+		return ErrPartyNotFound
 	}
 
 	if partyStatus != partyv1.PartyStatus_PARTY_STATUS_ACTIVE {
-		return clients.ErrPartyNotActive
+		return ErrPartyNotActive
 	}
 
 	return nil
@@ -100,7 +99,7 @@ func (m *mockPartyClient) GetParty(_ context.Context, partyID string) (*partyv1.
 	}
 
 	if !partyExists {
-		return nil, clients.ErrPartyNotFound
+		return nil, ErrPartyNotFound
 	}
 
 	return &partyv1.Party{

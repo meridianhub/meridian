@@ -12,9 +12,11 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/service"
+	finacctclient "github.com/meridianhub/meridian/services/financial-accounting/client"
+	partyclient "github.com/meridianhub/meridian/services/party/client"
+	poskeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -182,7 +184,16 @@ func run(logger *slog.Logger) error {
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Register cleanup functions (LIFO order - Redis before database)
+	// Register cleanup functions (LIFO order - external clients, then Redis, then database)
+	// Register external client cleanup functions first (they get called last in LIFO)
+	for _, cleanup := range svcClients.cleanupFuncs {
+		fn := cleanup // capture for closure
+		orchestrator.AddCleanup(func() error {
+			fn()
+			return nil
+		})
+	}
+
 	if redisClient != nil {
 		orchestrator.AddCleanup(func() error {
 			if err := redisClient.Close(); err != nil {
@@ -218,18 +229,27 @@ func parseLogLevel(levelStr string) slog.Level {
 
 // serviceClients holds the clients created by createServiceWithClients.
 type serviceClients struct {
-	positionKeeping     clients.PositionKeepingClient
-	financialAccounting clients.FinancialAccountingClient
+	positionKeeping     service.PositionKeepingClient
+	financialAccounting service.FinancialAccountingClient
+	party               service.PartyClient
 	// Health clients bypass the circuit breaker for health checks
 	positionKeepingHealth     grpc_health_v1.HealthClient
 	financialAccountingHealth grpc_health_v1.HealthClient
+	// Cleanup functions for graceful shutdown
+	cleanupFuncs []func()
 }
 
 // createServiceWithClients creates the service and returns it along with the external clients
 // for use in health checking. This approach creates the clients once and shares them between
 // the service and health checker to avoid duplicate connections.
 //
-// Uses DNS-based client-side load balancing for inter-service gRPC communication.
+// Uses the new service-owned client packages with built-in resilience patterns:
+//   - services/position-keeping/client
+//   - services/financial-accounting/client
+//   - services/party/client
+//
+// Each client is configured with DNS-based client-side load balancing and optional
+// circuit breaker + retry resilience.
 func createServiceWithClients(
 	repo *persistence.Repository,
 	lienRepo *persistence.LienRepository,
@@ -252,91 +272,108 @@ func createServiceWithClients(
 			"deposit_clearing_account_id", accountConfig.DepositClearingAccountID)
 	}
 
-	// Create Position Keeping client with DNS-based load balancing
-	posKeepingGRPCClient, err := clients.NewPositionKeepingClient(&clients.PositionKeepingClientConfig{
-		ServiceName: "position-keeping",
+	// Track cleanup functions for graceful shutdown
+	var cleanupFuncs []func()
+
+	// Create Position Keeping client using service-owned client package
+	// The new client has built-in resilience patterns (circuit breaker + retry)
+	posKeepingClient, posKeepingCleanup, err := poskeepingclient.New(poskeepingclient.Config{
+		ServiceName: poskeepingclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.PositionKeeping,
 		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "position-keeping",
+		},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create position keeping client: %w", err)
 	}
+	cleanupFuncs = append(cleanupFuncs, posKeepingCleanup)
 
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientPosKeepingClient := clients.NewResilientPositionKeepingClient(
-		posKeepingGRPCClient,
-		sharedclients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
-
-	// Create Financial Accounting client with DNS-based load balancing
-	finAcctGRPCClient, err := clients.NewFinancialAccountingClient(&clients.FinancialAccountingClientConfig{
-		ServiceName: "financial-accounting",
+	// Create Financial Accounting client using service-owned client package
+	finAcctClient, finAcctCleanup, err := finacctclient.New(finacctclient.Config{
+		ServiceName: finacctclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.FinancialAccounting,
 		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "financial-accounting",
+		},
 	})
 	if err != nil {
+		// Cleanup already created clients before returning
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
 		return nil, nil, fmt.Errorf("failed to create financial accounting client: %w", err)
 	}
+	cleanupFuncs = append(cleanupFuncs, finAcctCleanup)
 
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientFinAcctClient := clients.NewResilientFinancialAccountingClient(
-		finAcctGRPCClient,
-		sharedclients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
-
-	// Create Party client with DNS-based load balancing
-	partyGRPCClient, err := clients.NewPartyClient(&sharedclients.PartyClientConfig{
-		ServiceName: "party",
+	// Create Party client using service-owned client package
+	// PartyClient requires a wrapper for ValidateParty/GetParty methods
+	partyBaseClient, partyCleanup, err := partyclient.New(partyclient.Config{
+		ServiceName: partyclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.Party,
 		Timeout:     defaults.DefaultRPCTimeout,
 		Tracer:      tracer,
+		Resilience: &sharedclients.ResilientClientConfig{
+			Logger:             logger,
+			CircuitBreakerName: "party",
+		},
 	})
 	if err != nil {
+		// Cleanup already created clients before returning
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
 		return nil, nil, fmt.Errorf("failed to create party client: %w", err)
 	}
+	cleanupFuncs = append(cleanupFuncs, partyCleanup)
 
-	// Wrap with resilience patterns (circuit breaker + retry)
-	resilientPartyClient := clients.NewResilientPartyClient(
-		partyGRPCClient,
-		sharedclients.ResilientClientConfig{
-			Logger: logger,
-		},
-	)
+	// Wrap the party client with CurrentAccount-specific methods (ValidateParty, GetParty)
+	partyClientWrapper := NewPartyClientWrapper(partyBaseClient)
 
 	// Create service with the pre-created clients
+	// The new service-owned clients implement the same interfaces as defined in
+	// services/current-account/service/client_interfaces.go
 	svc, err := service.NewServiceWithExistingClients(
 		repo,
 		lienRepo,
 		withdrawalRepo,
-		resilientPosKeepingClient,
-		resilientFinAcctClient,
-		resilientPartyClient,
+		posKeepingClient,   // *poskeepingclient.Client implements service.PositionKeepingClient
+		finAcctClient,      // *finacctclient.Client implements service.FinancialAccountingClient
+		partyClientWrapper, // *PartyClientWrapper implements service.PartyClient
 		accountConfig,
 		idempotencyService,
 		logger,
 		tracer,
 	)
 	if err != nil {
+		// Cleanup all clients before returning
+		for _, cleanup := range cleanupFuncs {
+			cleanup()
+		}
 		return nil, nil, fmt.Errorf("failed to create service with existing clients: %w", err)
 	}
 
 	// Create health clients from the underlying gRPC connections
 	// These bypass the circuit breaker to avoid health checks tripping business operation circuit breakers
-	clients := &serviceClients{
-		positionKeeping:           resilientPosKeepingClient,
-		financialAccounting:       resilientFinAcctClient,
-		positionKeepingHealth:     grpc_health_v1.NewHealthClient(posKeepingGRPCClient.Conn()),
-		financialAccountingHealth: grpc_health_v1.NewHealthClient(finAcctGRPCClient.Conn()),
+	svcClients := &serviceClients{
+		positionKeeping:           posKeepingClient,
+		financialAccounting:       finAcctClient,
+		party:                     partyClientWrapper,
+		positionKeepingHealth:     grpc_health_v1.NewHealthClient(posKeepingClient.Conn()),
+		financialAccountingHealth: grpc_health_v1.NewHealthClient(finAcctClient.Conn()),
+		cleanupFuncs:              cleanupFuncs,
 	}
 
-	return svc, clients, nil
+	return svc, svcClients, nil
 }
+
+// PartyClientWrapper is defined in party_wrapper.go

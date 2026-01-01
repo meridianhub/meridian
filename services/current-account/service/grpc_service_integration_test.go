@@ -14,7 +14,6 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -373,13 +372,13 @@ func testLogger() *slog.Logger {
 
 // testDepositOrchestrator creates a DepositOrchestrator for testing with the provided dependencies.
 // Panics if orchestrator creation fails (acceptable in test helpers).
-func testDepositOrchestrator(repo *persistence.Repository, posKeeping clients.PositionKeepingClient, finAcct clients.FinancialAccountingClient) *DepositOrchestrator {
+func testDepositOrchestrator(repo *persistence.Repository, posKeeping PositionKeepingClient, finAcct FinancialAccountingClient) *DepositOrchestrator {
 	return testDepositOrchestratorWithConfig(repo, posKeeping, finAcct, nil)
 }
 
 // testDepositOrchestratorWithConfig creates a DepositOrchestrator with optional AccountConfig.
 // Panics if orchestrator creation fails (acceptable in test helpers).
-func testDepositOrchestratorWithConfig(repo *persistence.Repository, posKeeping clients.PositionKeepingClient, finAcct clients.FinancialAccountingClient, acctConfig *config.AccountConfig) *DepositOrchestrator {
+func testDepositOrchestratorWithConfig(repo *persistence.Repository, posKeeping PositionKeepingClient, finAcct FinancialAccountingClient, acctConfig *config.AccountConfig) *DepositOrchestrator {
 	orchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
 		Logger:           testLogger(),
 		Repo:             repo,
@@ -593,165 +592,7 @@ func TestExecuteDeposit_WithOrchestration_FinancialAccountingFailure(t *testing.
 	assert.Equal(t, 0, mockFinAcct.compensateCalls, "No ledger compensation (it never succeeded)")
 }
 
-// Test 4: NewServiceWithClients with valid configuration
-
-// TestNewServiceWithClients_ValidConfig verifies the service factory function
-// correctly creates a service instance with all required client dependencies.
-//
-// Validates:
-// - Service is created successfully with valid configuration
-// - All required fields are populated
-// - Clients are properly initialized
-func TestNewServiceWithClients_ValidConfig(t *testing.T) {
-	// Setup
-	db, _, cleanup := setupIntegrationTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-
-	// Note: NewServiceWithClients creates real gRPC client connections.
-	// For unit testing, we verify the factory validates configuration correctly,
-	// but cannot test full initialization without real services running.
-	// Instead, we test the validation logic.
-
-	tests := []struct {
-		name    string
-		config  Config
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "missing repository",
-			config: Config{
-				Repository:                     nil,
-				PositionKeepingServiceName:     "position-keeping",
-				PositionKeepingPort:            50053,
-				FinancialAccountingServiceName: "financial-accounting",
-				FinancialAccountingPort:        50052,
-			},
-			wantErr: true,
-			errMsg:  "repository cannot be nil",
-		},
-		{
-			name: "missing position keeping service name",
-			config: Config{
-				Repository:                     repo,
-				PositionKeepingServiceName:     "",
-				FinancialAccountingServiceName: "financial-accounting",
-				FinancialAccountingPort:        50052,
-			},
-			wantErr: true,
-			errMsg:  "position keeping service name cannot be empty",
-		},
-		{
-			name: "missing financial accounting service name",
-			config: Config{
-				Repository:                     repo,
-				PositionKeepingServiceName:     "position-keeping",
-				PositionKeepingPort:            50053,
-				FinancialAccountingServiceName: "",
-			},
-			wantErr: true,
-			errMsg:  "financial accounting service name cannot be empty",
-		},
-		{
-			name: "all fields empty",
-			config: Config{
-				Repository:                     nil,
-				PositionKeepingServiceName:     "",
-				FinancialAccountingServiceName: "",
-			},
-			wantErr: true,
-			errMsg:  "repository cannot be nil",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			svc, err := NewServiceWithClients(tt.config)
-
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errMsg)
-				assert.Nil(t, svc)
-			} else {
-				require.NoError(t, err)
-				assert.NotNil(t, svc)
-				assert.NotNil(t, svc.repo)
-				assert.NotNil(t, svc.logger)
-			}
-		})
-	}
-}
-
-// Test 5: NewServiceWithClients handles missing service names
-
-// TestNewServiceWithClients_MissingServiceNames verifies proper error handling
-// when required service names are not provided in the configuration.
-//
-// This test validates fail-fast behavior at service initialization time,
-// preventing runtime failures when clients are actually used.
-func TestNewServiceWithClients_MissingServiceNames(t *testing.T) {
-	// Setup
-	db, _, cleanup := setupIntegrationTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-
-	t.Run("missing both service names", func(t *testing.T) {
-		config := Config{
-			Repository: repo,
-		}
-
-		svc, err := NewServiceWithClients(config)
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "position keeping service name cannot be empty")
-		assert.Nil(t, svc)
-	})
-
-	t.Run("missing financial accounting service name only", func(t *testing.T) {
-		config := Config{
-			Repository:                 repo,
-			PositionKeepingServiceName: "position-keeping",
-			PositionKeepingPort:        50053,
-		}
-
-		svc, err := NewServiceWithClients(config)
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "financial accounting service name cannot be empty")
-		assert.Nil(t, svc)
-	})
-
-	t.Run("all required fields provided", func(t *testing.T) {
-		// This will create gRPC clients with DNS-based load balancing.
-		// The DNS resolution happens lazily, so client creation succeeds.
-		config := Config{
-			Repository:                     repo,
-			Namespace:                      "default",
-			PositionKeepingServiceName:     "position-keeping",
-			PositionKeepingPort:            50053,
-			FinancialAccountingServiceName: "financial-accounting",
-			FinancialAccountingPort:        50052,
-		}
-
-		// Should not return validation error - DNS resolution happens lazily
-		svc, err := NewServiceWithClients(config)
-
-		// We expect this to fail (no real service running), but NOT due to validation
-		if err != nil {
-			// Error should be about client creation, not validation
-			assert.NotContains(t, err.Error(), "cannot be nil")
-			assert.NotContains(t, err.Error(), "cannot be empty")
-		} else {
-			// If it somehow succeeds (unlikely), cleanup
-			assert.NotNil(t, svc)
-		}
-	})
-}
-
-// Test 6: Compensation handles multiple step failures
+// Test 4: Compensation handles multiple step failures
 
 // TestExecuteDeposit_WithOrchestration_CompensationOrder verifies that saga
 // compensation executes in the correct order (reverse of execution order).

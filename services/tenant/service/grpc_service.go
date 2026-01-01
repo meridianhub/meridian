@@ -10,7 +10,6 @@ import (
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	"github.com/meridianhub/meridian/services/tenant/clients"
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/auth"
@@ -29,7 +28,7 @@ type Service struct {
 	pb.UnimplementedTenantServiceServer
 	repo        *persistence.Repository
 	provisioner provisioner.SchemaProvisioner
-	partyClient clients.PartyClient
+	partyClient PartyClient
 	slugCache   *SlugCache
 	logger      *slog.Logger
 }
@@ -38,7 +37,7 @@ type Service struct {
 // The provisioner parameter is optional; if nil, schema provisioning is skipped during tenant creation.
 // The partyClient parameter is optional; if nil, party registration is skipped during tenant creation.
 // The slugCache parameter is optional; if nil, slug caching is disabled.
-func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner, partyClient clients.PartyClient, slugCache *SlugCache, logger *slog.Logger) *Service {
+func NewService(repo *persistence.Repository, prov provisioner.SchemaProvisioner, partyClient PartyClient, slugCache *SlugCache, logger *slog.Logger) *Service {
 	return &Service{
 		repo:        repo,
 		provisioner: prov,

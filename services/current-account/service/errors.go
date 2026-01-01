@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 
-	"github.com/meridianhub/meridian/services/current-account/clients"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 )
 
@@ -49,8 +48,4 @@ var (
 	ErrNilCreditPosting = errors.New("financial accounting returned nil credit posting")
 )
 
-// Party validation errors (re-exported from clients package for convenience)
-var (
-	ErrPartyNotFound  = clients.ErrPartyNotFound
-	ErrPartyNotActive = clients.ErrPartyNotActive
-)
+// Note: ErrPartyNotFound and ErrPartyNotActive are defined in client_interfaces.go
