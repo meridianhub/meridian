@@ -118,20 +118,30 @@ func (s *Server) registerRoutes() {
 // handleHealth is the liveness probe endpoint.
 // Returns 200 OK if the server is alive.
 // This endpoint does NOT require tenant context.
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("OK"))
+	if _, err := w.Write([]byte("OK")); err != nil {
+		s.logger.Warn("failed to write health response",
+			"error", err,
+			"endpoint", r.URL.Path,
+			"remote_addr", r.RemoteAddr)
+	}
 }
 
 // handleReady is the readiness probe endpoint.
 // Returns 200 OK if the server is ready to accept traffic.
 // This endpoint does NOT require tenant context.
-func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	// TODO: Add actual readiness checks (database, redis, backends)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("READY"))
+	if _, err := w.Write([]byte("READY")); err != nil {
+		s.logger.Warn("failed to write readiness response",
+			"error", err,
+			"endpoint", r.URL.Path,
+			"remote_addr", r.RemoteAddr)
+	}
 }
 
 // handleAPI is a placeholder handler for API routes.
@@ -145,7 +155,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	// Placeholder response - actual routing will be implemented in future tasks
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusNotImplemented)
-	_, _ = w.Write([]byte(`{"error":"gateway routing not yet implemented"}`))
+	if _, err := w.Write([]byte(`{"error":"gateway routing not yet implemented"}`)); err != nil {
+		s.logger.Warn("failed to write API response",
+			"error", err,
+			"endpoint", r.URL.Path,
+			"remote_addr", r.RemoteAddr)
+	}
 }
 
 // Start starts the HTTP server and blocks until the server stops.

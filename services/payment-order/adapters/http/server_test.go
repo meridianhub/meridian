@@ -412,6 +412,49 @@ func TestMiddlewareChain(t *testing.T) {
 	assert.Equal(t, expected, order)
 }
 
+// failingResponseWriter is a mock that fails on Write to test error handling.
+type failingResponseWriter struct {
+	header     http.Header
+	statusCode int
+	writeErr   error
+}
+
+func newFailingResponseWriter(writeErr error) *failingResponseWriter {
+	return &failingResponseWriter{
+		header:   make(http.Header),
+		writeErr: writeErr,
+	}
+}
+
+func (w *failingResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *failingResponseWriter) Write(_ []byte) (int, error) {
+	return 0, w.writeErr
+}
+
+func (w *failingResponseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+}
+
+// TestHealthHandler_NoPanicOnWriteError verifies the handler doesn't panic when Write fails.
+func TestHealthHandler_NoPanicOnWriteError(t *testing.T) {
+	// Create failing response writer
+	w := newFailingResponseWriter(io.ErrUnexpectedEOF)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.RemoteAddr = "192.168.1.100:54321"
+
+	// Execute - should NOT panic
+	assert.NotPanics(t, func() {
+		healthHandler(w, req)
+	})
+
+	// Verify WriteHeader was still called (status set before Write attempt)
+	assert.Equal(t, http.StatusOK, w.statusCode)
+	assert.Equal(t, "application/json", w.header.Get("Content-Type"))
+}
+
 func TestRecoveryMiddleware(t *testing.T) {
 	panicHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		panic("test panic")

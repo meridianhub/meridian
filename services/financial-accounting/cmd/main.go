@@ -312,22 +312,42 @@ func run(logger *slog.Logger) error {
 		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{})
 		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("NOT_SERVING"))
+			if _, err := w.Write([]byte("NOT_SERVING")); err != nil {
+				logger.Warn("failed to write health response",
+					"error", err,
+					"endpoint", r.URL.Path,
+					"remote_addr", r.RemoteAddr)
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("SERVING"))
+		if _, err := w.Write([]byte("SERVING")); err != nil {
+			logger.Warn("failed to write health response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
 	})
 	httpMux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		// Readiness endpoint - checks database connectivity
 		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{Service: "database"})
 		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("NOT_READY"))
+			if _, err := w.Write([]byte("NOT_READY")); err != nil {
+				logger.Warn("failed to write readiness response",
+					"error", err,
+					"endpoint", r.URL.Path,
+					"remote_addr", r.RemoteAddr)
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("READY"))
+		if _, err := w.Write([]byte("READY")); err != nil {
+			logger.Warn("failed to write readiness response",
+				"error", err,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
 	})
 
 	httpServer := &http.Server{
