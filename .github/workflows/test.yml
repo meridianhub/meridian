@@ -37,7 +37,7 @@ jobs:
         run: go mod download
 
       - name: Install gotestsum
-        run: go install gotest.tools/gotestsum@v1.12.1
+        run: go install gotest.tools/gotestsum@v1.13.0
 
       - name: Run tests with coverage
         env:
