@@ -77,6 +77,47 @@ The cached CEL program executes → returns `false` → measurement rejected **b
 
 ---
 
+## Data Contract: Proto + CEL + Go
+
+This table visualizes how the three technologies work together:
+
+| Concept | Defined In (Static) | Instance Data (Runtime) | Connected By |
+|---------|---------------------|-------------------------|--------------|
+| **Structure** | **Protobuf** (`InstrumentAmount`) | `map<string,string> attributes` | The Wire Format |
+| **Logic** | **CEL** (Reference Data) | `validation_expression`, `fungibility_expression` | The Validation Engine |
+| **Bridge** | **Go** (`quantity.ParseQuantity`) | `env.Program.Eval(vars)` | Variable Injection |
+
+**How they connect at runtime:**
+
+```go
+// 1. PROTO holds the payload (dumb container)
+protoMsg := &pb.InstrumentAmount{
+    Amount:         "100.50",
+    InstrumentCode: "KWH",
+    Version:        1,
+    Attributes:     map[string]string{"tou_period": "14", "region": "us-east"},
+}
+
+// 2. CEL holds the rules (smart logic) - loaded from Reference Data
+cachedInstrument := cache.Get(tenantID, "KWH", 1)
+// validation_expression: "has(attributes.tou_period) && int(attributes.tou_period) >= 0"
+
+// 3. GO bridges them via Variable Injection
+celVars := map[string]interface{}{
+    "attributes": protoMsg.Attributes,  // Proto data → CEL environment
+}
+result, _ := cachedInstrument.ValidationProgram.Eval(celVars)
+// result: true (attributes are valid for this instrument)
+```
+
+**The Architectural Moat:**
+
+- **Proto** provides infinite flexibility (any `map<string,string>`)
+- **CEL** provides rigid safety (tenant-defined validation rules)
+- **Go Generics** provide compile-time physics (`Quantity[Monetary]` vs `Quantity[Commodity]`)
+
+---
+
 ## Fungibility Resolution
 
 Beyond ingestion validation, CEL handles **operational predicates** that determine position
@@ -163,41 +204,78 @@ If all checks pass, positions are merged (`SUM(amount)`). Otherwise, they remain
 **WHERE does merge happen?**
 
 - ❌ **Not at database level**: SQL cannot execute CEL. SQL can only `GROUP BY` exact columns.
-- ✅ **At application level**: Write-time aggregation requires a **Read-Modify-Write** loop.
+- ✅ **At application level**: Aggregation via CEL fungibility expressions.
 
-**Write-Time Aggregation Pattern:**
+#### Default Strategy: Append-Only (High Throughput)
+
+For 100k+ TPS targets, write-time merging with row locks creates bottlenecks on hot accounts
+(omnibus wallets, platform inventory). Instead, use **Append-Only writes with Read-Time aggregation**:
 
 ```go
-// Position Keeping: Application-side read-modify-write for fungibility
-func (s *Service) UpsertPosition(ctx context.Context, tenantID uuid.UUID, new Position) error {
-    // 1. Lock Position Key (Account + Instrument)
-    lock := s.locks.Acquire(new.AccountID, new.InstrumentCode)
-    defer lock.Release()
+// Position Keeping: Append-Only (High Throughput) - DEFAULT
+func (s *Service) RecordMeasurement(ctx context.Context, tenantID uuid.UUID, new Position) error {
+    // NO LOCKING. Constant time O(1) writes.
 
-    // 2. Load candidate existing positions (same account, instrument, version)
-    candidates, err := s.repo.FindByAccountAndInstrument(ctx, new.AccountID, new.InstrumentCode, new.Version)
+    // 1. Validate attributes via CEL (cached program, ~100ns)
+    cached, err := s.cache.Get(ctx, tenantID, new.InstrumentCode, new.Version)
     if err != nil {
         return err
     }
+    if valid, _ := s.cel.Validate(cached.ValidationProgram, new.Attributes); !valid {
+        return ErrAttributeValidationFailed
+    }
 
-    // 3. Find fungible match via CEL
+    // 2. Insert new row immediately - no read-modify-write
+    return s.repo.Insert(ctx, new)
+}
+
+// Aggregation happens on READ (cacheable)
+func (s *Service) GetAggregatedPosition(
+    ctx context.Context, tenantID uuid.UUID, accountID, instrumentCode string,
+) ([]AggregatedPosition, error) {
+    // 1. Load all raw position rows
+    rows, err := s.repo.FindAllByAccountAndInstrument(ctx, accountID, instrumentCode)
+    if err != nil {
+        return nil, err
+    }
+
+    // 2. Run CEL fungibility in-memory to aggregate
+    cached, _ := s.cache.Get(ctx, tenantID, instrumentCode, rows[0].Version)
+    return s.aggregateByFungibility(cached.FungibilityProgram, rows), nil
+}
+```
+
+**Why Append-Only is better:**
+
+- Write path is O(1) constant time - no locks, no reads
+- Read path pays aggregation cost, but reads are **cacheable**; writes are not
+- Background compaction can merge rows during low-traffic windows
+
+#### Alternative: Write-Time Merging (Low Throughput)
+
+For accounts with low transaction volume where real-time balance accuracy is critical:
+
+```go
+// Position Keeping: Write-Time Merge (Low Throughput) - OPT-IN
+func (s *Service) UpsertPositionWithMerge(ctx context.Context, tenantID uuid.UUID, new Position) error {
+    // WARNING: Row lock becomes bottleneck at high TPS
+    lock := s.locks.Acquire(new.AccountID, new.InstrumentCode)
+    defer lock.Release()
+
+    candidates, _ := s.repo.FindByAccountAndInstrument(ctx, new.AccountID, new.InstrumentCode, new.Version)
     cached, _ := s.cache.Get(ctx, tenantID, new.InstrumentCode, new.Version)
+
     for _, candidate := range candidates {
-        fungible, _ := s.cel.AreFungible(cached.FungibilityProgram, candidate.Attributes, new.Attributes)
-        if fungible {
-            // 4a. UPDATE: Merge into existing row
+        if fungible, _ := s.cel.AreFungible(cached.FungibilityProgram, candidate.Attributes, new.Attributes); fungible {
             return s.repo.UpdateAmount(ctx, candidate.ID, candidate.Amount.Add(new.Amount))
         }
     }
-
-    // 4b. INSERT: No match found, create new position row
     return s.repo.Insert(ctx, new)
 }
 ```
 
-> **Performance Note**: Write-time merging is expensive (read before write). For high-throughput
-> (100k+ TPS), consider "Insert Only" mode with **Read-Time Aggregation** or background compaction.
-> MVP can default to write-time merging; optimize later if Position Keeping becomes a bottleneck.
+> **Decision**: Default to Append-Only. Opt-in to write-time merging per-account or per-instrument
+> configuration when real-time balance accuracy outweighs throughput requirements.
 
 ### Temporal Logic
 
@@ -387,7 +465,10 @@ flowchart TB
 
    ```go
    // ParseQuantity converts raw data into a typed Quantity.
-   // This is the boundary between runtime (Proto/DB) and compile-time (Go generics).
+   // Returns 'any' because the concrete type depends on runtime dimension string.
+   //
+   // NOTE: Returning 'any' requires type assertions at call sites. For code paths
+   // where the dimension is known at compile time, prefer NewQuantity[D] instead.
    func ParseQuantity(amount decimal.Decimal, inst Instrument) (any, error) {
        switch inst.Dimension {
        case "Monetary":
@@ -398,7 +479,23 @@ flowchart TB
            return nil, ErrUnknownDimension
        }
    }
+
+   // For services that handle mixed dimensions (e.g., generic ledger),
+   // consider defining a QuantityValue interface for common operations:
+   type QuantityValue interface {
+       GetAmount() decimal.Decimal
+       GetInstrument() Instrument
+       IsZero() bool
+   }
    ```
+
+   **When to use which:**
+
+   | Scenario | Use | Returns |
+   |----------|-----|---------|
+   | Unknown dimension at compile time | `ParseQuantity()` | `any` (requires type assertion) |
+   | Known dimension (e.g., Current Account = Monetary) | `NewQuantity[Monetary]()` | `Quantity[Monetary]` |
+   | Generic operations on any quantity | `QuantityValue` interface | Avoids type assertions |
 
 7. **Typed Rehydration Constructor** (`quantity.go`)
 
@@ -505,10 +602,38 @@ flowchart TB
 
 3. **Rate validation**: Ensure `From != To` unless identity, validate temporal bounds
 
+4. **Precision Handling**:
+
+   > **Rule**: `Rate.Convert()` outputs a result with the **target instrument's precision**.
+
+   ```go
+   func (r Rate) Convert(q Quantity[Monetary]) (Quantity[Monetary], error) {
+       if q.Instrument.Code != r.From.Code {
+           return Quantity[Monetary]{}, ErrInstrumentMismatch
+       }
+
+       // Multiply by factor
+       rawResult := q.Amount.Mul(r.Factor)
+
+       // Round to target instrument's precision (e.g., USD = 2 decimal places)
+       roundedResult := rawResult.Round(int32(r.To.Precision))
+
+       return Quantity[Monetary]{
+           Amount:     roundedResult,
+           Instrument: r.To,
+       }, nil
+   }
+   ```
+
+   **Example**: Converting 1 Gold Bar (precision=4) to USD (precision=2) at rate 2,847.5312:
+   - Raw: `1 * 2847.5312 = 2847.5312`
+   - Rounded to USD precision: `2847.53`
+
 ### Acceptance Criteria
 
 - [ ] `Rate.Convert()` correctly multiplies amount by factor
-- [ ] `Rate.Convert()` returns error if unit mismatch
+- [ ] `Rate.Convert()` rounds result to target instrument's precision
+- [ ] `Rate.Convert()` returns error if source instrument mismatch
 - [ ] `IdentityRate()` returns factor of 1.0
 - [ ] Rate with `ValidFrom > ValidTo` rejected
 
@@ -759,7 +884,32 @@ flowchart TB
    > because no positions exist yet. The `ValidateAttributes` method is called by **Position Keeping**
    > at ingestion time, not by Reference Data during definition creation.
 
-4. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
+4. **Attribute Key Validation** (CEL Compatibility):
+
+   > **Rule**: Attribute keys referenced in CEL expressions MUST be `snake_case`
+   > (alphanumeric + underscores only, starting with a letter).
+
+   ```go
+   var validAttributeKeyRegex = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+   // validateAttributeKeys extracts attribute references from CEL and validates format
+   func validateAttributeKeys(expr string) error {
+       // Extract keys referenced as attributes.KEY or attributes['KEY']
+       keys := extractAttributeKeys(expr)
+       for _, key := range keys {
+           if !validAttributeKeyRegex.MatchString(key) {
+               return fmt.Errorf("%w: '%s' must be snake_case (e.g., 'expiry_date' not 'expiry-date')",
+                   ErrInvalidAttributeKey, key)
+           }
+       }
+       return nil
+   }
+   ```
+
+   **Why**: CEL interprets `attributes.user-id` as subtraction (`attributes.user` minus `id`).
+   Forcing `snake_case` ensures `attributes.user_id` works without bracket syntax `attributes['user-id']`.
+
+5. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
 
    ```go
    type CELCompiler struct {
@@ -814,9 +964,9 @@ flowchart TB
    }
    ```
 
-5. **PostgreSQL implementation** with sqlc-generated queries
+6. **PostgreSQL implementation** with sqlc-generated queries
 
-6. **Error types**:
+7. **Error types**:
    - `ErrInstrumentNotFound`
    - `ErrDuplicateInstrument`
    - `ErrCELCompileError` - syntax/semantic error in validation expression
