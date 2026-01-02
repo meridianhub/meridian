@@ -134,10 +134,13 @@ type Commodity struct{}  // Physical goods, energy, compute resources
 type FinancialInstrument struct {
     Code           string          // BIAN: FinancialInstrumentIdentification ("USD", "KWH")
     Version        uint32          // Schema version (1, 2, 3...)
+    Dimension      string          // "Monetary" or "Commodity" - required for deserialization
     InstrumentType InstrumentType  // BIAN: FinancialInstrumentType
     Precision      int             // Decimal places (2, 4, 0)
-    Schema         AttributeSchema // Rules for Layer 3 validation
 }
+
+// Note: Attribute validation uses CEL expressions stored in the Reference Data service.
+// See ADR-0014 for CEL-based Schema-on-Write validation.
 
 // InstrumentType aligns with BIAN financialinstrumenttypevalues.
 type InstrumentType string

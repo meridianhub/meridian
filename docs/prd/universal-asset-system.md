@@ -77,6 +77,106 @@ The cached CEL program executes → returns `false` → measurement rejected **b
 
 ---
 
+## Fungibility Resolution
+
+Beyond ingestion validation, CEL handles **operational predicates** that determine position
+behavior. This extends CEL from "is this data valid?" to "can these positions be combined?"
+
+### The Performance Guardrail
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│  NATIVE GO (Hot Path)              │  CEL (Policy Decisions)           │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Quantity.Add()                    │  validation_expression            │
+│  Quantity.Sub()                    │  fungibility_expression           │
+│  decimal.Decimal arithmetic        │  AreFungible(ctx_a, ctx_b)        │
+│  Position aggregation loop         │  Temporal overlap policy          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Rule**: CEL evaluates predicates (boolean decisions). Native Go performs arithmetic.
+We never offload `Add`/`Sub` to CEL in the hot loop.
+
+### Fungibility Expression
+
+Each instrument defines a CEL expression that determines whether two positions can be merged:
+
+```javascript
+// Input: 'a' and 'b' are attribute maps from two positions
+// Output: Boolean - true if positions can be combined into one row
+
+// Example 1: Same expiry = fungible
+a.expiry == b.expiry
+
+// Example 2: Same region AND same tier = fungible
+a.region == b.region && a.tier == b.tier
+
+// Example 3: Temporal overlap allowed if same contract
+a.contract_id == b.contract_id &&
+(int(a.valid_to) >= int(b.valid_from) || int(b.valid_to) >= int(a.valid_from))
+```
+
+### How Fungibility Affects the Ledger
+
+```mermaid
+flowchart TB
+    subgraph Input["Incoming Position"]
+        NEW["Amount: 100 KWH<br/>attrs: {period: '14:00-15:00'}"]
+    end
+
+    subgraph Existing["Existing Positions"]
+        E1["Amount: 50 KWH<br/>attrs: {period: '14:00-15:00'}"]
+        E2["Amount: 75 KWH<br/>attrs: {period: '15:00-16:00'}"]
+    end
+
+    subgraph CEL["CEL Predicate: AreFungible(new, existing)"]
+        C1["new vs E1: true<br/>(same period)"]
+        C2["new vs E2: false<br/>(different period)"]
+    end
+
+    subgraph Result["Ledger State"]
+        R1["Amount: 150 KWH ✓<br/>attrs: {period: '14:00-15:00'}"]
+        R2["Amount: 75 KWH<br/>attrs: {period: '15:00-16:00'}"]
+    end
+
+    NEW --> CEL
+    E1 --> C1
+    E2 --> C2
+    C1 -->|"MERGE"| R1
+    C2 -->|"KEEP SEPARATE"| R2
+```
+
+### The Aggregation Contract
+
+When Position Keeping aggregates positions:
+
+1. **Dimension check** (compile-time): `Quantity[Monetary]` cannot combine with `Quantity[Commodity]`
+2. **Instrument check** (runtime): USD cannot combine with EUR
+3. **Version check** (runtime): USD(v1) cannot combine with USD(v2)
+4. **Fungibility check** (CEL): `fungibility_expression.Eval({a: pos1.attrs, b: pos2.attrs})`
+
+If all checks pass, positions are merged (`SUM(amount)`). Otherwise, they remain distinct rows.
+
+### Temporal Logic
+
+Time-bound assets (energy, licenses, subscriptions) need temporal overlap policy:
+
+```javascript
+// Can merge if periods are adjacent or overlapping AND same tariff
+(int(a.period_end) >= int(b.period_start) ||
+ int(b.period_end) >= int(a.period_start)) &&
+a.tariff_code == b.tariff_code
+```
+
+**Edge case**: If CEL returns `false` for a merge attempt, the operation either:
+- Creates a new distinct position (accumulation), OR
+- Fails with `ErrPositionsNotFungible` (strict mode)
+
+The behavior is configurable per instrument.
+
+---
+
 ## Work Streams
 
 Designed for parallel execution across multiple developers. Dependencies shown in diagram below.
@@ -326,14 +426,19 @@ flowchart TB
        string dimension = 5;           // "Monetary" or "Commodity"
        int32 precision = 6;
 
-       // The "Gatekeeper": A CEL expression that validates if a
-       // position's attributes are allowed for this instrument.
-       // Compiled and cached by the service layer.
+       // The "Gatekeeper": Validates if attributes are allowed for this instrument.
+       // Compiled and cached. Input: attributes map. Output: bool.
        // Example: "has(attributes.region) && int(attributes.expiry) > 0"
        string validation_expression = 7;
 
-       string display_name = 8;
-       string description = 9;
+       // The "Arbiter": Determines if two positions can be merged (fungible).
+       // Compiled and cached. Input: 'a' and 'b' attribute maps. Output: bool.
+       // Example: "a.expiry == b.expiry && a.region == b.region"
+       // Default: "a == b" (exact attribute match required)
+       string fungibility_expression = 8;
+
+       string display_name = 9;
+       string description = 10;
    }
    ```
 
@@ -381,7 +486,11 @@ flowchart TB
        version INTEGER NOT NULL DEFAULT 1,
        dimension VARCHAR(32) NOT NULL,
        precision INTEGER NOT NULL,
-       validation_expression TEXT NOT NULL DEFAULT 'true',  -- CEL expression
+
+       -- CEL Expressions (compiled and cached by service layer)
+       validation_expression TEXT NOT NULL DEFAULT 'true',  -- Ingestion gatekeeper
+       fungibility_expression TEXT NOT NULL DEFAULT 'a == b',  -- Position merge arbiter
+
        display_name VARCHAR(128),
        description TEXT,
        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -389,16 +498,17 @@ flowchart TB
        UNIQUE(tenant_id, code, version),
        CHECK (precision >= 0 AND precision <= 18),
        CHECK (dimension IN ('Monetary', 'Commodity')),
-       CHECK (validation_expression <> '')  -- Must have some expression
+       CHECK (validation_expression <> ''),
+       CHECK (fungibility_expression <> '')
    );
 
    CREATE INDEX idx_instrument_definitions_lookup
        ON instrument_definitions(tenant_id, code, version);
    ```
 
-   > **CEL over JSON Schema**: We use CEL (Common Expression Language) instead of JSON Schema
-   > for attribute validation. CEL compiles to bytecode, executes in nanoseconds, guarantees
-   > termination, and can express cross-field validation that JSON Schema cannot.
+   > **Two CEL expressions per instrument**:
+   > - `validation_expression`: "Is this data valid?" (ingestion)
+   > - `fungibility_expression`: "Can these positions merge?" (aggregation)
 
 2. **System tenant seed data**:
 
@@ -482,31 +592,46 @@ flowchart TB
 
    ```go
    type CELCompiler struct {
-       env *cel.Env
+       validationEnv  *cel.Env  // For validation_expression (single attrs map)
+       fungibilityEnv *cel.Env  // For fungibility_expression (two attrs maps: a, b)
    }
 
    func NewCELCompiler() (*CELCompiler, error) {
-       env, err := cel.NewEnv(
+       // Environment for ingestion validation: attributes → bool
+       valEnv, err := cel.NewEnv(
            cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
        )
        if err != nil {
            return nil, err
        }
-       return &CELCompiler{env: env}, nil
-   }
 
-   // Compile parses and compiles a CEL expression. Called at instrument creation.
-   func (c *CELCompiler) Compile(expr string) (cel.Program, error) {
-       ast, issues := c.env.Compile(expr)
-       if issues != nil && issues.Err() != nil {
-           return nil, fmt.Errorf("CEL compile error: %w", issues.Err())
+       // Environment for fungibility check: a, b → bool
+       fungEnv, err := cel.NewEnv(
+           cel.Variable("a", cel.MapType(cel.StringType, cel.StringType)),
+           cel.Variable("b", cel.MapType(cel.StringType, cel.StringType)),
+       )
+       if err != nil {
+           return nil, err
        }
-       return c.env.Program(ast)
+
+       return &CELCompiler{validationEnv: valEnv, fungibilityEnv: fungEnv}, nil
    }
 
-   // Evaluate runs a compiled program against attributes. Called at ingestion.
-   func (c *CELCompiler) Evaluate(prog cel.Program, attrs map[string]string) (bool, error) {
-       out, _, err := prog.Eval(map[string]interface{}{"attributes": attrs})
+   // CompileValidation compiles ingestion validation expression.
+   func (c *CELCompiler) CompileValidation(expr string) (cel.Program, error) {
+       return c.compile(c.validationEnv, expr)
+   }
+
+   // CompileFungibility compiles position merge predicate.
+   func (c *CELCompiler) CompileFungibility(expr string) (cel.Program, error) {
+       return c.compile(c.fungibilityEnv, expr)
+   }
+
+   // AreFungible evaluates whether two positions can be merged.
+   func (c *CELCompiler) AreFungible(
+       prog cel.Program, attrsA, attrsB map[string]string,
+   ) (bool, error) {
+       out, _, err := prog.Eval(map[string]interface{}{"a": attrsA, "b": attrsB})
        if err != nil {
            return false, err
        }
@@ -575,10 +700,11 @@ flowchart TB
 1. **CachedInstrumentRegistry** wrapper with **compiled CEL programs**:
 
    ```go
-   // CachedInstrument holds both the definition and its pre-compiled CEL program
+   // CachedInstrument holds the definition and BOTH pre-compiled CEL programs
    type CachedInstrument struct {
-       Definition InstrumentDefinition
-       Program    cel.Program  // Pre-compiled - parsing CEL is expensive, execution is cheap
+       Definition         InstrumentDefinition
+       ValidationProgram  cel.Program  // For ingestion: attributes → bool
+       FungibilityProgram cel.Program  // For aggregation: (a, b) → bool
    }
 
    type CachedInstrumentRegistry struct {
@@ -590,7 +716,7 @@ flowchart TB
    ```
 
    > **Why cache compiled programs**: CEL parsing/compilation is ~100μs. CEL execution is ~100ns.
-   > By caching `cel.Program` alongside the definition, we pay the compilation cost once.
+   > By caching both `cel.Program` instances alongside the definition, we pay compilation once.
 
 2. **Read-through caching** on `GetDefinition` and `GetLatestDefinition`
    - On cache miss: fetch from DB, compile CEL, store both
@@ -784,9 +910,11 @@ flowchart TB
 | System Tenant ID | `00000000-0000-0000-0000-000000000000` |
 | Lookup inheritance | Tenant → System Tenant fallback |
 | Valuation scope | Rate struct only; ValuationProvider deferred to future PRD |
-| Attribute validation | CEL expressions (not JSON Schema) - 100x faster, cross-field capable |
+| Attribute validation | CEL `validation_expression` - 100x faster than JSON Schema |
+| Fungibility policy | CEL `fungibility_expression` - determines position merge eligibility |
+| Arithmetic | Native Go `decimal.Decimal` - CEL never in hot loop |
 | Local cache type | Bounded LRU (`hashicorp/golang-lru`) to prevent memory leaks |
-| CEL caching | Cache compiled `cel.Program` alongside definitions |
+| CEL caching | Cache both compiled programs (validation + fungibility) |
 
 ---
 
