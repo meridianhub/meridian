@@ -154,7 +154,7 @@ The CurrentAccount service owns:
 - Circuit breaker for downstream service failures
 - Retry logic with exponential backoff
 - Graceful degradation when dependencies are unavailable
-- **Implementation:** `services/current-account/client/resilient_client.go`
+- **Implementation:** `shared/pkg/clients/resilient.go`
 
 **Platform Services:**
 
@@ -1466,7 +1466,7 @@ This section documents the actual communication flows between services based on 
 
 - **Client:** `services/current-account/client/positionkeeping_client.go`
 - **Proto Import:** `meridian/position_keeping/v1/position_keeping.proto`
-- **Resilience:** Circuit breaker via `resilient_client.go`
+- **Resilience:** Circuit breaker via `shared/pkg/clients`
 
 **Usage Pattern:**
 
@@ -1491,7 +1491,7 @@ resp, err := pkClient.ListFinancialPositionLogs(ctx, &pb.ListRequest{
 
 - **Client:** `services/current-account/client/financialaccounting_client.go`
 - **Proto Import:** `meridian/financial_accounting/v1/financial_accounting.proto`
-- **Resilience:** Circuit breaker via `resilient_client.go`
+- **Resilience:** Circuit breaker via `shared/pkg/clients`
 
 **Usage Pattern:**
 
