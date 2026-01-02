@@ -158,6 +158,47 @@ When Position Keeping aggregates positions:
 
 If all checks pass, positions are merged (`SUM(amount)`). Otherwise, they remain distinct rows.
 
+### Fungibility Execution Context (Critical)
+
+**WHERE does merge happen?**
+
+- ❌ **Not at database level**: SQL cannot execute CEL. SQL can only `GROUP BY` exact columns.
+- ✅ **At application level**: Write-time aggregation requires a **Read-Modify-Write** loop.
+
+**Write-Time Aggregation Pattern:**
+
+```go
+// Position Keeping: Application-side read-modify-write for fungibility
+func (s *Service) UpsertPosition(ctx context.Context, tenantID uuid.UUID, new Position) error {
+    // 1. Lock Position Key (Account + Instrument)
+    lock := s.locks.Acquire(new.AccountID, new.InstrumentCode)
+    defer lock.Release()
+
+    // 2. Load candidate existing positions (same account, instrument, version)
+    candidates, err := s.repo.FindByAccountAndInstrument(ctx, new.AccountID, new.InstrumentCode, new.Version)
+    if err != nil {
+        return err
+    }
+
+    // 3. Find fungible match via CEL
+    cached, _ := s.cache.Get(ctx, tenantID, new.InstrumentCode, new.Version)
+    for _, candidate := range candidates {
+        fungible, _ := s.cel.AreFungible(cached.FungibilityProgram, candidate.Attributes, new.Attributes)
+        if fungible {
+            // 4a. UPDATE: Merge into existing row
+            return s.repo.UpdateAmount(ctx, candidate.ID, candidate.Amount.Add(new.Amount))
+        }
+    }
+
+    // 4b. INSERT: No match found, create new position row
+    return s.repo.Insert(ctx, new)
+}
+```
+
+> **Performance Note**: Write-time merging is expensive (read before write). For high-throughput
+> (100k+ TPS), consider "Insert Only" mode with **Read-Time Aggregation** or background compaction.
+> MVP can default to write-time merging; optimize later if Position Keeping becomes a bottleneck.
+
 ### Temporal Logic
 
 Time-bound assets (energy, licenses, subscriptions) need temporal overlap policy:
@@ -205,7 +246,7 @@ BEFORE                              AFTER
 shared/domain/money/                pkg/platform/quantity/
 ├── money.go (Money struct)         ├── quantity.go (Quantity[D])
 ├── currency.go                     ├── dimension.go (Monetary, Commodity)
-└── errors.go                       ├── instrument.go (UnitDef)
+└── errors.go                       ├── instrument.go (Instrument)
                                     └── currency/ (predefined fiat)
 
 services/*/domain/money.go          services/*/domain/quantity.go
@@ -294,14 +335,16 @@ flowchart TB
    type Commodity struct{}
    ```
 
-2. **UnitDef** (`unit.go`)
+2. **Instrument** (`instrument.go`)
 
    ```go
-   type UnitDef struct {
+   // Instrument identifies an asset type for quantity operations.
+   // Maps to InstrumentDefinition from Reference Data service.
+   type Instrument struct {
        Code      string    // "USD", "KWH", "GPU-H100"
        Version   uint32    // Schema version
        Dimension string    // "Monetary" or "Commodity" - required for deserialization
-       Precision int       // Decimal places
+       Precision int       // Decimal places (for display formatting; math uses arbitrary precision)
    }
    ```
 
@@ -313,11 +356,11 @@ flowchart TB
 
    ```go
    type Quantity[D any] struct {
-       Amount decimal.Decimal
-       Unit   UnitDef
+       Amount     decimal.Decimal
+       Instrument Instrument
    }
 
-   // Type aliases
+   // Type aliases for common use cases
    type Money = Quantity[Monetary]
    type Asset = Quantity[Commodity]
    ```
@@ -345,24 +388,52 @@ flowchart TB
    ```go
    // ParseQuantity converts raw data into a typed Quantity.
    // This is the boundary between runtime (Proto/DB) and compile-time (Go generics).
-   func ParseQuantity(amount decimal.Decimal, def UnitDef) (any, error) {
-       switch def.Dimension {
+   func ParseQuantity(amount decimal.Decimal, inst Instrument) (any, error) {
+       switch inst.Dimension {
        case "Monetary":
-           return Quantity[Monetary]{Amount: amount, Unit: def}, nil
+           return Quantity[Monetary]{Amount: amount, Instrument: inst}, nil
        case "Commodity":
-           return Quantity[Commodity]{Amount: amount, Unit: def}, nil
+           return Quantity[Commodity]{Amount: amount, Instrument: inst}, nil
        default:
            return nil, ErrUnknownDimension
        }
    }
    ```
 
+7. **Typed Rehydration Constructor** (`quantity.go`)
+
+   > **The Rehydration Problem**: When loading from DB/Proto, we need to validate that
+   > the stored dimension matches the expected compile-time type. This constructor
+   > provides a type-safe bridge with explicit dimension validation.
+
+   ```go
+   // NewQuantity creates a quantity from raw data, validating the dimension.
+   // Use this when you KNOW the expected dimension at compile time.
+   func NewQuantity[D Dimension](amount decimal.Decimal, inst Instrument) (Quantity[D], error) {
+       // Runtime check: does D match inst.Dimension?
+       var zero D
+       if inst.Dimension != zero.Name() {
+           return Quantity[D]{}, ErrDimensionMismatch
+       }
+       return Quantity[D]{Amount: amount, Instrument: inst}, nil
+   }
+
+   // Dimension interface for type-safe rehydration
+   type Dimension interface {
+       Name() string
+   }
+
+   func (Monetary) Name() string  { return "Monetary" }
+   func (Commodity) Name() string { return "Commodity" }
+   ```
+
 ### Acceptance Criteria
 
 - [ ] `Quantity[Monetary].Add(Quantity[Commodity])` fails at compile time
-- [ ] `USD.Add(EUR)` returns `ErrUnitMismatch` at runtime
+- [ ] `USD.Add(EUR)` returns `ErrInstrumentMismatch` at runtime
 - [ ] `USD(v1).Add(USD(v2))` returns `ErrVersionMismatch` at runtime
 - [ ] `ParseQuantity` correctly bridges runtime strings to compile-time types
+- [ ] `NewQuantity[Monetary]` with `Commodity` instrument returns `ErrDimensionMismatch`
 - [ ] 100% test coverage on arithmetic operations
 
 ---
@@ -370,18 +441,18 @@ flowchart TB
 ## Stream B: Currency Definitions
 
 **Location:** `pkg/platform/quantity/currency/`
-**Dependencies:** Stream A (UnitDef type)
+**Dependencies:** Stream A (Instrument type)
 
 ### Deliverables
 
-1. **Predefined UnitDefs** for major currencies (ISO 4217):
+1. **Predefined Instruments** for major currencies (ISO 4217):
    - USD, EUR, GBP, JPY, CHF, AUD, CAD, NZD
    - Precision: 2 for most, 0 for JPY
 
 2. **Lookup function**:
 
    ```go
-   func ByCode(code string) (UnitDef, bool)
+   func ByCode(code string) (Instrument, bool)
    ```
 
 3. **Constructor helpers**:
@@ -402,7 +473,7 @@ flowchart TB
 ## Stream C: Rate Type
 
 **Location:** `pkg/platform/quantity/`
-**Dependencies:** Stream A (Quantity, UnitDef types)
+**Dependencies:** Stream A (Quantity, Instrument types)
 
 > **Scope boundary**: This stream covers the Rate data structure and basic conversion math only.
 > ValuationProvider interface and orchestration belongs in a future Valuation Engine PRD (ADR-019).
@@ -413,15 +484,15 @@ flowchart TB
 
    ```go
    type Rate struct {
-       From      UnitDef
-       To        UnitDef
+       From      Instrument
+       To        Instrument
        Factor    decimal.Decimal
        ValidFrom time.Time
        ValidTo   time.Time
    }
 
    // Convert applies the rate to a quantity, returning the converted amount.
-   // Returns error if quantity's unit doesn't match Rate.From.
+   // Returns error if quantity's instrument doesn't match Rate.From.
    func (r Rate) Convert(q Quantity[Monetary]) (Quantity[Monetary], error)
    ```
 
@@ -429,7 +500,7 @@ flowchart TB
 
    ```go
    // IdentityRate returns a 1:1 rate for same-currency operations
-   func IdentityRate(unit UnitDef) Rate
+   func IdentityRate(inst Instrument) Rate
    ```
 
 3. **Rate validation**: Ensure `From != To` unless identity, validate temporal bounds
@@ -472,6 +543,18 @@ flowchart TB
    > **Why `map<string, string>`**: Using `google.protobuf.Struct` adds marshalling overhead
    > and CEL environment complexity. String maps are fast, simple, and CEL can coerce types
    > explicitly: `int(attributes['expiry']) > 1700000000`.
+
+   **CEL Type Coercion Table**: Force developers to rely on CEL's casting, not custom Go parsing:
+
+   | User Intent | Attribute Value (Proto) | CEL Expression |
+   |-------------|-------------------------|----------------|
+   | **Integer** | `"100"` | `int(attributes['val'])` |
+   | **Float** | `"99.5"` | `double(attributes['val'])` |
+   | **Boolean** | `"true"` | `bool(attributes['val'])` |
+   | **Timestamp** | `"2025-01-01T00:00:00Z"` | `timestamp(attributes['val'])` |
+   | **String** | `"us-east"` | `attributes['val']` (no coercion) |
+
+   > **Rule**: All type conversion happens in CEL expressions. Go code only sees `map[string]string`.
 
 2. **InstrumentDefinition message** (`reference_data.proto`) - *Structure + Rules*
 
@@ -526,7 +609,7 @@ flowchart TB
 ## Stream E: Database Schema
 
 **Location:** `services/reference-data/migrations/`
-**Dependencies:** Stream A (UnitDef field design)
+**Dependencies:** Stream A (Instrument field design)
 
 > **BIAN alignment**: This service maps to the BIAN `FinancialInstrumentReferenceDataManagement`
 > service domain, which maintains a directory of financial instrument reference data including
@@ -670,6 +753,11 @@ flowchart TB
        return r.queries.CreateInstrumentDefinition(ctx, def)
    }
    ```
+
+   > **Bootstrap Clarification**: `CreateDefinition` validates **CEL syntax** (does it compile?),
+   > NOT position attributes. This avoids a chicken-and-egg problem - we can't validate attributes
+   > because no positions exist yet. The `ValidateAttributes` method is called by **Position Keeping**
+   > at ingestion time, not by Reference Data during definition creation.
 
 4. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
 
@@ -844,12 +932,46 @@ flowchart TB
 
 3. **Cache invalidation** on `CreateDefinition` (local only, no distributed)
 
+4. **TTL Jitter** (Thundering Herd Prevention):
+
+   ```go
+   func (c *CachedInstrumentRegistry) jitteredTTL() time.Duration {
+       // Base TTL: 5 minutes, Jitter: ±30 seconds
+       // Prevents all nodes from refreshing cache simultaneously
+       jitter := time.Duration(rand.Int63n(int64(60 * time.Second))) - 30*time.Second
+       return c.ttl + jitter
+   }
+   ```
+
+5. **Emergency Cache Purge** (Safety Valve):
+
+   ```go
+   // PurgeAll clears the entire cache - use for emergency recovery.
+   // Exposed via admin API endpoint: POST /admin/cache/purge
+   // Or trigger via pod restart (cache is in-memory only).
+   func (c *CachedInstrumentRegistry) PurgeAll() {
+       c.cache.Purge()
+   }
+
+   // PurgeInstrument clears a specific instrument from cache.
+   // Use when a bad definition got cached and needs immediate eviction.
+   func (c *CachedInstrumentRegistry) PurgeInstrument(tenantID uuid.UUID, code string, version uint32) {
+       key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
+       c.cache.Remove(key)
+   }
+   ```
+
+   > **Recovery scenario**: If a malformed CEL expression passes compile-time checks but causes
+   > runtime errors, operators can purge the bad definition from cache while fixing the DB record.
+
 ### Acceptance Criteria
 
 - [ ] Cache hit returns pre-compiled CEL program
-- [ ] TTL-based expiration works
+- [ ] TTL-based expiration works with jitter (4m30s - 5m30s range)
 - [ ] Creation invalidates relevant cache entries
 - [ ] `ValidateAttributes` uses cached `cel.Program` (no re-compilation)
+- [ ] Admin API exposes cache purge endpoints
+- [ ] Pod restart clears cache (no persistent state)
 
 ---
 
@@ -876,6 +998,62 @@ type LocalInstrumentCache struct {
     ttl      time.Duration                   // Refresh interval (e.g., 5 minutes)
 }
 ```
+
+### The Rehydration Pattern (Critical)
+
+**Problem**: Database rows and Proto messages store instrument codes as strings. How do we safely
+reconstruct `Quantity[D]` when loading, ensuring the dimension matches?
+
+**Solution**: The Rehydration Pattern is a 4-step process at every persistence adapter boundary:
+
+```go
+// Persistence Adapter: Loading a position from the database
+func (a *PostgresAdapter) LoadPosition(ctx context.Context, id uuid.UUID) (any, error) {
+    // 1. Read row: Amount (decimal) + InstrumentCode + Version + Attributes
+    row, err := a.queries.GetPosition(ctx, id)
+    if err != nil {
+        return nil, err
+    }
+
+    // 2. Hot path lookup: Get cached instrument (includes dimension)
+    cached, err := a.cache.Get(ctx, row.TenantID, row.InstrumentCode, row.Version)
+    if err != nil {
+        return nil, fmt.Errorf("unknown instrument %s (v%d): %w", row.InstrumentCode, row.Version, err)
+    }
+
+    // 3. Dimension check: Validate dimension BEFORE instantiating generic type
+    // This prevents type confusion attacks and data corruption
+    inst := cached.Definition.ToInstrument()
+
+    // 4. Instantiate via bridge: Runtime string → Compile-time type
+    return quantity.ParseQuantity(row.Amount, inst)
+}
+```
+
+**Type-Safe Alternative** (when caller knows expected dimension):
+
+```go
+// When the calling code KNOWS it expects Monetary (e.g., Current Account balance)
+func (a *PostgresAdapter) LoadMonetaryPosition(ctx context.Context, id uuid.UUID) (quantity.Money, error) {
+    row, err := a.queries.GetPosition(ctx, id)
+    if err != nil {
+        return quantity.Money{}, err
+    }
+
+    cached, err := a.cache.Get(ctx, row.TenantID, row.InstrumentCode, row.Version)
+    if err != nil {
+        return quantity.Money{}, err
+    }
+
+    inst := cached.Definition.ToInstrument()
+
+    // NewQuantity validates dimension matches type parameter
+    return quantity.NewQuantity[quantity.Monetary](row.Amount, inst)
+}
+```
+
+**Key Insight**: The rehydration boundary is the **adapter layer**, not the domain layer.
+Domain code receives fully-typed `Quantity[D]` values. Adapters handle the runtime→compile-time bridge.
 
 ---
 
@@ -948,7 +1126,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
        }
 
        // 3. Type bridge
-       qty, err := quantity.ParseQuantity(amount, cached.Definition.ToUnitDef())
+       qty, err := quantity.ParseQuantity(amount, cached.Definition.ToInstrument())
        if err != nil {
            return status.Errorf(codes.Internal, "type bridge failed: %v", err)
        }
