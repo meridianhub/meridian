@@ -21,31 +21,35 @@ An open source, cloud-native core banking engine following BIAN (Banking Industr
 
 ```text
 meridian/
-├── services/                    # BIAN service domains (domain-centric)
+├── services/                    # BIAN service domains
 │   ├── current-account/         # Customer-facing account management
 │   │   ├── cmd/                 # Entry point and Dockerfile
 │   │   ├── domain/              # Business logic and entities
 │   │   ├── adapters/            # Persistence, messaging adapters
 │   │   ├── service/             # gRPC service implementation
 │   │   ├── client/              # Service-owned gRPC client
-│   │   ├── migrations/          # Database migrations
 │   │   ├── atlas/               # Atlas schema config
+│   │   ├── migrations/          # Database migrations
 │   │   └── k8s/                 # Kubernetes manifests
 │   ├── financial-accounting/    # Double-entry general ledger
+│   ├── gateway/                 # API gateway
 │   ├── party/                   # Customer and party reference data
 │   ├── payment-order/           # Payment execution
 │   ├── position-keeping/        # Pre-ledger transaction log
-│   └── tenant/                  # Multi-tenant platform management
+│   ├── tenant/                  # Multi-tenant platform management
+│   ├── audit-worker/            # Audit log processor
+│   └── utilization-metering-consumer/  # Usage metering
 ├── shared/                      # Cross-service shared code
 │   ├── platform/                # Infrastructure (auth, db, kafka, observability)
 │   ├── domain/                  # Shared domain models and primitives
-│   └── pkg/                     # Shared utilities (health, idempotency)
-├── utilities/                   # CLI tools
-│   ├── meridian/                # Main CLI
+│   └── pkg/                     # Shared utilities (health, idempotency, clients)
+├── cmd/                         # CLI tools
+│   └── tenantctl/               # Tenant management CLI
+├── utilities/                   # Development utilities
 │   ├── atlas-loader/            # Migration schema loader
 │   └── horizon-demo/            # Demo utility
 ├── api/proto/                   # Protocol Buffer API definitions
-├── deployments/k8s/             # Shared Kubernetes resources (base, overlays)
+├── deployments/k8s/             # Shared Kubernetes resources
 └── docs/                        # Documentation and ADRs
 ```
 
@@ -80,13 +84,14 @@ Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bia
 
 ### Infrastructure Services
 
-| Service | Purpose | Standalone |
-|---------|---------|:----------:|
-| [**Tenant**][svc-tenant] | Multi-tenant platform management with PostgreSQL schema-per-tenant isolation | Yes |
+| Service | Purpose |
+|---------|---------|
+| [**Tenant**][svc-tenant] | Multi-tenant platform management with schema-per-tenant isolation |
+| **Gateway** | API gateway for external access |
+| **audit-worker** | Processes audit log outbox entries |
+| **utilization-metering-consumer** | Usage metering for billing |
 
-The Tenant service is not part of the BIAN standard but is essential for shared-cluster deployments
-requiring data isolation between organizations. It provides schema-based multi-tenancy where each
-tenant's data is isolated in a dedicated PostgreSQL schema (`org_{tenant_id}`).
+These services are not part of the BIAN standard but provide platform infrastructure.
 
 ## Technology Stack
 

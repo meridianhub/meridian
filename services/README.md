@@ -281,12 +281,9 @@ their own client.
 
 ```text
 services/<service-name>/
-├── client/                 # Service-owned client library (NEW)
+├── client/                 # Service-owned client library
 │   ├── client.go           # Client implementation
 │   └── client_test.go      # Client tests
-├── clients/                # Consumer-specific interfaces (DEPRECATED)
-│   ├── DEPRECATED.md       # Migration guide
-│   └── interfaces.go       # Interface definitions for testing
 └── ...
 ```
 
@@ -365,18 +362,6 @@ When `Resilience` is configured, clients automatically include:
 | CurrentAccount | `services/current-account/client` | 50057 |
 | Tenant | `services/tenant/client` | 50056 |
 
-### Migration from Old Clients
-
-The old `services/<service>/clients/` directories are deprecated. See the `DEPRECATED.md` file
-in each directory for migration guidance. Key changes:
-
-| Old Pattern | New Pattern |
-|-------------|-------------|
-| Consumer creates/owns client | Service exports its own client |
-| `clients.NewXxxClient()` | `xxxclient.New()` |
-| Separate resilience wrapper | Built-in via `Config.Resilience` |
-| Manual connection management | Cleanup function returned by `New()` |
-
 ## Service Directory Structure
 
 Each service follows hexagonal architecture:
@@ -384,15 +369,13 @@ Each service follows hexagonal architecture:
 ```text
 services/<service-name>/
 ├── cmd/                    # Entry point, main.go, Dockerfile
-├── app/                    # Application bootstrap, DI container
 ├── domain/                 # Business logic, entities, value objects
-├── service/                # Use cases, gRPC service implementation
+├── service/                # gRPC service implementation
 ├── adapters/               # External adapters
 │   ├── persistence/        # Database repositories
-│   ├── messaging/          # Kafka producers/consumers
-│   └── http/               # HTTP handlers (if applicable)
-├── client/                 # Service-owned client library (for other services)
-├── clients/                # Consumer-specific interfaces (DEPRECATED)
+│   └── messaging/          # Kafka producers/consumers (if applicable)
+├── client/                 # Service-owned client library
+├── atlas/                  # Atlas schema config
 ├── migrations/             # Database migrations
 └── k8s/                    # Kubernetes manifests
 ```
