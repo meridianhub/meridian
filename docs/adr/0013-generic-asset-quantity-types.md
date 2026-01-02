@@ -189,6 +189,24 @@ type Money = Quantity[Monetary]
 type Physical = Quantity[Commodity]
 
 // =============================================================================
+// GENERIC BRIDGE: Runtime → Compile-Time Conversion
+// =============================================================================
+
+// ParseQuantity is the ONLY boundary where runtime strings become compile-time types.
+// Go generics are erased at runtime, but DB/Proto use string dimensions.
+// This factory reconstructs the correct Quantity type at the adapter layer.
+func ParseQuantity(amount decimal.Decimal, instrument FinancialInstrument) (any, error) {
+    switch instrument.Dimension {
+    case "Monetary":
+        return Quantity[Monetary]{Amount: amount, Instrument: instrument}, nil
+    case "Commodity":
+        return Quantity[Commodity]{Amount: amount, Instrument: instrument}, nil
+    default:
+        return nil, ErrUnknownDimension
+    }
+}
+
+// =============================================================================
 // POSITION KEY: Handles Fungibility/Context
 // =============================================================================
 
@@ -217,6 +235,9 @@ var (
 
     // ErrDimensionMismatch is returned when a loaded instrument has unexpected dimension
     ErrDimensionMismatch = errors.New("dimension mismatch: instrument type does not match expected dimension")
+
+    // ErrUnknownDimension is returned when ParseQuantity receives an unrecognized dimension
+    ErrUnknownDimension = errors.New("unknown dimension: must be 'Monetary' or 'Commodity'")
 )
 ```
 

@@ -170,10 +170,52 @@ a.tariff_code == b.tariff_code
 ```
 
 **Edge case**: If CEL returns `false` for a merge attempt, the operation either:
+
 - Creates a new distinct position (accumulation), OR
 - Fails with `ErrPositionsNotFungible` (strict mode)
 
 The behavior is configurable per instrument.
+
+---
+
+## Service Impact Matrix
+
+Overview of all services and the changes required for Universal Asset System.
+
+| Service | Impact | Change Type | Description |
+|---------|--------|-------------|-------------|
+| `reference-data` | **NEW** | Full service | New BIAN service for instrument definitions |
+| `position-keeping` | **HIGH** | Domain + Adapter | Core asset tracking, CEL validation, fungibility |
+| `current-account` | **HIGH** | Domain + Adapter | Multi-asset balance support |
+| `financial-accounting` | **HIGH** | Domain + Adapter | Multi-dimensional ledger entries |
+| `payment-order` | **MODERATE** | Adapter | Multi-asset payment instructions |
+| `utilization-metering-consumer` | **MODERATE** | Domain + Adapter | Native fit for `Quantity[Commodity]` |
+| `gateway` | **LOW** | Pass-through | Route new Reference Data API |
+| `tenant` | **NONE** | No changes | Tenant context unchanged |
+| `party` | **NONE** | No changes | Party management independent |
+| `audit-worker` | **NONE** | No changes | Consumes events, no money logic |
+
+### Shared Package Migration
+
+The existing `shared/domain/money` package is re-exported by all services. Migration path:
+
+```text
+BEFORE                              AFTER
+──────                              ─────
+shared/domain/money/                pkg/platform/quantity/
+├── money.go (Money struct)         ├── quantity.go (Quantity[D])
+├── currency.go                     ├── dimension.go (Monetary, Commodity)
+└── errors.go                       ├── instrument.go (UnitDef)
+                                    └── currency/ (predefined fiat)
+
+services/*/domain/money.go          services/*/domain/quantity.go
+└── re-exports shared/domain/money  └── re-exports pkg/platform/quantity
+```
+
+**Migration sequence:**
+1. Stream A creates `pkg/platform/quantity` (new, no breaking changes)
+2. Per-service streams (I.1-I.4) migrate from `shared/domain/money` → `pkg/platform/quantity`
+3. After all services migrated, deprecate `shared/domain/money`
 
 ---
 
@@ -203,8 +245,14 @@ flowchart TB
         H["Stream H<br/>Caching<br/>Layer"]
     end
 
-    subgraph Integration["Phase 5: Integration"]
-        I["Stream I<br/>Adapter<br/>Integration"]
+    subgraph Integration["Phase 5: Service Integration (Parallel)"]
+        I1["Stream I.1<br/>position-keeping"]
+        I2["Stream I.2<br/>current-account"]
+        I3["Stream I.3<br/>financial-accounting"]
+        I4["Stream I.4<br/>payment-order &<br/>utilization-metering"]
+    end
+
+    subgraph Final["Phase 6: Verification"]
         J["Stream J<br/>Integration<br/>Tests"]
     end
 
@@ -215,9 +263,18 @@ flowchart TB
     E --> F
     F --> G
     F --> H
-    G --> I
-    H --> I
-    I --> J
+    G --> I1
+    G --> I2
+    G --> I3
+    G --> I4
+    H --> I1
+    H --> I2
+    H --> I3
+    H --> I4
+    I1 --> J
+    I2 --> J
+    I3 --> J
+    I4 --> J
 ```
 
 ---
@@ -732,127 +789,258 @@ flowchart TB
 
 ---
 
-## Stream I: Adapter Integration
+## Stream I: Service Integration (Per-Service Sub-Streams)
 
-**Location:** Existing service adapters (Position Keeping, Current Account, etc.)
 **Dependencies:** Stream F, Stream G, Stream H
+**Parallel execution:** All I.x streams can run in parallel after Phase 4 completes.
 
 > **Performance critical**: Position Keeping may process 100k+ TPS. Every `RecordMeasurement`
 > call must NOT make a synchronous gRPC call to Reference Data. Instrument definitions AND
 > compiled CEL programs must be cached aggressively in-process.
 
-### Deliverables
+### Shared Infrastructure (All Services)
 
-1. **Reference Data client** injected into transaction adapters
+Before per-service work, establish shared caching infrastructure:
 
-2. **Bounded LRU cache** within Position Keeping using `hashicorp/golang-lru`:
+```go
+// LocalInstrumentCache provides sub-microsecond lookups for hot-path operations.
+// Used by all services that handle quantities.
+type LocalInstrumentCache struct {
+    registry InstrumentRegistry              // Remote client (fallback)
+    compiler *CELCompiler                    // For compiling on cache miss
+    cache    *lru.Cache[string, CachedInstrument]  // Bounded: max 10,000 entries
+    ttl      time.Duration                   // Refresh interval (e.g., 5 minutes)
+}
+```
+
+---
+
+### Stream I.1: Position Keeping Integration
+
+**Location:** `services/position-keeping/`
+**Developer allocation:** 2
+
+#### Scope
+
+Position Keeping is the **primary consumer** of multi-asset quantities. Changes span:
+
+| Layer | Files | Changes |
+|-------|-------|---------|
+| Domain | `domain/money.go` | Replace with `domain/quantity.go` re-exporting `pkg/platform/quantity` |
+| Domain | `domain/measurement.go` | Use `Quantity[D]` instead of `Money` |
+| Domain | `domain/events.go` | Update event payloads to use `InstrumentAmount` |
+| Adapter | `adapters/grpc/*.go` | Add CEL validation, `ParseQuantity` bridge |
+| Adapter | `adapters/persistence/*.go` | Update SQL to store instrument_code + version + attributes |
+| Service | `service/*.go` | Inject `LocalInstrumentCache`, use `AreFungible` for position merge |
+
+#### Deliverables
+
+1. **Domain migration**: Replace `Money` type with `Quantity[D]`
 
    ```go
-   // LocalInstrumentCache provides sub-microsecond lookups for hot-path operations.
-   // Uses bounded LRU to prevent memory explosion from temporary assets.
-   type LocalInstrumentCache struct {
-       registry InstrumentRegistry              // Remote client (fallback)
-       compiler *CELCompiler                    // For compiling on cache miss
-       cache    *lru.Cache[string, CachedInstrument]  // Bounded: max 10,000 entries
-       ttl      time.Duration                   // Refresh interval (e.g., 5 minutes)
+   // BEFORE
+   type Position struct {
+       Amount   Money
+       Currency Currency
    }
 
-   func (c *LocalInstrumentCache) Get(
-       ctx context.Context, tenantID uuid.UUID, code string, version uint32,
-   ) (CachedInstrument, error) {
-       key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
-
-       // 1. Check LRU cache (O(1) lookup)
-       if cached, ok := c.cache.Get(key); ok {
-           return cached, nil
-       }
-
-       // 2. Cache miss: fetch from Reference Data service
-       def, err := c.registry.GetDefinition(ctx, tenantID, code, version)
-       if err != nil {
-           return CachedInstrument{}, err
-       }
-
-       // 3. Compile CEL program
-       prog, err := c.compiler.Compile(def.ValidationExpression)
-       if err != nil {
-           return CachedInstrument{}, fmt.Errorf("CEL compile: %w", err)
-       }
-
-       // 4. Store in bounded LRU (evicts oldest if full)
-       cached := CachedInstrument{Definition: def, Program: prog}
-       c.cache.Add(key, cached)
-       return cached, nil
+   // AFTER
+   type Position struct {
+       Amount     Quantity[D]  // D is Monetary or Commodity
+       Attributes map[string]string
    }
    ```
 
-   > **Why bounded LRU over sync.Map**: If a tenant defines 10,000+ temporary voucher codes,
-   > an unbounded `sync.Map` will leak memory. LRU evicts least-recently-used entries,
-   > keeping memory bounded while retaining hot instruments.
-
-3. **Background refresh goroutine**: Periodically refresh cached definitions to pick up new
-   instruments without requiring restarts
-
-4. **Validation Checkpoint** (the ingestion pipeline):
-
-   When `RecordMeasurement` is called, the adapter executes this sequence:
-
-   ```text
-   ┌─────────────────────────────────────────────────────────────────┐
-   │  1. PROTO DECODE                                                │
-   │     Receive InstrumentAmount (pure data)                        │
-   ├─────────────────────────────────────────────────────────────────┤
-   │  2. CACHE LOOKUP                                                │
-   │     Fetch CachedInstrument using instrument_code + version      │
-   │     (LRU hit = ~10ns, miss = gRPC + CEL compile)                │
-   ├─────────────────────────────────────────────────────────────────┤
-   │  3. CEL EXECUTION                                               │
-   │     Run cached.Program.Eval(attributes)                         │
-   │     → false or error: REJECT (400 Bad Request)                  │
-   │     → true: CONTINUE                                            │
-   ├─────────────────────────────────────────────────────────────────┤
-   │  4. TYPE BRIDGE                                                 │
-   │     ParseQuantity(amount, def) → Quantity[Monetary/Commodity]   │
-   │     Only NOW does data become a typed domain object             │
-   ├─────────────────────────────────────────────────────────────────┤
-   │  5. DOMAIN ENTRY                                                │
-   │     Pass typed Quantity to Position Keeping domain layer        │
-   └─────────────────────────────────────────────────────────────────┘
-   ```
+2. **Fungibility integration** in position aggregation:
 
    ```go
-   func (a *TransactionAdapter) validateInstrument(
-       ctx context.Context, req *pb.InstrumentAmount,
-   ) error {
-       // Step 2: Cache lookup
-       cached, err := a.localCache.Get(ctx, tenantID, req.InstrumentCode, req.Version)
+   func (s *Service) canMergePositions(
+       ctx context.Context, existing, incoming Position,
+   ) (bool, error) {
+       // Same dimension, same instrument, same version already checked
+       cached, _ := s.cache.Get(ctx, tenantID, existing.InstrumentCode, existing.Version)
+       return s.celCompiler.AreFungible(
+           cached.FungibilityProgram,
+           existing.Attributes,
+           incoming.Attributes,
+       )
+   }
+   ```
+
+3. **Validation checkpoint** in `RecordMeasurement`:
+
+   ```go
+   func (a *Adapter) RecordMeasurement(ctx context.Context, req *pb.RecordMeasurementRequest) error {
+       // 1. Cache lookup
+       cached, err := a.cache.Get(ctx, tenantID, req.Amount.InstrumentCode, req.Amount.Version)
        if err != nil {
-           return status.Errorf(codes.NotFound, "unknown instrument")
+           return status.Errorf(codes.NotFound, "unknown instrument: %s", req.Amount.InstrumentCode)
        }
 
-       // Step 3: CEL execution (~100ns)
-       valid, err := a.compiler.Evaluate(cached.Program, req.Attributes)
-       if err != nil {
-           return status.Errorf(codes.Internal, "CEL eval error: %v", err)
-       }
+       // 2. CEL validation (~100ns)
+       valid, err := a.cel.Validate(cached.ValidationProgram, req.Amount.Attributes)
        if !valid {
            return status.Errorf(codes.InvalidArgument, "attributes failed validation")
        }
-       return nil
+
+       // 3. Type bridge
+       qty, err := quantity.ParseQuantity(amount, cached.Definition.ToUnitDef())
+       if err != nil {
+           return status.Errorf(codes.Internal, "type bridge failed: %v", err)
+       }
+
+       // 4. Domain entry
+       return a.service.RecordMeasurement(ctx, qty, req.Amount.Attributes)
    }
    ```
 
-5. **Position creation** using validated `PositionKey` and `ParseQuantity` factory
+4. **Database migration**: Add `attributes JSONB` column to positions table
 
-### Acceptance Criteria
+#### Acceptance Criteria
 
-- [ ] Invalid instruments rejected at adapter layer
-- [ ] Invalid attributes rejected with clear errors (CEL returns false)
-- [ ] Cache hit rate > 99% after warm-up
-- [ ] No gRPC calls on hot path (cache hit)
-- [ ] No CEL compilation on hot path (use cached `cel.Program`)
-- [ ] Memory bounded by LRU max size (e.g., 10,000 entries)
-- [ ] New instruments visible within TTL window (e.g., 5 minutes)
+- [ ] `RecordMeasurement` accepts multi-asset instruments
+- [ ] CEL validation rejects invalid attributes before domain entry
+- [ ] Fungibility expression controls position merging
+- [ ] Existing fiat-only tests still pass (backwards compatible)
+- [ ] No gRPC calls on hot path (cache hit rate > 99%)
+
+---
+
+### Stream I.2: Current Account Integration
+
+**Location:** `services/current-account/`
+**Developer allocation:** 1
+
+#### Scope
+
+Current Account manages account balances. Changes:
+
+| Layer | Files | Changes |
+|-------|-------|---------|
+| Domain | `domain/money.go` | Replace with `domain/quantity.go` |
+| Domain | `domain/account.go` | Balance as `Quantity[Monetary]` (fiat accounts) |
+| Domain | `domain/lien.go` | Lien amounts as `Quantity[Monetary]` |
+| Adapter | `adapters/persistence/*.go` | Update balance storage |
+| Service | `service/*.go` | Inject cache, validate on deposit/withdrawal |
+
+#### Deliverables
+
+1. **Domain migration**: Update `Account.Balance` to use `Quantity[Monetary]`
+
+   ```go
+   type Account struct {
+       ID        uuid.UUID
+       Balance   Quantity[Monetary]  // Was: Money
+       Currency  string              // Instrument code (e.g., "GBP")
+   }
+   ```
+
+2. **Deposit/Withdrawal validation**: Validate instrument exists before accepting
+
+3. **Multi-currency foundation**: Structure supports future multi-currency accounts
+
+#### Acceptance Criteria
+
+- [ ] Account creation accepts instrument code (not just currency string)
+- [ ] Deposits/withdrawals validated against Reference Data
+- [ ] Balance queries return `InstrumentAmount` in proto responses
+- [ ] Existing account tests pass
+
+---
+
+### Stream I.3: Financial Accounting Integration
+
+**Location:** `services/financial-accounting/`
+**Developer allocation:** 1
+
+#### Scope
+
+Financial Accounting maintains the double-entry ledger. Changes:
+
+| Layer | Files | Changes |
+|-------|-------|---------|
+| Domain | `domain/money.go` | Replace with `domain/quantity.go` |
+| Domain | `domain/ledger_posting.go` | Postings use `Quantity[D]` |
+| Adapter | `adapters/persistence/*.go` | Ledger entries store instrument + attributes |
+| Service | `service/*.go` | Validate instruments on posting |
+
+#### Deliverables
+
+1. **Domain migration**: Ledger postings support any dimension
+
+   ```go
+   type LedgerPosting struct {
+       DebitAccount  uuid.UUID
+       CreditAccount uuid.UUID
+       Amount        Quantity[D]  // Generic: can be Monetary or Commodity
+       Attributes    map[string]string
+   }
+   ```
+
+2. **Dimension-aware validation**: Ensure debit/credit use same dimension
+
+3. **Audit trail**: Attributes stored with each posting for full traceability
+
+#### Acceptance Criteria
+
+- [ ] Ledger accepts multi-asset postings
+- [ ] Dimension mismatch in double-entry rejected at domain layer
+- [ ] Existing fiat posting tests pass
+- [ ] Audit queries return full attribute context
+
+---
+
+### Stream I.4: Secondary Services Integration
+
+**Location:** `services/payment-order/`, `services/utilization-metering-consumer/`
+**Developer allocation:** 1
+
+#### Scope (Payment Order)
+
+Payment Order orchestrates payment instructions:
+
+| Layer | Files | Changes |
+|-------|-------|---------|
+| Domain | `domain/money.go` | Replace with `domain/quantity.go` |
+| Domain | `domain/payment_order.go` | Amount as `Quantity[Monetary]` |
+| Adapter | `adapters/persistence/*.go` | Store instrument code |
+
+#### Scope (Utilization Metering Consumer)
+
+This service already tracks non-fiat measurements - **native fit for `Quantity[Commodity]`**:
+
+| Layer | Files | Changes |
+|-------|-------|---------|
+| Domain | `domain/measurement.go` | Replace `Quantity int64` + `UnitOfMeasure string` with `Quantity[Commodity]` |
+| Adapter | `adapters/grpc/*.go` | Use `InstrumentAmount` for Position Keeping calls |
+
+#### Deliverables
+
+1. **Payment Order**: Update to use `Quantity[Monetary]` for payment amounts
+
+2. **Utilization Metering**: Natural migration to typed quantities
+
+   ```go
+   // BEFORE
+   type UtilizationMeasurement struct {
+       Quantity      int64   // e.g., 1
+       UnitOfMeasure string  // e.g., "transaction"
+   }
+
+   // AFTER
+   type UtilizationMeasurement struct {
+       Amount Quantity[Commodity]  // Instrument: "TRANSACTION", "API_CALL", etc.
+   }
+   ```
+
+3. **Instrument definitions**: Create system-tenant instruments for utilization types
+
+#### Acceptance Criteria
+
+- [ ] Payment orders accept multi-asset amounts
+- [ ] Utilization measurements use typed `Quantity[Commodity]`
+- [ ] Position Keeping receives properly typed measurements
+- [ ] Existing payment/metering tests pass
 
 ---
 
@@ -883,22 +1071,29 @@ flowchart TB
 
 ## Parallel Execution Summary
 
-| Stream | Can Start After | Developers |
-|--------|-----------------|------------|
-| A: Core Types | Immediately | 2 |
-| B: Currency | A | 1 |
-| C: Rate Type | A | 1 |
-| D: Protobuf | Immediately (from ADR spec) | 1 |
-| E: DB Schema | Immediately (from ADR spec) | 1 |
-| F: Reference Data Service | A + E | 2 |
-| G: gRPC Handlers | D + F | 1 |
-| H: Caching | F | 1 |
-| I: Adapter Integration | F + G | 2 |
-| J: Integration Tests | All | 1 |
+| Stream | Can Start After | Developers | Service |
+|--------|-----------------|------------|---------|
+| A: Core Types | Immediately | 2 | `pkg/platform/quantity` |
+| B: Currency | A | 1 | `pkg/platform/quantity/currency` |
+| C: Rate Type | A | 1 | `pkg/platform/quantity` |
+| D: Protobuf | Immediately (from ADR spec) | 1 | `proto/platform/v1` |
+| E: DB Schema | Immediately (from ADR spec) | 1 | `services/reference-data` |
+| F: Reference Data Service | A + E | 2 | `services/reference-data` |
+| G: gRPC Handlers | D + F | 1 | `services/reference-data` |
+| H: Caching | F | 1 | `services/reference-data` |
+| **I.1: Position Keeping** | G + H | 2 | `services/position-keeping` |
+| **I.2: Current Account** | G + H | 1 | `services/current-account` |
+| **I.3: Financial Accounting** | G + H | 1 | `services/financial-accounting` |
+| **I.4: Payment + Metering** | G + H | 1 | `services/payment-order`, `services/utilization-metering-consumer` |
+| J: Integration Tests | All I.x | 1 | Cross-service |
 
-**Critical path:** A → F → G → I → J
+**Critical path:** A → F → G → I.1 → J
 
-**Maximum parallelism at start:** 4 streams (A, D, E, and potentially B/C if working from ADR spec)
+**Maximum parallelism:**
+- **Phase 1:** 4 streams (A, D, E, and B/C if working from ADR spec)
+- **Phase 5:** 4 streams (I.1, I.2, I.3, I.4 all run in parallel)
+
+**Total developer allocation:** 14 developer-streams across 10 developers
 
 ---
 
@@ -915,6 +1110,8 @@ flowchart TB
 | Arithmetic | Native Go `decimal.Decimal` - CEL never in hot loop |
 | Local cache type | Bounded LRU (`hashicorp/golang-lru`) to prevent memory leaks |
 | CEL caching | Cache both compiled programs (validation + fungibility) |
+| Integration strategy | Per-service streams (I.1-I.4) for parallel execution |
+| Shared package | New `pkg/platform/quantity`; deprecate `shared/domain/money` after migration |
 
 ---
 
