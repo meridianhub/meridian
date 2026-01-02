@@ -27,6 +27,32 @@ compile-time dimensional safety.
 - ~~Migration-as-Trade pattern~~ - no existing positions to migrate
 - ~~Version deprecation lifecycle~~ - not needed pre-production
 - ~~Distributed cache invalidation~~ - simple caching sufficient for now
+  > **Future consideration**: When scaling beyond single-region, consider Redis pub/sub or Kafka
+  > topic for cross-node cache invalidation. For now, TTL jitter + pod restarts provide recovery.
+
+---
+
+## Table of Contents
+
+- [CEL Validation Pattern](#cel-validation-pattern)
+- [Data Contract: Proto + CEL + Go](#data-contract-proto--cel--go)
+- [Fungibility Resolution](#fungibility-resolution)
+- [Service Impact Matrix](#service-impact-matrix)
+- [Work Streams](#work-streams)
+  - [Stream A: Core Types Package](#stream-a-core-types-package)
+  - [Stream B: Currency Definitions](#stream-b-currency-definitions)
+  - [Stream C: Rate Type](#stream-c-rate-type)
+  - [Stream D: Protobuf Definitions](#stream-d-protobuf-definitions)
+  - [Stream E: Database Schema](#stream-e-database-schema)
+  - [Stream F: Reference Data Service](#stream-f-reference-data-service)
+  - [Stream G: gRPC API Handlers](#stream-g-grpc-api-handlers)
+  - [Stream H: Caching Layer](#stream-h-caching-layer)
+  - [Stream I: Service Integration](#stream-i-service-integration-per-service-sub-streams)
+  - [Stream J: Integration Tests](#stream-j-integration-tests)
+- [Parallel Execution Summary](#parallel-execution-summary)
+- [Decisions Made](#decisions-made)
+- [Open Questions](#open-questions)
+- [Success Metrics](#success-metrics)
 
 ---
 
@@ -774,8 +800,10 @@ flowchart TB
        UNIQUE(tenant_id, code, version),
        CHECK (precision >= 0 AND precision <= 18),
        CHECK (dimension IN ('Monetary', 'Commodity')),
-       CHECK (validation_expression <> ''),
-       CHECK (fungibility_expression <> '')
+       CHECK (length(trim(validation_expression)) > 0),
+       CHECK (length(trim(fungibility_expression)) > 0),
+       CHECK (length(validation_expression) <= 4096),
+       CHECK (length(fungibility_expression) <= 4096)
    );
 
    CREATE INDEX idx_instrument_definitions_lookup
@@ -829,7 +857,10 @@ flowchart TB
        // Lookup order: tenant_id → SystemTenantID
        GetDefinition(ctx context.Context, tenantID uuid.UUID, code string, version uint32) (InstrumentDefinition, error)
 
-       // GetLatestDefinition returns highest version, with same fallback logic
+       // GetLatestDefinition returns highest version, with same fallback logic.
+       // NOTE: When callers pass version=0, it means "use latest version".
+       // Implementation: SELECT ... WHERE version = COALESCE(NULLIF($version, 0), (SELECT MAX(version) ...))
+       // Or: if version == 0 { return GetLatestDefinition(...) }
        GetLatestDefinition(ctx context.Context, tenantID uuid.UUID, code string) (InstrumentDefinition, error)
 
        // CreateDefinition creates tenant-specific instrument (cannot create in SystemTenant via API)
@@ -894,7 +925,34 @@ flowchart TB
    > because no positions exist yet. The `ValidateAttributes` method is called by **Position Keeping**
    > at ingestion time, not by Reference Data during definition creation.
 
-4. **Attribute Key Validation** (CEL Compatibility):
+4. **CEL Security Constraints**:
+
+   | Constraint | Limit | Rationale |
+   |------------|-------|-----------|
+   | Expression length | 4KB max | Prevent storage abuse |
+   | Cost limit | 10,000 | Prevent expensive evaluations (built into CEL env) |
+   | Registration rate | 10/min/tenant | Prevent DoS via compilation spam |
+
+   ```go
+   const MaxExpressionLength = 4096  // 4KB
+
+   func (r *PostgresRegistry) CreateDefinition(ctx context.Context, def InstrumentDefinition) error {
+       // Length check before compilation
+       if len(def.ValidationExpression) > MaxExpressionLength {
+           return ErrExpressionTooLong
+       }
+       if len(def.FungibilityExpression) > MaxExpressionLength {
+           return ErrExpressionTooLong
+       }
+       // ... continue with compilation and persistence
+   }
+   ```
+
+   > **Security Review**: Tenant-provided CEL expressions are validated at compile-time
+   > by cel-go. Runtime execution uses `CostLimit(10000)` to abort expensive evaluations.
+   > No manual security review required - CEL's non-Turing-complete nature guarantees termination.
+
+5. **Attribute Key Validation** (CEL Compatibility):
 
    > **Rule**: Attribute keys referenced in CEL expressions MUST be `snake_case`
    > (alphanumeric + underscores only, starting with a letter).
@@ -1009,6 +1067,49 @@ flowchart TB
    - `ErrCELCompileError` - syntax/semantic error in validation expression
    - `ErrAttributeValidationFailed` - CEL evaluated to `false`
    - `ErrSystemTenantReadOnly` - attempt to create/modify System Tenant instrument
+
+9. **CEL Error Message Surfacing**:
+
+   CEL validation failures should provide actionable error messages to API callers:
+
+   ```go
+   // ValidationError wraps CEL evaluation context for debugging
+   type ValidationError struct {
+       InstrumentCode string
+       Expression     string            // The CEL expression that failed
+       Attributes     map[string]string // The input attributes
+       Reason         string            // "expression evaluated to false" or CEL runtime error
+   }
+
+   func (e ValidationError) Error() string {
+       return fmt.Sprintf("validation failed for instrument %s: %s", e.InstrumentCode, e.Reason)
+   }
+
+   // Usage in ValidateAttributes
+   func (r *Registry) ValidateAttributes(ctx context.Context, def InstrumentDefinition, attrs map[string]string) error {
+       result, details, err := r.validationProgram.Eval(map[string]any{"attributes": attrs})
+       if err != nil {
+           return ValidationError{
+               InstrumentCode: def.Code,
+               Expression:     def.ValidationExpression,
+               Attributes:     attrs,
+               Reason:         fmt.Sprintf("CEL runtime error: %v", err),
+           }
+       }
+       if result.Value() != true {
+           return ValidationError{
+               InstrumentCode: def.Code,
+               Expression:     def.ValidationExpression,
+               Attributes:     attrs,
+               Reason:         "expression evaluated to false",
+           }
+       }
+       return nil
+   }
+   ```
+
+   > **Security note**: Log full `ValidationError` details internally, but return only
+   > `Reason` to external callers to avoid leaking CEL expression logic.
 
 ### Acceptance Criteria
 
