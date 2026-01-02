@@ -154,7 +154,7 @@ The CurrentAccount service owns:
 - Circuit breaker for downstream service failures
 - Retry logic with exponential backoff
 - Graceful degradation when dependencies are unavailable
-- **Implementation:** `services/current-account/client/resilient_client.go`
+- **Implementation:** `shared/pkg/clients/resilient.go`
 
 **Platform Services:**
 
@@ -703,83 +703,64 @@ Platform code is currently in `internal/platform/` but is being migrated to `pkg
 - Duplicate request detection
 - Response caching for idempotent operations
 
-### Service-Specific Code (`internal/<service>/` - Private Implementation)
+### Service Structure
 
-Each service follows a layered architecture within its `internal/` directory. Code in `internal/<service>/` is private to that service and must not be imported by other services.
+Each service follows a layered architecture within its `services/<service>/` directory.
 
 #### CurrentAccount Service Structure
 
-```protobuf
-internal/current-account/
+```text
+services/current-account/
 ├── domain/              # Business logic and domain models
-│   ├── account.go       # Account entity and business rules
-│   ├── overdraft.go     # Overdraft limit enforcement
-│   └── transaction.go   # Transaction validation logic
 ├── service/             # gRPC service implementation
-│   ├── grpc_service.go  # CurrentAccountService RPC handlers
-│   └── orchestration.go # Multi-service orchestration logic
-├── clients/             # gRPC clients for downstream services
-│   ├── positionkeeping_client.go      # Position-keeping gRPC client
-│   ├── financialaccounting_client.go  # Financial-accounting gRPC client
-│   └── resilient_client.go            # Circuit breaker wrapper
-└── adapters/
-    └── persistence/     # Database adapters
-        └── repository.go # Audit log persistence
+├── client/              # Service-owned gRPC client (for consumers)
+├── adapters/
+│   └── persistence/     # Database adapters
+├── atlas/               # Schema configuration
+├── migrations/          # Database migrations
+└── k8s/                 # Kubernetes manifests
 ```
 
 **Key Characteristics:**
 
 - Domain models enforce account lifecycle rules
 - Service layer orchestrates cross-service operations
-- Clients implement anti-corruption layer for downstream services
-- Resilience patterns (circuit breaker, retry) protect against failures
+- Resilience patterns via `shared/pkg/clients` (circuit breaker, retry)
 
 #### PositionKeeping Service Structure
 
-```protobuf
-internal/position-keeping/
-├── domain/                  # Business logic and domain models
-│   ├── financial_position_log.go  # Aggregate root
-│   ├── transaction_log_entry.go   # Transaction records
-│   ├── transaction_lineage.go     # Lineage tracking
-│   ├── audit_trail_entry.go       # Audit records
-│   ├── status_tracking.go         # Status lifecycle
-│   └── event_publisher.go         # Domain event interface
-├── service/                 # gRPC service implementation
-│   └── position_keeping_service.go  # PositionKeepingService RPC handlers
+```text
+services/position-keeping/
+├── domain/              # Business logic, aggregate root pattern
+├── service/             # gRPC service implementation
+├── client/              # Service-owned gRPC client
 ├── adapters/
-│   ├── persistence/         # Database adapters
-│   │   └── repository.go    # Position log persistence
-│   └── messaging/           # Event publishing adapters
-│       └── kafka_event_publisher.go  # Kafka event adapter
-└── app/
-    └── container.go         # Dependency injection container
+│   ├── persistence/     # Database adapters
+│   └── messaging/       # Kafka event publisher
+├── atlas/               # Schema configuration
+├── migrations/          # Database migrations
+└── k8s/                 # Kubernetes manifests
 ```
 
 **Key Characteristics:**
 
 - Rich domain model with aggregate root pattern
-- Domain-driven design with clear entity boundaries
-- Event publishing via domain interface + Kafka adapter
+- Event publishing via Kafka adapter
 - Dependency injection for testability
 
 #### FinancialAccounting Service Structure
 
-```protobuf
-internal/financial-accounting/
-├── domain/                     # Business logic and domain models
-│   ├── financial_booking_log.go  # Booking log entity
-│   ├── ledger_posting.go         # Posting entity
-│   └── balance_validator.go      # Double-entry validation
-├── service/                    # gRPC service implementation
-│   ├── booking_service.go      # Booking log operations
-│   └── posting_service.go      # Ledger posting operations
-└── adapters/
-    ├── persistence/            # Database adapters
-    │   └── repository.go       # Booking log and posting persistence
-    └── messaging/              # Event-driven adapters
-        ├── deposit_consumer.go      # Kafka deposit event consumer
-        └── accounting_event_publisher.go  # Accounting event publisher
+```text
+services/financial-accounting/
+├── domain/              # Business logic, double-entry validation
+├── service/             # gRPC service implementation
+├── client/              # Service-owned gRPC client
+├── adapters/
+│   ├── persistence/     # Database adapters
+│   └── messaging/       # Kafka consumer for position-keeping events
+├── atlas/               # Schema configuration
+├── migrations/          # Database migrations
+└── k8s/                 # Kubernetes manifests
 ```
 
 **Key Characteristics:**
@@ -1485,7 +1466,7 @@ This section documents the actual communication flows between services based on 
 
 - **Client:** `services/current-account/client/positionkeeping_client.go`
 - **Proto Import:** `meridian/position_keeping/v1/position_keeping.proto`
-- **Resilience:** Circuit breaker via `resilient_client.go`
+- **Resilience:** Circuit breaker via `shared/pkg/clients`
 
 **Usage Pattern:**
 
@@ -1510,7 +1491,7 @@ resp, err := pkClient.ListFinancialPositionLogs(ctx, &pb.ListRequest{
 
 - **Client:** `services/current-account/client/financialaccounting_client.go`
 - **Proto Import:** `meridian/financial_accounting/v1/financial_accounting.proto`
-- **Resilience:** Circuit breaker via `resilient_client.go`
+- **Resilience:** Circuit breaker via `shared/pkg/clients`
 
 **Usage Pattern:**
 
