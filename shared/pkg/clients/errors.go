@@ -38,17 +38,11 @@ var (
 )
 
 // Service-specific client configuration errors.
-// These wrap ErrConfigClientNil with service-specific context.
+// These provide service-specific context for nil dependency validation.
 var (
 	// ErrConfigPositionKeepingClientNil indicates the position keeping client is nil.
 	ErrConfigPositionKeepingClientNil = errors.New("config: position keeping client cannot be nil")
 
 	// ErrConfigFinancialAccountingClientNil indicates the financial accounting client is nil.
 	ErrConfigFinancialAccountingClientNil = errors.New("config: financial accounting client cannot be nil")
-
-	// ErrConfigCurrentAccountClientNil indicates the current account client is nil.
-	ErrConfigCurrentAccountClientNil = errors.New("config: current account client cannot be nil")
-
-	// ErrConfigPaymentGatewayNil indicates the payment gateway is nil.
-	ErrConfigPaymentGatewayNil = errors.New("config: payment gateway cannot be nil")
 )
