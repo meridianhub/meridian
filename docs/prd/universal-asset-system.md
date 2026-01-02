@@ -213,6 +213,7 @@ services/*/domain/money.go          services/*/domain/quantity.go
 ```
 
 **Migration sequence:**
+
 1. Stream A creates `pkg/platform/quantity` (new, no breaking changes)
 2. Per-service streams (I.1-I.4) migrate from `shared/domain/money` → `pkg/platform/quantity`
 3. After all services migrated, deprecate `shared/domain/money`
@@ -645,7 +646,32 @@ flowchart TB
    }
    ```
 
-3. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
+3. **System Tenant Write Protection**:
+
+   ```go
+   var ErrSystemTenantReadOnly = errors.New("system tenant instruments are read-only")
+
+   func (r *PostgresRegistry) CreateDefinition(
+       ctx context.Context, def InstrumentDefinition,
+   ) (InstrumentDefinition, error) {
+       // Enforce: System Tenant instruments are admin-only (seeded via migrations)
+       if def.TenantID == SystemTenantID {
+           return InstrumentDefinition{}, ErrSystemTenantReadOnly
+       }
+
+       // Compile CEL expressions before persisting (fail fast on syntax errors)
+       if _, err := r.compiler.CompileValidation(def.ValidationExpression); err != nil {
+           return InstrumentDefinition{}, fmt.Errorf("%w: %v", ErrCELCompileError, err)
+       }
+       if _, err := r.compiler.CompileFungibility(def.FungibilityExpression); err != nil {
+           return InstrumentDefinition{}, fmt.Errorf("%w: %v", ErrCELCompileError, err)
+       }
+
+       return r.queries.CreateInstrumentDefinition(ctx, def)
+   }
+   ```
+
+4. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
 
    ```go
    type CELCompiler struct {
@@ -692,17 +718,22 @@ flowchart TB
        if err != nil {
            return false, err
        }
-       return out.Value().(bool), nil
+       result, ok := out.Value().(bool)
+       if !ok {
+           return false, fmt.Errorf("CEL expression must return bool, got %T", out.Value())
+       }
+       return result, nil
    }
    ```
 
-4. **PostgreSQL implementation** with sqlc-generated queries
+5. **PostgreSQL implementation** with sqlc-generated queries
 
-5. **Error types**:
+6. **Error types**:
    - `ErrInstrumentNotFound`
    - `ErrDuplicateInstrument`
    - `ErrCELCompileError` - syntax/semantic error in validation expression
    - `ErrAttributeValidationFailed` - CEL evaluated to `false`
+   - `ErrSystemTenantReadOnly` - attempt to create/modify System Tenant instrument
 
 ### Acceptance Criteria
 
@@ -764,10 +795,16 @@ flowchart TB
        FungibilityProgram cel.Program  // For aggregation: (a, b) → bool
    }
 
+   // cachedEntry wraps CachedInstrument with timestamp for TTL enforcement
+   type cachedEntry struct {
+       instrument CachedInstrument
+       cachedAt   time.Time
+   }
+
    type CachedInstrumentRegistry struct {
        delegate InstrumentRegistry
        compiler *CELCompiler
-       cache    *lru.Cache[string, CachedInstrument]  // Bounded LRU
+       cache    *lru.Cache[string, cachedEntry]  // Bounded LRU with TTL
        ttl      time.Duration
    }
    ```
@@ -775,8 +812,35 @@ flowchart TB
    > **Why cache compiled programs**: CEL parsing/compilation is ~100μs. CEL execution is ~100ns.
    > By caching both `cel.Program` instances alongside the definition, we pay compilation once.
 
-2. **Read-through caching** on `GetDefinition` and `GetLatestDefinition`
-   - On cache miss: fetch from DB, compile CEL, store both
+2. **Read-through caching with TTL enforcement**:
+
+   ```go
+   func (c *CachedInstrumentRegistry) GetDefinition(
+       ctx context.Context, tenantID uuid.UUID, code string, version uint32,
+   ) (CachedInstrument, error) {
+       key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
+
+       // Check cache with TTL validation
+       if entry, ok := c.cache.Get(key); ok {
+           if time.Since(entry.cachedAt) < c.ttl {
+               return entry.instrument, nil  // Cache hit, still valid
+           }
+           c.cache.Remove(key)  // Expired, remove stale entry
+       }
+
+       // Cache miss or expired: fetch from delegate, compile, cache
+       def, err := c.delegate.GetDefinition(ctx, tenantID, code, version)
+       if err != nil {
+           return CachedInstrument{}, err
+       }
+
+       inst, err := c.compileAndCache(key, def)
+       if err != nil {
+           return CachedInstrument{}, err
+       }
+       return inst, nil
+   }
+   ```
 
 3. **Cache invalidation** on `CreateDefinition` (local only, no distributed)
 
@@ -1090,6 +1154,7 @@ This service already tracks non-fiat measurements - **native fit for `Quantity[C
 **Critical path:** A → F → G → I.1 → J
 
 **Maximum parallelism:**
+
 - **Phase 1:** 4 streams (A, D, E, and B/C if working from ADR spec)
 - **Phase 5:** 4 streams (I.1, I.2, I.3, I.4 all run in parallel)
 
