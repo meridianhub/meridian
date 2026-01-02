@@ -1,7 +1,11 @@
 # PRD: Universal Asset System
 
 **Status:** Draft
-**ADRs:** [0013 - Universal Quantity Type System](../adr/0013-generic-asset-quantity-types.md), [0014 - Dynamic Asset Registry](../adr/0014-dynamic-asset-registry.md)
+**ADRs:**
+
+- [0013 - Universal Quantity Type System](../adr/0013-generic-asset-quantity-types.md)
+- [0014 - Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
+
 **Target Task Master Tag:** `universal-asset-system`
 
 ## Overview
@@ -251,31 +255,9 @@ func (s *Service) GetAggregatedPosition(
 - Read path pays aggregation cost, but reads are **cacheable**; writes are not
 - Background compaction can merge rows during low-traffic windows
 
-#### Alternative: Write-Time Merging (Low Throughput)
-
-For accounts with low transaction volume where real-time balance accuracy is critical:
-
-```go
-// Position Keeping: Write-Time Merge (Low Throughput) - OPT-IN
-func (s *Service) UpsertPositionWithMerge(ctx context.Context, tenantID uuid.UUID, new Position) error {
-    // WARNING: Row lock becomes bottleneck at high TPS
-    lock := s.locks.Acquire(new.AccountID, new.InstrumentCode)
-    defer lock.Release()
-
-    candidates, _ := s.repo.FindByAccountAndInstrument(ctx, new.AccountID, new.InstrumentCode, new.Version)
-    cached, _ := s.cache.Get(ctx, tenantID, new.InstrumentCode, new.Version)
-
-    for _, candidate := range candidates {
-        if fungible, _ := s.cel.AreFungible(cached.FungibilityProgram, candidate.Attributes, new.Attributes); fungible {
-            return s.repo.UpdateAmount(ctx, candidate.ID, candidate.Amount.Add(new.Amount))
-        }
-    }
-    return s.repo.Insert(ctx, new)
-}
-```
-
-> **Decision**: Default to Append-Only. Opt-in to write-time merging per-account or per-instrument
-> configuration when real-time balance accuracy outweighs throughput requirements.
+> **Phase 1 Decision**: Append-Only is the **ONLY** supported write mode.
+> Write-time merging requires per-bucket locking (hash of attributes, not just instrument code),
+> which adds complexity. Defer to Phase 2 after validating Append-Only meets real-world needs.
 
 ### Temporal Logic
 
@@ -481,21 +463,32 @@ flowchart TB
    }
 
    // For services that handle mixed dimensions (e.g., generic ledger),
-   // consider defining a QuantityValue interface for common operations:
+   // define a closed interface with type-safe accessors:
    type QuantityValue interface {
+       Dimension() string
        GetAmount() decimal.Decimal
        GetInstrument() Instrument
        IsZero() bool
+
+       // Type-safe accessors - avoid raw type assertions
+       AsMonetary() (Quantity[Monetary], bool)
+       AsCommodity() (Quantity[Commodity], bool)
    }
+
+   // Implementation on Quantity[D]
+   func (q Quantity[Monetary]) AsMonetary() (Quantity[Monetary], bool) { return q, true }
+   func (q Quantity[Monetary]) AsCommodity() (Quantity[Commodity], bool) { return Quantity[Commodity]{}, false }
+   func (q Quantity[Commodity]) AsMonetary() (Quantity[Monetary], bool) { return Quantity[Monetary]{}, false }
+   func (q Quantity[Commodity]) AsCommodity() (Quantity[Commodity], bool) { return q, true }
    ```
 
    **When to use which:**
 
    | Scenario | Use | Returns |
    |----------|-----|---------|
-   | Unknown dimension at compile time | `ParseQuantity()` | `any` (requires type assertion) |
-   | Known dimension (e.g., Current Account = Monetary) | `NewQuantity[Monetary]()` | `Quantity[Monetary]` |
-   | Generic operations on any quantity | `QuantityValue` interface | Avoids type assertions |
+   | Unknown dimension at compile time | `ParseQuantity()` | `any` → use `AsMonetary()`/`AsCommodity()` |
+   | Known dimension (e.g., Current Account = Monetary) | `NewQuantity[Monetary]()` | `Quantity[Monetary]` directly |
+   | Generic operations on any quantity | `QuantityValue` interface | Type-safe, no panic risk |
 
 7. **Typed Rehydration Constructor** (`quantity.go`)
 
@@ -615,8 +608,9 @@ flowchart TB
        // Multiply by factor
        rawResult := q.Amount.Mul(r.Factor)
 
-       // Round to target instrument's precision (e.g., USD = 2 decimal places)
-       roundedResult := rawResult.Round(int32(r.To.Precision))
+       // Round to target instrument's precision using Banker's rounding
+       // (round half to even) for financial compliance
+       roundedResult := rawResult.RoundBank(int32(r.To.Precision))
 
        return Quantity[Monetary]{
            Amount:     roundedResult,
@@ -625,14 +619,17 @@ flowchart TB
    }
    ```
 
-   **Example**: Converting 1 Gold Bar (precision=4) to USD (precision=2) at rate 2,847.5312:
-   - Raw: `1 * 2847.5312 = 2847.5312`
-   - Rounded to USD precision: `2847.53`
+   > **Rounding Mode**: Banker's rounding (round half to even) is required for financial
+   > compliance. It eliminates systematic bias that occurs with round-half-up.
+
+   **Example**: Converting 1 Gold Bar (precision=4) to USD (precision=2) at rate 2,847.5350:
+   - Raw: `1 * 2847.5350 = 2847.5350`
+   - Banker's rounding: `2847.54` (0.535 → 0.54 because 4 is even)
 
 ### Acceptance Criteria
 
 - [ ] `Rate.Convert()` correctly multiplies amount by factor
-- [ ] `Rate.Convert()` rounds result to target instrument's precision
+- [ ] `Rate.Convert()` uses Banker's rounding (round half to even)
 - [ ] `Rate.Convert()` returns error if source instrument mismatch
 - [ ] `IdentityRate()` returns factor of 1.0
 - [ ] Rate with `ValidFrom > ValidTo` rejected
@@ -654,20 +651,33 @@ flowchart TB
 
    ```protobuf
    message InstrumentAmount {
-       string amount = 1;              // Decimal as string for precision
+       // The quantity magnitude (decimal string).
+       // Native Go math handles this. CEL NEVER touches this field.
+       string amount = 1;
+
+       // The Identity of the asset.
        string instrument_code = 2;     // "USD", "KWH", "GPU-H100"
        uint32 version = 3;             // Schema version
 
-       // The "Payload": Raw key-value pairs.
-       // Checked against validation_expression at ingestion time.
-       // All values are strings; CEL handles type coercion.
+       // The Context/Fungibility payload.
+       // CONSTRAINT: Keys MUST be snake_case (^[a-z][a-z0-9_]*$) for CEL compatibility.
+       // Values are strings; CEL 'int()' or 'timestamp()' macros handle coercion.
        map<string, string> attributes = 4;
+
+       // Temporal bounds (first-class citizens per ADR-0017).
+       // Time is fundamental, not just another attribute.
+       google.protobuf.Timestamp valid_from = 5;
+       google.protobuf.Timestamp valid_to = 6;
    }
    ```
 
    > **Why `map<string, string>`**: Using `google.protobuf.Struct` adds marshalling overhead
    > and CEL environment complexity. String maps are fast, simple, and CEL can coerce types
    > explicitly: `int(attributes['expiry']) > 1700000000`.
+   >
+   > **Why explicit time fields**: Per ADR-0017 (Temporal Quality), time is a first-class citizen.
+   > Storing `valid_from`/`valid_to` as top-level fields avoids parsing them from attributes
+   > on every write to the database's `period_start`/`period_end` columns.
 
    **CEL Type Coercion Table**: Force developers to rely on CEL's casting, not custom Go parsing:
 
@@ -909,7 +919,28 @@ flowchart TB
    **Why**: CEL interprets `attributes.user-id` as subtraction (`attributes.user` minus `id`).
    Forcing `snake_case` ensures `attributes.user_id` works without bracket syntax `attributes['user-id']`.
 
-5. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
+5. **CEL Environment Variables** (Explicit Contract):
+
+   The CEL environments are strictly typed. Variable names are fixed contracts:
+
+   **Validation Expression Environment:**
+
+   | Variable | Type | Description |
+   |----------|------|-------------|
+   | `attributes` | `Map<String, String>` | The attributes map from InstrumentAmount proto |
+   | `amount` | `String` | The quantity magnitude (for min/max checks) |
+   | `valid_from` | `Timestamp` | Period start (if provided) |
+   | `valid_to` | `Timestamp` | Period end (if provided) |
+
+   **Fungibility Expression Environment:**
+
+   | Variable | Type | Description |
+   |----------|------|-------------|
+   | `a` | `Map<String, String>` | Attributes of existing position |
+   | `b` | `Map<String, String>` | Attributes of incoming position |
+   | Returns | `Bool` | `true` = merge, `false` = keep separate |
+
+6. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
 
    ```go
    type CELCompiler struct {
@@ -918,9 +949,14 @@ flowchart TB
    }
 
    func NewCELCompiler() (*CELCompiler, error) {
-       // Environment for ingestion validation: attributes → bool
+       // Environment for ingestion validation
+       // CostLimit prevents DoS via complex expressions
        valEnv, err := cel.NewEnv(
            cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+           cel.Variable("amount", cel.StringType),
+           cel.Variable("valid_from", cel.TimestampType),
+           cel.Variable("valid_to", cel.TimestampType),
+           cel.CostLimit(10000),  // Prevent expensive expressions
        )
        if err != nil {
            return nil, err
@@ -930,6 +966,7 @@ flowchart TB
        fungEnv, err := cel.NewEnv(
            cel.Variable("a", cel.MapType(cel.StringType, cel.StringType)),
            cel.Variable("b", cel.MapType(cel.StringType, cel.StringType)),
+           cel.CostLimit(10000),
        )
        if err != nil {
            return nil, err
@@ -964,9 +1001,9 @@ flowchart TB
    }
    ```
 
-6. **PostgreSQL implementation** with sqlc-generated queries
+7. **PostgreSQL implementation** with sqlc-generated queries
 
-7. **Error types**:
+8. **Error types**:
    - `ErrInstrumentNotFound`
    - `ErrDuplicateInstrument`
    - `ErrCELCompileError` - syntax/semantic error in validation expression
