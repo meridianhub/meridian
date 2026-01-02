@@ -179,11 +179,32 @@ flowchart TB
    }
    ```
 
+6. **Generic Bridge Factory** (`factory.go`)
+
+   > **The Problem**: Go generics are erased at runtime, but DB/Proto use string dimensions.
+   > This factory is the **only** boundary where runtime strings become compile-time types.
+
+   ```go
+   // ParseQuantity converts raw data into a typed Quantity.
+   // This is the boundary between runtime (Proto/DB) and compile-time (Go generics).
+   func ParseQuantity(amount decimal.Decimal, def UnitDef) (any, error) {
+       switch def.Dimension {
+       case "Monetary":
+           return Quantity[Monetary]{Amount: amount, Unit: def}, nil
+       case "Commodity":
+           return Quantity[Commodity]{Amount: amount, Unit: def}, nil
+       default:
+           return nil, ErrUnknownDimension
+       }
+   }
+   ```
+
 ### Acceptance Criteria
 
 - [ ] `Quantity[Monetary].Add(Quantity[Commodity])` fails at compile time
 - [ ] `USD.Add(EUR)` returns `ErrUnitMismatch` at runtime
 - [ ] `USD(v1).Add(USD(v2))` returns `ErrVersionMismatch` at runtime
+- [ ] `ParseQuantity` correctly bridges runtime strings to compile-time types
 - [ ] 100% test coverage on arithmetic operations
 
 ---
@@ -269,25 +290,32 @@ flowchart TB
 **Location:** `proto/platform/v1/`
 **Dependencies:** Stream A (type design, can work from ADR spec)
 
+> **Proto vs CEL**: Protobuf defines the **Container** (data structure). CEL is the **Gatekeeper**
+> (validation logic). Proto messages are pure data carriers with no behavior. CEL expressions
+> are compiled and executed by the service layer to validate attribute payloads.
+
 ### Deliverables
 
-1. **InstrumentAmount message** (`quantity.proto`)
+1. **InstrumentAmount message** (`quantity.proto`) - *The Data Carrier*
 
    ```protobuf
    message InstrumentAmount {
        string amount = 1;              // Decimal as string for precision
        string instrument_code = 2;     // "USD", "KWH", "GPU-H100"
        uint32 version = 3;             // Schema version
-       map<string, string> attributes = 4;  // Validated by CEL at ingestion
+
+       // The "Payload": Raw key-value pairs.
+       // Checked against validation_expression at ingestion time.
+       // All values are strings; CEL handles type coercion.
+       map<string, string> attributes = 4;
    }
    ```
 
-   > **CEL typing**: While `attributes` is `map<string, string>` on the wire, CEL expressions
-   > can coerce values where needed: `int(attributes['expiry']) > 1700000000`. The CEL
-   > environment treats all attribute values as strings; type conversion is explicit in
-   > the expression.
+   > **Why `map<string, string>`**: Using `google.protobuf.Struct` adds marshalling overhead
+   > and CEL environment complexity. String maps are fast, simple, and CEL can coerce types
+   > explicitly: `int(attributes['expiry']) > 1700000000`.
 
-2. **InstrumentDefinition message** (`reference_data.proto`)
+2. **InstrumentDefinition message** (`reference_data.proto`) - *Structure + Rules*
 
    ```protobuf
    message InstrumentDefinition {
@@ -297,7 +325,13 @@ flowchart TB
        uint32 version = 4;
        string dimension = 5;           // "Monetary" or "Commodity"
        int32 precision = 6;
-       string validation_expression = 7;  // CEL: "has(attributes.region)"
+
+       // The "Gatekeeper": A CEL expression that validates if a
+       // position's attributes are allowed for this instrument.
+       // Compiled and cached by the service layer.
+       // Example: "has(attributes.region) && int(attributes.expiry) > 0"
+       string validation_expression = 7;
+
        string display_name = 8;
        string description = 9;
    }
@@ -633,18 +667,44 @@ flowchart TB
 3. **Background refresh goroutine**: Periodically refresh cached definitions to pick up new
    instruments without requiring restarts
 
-4. **CEL validation** at ingestion (using cached compiled program):
+4. **Validation Checkpoint** (the ingestion pipeline):
+
+   When `RecordMeasurement` is called, the adapter executes this sequence:
+
+   ```text
+   ┌─────────────────────────────────────────────────────────────────┐
+   │  1. PROTO DECODE                                                │
+   │     Receive InstrumentAmount (pure data)                        │
+   ├─────────────────────────────────────────────────────────────────┤
+   │  2. CACHE LOOKUP                                                │
+   │     Fetch CachedInstrument using instrument_code + version      │
+   │     (LRU hit = ~10ns, miss = gRPC + CEL compile)                │
+   ├─────────────────────────────────────────────────────────────────┤
+   │  3. CEL EXECUTION                                               │
+   │     Run cached.Program.Eval(attributes)                         │
+   │     → false or error: REJECT (400 Bad Request)                  │
+   │     → true: CONTINUE                                            │
+   ├─────────────────────────────────────────────────────────────────┤
+   │  4. TYPE BRIDGE                                                 │
+   │     ParseQuantity(amount, def) → Quantity[Monetary/Commodity]   │
+   │     Only NOW does data become a typed domain object             │
+   ├─────────────────────────────────────────────────────────────────┤
+   │  5. DOMAIN ENTRY                                                │
+   │     Pass typed Quantity to Position Keeping domain layer        │
+   └─────────────────────────────────────────────────────────────────┘
+   ```
 
    ```go
    func (a *TransactionAdapter) validateInstrument(
-       ctx context.Context, req *pb.Request,
+       ctx context.Context, req *pb.InstrumentAmount,
    ) error {
+       // Step 2: Cache lookup
        cached, err := a.localCache.Get(ctx, tenantID, req.InstrumentCode, req.Version)
        if err != nil {
            return status.Errorf(codes.NotFound, "unknown instrument")
        }
 
-       // Execute pre-compiled CEL - nanosecond latency
+       // Step 3: CEL execution (~100ns)
        valid, err := a.compiler.Evaluate(cached.Program, req.Attributes)
        if err != nil {
            return status.Errorf(codes.Internal, "CEL eval error: %v", err)
@@ -656,7 +716,7 @@ flowchart TB
    }
    ```
 
-5. **Position creation** using validated `PositionKey`
+5. **Position creation** using validated `PositionKey` and `ParseQuantity` factory
 
 ### Acceptance Criteria
 
