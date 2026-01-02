@@ -15,7 +15,7 @@ compile-time dimensional safety.
 1. **Compile-time safety**: Prevent physics errors (money + rice) at build time
 2. **Runtime flexibility**: New assets via database configuration, not code
 3. **Tenant isolation**: Each tenant has their own asset catalog
-4. **Valuation architecture**: Pluggable providers for asset-to-currency conversion
+4. **Valuation foundation**: Rate type for asset-to-currency conversion (providers in future PRD)
 
 ### Non-Goals (Simplified Scope)
 
@@ -30,62 +30,43 @@ compile-time dimensional safety.
 
 Designed for parallel execution across multiple developers. Dependencies shown in diagram below.
 
-```text
-                                    ┌─────────────────────┐
-                                    │   Stream A          │
-                                    │   Core Types        │
-                                    │   (quantity pkg)    │
-                                    └──────────┬──────────┘
-                                               │
-                    ┌──────────────────────────┼──────────────────────────┐
-                    │                          │                          │
-                    ▼                          ▼                          ▼
-          ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-          │   Stream B      │       │   Stream C      │       │   Stream D      │
-          │   Currency      │       │   Rate &        │       │   Protobuf      │
-          │   Definitions   │       │   Valuation     │       │   Definitions   │
-          └────────┬────────┘       └────────┬────────┘       └────────┬────────┘
-                   │                         │                         │
-                   │                         │                         │
-                   └─────────────────────────┼─────────────────────────┘
-                                             │
-          ┌─────────────────┐                │
-          │   Stream E      │                │
-          │   DB Schema     │◄───────────────┘
-          │   (parallel)    │
-          └────────┬────────┘
-                   │
-                   ▼
-          ┌─────────────────┐
-          │   Stream F      │
-          │   Registry      │
-          │   Service       │
-          └────────┬────────┘
-                   │
-          ┌────────┴────────┐
-          │                 │
-          ▼                 ▼
-┌─────────────────┐ ┌─────────────────┐
-│   Stream G      │ │   Stream H      │
-│   gRPC API      │ │   Caching       │
-│   Handlers      │ │   Layer         │
-└────────┬────────┘ └────────┬────────┘
-         │                   │
-         └─────────┬─────────┘
-                   │
-                   ▼
-          ┌─────────────────┐
-          │   Stream I      │
-          │   Adapter       │
-          │   Integration   │
-          └────────┬────────┘
-                   │
-                   ▼
-          ┌─────────────────┐
-          │   Stream J      │
-          │   Integration   │
-          │   Tests         │
-          └─────────────────┘
+```mermaid
+flowchart TB
+    subgraph Foundation["Phase 1: Foundation (Parallel)"]
+        A["Stream A<br/>Core Types<br/>(quantity pkg)"]
+        D["Stream D<br/>Protobuf<br/>Definitions"]
+        E["Stream E<br/>DB Schema"]
+    end
+
+    subgraph TypeExt["Phase 2: Type Extensions"]
+        B["Stream B<br/>Currency<br/>Definitions"]
+        C["Stream C<br/>Rate Type"]
+    end
+
+    subgraph Service["Phase 3: Service Layer"]
+        F["Stream F<br/>Reference Data<br/>Service"]
+    end
+
+    subgraph API["Phase 4: API & Caching (Parallel)"]
+        G["Stream G<br/>gRPC API<br/>Handlers"]
+        H["Stream H<br/>Caching<br/>Layer"]
+    end
+
+    subgraph Integration["Phase 5: Integration"]
+        I["Stream I<br/>Adapter<br/>Integration"]
+        J["Stream J<br/>Integration<br/>Tests"]
+    end
+
+    A --> B
+    A --> C
+    A --> F
+    D --> G
+    E --> F
+    F --> G
+    F --> H
+    G --> I
+    H --> I
+    I --> J
 ```
 
 ---
@@ -186,11 +167,14 @@ Designed for parallel execution across multiple developers. Dependencies shown i
 
 ---
 
-## Stream C: Rate & Valuation
+## Stream C: Rate Type
 
 **Location:** `pkg/platform/quantity/`
 **Dependencies:** Stream A (Quantity, UnitDef types)
-**Estimated complexity:** 3 points
+**Estimated complexity:** 2 points
+
+> **Scope boundary**: This stream covers the Rate data structure and basic conversion math only.
+> ValuationProvider interface and orchestration belongs in a future Valuation Engine PRD (ADR-019).
 
 ### Deliverables
 
@@ -204,36 +188,27 @@ Designed for parallel execution across multiple developers. Dependencies shown i
        ValidFrom time.Time
        ValidTo   time.Time
    }
+
+   // Convert applies the rate to a quantity, returning the converted amount.
+   // Returns error if quantity's unit doesn't match Rate.From.
+   func (r Rate) Convert(q Quantity[Monetary]) (Quantity[Monetary], error)
    ```
 
-2. **ValuationProvider interface** (`valuation.go`)
+2. **Identity rate helper**:
 
    ```go
-   type ValuationProvider interface {
-       Valuate(ctx context.Context, req ValuationRequest) (ValuationResponse, error)
-       Supports(dimension string, assetCode string) bool
-   }
-
-   type ValuationRequest struct {
-       Position    Position
-       TargetUnit  UnitDef
-       AtTime      time.Time
-   }
-
-   type ValuationResponse struct {
-       Value       Money
-       Rate        Rate
-       Provider    string
-   }
+   // IdentityRate returns a 1:1 rate for same-currency operations
+   func IdentityRate(unit UnitDef) Rate
    ```
 
-3. **IdentityProvider**: Trivial implementation for same-currency valuation
+3. **Rate validation**: Ensure `From != To` unless identity, validate temporal bounds
 
 ### Acceptance Criteria
 
-- [ ] Rate correctly converts between units
-- [ ] IdentityProvider returns 1:1 for same currency
-- [ ] ValuationProvider interface supports pluggable implementations
+- [ ] `Rate.Convert()` correctly multiplies amount by factor
+- [ ] `Rate.Convert()` returns error if unit mismatch
+- [ ] `IdentityRate()` returns factor of 1.0
+- [ ] Rate with `ValidFrom > ValidTo` rejected
 
 ---
 
@@ -280,16 +255,20 @@ Designed for parallel execution across multiple developers. Dependencies shown i
 
 ## Stream E: Database Schema
 
-**Location:** `services/asset-registry/migrations/`
+**Location:** `services/reference-data/migrations/`
 **Dependencies:** Stream A (UnitDef field design)
 **Estimated complexity:** 2 points
+
+> **BIAN alignment**: This service maps to the BIAN `FinancialInstrumentReferenceDataManagement`
+> service domain, which maintains a directory of financial instrument reference data including
+> currencies, equities, debt instruments, and commodities.
 
 ### Deliverables
 
 1. **Asset definitions table**
 
    ```sql
-   CREATE TABLE asset_definitions (
+   CREATE TABLE instrument_definitions (
        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
        tenant_id UUID NOT NULL,
        code VARCHAR(32) NOT NULL,
@@ -306,75 +285,119 @@ Designed for parallel execution across multiple developers. Dependencies shown i
        CHECK (dimension IN ('Monetary', 'Commodity'))
    );
 
-   CREATE INDEX idx_asset_definitions_lookup
-       ON asset_definitions(tenant_id, code, version);
+   CREATE INDEX idx_instrument_definitions_lookup
+       ON instrument_definitions(tenant_id, code, version);
    ```
 
-2. **Seed data** for platform currencies (system tenant):
-   - USD, EUR, GBP with precision 2
+2. **System tenant seed data**:
+
+   ```sql
+   -- System tenant ID: 00000000-0000-0000-0000-000000000000
+   -- Platform-wide instruments accessible to ALL tenants
+   INSERT INTO instrument_definitions (tenant_id, code, version, dimension, precision, display_name)
+   VALUES
+       ('00000000-0000-0000-0000-000000000000', 'USD', 1, 'Monetary', 2, 'US Dollar'),
+       ('00000000-0000-0000-0000-000000000000', 'EUR', 1, 'Monetary', 2, 'Euro'),
+       ('00000000-0000-0000-0000-000000000000', 'GBP', 1, 'Monetary', 2, 'British Pound');
+   ```
 
 ### Acceptance Criteria
 
 - [ ] Migration applies cleanly
 - [ ] Unique constraint prevents duplicate code+version per tenant
 - [ ] Index supports efficient lookups
+- [ ] System tenant seed data inserted
 
 ---
 
-## Stream F: Registry Service
+## Stream F: Reference Data Service
 
-**Location:** `services/asset-registry/`
+**Location:** `services/reference-data/`
 **Dependencies:** Stream A, Stream E
 **Estimated complexity:** 5 points
 
 ### Deliverables
 
-1. **AssetRegistry interface** (`registry.go`)
+1. **InstrumentRegistry interface** (`registry.go`)
 
    ```go
-   type AssetRegistry interface {
-       GetDefinition(ctx context.Context, tenantID uuid.UUID, code string, version uint32) (AssetDefinition, error)
-       GetLatestDefinition(ctx context.Context, tenantID uuid.UUID, code string) (AssetDefinition, error)
-       CreateDefinition(ctx context.Context, def AssetDefinition) (AssetDefinition, error)
-       ListDefinitions(ctx context.Context, tenantID uuid.UUID) ([]AssetDefinition, error)
-       ValidateAttributes(ctx context.Context, def AssetDefinition, attrs map[string]string) error
+   // SystemTenantID is the well-known UUID for platform-wide instruments
+   var SystemTenantID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
+
+   type InstrumentRegistry interface {
+       // GetDefinition looks up instrument by tenant, falling back to SystemTenant if not found.
+       // Lookup order: tenant_id → SystemTenantID
+       GetDefinition(ctx context.Context, tenantID uuid.UUID, code string, version uint32) (InstrumentDefinition, error)
+
+       // GetLatestDefinition returns highest version, with same fallback logic
+       GetLatestDefinition(ctx context.Context, tenantID uuid.UUID, code string) (InstrumentDefinition, error)
+
+       // CreateDefinition creates tenant-specific instrument (cannot create in SystemTenant via API)
+       CreateDefinition(ctx context.Context, def InstrumentDefinition) (InstrumentDefinition, error)
+
+       // ListDefinitions returns tenant instruments + all SystemTenant instruments
+       ListDefinitions(ctx context.Context, tenantID uuid.UUID) ([]InstrumentDefinition, error)
+
+       // ValidateAttributes checks attributes against instrument's JSON Schema
+       ValidateAttributes(ctx context.Context, def InstrumentDefinition, attrs map[string]string) error
    }
    ```
 
-2. **PostgreSQL implementation** with sqlc-generated queries
+2. **System Tenant Inheritance Logic**:
 
-3. **JSON Schema validation** using `github.com/santhosh-tekuri/jsonschema`
+   ```go
+   func (r *PostgresRegistry) GetDefinition(
+       ctx context.Context, tenantID uuid.UUID, code string, version uint32,
+   ) (InstrumentDefinition, error) {
+       // 1. Try tenant-specific lookup
+       def, err := r.queries.GetInstrumentDefinition(ctx, tenantID, code, version)
+       if err == nil {
+           return def, nil
+       }
+       if !errors.Is(err, sql.ErrNoRows) {
+           return InstrumentDefinition{}, err
+       }
 
-4. **Error types**:
-   - `ErrAssetNotFound`
-   - `ErrDuplicateAsset`
+       // 2. Fallback to System Tenant
+       return r.queries.GetInstrumentDefinition(ctx, SystemTenantID, code, version)
+   }
+   ```
+
+3. **PostgreSQL implementation** with sqlc-generated queries
+
+4. **JSON Schema validation** using `github.com/santhosh-tekuri/jsonschema`
+
+5. **Error types**:
+   - `ErrInstrumentNotFound`
+   - `ErrDuplicateInstrument`
    - `ErrInvalidSchema`
    - `ErrAttributeValidationFailed`
 
 ### Acceptance Criteria
 
 - [ ] CRUD operations work correctly
-- [ ] Tenant isolation enforced (queries always filter by tenant_id)
+- [ ] Tenant lookup falls back to System Tenant when not found
+- [ ] `ListDefinitions` includes both tenant and System Tenant instruments
+- [ ] Cannot create instruments in System Tenant via API (admin-only seed data)
 - [ ] Invalid attributes rejected with clear error messages
-- [ ] System tenant assets (currencies) accessible to all tenants
 
 ---
 
 ## Stream G: gRPC API Handlers
 
-**Location:** `services/asset-registry/handler/`
+**Location:** `services/reference-data/handler/`
 **Dependencies:** Stream D, Stream F
 **Estimated complexity:** 3 points
 
 ### Deliverables
 
-1. **AssetRegistryService** proto definition:
+1. **ReferenceDataService** proto definition:
 
    ```protobuf
-   service AssetRegistryService {
-       rpc CreateAsset(CreateAssetRequest) returns (AssetDefinition);
-       rpc GetAsset(GetAssetRequest) returns (AssetDefinition);
-       rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
+   service ReferenceDataService {
+       rpc RegisterInstrument(RegisterInstrumentRequest) returns (InstrumentDefinition);
+       rpc RetrieveInstrument(RetrieveInstrumentRequest) returns (InstrumentDefinition);
+       rpc ListInstruments(ListInstrumentsRequest) returns (ListInstrumentsResponse);
    }
    ```
 
@@ -395,17 +418,17 @@ Designed for parallel execution across multiple developers. Dependencies shown i
 
 ## Stream H: Caching Layer
 
-**Location:** `services/asset-registry/cache/`
+**Location:** `services/reference-data/cache/`
 **Dependencies:** Stream F (registry interface)
 **Estimated complexity:** 2 points
 
 ### Deliverables
 
-1. **CachedAssetRegistry** wrapper:
+1. **CachedInstrumentRegistry** wrapper:
 
    ```go
-   type CachedAssetRegistry struct {
-       delegate AssetRegistry
+   type CachedInstrumentRegistry struct {
+       delegate InstrumentRegistry
        cache    *cache.Cache
        ttl      time.Duration
    }
@@ -425,49 +448,91 @@ Designed for parallel execution across multiple developers. Dependencies shown i
 
 ## Stream I: Adapter Integration
 
-**Location:** Existing service adapters
+**Location:** Existing service adapters (Position Keeping, Current Account, etc.)
 **Dependencies:** Stream F, Stream G
-**Estimated complexity:** 3 points
+**Estimated complexity:** 5 points
+
+> **Performance critical**: Position Keeping may process 100k+ TPS. Every `RecordMeasurement`
+> call must NOT make a synchronous gRPC call to Reference Data. Instrument definitions must
+> be cached aggressively in-process.
 
 ### Deliverables
 
-1. **Asset Registry client** injected into transaction adapters
+1. **Reference Data client** injected into transaction adapters
 
-2. **Schema-on-Write validation** at ingestion:
+2. **Aggressive in-memory caching** within Position Keeping:
 
    ```go
-   func (a *TransactionAdapter) validateAsset(ctx context.Context, req *pb.Request) error {
-       def, err := a.registry.GetDefinition(ctx, tenantID, req.AssetCode, req.Version)
+   // LocalInstrumentCache provides sub-microsecond lookups for hot-path operations.
+   // Refreshed asynchronously; stale reads acceptable for short windows.
+   type LocalInstrumentCache struct {
+       registry InstrumentRegistry      // Remote client (fallback)
+       cache    sync.Map                // instrument_code:version → InstrumentDefinition
+       ttl      time.Duration           // Refresh interval (e.g., 5 minutes)
+   }
+
+   func (c *LocalInstrumentCache) Get(
+       ctx context.Context, tenantID uuid.UUID, code string, version uint32,
+   ) (InstrumentDefinition, error) {
+       // 1. Check local cache (sync.Map - lock-free reads)
+       key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
+       if cached, ok := c.cache.Load(key); ok {
+           return cached.(InstrumentDefinition), nil
+       }
+
+       // 2. Cache miss: fetch from Reference Data service
+       def, err := c.registry.GetDefinition(ctx, tenantID, code, version)
        if err != nil {
-           return status.Errorf(codes.NotFound, "unknown asset")
+           return InstrumentDefinition{}, err
+       }
+
+       // 3. Populate cache
+       c.cache.Store(key, def)
+       return def, nil
+   }
+   ```
+
+3. **Background refresh goroutine**: Periodically refresh cached definitions to pick up new
+   instruments without requiring restarts
+
+4. **Schema-on-Write validation** at ingestion:
+
+   ```go
+   func (a *TransactionAdapter) validateInstrument(ctx context.Context, req *pb.Request) error {
+       def, err := a.localCache.Get(ctx, tenantID, req.InstrumentCode, req.Version)
+       if err != nil {
+           return status.Errorf(codes.NotFound, "unknown instrument")
        }
        return a.registry.ValidateAttributes(ctx, def, req.Attributes)
    }
    ```
 
-3. **Position creation** using validated `PositionKey`
+5. **Position creation** using validated `PositionKey`
 
 ### Acceptance Criteria
 
-- [ ] Invalid assets rejected at adapter layer
+- [ ] Invalid instruments rejected at adapter layer
 - [ ] Invalid attributes rejected with clear errors
-- [ ] Valid requests flow through to domain layer
+- [ ] Cache hit rate > 99% after warm-up
+- [ ] No gRPC calls on hot path (cache hit)
+- [ ] New instruments visible within TTL window (e.g., 5 minutes)
 
 ---
 
 ## Stream J: Integration Tests
 
-**Location:** `services/asset-registry/integration_test.go`
+**Location:** `services/reference-data/integration_test.go`
 **Dependencies:** All streams
 **Estimated complexity:** 3 points
 
 ### Deliverables
 
 1. **End-to-end tests** using Testcontainers:
-   - Create custom asset definition
-   - Create position with asset
+   - Create custom instrument definition
+   - Create position with instrument
    - Validate attribute rejection
    - Tenant isolation verification
+   - System Tenant fallback verification
 
 2. **Performance baseline**: Registry lookup latency under load
 
@@ -475,24 +540,27 @@ Designed for parallel execution across multiple developers. Dependencies shown i
 
 - [ ] Full workflow tested
 - [ ] Tenant isolation proven
+- [ ] System Tenant inheritance works (tenant can use "USD" without defining it)
 - [ ] No flaky tests (use `await` package, not `time.Sleep`)
 
 ---
 
 ## Parallel Execution Summary
 
-| Stream | Can Start After | Developers |
-|--------|-----------------|------------|
-| A: Core Types | Immediately | 2 |
-| B: Currency | A | 1 |
-| C: Rate/Valuation | A | 1 |
-| D: Protobuf | Immediately (from ADR spec) | 1 |
-| E: DB Schema | Immediately (from ADR spec) | 1 |
-| F: Registry Service | A + E | 2 |
-| G: gRPC Handlers | D + F | 1 |
-| H: Caching | F | 1 |
-| I: Adapter Integration | F + G | 1 |
-| J: Integration Tests | All | 1 |
+| Stream | Can Start After | Developers | Points |
+|--------|-----------------|------------|--------|
+| A: Core Types | Immediately | 2 | 5 |
+| B: Currency | A | 1 | 2 |
+| C: Rate Type | A | 1 | 2 |
+| D: Protobuf | Immediately (from ADR spec) | 1 | 2 |
+| E: DB Schema | Immediately (from ADR spec) | 1 | 2 |
+| F: Reference Data Service | A + E | 2 | 5 |
+| G: gRPC Handlers | D + F | 1 | 3 |
+| H: Caching | F | 1 | 2 |
+| I: Adapter Integration | F + G | 2 | 5 |
+| J: Integration Tests | All | 1 | 3 |
+
+**Total:** ~31 story points
 
 **Critical path:** A → F → G → I → J
 
@@ -500,17 +568,29 @@ Designed for parallel execution across multiple developers. Dependencies shown i
 
 ---
 
+## Decisions Made
+
+| Question | Decision |
+|----------|----------|
+| Service naming | `reference-data` (BIAN: FinancialInstrumentReferenceDataManagement) |
+| System Tenant ID | `00000000-0000-0000-0000-000000000000` |
+| Lookup inheritance | Tenant → System Tenant fallback |
+| Valuation scope | Rate struct only; ValuationProvider deferred to future PRD |
+
+---
+
 ## Open Questions
 
-1. **Service ownership**: Should Asset Registry be a new service or part of an existing BIAN domain?
-2. **System tenant ID**: Confirm UUID for platform-wide assets (suggest `00000000-0000-0000-0000-000000000000`)
-3. **Initial asset catalog**: Which commodity assets should be seeded beyond fiat currencies?
+1. **Initial commodity catalog**: Which non-currency instruments should be seeded (if any)?
+2. **Cache TTL**: What's the acceptable staleness window for instrument definitions? (Proposed: 5 min)
 
 ---
 
 ## Success Metrics
 
 - [ ] All streams completed and merged
-- [ ] Custom asset creation works end-to-end
+- [ ] Custom instrument creation works end-to-end
+- [ ] System Tenant inheritance works (any tenant can use "USD")
 - [ ] No compile-time dimensional safety regressions
-- [ ] Registry lookup p99 < 10ms (with caching)
+- [ ] Reference Data lookup p99 < 10ms (with service-level caching)
+- [ ] Position Keeping cache hit rate > 99% (with local caching)
