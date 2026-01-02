@@ -65,17 +65,14 @@
 //	)
 //	result := saga.Execute(ctx)
 //
-// # Migration from Service-Specific Clients
+// # Package Scope
 //
-// Services that previously defined their own circuit breaker, retry, or saga
-// implementations should migrate to this shared package:
+// This package provides ONLY generic resilience patterns:
+//   - Circuit breaker (wrapping sony/gobreaker)
+//   - Retry with exponential backoff
+//   - Saga orchestration for distributed transactions
+//   - Context utilities (correlation ID, timeout, metadata propagation)
 //
-//	// Old import (deprecated)
-//	import "github.com/meridianhub/meridian/services/current-account/clients"
-//
-//	// New import (recommended)
-//	import "github.com/meridianhub/meridian/shared/pkg/clients"
-//
-// The service-specific packages re-export these types with deprecation notices
-// to maintain backward compatibility during migration.
+// Service-specific gRPC clients are owned by each service in their respective
+// client packages (e.g., services/party/client, services/tenant/client).
 package clients
