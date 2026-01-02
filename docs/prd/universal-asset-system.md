@@ -75,7 +75,6 @@ flowchart TB
 
 **Location:** `pkg/platform/quantity/`
 **Dependencies:** None (foundational)
-**Estimated complexity:** 5 points
 
 ### Deliverables
 
@@ -138,7 +137,6 @@ flowchart TB
 
 **Location:** `pkg/platform/quantity/currency/`
 **Dependencies:** Stream A (UnitDef type)
-**Estimated complexity:** 2 points
 
 ### Deliverables
 
@@ -171,7 +169,6 @@ flowchart TB
 
 **Location:** `pkg/platform/quantity/`
 **Dependencies:** Stream A (Quantity, UnitDef types)
-**Estimated complexity:** 2 points
 
 > **Scope boundary**: This stream covers the Rate data structure and basic conversion math only.
 > ValuationProvider interface and orchestration belongs in a future Valuation Engine PRD (ADR-019).
@@ -216,7 +213,6 @@ flowchart TB
 
 **Location:** `proto/platform/quantity/v1/`
 **Dependencies:** Stream A (type design, can work from ADR spec)
-**Estimated complexity:** 2 points
 
 ### Deliverables
 
@@ -257,7 +253,6 @@ flowchart TB
 
 **Location:** `services/reference-data/migrations/`
 **Dependencies:** Stream A (UnitDef field design)
-**Estimated complexity:** 2 points
 
 > **BIAN alignment**: This service maps to the BIAN `FinancialInstrumentReferenceDataManagement`
 > service domain, which maintains a directory of financial instrument reference data including
@@ -314,7 +309,6 @@ flowchart TB
 
 **Location:** `services/reference-data/`
 **Dependencies:** Stream A, Stream E
-**Estimated complexity:** 5 points
 
 ### Deliverables
 
@@ -387,7 +381,6 @@ flowchart TB
 
 **Location:** `services/reference-data/handler/`
 **Dependencies:** Stream D, Stream F
-**Estimated complexity:** 3 points
 
 ### Deliverables
 
@@ -420,7 +413,6 @@ flowchart TB
 
 **Location:** `services/reference-data/cache/`
 **Dependencies:** Stream F (registry interface)
-**Estimated complexity:** 2 points
 
 ### Deliverables
 
@@ -450,7 +442,6 @@ flowchart TB
 
 **Location:** Existing service adapters (Position Keeping, Current Account, etc.)
 **Dependencies:** Stream F, Stream G
-**Estimated complexity:** 5 points
 
 > **Performance critical**: Position Keeping may process 100k+ TPS. Every `RecordMeasurement`
 > call must NOT make a synchronous gRPC call to Reference Data. Instrument definitions must
@@ -523,7 +514,6 @@ flowchart TB
 
 **Location:** `services/reference-data/integration_test.go`
 **Dependencies:** All streams
-**Estimated complexity:** 3 points
 
 ### Deliverables
 
@@ -547,20 +537,18 @@ flowchart TB
 
 ## Parallel Execution Summary
 
-| Stream | Can Start After | Developers | Points |
-|--------|-----------------|------------|--------|
-| A: Core Types | Immediately | 2 | 5 |
-| B: Currency | A | 1 | 2 |
-| C: Rate Type | A | 1 | 2 |
-| D: Protobuf | Immediately (from ADR spec) | 1 | 2 |
-| E: DB Schema | Immediately (from ADR spec) | 1 | 2 |
-| F: Reference Data Service | A + E | 2 | 5 |
-| G: gRPC Handlers | D + F | 1 | 3 |
-| H: Caching | F | 1 | 2 |
-| I: Adapter Integration | F + G | 2 | 5 |
-| J: Integration Tests | All | 1 | 3 |
-
-**Total:** ~31 story points
+| Stream | Can Start After | Developers |
+|--------|-----------------|------------|
+| A: Core Types | Immediately | 2 |
+| B: Currency | A | 1 |
+| C: Rate Type | A | 1 |
+| D: Protobuf | Immediately (from ADR spec) | 1 |
+| E: DB Schema | Immediately (from ADR spec) | 1 |
+| F: Reference Data Service | A + E | 2 |
+| G: gRPC Handlers | D + F | 1 |
+| H: Caching | F | 1 |
+| I: Adapter Integration | F + G | 2 |
+| J: Integration Tests | All | 1 |
 
 **Critical path:** A → F → G → I → J
 
