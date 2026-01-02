@@ -26,6 +26,57 @@ compile-time dimensional safety.
 
 ---
 
+## CEL Validation Pattern
+
+We use **Google CEL (Common Expression Language)** for attribute validation instead of JSON Schema.
+CEL is non-Turing complete, compiles to bytecode, executes in nanoseconds, and can express
+cross-field validation that JSON Schema cannot.
+
+### Why CEL over JSON Schema
+
+| Aspect | JSON Schema | CEL |
+|--------|-------------|-----|
+| **Performance** | ~1ms (parse + validate) | ~100ns (execute compiled) |
+| **Cross-field validation** | Limited | Native: `a.x > a.y` |
+| **Type coercion** | Strict | Explicit: `int(attrs['expiry'])` |
+| **Ecosystem** | Web-standard | Google/Proto-native |
+| **Safety** | Schema validation | Guaranteed termination |
+
+### Example: Defining a Custom Instrument with CEL
+
+A tenant registers "GPU-H100-SPOT" with this validation expression:
+
+```javascript
+// Rule: Must have region, and if US region, zone must be 1 or 2
+has(attributes.region) &&
+(attributes.region != 'us-east' || attributes.zone in ['1', '2'])
+```
+
+### Example: Validation at Ingestion
+
+When `RecordMeasurement` receives:
+
+```json
+{
+  "instrument": "GPU-H100-SPOT",
+  "attributes": { "region": "us-east", "zone": "5" }
+}
+```
+
+The cached CEL program executes → returns `false` → measurement rejected **before** domain layer.
+
+### CEL Expression Examples
+
+| Use Case | CEL Expression |
+|----------|----------------|
+| No constraints | `true` |
+| Require field | `has(attributes.region)` |
+| Enum validation | `attributes.type in ['spot', 'reserved', 'committed']` |
+| Numeric check | `int(attributes.expiry) > 1700000000` |
+| Cross-field | `attributes.tier == 'premium' \|\| !has(attributes.sla)` |
+
+---
+
 ## Work Streams
 
 Designed for parallel execution across multiple developers. Dependencies shown in diagram below.
@@ -89,12 +140,16 @@ flowchart TB
 
    ```go
    type UnitDef struct {
-       Code      string
-       Version   uint32
-       Precision int
-       Schema    AttributeSchema
+       Code      string    // "USD", "KWH", "GPU-H100"
+       Version   uint32    // Schema version
+       Dimension string    // "Monetary" or "Commodity" - required for deserialization
+       Precision int       // Decimal places
    }
    ```
+
+   > **Serialization note**: `Dimension` is stored as a string (not type parameter) because
+   > Go generics are erased at runtime. When deserializing from DB/proto, we use `Dimension`
+   > to reconstruct the correct `Quantity[Monetary]` or `Quantity[Commodity]` at the boundary.
 
 3. **Quantity[D]** (`quantity.go`)
 
@@ -211,23 +266,44 @@ flowchart TB
 
 ## Stream D: Protobuf Definitions
 
-**Location:** `proto/platform/quantity/v1/`
+**Location:** `proto/platform/v1/`
 **Dependencies:** Stream A (type design, can work from ADR spec)
 
 ### Deliverables
 
-1. **AssetAmount message** (`quantity.proto`)
+1. **InstrumentAmount message** (`quantity.proto`)
 
    ```protobuf
-   message AssetAmount {
-       string amount = 1;
-       string asset_code = 2;
-       uint32 version = 3;
-       map<string, string> attributes = 4;
+   message InstrumentAmount {
+       string amount = 1;              // Decimal as string for precision
+       string instrument_code = 2;     // "USD", "KWH", "GPU-H100"
+       uint32 version = 3;             // Schema version
+       map<string, string> attributes = 4;  // Validated by CEL at ingestion
    }
    ```
 
-2. **Rate message**
+   > **CEL typing**: While `attributes` is `map<string, string>` on the wire, CEL expressions
+   > can coerce values where needed: `int(attributes['expiry']) > 1700000000`. The CEL
+   > environment treats all attribute values as strings; type conversion is explicit in
+   > the expression.
+
+2. **InstrumentDefinition message** (`reference_data.proto`)
+
+   ```protobuf
+   message InstrumentDefinition {
+       string id = 1;
+       string tenant_id = 2;
+       string code = 3;
+       uint32 version = 4;
+       string dimension = 5;           // "Monetary" or "Commodity"
+       int32 precision = 6;
+       string validation_expression = 7;  // CEL: "has(attributes.region)"
+       string display_name = 8;
+       string description = 9;
+   }
+   ```
+
+3. **Rate message**
 
    ```protobuf
    message Rate {
@@ -239,13 +315,14 @@ flowchart TB
    }
    ```
 
-3. **Buf breaking change detection** configured
+4. **Buf breaking change detection** configured
 
 ### Acceptance Criteria
 
 - [ ] Proto compiles without errors
 - [ ] Generated Go code matches domain types
 - [ ] Buf lint passes
+- [ ] `validation_expression` field documented with CEL examples
 
 ---
 
@@ -260,7 +337,7 @@ flowchart TB
 
 ### Deliverables
 
-1. **Asset definitions table**
+1. **Instrument definitions table**
 
    ```sql
    CREATE TABLE instrument_definitions (
@@ -270,30 +347,37 @@ flowchart TB
        version INTEGER NOT NULL DEFAULT 1,
        dimension VARCHAR(32) NOT NULL,
        precision INTEGER NOT NULL,
-       attribute_schema JSONB NOT NULL DEFAULT '{}',
+       validation_expression TEXT NOT NULL DEFAULT 'true',  -- CEL expression
        display_name VARCHAR(128),
        description TEXT,
        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
        UNIQUE(tenant_id, code, version),
        CHECK (precision >= 0 AND precision <= 18),
-       CHECK (dimension IN ('Monetary', 'Commodity'))
+       CHECK (dimension IN ('Monetary', 'Commodity')),
+       CHECK (validation_expression <> '')  -- Must have some expression
    );
 
    CREATE INDEX idx_instrument_definitions_lookup
        ON instrument_definitions(tenant_id, code, version);
    ```
 
+   > **CEL over JSON Schema**: We use CEL (Common Expression Language) instead of JSON Schema
+   > for attribute validation. CEL compiles to bytecode, executes in nanoseconds, guarantees
+   > termination, and can express cross-field validation that JSON Schema cannot.
+
 2. **System tenant seed data**:
 
    ```sql
    -- System tenant ID: 00000000-0000-0000-0000-000000000000
    -- Platform-wide instruments accessible to ALL tenants
-   INSERT INTO instrument_definitions (tenant_id, code, version, dimension, precision, display_name)
+   -- validation_expression='true' means no attribute constraints
+   INSERT INTO instrument_definitions
+       (tenant_id, code, version, dimension, precision, validation_expression, display_name)
    VALUES
-       ('00000000-0000-0000-0000-000000000000', 'USD', 1, 'Monetary', 2, 'US Dollar'),
-       ('00000000-0000-0000-0000-000000000000', 'EUR', 1, 'Monetary', 2, 'Euro'),
-       ('00000000-0000-0000-0000-000000000000', 'GBP', 1, 'Monetary', 2, 'British Pound');
+       ('00000000-0000-0000-0000-000000000000', 'USD', 1, 'Monetary', 2, 'true', 'US Dollar'),
+       ('00000000-0000-0000-0000-000000000000', 'EUR', 1, 'Monetary', 2, 'true', 'Euro'),
+       ('00000000-0000-0000-0000-000000000000', 'GBP', 1, 'Monetary', 2, 'true', 'British Pound');
    ```
 
 ### Acceptance Criteria
@@ -302,6 +386,8 @@ flowchart TB
 - [ ] Unique constraint prevents duplicate code+version per tenant
 - [ ] Index supports efficient lookups
 - [ ] System tenant seed data inserted
+- [ ] `validation_expression` column stores valid CEL expressions
+- [ ] Default `'true'` allows permissive instruments (no attribute constraints)
 
 ---
 
@@ -327,12 +413,13 @@ flowchart TB
        GetLatestDefinition(ctx context.Context, tenantID uuid.UUID, code string) (InstrumentDefinition, error)
 
        // CreateDefinition creates tenant-specific instrument (cannot create in SystemTenant via API)
+       // Compiles CEL expression at creation time - fails fast on syntax errors
        CreateDefinition(ctx context.Context, def InstrumentDefinition) (InstrumentDefinition, error)
 
        // ListDefinitions returns tenant instruments + all SystemTenant instruments
        ListDefinitions(ctx context.Context, tenantID uuid.UUID) ([]InstrumentDefinition, error)
 
-       // ValidateAttributes checks attributes against instrument's JSON Schema
+       // ValidateAttributes executes compiled CEL program against attribute map
        ValidateAttributes(ctx context.Context, def InstrumentDefinition, attrs map[string]string) error
    }
    ```
@@ -357,15 +444,49 @@ flowchart TB
    }
    ```
 
-3. **PostgreSQL implementation** with sqlc-generated queries
+3. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
 
-4. **JSON Schema validation** using `github.com/santhosh-tekuri/jsonschema`
+   ```go
+   type CELCompiler struct {
+       env *cel.Env
+   }
+
+   func NewCELCompiler() (*CELCompiler, error) {
+       env, err := cel.NewEnv(
+           cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+       )
+       if err != nil {
+           return nil, err
+       }
+       return &CELCompiler{env: env}, nil
+   }
+
+   // Compile parses and compiles a CEL expression. Called at instrument creation.
+   func (c *CELCompiler) Compile(expr string) (cel.Program, error) {
+       ast, issues := c.env.Compile(expr)
+       if issues != nil && issues.Err() != nil {
+           return nil, fmt.Errorf("CEL compile error: %w", issues.Err())
+       }
+       return c.env.Program(ast)
+   }
+
+   // Evaluate runs a compiled program against attributes. Called at ingestion.
+   func (c *CELCompiler) Evaluate(prog cel.Program, attrs map[string]string) (bool, error) {
+       out, _, err := prog.Eval(map[string]interface{}{"attributes": attrs})
+       if err != nil {
+           return false, err
+       }
+       return out.Value().(bool), nil
+   }
+   ```
+
+4. **PostgreSQL implementation** with sqlc-generated queries
 
 5. **Error types**:
    - `ErrInstrumentNotFound`
    - `ErrDuplicateInstrument`
-   - `ErrInvalidSchema`
-   - `ErrAttributeValidationFailed`
+   - `ErrCELCompileError` - syntax/semantic error in validation expression
+   - `ErrAttributeValidationFailed` - CEL evaluated to `false`
 
 ### Acceptance Criteria
 
@@ -373,7 +494,8 @@ flowchart TB
 - [ ] Tenant lookup falls back to System Tenant when not found
 - [ ] `ListDefinitions` includes both tenant and System Tenant instruments
 - [ ] Cannot create instruments in System Tenant via API (admin-only seed data)
-- [ ] Invalid attributes rejected with clear error messages
+- [ ] CEL expression compiled at `CreateDefinition` - syntax errors rejected immediately
+- [ ] `ValidateAttributes` executes compiled CEL and returns clear error on `false`
 
 ---
 
@@ -416,85 +538,121 @@ flowchart TB
 
 ### Deliverables
 
-1. **CachedInstrumentRegistry** wrapper:
+1. **CachedInstrumentRegistry** wrapper with **compiled CEL programs**:
 
    ```go
+   // CachedInstrument holds both the definition and its pre-compiled CEL program
+   type CachedInstrument struct {
+       Definition InstrumentDefinition
+       Program    cel.Program  // Pre-compiled - parsing CEL is expensive, execution is cheap
+   }
+
    type CachedInstrumentRegistry struct {
        delegate InstrumentRegistry
-       cache    *cache.Cache
+       compiler *CELCompiler
+       cache    *lru.Cache[string, CachedInstrument]  // Bounded LRU
        ttl      time.Duration
    }
    ```
 
+   > **Why cache compiled programs**: CEL parsing/compilation is ~100μs. CEL execution is ~100ns.
+   > By caching `cel.Program` alongside the definition, we pay the compilation cost once.
+
 2. **Read-through caching** on `GetDefinition` and `GetLatestDefinition`
+   - On cache miss: fetch from DB, compile CEL, store both
 
 3. **Cache invalidation** on `CreateDefinition` (local only, no distributed)
 
 ### Acceptance Criteria
 
-- [ ] Cache hit reduces database queries
+- [ ] Cache hit returns pre-compiled CEL program
 - [ ] TTL-based expiration works
 - [ ] Creation invalidates relevant cache entries
+- [ ] `ValidateAttributes` uses cached `cel.Program` (no re-compilation)
 
 ---
 
 ## Stream I: Adapter Integration
 
 **Location:** Existing service adapters (Position Keeping, Current Account, etc.)
-**Dependencies:** Stream F, Stream G
+**Dependencies:** Stream F, Stream G, Stream H
 
 > **Performance critical**: Position Keeping may process 100k+ TPS. Every `RecordMeasurement`
-> call must NOT make a synchronous gRPC call to Reference Data. Instrument definitions must
-> be cached aggressively in-process.
+> call must NOT make a synchronous gRPC call to Reference Data. Instrument definitions AND
+> compiled CEL programs must be cached aggressively in-process.
 
 ### Deliverables
 
 1. **Reference Data client** injected into transaction adapters
 
-2. **Aggressive in-memory caching** within Position Keeping:
+2. **Bounded LRU cache** within Position Keeping using `hashicorp/golang-lru`:
 
    ```go
    // LocalInstrumentCache provides sub-microsecond lookups for hot-path operations.
-   // Refreshed asynchronously; stale reads acceptable for short windows.
+   // Uses bounded LRU to prevent memory explosion from temporary assets.
    type LocalInstrumentCache struct {
-       registry InstrumentRegistry      // Remote client (fallback)
-       cache    sync.Map                // instrument_code:version → InstrumentDefinition
-       ttl      time.Duration           // Refresh interval (e.g., 5 minutes)
+       registry InstrumentRegistry              // Remote client (fallback)
+       compiler *CELCompiler                    // For compiling on cache miss
+       cache    *lru.Cache[string, CachedInstrument]  // Bounded: max 10,000 entries
+       ttl      time.Duration                   // Refresh interval (e.g., 5 minutes)
    }
 
    func (c *LocalInstrumentCache) Get(
        ctx context.Context, tenantID uuid.UUID, code string, version uint32,
-   ) (InstrumentDefinition, error) {
-       // 1. Check local cache (sync.Map - lock-free reads)
+   ) (CachedInstrument, error) {
        key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
-       if cached, ok := c.cache.Load(key); ok {
-           return cached.(InstrumentDefinition), nil
+
+       // 1. Check LRU cache (O(1) lookup)
+       if cached, ok := c.cache.Get(key); ok {
+           return cached, nil
        }
 
        // 2. Cache miss: fetch from Reference Data service
        def, err := c.registry.GetDefinition(ctx, tenantID, code, version)
        if err != nil {
-           return InstrumentDefinition{}, err
+           return CachedInstrument{}, err
        }
 
-       // 3. Populate cache
-       c.cache.Store(key, def)
-       return def, nil
+       // 3. Compile CEL program
+       prog, err := c.compiler.Compile(def.ValidationExpression)
+       if err != nil {
+           return CachedInstrument{}, fmt.Errorf("CEL compile: %w", err)
+       }
+
+       // 4. Store in bounded LRU (evicts oldest if full)
+       cached := CachedInstrument{Definition: def, Program: prog}
+       c.cache.Add(key, cached)
+       return cached, nil
    }
    ```
+
+   > **Why bounded LRU over sync.Map**: If a tenant defines 10,000+ temporary voucher codes,
+   > an unbounded `sync.Map` will leak memory. LRU evicts least-recently-used entries,
+   > keeping memory bounded while retaining hot instruments.
 
 3. **Background refresh goroutine**: Periodically refresh cached definitions to pick up new
    instruments without requiring restarts
 
-4. **Schema-on-Write validation** at ingestion:
+4. **CEL validation** at ingestion (using cached compiled program):
 
    ```go
-   func (a *TransactionAdapter) validateInstrument(ctx context.Context, req *pb.Request) error {
-       def, err := a.localCache.Get(ctx, tenantID, req.InstrumentCode, req.Version)
+   func (a *TransactionAdapter) validateInstrument(
+       ctx context.Context, req *pb.Request,
+   ) error {
+       cached, err := a.localCache.Get(ctx, tenantID, req.InstrumentCode, req.Version)
        if err != nil {
            return status.Errorf(codes.NotFound, "unknown instrument")
        }
-       return a.registry.ValidateAttributes(ctx, def, req.Attributes)
+
+       // Execute pre-compiled CEL - nanosecond latency
+       valid, err := a.compiler.Evaluate(cached.Program, req.Attributes)
+       if err != nil {
+           return status.Errorf(codes.Internal, "CEL eval error: %v", err)
+       }
+       if !valid {
+           return status.Errorf(codes.InvalidArgument, "attributes failed validation")
+       }
+       return nil
    }
    ```
 
@@ -503,9 +661,11 @@ flowchart TB
 ### Acceptance Criteria
 
 - [ ] Invalid instruments rejected at adapter layer
-- [ ] Invalid attributes rejected with clear errors
+- [ ] Invalid attributes rejected with clear errors (CEL returns false)
 - [ ] Cache hit rate > 99% after warm-up
 - [ ] No gRPC calls on hot path (cache hit)
+- [ ] No CEL compilation on hot path (use cached `cel.Program`)
+- [ ] Memory bounded by LRU max size (e.g., 10,000 entries)
 - [ ] New instruments visible within TTL window (e.g., 5 minutes)
 
 ---
@@ -564,6 +724,9 @@ flowchart TB
 | System Tenant ID | `00000000-0000-0000-0000-000000000000` |
 | Lookup inheritance | Tenant → System Tenant fallback |
 | Valuation scope | Rate struct only; ValuationProvider deferred to future PRD |
+| Attribute validation | CEL expressions (not JSON Schema) - 100x faster, cross-field capable |
+| Local cache type | Bounded LRU (`hashicorp/golang-lru`) to prevent memory leaks |
+| CEL caching | Cache compiled `cel.Program` alongside definitions |
 
 ---
 
