@@ -657,6 +657,11 @@ func TestAlertCheckIntegration(t *testing.T) {
 	}
 	require.NoError(t, repo.Create(tc.ctx, testTenant))
 
+	// GORM's autoUpdateTime sets updated_at to now() on create, but ListByStatusOlderThan
+	// queries by updated_at. Update it to match created_at for the test to work correctly.
+	err := tc.db.Exec("UPDATE tenant SET updated_at = created_at WHERE id = ?", testTenant.ID.String()).Error
+	require.NoError(t, err)
+
 	// Capture log output to verify alert is logged
 	var logBuffer safeBuffer
 	testLogger := slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -676,8 +681,10 @@ func TestAlertCheckIntegration(t *testing.T) {
 
 	go worker.Start(ctx)
 
-	// Wait for alert check to execute (should happen within 1 second + buffer)
-	err = await.AtMost(3 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
+	// Wait for alert check to execute. The ticker fires after AlertInterval (1s),
+	// then the check runs (database query + logging). On CI with resource contention,
+	// this can take longer than expected, so we use a generous 5s timeout.
+	err = await.AtMost(5 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
 		logOutput := logBuffer.String()
 		return strings.Contains(logOutput, "tenant provisioning failure alert") &&
 			strings.Contains(logOutput, "failed_alert_tenant")
