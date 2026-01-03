@@ -312,10 +312,11 @@ If two positions have the same `bucket_id`, they ARE fungible. Period.
 │  fungibility_key_expression (The SOLE determinant of fungibility)       │
 │  ────────────────────────────────────────────────────────────────       │
 │  Input: attributes map                                                  │
-│  Output: string (bucket key)                                            │
-│  Example: attributes.region + "|" + attributes.vintage                  │
+│  Output: string (bucket key - SHA256 hash)                              │
+│  Example: bucket_key(['region', 'vintage'])                             │
 │                                                                         │
 │  Rule: Same bucket_id = fungible. Different bucket_id = NOT fungible.   │
+│  SECURITY: Use bucket_key(), never string concatenation (see below)     │
 │                                                                         │
 │  Write Path: Calculate key → INSERT       Read Path: GROUP BY bucket_id │
 │              with bucket_id column                   → SUM(amount)      │
@@ -351,25 +352,35 @@ Each instrument defines a CEL expression that generates a deterministic bucket k
 
 ```javascript
 // Input: 'attributes' map from incoming position
-// Output: String - the bucket key for database grouping
+// Output: String - the bucket key (SHA256 hash for collision resistance)
 
 // Example 1: Empty key = all positions fungible (default)
 ""
 
-// Example 2: Group by region and vintage
-attributes.region + "|" + attributes.vintage
+// Example 2: Group by region and vintage (SECURE - uses hash)
+bucket_key(['region', 'vintage'])
 
 // Example 3: Group by contract and expiry month
-attributes.contract_id + "|" + string(int(attributes.expiry) / 2592000)
+bucket_key(['contract_id', 'expiry_month'])
+// Note: Pre-compute expiry_month in validation, store as attribute
 
 // Example 4: Complex matching (Vintage 2023 and 2024 are fungible)
-// Output same key for both vintages:
-attributes.region + "|" + (int(attributes.vintage) >= 2023 ? "recent" : attributes.vintage)
+// Use validation_expression to normalize vintage to "recent" before bucketing:
+// validation: if int(attributes.vintage) >= 2023 then attributes.vintage = "recent"
+bucket_key(['region', 'vintage'])
 ```
 
-> **Key Design**: If you need "Vintage 2023 matches 2024", don't add a pairwise check.
-> Write a CEL expression that outputs `"us-east|recent"` for both 2023 and 2024.
-> Same key = fungible. Different key = not fungible.
+> **CRITICAL SECURITY**: Always use `bucket_key()` function, NEVER string concatenation.
+>
+> **Delimiter Injection Attack**: If you use `attributes.region + "|" + attributes.vintage`:
+> - Position A: `region="US|East"`, `vintage="2024"` → Key: `US|East|2024`
+> - Position B: `region="US"`, `vintage="East|2024"` → Key: `US|East|2024`
+>
+> These two chemically different positions become fungible and the ledger merges them.
+> The `bucket_key()` function uses length-prefixed hashing to prevent this attack.
+>
+> **Key Design**: If you need "Vintage 2023 matches 2024", normalize in validation
+> (set `vintage="recent"` for both), then use `bucket_key(['region', 'vintage'])`.
 
 ### How Bucket & Verify Affects the Ledger
 
@@ -379,17 +390,17 @@ flowchart TB
         NEW["Amount: 100 KWH<br/>attrs: {region: 'us-east', vintage: '2025'}"]
     end
 
-    subgraph CELKey["Step 1: Generate Bucket Key (hashCode)"]
-        KEY["fungibility_key_expression.Eval()<br/>→ 'us-east|2025'"]
+    subgraph CELKey["Step 1: Generate Bucket Key (SHA256 hash)"]
+        KEY["bucket_key(['region', 'vintage'])<br/>→ 'a1b2c3d4e5f6...' (32 hex chars)"]
     end
 
     subgraph Database["Step 2: Index Lookup (O(log N))"]
-        DB["SELECT * FROM positions<br/>WHERE bucket_id = 'us-east|2025'"]
+        DB["SELECT * FROM positions<br/>WHERE bucket_id = 'a1b2c3d4e5f6...'"]
     end
 
     subgraph Result["Step 3: Aggregate by Bucket"]
-        R1["SUM(amount) = 150 KWH<br/>bucket_id: 'us-east|2025'"]
-        R2["SUM(amount) = 75 KWH<br/>bucket_id: 'us-west|2024'"]
+        R1["SUM(amount) = 150 KWH<br/>bucket_id: 'a1b2c3d4...'"]
+        R2["SUM(amount) = 75 KWH<br/>bucket_id: 'f7e8d9c0...'"]
     end
 
     NEW --> CELKey
@@ -977,8 +988,9 @@ flowchart TB
        string validation_expression = 7;
 
        // The "Bucketer": Generates deterministic key for database grouping.
-       // Compiled and cached. Input: attributes map. Output: string.
-       // Example: "attributes.region + '|' + attributes.vintage"
+       // Compiled and cached. Input: attributes map. Output: string (SHA256 hash).
+       // Example: "bucket_key(['region', 'vintage'])"
+       // SECURITY: Always use bucket_key(), never string concatenation (delimiter injection)
        // Default: "" (all positions in same bucket - fungible by instrument alone)
        // CRITICAL: This key is stored as `bucket_id` column and indexed for O(log N) lookups.
        // RULE: Same bucket_id = fungible. Different bucket_id = NOT fungible.
@@ -1476,6 +1488,9 @@ flowchart TB
    }
 
    func NewCELCompiler() (*CELCompiler, error) {
+       // Custom functions for safe string parsing (avoid "Date Format Hell")
+       safeParseFuncs := cel.Lib(&SafeParseLib{})
+
        // Environment for ingestion validation: attributes → bool
        valEnv, err := cel.NewEnv(
            cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
@@ -1483,15 +1498,21 @@ flowchart TB
            cel.Variable("valid_from", cel.TimestampType),
            cel.Variable("valid_to", cel.TimestampType),
            cel.CostLimit(10000),
+           safeParseFuncs,
        )
        if err != nil {
            return nil, err
        }
 
+       // Custom function for hash-based bucket keys (avoid delimiter injection)
+       bucketKeyFunc := cel.Lib(&BucketKeyLib{})
+
        // Environment for bucket key generation: attributes → string
        bucketEnv, err := cel.NewEnv(
            cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
            cel.CostLimit(10000),
+           safeParseFuncs,
+           bucketKeyFunc,
        )
        if err != nil {
            return nil, err
@@ -1502,6 +1523,100 @@ flowchart TB
            bucketKeyEnv:  bucketEnv,
        }, nil
    }
+
+   // SafeParseLib provides safe string parsing functions to avoid "Date Format Hell".
+   // Tenants MUST use these instead of raw CEL type coercion for consistent behavior.
+   //
+   // Functions:
+   //   parse_iso_date(string) -> timestamp  // Strict ISO 8601: "2025-01-15T00:00:00Z"
+   //   parse_int(string) -> int             // Explicit error on non-numeric
+   //   parse_decimal(string) -> double      // For amounts, explicit error on invalid
+   //   parse_bool(string) -> bool           // Only "true"/"false", not "1"/"0"
+   //
+   // Example: parse_iso_date(attributes.expiry) > now
+   // Instead of: timestamp(attributes.expiry) > now  // UNSAFE: format unknown
+   type SafeParseLib struct{}
+
+   func (SafeParseLib) CompileOptions() []cel.EnvOption {
+       return []cel.EnvOption{
+           cel.Function("parse_iso_date",
+               cel.Overload("parse_iso_date_string",
+                   []*cel.Type{cel.StringType}, cel.TimestampType,
+                   cel.UnaryBinding(func(val ref.Val) ref.Val {
+                       s := val.Value().(string)
+                       t, err := time.Parse(time.RFC3339, s)
+                       if err != nil {
+                           return types.NewErr("parse_iso_date: invalid ISO 8601 format: %s", s)
+                       }
+                       return types.Timestamp{Time: t}
+                   }),
+               ),
+           ),
+           cel.Function("parse_int",
+               cel.Overload("parse_int_string",
+                   []*cel.Type{cel.StringType}, cel.IntType,
+                   cel.UnaryBinding(func(val ref.Val) ref.Val {
+                       s := val.Value().(string)
+                       i, err := strconv.ParseInt(s, 10, 64)
+                       if err != nil {
+                           return types.NewErr("parse_int: invalid integer: %s", s)
+                       }
+                       return types.Int(i)
+                   }),
+               ),
+           ),
+           // parse_decimal and parse_bool follow same pattern...
+       }
+   }
+
+   func (SafeParseLib) ProgramOptions() []cel.ProgramOption { return nil }
+
+   // BucketKeyLib provides the bucket_key() function for SAFE bucket key generation.
+   // This MUST be used instead of string concatenation to avoid delimiter injection.
+   //
+   // Example: bucket_key(['region', 'vintage'])
+   // Output: SHA256 hash of sorted, length-prefixed key-value pairs
+   //
+   // SECURITY: Prevents delimiter injection attacks where:
+   //   Region="US|East", Vintage="2024" would otherwise collide with
+   //   Region="US", Vintage="East|2024"
+   type BucketKeyLib struct{}
+
+   func (BucketKeyLib) CompileOptions() []cel.EnvOption {
+       return []cel.EnvOption{
+           cel.Function("bucket_key",
+               cel.Overload("bucket_key_list",
+                   []*cel.Type{cel.ListType(cel.StringType)}, cel.StringType,
+                   cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+                       // Extract attribute keys from CEL list
+                       keys := args[0].(traits.Lister)
+                       attrs := args[1].(traits.Mapper)  // attributes variable
+
+                       // Sort keys for deterministic output
+                       sortedKeys := extractAndSort(keys)
+
+                       // Build length-prefixed concatenation, then hash
+                       var buf bytes.Buffer
+                       for _, k := range sortedKeys {
+                           v := attrs.Get(types.String(k))
+                           if types.IsError(v) {
+                               return types.NewErr("bucket_key: missing attribute '%s'", k)
+                           }
+                           // Length prefix prevents delimiter injection
+                           buf.WriteString(fmt.Sprintf("%d:%s=%d:%s;",
+                               len(k), k, len(v.Value().(string)), v.Value().(string)))
+                       }
+
+                       // SHA256 for fixed-length, collision-resistant key
+                       hash := sha256.Sum256(buf.Bytes())
+                       return types.String(hex.EncodeToString(hash[:16])) // 32 hex chars
+                   }),
+               ),
+           ),
+       }
+   }
+
+   func (BucketKeyLib) ProgramOptions() []cel.ProgramOption { return nil }
 
    // CompileValidation compiles ingestion validation expression.
    func (c *CELCompiler) CompileValidation(expr string) (cel.Program, error) {
@@ -2350,15 +2465,40 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
            return status.Errorf(codes.InvalidArgument, "attributes failed validation")
        }
 
-       // 3. Type bridge
+       // 3. Generate bucket key
+       bucketID, err := a.cel.GenerateBucketKey(cached.BucketKeyProgram, req.Amount.Attributes)
+       if err != nil {
+           return status.Errorf(codes.InvalidArgument, "bucket key generation failed: %v", err)
+       }
+
+       // 4. CARDINALITY GUARD: Prevent "Infinite Buckets" DOS attack
+       // If a tenant buckets by serial_number, every position gets unique bucket.
+       // This defeats aggregation, bloats indexes, and creates O(N) reads.
+       bucketCount, err := a.repo.CountDistinctBuckets(ctx, tenantID, req.AccountID, req.Amount.InstrumentCode)
+       if err != nil {
+           return status.Errorf(codes.Internal, "bucket count failed: %v", err)
+       }
+       if bucketCount >= MaxBucketsPerAccountInstrument {
+           return status.Errorf(codes.ResourceExhausted,
+               "bucket limit exceeded: account has %d buckets for instrument %s (max: %d)",
+               bucketCount, req.Amount.InstrumentCode, MaxBucketsPerAccountInstrument)
+       }
+
+       // 5. Type bridge
        qty, err := quantity.ParseQuantity(amount, cached.Definition.ToInstrument())
        if err != nil {
            return status.Errorf(codes.Internal, "type bridge failed: %v", err)
        }
 
-       // 4. Domain entry
-       return a.service.RecordMeasurement(ctx, qty, req.Amount.Attributes)
+       // 6. Domain entry
+       return a.service.RecordMeasurement(ctx, qty, req.Amount.Attributes, bucketID)
    }
+
+   // Cardinality limits to prevent "Infinite Buckets" DOS
+   const (
+       MaxBucketsPerAccountInstrument = 10000  // Hard limit - reject above this
+       BucketCardinalityAlertThreshold = 1000  // Soft limit - emit metric/alert
+   )
    ```
 
 4. **Database migration**: Add new columns to positions table:
@@ -2369,13 +2509,13 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
    > The `dimension` column enables reading positions without Reference Data service dependency.
    > See Stream E.2 for rationale on read availability decoupling.
 
-5. **Read-Side Coalescing** (Compaction Safety Valve):
+5. **Read-Side Aggregation** (Simple, No Side Effects):
 
-   Since we use **Append-Only** writes, buckets will accumulate fragments over time. To prevent
-   read performance degradation, implement read-side coalescing:
+   Since we use **Append-Only** writes, buckets accumulate fragments over time. Reads simply
+   sum in memory - Go is fast enough to sum 1,000 decimals in microseconds.
 
    ```go
-   // When reading a bucket, check fragment count
+   // Read path: Just sum in memory. No side effects, no compaction triggers.
    func (s *Service) GetAggregatedPosition(
        ctx context.Context, tenantID uuid.UUID, accountID, instrumentCode, bucketID string,
    ) (AggregatedPosition, error) {
@@ -2384,26 +2524,56 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
            return AggregatedPosition{}, err
        }
 
-       // If bucket has too many fragments, trigger async compaction
-       if len(rows) > 100 {
-           go s.compactionQueue.Enqueue(CompactionJob{
-               TenantID:       tenantID,
-               AccountID:      accountID,
-               InstrumentCode: instrumentCode,
-               BucketID:       bucketID,
-           })
-       }
-
-       // Return aggregated result immediately (don't wait for compaction)
+       // Simple in-memory sum. Even 1,000 rows completes in < 1ms.
+       // Do NOT trigger side effects (compaction) from reads - this couples
+       // read availability to write load and creates DOS vectors.
        return s.sumPositions(rows), nil
    }
    ```
 
-   > **Threshold**: 100 rows per bucket triggers compaction. This balances read performance
-   > (100 rows is ~1ms to sum in-memory) against compaction overhead.
+   > **Why no read-triggered compaction?** Triggering async work from reads is dangerous:
    >
-   > **Phase 1 Note**: Compaction job can be a simple goroutine with debouncing. Production
-   > deployments should use a proper job queue (e.g., Kafka topic, SQS).
+   > - Couples read availability to write load (fragmented accounts slow down reads)
+   > - A DOS attack that fragments buckets spawns runaway goroutines/kafka messages
+   > - Creates unpredictable latency spikes on read path
+   >
+   > **Solution**: Compaction runs as a **standalone background worker** that scans for
+   > fragmented buckets independently of read traffic. See `CompactionWorker` below.
+
+6. **Background Compaction Worker** (Decoupled from Read Path):
+
+   ```go
+   // CompactionWorker runs on a schedule, NOT triggered by reads.
+   // Scans for buckets with high fragment counts and compacts them.
+   type CompactionWorker struct {
+       repo      PositionRepository
+       interval  time.Duration  // e.g., every 5 minutes
+       threshold int            // e.g., 100 rows per bucket
+   }
+
+   func (w *CompactionWorker) Run(ctx context.Context) {
+       ticker := time.NewTicker(w.interval)
+       for {
+           select {
+           case <-ctx.Done():
+               return
+           case <-ticker.C:
+               w.compactFragmentedBuckets(ctx)
+           }
+       }
+   }
+
+   func (w *CompactionWorker) compactFragmentedBuckets(ctx context.Context) {
+       // Find buckets with > threshold rows
+       fragmented, _ := w.repo.FindFragmentedBuckets(ctx, w.threshold)
+       for _, bucket := range fragmented {
+           w.compactBucket(ctx, bucket)
+       }
+   }
+   ```
+
+   > **Phase 1 Note**: Background worker can be a simple goroutine. Production deployments
+   > should use a proper job scheduler with distributed locking.
 
 6. **Re-bucketing Tool** (Admin-Only Data Recovery):
 
@@ -2421,6 +2591,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
    type RebucketingTool struct {
        measurementStore MeasurementStore  // Raw measurements with original attributes
        positionStore    PositionStore
+       settlementStore  SettlementStore   // To check settlement locks
        celCompiler      *CELCompiler
    }
 
@@ -2429,12 +2600,33 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
    // 1. Raw measurements with original attributes must be preserved (not compacted away)
    // 2. Instrument must be DEPRECATED (prevents new writes during rebucketing)
    // 3. New instrument version (N+1) must exist with corrected expression
+   // 4. NO positions can be included in a FINALIZED settlement run (settlement lock)
    func (t *RebucketingTool) Rebucket(
        ctx context.Context,
        tenantID uuid.UUID,
        instrumentCode string,
        fromVersion, toVersion uint32,
    ) (*RebucketingReport, error) {
+       // 0. SETTLEMENT LOCK CHECK: Cannot rebucket settled history
+       // Positions included in finalized settlements are immutable for audit/regulatory reasons
+       settledPositions, err := t.settlementStore.FindSettledPositions(
+           ctx, tenantID, instrumentCode, fromVersion,
+       )
+       if err != nil {
+           return nil, fmt.Errorf("settlement check failed: %w", err)
+       }
+       if len(settledPositions) > 0 {
+           return nil, &SettlementLockError{
+               InstrumentCode: instrumentCode,
+               Version:        fromVersion,
+               SettledCount:   len(settledPositions),
+               Message: fmt.Sprintf(
+                   "cannot rebucket: %d positions included in finalized settlements",
+                   len(settledPositions),
+               ),
+           }
+       }
+
        // 1. Load new expression from Version N+1
        newDef, err := t.registry.GetDefinition(ctx, tenantID, instrumentCode, toVersion)
        if err != nil {
@@ -2475,6 +2667,19 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
            Failed:  failed,
        }, nil
    }
+
+   // SettlementLockError returned when attempting to rebucket settled positions.
+   // Settled positions are immutable - you cannot rewrite financial history.
+   type SettlementLockError struct {
+       InstrumentCode string
+       Version        uint32
+       SettledCount   int
+       Message        string
+   }
+
+   func (e *SettlementLockError) Error() string {
+       return e.Message
+   }
    ```
 
    > **Critical Requirement**: Raw measurements with original attributes **MUST** be preserved.
@@ -2490,12 +2695,16 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
 
 - [ ] `RecordMeasurement` accepts multi-asset instruments
 - [ ] CEL validation rejects invalid attributes before domain entry
-- [ ] Bucket ID generated from `fungibility_key_expression` and stored with position
+- [ ] `SafeParseLib` macros available in CEL environment (`parse_iso_date`, `parse_int`, etc.)
+- [ ] `bucket_key()` function generates hash-based keys (prevents delimiter injection)
+- [ ] Bucket ID generated from `fungibility_key_expression` using `bucket_key()`, stored with position
+- [ ] Cardinality guard rejects requests when bucket count exceeds limit (10,000 per account/instrument)
 - [ ] `GetAggregatedPosition` uses `GROUP BY bucket_id` for O(log N) lookup
-- [ ] Read-side coalescing triggers when bucket exceeds 100 rows
+- [ ] Background `CompactionWorker` consolidates fragmented buckets (NOT on read path)
 - [ ] Existing fiat-only tests still pass (backwards compatible)
 - [ ] No gRPC calls on hot path (cache hit rate > 99%)
 - [ ] Re-bucketing tool can rebuild bucket assignments from raw measurements
+- [ ] Re-bucketing tool fails with `SettlementLockError` if positions are in finalized settlements
 - [ ] Raw measurements preserve original attributes (not discarded during compaction)
 
 **Phase 1 Append-Only Enforcement** (Critical):
