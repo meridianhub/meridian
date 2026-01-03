@@ -871,6 +871,11 @@ flowchart TB
 
    > **Rounding Mode**: Banker's rounding (round half to even) is required for financial
    > compliance. It eliminates systematic bias that occurs with round-half-up.
+   >
+   > **Performance Note**: `shopspring/decimal.RoundBank()` is ~100-200ns per call. At 100k TPS
+   > with valuation loops, verify this doesn't become a bottleneck. The operation is CPU-bound
+   > (no allocations), so it scales with core count. If profiling shows hotspot, consider
+   > batching conversions or caching common rate+precision combinations.
 
    **Example**: Converting 1 Gold Bar (precision=4) to USD (precision=2) at rate 2,847.5350:
    - Raw: `1 * 2847.5350 = 2847.5350`
@@ -933,6 +938,15 @@ flowchart TB
    > **Why explicit time fields**: Per ADR-0017 (Temporal Quality), time is a first-class citizen.
    > Storing `valid_from`/`valid_to` as top-level fields avoids parsing them from attributes
    > on every write to the database's `period_start`/`period_end` columns.
+   >
+   > **GC Pressure Warning**: At 100k TPS, creating a `map[string]string` per request generates
+   > significant heap pressure. A batch of 10,000 entries = 10,000 map allocations. Mitigations:
+   >
+   > - **sync.Pool**: Pool map instances for reuse (reset, don't reallocate)
+   > - **Vertical scaling**: Size heap for sustained allocation rate
+   > - **Load testing**: Measure GC pause times, not just throughput (see Stream J)
+   >
+   > The bottleneck won't be CEL execution (~100ns); it will be GC pauses from map churn.
 
    **CEL Type Coercion Table**: Force developers to rely on CEL's casting, not custom Go parsing:
 
@@ -1047,6 +1061,10 @@ flowchart TB
        -- Optional user-friendly error message expression (CEL)
        error_message_expression TEXT,
 
+       -- Client-facing schema for attribute discovery (JSON Schema draft-07)
+       -- Enables frontends to generate forms and validate input client-side
+       attribute_schema JSONB,
+
        display_name VARCHAR(128),
        description TEXT,
        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1122,16 +1140,26 @@ flowchart TB
    >                                    No revert from ACTIVE → DRAFT
    > ```
 
-2. **Bucket ID in positions table** (added by Stream I.1 migration)
+2. **Position table columns** (added by Stream I.1 migration)
 
    ```sql
-   -- Position Keeping adds bucket_id column for O(log N) aggregation
+   -- Position Keeping adds columns for multi-asset support
    ALTER TABLE positions ADD COLUMN bucket_id VARCHAR(256);
+   ALTER TABLE positions ADD COLUMN dimension VARCHAR(32) NOT NULL DEFAULT 'Monetary';
+   ALTER TABLE positions ADD COLUMN attributes JSONB;
+
    CREATE INDEX idx_positions_bucket ON positions(tenant_id, instrument_code, bucket_id);
    ```
 
    > **Write path**: Calculate bucket_id from `fungibility_key_expression`, store with position.
    > **Read path**: `SELECT SUM(amount) FROM positions WHERE bucket_id = ?` uses index.
+   >
+   > **Read Availability**: The `dimension` column is **intentionally redundant**. It allows
+   > Position Keeping to instantiate `Quantity[D]` structs and perform basic aggregations
+   > **even if the Reference Data service is offline**. Without this, a Reference Data outage
+   > would make the Ledger unreadable (Tier 0 availability coupled to Tier 1 service).
+   >
+   > The tradeoff: ~32 bytes per row vs. service independence on the read path.
 
 3. **System tenant seed data** (App Bootstrap - NOT SQL Migration):
 
@@ -1224,10 +1252,10 @@ flowchart TB
 
    ```go
    // SystemTenantID is the well-known UUID for platform-wide instruments.
-   // WARNING: This is the zero UUID (all zeros). Ensure your code distinguishes
-   // "System Tenant" (valid, all-zeros) from "Unset/Missing" (nil pointer or error).
-   // The uuid library's uuid.Nil IS all zeros - use explicit comparisons, not nil checks.
-   var SystemTenantID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
+   // NOTE: We use a NON-ZERO UUID to distinguish "System Tenant" from "Uninitialized".
+   // Many ORMs and Go's uuid.Nil treat all-zeros as "nil/unset", causing subtle bugs.
+   // This UUID is valid v4 format (positions 13=4, 17=8) and clearly intentional.
+   var SystemTenantID = uuid.MustParse("00000000-0000-4000-8000-000000000001")
 
    type InstrumentRegistry interface {
        // GetDefinition looks up instrument by tenant, falling back to SystemTenant if not found.
@@ -1627,7 +1655,7 @@ flowchart TB
     > `"!has(attributes.region) ? 'Missing required field: region' : ''"` to provide
     > actionable feedback like "Missing required field: region".
 
-1. **Archetype Loader** (`cmd/archetype-loader`)
+11. **Archetype Loader** (`cmd/archetype-loader`)
 
     Reads YAML archetype definitions from `configs/archetypes/` and seeds them into the System Tenant:
 
@@ -1670,7 +1698,7 @@ flowchart TB
 
     > **Usage**: Run during deployment or as init container to seed archetypes.
 
-2. **Archetype Tester** (`cmd/archetype-tester`)
+12. **Archetype Tester** (`cmd/archetype-tester`)
 
     CI tool that validates archetype CEL logic against test scenarios:
 
@@ -1752,6 +1780,48 @@ flowchart TB
 
        // CEL Playground - Test expressions without persisting
        rpc EvaluateInstrument(EvaluateInstrumentRequest) returns (EvaluateInstrumentResponse);
+
+       // Client Discovery - Get attribute schema for form generation
+       rpc GetAttributeSchema(GetAttributeSchemaRequest) returns (GetAttributeSchemaResponse);
+   }
+
+   // InstrumentDefinition includes attribute_schema for client discovery
+   message InstrumentDefinition {
+       string code = 1;
+       uint32 version = 2;
+       string dimension = 3;
+       uint32 precision = 4;
+       string status = 5;  // DRAFT, ACTIVE, DEPRECATED
+       string validation_expression = 6;
+       string fungibility_key_expression = 7;
+       string error_message_expression = 8;
+
+       // CLIENT DISCOVERY: JSON Schema (draft-07) describing expected attributes.
+       // Frontends use this to generate input forms and validate client-side.
+       // Example: {"type":"object","properties":{"region":{"type":"string","enum":["US","EU"]}}}
+       string attribute_schema_json = 9;
+
+       string display_name = 10;
+       string description = 11;
+   }
+
+   message GetAttributeSchemaRequest {
+       string instrument_code = 1;
+       uint32 version = 2;  // 0 = latest
+   }
+
+   message GetAttributeSchemaResponse {
+       string instrument_code = 1;
+       uint32 version = 2;
+
+       // JSON Schema for client-side validation and form generation
+       string attribute_schema_json = 3;
+
+       // Extracted required fields (convenience for simple clients)
+       repeated string required_attributes = 4;
+
+       // Example valid attributes (for documentation/testing)
+       map<string, string> example_attributes = 5;
    }
 
    message EvaluateInstrumentRequest {
@@ -1777,6 +1847,30 @@ flowchart TB
        string bucket_key = 5;
    }
    ```
+
+   > **Client Discovery Pattern**: The "Sealed Envelope" pattern solves the backend problem
+   > (Go passes attributes blindly), but API consumers need to know what keys to include.
+   >
+   > **Solution**: Every `InstrumentDefinition` includes `attribute_schema_json` (JSON Schema).
+   > Clients call `GetAttributeSchema` or inspect `RetrieveInstrument` response to:
+   >
+   > 1. Generate input forms dynamically (JSON Schema → UI components)
+   > 2. Validate attributes client-side before submission
+   > 3. Display helpful error messages (e.g., "region must be US or EU")
+   >
+   > **Example flow**:
+   >
+   > ```mermaid
+   > sequenceDiagram
+   >     participant C as Client
+   >     participant R as Reference Data
+   >     C->>R: GetAttributeSchema("RICE")
+   >     R-->>C: {schema: {properties: {grade, origin}}}
+   >     Note over C: Generate form from schema
+   >     Note over C: Validate input client-side
+   >     C->>R: RecordMeasurement(attrs)
+   >     R-->>C: ✓ Valid
+   > ```
 
 2. **Handler implementation** with:
    - Tenant extraction from context
@@ -1911,8 +2005,11 @@ flowchart TB
 - [ ] Lifecycle endpoints functional (`Activate`, `Deprecate`)
 - [ ] `EvaluateInstrument` compiles and evaluates CEL expressions without persisting
 - [ ] `EvaluateInstrument` returns compile errors, validation report, and bucket key
+- [ ] `GetAttributeSchema` returns JSON Schema for client-side validation
+- [ ] `RetrieveInstrument` includes `attribute_schema_json` in response
 - [ ] Proper gRPC error codes returned
 - [ ] Tenant context required and enforced
+- [ ] Rate limiting implemented as `RateLimitInterceptor` (middleware, not handler)
 - [ ] `RegisterInstrument` rate-limited to 10 requests/minute per tenant
 - [ ] Rate limit exceeded returns `RESOURCE_EXHAUSTED` (gRPC code 8) with clear message
 - [ ] Rate limiting does NOT apply to read-only endpoints
@@ -2264,7 +2361,13 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
    }
    ```
 
-4. **Database migration**: Add `attributes JSONB` and `bucket_id VARCHAR(256)` columns to positions table
+4. **Database migration**: Add new columns to positions table:
+   - `attributes JSONB`
+   - `bucket_id VARCHAR(256)`
+   - `dimension VARCHAR(32)`
+
+   > The `dimension` column enables reading positions without Reference Data service dependency.
+   > See Stream E.2 for rationale on read availability decoupling.
 
 5. **Read-Side Coalescing** (Compaction Safety Valve):
 
@@ -2302,6 +2405,87 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
    > **Phase 1 Note**: Compaction job can be a simple goroutine with debouncing. Production
    > deployments should use a proper job queue (e.g., Kafka topic, SQS).
 
+6. **Re-bucketing Tool** (Admin-Only Data Recovery):
+
+   > **The Problem**: If a tenant misconfigures `fungibility_key_expression`, positions may
+   > be incorrectly bucketed (e.g., high-grade and low-grade rice merged into same bucket).
+   > Since bucket_id is computed at write time, you cannot simply "fix" the expression -
+   > historical data is already merged.
+   >
+   > **Solution**: An admin-only tool that rebuilds bucket assignments from raw measurement data.
+
+   ```go
+   // RebucketingTool rebuilds position bucket assignments for an instrument.
+   // ADMIN-ONLY: Requires explicit authorization and audit logging.
+   // DESTRUCTIVE: Rebuilds positions table for the affected instrument.
+   type RebucketingTool struct {
+       measurementStore MeasurementStore  // Raw measurements with original attributes
+       positionStore    PositionStore
+       celCompiler      *CELCompiler
+   }
+
+   // Rebucket recalculates bucket_id for all positions of an instrument.
+   // Prerequisites:
+   // 1. Raw measurements with original attributes must be preserved (not compacted away)
+   // 2. Instrument must be DEPRECATED (prevents new writes during rebucketing)
+   // 3. New instrument version (N+1) must exist with corrected expression
+   func (t *RebucketingTool) Rebucket(
+       ctx context.Context,
+       tenantID uuid.UUID,
+       instrumentCode string,
+       fromVersion, toVersion uint32,
+   ) (*RebucketingReport, error) {
+       // 1. Load new expression from Version N+1
+       newDef, err := t.registry.GetDefinition(ctx, tenantID, instrumentCode, toVersion)
+       if err != nil {
+           return nil, fmt.Errorf("target version not found: %w", err)
+       }
+       bucketProg, err := t.celCompiler.CompileFungibility(newDef.FungibilityKeyExpression)
+       if err != nil {
+           return nil, fmt.Errorf("failed to compile new expression: %w", err)
+       }
+
+       // 2. Stream all raw measurements for old version
+       measurements, err := t.measurementStore.StreamByInstrumentVersion(
+           ctx, tenantID, instrumentCode, fromVersion,
+       )
+       if err != nil {
+           return nil, err
+       }
+
+       // 3. Rebuild positions with new bucket_id
+       var rebuilt, failed int
+       for m := range measurements {
+           newBucketID, err := t.celCompiler.GenerateBucketKey(bucketProg, m.Attributes)
+           if err != nil {
+               failed++
+               continue  // Log and continue, don't abort entire operation
+           }
+
+           err = t.positionStore.UpdateBucketID(ctx, m.PositionID, newBucketID, toVersion)
+           if err != nil {
+               failed++
+               continue
+           }
+           rebuilt++
+       }
+
+       return &RebucketingReport{
+           Rebuilt: rebuilt,
+           Failed:  failed,
+       }, nil
+   }
+   ```
+
+   > **Critical Requirement**: Raw measurements with original attributes **MUST** be preserved.
+   > Compaction that discards attributes makes rebucketing impossible.
+   >
+   > **Workflow**:
+   > 1. Deprecate `Rice(v1)` to stop new transactions
+   > 2. Create `Rice(v2)` with corrected `fungibility_key_expression`
+   > 3. Run `Rebucket(tenant, "RICE", v1, v2)` to migrate positions
+   > 4. Activate `Rice(v2)` when rebucketing completes
+
 #### Acceptance Criteria
 
 - [ ] `RecordMeasurement` accepts multi-asset instruments
@@ -2311,6 +2495,8 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
 - [ ] Read-side coalescing triggers when bucket exceeds 100 rows
 - [ ] Existing fiat-only tests still pass (backwards compatible)
 - [ ] No gRPC calls on hot path (cache hit rate > 99%)
+- [ ] Re-bucketing tool can rebuild bucket assignments from raw measurements
+- [ ] Raw measurements preserve original attributes (not discarded during compaction)
 
 **Phase 1 Append-Only Enforcement** (Critical):
 
@@ -2541,6 +2727,9 @@ This service already tracks non-fiat measurements - **native fit for `Quantity[C
       remains under 10ms even with 1 million distinct buckets (attribute combinations)
 - [ ] **Bucket Aggregation Test**: Verify `GROUP BY bucket_id` aggregation with 10,000 positions
       across 100 buckets completes under 50ms
+- [ ] **GC Pressure Load Test**: Sustained 100k TPS with `map[string]string` allocations per request.
+      Measure P99 latency AND GC pause times (not just throughput). Target: <10ms P99, <50ms GC pauses.
+      If GC pauses exceed target, document sync.Pool or heap sizing recommendations.
 
 ---
 
@@ -2633,7 +2822,7 @@ If API Layer gate shows >2x expected integration complexity:
 | Question | Decision |
 |----------|----------|
 | Service naming | `reference-data` (BIAN: FinancialInstrumentReferenceDataManagement) |
-| System Tenant ID | `00000000-0000-0000-0000-000000000000` |
+| System Tenant ID | `00000000-0000-4000-8000-000000000001` |
 | Lookup inheritance | Tenant → System Tenant fallback |
 | Valuation scope | Rate struct only; ValuationProvider deferred to future PRD |
 | Attribute validation | CEL `validation_expression` - 100x faster than JSON Schema |
