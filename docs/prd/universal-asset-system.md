@@ -51,6 +51,7 @@ compile-time dimensional safety.
   - [Stream I: Service Integration](#stream-i-service-integration-per-service-sub-streams)
   - [Stream J: Integration Tests](#stream-j-integration-tests)
 - [Parallel Execution Summary](#parallel-execution-summary)
+- [Integration Coordination Strategy](#integration-coordination-strategy)
 - [Decisions Made](#decisions-made)
 - [Open Questions](#open-questions)
 - [Success Metrics](#success-metrics)
@@ -1027,14 +1028,22 @@ flowchart TB
 
 4. **CEL Security Constraints**:
 
-   | Constraint | Limit | Rationale |
-   |------------|-------|-----------|
-   | Expression length | 4KB max | Prevent storage abuse |
-   | Cost limit | 10,000 | Prevent expensive evaluations (built into CEL env) |
-   | Registration rate | 10/min/tenant | Prevent DoS via compilation spam |
+   | Constraint | Limit | Enforcement Layer | Rationale |
+   |------------|-------|-------------------|-----------|
+   | Expression length | 4KB max | Stream F (Registry) | Prevent storage abuse |
+   | Cost limit | 10,000 | Stream F (CEL env) | Prevent expensive evaluations |
+   | Registration rate | 10/min/tenant | **Stream G (gRPC handler)** | Prevent DoS via compilation spam |
+   | Expression depth | 10 levels max | Stream F (Registry) | Prevent stack overflow in evaluation |
+
+   > **Rate Limiting Note**: Registration rate limiting is enforced at the **gRPC handler layer**
+   > (Stream G), not in the registry service (Stream F). This separation ensures:
+   > - Registry remains a pure domain service without HTTP/transport concerns
+   > - Rate limiting middleware can be shared across all tenant-facing endpoints
+   > - Metrics and rate-limit headers are handled at the transport layer
 
    ```go
    const MaxExpressionLength = 4096  // 4KB
+   const MaxExpressionDepth = 10     // Nesting levels
 
    func (r *PostgresRegistry) CreateDefinition(ctx context.Context, def InstrumentDefinition) error {
        // Length check before compilation
@@ -1044,13 +1053,20 @@ flowchart TB
        if len(def.FungibilityExpression) > MaxExpressionLength {
            return ErrExpressionTooLong
        }
+
+       // Depth check (prevents deeply nested expressions)
+       if depth := measureExpressionDepth(def.ValidationExpression); depth > MaxExpressionDepth {
+           return ErrExpressionTooDeep
+       }
+
        // ... continue with compilation and persistence
    }
    ```
 
    > **Security Review**: Tenant-provided CEL expressions are validated at compile-time
    > by cel-go. Runtime execution uses `CostLimit(10000)` to abort expensive evaluations.
-   > No manual security review required - CEL's non-Turing-complete nature guarantees termination.
+   > Expression depth limits prevent stack overflow. CEL's non-Turing-complete nature
+   > guarantees termination.
 
 5. **Attribute Key Validation** (CEL Compatibility):
 
@@ -1162,11 +1178,30 @@ flowchart TB
 8. **PostgreSQL implementation** with sqlc-generated queries
 
 9. **Error types**:
-   - `ErrInstrumentNotFound`
-   - `ErrDuplicateInstrument`
-   - `ErrCELCompileError` - syntax/semantic error in validation expression
-   - `ErrAttributeValidationFailed` - CEL evaluated to `false`
-   - `ErrSystemTenantReadOnly` - attempt to create/modify System Tenant instrument
+
+   ```go
+   var (
+       // Lookup errors
+       ErrInstrumentNotFound  = errors.New("instrument not found")
+       ErrDuplicateInstrument = errors.New("instrument already exists")
+
+       // CEL compilation errors (fail at registration time)
+       ErrInvalidValidationExpression  = errors.New("validation expression failed to compile")
+       ErrInvalidFungibilityExpression = errors.New("fungibility expression failed to compile")
+       ErrExpressionTooLong            = errors.New("expression exceeds 4KB limit")
+       ErrExpressionTooDeep            = errors.New("expression exceeds max nesting depth")
+
+       // CEL runtime errors (fail at validation time)
+       ErrAttributeValidationFailed = errors.New("attributes failed CEL validation")
+       ErrCELRuntimeError           = errors.New("CEL expression runtime error")
+
+       // Access control errors
+       ErrSystemTenantReadOnly = errors.New("system tenant instruments are read-only")
+   )
+   ```
+
+   > **Error wrapping**: Use `fmt.Errorf("%w: %v", ErrInvalidValidationExpression, celErr)`
+   > to preserve both the sentinel error and the underlying CEL parser message.
 
 10. **CEL Error Message Surfacing**:
 
@@ -1321,11 +1356,51 @@ flowchart TB
 
 3. **Adapter layer** for proto ↔ domain conversion
 
+4. **Rate Limiting Middleware** for `RegisterInstrument`:
+
+   ```go
+   // RateLimitInterceptor enforces per-tenant rate limits on instrument registration.
+   // Uses token bucket algorithm: 10 tokens, refill 1 token per 6 seconds.
+   type RateLimitInterceptor struct {
+       limiters sync.Map  // map[tenantID]*rate.Limiter
+   }
+
+   func (r *RateLimitInterceptor) UnaryInterceptor(
+       ctx context.Context,
+       req interface{},
+       info *grpc.UnaryServerInfo,
+       handler grpc.UnaryHandler,
+   ) (interface{}, error) {
+       // Only rate-limit RegisterInstrument, not reads
+       if info.FullMethod != "/platform.v1.ReferenceDataService/RegisterInstrument" {
+           return handler(ctx, req)
+       }
+
+       tenantID := tenant.FromContext(ctx)
+       limiter := r.getLimiter(tenantID)  // 10/min token bucket
+
+       if !limiter.Allow() {
+           // Return gRPC RESOURCE_EXHAUSTED with Retry-After header
+           return nil, status.Errorf(codes.ResourceExhausted,
+               "rate limit exceeded: max 10 instrument registrations per minute")
+       }
+
+       return handler(ctx, req)
+   }
+   ```
+
+   > **Implementation**: Use `golang.org/x/time/rate` for token bucket. Each tenant gets
+   > independent limiter with burst=10, rate=10/minute. Limiters are lazily created and
+   > stored in sync.Map for thread safety.
+
 ### Acceptance Criteria
 
 - [ ] All endpoints functional
 - [ ] Proper gRPC error codes returned
 - [ ] Tenant context required and enforced
+- [ ] `RegisterInstrument` rate-limited to 10 requests/minute per tenant
+- [ ] Rate limit exceeded returns `RESOURCE_EXHAUSTED` (gRPC code 8) with clear message
+- [ ] Rate limiting does NOT apply to `RetrieveInstrument` or `ListInstruments` (read-only)
 
 ---
 
@@ -1352,16 +1427,27 @@ flowchart TB
        cachedAt   time.Time
    }
 
+   // cacheKey is a struct-based key to avoid delimiter collision risks.
+   // Using a struct instead of fmt.Sprintf("%s:%s:%d") prevents edge cases
+   // where tenant IDs or codes might contain the delimiter character.
+   type cacheKey struct {
+       TenantID uuid.UUID
+       Code     string
+       Version  uint32
+   }
+
    type CachedInstrumentRegistry struct {
        delegate InstrumentRegistry
        compiler *CELCompiler
-       cache    *lru.Cache[string, cachedEntry]  // Bounded LRU with TTL
+       cache    *lru.Cache[cacheKey, cachedEntry]  // Bounded LRU with struct key
        ttl      time.Duration
    }
    ```
 
    > **Why cache compiled programs**: CEL parsing/compilation is ~100μs. CEL execution is ~100ns.
    > By caching both `cel.Program` instances alongside the definition, we pay compilation once.
+   >
+   > **Why struct keys**: Avoids delimiter collision risks with string-based keys.
 
 2. **Read-through caching with TTL enforcement**:
 
@@ -1369,7 +1455,7 @@ flowchart TB
    func (c *CachedInstrumentRegistry) GetDefinition(
        ctx context.Context, tenantID uuid.UUID, code string, version uint32,
    ) (CachedInstrument, error) {
-       key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
+       key := cacheKey{TenantID: tenantID, Code: code, Version: version}
 
        // Check cache with TTL validation
        if entry, ok := c.cache.Get(key); ok {
@@ -1419,7 +1505,7 @@ flowchart TB
    // PurgeInstrument clears a specific instrument from cache.
    // Use when a bad definition got cached and needs immediate eviction.
    func (c *CachedInstrumentRegistry) PurgeInstrument(tenantID uuid.UUID, code string, version uint32) {
-       key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
+       key := cacheKey{TenantID: tenantID, Code: code, Version: version}
        c.cache.Remove(key)
    }
    ```
@@ -1800,6 +1886,59 @@ This service already tracks non-fiat measurements - **native fit for `Quantity[C
 - **Phase 5:** 4 streams (I.1, I.2, I.3, I.4 all run in parallel)
 
 **Total developer allocation:** 14 developer-streams across 10 developers
+
+---
+
+## Integration Coordination Strategy
+
+With 10 parallel streams touching 6+ services, late-discovery integration failures are a significant
+risk. This section defines guardrails to catch misalignment early.
+
+### Integration Coordinator Role
+
+Assign one person (rotating weekly) as **Integration Coordinator** with responsibilities:
+
+- Own cross-stream interface contracts (proto definitions, Go interfaces)
+- Run daily integration smoke tests (not just unit tests)
+- Triage integration failures with priority over feature work
+- Approve any changes to shared contracts (proto, `pkg/platform/quantity`)
+
+### Weekly Integration Checkpoints
+
+| Week | Checkpoint | Exit Criteria |
+|------|------------|---------------|
+| 1 | Contract freeze | All proto definitions and Go interfaces finalized |
+| 2 | Foundation integration | Streams A, D, E compile together; shared types work |
+| 3 | Service layer integration | Stream F passes unit tests with real DB |
+| 4 | API integration | Streams F, G, H work end-to-end with mock tenant |
+| 5+ | Per-service integration | Each I.x stream demonstrates working integration |
+
+### Interface Contract Rules
+
+1. **Proto definitions are immutable after Week 1** - use `reserved` fields, not modifications
+2. **Go interfaces in `pkg/platform/quantity` require coordinator approval** to change
+3. **Database schemas require migration compatibility** - no breaking changes to existing columns
+4. **Cache key formats are contracts** - changes require cache flush coordination
+
+### Early Warning Signals
+
+| Signal | Response |
+|--------|----------|
+| Stream blocked on another stream's API | Escalate to coordinator; consider interface stub |
+| Integration test fails for >24 hours | Stop feature work; fix integration first |
+| Contract change requested after Week 1 | Require written justification and impact analysis |
+| >3 streams modifying same file | Architectural review needed |
+
+### Escape Hatch
+
+If Week 4 checkpoint shows >2x expected integration complexity:
+
+1. Pause new feature work
+2. Assess: Can we reduce to 5 streams (vertical slices)?
+3. Consider: Defer Asset Catalog (F.4, F.5) to Phase 2
+4. Replan with reduced scope if necessary
+
+> **Goal**: Catch integration issues in Week 2-3, not Week 8 during Stream J.
 
 ---
 
