@@ -12,11 +12,15 @@
 
 Extend Meridian's ledger from fiat-only to multi-asset support. Enable tenants to define
 custom assets (energy, commodities, vouchers) without code deployment while maintaining
-compile-time dimensional safety.
+dimensional safety.
 
 ### Goals
 
-1. **Compile-time safety**: Prevent physics errors (money + rice) at build time
+1. **Dimensional safety**: Prevent physics errors (money + rice) via Go generics
+   > *Clarification*: In a distributed system with dynamic schemas, you cannot have true "compile-time"
+   > safety for tenant-defined assets (the compiler doesn't know "Rice" exists). What we have is
+   > **dimensional safety**: the platform knows at compile time that `Monetary` math is distinct from
+   > `Commodity` math, preventing accidental treatment of commodity balances as cash during settlement.
 2. **Runtime flexibility**: New assets via database configuration, not code
 3. **Tenant isolation**: Each tenant has their own asset catalog
 4. **Valuation foundation**: Rate type for asset-to-currency conversion (providers in future PRD)
@@ -111,18 +115,51 @@ The cached CEL program executes → returns `false` → measurement rejected **b
 
 ## Data Contract: Proto + CEL + Go
 
-This table visualizes how the three technologies work together:
+### The Sealed Envelope Pattern
+
+This is a **schema-less schema** pattern. Protobuf defines the physical container; CEL defines the logical shape.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│  InstrumentAmount (The Sealed Envelope)                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────────────────────────┐   ┌─────────────────────────────┐  │
+│  │  ENVELOPE (Go handles)          │   │  LETTER (CEL handles)       │  │
+│  │  ─────────────────────          │   │  ──────────────────         │  │
+│  │  • amount: "100.50"             │   │  • attributes: {...}        │  │
+│  │  • instrument_code: "KWH"       │   │                             │  │
+│  │  • version: 1                   │   │  Go NEVER introspects this  │  │
+│  │  • valid_from/valid_to          │   │  map for business logic.    │  │
+│  └─────────────────────────────────┘   └─────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**The Contract:**
+
+| Layer | Responsibility | Touches `attributes`? |
+|-------|----------------|----------------------|
+| **Protobuf** | Physical container, wire format | Serializes blindly |
+| **Go** | Envelope handling (Amount, Code, Version) | **NEVER** introspects for business logic |
+| **CEL** | Letter handling (Attributes validation, bucket key) | **SOLE** accessor for business rules |
+
+> **Critical Rule**: Go code **blindly passes** the `attributes` map to CEL. It never reads attribute
+> keys or values for business logic. This guarantees that adding a new asset type **never requires
+> Go code changes** - only a new CEL expression in the database.
+
+### How the Layers Connect
 
 | Concept | Defined In (Static) | Instance Data (Runtime) | Connected By |
 |---------|---------------------|-------------------------|--------------|
 | **Structure** | **Protobuf** (`InstrumentAmount`) | `map<string,string> attributes` | The Wire Format |
-| **Logic** | **CEL** (Reference Data) | `validation_expression`, `fungibility_expression` | The Validation Engine |
+| **Logic** | **CEL** (Reference Data) | `validation_expression`, `fungibility_key_expression` | The Validation Engine |
 | **Bridge** | **Go** (`quantity.ParseQuantity`) | `env.Program.Eval(vars)` | Variable Injection |
 
-**How they connect at runtime:**
+**Runtime flow:**
 
 ```go
-// 1. PROTO holds the payload (dumb container)
+// 1. PROTO holds the payload (the Sealed Envelope)
 protoMsg := &pb.InstrumentAmount{
     Amount:         "100.50",
     InstrumentCode: "KWH",
@@ -130,16 +167,16 @@ protoMsg := &pb.InstrumentAmount{
     Attributes:     map[string]string{"tou_period": "14", "region": "us-east"},
 }
 
-// 2. CEL holds the rules (smart logic) - loaded from Reference Data
-cachedInstrument := cache.Get(tenantID, "KWH", 1)
-// validation_expression: "has(attributes.tou_period) && int(attributes.tou_period) >= 0"
+// 2. GO handles the Envelope (Amount, Code) - NEVER reads attribute keys
+amount := decimal.RequireFromString(protoMsg.Amount)
+cached := cache.Get(tenantID, protoMsg.InstrumentCode, protoMsg.Version)
 
-// 3. GO bridges them via Variable Injection
+// 3. CEL handles the Letter (Attributes) - Go passes map blindly
 celVars := map[string]interface{}{
-    "attributes": protoMsg.Attributes,  // Proto data → CEL environment
+    "attributes": protoMsg.Attributes,  // Go doesn't know what's in here
 }
-result, _ := cachedInstrument.ValidationProgram.Eval(celVars)
-// result: true (attributes are valid for this instrument)
+result, _ := cached.ValidationProgram.Eval(celVars)
+// CEL knows: "has(attributes.tou_period) && int(attributes.tou_period) >= 0"
 ```
 
 **The Architectural Moat:**
@@ -147,6 +184,7 @@ result, _ := cachedInstrument.ValidationProgram.Eval(celVars)
 - **Proto** provides infinite flexibility (any `map<string,string>`)
 - **CEL** provides rigid safety (tenant-defined validation rules)
 - **Go Generics** provide compile-time physics (`Quantity[Monetary]` vs `Quantity[Commodity]`)
+- **Go blindness** ensures new asset types never require code deployment
 
 ---
 
@@ -191,12 +229,10 @@ attributes:
 validation_cel: |
   has(attributes.expiry_date) &&
   timestamp(attributes.expiry_date) > now
-# Bucket by expiry date (hashCode) - O(log N) lookup
+# Bucket key = sole determinant of fungibility
+# Same expiry_date = same bucket = fungible
 fungibility_key_cel: |
   attributes.expiry_date
-# All items in same expiry bucket are fungible (equals)
-fungibility_cel: |
-  true
 ```
 
 **File:** `configs/archetypes/energy/renewable_power.yaml`
@@ -211,12 +247,10 @@ attributes:
 validation_cel: |
   has(attributes.generation_source) &&
   attributes.generation_source in ['solar', 'wind', 'hydro']
-# Bucket by source + region (hashCode) - O(log N) lookup
+# Bucket key = sole determinant of fungibility
+# Same source + region = same bucket = fungible
 fungibility_key_cel: |
   attributes.generation_source + "|" + attributes.region
-# All items in same bucket are fungible (equals)
-fungibility_cel: |
-  true
 ```
 
 ### Testing Archetypes (Community Contribution Model)
@@ -262,52 +296,56 @@ contributed by domain experts. Tenants select from the catalog rather than writi
 Beyond ingestion validation, CEL handles **operational predicates** that determine position
 behavior. This extends CEL from "is this data valid?" to "can these positions be combined?"
 
-### The HashMap Pattern: Bucket & Verify
+### The Bucket Key Pattern (Sole Source of Truth)
 
 **The Problem**: Naively checking `AreFungible(a, b)` for every existing position is O(N).
 With millions of positions, this kills performance.
 
-**The Solution**: Apply the "HashMap" pattern from Java:
-
-1. **`hashCode()` → `fungibility_key_expression`**: Generate a deterministic bucket key
-2. **`equals()` → `fungibility_expression`**: Pairwise comparison within the bucket
-
-This converts O(N) scans into O(log N) index lookups.
+**The Solution**: Use a single CEL expression to generate a deterministic **bucket key**.
+If two positions have the same `bucket_id`, they ARE fungible. Period.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  The HashMap Pattern for Position Aggregation                          │
+│  The Bucket Key Pattern for Position Aggregation                        │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  fungibility_key_expression (hashCode)   fungibility_expression (equals)│
-│  ───────────────────────────────────     ───────────────────────────────│
-│  Input: attributes map                   Input: a, b attribute maps     │
-│  Output: string (bucket key)             Output: bool (can merge?)      │
-│  Example: region + "|" + vintage         Example: a.tier == b.tier      │
+│  fungibility_key_expression (The SOLE determinant of fungibility)       │
+│  ────────────────────────────────────────────────────────────────       │
+│  Input: attributes map                                                  │
+│  Output: string (bucket key)                                            │
+│  Example: attributes.region + "|" + attributes.vintage                  │
 │                                                                         │
-│  Write Path: Calculate key → INSERT      Read Path: GROUP BY bucket_id  │
-│              with bucket_id column                  → SUM(amount)       │
+│  Rule: Same bucket_id = fungible. Different bucket_id = NOT fungible.   │
+│                                                                         │
+│  Write Path: Calculate key → INSERT       Read Path: GROUP BY bucket_id │
+│              with bucket_id column                   → SUM(amount)      │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+> **Why no pairwise `equals()` check?** A pairwise comparison inside the read path introduces
+> O(N²) complexity. If you need complex fungibility rules (e.g., "Vintage 2023 matches 2024"),
+> encode that logic in the key expression to output the **same string** for both. Push complexity
+> to configuration, not runtime.
 
 ### The Performance Guardrail
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  NATIVE GO (Hot Path)              │  CEL (Policy Decisions)           │
+│  NATIVE GO + SQL (Hot Path)        │  CEL (Policy Decisions)           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  Quantity.Add()                    │  validation_expression            │
 │  Quantity.Sub()                    │  fungibility_key_expression       │
-│  decimal.Decimal arithmetic        │  fungibility_expression           │
-│  SQL SUM() aggregation             │  Temporal overlap policy          │
+│  decimal.Decimal arithmetic        │                                   │
+│  SQL SUM() + GROUP BY bucket_id    │  (bucket key on write only)       │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Rule**: CEL evaluates predicates and generates keys. Native Go and SQL perform arithmetic.
-We never offload `Add`/`Sub` to CEL in the hot loop.
+**Rule**: CEL runs on the **write path only** (validation + bucket key generation).
+The read path uses pure SQL: `SELECT SUM(amount) ... GROUP BY bucket_id`.
+No CEL evaluation on reads.
 
-### Bucket Key Expression (The hashCode)
+### Bucket Key Expression
 
 Each instrument defines a CEL expression that generates a deterministic bucket key:
 
@@ -323,26 +361,15 @@ attributes.region + "|" + attributes.vintage
 
 // Example 3: Group by contract and expiry month
 attributes.contract_id + "|" + string(int(attributes.expiry) / 2592000)
+
+// Example 4: Complex matching (Vintage 2023 and 2024 are fungible)
+// Output same key for both vintages:
+attributes.region + "|" + (int(attributes.vintage) >= 2023 ? "recent" : attributes.vintage)
 ```
 
-### Fungibility Expression (The equals)
-
-For edge cases where bucket key alone is insufficient, define a pairwise predicate:
-
-```javascript
-// Input: 'a' and 'b' are attribute maps from two positions IN THE SAME BUCKET
-// Output: Boolean - true if positions can be combined into one row
-
-// Example 1: Always merge within bucket (default)
-true
-
-// Example 2: Same tier required within bucket
-a.tier == b.tier
-
-// Example 3: Temporal overlap allowed if same contract
-a.contract_id == b.contract_id &&
-(int(a.valid_to) >= int(b.valid_from) || int(b.valid_to) >= int(a.valid_from))
-```
+> **Key Design**: If you need "Vintage 2023 matches 2024", don't add a pairwise check.
+> Write a CEL expression that outputs `"us-east|recent"` for both 2023 and 2024.
+> Same key = fungible. Different key = not fungible.
 
 ### How Bucket & Verify Affects the Ledger
 
@@ -378,10 +405,9 @@ When Position Keeping aggregates positions:
 1. **Dimension check** (compile-time): `Quantity[Monetary]` cannot combine with `Quantity[Commodity]`
 2. **Instrument check** (runtime): USD cannot combine with EUR
 3. **Version check** (runtime): USD(v1) cannot combine with USD(v2)
-4. **Bucket check** (index): Positions with different `bucket_id` are never compared
-5. **Fungibility check** (CEL, optional): `fungibility_expression.Eval({a: pos1.attrs, b: pos2.attrs})`
+4. **Bucket check** (SQL): `GROUP BY bucket_id` - same bucket = fungible
 
-Most instruments skip step 5 by using `fungibility_expression = "true"` (bucket key is sufficient).
+**That's it.** No CEL on the read path. Pure SQL aggregation.
 
 ### Write Path: Append-Only with Bucket ID
 
@@ -411,45 +437,34 @@ func (s *Service) RecordMeasurement(ctx context.Context, tenantID uuid.UUID, new
 }
 ```
 
-### Read Path: Index-Based Aggregation
+### Read Path: Pure SQL Aggregation
 
 ```go
-// Aggregation uses database index for O(log N) lookup
+// Aggregation is pure SQL - no CEL on reads
 func (s *Service) GetAggregatedPosition(
     ctx context.Context, tenantID uuid.UUID, accountID, instrumentCode string,
 ) ([]AggregatedPosition, error) {
-    // Database does the heavy lifting via index
+    // Database does ALL the work via indexed GROUP BY
     // SELECT bucket_id, SUM(amount) FROM positions
     // WHERE account_id = ? AND instrument_code = ?
     // GROUP BY bucket_id
     return s.repo.AggregateByBucket(ctx, accountID, instrumentCode)
 }
 
-// For fine-grained aggregation (when fungibility_expression != "true")
-func (s *Service) GetDetailedPosition(
-    ctx context.Context, tenantID uuid.UUID, accountID, instrumentCode, bucketID string,
+// For detailed breakdown within a bucket
+func (s *Service) GetBucketDetails(
+    ctx context.Context, accountID, instrumentCode, bucketID string,
 ) ([]Position, error) {
-    // 1. Load positions in this bucket
-    rows, err := s.repo.FindByBucket(ctx, accountID, instrumentCode, bucketID)
-    if err != nil {
-        return nil, err
-    }
-
-    // 2. Run CEL fungibility within bucket (only if expression != "true")
-    cached, _ := s.cache.Get(ctx, tenantID, instrumentCode, rows[0].Version)
-    if cached.FungibilityProgram == nil {
-        // Default: all positions in bucket are fungible
-        return s.sumPositions(rows), nil
-    }
-    return s.aggregateByFungibility(cached.FungibilityProgram, rows), nil
+    // Just return raw positions - no CEL processing
+    return s.repo.FindByBucket(ctx, accountID, instrumentCode, bucketID)
 }
 ```
 
-**Why Bucket & Verify is better:**
+**Why Bucket Key Only is better:**
 
-- Write path is O(1) constant time - no locks, no reads, just calculate bucket ID
-- Read path uses database index for O(log N) lookup
-- CEL pairwise comparison only runs within buckets (typically small)
+- Write path is O(1) constant time - calculate bucket ID, INSERT
+- Read path is pure SQL: `GROUP BY bucket_id` uses B-tree index
+- **No CEL on reads** - aggregation happens entirely in the database
 - Background compaction can merge rows within buckets during low-traffic windows
 
 > **Phase 1 Decision**: Append-Only is the **ONLY** supported write mode.
@@ -620,6 +635,15 @@ flowchart TB
    type Money = Quantity[Monetary]
    type Asset = Quantity[Commodity]
    ```
+
+   > **Decimal Parsing Performance**: Proto uses `string amount` for compatibility and precision.
+   > Parsing strings to `decimal.Decimal` happens on every ledger row read. Use a high-performance
+   > parser like `shopspring/decimal` which benchmarks at ~500ns per parse. At 100k TPS reads,
+   > this adds ~50ms/second overhead - acceptable but worth monitoring.
+   >
+   > **Alternative considered**: Google's `google.type.Money` (units + nanos) or custom proto
+   > `Decimal` message (value + scale). Both require more complex marshalling. String parsing
+   > with a fast library is simpler and sufficient for our scale.
 
 4. **Operations**: `Add`, `Subtract`, `Multiply`, `Divide`, `Neg`, `IsZero`, `Compare`
    - Same-dimension operations: compile-time safe
@@ -908,28 +932,31 @@ flowchart TB
        // Example: "has(attributes.region) && int(attributes.expiry) > 0"
        string validation_expression = 7;
 
-       // The "Bucketer" (HashMap hashCode): Generates deterministic key for database grouping.
+       // The "Bucketer": Generates deterministic key for database grouping.
        // Compiled and cached. Input: attributes map. Output: string.
        // Example: "attributes.region + '|' + attributes.vintage"
        // Default: "" (all positions in same bucket - fungible by instrument alone)
        // CRITICAL: This key is stored as `bucket_id` column and indexed for O(log N) lookups.
+       // RULE: Same bucket_id = fungible. Different bucket_id = NOT fungible.
        string fungibility_key_expression = 8;
 
-       // The "Arbiter" (HashMap equals): Pairwise comparison within same bucket (optional).
-       // Used for edge cases where key alone is insufficient.
-       // Compiled and cached. Input: 'a' and 'b' attribute maps. Output: bool.
-       // Example: "a.expiry == b.expiry && a.region == b.region"
-       // Default: "true" (if bucket keys match, positions are fungible)
-       string fungibility_expression = 9;
-
-       string display_name = 10;
-       string description = 11;
+       string display_name = 9;
+       string description = 10;
    }
    ```
 
-   > **The HashMap Pattern**: `fungibility_key_expression` is analogous to Java's `hashCode()` -
-   > it gets you to the right bucket quickly (O(log N) via database index). `fungibility_expression`
-   > is analogous to `equals()` - it confirms identity within that bucket (handling collisions).
+   > **Sole Source of Truth**: `fungibility_key_expression` is the **only** determinant of fungibility.
+   > There is no pairwise `equals()` check. If two positions have the same `bucket_id`, they are
+   > fungible and will be aggregated together via `GROUP BY bucket_id`. Complex fungibility rules
+   > must be encoded in the key expression to output the same string for fungible positions.
+   >
+   > **Immutability of Bucket Key Logic (CRITICAL)**:
+   > The `fungibility_key_expression` is **immutable** for a given Instrument Version. Changing the
+   > bucketing logic fundamentally changes what the asset *is*. Historical rows have the old `bucket_id`;
+   > SQL `GROUP BY` will treat old and new buckets as separate positions.
+   >
+   > **To change logic, the Tenant must create Version N+1.** Positions in Version N remain in their
+   > old buckets until explicitly traded/migrated to Version N+1 via a "Wash/Reload" trade pattern.
 
 3. **Rate message**
 
@@ -979,11 +1006,10 @@ flowchart TB
        -- CEL Expressions (compiled and cached by service layer)
        validation_expression TEXT NOT NULL DEFAULT 'true',  -- Ingestion gatekeeper
 
-       -- The "HashMap" pattern for O(log N) position lookups:
-       -- fungibility_key_expression: Generates bucket_id (like hashCode)
-       -- fungibility_expression: Pairwise check within bucket (like equals)
-       fungibility_key_expression TEXT NOT NULL DEFAULT '',  -- Empty = all same bucket
-       fungibility_expression TEXT NOT NULL DEFAULT 'true',  -- If keys match, merge
+       -- Bucket key for O(log N) position aggregation
+       -- Empty string = all positions fungible by instrument alone
+       -- Same bucket_id = fungible. Different bucket_id = NOT fungible.
+       fungibility_key_expression TEXT NOT NULL DEFAULT '',
 
        display_name VARCHAR(128),
        description TEXT,
@@ -994,18 +1020,16 @@ flowchart TB
        CHECK (dimension IN ('Monetary', 'Commodity')),
        CHECK (length(trim(validation_expression)) > 0),
        CHECK (length(validation_expression) <= 4096),
-       CHECK (length(fungibility_key_expression) <= 4096),
-       CHECK (length(fungibility_expression) <= 4096)
+       CHECK (length(fungibility_key_expression) <= 4096)
    );
 
    CREATE INDEX idx_instrument_definitions_lookup
        ON instrument_definitions(tenant_id, code, version);
    ```
 
-   > **Three CEL expressions per instrument** (The HashMap Pattern):
+   > **Two CEL expressions per instrument**:
    > - `validation_expression`: "Is this data valid?" (ingestion gatekeeper)
-   > - `fungibility_key_expression`: "What bucket does this belong to?" (hashCode - O(log N) lookup)
-   > - `fungibility_expression`: "Are these two positions identical within the bucket?" (equals - collision handling)
+   > - `fungibility_key_expression`: "What bucket does this belong to?" (sole determinant of fungibility)
 
 2. **Bucket ID in positions table** (added by Stream I.1 migration)
 
@@ -1018,7 +1042,14 @@ flowchart TB
    > **Write path**: Calculate bucket_id from `fungibility_key_expression`, store with position.
    > **Read path**: `SELECT SUM(amount) FROM positions WHERE bucket_id = ?` uses index.
 
-3. **System tenant seed data**:
+3. **System tenant seed data** (Bootstrap Migration - CRITICAL):
+
+   > **The Chicken-and-Egg Problem**: To create a Tenant, you need to bill them. To bill them,
+   > you need an Instrument (`USD`). To define `USD`, you need Reference Data Service running.
+   > The Reference Data Service needs the database schema.
+   >
+   > **Solution**: Insert base instruments via SQL migration, not API. The system comes up
+   > ready to transact on day one.
 
    ```sql
    -- System tenant ID: 00000000-0000-0000-0000-000000000000
@@ -1209,28 +1240,22 @@ flowchart TB
    | `valid_from` | `Timestamp` | Period start (if provided) |
    | `valid_to` | `Timestamp` | Period end (if provided) |
 
-   **Bucket Key Expression Environment** (The "hashCode"):
+   **Bucket Key Expression Environment:**
 
    | Variable | Type | Description |
    |----------|------|-------------|
    | `attributes` | `Map<String, String>` | The attributes map from InstrumentAmount proto |
    | Returns | `String` | The bucket key for database grouping (index lookup) |
 
-   **Fungibility Expression Environment** (The "equals"):
-
-   | Variable | Type | Description |
-   |----------|------|-------------|
-   | `a` | `Map<String, String>` | Attributes of existing position (within same bucket) |
-   | `b` | `Map<String, String>` | Attributes of incoming position (within same bucket) |
-   | Returns | `Bool` | `true` = merge, `false` = keep separate |
+   > **Note**: There is no pairwise "fungibility expression" environment. The bucket key is the
+   > **sole determinant** of fungibility. Same key = fungible. Different key = not fungible.
 
 7. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
 
    ```go
    type CELCompiler struct {
-       validationEnv   *cel.Env  // For validation_expression (single attrs map) → bool
-       bucketKeyEnv    *cel.Env  // For fungibility_key_expression (single attrs map) → string
-       fungibilityEnv  *cel.Env  // For fungibility_expression (two attrs maps: a, b) → bool
+       validationEnv *cel.Env  // For validation_expression: attributes → bool
+       bucketKeyEnv  *cel.Env  // For fungibility_key_expression: attributes → string
    }
 
    func NewCELCompiler() (*CELCompiler, error) {
@@ -1246,7 +1271,7 @@ flowchart TB
            return nil, err
        }
 
-       // Environment for bucket key generation: attributes → string (The "hashCode")
+       // Environment for bucket key generation: attributes → string
        bucketEnv, err := cel.NewEnv(
            cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
            cel.CostLimit(10000),
@@ -1255,20 +1280,9 @@ flowchart TB
            return nil, err
        }
 
-       // Environment for fungibility check: a, b → bool (The "equals")
-       fungEnv, err := cel.NewEnv(
-           cel.Variable("a", cel.MapType(cel.StringType, cel.StringType)),
-           cel.Variable("b", cel.MapType(cel.StringType, cel.StringType)),
-           cel.CostLimit(10000),
-       )
-       if err != nil {
-           return nil, err
-       }
-
        return &CELCompiler{
-           validationEnv:  valEnv,
-           bucketKeyEnv:   bucketEnv,
-           fungibilityEnv: fungEnv,
+           validationEnv: valEnv,
+           bucketKeyEnv:  bucketEnv,
        }, nil
    }
 
@@ -1277,7 +1291,7 @@ flowchart TB
        return c.compile(c.validationEnv, expr)
    }
 
-   // CompileBucketKey compiles bucket key generation expression (hashCode).
+   // CompileBucketKey compiles bucket key generation expression.
    func (c *CELCompiler) CompileBucketKey(expr string) (cel.Program, error) {
        if expr == "" {
            return nil, nil  // Empty expression = all positions in same bucket
@@ -1286,13 +1300,20 @@ flowchart TB
    }
 
    // GenerateBucketKey evaluates the bucket key for database grouping.
+   // This is the SOLE determinant of fungibility.
+   //
+   // FAIL-FAST BEHAVIOR: If the CEL expression references a missing attribute,
+   // this returns an error and the transaction MUST be rejected. We do not
+   // support "partial" bucketing or "default" buckets.
    func (c *CELCompiler) GenerateBucketKey(prog cel.Program, attrs map[string]string) (string, error) {
        if prog == nil {
            return "", nil  // No key expression = empty bucket (all fungible by instrument)
        }
        out, _, err := prog.Eval(map[string]interface{}{"attributes": attrs})
        if err != nil {
-           return "", err
+           // CEL error = missing attribute or type mismatch
+           // REJECT the transaction - do not fall back to "default" bucket
+           return "", fmt.Errorf("bucket key generation failed: %w", err)
        }
        key, ok := out.Value().(string)
        if !ok {
@@ -1300,27 +1321,15 @@ flowchart TB
        }
        return key, nil
    }
-
-   // CompileFungibility compiles position merge predicate (equals).
-   func (c *CELCompiler) CompileFungibility(expr string) (cel.Program, error) {
-       return c.compile(c.fungibilityEnv, expr)
-   }
-
-   // AreFungible evaluates whether two positions can be merged (within same bucket).
-   func (c *CELCompiler) AreFungible(
-       prog cel.Program, attrsA, attrsB map[string]string,
-   ) (bool, error) {
-       out, _, err := prog.Eval(map[string]interface{}{"a": attrsA, "b": attrsB})
-       if err != nil {
-           return false, err
-       }
-       result, ok := out.Value().(bool)
-       if !ok {
-           return false, fmt.Errorf("CEL expression must return bool, got %T", out.Value())
-       }
-       return result, nil
-   }
    ```
+
+   > **No pairwise comparison**: There is no `AreFungible(a, b)` function. Fungibility is
+   > determined entirely by the bucket key. Same key = fungible. Different key = not fungible.
+   >
+   > **Fail-Fast on Missing Attributes**: If the bucket key expression references an attribute
+   > that is missing (e.g., `attributes['vintage']` when only `region` is provided), the CEL
+   > evaluation returns an error. The transaction is **rejected**, not placed in a "default" bucket.
+   > This enforces data quality at the gate.
 
 8. **PostgreSQL implementation** with sqlc-generated queries
 
@@ -1333,13 +1342,14 @@ flowchart TB
        ErrDuplicateInstrument = errors.New("instrument already exists")
 
        // CEL compilation errors (fail at registration time)
-       ErrInvalidValidationExpression  = errors.New("validation expression failed to compile")
-       ErrInvalidFungibilityExpression = errors.New("fungibility expression failed to compile")
-       ErrExpressionTooLong            = errors.New("expression exceeds 4KB limit")
-       ErrExpressionTooDeep            = errors.New("expression exceeds max nesting depth")
+       ErrInvalidValidationExpression = errors.New("validation expression failed to compile")
+       ErrInvalidBucketKeyExpression  = errors.New("bucket key expression failed to compile")
+       ErrExpressionTooLong           = errors.New("expression exceeds 4KB limit")
+       ErrExpressionTooDeep           = errors.New("expression exceeds max nesting depth")
 
-       // CEL runtime errors (fail at validation time)
+       // CEL runtime errors (fail at validation/key generation time)
        ErrAttributeValidationFailed = errors.New("attributes failed CEL validation")
+       ErrBucketKeyGenerationFailed = errors.New("bucket key generation failed")
        ErrCELRuntimeError           = errors.New("CEL expression runtime error")
 
        // Access control errors
@@ -1519,11 +1529,19 @@ flowchart TB
 
 3. **Adapter layer** for proto ↔ domain conversion
 
-4. **Rate Limiting Middleware** for `RegisterInstrument`:
+4. **Rate Limiting** for `RegisterInstrument`:
+
+   > **Preferred location**: API Gateway (Envoy, Kong, Nginx) using external rate limit service.
+   > Gateway-level rate limiting keeps operational concerns separate from business logic.
+   >
+   > **Fallback**: If Gateway rate limiting is not available, implement as gRPC interceptor:
 
    ```go
    // RateLimitInterceptor enforces per-tenant rate limits on instrument registration.
    // Uses token bucket algorithm: 10 tokens, refill 1 token per 6 seconds.
+   //
+   // NOTE: Prefer Gateway-level rate limiting (Envoy ratelimit service).
+   // This interceptor is a fallback for environments without Gateway support.
    type RateLimitInterceptor struct {
        limiters sync.Map  // map[tenantID]*rate.Limiter
    }
@@ -1577,13 +1595,13 @@ flowchart TB
 1. **CachedInstrumentRegistry** wrapper with **compiled CEL programs**:
 
    ```go
-   // CachedInstrument holds the definition and ALL pre-compiled CEL programs
+   // CachedInstrument holds the definition and pre-compiled CEL programs
    type CachedInstrument struct {
-       Definition         InstrumentDefinition
-       ValidationProgram  cel.Program  // For ingestion: attributes → bool
-       BucketKeyProgram   cel.Program  // For bucketing: attributes → string (may be nil)
-       FungibilityProgram cel.Program  // For aggregation: (a, b) → bool
+       Definition        InstrumentDefinition
+       ValidationProgram cel.Program  // For ingestion: attributes → bool
+       BucketKeyProgram  cel.Program  // For bucketing: attributes → string (may be nil)
    }
+   // Note: No FungibilityProgram - bucket key is sole determinant of fungibility
 
    // cachedEntry wraps CachedInstrument with timestamp for TTL enforcement
    type cachedEntry struct {
@@ -1704,13 +1722,45 @@ Before per-service work, establish shared caching infrastructure:
 ```go
 // LocalInstrumentCache provides sub-microsecond lookups for hot-path operations.
 // Used by all services that handle quantities.
+//
+// CRITICAL: On the hot write path (100k+ TPS), a cache miss CANNOT block on
+// a synchronous gRPC call to Reference Data. This cache uses:
+// 1. Prefetch on startup: Load all active instruments before accepting traffic
+// 2. Background refresh: Subscribe to instrument updates via Kafka/gRPC stream
+// 3. Cache miss = reject: If instrument not in cache, reject request immediately
 type LocalInstrumentCache struct {
-    registry InstrumentRegistry              // Remote client (fallback)
+    registry InstrumentRegistry              // Remote client (for prefetch only)
     compiler *CELCompiler                    // For compiling on cache miss
     cache    *lru.Cache[string, CachedInstrument]  // Bounded: max 10,000 entries
     ttl      time.Duration                   // Refresh interval (e.g., 5 minutes)
 }
+
+// STARTUP SEQUENCE:
+// 1. Connect to Reference Data service
+// 2. Prefetch ALL instruments for this tenant (blocking)
+// 3. Subscribe to instrument update stream (background)
+// 4. Only then: start accepting traffic
+//
+// If prefetch fails, service should NOT start (fail-fast).
+
+func (c *LocalInstrumentCache) Get(
+    ctx context.Context, tenantID uuid.UUID, code string, version uint32,
+) (CachedInstrument, error) {
+    key := cacheKey{TenantID: tenantID, Code: code, Version: version}
+    if cached, ok := c.cache.Get(key); ok {
+        return cached, nil
+    }
+    // CRITICAL: Do NOT call registry.GetDefinition() here on the hot path.
+    // Cache miss = unknown instrument = reject request.
+    return CachedInstrument{}, ErrInstrumentNotCached
+}
+
+var ErrInstrumentNotCached = errors.New("instrument not in local cache; register it first")
 ```
+
+> **Why reject on cache miss?** At 100k TPS, a synchronous gRPC call blocks the hot path.
+> If an instrument isn't cached, either: (a) it doesn't exist, or (b) the cache hasn't
+> refreshed yet. Either way, rejecting is safer than blocking.
 
 ### The Rehydration Pattern (Critical)
 
@@ -1946,11 +1996,55 @@ Current Account manages account balances. Changes:
 
 3. **Multi-currency foundation**: Structure supports future multi-currency accounts
 
+4. **Dimensional Liens** (CRITICAL for bucket-aware accounts):
+
+   The `Lien` entity **must** store `bucket_id` for commodity accounts with attributes.
+   When `InitiateLien` is called, the service must:
+
+   ```go
+   func (s *Service) InitiateLien(ctx context.Context, req LienRequest) (*Lien, error) {
+       // 1. Load the Instrument Definition
+       cached, err := s.cache.Get(ctx, req.TenantID, req.InstrumentCode, req.Version)
+       if err != nil {
+           return nil, err
+       }
+
+       // 2. Execute fungibility_key_expression on the request attributes
+       bucketID, err := s.cel.GenerateBucketKey(cached.BucketKeyProgram, req.Attributes)
+       if err != nil {
+           return nil, fmt.Errorf("cannot generate bucket key for lien: %w", err)
+       }
+
+       // 3. Store the resulting bucket_id on the Lien
+       lien := &Lien{
+           AccountID:      req.AccountID,
+           InstrumentCode: req.InstrumentCode,
+           BucketID:       bucketID,  // CRITICAL: Must match position bucket
+           Amount:         req.Amount,
+       }
+
+       // 4. Validate solvency against the SPECIFIC bucket balance
+       available := s.getAvailableBalance(ctx, req.AccountID, req.InstrumentCode, bucketID)
+       // Available = Sum(Positions where bucket=X) - Sum(Liens where bucket=X)
+       if available.LessThan(req.Amount) {
+           return nil, ErrInsufficientFunds
+       }
+
+       return s.repo.CreateLien(ctx, lien)
+   }
+   ```
+
+   > **Why bucket-aware liens?** A user with 100 units of `RICE` in `bucket_id="grade_a"` and
+   > 50 units in `bucket_id="grade_b"` must not be able to lien 150 units of "Grade A Rice".
+   > The lien must lock the *specific bucket*, not just the instrument total.
+
 #### Acceptance Criteria
 
 - [ ] Account creation accepts instrument code (not just currency string)
 - [ ] Deposits/withdrawals validated against Reference Data
 - [ ] Balance queries return `InstrumentAmount` in proto responses
+- [ ] **Lien entity stores `bucket_id`** (for commodity accounts with attributes)
+- [ ] **Solvency check validates against specific bucket balance**, not total instrument balance
 - [ ] Existing account tests pass
 
 ---
@@ -2173,11 +2267,12 @@ If API Layer gate shows >2x expected integration complexity:
 | Lookup inheritance | Tenant → System Tenant fallback |
 | Valuation scope | Rate struct only; ValuationProvider deferred to future PRD |
 | Attribute validation | CEL `validation_expression` - 100x faster than JSON Schema |
-| Fungibility pattern | **HashMap** - `fungibility_key_expression` (hashCode) + `fungibility_expression` (equals) |
-| Position aggregation | O(log N) via database index on `bucket_id` column, not O(N) pairwise scan |
+| Fungibility pattern | **Bucket key only** - `fungibility_key_expression` is sole determinant (no pairwise check) |
+| Position aggregation | Pure SQL: `GROUP BY bucket_id` - no CEL on read path |
 | Arithmetic | Native Go `decimal.Decimal` - CEL never in hot loop |
 | Local cache type | Bounded LRU (`hashicorp/golang-lru`) to prevent memory leaks |
-| CEL caching | Cache all compiled programs (validation + bucket key + fungibility) |
+| CEL caching | Cache compiled programs (validation + bucket key) |
+| Cache miss strategy | Prefetch on startup; cache miss = critical failure (reject request) |
 | Read-side coalescing | Trigger compaction when bucket exceeds 100 rows |
 | Integration strategy | Per-service streams (I.1-I.4) for parallel execution |
 | Shared package | New `pkg/platform/quantity`; deprecate `shared/domain/money` after migration |
