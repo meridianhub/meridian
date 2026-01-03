@@ -1299,11 +1299,27 @@ flowchart TB
         arch := loadArchetype(archetypePath)
         tests := loadTests(testPath)
 
-        program, _ := t.compiler.CompileValidation(arch.ValidationCEL)
+        program, err := t.compiler.CompileValidation(arch.ValidationCEL)
+        if err != nil {
+            return fmt.Errorf("failed to compile archetype %s: %w", archetypePath, err)
+        }
 
         for _, tc := range tests.Tests {
-            result, _ := program.Eval(map[string]any{"attributes": tc.Input})
-            passed := result.Value().(bool)
+            // Evaluate CEL expression with test input
+            out, _, err := program.Eval(map[string]any{"attributes": tc.Input})
+            if err != nil {
+                // CEL runtime error - treat as validation failure
+                if tc.Expect == "PASS" {
+                    return fmt.Errorf("test %q: expected PASS, got CEL error: %v", tc.Name, err)
+                }
+                continue  // Expected FAIL, CEL error counts as failure
+            }
+
+            // Safe type assertion (mirrors AreFungible pattern)
+            passed, ok := out.Value().(bool)
+            if !ok {
+                return fmt.Errorf("test %q: CEL expression must return bool, got %T", tc.Name, out.Value())
+            }
 
             if tc.Expect == "PASS" && !passed {
                 return fmt.Errorf("test %q: expected PASS, got FAIL", tc.Name)
@@ -1694,6 +1710,20 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
 - [ ] Fungibility expression controls position merging
 - [ ] Existing fiat-only tests still pass (backwards compatible)
 - [ ] No gRPC calls on hot path (cache hit rate > 99%)
+
+**Phase 1 Append-Only Enforcement** (Critical):
+
+- [ ] All write APIs (`RecordMeasurement`, `CreatePosition`) use INSERT only, never UPDATE
+- [ ] No write-time position merging: requests that would merge positions create new rows instead
+- [ ] `UpdatePosition` and `MergePositions` endpoints return `UNIMPLEMENTED` in Phase 1
+- [ ] Database constraints prevent UPDATE on position amount columns (trigger or policy)
+- [ ] Integration tests verify: 100 writes to same account = 100 rows (no consolidation)
+- [ ] Position consolidation occurs ONLY via offline background job (not on hot write path)
+- [ ] Background compaction job is documented but NOT required for Phase 1 MVP
+
+> **Rationale**: Append-only writes achieve O(1) constant time without locks. Write-time merging
+> requires per-bucket locking which creates bottlenecks on hot accounts at 100k+ TPS. Position
+> aggregation happens at read-time (cacheable) or via background compaction during low-traffic windows.
 
 ---
 
