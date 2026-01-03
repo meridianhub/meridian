@@ -373,6 +373,7 @@ bucket_key(['region', 'vintage'])
 > **CRITICAL SECURITY**: Always use `bucket_key()` function, NEVER string concatenation.
 >
 > **Delimiter Injection Attack**: If you use `attributes.region + "|" + attributes.vintage`:
+>
 > - Position A: `region="US|East"`, `vintage="2024"` → Key: `US|East|2024`
 > - Position B: `region="US"`, `vintage="East|2024"` → Key: `US|East|2024`
 >
@@ -1364,11 +1365,32 @@ flowchart TB
        if err != nil {
            return err
        }
+       // Enforce: System Tenant instruments are admin-only (cannot modify via API)
+       if def.TenantID == SystemTenantID {
+           return ErrSystemTenantReadOnly
+       }
        if def.Status != "DRAFT" {
            return ErrInstrumentNotDraft
        }
        // DB trigger handles setting activated_at
        return r.queries.UpdateInstrumentStatus(ctx, def.ID, "ACTIVE")
+   }
+
+   func (r *PostgresRegistry) DeprecateInstrument(
+       ctx context.Context, tenantID uuid.UUID, code string, version uint32,
+   ) error {
+       def, err := r.GetDefinition(ctx, tenantID, code, version)
+       if err != nil {
+           return err
+       }
+       // Enforce: System Tenant instruments are admin-only (cannot modify via API)
+       if def.TenantID == SystemTenantID {
+           return ErrSystemTenantReadOnly
+       }
+       if def.Status != "ACTIVE" {
+           return ErrInstrumentNotActive
+       }
+       return r.queries.UpdateInstrumentStatus(ctx, def.ID, "DEPRECATED")
    }
    ```
 
@@ -1383,14 +1405,16 @@ flowchart TB
    |------------|-------|-------------------|-----------|
    | Expression length | 4KB max | Stream F (Registry) | Prevent storage abuse |
    | Cost limit | 10,000 | Stream F (CEL env) | Prevent expensive evaluations |
-   | Registration rate | 10/min/tenant | **Stream G (gRPC handler)** | Prevent DoS via compilation spam |
+   | Registration rate | 10/min/tenant | **Stream G (gRPC interceptor)** | Prevent DoS via compilation spam |
    | Expression depth | 10 levels max | Stream F (Registry) | Prevent stack overflow in evaluation |
 
-   > **Rate Limiting Note**: Registration rate limiting is enforced at the **gRPC handler layer**
-   > (Stream G), not in the registry service (Stream F). This separation ensures:
-   > - Registry remains a pure domain service without HTTP/transport concerns
-   > - Rate limiting middleware can be shared across all tenant-facing endpoints
+   > **Rate Limiting Note**: Registration rate limiting is enforced as a **gRPC interceptor**
+   > (Stream G, see `RateLimitInterceptor`), not in the registry service (Stream F). This ensures:
+   > - Registry remains a pure domain service without transport concerns
+   > - Rate limiting middleware is shared across all tenant-facing endpoints
    > - Metrics and rate-limit headers are handled at the transport layer
+   >
+   > **Preferred**: API Gateway rate limiting (Envoy, Kong). **Fallback**: gRPC interceptor.
 
    ```go
    const MaxExpressionLength = 4096  // 4KB
@@ -1602,9 +1626,14 @@ flowchart TB
                            if types.IsError(v) {
                                return types.NewErr("bucket_key: missing attribute '%s'", k)
                            }
+                           // Safe type assertion - attributes must be strings
+                           strVal, ok := v.Value().(string)
+                           if !ok {
+                               return types.NewErr("bucket_key: attribute '%s' must be string, got %T", k, v.Value())
+                           }
                            // Length prefix prevents delimiter injection
                            buf.WriteString(fmt.Sprintf("%d:%s=%d:%s;",
-                               len(k), k, len(v.Value().(string)), v.Value().(string)))
+                               len(k), k, len(strVal), strVal))
                        }
 
                        // SHA256 for fixed-length, collision-resistant key
@@ -1743,7 +1772,21 @@ flowchart TB
                 Code:    "CEL_RUNTIME_ERROR",
                 Message: err.Error(),
             })
-        } else if result.Value() != true {
+            return report
+        }
+
+        // Safe type assertion - CEL expressions MUST return bool
+        passed, ok := result.Value().(bool)
+        if !ok {
+            report.Valid = false
+            report.Errors = append(report.Errors, ValidationError{
+                Code:    "CEL_TYPE_ERROR",
+                Message: fmt.Sprintf("validation expression must return bool, got %T", result.Value()),
+            })
+            return report
+        }
+
+        if !passed {
             report.Valid = false
 
             // 2. Generate user-friendly message via error_message_expression
@@ -2185,9 +2228,9 @@ flowchart TB
    ) (CachedInstrument, error) {
        key := cacheKey{TenantID: tenantID, Code: code, Version: version}
 
-       // Check cache with TTL validation
+       // Check cache with TTL validation (jitter applied here for thundering herd prevention)
        if entry, ok := c.cache.Get(key); ok {
-           if time.Since(entry.cachedAt) < c.ttl {
+           if time.Since(entry.cachedAt) < c.jitteredTTL() {
                return entry.instrument, nil  // Cache hit, still valid
            }
            c.cache.Remove(key)  // Expired, remove stale entry
@@ -2205,7 +2248,40 @@ flowchart TB
        }
        return inst, nil
    }
+
+   // compileAndCache compiles CEL programs and stores with jittered TTL
+   func (c *CachedInstrumentRegistry) compileAndCache(
+       key cacheKey, def InstrumentDefinition,
+   ) (CachedInstrument, error) {
+       validationProg, err := c.compiler.CompileValidation(def.ValidationExpression)
+       if err != nil {
+           return CachedInstrument{}, fmt.Errorf("compile validation: %w", err)
+       }
+       bucketKeyProg, err := c.compiler.CompileBucketKey(def.FungibilityKeyExpression)
+       if err != nil {
+           return CachedInstrument{}, fmt.Errorf("compile bucket key: %w", err)
+       }
+
+       inst := CachedInstrument{
+           Definition:        def,
+           ValidationProgram: validationProg,
+           BucketKeyProgram:  bucketKeyProg,
+       }
+
+       // Store with current timestamp - TTL checked on read via time.Since()
+       // Jitter applied at validation time to prevent thundering herd
+       c.cache.Add(key, cachedEntry{
+           instrument: inst,
+           cachedAt:   time.Now(),
+       })
+
+       return inst, nil
+   }
    ```
+
+   > **TTL Enforcement**: Cache entries store `cachedAt` timestamp. On read, we check
+   > `time.Since(entry.cachedAt) < c.jitteredTTL()` - the jitter is applied at validation
+   > time, not storage time, so each node's "view" of expiration differs slightly.
 
 3. **Cache invalidation** (local + event-driven):
 
@@ -2575,7 +2651,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
    > **Phase 1 Note**: Background worker can be a simple goroutine. Production deployments
    > should use a proper job scheduler with distributed locking.
 
-6. **Re-bucketing Tool** (Admin-Only Data Recovery):
+7. **Re-bucketing Tool** (Admin-Only Data Recovery):
 
    > **The Problem**: If a tenant misconfigures `fungibility_key_expression`, positions may
    > be incorrectly bucketed (e.g., high-grade and low-grade rice merged into same bucket).
@@ -2716,6 +2792,20 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
 - [ ] Integration tests verify: 100 writes to same account = 100 rows (no consolidation)
 - [ ] Position consolidation occurs ONLY via offline background job (not on hot write path)
 - [ ] Background compaction job is documented but NOT required for Phase 1 MVP
+
+**Append-Only Enforcement Mechanisms** (Code-level):
+
+- [ ] `PositionRepository.Insert()` is the ONLY write method; no `Update()` or `Upsert()` exists
+- [ ] Service layer has no `MergeOnWrite` option or similar configuration
+- [ ] Database trigger on `positions` table rejects UPDATE on `amount` column:
+  ```sql
+  CREATE TRIGGER positions_append_only
+  BEFORE UPDATE ON positions
+  FOR EACH ROW
+  WHEN (OLD.amount IS DISTINCT FROM NEW.amount)
+  EXECUTE FUNCTION reject_position_update();
+  ```
+- [ ] Code review checklist includes "No UPDATE on positions table" verification
 
 > **Rationale**: Append-only writes achieve O(1) constant time without locks. Write-time merging
 > requires per-bucket locking which creates bottlenecks on hot accounts at 100k+ TPS. Position
