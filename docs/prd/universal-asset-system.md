@@ -1025,6 +1025,25 @@ flowchart TB
 
    CREATE INDEX idx_instrument_definitions_lookup
        ON instrument_definitions(tenant_id, code, version);
+
+   -- IMMUTABILITY ENFORCEMENT: Prevent updates to bucketing logic after creation.
+   -- To change logic, tenant MUST create Version N+1.
+   CREATE OR REPLACE FUNCTION prevent_bucket_key_update()
+   RETURNS TRIGGER AS $$
+   BEGIN
+       IF OLD.fungibility_key_expression IS DISTINCT FROM NEW.fungibility_key_expression THEN
+           RAISE EXCEPTION 'Cannot update fungibility_key_expression. Create Version N+1 instead.';
+       END IF;
+       IF OLD.validation_expression IS DISTINCT FROM NEW.validation_expression THEN
+           RAISE EXCEPTION 'Cannot update validation_expression. Create Version N+1 instead.';
+       END IF;
+       RETURN NEW;
+   END;
+   $$ LANGUAGE plpgsql;
+
+   CREATE TRIGGER enforce_expression_immutability
+       BEFORE UPDATE ON instrument_definitions
+       FOR EACH ROW EXECUTE FUNCTION prevent_bucket_key_update();
    ```
 
    > **Two CEL expressions per instrument**:
