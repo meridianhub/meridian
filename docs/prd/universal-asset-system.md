@@ -1084,7 +1084,10 @@ flowchart TB
 1. **InstrumentRegistry interface** (`registry.go`)
 
    ```go
-   // SystemTenantID is the well-known UUID for platform-wide instruments
+   // SystemTenantID is the well-known UUID for platform-wide instruments.
+   // WARNING: This is the zero UUID (all zeros). Ensure your code distinguishes
+   // "System Tenant" (valid, all-zeros) from "Unset/Missing" (nil pointer or error).
+   // The uuid library's uuid.Nil IS all zeros - use explicit comparisons, not nil checks.
    var SystemTenantID = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 
    type InstrumentRegistry interface {
@@ -1180,27 +1183,39 @@ flowchart TB
    const MaxExpressionDepth = 10     // Nesting levels
 
    func (r *PostgresRegistry) CreateDefinition(ctx context.Context, def InstrumentDefinition) error {
-       // Length check before compilation
+       // Length check before compilation (quick reject)
        if len(def.ValidationExpression) > MaxExpressionLength {
            return ErrExpressionTooLong
        }
-       if len(def.FungibilityExpression) > MaxExpressionLength {
+       if len(def.FungibilityKeyExpression) > MaxExpressionLength {
            return ErrExpressionTooLong
        }
 
-       // Depth check (prevents deeply nested expressions)
-       if depth := measureExpressionDepth(def.ValidationExpression); depth > MaxExpressionDepth {
+       // Parse to AST (we're compiling anyway - reuse the parse result)
+       ast, issues := r.compiler.validationEnv.Parse(def.ValidationExpression)
+       if issues != nil && issues.Err() != nil {
+           return fmt.Errorf("%w: %v", ErrInvalidValidationExpression, issues.Err())
+       }
+
+       // Depth check on AST (not raw string - accurate measurement)
+       if depth := measureASTDepth(ast.Expr()); depth > MaxExpressionDepth {
            return ErrExpressionTooDeep
        }
 
-       // ... continue with compilation and persistence
+       // Continue with type-check and program compilation...
+   }
+
+   // measureASTDepth walks the CEL AST to find maximum nesting depth
+   func measureASTDepth(expr *exprpb.Expr) int {
+       // Traverse children recursively, return max depth
+       // ...
    }
    ```
 
    > **Security Review**: Tenant-provided CEL expressions are validated at compile-time
    > by cel-go. Runtime execution uses `CostLimit(10000)` to abort expensive evaluations.
-   > Expression depth limits prevent stack overflow. CEL's non-Turing-complete nature
-   > guarantees termination.
+   > Expression depth limits (measured on AST, not raw string) prevent stack overflow.
+   > CEL's non-Turing-complete nature guarantees termination.
 
 5. **Attribute Key Validation** (CEL Compatibility):
 
@@ -2037,6 +2052,11 @@ Current Account manages account balances. Changes:
    > **Why bucket-aware liens?** A user with 100 units of `RICE` in `bucket_id="grade_a"` and
    > 50 units in `bucket_id="grade_b"` must not be able to lien 150 units of "Grade A Rice".
    > The lien must lock the *specific bucket*, not just the instrument total.
+   >
+   > **Phase 1 Scope**: Liens are strictly single-bucket. If a user wants to reserve "Any valid
+   > electricity" (regardless of source=solar vs source=wind), the upstream Payment Order service
+   > must query available buckets and issue specific Lien requests. Current Account does not
+   > support "multi-bucket liens" - this avoids complexity in the solvency check.
 
 #### Acceptance Criteria
 
