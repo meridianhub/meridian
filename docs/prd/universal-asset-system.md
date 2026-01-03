@@ -1926,26 +1926,28 @@ risk. This section defines guardrails to catch misalignment early.
 
 ### Integration Coordinator Role
 
-Assign one person (rotating weekly) as **Integration Coordinator** with responsibilities:
+Assign one person as **Integration Coordinator** with responsibilities:
 
 - Own cross-stream interface contracts (proto definitions, Go interfaces)
-- Run daily integration smoke tests (not just unit tests)
+- Run integration smoke tests on each dependency resolution (not just unit tests)
 - Triage integration failures with priority over feature work
 - Approve any changes to shared contracts (proto, `pkg/platform/quantity`)
 
-### Weekly Integration Checkpoints
+### Dependency-Based Integration Gates
 
-| Week | Checkpoint | Exit Criteria |
-|------|------------|---------------|
-| 1 | Contract freeze | All proto definitions and Go interfaces finalized |
-| 2 | Foundation integration | Streams A, D, E compile together; shared types work |
-| 3 | Service layer integration | Stream F passes unit tests with real DB |
-| 4 | API integration | Streams F, G, H work end-to-end with mock tenant |
-| 5+ | Per-service integration | Each I.x stream demonstrates working integration |
+Integration validation occurs at dependency boundaries, not calendar dates:
+
+| Gate | Trigger | Exit Criteria |
+|------|---------|---------------|
+| **Contract Freeze** | Before any dependent stream starts | All proto definitions and Go interfaces finalized |
+| **Foundation** | Streams A, D, E all complete | Shared types compile together; no interface conflicts |
+| **Service Layer** | Stream F complete | Registry passes tests with real DB; CEL compilation works |
+| **API Layer** | Streams F, G, H complete | End-to-end flow works with mock tenant |
+| **Integration** | All I.x streams complete | Cross-service calls validated |
 
 ### Interface Contract Rules
 
-1. **Proto definitions are immutable after Week 1** - use `reserved` fields, not modifications
+1. **Proto definitions are immutable after Contract Freeze** - use `reserved` fields, not modifications
 2. **Go interfaces in `pkg/platform/quantity` require coordinator approval** to change
 3. **Database schemas require migration compatibility** - no breaking changes to existing columns
 4. **Cache key formats are contracts** - changes require cache flush coordination
@@ -1955,20 +1957,20 @@ Assign one person (rotating weekly) as **Integration Coordinator** with responsi
 | Signal | Response |
 |--------|----------|
 | Stream blocked on another stream's API | Escalate to coordinator; consider interface stub |
-| Integration test fails for >24 hours | Stop feature work; fix integration first |
-| Contract change requested after Week 1 | Require written justification and impact analysis |
+| Integration test fails after dependency resolves | Stop downstream work; fix integration first |
+| Contract change requested after freeze | Require written justification and impact analysis |
 | >3 streams modifying same file | Architectural review needed |
 
 ### Escape Hatch
 
-If Week 4 checkpoint shows >2x expected integration complexity:
+If API Layer gate shows >2x expected integration complexity:
 
-1. Pause new feature work
+1. Pause downstream streams (I.x)
 2. Assess: Can we reduce to 5 streams (vertical slices)?
-3. Consider: Defer Asset Catalog (F.4, F.5) to Phase 2
+3. Consider: Defer Asset Catalog (streams 11-12 in F) to Phase 2
 4. Replan with reduced scope if necessary
 
-> **Goal**: Catch integration issues in Week 2-3, not Week 8 during Stream J.
+> **Goal**: Catch integration issues at dependency boundaries, not during final Stream J.
 
 ---
 
