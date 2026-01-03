@@ -30,9 +30,9 @@ dimensional safety.
 - ~~Migration from legacy `Money` types~~ - clean implementation, no backwards compatibility
 - ~~Migration-as-Trade pattern~~ - no existing positions to migrate
 - ~~Version deprecation lifecycle~~ - not needed pre-production
-- ~~Distributed cache invalidation~~ - simple caching sufficient for now
-  > **Future consideration**: When scaling beyond single-region, consider Redis pub/sub or Kafka
-  > topic for cross-node cache invalidation. For now, TTL jitter + pod restarts provide recovery.
+- ~~Distributed cache invalidation~~ - **INCLUDED** (event-driven via `instrument.updated`)
+  > Each service subscribes to instrument update events for cross-node cache invalidation.
+  > This enables near-real-time consistency (<100ms) with TTL as the safety net.
 
 ---
 
@@ -666,12 +666,23 @@ flowchart TB
    > This factory is the **only** boundary where runtime strings become compile-time types.
 
    ```go
-   // ParseQuantity converts raw data into a typed Quantity.
-   // Returns 'any' because the concrete type depends on runtime dimension string.
-   //
-   // NOTE: Returning 'any' requires type assertions at call sites. For code paths
-   // where the dimension is known at compile time, prefer NewQuantity[D] instead.
-   func ParseQuantity(amount decimal.Decimal, inst Instrument) (any, error) {
+   // QuantityValue is the closed interface for handling mixed dimensions.
+   // Consumers use type-safe accessors instead of raw type assertions.
+   type QuantityValue interface {
+       Dimension() string
+       GetAmount() decimal.Decimal
+       GetInstrument() Instrument
+       IsZero() bool
+
+       // Type-safe accessors - use these instead of type assertions
+       AsMonetary() (Quantity[Monetary], bool)
+       AsCommodity() (Quantity[Commodity], bool)
+   }
+
+   // ParseQuantity converts raw data into a QuantityValue.
+   // Returns the interface type - consumers must use AsMonetary()/AsCommodity()
+   // for type-safe access. This avoids panic-prone type assertions.
+   func ParseQuantity(amount decimal.Decimal, inst Instrument) (QuantityValue, error) {
        switch inst.Dimension {
        case "Monetary":
            return Quantity[Monetary]{Amount: amount, Instrument: inst}, nil
@@ -682,24 +693,43 @@ flowchart TB
        }
    }
 
-   // For services that handle mixed dimensions (e.g., generic ledger),
-   // define a closed interface with type-safe accessors:
-   type QuantityValue interface {
-       Dimension() string
-       GetAmount() decimal.Decimal
-       GetInstrument() Instrument
-       IsZero() bool
+   // Usage pattern - safe dimension handling:
+   //
+   // qv, err := ParseQuantity(amount, inst)
+   // if m, ok := qv.AsMonetary(); ok {
+   //     // Handle monetary quantity
+   // } else if c, ok := qv.AsCommodity(); ok {
+   //     // Handle commodity quantity
+   // }
+   ```
 
-       // Type-safe accessors - avoid raw type assertions
-       AsMonetary() (Quantity[Monetary], bool)
-       AsCommodity() (Quantity[Commodity], bool)
-   }
+   > **Why QuantityValue instead of `any`?** Returning `any` forces raw type assertions
+   > (`result.(Quantity[Monetary])`) which panic if wrong. The interface's `AsMonetary()`
+   > and `AsCommodity()` methods return `(T, bool)`, matching Go's map/type-switch pattern.
+   > This provides compile-time safety at the call site without requiring dimension knowledge.
 
-   // Implementation on Quantity[D]
+   **Interface Implementation** (both Quantity types implement QuantityValue):
+
+   ```go
    func (q Quantity[Monetary]) AsMonetary() (Quantity[Monetary], bool) { return q, true }
    func (q Quantity[Monetary]) AsCommodity() (Quantity[Commodity], bool) { return Quantity[Commodity]{}, false }
    func (q Quantity[Commodity]) AsMonetary() (Quantity[Monetary], bool) { return Quantity[Monetary]{}, false }
    func (q Quantity[Commodity]) AsCommodity() (Quantity[Commodity], bool) { return q, true }
+   ```
+
+   For code paths where dimension is known at compile time, prefer direct construction:
+
+   ```go
+   // Known dimension at compile time - use NewQuantity[D]
+   money := NewQuantity[Monetary](decimal.NewFromInt(100), usdInstrument)
+
+   // Unknown dimension at runtime - use ParseQuantity + interface
+   qv, _ := ParseQuantity(amountFromProto, instFromDB)
+   if m, ok := qv.AsMonetary(); ok {
+       processMonetaryPayment(m)
+   } else if c, ok := qv.AsCommodity(); ok {
+       processCommodityTransfer(c)
+   }
    ```
 
    **When to use which:**
@@ -1003,6 +1033,9 @@ flowchart TB
        dimension VARCHAR(32) NOT NULL,
        precision INTEGER NOT NULL,
 
+       -- Lifecycle status: DRAFT allows editing, ACTIVE locks expressions
+       status VARCHAR(16) NOT NULL DEFAULT 'DRAFT',
+
        -- CEL Expressions (compiled and cached by service layer)
        validation_expression TEXT NOT NULL DEFAULT 'true',  -- Ingestion gatekeeper
 
@@ -1011,13 +1044,18 @@ flowchart TB
        -- Same bucket_id = fungible. Different bucket_id = NOT fungible.
        fungibility_key_expression TEXT NOT NULL DEFAULT '',
 
+       -- Optional user-friendly error message expression (CEL)
+       error_message_expression TEXT,
+
        display_name VARCHAR(128),
        description TEXT,
        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       activated_at TIMESTAMPTZ,  -- When status changed to ACTIVE
 
        UNIQUE(tenant_id, code, version),
        CHECK (precision >= 0 AND precision <= 18),
        CHECK (dimension IN ('Monetary', 'Commodity')),
+       CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
        CHECK (length(trim(validation_expression)) > 0),
        CHECK (length(validation_expression) <= 4096),
        CHECK (length(fungibility_key_expression) <= 4096)
@@ -1026,29 +1064,63 @@ flowchart TB
    CREATE INDEX idx_instrument_definitions_lookup
        ON instrument_definitions(tenant_id, code, version);
 
-   -- IMMUTABILITY ENFORCEMENT: Prevent updates to bucketing logic after creation.
-   -- To change logic, tenant MUST create Version N+1.
-   CREATE OR REPLACE FUNCTION prevent_bucket_key_update()
+   -- LIFECYCLE AND IMMUTABILITY ENFORCEMENT
+   -- DRAFT: Free editing, no transactions allowed
+   -- ACTIVE: Expressions locked, transactions allowed
+   -- DEPRECATED: Read-only, no new transactions
+   CREATE OR REPLACE FUNCTION enforce_instrument_lifecycle()
    RETURNS TRIGGER AS $$
    BEGIN
+       -- DRAFT instruments can be freely edited
+       IF OLD.status = 'DRAFT' THEN
+           -- When activating, record the timestamp
+           IF NEW.status = 'ACTIVE' THEN
+               NEW.activated_at := NOW();
+           END IF;
+           RETURN NEW;
+       END IF;
+
+       -- ACTIVE/DEPRECATED instruments: expressions are immutable
        IF OLD.fungibility_key_expression IS DISTINCT FROM NEW.fungibility_key_expression THEN
            RAISE EXCEPTION 'Cannot update fungibility_key_expression. Create Version N+1 instead.';
        END IF;
        IF OLD.validation_expression IS DISTINCT FROM NEW.validation_expression THEN
            RAISE EXCEPTION 'Cannot update validation_expression. Create Version N+1 instead.';
        END IF;
+
+       -- Prevent reverting ACTIVE to DRAFT (would orphan bucket calculations)
+       IF OLD.status = 'ACTIVE' AND NEW.status = 'DRAFT' THEN
+           RAISE EXCEPTION 'Cannot revert ACTIVE instrument to DRAFT. Create Version N+1 instead.';
+       END IF;
+
+       -- Allow ACTIVE -> DEPRECATED (soft deprecation)
        RETURN NEW;
    END;
    $$ LANGUAGE plpgsql;
 
-   CREATE TRIGGER enforce_expression_immutability
+   CREATE TRIGGER enforce_instrument_lifecycle
        BEFORE UPDATE ON instrument_definitions
-       FOR EACH ROW EXECUTE FUNCTION prevent_bucket_key_update();
+       FOR EACH ROW EXECUTE FUNCTION enforce_instrument_lifecycle();
    ```
 
    > **Two CEL expressions per instrument**:
+   >
    > - `validation_expression`: "Is this data valid?" (ingestion gatekeeper)
    > - `fungibility_key_expression`: "What bucket does this belong to?" (sole determinant of fungibility)
+   >
+   > **Instrument Lifecycle**:
+   >
+   > ```text
+   > ┌─────────┐      Activate()      ┌─────────┐     Deprecate()    ┌────────────┐
+   > │  DRAFT  │ ──────────────────▶  │ ACTIVE  │ ─────────────────▶ │ DEPRECATED │
+   > └─────────┘                      └─────────┘                    └────────────┘
+   >     │                                │                               │
+   >     │ • Expressions editable         │ • Expressions LOCKED          │ • Read-only
+   >     │ • No transactions allowed      │ • Transactions allowed        │ • No new txns
+   >     │ • CEL Playground testing       │ • activated_at set            │ • Soft sunset
+   >     └────────────────────────────────┴───────────────────────────────┘
+   >                                    No revert from ACTIVE → DRAFT
+   > ```
 
 2. **Bucket ID in positions table** (added by Stream I.1 migration)
 
@@ -1061,35 +1133,83 @@ flowchart TB
    > **Write path**: Calculate bucket_id from `fungibility_key_expression`, store with position.
    > **Read path**: `SELECT SUM(amount) FROM positions WHERE bucket_id = ?` uses index.
 
-3. **System tenant seed data** (Bootstrap Migration - CRITICAL):
+3. **System tenant seed data** (App Bootstrap - NOT SQL Migration):
 
    > **The Chicken-and-Egg Problem**: To create a Tenant, you need to bill them. To bill them,
    > you need an Instrument (`USD`). To define `USD`, you need Reference Data Service running.
    > The Reference Data Service needs the database schema.
    >
-   > **Solution**: Insert base instruments via SQL migration, not API. The system comes up
-   > ready to transact on day one.
+   > **Solution**: Seed base instruments via **App Bootstrap**, not SQL migration. This keeps
+   > migrations purely structural (schema changes only) while application code handles data seeding.
+   > The service startup sequence ensures instruments exist before accepting traffic.
 
-   ```sql
-   -- System tenant ID: 00000000-0000-0000-0000-000000000000
-   -- Platform-wide instruments accessible to ALL tenants
-   -- validation_expression='true' means no attribute constraints
-   INSERT INTO instrument_definitions
-       (tenant_id, code, version, dimension, precision, validation_expression, display_name)
-   VALUES
-       ('00000000-0000-0000-0000-000000000000', 'USD', 1, 'Monetary', 2, 'true', 'US Dollar'),
-       ('00000000-0000-0000-0000-000000000000', 'EUR', 1, 'Monetary', 2, 'true', 'Euro'),
-       ('00000000-0000-0000-0000-000000000000', 'GBP', 1, 'Monetary', 2, 'true', 'British Pound');
+   ```go
+   // bootstrap.go - Runs on service startup, AFTER migrations, BEFORE accepting traffic
+   func (s *Service) Bootstrap(ctx context.Context) error {
+       // Idempotent: Only insert if not already present
+       systemInstruments := []InstrumentDefinition{
+           {
+               TenantID:   SystemTenantID,
+               Code:       "USD",
+               Version:    1,
+               Dimension:  "Monetary",
+               Precision:  2,
+               Status:     "ACTIVE",
+               ValidationExpression: "true",
+               DisplayName: "US Dollar",
+           },
+           {
+               TenantID:   SystemTenantID,
+               Code:       "EUR",
+               Version:    1,
+               Dimension:  "Monetary",
+               Precision:  2,
+               Status:     "ACTIVE",
+               ValidationExpression: "true",
+               DisplayName: "Euro",
+           },
+           {
+               TenantID:   SystemTenantID,
+               Code:       "GBP",
+               Version:    1,
+               Dimension:  "Monetary",
+               Precision:  2,
+               Status:     "ACTIVE",
+               ValidationExpression: "true",
+               DisplayName: "British Pound",
+           },
+       }
+
+       for _, inst := range systemInstruments {
+           // Upsert: INSERT ... ON CONFLICT DO NOTHING
+           if err := s.repo.UpsertSystemInstrument(ctx, inst); err != nil {
+               return fmt.Errorf("bootstrap instrument %s: %w", inst.Code, err)
+           }
+       }
+       return nil
+   }
    ```
+
+   > **Why App Bootstrap over SQL Migration?**
+   >
+   > - Migrations stay **pure DDL** (CREATE TABLE, ALTER, etc.) - easier to review and audit
+   > - Seed data lives in **Go code** - type-safe, testable, version-controlled alongside service
+   > - **Idempotent by design** - uses ON CONFLICT, safe to run multiple times
+   > - **Environment-specific** - dev/staging/prod can have different seed sets if needed
 
 ### Acceptance Criteria
 
-- [ ] Migration applies cleanly
+- [ ] Migration applies cleanly (pure DDL, no INSERT statements)
 - [ ] Unique constraint prevents duplicate code+version per tenant
 - [ ] Index supports efficient lookups
-- [ ] System tenant seed data inserted
+- [ ] App Bootstrap seeds system instruments on startup (idempotent)
+- [ ] System instruments have `status='ACTIVE'` after bootstrap
 - [ ] `validation_expression` column stores valid CEL expressions
 - [ ] Default `'true'` allows permissive instruments (no attribute constraints)
+- [ ] DRAFT instruments allow expression edits via trigger
+- [ ] ACTIVE instruments reject expression updates (trigger raises exception)
+- [ ] ACTIVE → DRAFT revert is blocked by trigger
+- [ ] ACTIVE → DEPRECATED transition allowed
 
 ---
 
@@ -1120,9 +1240,22 @@ flowchart TB
        // Or: if version == 0 { return GetLatestDefinition(...) }
        GetLatestDefinition(ctx context.Context, tenantID uuid.UUID, code string) (InstrumentDefinition, error)
 
-       // CreateDefinition creates tenant-specific instrument (cannot create in SystemTenant via API)
+       // CreateDefinition creates a DRAFT instrument (cannot create in SystemTenant via API)
        // Compiles CEL expression at creation time - fails fast on syntax errors
+       // New instruments start in DRAFT status, allowing expression edits before activation.
        CreateDefinition(ctx context.Context, def InstrumentDefinition) (InstrumentDefinition, error)
+
+       // UpdateDefinition updates a DRAFT instrument's expressions.
+       // Returns ErrInstrumentLocked if instrument is ACTIVE or DEPRECATED.
+       UpdateDefinition(ctx context.Context, def InstrumentDefinition) (InstrumentDefinition, error)
+
+       // ActivateInstrument transitions DRAFT → ACTIVE, locking expressions permanently.
+       // After activation, only DEPRECATED transition is allowed.
+       ActivateInstrument(ctx context.Context, tenantID uuid.UUID, code string, version uint32) error
+
+       // DeprecateInstrument transitions ACTIVE → DEPRECATED for soft sunset.
+       // Deprecated instruments reject new transactions but allow reads.
+       DeprecateInstrument(ctx context.Context, tenantID uuid.UUID, code string, version uint32) error
 
        // ListDefinitions returns tenant instruments + all SystemTenant instruments
        ListDefinitions(ctx context.Context, tenantID uuid.UUID) ([]InstrumentDefinition, error)
@@ -1152,10 +1285,15 @@ flowchart TB
    }
    ```
 
-3. **System Tenant Write Protection**:
+3. **System Tenant Write Protection and Lifecycle Errors**:
 
    ```go
-   var ErrSystemTenantReadOnly = errors.New("system tenant instruments are read-only")
+   var (
+       ErrSystemTenantReadOnly = errors.New("system tenant instruments are read-only")
+       ErrInstrumentLocked     = errors.New("instrument is ACTIVE or DEPRECATED; expressions cannot be modified")
+       ErrInstrumentNotDraft   = errors.New("instrument must be DRAFT to activate")
+       ErrInstrumentNotActive  = errors.New("instrument must be ACTIVE to deprecate")
+   )
 
    func (r *PostgresRegistry) CreateDefinition(
        ctx context.Context, def InstrumentDefinition,
@@ -1164,6 +1302,9 @@ flowchart TB
        if def.TenantID == SystemTenantID {
            return InstrumentDefinition{}, ErrSystemTenantReadOnly
        }
+
+       // New instruments always start as DRAFT (DB default, enforced here too)
+       def.Status = "DRAFT"
 
        // Compile CEL expressions before persisting (fail fast on syntax errors)
        if _, err := r.compiler.CompileValidation(def.ValidationExpression); err != nil {
@@ -1174,6 +1315,20 @@ flowchart TB
        }
 
        return r.queries.CreateInstrumentDefinition(ctx, def)
+   }
+
+   func (r *PostgresRegistry) ActivateInstrument(
+       ctx context.Context, tenantID uuid.UUID, code string, version uint32,
+   ) error {
+       def, err := r.GetDefinition(ctx, tenantID, code, version)
+       if err != nil {
+           return err
+       }
+       if def.Status != "DRAFT" {
+           return ErrInstrumentNotDraft
+       }
+       // DB trigger handles setting activated_at
+       return r.queries.UpdateInstrumentStatus(ctx, def.ID, "ACTIVE")
    }
    ```
 
@@ -1394,48 +1549,83 @@ flowchart TB
    > **Error wrapping**: Use `fmt.Errorf("%w: %v", ErrInvalidValidationExpression, celErr)`
    > to preserve both the sentinel error and the underlying CEL parser message.
 
-10. **CEL Error Message Surfacing**:
+10. **CEL Error Message Surfacing** (Structured ValidationReport):
 
-   CEL validation failures should provide actionable error messages to API callers:
+    CEL validation failures should provide **actionable, user-friendly** error messages:
 
-   ```go
-   // ValidationError wraps CEL evaluation context for debugging
-   type ValidationError struct {
-       InstrumentCode string
-       Expression     string            // The CEL expression that failed
-       Attributes     map[string]string // The input attributes
-       Reason         string            // "expression evaluated to false" or CEL runtime error
-   }
+    ```go
+    // ValidationReport provides structured feedback for CEL failures
+    type ValidationReport struct {
+        InstrumentCode string              `json:"instrument_code"`
+        Valid          bool                `json:"valid"`
+        Errors         []ValidationError   `json:"errors,omitempty"`
+        UserMessage    string              `json:"user_message,omitempty"`  // Human-readable
+    }
 
-   func (e ValidationError) Error() string {
-       return fmt.Sprintf("validation failed for instrument %s: %s", e.InstrumentCode, e.Reason)
-   }
+    type ValidationError struct {
+        Field   string `json:"field,omitempty"`   // e.g., "region"
+        Code    string `json:"code"`              // e.g., "MISSING_REQUIRED_FIELD"
+        Message string `json:"message"`           // e.g., "Missing required field: region"
+    }
+    ```
 
-   // Usage in ValidateAttributes
-   func (r *Registry) ValidateAttributes(ctx context.Context, def InstrumentDefinition, attrs map[string]string) error {
-       result, details, err := r.validationProgram.Eval(map[string]any{"attributes": attrs})
-       if err != nil {
-           return ValidationError{
-               InstrumentCode: def.Code,
-               Expression:     def.ValidationExpression,
-               Attributes:     attrs,
-               Reason:         fmt.Sprintf("CEL runtime error: %v", err),
-           }
-       }
-       if result.Value() != true {
-           return ValidationError{
-               InstrumentCode: def.Code,
-               Expression:     def.ValidationExpression,
-               Attributes:     attrs,
-               Reason:         "expression evaluated to false",
-           }
-       }
-       return nil
-   }
-   ```
+    **User-Friendly Error Generation:**
 
-   > **Security note**: Log full `ValidationError` details internally, but return only
-   > `Reason` to external callers to avoid leaking CEL expression logic.
+    InstrumentDefinition supports an optional `error_message_expression` (CEL) that constructs
+    human-readable errors based on input attributes:
+
+    ```protobuf
+    message InstrumentDefinition {
+        // ... existing fields ...
+
+        // Optional: CEL expression to generate user-friendly error messages.
+        // Input: attributes map. Output: string (error message, or "" if valid).
+        // Example: "!has(attributes.region) ? 'Missing required field: region' : ''"
+        string error_message_expression = 12;
+    }
+    ```
+
+    ```go
+    // Usage in ValidateAttributes - returns structured report, not just error
+    func (r *Registry) ValidateAttributes(
+        ctx context.Context, def InstrumentDefinition, attrs map[string]string,
+    ) ValidationReport {
+        report := ValidationReport{InstrumentCode: def.Code, Valid: true}
+
+        // 1. Run validation expression
+        result, _, err := r.validationProgram.Eval(map[string]any{"attributes": attrs})
+        if err != nil {
+            report.Valid = false
+            report.Errors = append(report.Errors, ValidationError{
+                Code:    "CEL_RUNTIME_ERROR",
+                Message: err.Error(),
+            })
+        } else if result.Value() != true {
+            report.Valid = false
+
+            // 2. Generate user-friendly message via error_message_expression
+            if def.ErrorMessageExpression != "" {
+                msg, _ := r.errorMsgProgram.Eval(map[string]any{"attributes": attrs})
+                if s, ok := msg.Value().(string); ok && s != "" {
+                    report.UserMessage = s
+                }
+            }
+            if report.UserMessage == "" {
+                report.UserMessage = "Attributes failed validation"
+            }
+            report.Errors = append(report.Errors, ValidationError{
+                Code:    "VALIDATION_FAILED",
+                Message: report.UserMessage,
+            })
+        }
+        return report
+    }
+    ```
+
+    > **Why structured reports?** A generic "InvalidArgument: attributes failed validation"
+    > frustrates developers. With `error_message_expression`, tenants can define:
+    > `"!has(attributes.region) ? 'Missing required field: region' : ''"` to provide
+    > actionable feedback like "Missing required field: region".
 
 1. **Archetype Loader** (`cmd/archetype-loader`)
 
@@ -1550,9 +1740,41 @@ flowchart TB
 
    ```protobuf
    service ReferenceDataService {
+       // CRUD operations
        rpc RegisterInstrument(RegisterInstrumentRequest) returns (InstrumentDefinition);
+       rpc UpdateInstrument(UpdateInstrumentRequest) returns (InstrumentDefinition);
        rpc RetrieveInstrument(RetrieveInstrumentRequest) returns (InstrumentDefinition);
        rpc ListInstruments(ListInstrumentsRequest) returns (ListInstrumentsResponse);
+
+       // Lifecycle transitions (see Stream E/F for status semantics)
+       rpc ActivateInstrument(ActivateInstrumentRequest) returns (InstrumentDefinition);
+       rpc DeprecateInstrument(DeprecateInstrumentRequest) returns (InstrumentDefinition);
+
+       // CEL Playground - Test expressions without persisting
+       rpc EvaluateInstrument(EvaluateInstrumentRequest) returns (EvaluateInstrumentResponse);
+   }
+
+   message EvaluateInstrumentRequest {
+       // CEL expressions to evaluate (same fields as InstrumentDefinition)
+       string validation_expression = 1;
+       string fungibility_key_expression = 2;
+       string error_message_expression = 3;
+
+       // Test data: attributes to evaluate against
+       map<string, string> test_attributes = 4;
+   }
+
+   message EvaluateInstrumentResponse {
+       // Did the expressions compile successfully?
+       bool compile_success = 1;
+       repeated string compile_errors = 2;
+
+       // Validation result (if compiled successfully)
+       bool validation_passed = 3;
+       ValidationReport validation_report = 4;
+
+       // Bucket key result (if compiled successfully)
+       string bucket_key = 5;
    }
    ```
 
@@ -1563,7 +1785,82 @@ flowchart TB
 
 3. **Adapter layer** for proto ↔ domain conversion
 
-4. **Rate Limiting** for `RegisterInstrument`:
+4. **CEL Playground** (`EvaluateInstrument` handler):
+
+   ```go
+   // EvaluateInstrument provides a "dry run" mode for testing CEL expressions.
+   // Use this to validate expressions BEFORE activating an instrument.
+   // The endpoint does NOT persist anything - purely for testing.
+   func (h *Handler) EvaluateInstrument(
+       ctx context.Context,
+       req *pb.EvaluateInstrumentRequest,
+   ) (*pb.EvaluateInstrumentResponse, error) {
+       resp := &pb.EvaluateInstrumentResponse{}
+
+       // 1. Compile validation expression
+       valProg, err := h.compiler.CompileValidation(req.ValidationExpression)
+       if err != nil {
+           resp.CompileSuccess = false
+           resp.CompileErrors = append(resp.CompileErrors,
+               fmt.Sprintf("validation_expression: %v", err))
+       }
+
+       // 2. Compile bucket key expression (if provided)
+       var bucketProg cel.Program
+       if req.FungibilityKeyExpression != "" {
+           bucketProg, err = h.compiler.CompileFungibility(req.FungibilityKeyExpression)
+           if err != nil {
+               resp.CompileSuccess = false
+               resp.CompileErrors = append(resp.CompileErrors,
+                   fmt.Sprintf("fungibility_key_expression: %v", err))
+           }
+       }
+
+       // 3. Compile error message expression (if provided)
+       var errMsgProg cel.Program
+       if req.ErrorMessageExpression != "" {
+           errMsgProg, err = h.compiler.CompileErrorMessage(req.ErrorMessageExpression)
+           if err != nil {
+               resp.CompileSuccess = false
+               resp.CompileErrors = append(resp.CompileErrors,
+                   fmt.Sprintf("error_message_expression: %v", err))
+           }
+       }
+
+       // If any compilation failed, return early
+       if len(resp.CompileErrors) > 0 {
+           return resp, nil
+       }
+       resp.CompileSuccess = true
+
+       // 4. Evaluate against test attributes
+       if len(req.TestAttributes) > 0 {
+           // Run validation
+           passed, report := h.validator.Evaluate(valProg, errMsgProg, req.TestAttributes)
+           resp.ValidationPassed = passed
+           resp.ValidationReport = report.ToProto()
+
+           // Generate bucket key
+           if bucketProg != nil {
+               bucketKey, err := h.evaluator.GenerateBucketKey(bucketProg, req.TestAttributes)
+               if err != nil {
+                   resp.CompileErrors = append(resp.CompileErrors,
+                       fmt.Sprintf("bucket_key evaluation failed: %v", err))
+               } else {
+                   resp.BucketKey = bucketKey
+               }
+           }
+       }
+
+       return resp, nil
+   }
+   ```
+
+   > **Workflow**: Create DRAFT instrument → Test expressions via `EvaluateInstrument` →
+   > Iterate on expressions using `UpdateInstrument` → When satisfied, call `ActivateInstrument`.
+   > This prevents "lock-in" of untested expressions.
+
+5. **Rate Limiting** for `RegisterInstrument`:
 
    > **Preferred location**: API Gateway (Envoy, Kong, Nginx) using external rate limit service.
    > Gateway-level rate limiting keeps operational concerns separate from business logic.
@@ -1610,12 +1907,15 @@ flowchart TB
 
 ### Acceptance Criteria
 
-- [ ] All endpoints functional
+- [ ] All CRUD endpoints functional (`Register`, `Update`, `Retrieve`, `List`)
+- [ ] Lifecycle endpoints functional (`Activate`, `Deprecate`)
+- [ ] `EvaluateInstrument` compiles and evaluates CEL expressions without persisting
+- [ ] `EvaluateInstrument` returns compile errors, validation report, and bucket key
 - [ ] Proper gRPC error codes returned
 - [ ] Tenant context required and enforced
 - [ ] `RegisterInstrument` rate-limited to 10 requests/minute per tenant
 - [ ] Rate limit exceeded returns `RESOURCE_EXHAUSTED` (gRPC code 8) with clear message
-- [ ] Rate limiting does NOT apply to `RetrieveInstrument` or `ListInstruments` (read-only)
+- [ ] Rate limiting does NOT apply to read-only endpoints
 
 ---
 
@@ -1695,7 +1995,37 @@ flowchart TB
    }
    ```
 
-3. **Cache invalidation** on `CreateDefinition` (local only, no distributed)
+3. **Cache invalidation** (local + event-driven):
+
+   ```go
+   // Local invalidation: Clear cache on writes from this node
+   func (c *CachedInstrumentRegistry) InvalidateOnWrite(
+       tenantID uuid.UUID, code string, version uint32,
+   ) {
+       key := cacheKey{TenantID: tenantID, Code: code, Version: version}
+       c.cache.Remove(key)
+   }
+
+   // Event-driven invalidation: Subscribe to instrument.updated events
+   // This handles invalidation when OTHER nodes modify instruments
+   func (c *CachedInstrumentRegistry) SubscribeToUpdates(ctx context.Context, consumer EventConsumer) {
+       consumer.Subscribe("instrument.updated", func(event InstrumentUpdatedEvent) {
+           c.cache.Remove(cacheKey{
+               TenantID: event.TenantID,
+               Code:     event.Code,
+               Version:  event.Version,
+           })
+           log.Info().
+               Str("code", event.Code).
+               Uint32("version", event.Version).
+               Msg("cache invalidated via event")
+       })
+   }
+   ```
+
+   > **Dual invalidation strategy**: Local writes invalidate immediately (synchronous).
+   > Remote writes invalidate via event stream (eventual consistency, typically <100ms).
+   > TTL provides the safety net for missed events.
 
 4. **TTL Jitter** (Thundering Herd Prevention):
 
@@ -1733,7 +2063,8 @@ flowchart TB
 
 - [ ] Cache hit returns pre-compiled CEL program
 - [ ] TTL-based expiration works with jitter (4m30s - 5m30s range)
-- [ ] Creation invalidates relevant cache entries
+- [ ] Local writes invalidate cache entries synchronously
+- [ ] Event subscription invalidates cache on remote writes (`instrument.updated`)
 - [ ] `ValidateAttributes` uses cached `cel.Program` (no re-compilation)
 - [ ] Admin API exposes cache purge endpoints
 - [ ] Pod restart clears cache (no persistent state)
