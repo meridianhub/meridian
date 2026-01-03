@@ -36,6 +36,7 @@ compile-time dimensional safety.
 
 - [CEL Validation Pattern](#cel-validation-pattern)
 - [Data Contract: Proto + CEL + Go](#data-contract-proto--cel--go)
+- [Asset Catalog (Open Source Library)](#asset-catalog-open-source-library)
 - [Fungibility Resolution](#fungibility-resolution)
 - [Service Impact Matrix](#service-impact-matrix)
 - [Work Streams](#work-streams)
@@ -145,6 +146,105 @@ result, _ := cachedInstrument.ValidationProgram.Eval(celVars)
 - **Proto** provides infinite flexibility (any `map<string,string>`)
 - **CEL** provides rigid safety (tenant-defined validation rules)
 - **Go Generics** provide compile-time physics (`Quantity[Monetary]` vs `Quantity[Commodity]`)
+
+---
+
+## Asset Catalog (Open Source Library)
+
+The PRD defines a flexible system where tenants can create custom instruments with CEL expressions.
+However, expecting every tenant to write CEL from scratch is operationally impractical. We need a
+**Standard Library** of validated asset types that users can instantiate or extend.
+
+### Concept: Asset Archetypes
+
+An **Archetype** is a pre-built instrument template stored as YAML in the repository. Archetypes
+provide battle-tested CEL logic for common asset classes, contributed by domain experts.
+
+**Directory structure:**
+
+```text
+configs/archetypes/
+├── commodity/
+│   ├── perishable_goods.yaml
+│   └── perishable_goods_test.yaml
+├── energy/
+│   ├── renewable_power.yaml
+│   └── renewable_power_test.yaml
+└── financial/
+    ├── carbon_credit.yaml
+    └── carbon_credit_test.yaml
+```
+
+### Example Archetype Definition
+
+**File:** `configs/archetypes/commodity/perishable_goods.yaml`
+
+```yaml
+name: "Perishable Goods (Base)"
+description: "Items that expire and cannot be traded after a specific date."
+dimension: "Commodity"
+attributes:
+  - name: "expiry_date"
+    type: "timestamp"
+    required: true
+validation_cel: |
+  has(attributes.expiry_date) &&
+  timestamp(attributes.expiry_date) > now
+fungibility_cel: |
+  a.expiry_date == b.expiry_date
+```
+
+**File:** `configs/archetypes/energy/renewable_power.yaml`
+
+```yaml
+name: "Renewable Energy Certificate"
+dimension: "Commodity"
+attributes:
+  - name: "generation_source"
+    enum: ["solar", "wind", "hydro"]
+  - name: "region"
+validation_cel: |
+  has(attributes.generation_source) &&
+  attributes.generation_source in ['solar', 'wind', 'hydro']
+fungibility_cel: |
+  a.generation_source == b.generation_source && a.region == b.region
+```
+
+### Testing Archetypes (Community Contribution Model)
+
+Contributors don't touch Go code. They submit a YAML archetype + test file:
+
+**File:** `configs/archetypes/energy/renewable_power_test.yaml`
+
+```yaml
+archetype: "renewable_power.yaml"
+tests:
+  - name: "Valid Solar"
+    input: { "generation_source": "solar", "region": "us-east" }
+    expect: PASS
+
+  - name: "Invalid Source"
+    input: { "generation_source": "coal", "region": "us-east" }
+    expect: FAIL
+
+  - name: "Missing Required Field"
+    input: { "region": "us-east" }
+    expect: FAIL
+```
+
+**CI Pipeline:**
+
+1. Developer submits PR with new YAML archetype + test YAML
+2. GitHub Actions runs `go run cmd/archetype-tester`
+3. Tester compiles CEL from YAML and runs all scenarios
+4. Green build → PR merges
+
+### Goal: Asset Marketplace
+
+Enable a library of asset types (EU Carbon Credits, ISDA Swaps, US Treasuries, GPU Compute Hours)
+contributed by domain experts. Tenants select from the catalog rather than writing CEL from scratch.
+
+> **Implementation tasks** are defined in Stream F (F.4 and F.5).
 
 ---
 
@@ -977,7 +1077,7 @@ flowchart TB
    **Why**: CEL interprets `attributes.user-id` as subtraction (`attributes.user` minus `id`).
    Forcing `snake_case` ensures `attributes.user_id` works without bracket syntax `attributes['user-id']`.
 
-5. **CEL Environment Variables** (Explicit Contract):
+6. **CEL Environment Variables** (Explicit Contract):
 
    The CEL environments are strictly typed. Variable names are fixed contracts:
 
@@ -998,7 +1098,7 @@ flowchart TB
    | `b` | `Map<String, String>` | Attributes of incoming position |
    | Returns | `Bool` | `true` = merge, `false` = keep separate |
 
-6. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
+7. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
 
    ```go
    type CELCompiler struct {
@@ -1059,16 +1159,16 @@ flowchart TB
    }
    ```
 
-7. **PostgreSQL implementation** with sqlc-generated queries
+8. **PostgreSQL implementation** with sqlc-generated queries
 
-8. **Error types**:
+9. **Error types**:
    - `ErrInstrumentNotFound`
    - `ErrDuplicateInstrument`
    - `ErrCELCompileError` - syntax/semantic error in validation expression
    - `ErrAttributeValidationFailed` - CEL evaluated to `false`
    - `ErrSystemTenantReadOnly` - attempt to create/modify System Tenant instrument
 
-9. **CEL Error Message Surfacing**:
+10. **CEL Error Message Surfacing**:
 
    CEL validation failures should provide actionable error messages to API callers:
 
@@ -1111,6 +1211,79 @@ flowchart TB
    > **Security note**: Log full `ValidationError` details internally, but return only
    > `Reason` to external callers to avoid leaking CEL expression logic.
 
+1. **Archetype Loader** (`cmd/archetype-loader`)
+
+    Reads YAML archetype definitions from `configs/archetypes/` and seeds them into the System Tenant:
+
+    ```go
+    // ArchetypeLoader reads YAML files and creates InstrumentDefinitions
+    type ArchetypeLoader struct {
+        registry InstrumentRegistry
+        compiler *CELCompiler
+    }
+
+    func (l *ArchetypeLoader) LoadAll(ctx context.Context, dir string) error {
+        files, _ := filepath.Glob(filepath.Join(dir, "**/*.yaml"))
+        for _, f := range files {
+            if strings.HasSuffix(f, "_test.yaml") {
+                continue // Skip test files
+            }
+            if err := l.loadArchetype(ctx, f); err != nil {
+                return fmt.Errorf("failed to load %s: %w", f, err)
+            }
+        }
+        return nil
+    }
+
+    func (l *ArchetypeLoader) loadArchetype(ctx context.Context, path string) error {
+        var arch Archetype
+        data, _ := os.ReadFile(path)
+        yaml.Unmarshal(data, &arch)
+
+        def := InstrumentDefinition{
+            TenantID:              SystemTenantID,
+            Code:                  arch.Name,
+            Dimension:             arch.Dimension,
+            ValidationExpression:  arch.ValidationCEL,
+            FungibilityExpression: arch.FungibilityCEL,
+        }
+        _, err := l.registry.CreateDefinition(ctx, def)
+        return err
+    }
+    ```
+
+    > **Usage**: Run during deployment or as init container to seed archetypes.
+
+2. **Archetype Tester** (`cmd/archetype-tester`)
+
+    CI tool that validates archetype CEL logic against test scenarios:
+
+    ```go
+    // ArchetypeTester runs test cases against archetype definitions
+    func (t *ArchetypeTester) RunTests(archetypePath, testPath string) error {
+        arch := loadArchetype(archetypePath)
+        tests := loadTests(testPath)
+
+        program, _ := t.compiler.CompileValidation(arch.ValidationCEL)
+
+        for _, tc := range tests.Tests {
+            result, _ := program.Eval(map[string]any{"attributes": tc.Input})
+            passed := result.Value().(bool)
+
+            if tc.Expect == "PASS" && !passed {
+                return fmt.Errorf("test %q: expected PASS, got FAIL", tc.Name)
+            }
+            if tc.Expect == "FAIL" && passed {
+                return fmt.Errorf("test %q: expected FAIL, got PASS", tc.Name)
+            }
+        }
+        return nil
+    }
+    ```
+
+    > **CI Integration**: Add GitHub Action that runs `go run cmd/archetype-tester` on PRs
+    > touching `configs/archetypes/`.
+
 ### Acceptance Criteria
 
 - [ ] CRUD operations work correctly
@@ -1119,6 +1292,8 @@ flowchart TB
 - [ ] Cannot create instruments in System Tenant via API (admin-only seed data)
 - [ ] CEL expression compiled at `CreateDefinition` - syntax errors rejected immediately
 - [ ] `ValidateAttributes` executes compiled CEL and returns clear error on `false`
+- [ ] Archetype loader seeds YAML definitions into System Tenant
+- [ ] Archetype tester validates CEL logic against test scenarios in CI
 
 ---
 
