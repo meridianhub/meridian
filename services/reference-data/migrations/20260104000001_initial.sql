@@ -20,6 +20,7 @@ CREATE TABLE "instrument_definition" (
   "display_name" character varying(255) NULL,
   "description" text NULL,
   "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
   "activated_at" timestamptz NULL,
   "deprecated_at" timestamptz NULL,
   PRIMARY KEY ("id")
@@ -38,10 +39,18 @@ ALTER TABLE "instrument_definition"
   ADD CONSTRAINT "chk_instrument_definition_status"
   CHECK ("status" IN ('DRAFT', 'ACTIVE', 'DEPRECATED'));
 
--- Limit validation_expression to 4KB to prevent abuse
+-- Limit expression columns to 4KB to prevent abuse
 ALTER TABLE "instrument_definition"
   ADD CONSTRAINT "chk_instrument_definition_validation_expression_length"
   CHECK ("validation_expression" IS NULL OR length("validation_expression") <= 4096);
+
+ALTER TABLE "instrument_definition"
+  ADD CONSTRAINT "chk_instrument_definition_fungibility_expression_length"
+  CHECK (length("fungibility_key_expression") <= 4096);
+
+ALTER TABLE "instrument_definition"
+  ADD CONSTRAINT "chk_instrument_definition_error_message_length"
+  CHECK ("error_message_expression" IS NULL OR length("error_message_expression") <= 4096);
 
 -- Ensure code+version is unique (allows multiple versions of same instrument)
 ALTER TABLE "instrument_definition"
@@ -49,7 +58,7 @@ ALTER TABLE "instrument_definition"
   UNIQUE ("code", "version");
 
 -- Create indexes for efficient lookups
-CREATE INDEX "idx_instrument_definition_code_version" ON "instrument_definition" ("code", "version");
+-- Note: (code, version) index not needed - unique constraint creates implicit index
 
 -- Partial index for quickly finding active instruments by code
 CREATE INDEX "idx_instrument_definition_code_active" ON "instrument_definition" ("code") WHERE "status" = 'ACTIVE';
@@ -66,11 +75,17 @@ CREATE INDEX "idx_instrument_definition_created_at" ON "instrument_definition" (
 CREATE OR REPLACE FUNCTION "enforce_instrument_lifecycle"()
 RETURNS TRIGGER AS $$
 BEGIN
+  -- Always update updated_at on any change
+  NEW."updated_at" = NOW();
+
   -- Allow all edits when status is DRAFT
   IF OLD."status" = 'DRAFT' THEN
     -- If transitioning from DRAFT to ACTIVE, set activated_at
     IF NEW."status" = 'ACTIVE' THEN
       NEW."activated_at" = NOW();
+    -- If transitioning from DRAFT to DEPRECATED, set deprecated_at
+    ELSIF NEW."status" = 'DEPRECATED' THEN
+      NEW."deprecated_at" = NOW();
     END IF;
     RETURN NEW;
   END IF;

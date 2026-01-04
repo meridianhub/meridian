@@ -320,6 +320,55 @@ func TestMigration_CheckConstraints(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "chk_instrument_definition_validation_expression_length")
 	})
+
+	t.Run("fungibility_key_expression length constraint accepts up to 4KB", func(t *testing.T) {
+		// Exactly 4096 bytes should be accepted
+		validExpr := strings.Repeat("x", 4096)
+		_, err := tc.pool.Exec(ctx, `
+			INSERT INTO instrument_definition (id, code, version, dimension, precision, status, fungibility_key_expression)
+			VALUES ($1, 'VALID_FUNG_EXPR', 1, 'MONETARY', 2, 'DRAFT', $2)
+		`, uuid.New(), validExpr)
+		require.NoError(t, err)
+	})
+
+	t.Run("fungibility_key_expression length constraint rejects over 4KB", func(t *testing.T) {
+		// 4097 bytes should be rejected
+		invalidExpr := strings.Repeat("x", 4097)
+		_, err := tc.pool.Exec(ctx, `
+			INSERT INTO instrument_definition (id, code, version, dimension, precision, status, fungibility_key_expression)
+			VALUES ($1, 'INVALID_FUNG_EXPR', 1, 'MONETARY', 2, 'DRAFT', $2)
+		`, uuid.New(), invalidExpr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "chk_instrument_definition_fungibility_expression_length")
+	})
+
+	t.Run("error_message_expression length constraint accepts up to 4KB", func(t *testing.T) {
+		// Exactly 4096 bytes should be accepted
+		validExpr := strings.Repeat("x", 4096)
+		_, err := tc.pool.Exec(ctx, `
+			INSERT INTO instrument_definition (id, code, version, dimension, precision, status, fungibility_key_expression, error_message_expression)
+			VALUES ($1, 'VALID_ERR_EXPR', 1, 'MONETARY', 2, 'DRAFT', '', $2)
+		`, uuid.New(), validExpr)
+		require.NoError(t, err)
+
+		// NULL should be accepted
+		_, err = tc.pool.Exec(ctx, `
+			INSERT INTO instrument_definition (id, code, version, dimension, precision, status, fungibility_key_expression, error_message_expression)
+			VALUES ($1, 'NULL_ERR_EXPR', 1, 'MONETARY', 2, 'DRAFT', '', NULL)
+		`, uuid.New())
+		require.NoError(t, err)
+	})
+
+	t.Run("error_message_expression length constraint rejects over 4KB", func(t *testing.T) {
+		// 4097 bytes should be rejected
+		invalidExpr := strings.Repeat("x", 4097)
+		_, err := tc.pool.Exec(ctx, `
+			INSERT INTO instrument_definition (id, code, version, dimension, precision, status, fungibility_key_expression, error_message_expression)
+			VALUES ($1, 'INVALID_ERR_EXPR', 1, 'MONETARY', 2, 'DRAFT', '', $2)
+		`, uuid.New(), invalidExpr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "chk_instrument_definition_error_message_length")
+	})
 }
 
 func TestMigration_LifecycleTrigger_DraftAllowsEdits(t *testing.T) {
@@ -603,6 +652,51 @@ func TestMigration_LifecycleTrigger_TimestampPopulation(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, createdAt.After(beforeInsert), "created_at should be after the insert request")
 	})
+
+	t.Run("deprecated_at populated on DRAFT to DEPRECATED transition", func(t *testing.T) {
+		id := insertInstrument(ctx, t, tc.pool, "DRAFT_DEPRECATION", 1, "MONETARY", 2, "DRAFT")
+
+		// Verify deprecated_at is NULL initially
+		var deprecatedAt *time.Time
+		err := tc.pool.QueryRow(ctx, `SELECT deprecated_at FROM instrument_definition WHERE id = $1`, id).Scan(&deprecatedAt)
+		require.NoError(t, err)
+		assert.Nil(t, deprecatedAt)
+
+		// Capture time before deprecation
+		beforeDeprecation := time.Now().Add(-1 * time.Second)
+
+		// Deprecate directly from DRAFT
+		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET status = 'DEPRECATED' WHERE id = $1`, id)
+		require.NoError(t, err)
+
+		// Verify deprecated_at is now set
+		err = tc.pool.QueryRow(ctx, `SELECT deprecated_at FROM instrument_definition WHERE id = $1`, id).Scan(&deprecatedAt)
+		require.NoError(t, err)
+		require.NotNil(t, deprecatedAt)
+		assert.True(t, deprecatedAt.After(beforeDeprecation), "deprecated_at should be after the deprecation request")
+	})
+
+	t.Run("updated_at populated on any update", func(t *testing.T) {
+		id := insertInstrument(ctx, t, tc.pool, "UPDATED_TIMESTAMP", 1, "MONETARY", 2, "DRAFT")
+
+		// Get initial updated_at
+		var initialUpdatedAt time.Time
+		err := tc.pool.QueryRow(ctx, `SELECT updated_at FROM instrument_definition WHERE id = $1`, id).Scan(&initialUpdatedAt)
+		require.NoError(t, err)
+
+		// Wait a tiny bit to ensure time difference
+		time.Sleep(10 * time.Millisecond)
+
+		// Update display_name
+		_, err = tc.pool.Exec(ctx, `UPDATE instrument_definition SET display_name = 'Updated Name' WHERE id = $1`, id)
+		require.NoError(t, err)
+
+		// Verify updated_at changed
+		var newUpdatedAt time.Time
+		err = tc.pool.QueryRow(ctx, `SELECT updated_at FROM instrument_definition WHERE id = $1`, id).Scan(&newUpdatedAt)
+		require.NoError(t, err)
+		assert.True(t, newUpdatedAt.After(initialUpdatedAt), "updated_at should be after the initial value")
+	})
 }
 
 func TestMigration_Indexes(t *testing.T) {
@@ -612,8 +706,8 @@ func TestMigration_Indexes(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("verify expected indexes exist", func(t *testing.T) {
+		// Note: (code, version) index is implicit via unique constraint
 		expectedIndexes := []string{
-			"idx_instrument_definition_code_version",
 			"idx_instrument_definition_code_active",
 			"idx_instrument_definition_status",
 			"idx_instrument_definition_created_at",
