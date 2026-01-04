@@ -15,6 +15,10 @@ type kv struct {
 // AttributeBag is a poolable implementation of attribute storage.
 // It uses a slice of key-value pairs instead of a map to enable efficient
 // sync.Pool reuse without per-unmarshal allocations.
+//
+// Thread Safety: AttributeBag is NOT thread-safe. Each goroutine should
+// acquire its own bag from the pool via AcquireAttributeBag(). Do not
+// share a single AttributeBag across goroutines.
 type AttributeBag struct {
 	entries []kv
 }
