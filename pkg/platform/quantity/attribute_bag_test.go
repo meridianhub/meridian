@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestSliceAttributeBag_BasicOperations tests Get, Set, Len, Keys operations.
-func TestSliceAttributeBag_BasicOperations(t *testing.T) {
+// TestAttributeBag_BasicOperations tests Get, Set, Len, Keys operations.
+func TestAttributeBag_BasicOperations(t *testing.T) {
 	bag := AcquireAttributeBag()
 	defer ReleaseAttributeBag(bag)
 
@@ -43,8 +43,8 @@ func TestSliceAttributeBag_BasicOperations(t *testing.T) {
 	}
 }
 
-// TestSliceAttributeBag_UpdateExisting tests that Set updates existing keys.
-func TestSliceAttributeBag_UpdateExisting(t *testing.T) {
+// TestAttributeBag_UpdateExisting tests that Set updates existing keys.
+func TestAttributeBag_UpdateExisting(t *testing.T) {
 	bag := AcquireAttributeBag()
 	defer ReleaseAttributeBag(bag)
 
@@ -59,8 +59,8 @@ func TestSliceAttributeBag_UpdateExisting(t *testing.T) {
 	}
 }
 
-// TestSliceAttributeBag_Reset tests that Reset clears entries but preserves capacity.
-func TestSliceAttributeBag_Reset(t *testing.T) {
+// TestAttributeBag_Reset tests that Reset clears entries but preserves capacity.
+func TestAttributeBag_Reset(t *testing.T) {
 	bag := AcquireAttributeBag()
 	defer ReleaseAttributeBag(bag)
 
@@ -87,8 +87,8 @@ func TestSliceAttributeBag_Reset(t *testing.T) {
 	}
 }
 
-// TestSliceAttributeBag_ToMap tests map conversion for CEL boundary.
-func TestSliceAttributeBag_ToMap(t *testing.T) {
+// TestAttributeBag_ToMap tests map conversion for CEL boundary.
+func TestAttributeBag_ToMap(t *testing.T) {
 	bag := AcquireAttributeBag()
 	defer ReleaseAttributeBag(bag)
 
@@ -114,8 +114,8 @@ func TestSliceAttributeBag_ToMap(t *testing.T) {
 	}
 }
 
-// TestSliceAttributeBag_ToAttributes tests conversion to Attribute slice.
-func TestSliceAttributeBag_ToAttributes(t *testing.T) {
+// TestAttributeBag_ToAttributes tests conversion to Attribute slice.
+func TestAttributeBag_ToAttributes(t *testing.T) {
 	bag := AcquireAttributeBag()
 	defer ReleaseAttributeBag(bag)
 
@@ -138,8 +138,8 @@ func TestSliceAttributeBag_ToAttributes(t *testing.T) {
 	}
 }
 
-// TestSliceAttributeBag_FromAttributes tests populating from Attribute slice.
-func TestSliceAttributeBag_FromAttributes(t *testing.T) {
+// TestAttributeBag_FromAttributes tests populating from Attribute slice.
+func TestAttributeBag_FromAttributes(t *testing.T) {
 	bag := AcquireAttributeBag()
 	defer ReleaseAttributeBag(bag)
 
@@ -158,8 +158,8 @@ func TestSliceAttributeBag_FromAttributes(t *testing.T) {
 	}
 }
 
-// TestSliceAttributeBag_InitialCapacity verifies bag starts with capacity 16.
-func TestSliceAttributeBag_InitialCapacity(t *testing.T) {
+// TestAttributeBag_InitialCapacity verifies bag starts with capacity 16.
+func TestAttributeBag_InitialCapacity(t *testing.T) {
 	bag := AcquireAttributeBag()
 	defer ReleaseAttributeBag(bag)
 
