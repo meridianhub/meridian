@@ -38,6 +38,7 @@ dimensional safety.
 
 ## Table of Contents
 
+- [Zero-State Contract (IMMUTABLE)](#zero-state-contract-immutable)
 - [CEL Validation Pattern](#cel-validation-pattern)
 - [Data Contract: Proto + CEL + Go](#data-contract-proto--cel--go)
 - [Asset Catalog (Open Source Library)](#asset-catalog-open-source-library)
@@ -59,6 +60,305 @@ dimensional safety.
 - [Decisions Made](#decisions-made)
 - [Open Questions](#open-questions)
 - [Success Metrics](#success-metrics)
+
+---
+
+## Zero-State Contract (IMMUTABLE)
+
+> **⚠️ AI AGENT INSTRUCTION**: This section defines the immutable contracts for this sprint.
+> You **MUST NOT** modify these proto definitions or Go interfaces. If you need a change,
+> you **MUST abort** and request a contract update from the human operator. These contracts
+> are the coordination points between parallel work streams.
+
+This section locks down the shared contracts **before** any parallel stream begins work.
+Without this, agents working on Stream A (Core Types) and Stream F (Ref Data) will drift
+in their understanding of `Instrument` by even one field, causing Stream I (Integration)
+to fail catastrophically.
+
+### Immutable Proto Definitions
+
+These proto files are created in **Step 0** (before any stream executes) and committed
+to the repository. Agents read but **never modify** these files.
+
+#### `proto/quantity/v1/quantity.proto`
+
+```protobuf
+syntax = "proto3";
+package quantity.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "meridian/gen/quantity/v1;quantityv1";
+
+// InstrumentAmount is the "Sealed Envelope" - the universal payload for all asset quantities.
+// Go code handles the envelope (amount, code, version, temporal bounds, source).
+// CEL handles the letter (attributes validation, bucket key generation).
+message InstrumentAmount {
+    // The quantity magnitude (decimal string for precision).
+    // Native Go math handles this. CEL accesses via 'amount' variable.
+    string amount = 1;
+
+    // The Identity of the asset.
+    string instrument_code = 2;     // "USD", "KWH", "GPU-H100"
+    uint32 version = 3;             // Schema version for evolution
+
+    // The Context/Fungibility payload (tenant-defined attributes).
+    // CEL is the SOLE accessor for business rules on this map.
+    // Keys MUST be snake_case (^[a-z][a-z0-9_]*$) for CEL dot-access.
+    map<string, string> attributes = 4;
+
+    // Temporal bounds (first-class citizens per ADR-0017).
+    // Exposed to CEL as 'valid_from' and 'valid_to' variables.
+    google.protobuf.Timestamp valid_from = 5;
+    google.protobuf.Timestamp valid_to = 6;
+
+    // Quality Ladder support (ADR-0017).
+    // Lookup key for Source Authority Registry (e.g., "SMETS2_METER", "CUSTOMER_READ").
+    // Exposed to CEL as 'source' variable for source-specific validation rules.
+    string source = 7;
+}
+```
+
+#### `proto/reference_data/v1/instrument.proto`
+
+```protobuf
+syntax = "proto3";
+package reference_data.v1;
+
+option go_package = "meridian/gen/reference_data/v1;referencedatav1";
+
+// InstrumentDefinition is the schema + rules for an asset type.
+// Stored in Reference Data service, cached in all consuming services.
+message InstrumentDefinition {
+    string id = 1;
+    string tenant_id = 2;
+    string code = 3;                        // "USD", "RICE", "KWH"
+    uint32 version = 4;
+    string dimension = 5;                   // "Monetary" or "Commodity"
+    int32 precision = 6;                    // Decimal places (2 for USD, 0 for whole units)
+
+    // CEL expression for attribute validation.
+    // Input: {attributes, amount, valid_from, valid_to, source, instrument}
+    // Output: bool (true = valid)
+    string validation_expression = 7;
+
+    // CEL expression for bucket key generation.
+    // Input: {attributes}
+    // Output: string (SHA256 hash via bucket_key() function)
+    string fungibility_key_expression = 8;
+
+    // Attribute schema with input hints for client guidance.
+    // Maps attribute name → format hint for the expected string format.
+    map<string, AttributeHint> attribute_hints = 9;
+
+    string display_name = 10;
+    string description = 11;
+    string status = 12;                     // "DRAFT", "ACTIVE", "DEPRECATED"
+}
+
+// AttributeHint provides guidance on expected string format for an attribute.
+// This bridges the gap between stringly-typed proto and CEL type coercion.
+message AttributeHint {
+    string type = 1;              // "string", "int", "decimal", "timestamp", "bool"
+    string format = 2;            // Regex or format hint: "^\d+$", "ISO8601", "^[A-Z]{2}$"
+    string description = 3;       // Human-readable description
+    bool required = 4;            // Must be present
+    string example = 5;           // Example value for documentation
+}
+```
+
+### Immutable Go Interfaces
+
+These interfaces are defined in **Step 0** and placed in `pkg/platform/quantity/interfaces.go`.
+All stream implementations **MUST** implement these interfaces exactly.
+
+#### `pkg/platform/quantity/interfaces.go`
+
+```go
+package quantity
+
+import (
+    "context"
+    "time"
+
+    "github.com/google/uuid"
+    "github.com/shopspring/decimal"
+)
+
+// ===============================================================
+// IMMUTABLE INTERFACES - DO NOT MODIFY DURING SPRINT
+// If you need changes, ABORT and request contract update.
+// ===============================================================
+
+// Dimension represents the physics of an asset (compile-time safety).
+type Dimension interface {
+    Name() string  // "Monetary" or "Commodity"
+}
+
+// Quantity represents a dimensionally-safe amount of an asset.
+// D is a phantom type for compile-time dimension checking.
+type Quantity[D Dimension] struct {
+    amount         decimal.Decimal
+    instrumentCode string
+    version        uint32
+}
+
+// QuantityValue is the closed interface for mixed-dimension handling.
+// Used when dimension is known only at runtime (database reads).
+type QuantityValue interface {
+    Dimension() string
+    Amount() decimal.Decimal
+    InstrumentCode() string
+    Version() uint32
+}
+
+// AttributeBag is a poolable container for attributes.
+// MANDATORY for hot paths to avoid GC pressure at 100k TPS.
+// Implementations MUST use sync.Pool for allocation.
+type AttributeBag interface {
+    Get(key string) (string, bool)
+    Set(key, value string)
+    Keys() []string
+    Len() int
+    Reset()  // Clears all entries for pool reuse
+    ToMap() map[string]string  // For CEL evaluation (allocates)
+}
+
+// InstrumentRegistry is the contract between Reference Data and consumers.
+type InstrumentRegistry interface {
+    // GetDefinition retrieves an instrument, falling back to SystemTenant if not found.
+    GetDefinition(ctx context.Context, tenantID uuid.UUID, code string, version uint32) (InstrumentDefinition, error)
+
+    // GetLatestDefinition retrieves the latest ACTIVE version.
+    GetLatestDefinition(ctx context.Context, tenantID uuid.UUID, code string) (InstrumentDefinition, error)
+
+    // CreateDefinition creates a new DRAFT instrument.
+    // Returns ErrSystemTenantReadOnly if tenantID is SystemTenantID.
+    CreateDefinition(ctx context.Context, def InstrumentDefinition) (InstrumentDefinition, error)
+
+    // ActivateInstrument transitions DRAFT → ACTIVE.
+    ActivateInstrument(ctx context.Context, tenantID uuid.UUID, code string, version uint32) error
+
+    // DeprecateInstrument transitions ACTIVE → DEPRECATED.
+    DeprecateInstrument(ctx context.Context, tenantID uuid.UUID, code string, version uint32) error
+
+    // ListDefinitions returns tenant instruments + SystemTenant instruments.
+    ListDefinitions(ctx context.Context, tenantID uuid.UUID) ([]InstrumentDefinition, error)
+}
+
+// CachedInstrumentRegistry wraps InstrumentRegistry with caching.
+// CRITICAL: Must implement singleflight for cold cache misses.
+type CachedInstrumentRegistry interface {
+    InstrumentRegistry
+
+    // GetCached returns a cached instrument with compiled CEL programs.
+    // On cache miss: uses singleflight to fetch once, cache, then return.
+    // NEVER returns ErrInstrumentNotCached - always attempts recovery.
+    GetCached(ctx context.Context, tenantID uuid.UUID, code string, version uint32) (CachedInstrument, error)
+
+    // Invalidate removes an entry from cache (called on local writes).
+    Invalidate(tenantID uuid.UUID, code string, version uint32)
+
+    // InvalidateAll clears the entire cache (emergency recovery).
+    InvalidateAll()
+}
+
+// CachedInstrument contains pre-compiled CEL programs for hot-path performance.
+type CachedInstrument struct {
+    Definition        InstrumentDefinition
+    ValidationProgram interface{}  // *cel.Program - opaque to avoid import cycle
+    BucketKeyProgram  interface{}  // *cel.Program
+}
+
+// InstrumentDefinition is the domain model (Go representation of proto).
+type InstrumentDefinition struct {
+    ID                       uuid.UUID
+    TenantID                 uuid.UUID
+    Code                     string
+    Version                  uint32
+    Dimension                string
+    Precision                int32
+    ValidationExpression     string
+    FungibilityKeyExpression string
+    AttributeHints           map[string]AttributeHint
+    DisplayName              string
+    Description              string
+    Status                   string
+}
+
+// AttributeHint guides clients on expected attribute formats.
+type AttributeHint struct {
+    Type        string  // "string", "int", "decimal", "timestamp", "bool"
+    Format      string  // Regex or format: "^\d+$", "ISO8601"
+    Description string
+    Required    bool
+    Example     string
+}
+
+// CELEvaluator is the contract for CEL expression evaluation.
+type CELEvaluator interface {
+    // ValidateAttributes runs the validation expression.
+    // Input: attributes, amount, valid_from, valid_to, source, instrument context.
+    // Returns: (valid bool, error)
+    ValidateAttributes(
+        ctx context.Context,
+        program interface{},  // *cel.Program
+        attrs AttributeBag,
+        amount string,
+        validFrom, validTo time.Time,
+        source string,
+        instrument InstrumentContext,
+    ) (bool, error)
+
+    // GenerateBucketKey runs the fungibility expression.
+    // Input: attributes map.
+    // Returns: (bucketKey string, error)
+    GenerateBucketKey(program interface{}, attrs AttributeBag) (string, error)
+}
+
+// InstrumentContext provides instrument metadata to CEL expressions.
+// Enables rules like: "instrument.precision == 2" or "instrument.dimension == 'Monetary'"
+type InstrumentContext struct {
+    Code      string
+    Version   uint32
+    Dimension string
+    Precision int32
+}
+
+// Well-known error types for contract enforcement.
+var (
+    ErrInstrumentNotFound    = errors.New("instrument not found")
+    ErrSystemTenantReadOnly  = errors.New("system tenant instruments are read-only")
+    ErrInstrumentLocked      = errors.New("instrument is ACTIVE or DEPRECATED; cannot modify")
+    ErrCELCompileError       = errors.New("CEL expression compilation failed")
+    ErrCELEvalError          = errors.New("CEL expression evaluation failed")
+    ErrDimensionMismatch     = errors.New("dimension mismatch in quantity operation")
+    ErrVersionMismatch       = errors.New("instrument version mismatch")
+)
+```
+
+### Contract Rules for AI Agents
+
+| Rule | Enforcement |
+|------|-------------|
+| **No proto modifications** | Agents abort if proto changes are needed |
+| **No interface modifications** | Agents abort if interface changes are needed |
+| **Implement exactly as specified** | Type signatures must match byte-for-byte |
+| **Request contract update if blocked** | Human operator reviews and approves changes |
+| **All streams depend on Step 0** | No stream starts until contracts are committed |
+
+### Contract Verification Checklist (Stream J)
+
+Integration tests **MUST** verify these contracts are honored:
+
+```go
+// contract_test.go - Run FIRST before any other integration tests
+func TestContractsNotModified(t *testing.T) {
+    // Verify proto files match expected SHA256 checksums
+    // Verify interface file matches expected SHA256 checksum
+    // If mismatch: FAIL LOUDLY with "CONTRACT VIOLATION" message
+}
+```
 
 ---
 
@@ -546,13 +846,37 @@ services/*/domain/money.go          services/*/domain/quantity.go
 
 ## Work Streams
 
-Designed for parallel execution across multiple developers. Dependencies shown in diagram below.
+Designed for parallel execution across multiple AI agents or developers. **Step 0 must complete
+before any stream begins** - it establishes the immutable contracts that all streams implement.
+
+> **⚠️ AI AGENT COORDINATION**: Streams can run in parallel ONLY within the same phase.
+> All streams depend on Step 0 contracts. If an agent needs a contract change, it MUST abort
+> and request human approval. See [Zero-State Contract](#zero-state-contract-immutable).
+
+### Step 0: Contract Lock (HUMAN ONLY)
+
+**Before any stream begins**, a human operator commits the immutable contracts:
+
+1. Create `proto/quantity/v1/quantity.proto` (from Zero-State Contract section)
+2. Create `proto/reference_data/v1/instrument.proto` (from Zero-State Contract section)
+3. Create `pkg/platform/quantity/interfaces.go` (from Zero-State Contract section)
+4. Run `buf generate` to create Go stubs
+5. Commit all files with message: `feat: lock zero-state contracts for sprint`
+6. Calculate SHA256 checksums for contract verification in Stream J
+
+**Rule**: No agent may modify these files. If blocked, abort and request contract update.
+
+### Dependency Diagram
 
 ```mermaid
 flowchart TB
+    subgraph Step0["Step 0: Contract Lock (Human)"]
+        Z["Zero-State<br/>Contracts<br/>(Proto + Interfaces)"]
+    end
+
     subgraph Foundation["Phase 1: Foundation (Parallel)"]
-        A["Stream A<br/>Core Types<br/>(quantity pkg)"]
-        D["Stream D<br/>Protobuf<br/>Definitions"]
+        A["Stream A<br/>Core Types<br/>(implement interfaces)"]
+        D["Stream D<br/>Protobuf<br/>(extend, not modify)"]
         E["Stream E<br/>DB Schema"]
     end
 
@@ -571,7 +895,9 @@ flowchart TB
     end
 
     subgraph Integration["Phase 5: Service Integration (Parallel)"]
-        I1["Stream I.1<br/>position-keeping"]
+        direction TB
+        I1["Stream I.1<br/>Position Keeping<br/>(Write Path)"]
+        I1R["Stream I.1R<br/>Position Keeping<br/>(Read Path)"]
         I2["Stream I.2<br/>current-account"]
         I3["Stream I.3<br/>financial-accounting"]
         I4["Stream I.4<br/>payment-order &<br/>utilization-metering"]
@@ -581,6 +907,9 @@ flowchart TB
         J["Stream J<br/>Integration<br/>Tests"]
     end
 
+    Z --> A
+    Z --> D
+    Z --> E
     A --> B
     A --> C
     A --> F
@@ -589,18 +918,33 @@ flowchart TB
     F --> G
     F --> H
     G --> I1
+    G --> I1R
     G --> I2
     G --> I3
     G --> I4
     H --> I1
+    H --> I1R
     H --> I2
     H --> I3
     H --> I4
     I1 --> J
+    I1R --> J
     I2 --> J
     I3 --> J
     I4 --> J
 ```
+
+### Stream I Split (AI Execution Safety)
+
+Stream I.1 (Position Keeping) is split into **Write Path** and **Read Path** sub-streams:
+
+| Sub-Stream | Focus | Agent Specialty |
+|------------|-------|-----------------|
+| **I.1 (Write)** | `RecordMeasurement`, CEL validation, bucket key | CEL-heavy, AttributeBag pooling |
+| **I.1R (Read)** | `GetAggregatedPosition`, SQL GROUP BY | SQL-heavy, query optimization |
+
+**Rationale**: These are different problem domains. One agent focuses on CEL complexity,
+the other on SQL query performance. This prevents context-switching overhead.
 
 ---
 
@@ -1222,20 +1566,69 @@ flowchart TB
        }
 
        for _, inst := range systemInstruments {
-           // Upsert: INSERT ... ON CONFLICT DO NOTHING
-           if err := s.repo.UpsertSystemInstrument(ctx, inst); err != nil {
+           // CRITICAL: Use ON CONFLICT DO NOTHING, not UPSERT
+           // In distributed deployment (5 replicas starting simultaneously),
+           // all will race to insert. Only one wins; others hit conflict.
+           // DO NOT log conflict as error - it's expected behavior.
+           if err := s.repo.InsertIfNotExists(ctx, inst); err != nil {
                return fmt.Errorf("bootstrap instrument %s: %w", inst.Code, err)
            }
        }
        return nil
    }
+
+   // InsertIfNotExists uses ON CONFLICT DO NOTHING.
+   // Returns nil on both success AND conflict (idempotent).
+   func (r *PostgresRepo) InsertIfNotExists(ctx context.Context, inst InstrumentDefinition) error {
+       _, err := r.db.ExecContext(ctx, `
+           INSERT INTO instrument_definitions (
+               id, tenant_id, code, version, dimension, precision,
+               status, validation_expression, display_name
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (tenant_id, code, version) DO NOTHING
+       `, uuid.New(), inst.TenantID, inst.Code, inst.Version, inst.Dimension,
+          inst.Precision, inst.Status, inst.ValidationExpression, inst.DisplayName)
+
+       // DO NOT check RowsAffected() == 0 as an error.
+       // Zero rows affected means another replica already inserted - that's fine.
+       return err
+   }
    ```
 
+   > **Distributed Deployment Race Condition**:
+   >
+   > When 5 Kubernetes replicas start simultaneously, they all race to INSERT system instruments.
+   > Using `ON CONFLICT DO NOTHING` ensures only one wins, others silently succeed (no error).
+   >
+   > **CRITICAL**: Do NOT log "unique constraint violation" as an error. It's expected behavior
+   > in distributed deployments. The InsertIfNotExists pattern treats conflict as success.
+   >
+   > **Alternative (Kubernetes Job)**: For stricter control, run seeding as a Helm pre-install hook:
+>
+   > ```yaml
+   > # helm/templates/seed-job.yaml
+   > apiVersion: batch/v1
+   > kind: Job
+   > metadata:
+   >   name: {{ .Release.Name }}-seed
+   >   annotations:
+   >     "helm.sh/hook": pre-install,pre-upgrade
+   >     "helm.sh/hook-weight": "5"  # After migrations (weight 0)
+   > spec:
+   >   template:
+   >     spec:
+   >       containers:
+   >       - name: seed
+   >         image: {{ .Values.image }}
+   >         command: ["./reference-data", "seed"]
+   >       restartPolicy: Never
+   > ```
+   >
    > **Why App Bootstrap over SQL Migration?**
    >
    > - Migrations stay **pure DDL** (CREATE TABLE, ALTER, etc.) - easier to review and audit
    > - Seed data lives in **Go code** - type-safe, testable, version-controlled alongside service
-   > - **Idempotent by design** - uses ON CONFLICT, safe to run multiple times
+   > - **Idempotent by design** - uses ON CONFLICT DO NOTHING, safe to run multiple times
    > - **Environment-specific** - dev/staging/prod can have different seed sets if needed
 
 ### Acceptance Criteria
@@ -2376,16 +2769,16 @@ Before per-service work, establish shared caching infrastructure:
 // LocalInstrumentCache provides sub-microsecond lookups for hot-path operations.
 // Used by all services that handle quantities.
 //
-// CRITICAL: On the hot write path (100k+ TPS), a cache miss CANNOT block on
-// a synchronous gRPC call to Reference Data. This cache uses:
+// COLD CACHE STRATEGY: Uses singleflight to handle cache misses gracefully.
 // 1. Prefetch on startup: Load all active instruments before accepting traffic
 // 2. Background refresh: Subscribe to instrument updates via Kafka/gRPC stream
-// 3. Cache miss = reject: If instrument not in cache, reject request immediately
+// 3. Cache miss = singleflight fallback: One request fetches, others wait
 type LocalInstrumentCache struct {
-    registry InstrumentRegistry              // Remote client (for prefetch only)
-    compiler *CELCompiler                    // For compiling on cache miss
+    registry InstrumentRegistry              // Remote client (for fetch on miss)
+    compiler *CELCompiler                    // For compiling fetched definitions
     cache    *lru.Cache[string, CachedInstrument]  // Bounded: max 10,000 entries
     ttl      time.Duration                   // Refresh interval (e.g., 5 minutes)
+    sflight  singleflight.Group              // Deduplicates concurrent cache misses
 }
 
 // STARTUP SEQUENCE:
@@ -2399,21 +2792,54 @@ type LocalInstrumentCache struct {
 func (c *LocalInstrumentCache) Get(
     ctx context.Context, tenantID uuid.UUID, code string, version uint32,
 ) (CachedInstrument, error) {
-    key := cacheKey{TenantID: tenantID, Code: code, Version: version}
+    key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
+
+    // Fast path: cache hit
     if cached, ok := c.cache.Get(key); ok {
         return cached, nil
     }
-    // CRITICAL: Do NOT call registry.GetDefinition() here on the hot path.
-    // Cache miss = unknown instrument = reject request.
-    return CachedInstrument{}, ErrInstrumentNotCached
-}
 
-var ErrInstrumentNotCached = errors.New("instrument not in local cache; register it first")
+    // Slow path: singleflight fetch (one request fetches, others wait)
+    // This solves the "cold cache rejection" problem for new instruments.
+    result, err, _ := c.sflight.Do(key, func() (interface{}, error) {
+        // Double-check: another goroutine may have populated cache
+        if cached, ok := c.cache.Get(key); ok {
+            return cached, nil
+        }
+
+        // Fetch from Reference Data service (gRPC call)
+        def, err := c.registry.GetDefinition(ctx, tenantID, code, version)
+        if err != nil {
+            return nil, err  // Instrument truly doesn't exist
+        }
+
+        // Compile CEL programs
+        cached, err := c.compileAndCache(key, def)
+        if err != nil {
+            return nil, err
+        }
+
+        return cached, nil
+    })
+
+    if err != nil {
+        return CachedInstrument{}, err
+    }
+    return result.(CachedInstrument), nil
+}
 ```
 
-> **Why reject on cache miss?** At 100k TPS, a synchronous gRPC call blocks the hot path.
-> If an instrument isn't cached, either: (a) it doesn't exist, or (b) the cache hasn't
-> refreshed yet. Either way, rejecting is safer than blocking.
+> **Singleflight Pattern**: When you deploy a new instrument "RICE-V2" and immediately
+> send 10k transactions, the first request fetches from Reference Data (gRPC) while
+> all others wait. Once cached, all 10k requests proceed. This eliminates the "flaky
+> API" feeling without opening a DDoS vector (singleflight deduplicates concurrent requests).
+>
+> **Scenario Analysis**:
+>
+> - Cache hit: ~100ns (normal operation)
+> - Cache miss (first request): ~5ms (gRPC round-trip)
+> - Cache miss (concurrent requests): Wait for first request, then ~100ns
+> - Unknown instrument: Returns error after gRPC confirms non-existence
 
 ### The Rehydration Pattern (Critical)
 
@@ -2798,6 +3224,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
 - [ ] `PositionRepository.Insert()` is the ONLY write method; no `Update()` or `Upsert()` exists
 - [ ] Service layer has no `MergeOnWrite` option or similar configuration
 - [ ] Database trigger on `positions` table rejects UPDATE on `amount` column:
+
   ```sql
   CREATE TRIGGER positions_append_only
   BEFORE UPDATE ON positions
@@ -2805,6 +3232,7 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
   WHEN (OLD.amount IS DISTINCT FROM NEW.amount)
   EXECUTE FUNCTION reject_position_update();
   ```
+
 - [ ] Code review checklist includes "No UPDATE on positions table" verification
 
 > **Rationale**: Append-only writes achieve O(1) constant time without locks. Write-time merging
@@ -3130,7 +3558,7 @@ If API Layer gate shows >2x expected integration complexity:
 | Arithmetic | Native Go `decimal.Decimal` - CEL never in hot loop |
 | Local cache type | Bounded LRU (`hashicorp/golang-lru`) to prevent memory leaks |
 | CEL caching | Cache compiled programs (validation + bucket key) |
-| Cache miss strategy | Prefetch on startup; cache miss = critical failure (reject request) |
+| Cache miss strategy | Prefetch on startup; cache miss = singleflight fallback (one request fetches, others wait) |
 | Read-side coalescing | Trigger compaction when bucket exceeds 100 rows |
 | Integration strategy | Per-service streams (I.1-I.4) for parallel execution |
 | Shared package | New `pkg/platform/quantity`; deprecate `shared/domain/money` after migration |
