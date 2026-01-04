@@ -105,6 +105,11 @@ message InstrumentAmount {
     // The Context/Fungibility payload (tenant-defined attributes).
     // CEL is the SOLE accessor for business rules on this map.
     // Keys MUST be snake_case (^[a-z][a-z0-9_]*$) for CEL dot-access.
+    //
+    // DESIGN NOTE: map<K,V> forces one allocation per unmarshal at 100k TPS.
+    // Alternative: `repeated AttributeEntry attributes` (slice of structs).
+    // Phase 1 uses map for CEL ergonomics; if GC pauses exceed 50ms in
+    // Stream J load tests, migrate to repeated (slices are poolable).
     map<string, string> attributes = 4;
 
     // Temporal bounds (first-class citizens per ADR-0017).
@@ -2206,7 +2211,22 @@ the other on SQL query performance. This prevents context-switching overhead.
     > `"!has(attributes.region) ? 'Missing required field: region' : ''"` to provide
     > actionable feedback like "Missing required field: region".
 
-11. **Archetype Loader** (`cmd/archetype-loader`)
+### Acceptance Criteria
+
+- [ ] CRUD operations work correctly
+- [ ] Tenant lookup falls back to System Tenant when not found
+- [ ] `ListDefinitions` includes both tenant and System Tenant instruments
+- [ ] Cannot create instruments in System Tenant via API (admin-only seed data)
+- [ ] CEL expression compiled at `CreateDefinition` - syntax errors rejected immediately
+- [ ] `ValidateAttributes` executes compiled CEL and returns clear error on `false`
+
+### Phase 1.5: Asset Catalog (Deferred)
+
+> **Scope Decision**: The following deliverables are moved to Phase 1.5. For the "Frugal Path,"
+> we only need to prove we can define *one* custom asset manually via API/CLI. Building a
+> library system now distracts from the core ledger physics.
+
+11. **Archetype Loader** (`cmd/archetype-loader`) - *Phase 1.5*
 
     Reads YAML archetype definitions from `configs/archetypes/` and seeds them into the System Tenant:
 
@@ -2249,7 +2269,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 
     > **Usage**: Run during deployment or as init container to seed archetypes.
 
-12. **Archetype Tester** (`cmd/archetype-tester`)
+12. **Archetype Tester** (`cmd/archetype-tester`) - *Phase 1.5*
 
     CI tool that validates archetype CEL logic against test scenarios:
 
@@ -2295,14 +2315,8 @@ the other on SQL query performance. This prevents context-switching overhead.
     > **CI Integration**: Add GitHub Action that runs `go run cmd/archetype-tester` on PRs
     > touching `configs/archetypes/`.
 
-### Acceptance Criteria
+#### Phase 1.5 Acceptance Criteria
 
-- [ ] CRUD operations work correctly
-- [ ] Tenant lookup falls back to System Tenant when not found
-- [ ] `ListDefinitions` includes both tenant and System Tenant instruments
-- [ ] Cannot create instruments in System Tenant via API (admin-only seed data)
-- [ ] CEL expression compiled at `CreateDefinition` - syntax errors rejected immediately
-- [ ] `ValidateAttributes` executes compiled CEL and returns clear error on `false`
 - [ ] Archetype loader seeds YAML definitions into System Tenant
 - [ ] Archetype tester validates CEL logic against test scenarios in CI
 
@@ -2740,6 +2754,71 @@ the other on SQL query performance. This prevents context-switching overhead.
    > **Recovery scenario**: If a malformed CEL expression passes compile-time checks but causes
    > runtime errors, operators can purge the bad definition from cache while fixing the DB record.
 
+6. **Redis L2 Cache** (Cold Start Resilience):
+
+   ```go
+   // TieredCache implements Memory (L1) → Redis (L2) → gRPC (Source) lookup.
+   // L2 provides resilience: if Reference Data is down AND pod restarts (cold L1),
+   // Position Keeping can still process transactions from L2.
+   type TieredCache struct {
+       l1        *lru.Cache[cacheKey, cachedEntry]  // In-memory, fastest
+       l2        *redis.Client                       // Persists across restarts
+       source    InstrumentRegistry                  // Reference Data gRPC
+       compiler  *CELCompiler
+       l1TTL     time.Duration  // 5 minutes
+       l2TTL     time.Duration  // 1 hour (survive Reference Data outages)
+   }
+
+   func (c *TieredCache) Get(
+       ctx context.Context, tenantID uuid.UUID, code string, version uint32,
+   ) (CachedInstrument, error) {
+       key := cacheKey{TenantID: tenantID, Code: code, Version: version}
+       redisKey := fmt.Sprintf("instrument:%s:%s:%d", tenantID, code, version)
+
+       // L1: Memory (sub-microsecond)
+       if entry, ok := c.l1.Get(key); ok {
+           if time.Since(entry.cachedAt) < c.jitteredL1TTL() {
+               return entry.instrument, nil
+           }
+           c.l1.Remove(key)
+       }
+
+       // L2: Redis (millisecond, survives pod restart)
+       if data, err := c.l2.Get(ctx, redisKey).Bytes(); err == nil {
+           var def InstrumentDefinition
+           if proto.Unmarshal(data, &def) == nil {
+               inst, _ := c.compileAndCacheL1(key, def)
+               return inst, nil  // Skip source, use L2 data
+           }
+       }
+
+       // Source: gRPC to Reference Data (singleflight)
+       def, err := c.source.GetDefinition(ctx, tenantID, code, version)
+       if err != nil {
+           return CachedInstrument{}, err
+       }
+
+       // Populate both L1 and L2
+       inst, _ := c.compileAndCacheL1(key, def)
+       c.cacheL2(ctx, redisKey, def)
+       return inst, nil
+   }
+
+   func (c *TieredCache) cacheL2(ctx context.Context, key string, def InstrumentDefinition) {
+       data, _ := proto.Marshal(&def)
+       c.l2.Set(ctx, key, data, c.l2TTL)
+   }
+   ```
+
+   > **Why Redis L2**: Without L2, a Position Keeping pod restart during a Reference Data
+   > outage would fail all transactions (cold L1, source unavailable). Redis survives pod
+   > restarts, providing 1-hour resilience window. Uses existing Redis infrastructure
+   > (already deployed for idempotency keys).
+   >
+   > **Invalidation**: L2 entries invalidated via same `instrument.updated` event stream.
+   > TTL provides safety net. Stale L2 is acceptable: worst case is using old CEL rules
+   > for up to 1 hour during an outage - better than transaction failures.
+
 ### Acceptance Criteria
 
 - [ ] Cache hit returns pre-compiled CEL program
@@ -2748,7 +2827,9 @@ the other on SQL query performance. This prevents context-switching overhead.
 - [ ] Event subscription invalidates cache on remote writes (`instrument.updated`)
 - [ ] `ValidateAttributes` uses cached `cel.Program` (no re-compilation)
 - [ ] Admin API exposes cache purge endpoints
-- [ ] Pod restart clears cache (no persistent state)
+- [ ] Pod restart clears L1 cache (in-memory)
+- [ ] **Redis L2**: Cold-start pod can serve transactions from L2 when Reference Data is unavailable
+- [ ] **Redis L2**: Invalidation events propagate to both L1 and L2
 
 ---
 
@@ -3457,6 +3538,10 @@ This service already tracks non-fiat measurements - **native fit for `Quantity[C
 - [ ] **GC Pressure Load Test**: Sustained 100k TPS with `map[string]string` allocations per request.
       Measure P99 latency AND GC pause times (not just throughput). Target: <10ms P99, <50ms GC pauses.
       If GC pauses exceed target, document sync.Pool or heap sizing recommendations.
+- [ ] **Poison Pill CEL Test**: Tenant defines a valid but computationally expensive CEL expression
+      (e.g., `size([1,2,3,4,5,6,7,8,9,10].map(x, [1,2,3,4,5,6,7,8,9,10].map(y, x*y)).flatten()) > 0`).
+      Verify `CostLimit(10000)` aborts evaluation instantly and returns clear error to gRPC client.
+      Must NOT hang the gRPC handler or leak goroutines.
 
 ---
 
