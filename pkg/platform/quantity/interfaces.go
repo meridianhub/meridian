@@ -92,6 +92,7 @@ type InstrumentDefinition struct {
 	Description              string
 	CreatedAt                time.Time
 	ActivatedAt              *time.Time
+	DeprecatedAt             *time.Time
 }
 
 // InstrumentRegistry provides access to instrument definitions.

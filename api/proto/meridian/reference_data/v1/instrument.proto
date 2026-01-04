@@ -106,4 +106,7 @@ message InstrumentDefinition {
 
   // activated_at is when this definition became active (null if never activated).
   google.protobuf.Timestamp activated_at = 15;
+
+  // deprecated_at is when this definition was deprecated (null if not deprecated).
+  google.protobuf.Timestamp deprecated_at = 16;
 }
