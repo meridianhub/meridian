@@ -139,17 +139,30 @@ type CELEvaluationResult struct {
 	ResultValue  any
 }
 
+// InstrumentContext provides instrument metadata for CEL expression evaluation.
+// CEL expressions can access these values via the "instrument" variable.
+// Example: "instrument.precision == 2 && instrument.dimension == 'CURRENCY'"
+type InstrumentContext struct {
+	Code      string // Instrument code (e.g., "USD", "KWH")
+	Version   int32  // Instrument definition version
+	Dimension string // Physical/conceptual dimension (e.g., "CURRENCY", "ENERGY")
+	Precision int32  // Number of decimal places (0-18)
+}
+
 // CELEvaluator evaluates Common Expression Language expressions for instrument validation.
 type CELEvaluator interface {
 	// Validate evaluates a validation expression against the given attributes.
+	// The instrument context is available in CEL as "instrument" (e.g., "instrument.precision == 2").
 	// Returns the validation result including any error message.
-	Validate(ctx context.Context, expression string, amount string, instrumentCode string, attributes []Attribute) (*CELEvaluationResult, error)
+	Validate(ctx context.Context, expression string, amount string, instrument InstrumentContext, attributes []Attribute) (*CELEvaluationResult, error)
 
 	// GenerateFungibilityKey evaluates a fungibility key expression.
+	// The instrument context is available in CEL as "instrument".
 	// Returns the computed key as a string.
-	GenerateFungibilityKey(ctx context.Context, expression string, amount string, instrumentCode string, version int32, attributes []Attribute) (string, error)
+	GenerateFungibilityKey(ctx context.Context, expression string, amount string, instrument InstrumentContext, attributes []Attribute) (string, error)
 
 	// GenerateErrorMessage evaluates an error message expression.
+	// The instrument context is available in CEL as "instrument".
 	// Returns the computed error message.
-	GenerateErrorMessage(ctx context.Context, expression string, amount string, instrumentCode string, attributes []Attribute) (string, error)
+	GenerateErrorMessage(ctx context.Context, expression string, amount string, instrument InstrumentContext, attributes []Attribute) (string, error)
 }
