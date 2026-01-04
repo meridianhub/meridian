@@ -95,6 +95,7 @@ type InstrumentDefinition struct {
 	CreatedAt                time.Time
 	ActivatedAt              *time.Time
 	DeprecatedAt             *time.Time
+	IsSystem                 bool // true = seeded during tenant provisioning, read-only
 }
 
 // InstrumentRegistry provides access to instrument definitions.

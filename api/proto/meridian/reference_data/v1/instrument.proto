@@ -107,4 +107,9 @@ message InstrumentDefinition {
 
   // deprecated_at is when this definition was deprecated (null if not deprecated).
   google.protobuf.Timestamp deprecated_at = 16;
+
+  // is_system indicates this instrument was seeded during tenant provisioning.
+  // System instruments are read-only (cannot be modified or deleted by tenants).
+  // Examples: USD, EUR, GBP - platform-wide instruments available to all tenants.
+  bool is_system = 17;
 }
