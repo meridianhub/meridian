@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package meridian.quantity.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1;quantityv1";
+
+// AttributeEntry represents a key-value attribute for an instrument amount.
+// Uses repeated struct instead of map to support poolability (deterministic ordering).
+message AttributeEntry {
+  // key is the attribute name in snake_case format.
+  string key = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
+
+  // value is the attribute value.
+  string value = 2 [(buf.validate.field).string.max_len = 256];
+}
+
+// InstrumentAmount represents a quantity of a specific instrument with optional attributes.
+// This is the universal representation for any asset type: currencies, energy, commodities, etc.
+message InstrumentAmount {
+  // amount is the decimal quantity as a string for precision (e.g., "1234.567890").
+  // String format preserves arbitrary precision without floating-point errors.
+  string amount = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 40
+    pattern: "^-?[0-9]+(\\.[0-9]+)?$"
+  }];
+
+  // instrument_code is the unique identifier for the instrument (e.g., "USD", "KWH", "CARBON_CREDIT").
+  string instrument_code = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // version is the instrument definition version for schema evolution.
+  int32 version = 3 [(buf.validate.field).int32.gte = 1];
+
+  // attributes contains additional metadata for this amount (e.g., batch_id, location, quality_grade).
+  // Uses repeated instead of map to support deterministic poolability key generation.
+  repeated AttributeEntry attributes = 4;
+
+  // valid_from is when this amount becomes valid (optional, for time-bound assets).
+  google.protobuf.Timestamp valid_from = 5;
+
+  // valid_to is when this amount expires (optional, for time-bound assets).
+  google.protobuf.Timestamp valid_to = 6;
+
+  // source identifies the origin of this amount (e.g., "meter_reading", "manual_entry", "settlement").
+  string source = 7 [(buf.validate.field).string.max_len = 64];
+}
