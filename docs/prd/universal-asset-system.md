@@ -90,6 +90,16 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "meridian/gen/quantity/v1;quantityv1";
 
+// AttributeEntry is a key-value pair for asset context.
+// Using repeated structs instead of map<string,string> enables:
+// 1. Pooling: Slices can be reset and reused via sync.Pool (maps cannot)
+// 2. Determinism: Iteration order is stable (maps are random)
+// 3. GC: At 100k TPS, pooled slices avoid 100k map allocations/sec
+message AttributeEntry {
+    string key = 1;    // Must be snake_case (^[a-z][a-z0-9_]*$)
+    string value = 2;
+}
+
 // InstrumentAmount is the "Sealed Envelope" - the universal payload for all asset quantities.
 // Go code handles the envelope (amount, code, version, temporal bounds, source).
 // CEL handles the letter (attributes validation, bucket key generation).
@@ -103,14 +113,14 @@ message InstrumentAmount {
     uint32 version = 3;             // Schema version for evolution
 
     // The Context/Fungibility payload (tenant-defined attributes).
-    // CEL is the SOLE accessor for business rules on this map.
+    // CEL is the SOLE accessor for business rules on this payload.
     // Keys MUST be snake_case (^[a-z][a-z0-9_]*$) for CEL dot-access.
     //
-    // DESIGN NOTE: map<K,V> forces one allocation per unmarshal at 100k TPS.
-    // Alternative: `repeated AttributeEntry attributes` (slice of structs).
-    // Phase 1 uses map for CEL ergonomics; if GC pauses exceed 50ms in
-    // Stream J load tests, migrate to repeated (slices are poolable).
-    map<string, string> attributes = 4;
+    // CRITICAL: Uses repeated structs, NOT map<string,string>.
+    // - Slices are poolable via sync.Pool; maps force allocation per unmarshal
+    // - At 100k TPS, this avoids 100k map allocations/second
+    // - Go code converts to map only at CEL boundary (transient allocation)
+    repeated AttributeEntry attributes = 4;
 
     // Temporal bounds (first-class citizens per ADR-0017).
     // Exposed to CEL as 'valid_from' and 'valid_to' variables.
@@ -227,6 +237,68 @@ type AttributeBag interface {
     Len() int
     Reset()  // Clears all entries for pool reuse
     ToMap() map[string]string  // For CEL evaluation (allocates)
+}
+
+// Pool-backed implementation (REQUIRED in Stream A, not deferred)
+var attributeBagPool = sync.Pool{
+    New: func() any { return &sliceAttributeBag{entries: make([]kv, 0, 16)} },
+}
+
+type kv struct{ key, value string }
+
+type sliceAttributeBag struct {
+    entries []kv
+}
+
+func AcquireAttributeBag() AttributeBag {
+    return attributeBagPool.Get().(*sliceAttributeBag)
+}
+
+func ReleaseAttributeBag(bag AttributeBag) {
+    if b, ok := bag.(*sliceAttributeBag); ok {
+        b.Reset()
+        attributeBagPool.Put(b)
+    }
+}
+
+func (b *sliceAttributeBag) Get(key string) (string, bool) {
+    for _, e := range b.entries {
+        if e.key == key { return e.value, true }
+    }
+    return "", false
+}
+
+func (b *sliceAttributeBag) Set(key, value string) {
+    for i := range b.entries {
+        if b.entries[i].key == key { b.entries[i].value = value; return }
+    }
+    b.entries = append(b.entries, kv{key, value})
+}
+
+func (b *sliceAttributeBag) Keys() []string {
+    keys := make([]string, len(b.entries))
+    for i, e := range b.entries { keys[i] = e.key }
+    return keys
+}
+
+func (b *sliceAttributeBag) Len() int { return len(b.entries) }
+
+func (b *sliceAttributeBag) Reset() { b.entries = b.entries[:0] }
+
+func (b *sliceAttributeBag) ToMap() map[string]string {
+    m := make(map[string]string, len(b.entries))
+    for _, e := range b.entries { m[e.key] = e.value }
+    return m
+}
+
+// FromProto converts proto AttributeEntry slice to pooled AttributeBag.
+// Caller MUST call ReleaseAttributeBag when done.
+func FromProto(entries []*quantityv1.AttributeEntry) AttributeBag {
+    bag := AcquireAttributeBag()
+    for _, e := range entries {
+        bag.Set(e.Key, e.Value)
+    }
+    return bag
 }
 
 // InstrumentRegistry is the contract between Reference Data and consumers.
@@ -1265,49 +1337,37 @@ the other on SQL query performance. This prevents context-switching overhead.
 
 1. **InstrumentAmount message** (`quantity.proto`) - *The Data Carrier*
 
+   > **See Zero-State Contract** for canonical proto definition. Key design points below.
+
    ```protobuf
+   message AttributeEntry {
+       string key = 1;    // Must be snake_case
+       string value = 2;
+   }
+
    message InstrumentAmount {
-       // The quantity magnitude (decimal string).
-       // Native Go math handles this. CEL NEVER touches this field.
        string amount = 1;
-
-       // The Identity of the asset.
-       string instrument_code = 2;     // "USD", "KWH", "GPU-H100"
-       uint32 version = 3;             // Schema version
-
-       // The Context/Fungibility payload (The "HashMap" Pattern).
-       // DESIGN DECISION: We use map<string, string> for flexibility + performance.
-       // Rationale:
-       // 1. Flexibility: Allows tenant-defined schemas without re-compiling Proto.
-       // 2. Performance: CEL handles type coercion (string→int) efficiently (~100ns).
-       // 3. Simplicity: Avoids complex nested structures on the wire.
-       // 4. Bucketing: CEL generates deterministic keys for database grouping.
-       // CONSTRAINT: Keys MUST be snake_case (^[a-z][a-z0-9_]*$) for CEL compatibility.
-       map<string, string> attributes = 4;
-
-       // Temporal bounds (first-class citizens per ADR-0017).
-       // Time is fundamental, not just another attribute.
+       string instrument_code = 2;
+       uint32 version = 3;
+       repeated AttributeEntry attributes = 4;  // NOT map - enables pooling
        google.protobuf.Timestamp valid_from = 5;
        google.protobuf.Timestamp valid_to = 6;
+       string source = 7;  // Quality Ladder (ADR-0017)
    }
    ```
 
-   > **Why `map<string, string>`**: Using `google.protobuf.Struct` adds marshalling overhead
-   > and CEL environment complexity. String maps are fast, simple, and CEL can coerce types
-   > explicitly: `int(attributes['expiry']) > 1700000000`.
+   > **Why `repeated AttributeEntry` instead of `map<string, string>`**:
+   >
+   > - **Poolability**: Slices can be reset and reused via sync.Pool. Maps cannot.
+   > - **Determinism**: Slice iteration order is stable. Map iteration is random.
+   > - **GC at scale**: At 100k TPS, map allocations cause 100k heap allocations/sec.
+   >   Pooled slices eliminate this entirely.
+   >
+   > **CEL Bridge**: Go code converts `[]AttributeEntry` to `map[string]string` only at the
+   > CEL evaluation boundary. This transient map is short-lived (per-request) and acceptable.
    >
    > **Why explicit time fields**: Per ADR-0017 (Temporal Quality), time is a first-class citizen.
-   > Storing `valid_from`/`valid_to` as top-level fields avoids parsing them from attributes
-   > on every write to the database's `period_start`/`period_end` columns.
-   >
-   > **GC Pressure Warning**: At 100k TPS, creating a `map[string]string` per request generates
-   > significant heap pressure. A batch of 10,000 entries = 10,000 map allocations. Mitigations:
-   >
-   > - **sync.Pool**: Pool map instances for reuse (reset, don't reallocate)
-   > - **Vertical scaling**: Size heap for sustained allocation rate
-   > - **Load testing**: Measure GC pause times, not just throughput (see Stream J)
-   >
-   > The bottleneck won't be CEL execution (~100ns); it will be GC pauses from map churn.
+   > Storing `valid_from`/`valid_to` as top-level fields avoids parsing from attributes.
 
    **CEL Type Coercion Table**: Force developers to rely on CEL's casting, not custom Go parsing:
 
@@ -1515,6 +1575,26 @@ the other on SQL query performance. This prevents context-switching overhead.
 
    > **Write path**: Calculate bucket_id from `fungibility_key_expression`, store with position.
    > **Read path**: `SELECT SUM(amount) FROM positions WHERE bucket_id = ?` uses index.
+   >
+   > ⚠️ **QUERY CONSTRAINT (CRITICAL)**: The index does NOT include `attributes` JSONB column.
+   >
+   > **ALLOWED**: Queries using `bucket_id` or `bucket_id IN (...)`:
+   >
+   > ```sql
+   > SELECT SUM(amount) FROM positions WHERE bucket_id = 'a1b2c3d4...'
+   > SELECT * FROM positions WHERE bucket_id IN ('a1b2c3d4...', 'e5f6g7h8...')
+   > ```
+   >
+   > **FORBIDDEN**: Queries filtering by raw attributes (causes full table scan):
+   >
+   > ```sql
+   > -- DO NOT DO THIS - will scan ALL positions for the instrument
+   > SELECT * FROM positions WHERE attributes->>'grade' = 'A'
+   > ```
+   >
+   > If a tenant needs "How much Grade A Rice do I have?", the application must
+   > calculate the bucket_id for `{grade: "A"}` using `bucket_key()`, then query by
+   > that bucket_id.
    >
    > **Read Availability**: The `dimension` column is **intentionally redundant**. It allows
    > Position Keeping to instantiate `Quantity[D]` structs and perform basic aggregations
@@ -1903,7 +1983,28 @@ the other on SQL query performance. This prevents context-switching overhead.
 
 7. **CEL Compiler** (`cel.go`) using `github.com/google/cel-go`:
 
+   > **CEL Version Pinning (CRITICAL for Determinism)**
+   >
+   > CEL expressions generate `bucket_id` values stored permanently in the database.
+   > If cel-go library behavior changes (function semantics, type coercion), calculated
+   > keys may shift, causing position splits or merges.
+   >
+   > **Requirements:**
+   > - Pin `github.com/google/cel-go` to exact version in `go.mod` (e.g., `v0.20.1`)
+   > - Never upgrade cel-go without running full bucket key regression tests
+   > - Document cel-go version in instrument definition metadata for future audits
+   > - BucketKeyLib MUST sort map keys before hashing (Go map iteration is random)
+   >
+   > ```go
+   > // go.mod - pin exact version
+   > require github.com/google/cel-go v0.20.1
+   > ```
+
    ```go
+   // CELVersion documents the pinned cel-go version for determinism audits.
+   // If upgraded, run full bucket key regression tests before deployment.
+   const CELVersion = "v0.20.1"
+
    type CELCompiler struct {
        validationEnv *cel.Env  // For validation_expression: attributes → bool
        bucketKeyEnv  *cel.Env  // For fungibility_key_expression: attributes → string
@@ -2226,7 +2327,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 > we only need to prove we can define *one* custom asset manually via API/CLI. Building a
 > library system now distracts from the core ledger physics.
 
-11. **Archetype Loader** (`cmd/archetype-loader`) - *Phase 1.5*
+1. **Archetype Loader** (`cmd/archetype-loader`) - *Phase 1.5*
 
     Reads YAML archetype definitions from `configs/archetypes/` and seeds them into the System Tenant:
 
@@ -2269,7 +2370,7 @@ the other on SQL query performance. This prevents context-switching overhead.
 
     > **Usage**: Run during deployment or as init container to seed archetypes.
 
-12. **Archetype Tester** (`cmd/archetype-tester`) - *Phase 1.5*
+2. **Archetype Tester** (`cmd/archetype-tester`) - *Phase 1.5*
 
     CI tool that validates archetype CEL logic against test scenarios:
 
@@ -2564,6 +2665,94 @@ the other on SQL query performance. This prevents context-switching overhead.
    > independent limiter with burst=10, rate=10/minute. Limiters are lazily created and
    > stored in sync.Map for thread safety.
 
+6. **Simulation Mode** (CLI/MCP - Full Transaction Dry Run):
+
+   > Beyond `EvaluateInstrument` (which tests expressions only), users need to simulate
+   > a complete transaction: "If I deposit 100 units with these attributes, what happens?"
+
+   ```go
+   // SimulateTransaction provides a full dry-run of a transaction.
+   // Shows validation result, bucket assignment, and what the position would look like.
+   type SimulateTransactionRequest struct {
+       InstrumentCode string
+       Version        uint32
+       Amount         string
+       Attributes     map[string]string
+       ValidFrom      time.Time
+       ValidTo        time.Time
+       Source         string  // Quality Ladder source
+   }
+
+   type SimulateTransactionResponse struct {
+       // Would validation pass?
+       ValidationPassed bool
+       ValidationErrors []string
+
+       // What bucket would this land in?
+       BucketID string
+
+       // Preview of the position record
+       PositionPreview struct {
+           InstrumentCode string
+           Amount         string
+           BucketID       string
+           Dimension      string
+           Attributes     map[string]string
+       }
+
+       // If bucket already exists, what's the current balance?
+       // (Optional - requires DB lookup, may return nil if not available)
+       ExistingBucketBalance *string
+   }
+   ```
+
+   **CLI Tool** (`cmd/instrument-cli`):
+
+   ```bash
+   # Simulate a deposit
+   $ instrument-cli simulate --tenant abc123 \
+       --instrument RICE --version 1 \
+       --amount 100 \
+       --attr grade=A --attr region=US \
+       --valid-from 2025-01-01 --valid-to 2025-12-31
+
+   Simulation Result:
+   ─────────────────────────────────────────────────
+   Instrument:        RICE (v1)
+   Amount:            100
+   Attributes:        {grade: "A", region: "US"}
+
+   Validation:        ✓ PASSED
+   Bucket ID:         a1b2c3d4e5f6g7h8...
+
+   Position Preview:
+     - instrument_code: RICE
+     - bucket_id:       a1b2c3d4e5f6g7h8...
+     - amount:          100
+     - dimension:       Commodity
+
+   Existing Bucket:   250 units (would become 350 after deposit)
+   ─────────────────────────────────────────────────
+
+   # Simulate validation failure
+   $ instrument-cli simulate --tenant abc123 \
+       --instrument RICE --version 1 \
+       --amount 100 \
+       --attr grade=X \  # Invalid grade
+
+   Simulation Result:
+   ─────────────────────────────────────────────────
+   Validation:        ✗ FAILED
+   Errors:
+     - Grade must be A, B, or C (got: X)
+   ─────────────────────────────────────────────────
+   ```
+
+   > **Why CLI over just API**: The API tests expressions in isolation. The CLI simulates
+   > the full pipeline: load instrument from cache, run validation, generate bucket key,
+   > optionally lookup existing bucket balance. Users see exactly what would happen before
+   > calling `RegisterInstrument`.
+
 ### Acceptance Criteria
 
 - [ ] All CRUD endpoints functional (`Register`, `Update`, `Retrieve`, `List`)
@@ -2578,6 +2767,8 @@ the other on SQL query performance. This prevents context-switching overhead.
 - [ ] `RegisterInstrument` rate-limited to 10 requests/minute per tenant
 - [ ] Rate limit exceeded returns `RESOURCE_EXHAUSTED` (gRPC code 8) with clear message
 - [ ] Rate limiting does NOT apply to read-only endpoints
+- [ ] **Simulation Mode**: `instrument-cli simulate` shows validation, bucket ID, and position preview
+- [ ] **Simulation Mode**: Optionally shows existing bucket balance (requires DB access)
 
 ---
 
@@ -3158,19 +3349,31 @@ Position Keeping is the **primary consumer** of multi-asset quantities. Changes 
    > **Phase 1 Note**: Background worker can be a simple goroutine. Production deployments
    > should use a proper job scheduler with distributed locking.
 
-7. **Re-bucketing Tool** (Admin-Only Data Recovery):
+7. **Re-bucketing Tool** (CATASTROPHIC RECOVERY ONLY):
 
-   > **The Problem**: If a tenant misconfigures `fungibility_key_expression`, positions may
-   > be incorrectly bucketed (e.g., high-grade and low-grade rice merged into same bucket).
-   > Since bucket_id is computed at write time, you cannot simply "fix" the expression -
-   > historical data is already merged.
+   > ⚠️ **LEDGER INTEGRITY WARNING**: Rebucketing violates the immutable ledger principle.
+   > Rewriting `bucket_id` on existing rows breaks the link between original Write and
+   > current Read. If you have backups or CDC streams, they will diverge from live data.
    >
-   > **Solution**: An admin-only tool that rebuilds bucket assignments from raw measurement data.
+   > **Preferred Solution: Migration-as-Trade**
+   > Instead of rebucketing, create a new instrument version and migrate:
+   > 1. Create `Rice(v2)` with corrected `fungibility_key_expression`
+   > 2. Debit from `Rice(v1)` positions (zeroing them out)
+   > 3. Credit to `Rice(v2)` positions (with correct bucketing)
+   > 4. This creates an auditable "trade" from v1 → v2
+   >
+   > **When to use Rebucketing** (catastrophic recovery only):
+   > - Definition was wrong from day 0 AND no settlements have occurred
+   > - Data corruption recovery where audit trail is already broken
+   > - Development/staging environment reset
+   >
+   > **Do NOT use for**: Normal expression fixes, gradual migrations, production corrections.
 
    ```go
    // RebucketingTool rebuilds position bucket assignments for an instrument.
+   // ⚠️ CATASTROPHIC RECOVERY ONLY - violates immutable ledger principle.
+   // Prefer Migration-as-Trade pattern for normal corrections.
    // ADMIN-ONLY: Requires explicit authorization and audit logging.
-   // DESTRUCTIVE: Rebuilds positions table for the affected instrument.
    type RebucketingTool struct {
        measurementStore MeasurementStore  // Raw measurements with original attributes
        positionStore    PositionStore
@@ -3535,9 +3738,14 @@ This service already tracks non-fiat measurements - **native fit for `Quantity[C
       remains under 10ms even with 1 million distinct buckets (attribute combinations)
 - [ ] **Bucket Aggregation Test**: Verify `GROUP BY bucket_id` aggregation with 10,000 positions
       across 100 buckets completes under 50ms
-- [ ] **GC Pressure Load Test**: Sustained 100k TPS with `map[string]string` allocations per request.
+- [ ] **GC Pressure Load Test**: Sustained 100k TPS with pooled `AttributeBag` allocations.
       Measure P99 latency AND GC pause times (not just throughput). Target: <10ms P99, <50ms GC pauses.
-      If GC pauses exceed target, document sync.Pool or heap sizing recommendations.
+      Verify pool reuse rate >95% (most requests should reuse, not allocate).
+- [ ] **CEL Determinism Test**: Same attributes in different order must produce identical `bucket_id`.
+      Run `bucket_key(['region', 'grade'])` with attributes `{region: "US", grade: "A"}` 10,000 times
+      across multiple goroutines. Every result must be identical. Fail if ANY divergence detected.
+- [ ] **CEL Version Regression Test**: Store expected `bucket_id` values for known attribute sets.
+      After any cel-go upgrade, re-run and compare. Block deployment if hashes change.
 - [ ] **Poison Pill CEL Test**: Tenant defines a valid but computationally expensive CEL expression
       (e.g., `size([1,2,3,4,5,6,7,8,9,10].map(x, [1,2,3,4,5,6,7,8,9,10].map(y, x*y)).flatten()) > 0`).
       Verify `CostLimit(10000)` aborts evaluation instantly and returns clear error to gRPC client.
