@@ -76,9 +76,11 @@ type Quantity[D Dimension] interface {
 }
 
 // InstrumentDefinition represents the reference data for an instrument type.
+// Note: TenantID is NOT included here. Tenant isolation is handled at the database
+// schema level - each tenant has their own schema. The tenant context flows through
+// request headers and is extracted by interceptors for schema routing.
 type InstrumentDefinition struct {
 	ID                       string
-	TenantID                 string
 	Code                     string
 	Version                  int32
 	Dimension                string
@@ -96,17 +98,19 @@ type InstrumentDefinition struct {
 }
 
 // InstrumentRegistry provides access to instrument definitions.
+// Tenant context is extracted from ctx by the implementation (schema-per-tenant routing).
 type InstrumentRegistry interface {
-	// GetDefinition retrieves an instrument definition by tenant, code, and version.
+	// GetDefinition retrieves an instrument definition by code and version.
+	// Tenant is determined from ctx (extracted from request headers by interceptors).
 	// Returns an error if the instrument is not found.
-	GetDefinition(ctx context.Context, tenantID, code string, version int32) (*InstrumentDefinition, error)
+	GetDefinition(ctx context.Context, code string, version int32) (*InstrumentDefinition, error)
 
 	// GetActiveDefinition retrieves the active version of an instrument.
 	// Returns an error if no active version exists.
-	GetActiveDefinition(ctx context.Context, tenantID, code string) (*InstrumentDefinition, error)
+	GetActiveDefinition(ctx context.Context, code string) (*InstrumentDefinition, error)
 
-	// ListActive returns all active instrument definitions for a tenant.
-	ListActive(ctx context.Context, tenantID string) ([]*InstrumentDefinition, error)
+	// ListActive returns all active instrument definitions for the tenant (from ctx).
+	ListActive(ctx context.Context) ([]*InstrumentDefinition, error)
 
 	// CreateDraft creates a new instrument definition in DRAFT status.
 	// Returns the created definition with assigned ID.
@@ -114,22 +118,24 @@ type InstrumentRegistry interface {
 
 	// ActivateInstrument transitions an instrument from DRAFT to ACTIVE status.
 	// Returns an error if the instrument is not in DRAFT status.
-	ActivateInstrument(ctx context.Context, tenantID, code string, version int32) error
+	ActivateInstrument(ctx context.Context, code string, version int32) error
 
 	// DeprecateInstrument transitions an instrument to DEPRECATED status.
 	// Returns an error if the instrument is not in ACTIVE status.
-	DeprecateInstrument(ctx context.Context, tenantID, code string, version int32) error
+	DeprecateInstrument(ctx context.Context, code string, version int32) error
 }
 
 // CachedInstrumentRegistry wraps an InstrumentRegistry with caching capabilities.
+// Cache keys are internally scoped by tenant (determined from ctx during lookups).
 type CachedInstrumentRegistry interface {
 	InstrumentRegistry
 
-	// InvalidateCache removes cached entries for the specified instrument.
-	// Pass empty code to invalidate all instruments for the tenant.
-	InvalidateCache(tenantID, code string)
+	// InvalidateCache removes cached entries for the specified instrument within the
+	// current tenant context (from ctx). Pass empty code to invalidate all instruments.
+	InvalidateCache(ctx context.Context, code string)
 
-	// InvalidateAll removes all cached entries.
+	// InvalidateAll removes all cached entries across all tenants.
+	// Use with caution - typically only for system-wide cache refresh.
 	InvalidateAll()
 }
 

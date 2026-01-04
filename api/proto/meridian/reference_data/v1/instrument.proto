@@ -49,11 +49,9 @@ message InstrumentDefinition {
   // id is the unique identifier for this definition (UUID).
   string id = 1 [(buf.validate.field).string.uuid = true];
 
-  // tenant_id identifies the tenant that owns this definition.
-  string tenant_id = 2 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 64
-  }];
+  // Note: tenant_id is NOT included here. Tenant isolation is handled at the
+  // database schema level - each tenant has their own schema. The tenant context
+  // flows through request headers and is extracted by interceptors for schema routing.
 
   // code is the unique instrument code within the tenant (e.g., "USD", "KWH").
   string code = 3 [(buf.validate.field).string = {
