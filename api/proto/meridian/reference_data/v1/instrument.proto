@@ -64,7 +64,11 @@ message InstrumentDefinition {
   int32 version = 4 [(buf.validate.field).int32.gte = 1];
 
   // dimension is the physical or conceptual dimension this instrument measures.
-  Dimension dimension = 5 [(buf.validate.field).enum.defined_only = true];
+  // DIMENSION_UNSPECIFIED (0) is rejected - instruments must have a defined dimension.
+  Dimension dimension = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 
   // precision is the number of decimal places for this instrument (0-18).
   int32 precision = 6 [(buf.validate.field).int32 = {
@@ -73,7 +77,11 @@ message InstrumentDefinition {
   }];
 
   // status is the lifecycle state of this definition.
-  InstrumentStatus status = 7 [(buf.validate.field).enum.defined_only = true];
+  // INSTRUMENT_STATUS_UNSPECIFIED (0) is rejected - instruments must have a defined status.
+  InstrumentStatus status = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 
   // validation_expression is a CEL expression to validate instrument amounts.
   // Example: "amount > 0 && (attributes.batch_id != '' || instrument.dimension == 'CURRENCY')"
