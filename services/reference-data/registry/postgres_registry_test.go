@@ -28,7 +28,8 @@ func setupTestRegistry(t *testing.T) (*registry.PostgresRegistry, *pgxpool.Pool)
 
 func setupTenantContext(t *testing.T, pool *pgxpool.Pool, tenantID string) context.Context {
 	t.Helper()
-	ctx, _ := testdb.SetupTenantSchemaForPgx(t, pool, tenantID, "reference-data")
+	ctx, cleanup := testdb.SetupTenantSchemaForPgx(t, pool, tenantID, "reference-data")
+	t.Cleanup(cleanup)
 	return ctx
 }
 

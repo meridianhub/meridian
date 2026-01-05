@@ -55,7 +55,6 @@ func NewTestPool(t *testing.T, opts ...PoolOption) *pgxpool.Pool {
 
 	// Create context with timeout for container operations
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
 
 	// Create PostgreSQL container
 	pgContainer, err := postgres.Run(ctx,
@@ -69,6 +68,7 @@ func NewTestPool(t *testing.T, opts ...PoolOption) *pgxpool.Pool {
 				WithStartupTimeout(60*time.Second)),
 	)
 	if err != nil {
+		cancel()
 		t.Fatalf("Failed to start PostgreSQL container: %v", err)
 	}
 
@@ -82,14 +82,19 @@ func NewTestPool(t *testing.T, opts ...PoolOption) *pgxpool.Pool {
 	// Get connection string
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
+		cancel()
 		t.Fatalf("Failed to get connection string: %v", err)
 	}
 
 	// Create pgxpool
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
+		cancel()
 		t.Fatalf("Failed to create connection pool: %v", err)
 	}
+
+	// Cancel setup context now that pool is created
+	cancel()
 
 	// Register pool cleanup
 	t.Cleanup(func() {

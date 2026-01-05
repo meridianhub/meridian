@@ -7,7 +7,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/cel-go/cel"
 	"github.com/google/uuid"
 )
 
@@ -210,12 +209,4 @@ type InstrumentRegistry interface {
 	// If no validation expression is defined, always returns valid.
 	// Uses pre-compiled CEL programs for performance.
 	ValidateAttributes(ctx context.Context, code string, version int, attrs AttributeBag) (ValidationResult, error)
-}
-
-// CompiledPrograms holds pre-compiled CEL programs for an instrument.
-// This avoids recompiling expressions on every validation call.
-type CompiledPrograms struct {
-	Validation     cel.Program
-	FungibilityKey cel.Program
-	ErrorMessage   cel.Program
 }

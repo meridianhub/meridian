@@ -449,8 +449,14 @@ func (r *PostgresRegistry) ValidateAttributes(ctx context.Context, code string, 
 
 // buildCELInput constructs the input map for CEL evaluation.
 func (r *PostgresRegistry) buildCELInput(attrs AttributeBag) map[string]any {
+	// Ensure attributes is never nil to prevent CEL evaluation issues
+	attributes := attrs.Attributes
+	if attributes == nil {
+		attributes = make(map[string]string)
+	}
+
 	input := map[string]any{
-		"attributes": attrs.Attributes,
+		"attributes": attributes,
 		"amount":     attrs.Amount,
 		"source":     attrs.Source,
 		"valid_from": time.Time{},
