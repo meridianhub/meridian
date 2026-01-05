@@ -2017,8 +2017,7 @@ func TestProtoToMoney(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				gotCents, err := got.ToMinorUnits()
-				require.NoError(t, err)
+				gotCents := domain.ToMinorUnits(got)
 				assert.Equal(t, tt.wantCents, gotCents)
 			}
 		})
@@ -2799,19 +2798,17 @@ func TestPostLedgerEntries_FailureModes(t *testing.T) {
 }
 
 // TestPostLedgerEntries_UnsupportedCurrency tests that unsupported currencies are rejected.
-// This tests the mappers.DomainCurrencyToProto function which returns CURRENCY_UNSPECIFIED for
+// This tests the mappers.CurrencyCodeToProto function which returns CURRENCY_UNSPECIFIED for
 // unsupported currencies, causing postLedgerEntries to return ErrUnsupportedCurrency.
 func TestPostLedgerEntries_UnsupportedCurrency(t *testing.T) {
 	// Test that unsupported currencies return CURRENCY_UNSPECIFIED
-	// Note: JPY is actually supported in the shared mapper now
-	unsupportedCurrency := domain.Currency("XYZ")
-	result := mappers.DomainCurrencyToProto(unsupportedCurrency)
+	result := mappers.CurrencyCodeToProto("XYZ")
 	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, result)
 
 	// Verify the error path in postLedgerEntries would be triggered
 	// by testing that CURRENCY_UNSPECIFIED causes the expected error
-	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, mappers.DomainCurrencyToProto(domain.Currency("XYZ")))
-	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, mappers.DomainCurrencyToProto(domain.Currency("")))
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, mappers.CurrencyCodeToProto("XYZ"))
+	assert.Equal(t, commonpb.Currency_CURRENCY_UNSPECIFIED, mappers.CurrencyCodeToProto(""))
 }
 
 // TestExtractGatewayIDFromRef tests the gateway ID extraction from reference IDs.
@@ -2837,27 +2834,27 @@ func TestExtractGatewayIDFromRef(t *testing.T) {
 	}
 }
 
-// TestDomainCurrencyToProto tests the shared currency conversion function.
-func TestDomainCurrencyToProto(t *testing.T) {
+// TestCurrencyCodeToProto tests the shared currency conversion function.
+func TestCurrencyCodeToProto(t *testing.T) {
 	testCases := []struct {
-		name     string
-		currency domain.Currency
-		expected commonpb.Currency
+		name         string
+		currencyCode string
+		expected     commonpb.Currency
 	}{
-		{"GBP converts correctly", domain.CurrencyGBP, commonpb.Currency_CURRENCY_GBP},
-		{"USD converts correctly", domain.CurrencyUSD, commonpb.Currency_CURRENCY_USD},
-		{"EUR converts correctly", domain.CurrencyEUR, commonpb.Currency_CURRENCY_EUR},
-		{"JPY converts correctly", domain.CurrencyJPY, commonpb.Currency_CURRENCY_JPY},
-		{"CHF converts correctly", domain.CurrencyCHF, commonpb.Currency_CURRENCY_CHF},
-		{"CAD converts correctly", domain.CurrencyCAD, commonpb.Currency_CURRENCY_CAD},
-		{"AUD converts correctly", domain.CurrencyAUD, commonpb.Currency_CURRENCY_AUD},
-		{"unsupported currency returns UNSPECIFIED", domain.Currency("XYZ"), commonpb.Currency_CURRENCY_UNSPECIFIED},
-		{"empty currency returns UNSPECIFIED", domain.Currency(""), commonpb.Currency_CURRENCY_UNSPECIFIED},
+		{"GBP converts correctly", "GBP", commonpb.Currency_CURRENCY_GBP},
+		{"USD converts correctly", "USD", commonpb.Currency_CURRENCY_USD},
+		{"EUR converts correctly", "EUR", commonpb.Currency_CURRENCY_EUR},
+		{"JPY converts correctly", "JPY", commonpb.Currency_CURRENCY_JPY},
+		{"CHF converts correctly", "CHF", commonpb.Currency_CURRENCY_CHF},
+		{"CAD converts correctly", "CAD", commonpb.Currency_CURRENCY_CAD},
+		{"AUD converts correctly", "AUD", commonpb.Currency_CURRENCY_AUD},
+		{"unsupported currency returns UNSPECIFIED", "XYZ", commonpb.Currency_CURRENCY_UNSPECIFIED},
+		{"empty currency returns UNSPECIFIED", "", commonpb.Currency_CURRENCY_UNSPECIFIED},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := mappers.DomainCurrencyToProto(tc.currency)
+			result := mappers.CurrencyCodeToProto(tc.currencyCode)
 			assert.Equal(t, tc.expected, result)
 		})
 	}

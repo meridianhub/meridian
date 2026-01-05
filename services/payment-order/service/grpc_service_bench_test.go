@@ -10,7 +10,6 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
@@ -113,7 +112,7 @@ func BenchmarkRetrievePaymentOrder(b *testing.B) {
 	}
 
 	// Create a payment order to retrieve
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	if err != nil {
 		b.Fatalf("setup: NewMoney failed: %v", err)
 	}
@@ -165,7 +164,7 @@ func BenchmarkListPaymentOrders(b *testing.B) {
 			// Pre-populate payment orders
 			ctx := context.Background()
 			for i := 0; i < bm.numOrders; i++ {
-				amount, err := cadomain.NewMoney("GBP", int64(1000+i))
+				amount, err := domain.NewMoney("GBP", int64(1000+i))
 				if err != nil {
 					b.Fatalf("setup: NewMoney failed: %v", err)
 				}
@@ -244,7 +243,7 @@ func BenchmarkUpdatePaymentOrder_Settled(b *testing.B) {
 	const poolSize = 1000
 	paymentOrders := make([]*domain.PaymentOrder, poolSize)
 	for i := 0; i < poolSize; i++ {
-		amount, err := cadomain.NewMoney("GBP", 10000)
+		amount, err := domain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
 		}
@@ -319,7 +318,7 @@ func BenchmarkCancelPaymentOrder(b *testing.B) {
 	const poolSize = 1000
 	paymentOrders := make([]*domain.PaymentOrder, poolSize)
 	for i := 0; i < poolSize; i++ {
-		amount, err := cadomain.NewMoney("GBP", 10000)
+		amount, err := domain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
 		}
@@ -383,7 +382,7 @@ func BenchmarkMoneyConversion(b *testing.B) {
 	})
 
 	b.Run("toMoneyAmount", func(b *testing.B) {
-		amount, err := cadomain.NewMoney("GBP", 1234567)
+		amount, err := domain.NewMoney("GBP", 1234567)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
 		}
@@ -400,7 +399,7 @@ func BenchmarkMoneyConversion(b *testing.B) {
 // BenchmarkToProto benchmarks the domain-to-proto conversion.
 // This is called on every response path.
 func BenchmarkToProto(b *testing.B) {
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	if err != nil {
 		b.Fatalf("setup: NewMoney failed: %v", err)
 	}

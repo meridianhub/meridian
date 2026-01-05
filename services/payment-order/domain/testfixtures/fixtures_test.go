@@ -130,35 +130,35 @@ func TestNewMoney(t *testing.T) {
 	m := testfixtures.NewMoney(t, 5000, "GBP")
 
 	assert.True(t, m.IsPositive())
-	assert.Equal(t, domain.CurrencyGBP, m.Currency())
+	assert.Equal(t, "GBP", domain.CurrencyCode(m))
 }
 
 func TestDefaultGBPMoney(t *testing.T) {
 	m := testfixtures.DefaultGBPMoney(t)
 
 	assert.True(t, m.IsPositive())
-	assert.Equal(t, domain.CurrencyGBP, m.Currency())
+	assert.Equal(t, "GBP", domain.CurrencyCode(m))
 }
 
 func TestDefaultUSDMoney(t *testing.T) {
 	m := testfixtures.DefaultUSDMoney(t)
 
 	assert.True(t, m.IsPositive())
-	assert.Equal(t, domain.CurrencyUSD, m.Currency())
+	assert.Equal(t, "USD", domain.CurrencyCode(m))
 }
 
 func TestLargeGBPMoney(t *testing.T) {
 	m := testfixtures.LargeGBPMoney(t)
 
 	assert.True(t, m.IsPositive())
-	assert.Equal(t, domain.CurrencyGBP, m.Currency())
+	assert.Equal(t, "GBP", domain.CurrencyCode(m))
 }
 
 func TestSmallGBPMoney(t *testing.T) {
 	m := testfixtures.SmallGBPMoney(t)
 
 	assert.True(t, m.IsPositive())
-	assert.Equal(t, domain.CurrencyGBP, m.Currency())
+	assert.Equal(t, "GBP", domain.CurrencyCode(m))
 }
 
 func TestHelperFunctions(t *testing.T) {
