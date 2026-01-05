@@ -5,6 +5,15 @@ on:
     workflows: ["Test", "Build", "Quality"]
     types: [completed]
 
+# Prevent concurrent Claude Code installations which cause lock conflicts
+# Only one Claude review can run at a time per repo
+concurrency:
+  group: claude-code-review-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  CLAUDE_CODE_VERSION: "2.0.74"
+
 jobs:
   claude-review:
     # Only run when ALL conditions are met:
@@ -66,6 +75,74 @@ jobs:
         id: date
         run: echo "current_date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
 
+      - name: Cache Claude Code
+        if: steps.pr.outputs.number
+        id: cache-claude
+        uses: actions/cache@v4
+        with:
+          # Cache the entire directory - installer may create multiple files
+          path: ~/.local/bin
+          # v2: invalidate bad cache from previous version
+          key: claude-code-${{ env.CLAUDE_CODE_VERSION }}-linux-x64-v2
+
+      - name: Validate cached Claude Code
+        if: steps.pr.outputs.number && steps.cache-claude.outputs.cache-hit == 'true'
+        id: validate-cache
+        run: |
+          # Check if cached binary is valid (exists, executable, reasonable size)
+          if [ -f ~/.local/bin/claude ] && [ -x ~/.local/bin/claude ]; then
+            SIZE=$(stat -c%s ~/.local/bin/claude 2>/dev/null || stat -f%z ~/.local/bin/claude 2>/dev/null || echo "0")
+            # Claude Code binary should be at least 10MB
+            if [ "$SIZE" -gt 10000000 ]; then
+              echo "Cache valid: claude binary is ${SIZE} bytes"
+              echo "valid=true" >> $GITHUB_OUTPUT
+            else
+              echo "::warning::Cache invalid: claude binary too small (${SIZE} bytes), will reinstall"
+              rm -f ~/.local/bin/claude
+              echo "valid=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::warning::Cache invalid: claude binary missing or not executable, will reinstall"
+            echo "valid=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Claude Code
+        if: steps.pr.outputs.number && (steps.cache-claude.outputs.cache-hit != 'true' || steps.validate-cache.outputs.valid != 'true')
+        run: |
+          echo "Installing Claude Code v${{ env.CLAUDE_CODE_VERSION }}..."
+          mkdir -p ~/.local/bin
+          for attempt in 1 2 3 4 5; do
+            echo "Installation attempt $attempt..."
+            if curl -fsSL https://claude.ai/install.sh | bash -s -- "${{ env.CLAUDE_CODE_VERSION }}"; then
+              # Verify installation succeeded
+              if [ -f ~/.local/bin/claude ] && [ -x ~/.local/bin/claude ]; then
+                SIZE=$(stat -c%s ~/.local/bin/claude 2>/dev/null || stat -f%z ~/.local/bin/claude 2>/dev/null || echo "0")
+                if [ "$SIZE" -gt 10000000 ]; then
+                  echo "Claude Code installed successfully (${SIZE} bytes)"
+                  break
+                else
+                  echo "::warning::Installation produced invalid binary (${SIZE} bytes)"
+                fi
+              fi
+            fi
+            if [ $attempt -eq 5 ]; then
+              echo "::error::Failed to install Claude Code after 5 attempts"
+              exit 1
+            fi
+            # Exponential backoff with jitter
+            sleep_time=$((attempt * 5 + RANDOM % 5))
+            echo "Installation failed, retrying in ${sleep_time}s..."
+            sleep $sleep_time
+          done
+
+      - name: Verify Claude Code installation
+        if: steps.pr.outputs.number
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # Final verification - this will fail the job if claude isn't working
+          ~/.local/bin/claude --version
+          echo "Claude Code ready"
+
       - name: Run Claude Code Review
         if: steps.pr.outputs.number
         id: claude-review
@@ -73,6 +150,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: ~/.local/bin/claude
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ steps.pr.outputs.number }}
@@ -100,9 +178,27 @@ jobs:
       - name: Report Final Status
         if: always() && steps.pr.outputs.number
         run: |
+          echo "## Claude Code Review Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR:** #${{ steps.pr.outputs.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cache hit:** ${{ steps.cache-claude.outputs.cache-hit == 'true' && 'Yes' || 'No' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Claude Code version:** ${{ env.CLAUDE_CODE_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
           if [ "${{ steps.claude-review.outcome }}" == "success" ]; then
-            echo "✅ Claude Code review completed successfully for PR #${{ steps.pr.outputs.number }}"
-          elif [ "${{ steps.claude-review.outcome }}" == "failure" ] || [ "${{ steps.claude-review.outcome }}" == "cancelled" ]; then
-            echo "⚠️  Claude Code review failed or was cancelled - this is non-blocking"
+            echo "### Result: Success" >> $GITHUB_STEP_SUMMARY
+            echo "Claude Code review completed successfully." >> $GITHUB_STEP_SUMMARY
+            echo "::notice::Claude Code review completed successfully for PR #${{ steps.pr.outputs.number }}"
+          elif [ "${{ steps.claude-review.outcome }}" == "failure" ]; then
+            echo "### Result: Failed" >> $GITHUB_STEP_SUMMARY
+            echo "Claude Code review failed - this is non-blocking." >> $GITHUB_STEP_SUMMARY
+            echo "::warning::Claude Code review failed for PR #${{ steps.pr.outputs.number }} - this is non-blocking"
+          elif [ "${{ steps.claude-review.outcome }}" == "cancelled" ]; then
+            echo "### Result: Cancelled" >> $GITHUB_STEP_SUMMARY
+            echo "Claude Code review was cancelled." >> $GITHUB_STEP_SUMMARY
+            echo "::warning::Claude Code review was cancelled for PR #${{ steps.pr.outputs.number }}"
+          elif [ "${{ steps.claude-review.outcome }}" == "skipped" ]; then
+            echo "### Result: Skipped" >> $GITHUB_STEP_SUMMARY
+            echo "Claude Code review was skipped." >> $GITHUB_STEP_SUMMARY
           fi
           exit 0
