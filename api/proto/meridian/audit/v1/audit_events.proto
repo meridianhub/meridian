@@ -17,6 +17,9 @@ enum AuditOperation {
   AUDIT_OPERATION_UPDATE = 2;
   // AUDIT_OPERATION_DELETE indicates a record was deleted.
   AUDIT_OPERATION_DELETE = 3;
+  // AUDIT_OPERATION_INITIAL_IMPORT indicates bulk position records were created
+  // during an initial data import or migration operation.
+  AUDIT_OPERATION_INITIAL_IMPORT = 4;
 }
 
 // AuditEvent represents a change to a database record that must be captured
