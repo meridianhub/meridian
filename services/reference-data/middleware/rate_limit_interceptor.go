@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -112,11 +113,13 @@ func NewRateLimitMetrics(registry prometheus.Registerer) *RateLimitMetrics {
 
 // RateLimitInterceptor provides per-tenant rate limiting for gRPC endpoints.
 type RateLimitInterceptor struct {
-	limiters sync.Map // map[string]*tenantLimiter
-	config   RateLimitInterceptorConfig
-	metrics  *RateLimitMetrics
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
+	limiters    sync.Map // map[string]*tenantLimiter
+	activeCount atomic.Int64
+	config      RateLimitInterceptorConfig
+	metrics     *RateLimitMetrics
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	wg          sync.WaitGroup
 }
 
 // NewRateLimitInterceptor creates a new rate limit interceptor with the given config.
@@ -148,8 +151,11 @@ func NewRateLimitInterceptor(config RateLimitInterceptorConfig, metrics *RateLim
 }
 
 // Stop gracefully stops the interceptor's background cleanup goroutine.
+// Safe to call multiple times.
 func (r *RateLimitInterceptor) Stop() {
-	close(r.stopCh)
+	r.stopOnce.Do(func() {
+		close(r.stopCh)
+	})
 	r.wg.Wait()
 }
 
@@ -173,7 +179,6 @@ func (r *RateLimitInterceptor) cleanupLoop() {
 // cleanupIdleLimiters removes limiters that haven't been used recently.
 func (r *RateLimitInterceptor) cleanupIdleLimiters() {
 	now := time.Now()
-	var activeCount int
 
 	r.limiters.Range(func(key, value any) bool {
 		tl, ok := value.(*tenantLimiter)
@@ -187,19 +192,18 @@ func (r *RateLimitInterceptor) cleanupIdleLimiters() {
 
 		if idle {
 			r.limiters.Delete(key)
+			r.activeCount.Add(-1)
 			if r.config.Logger != nil {
 				r.config.Logger.Debug("evicted idle rate limiter",
 					"tenant", key,
 					"idle_duration", idleDuration)
 			}
-		} else {
-			activeCount++
 		}
 		return true
 	})
 
 	if r.metrics != nil {
-		r.metrics.active.Set(float64(activeCount))
+		r.metrics.active.Set(float64(r.activeCount.Load()))
 	}
 }
 
@@ -235,14 +239,9 @@ func (r *RateLimitInterceptor) getOrCreateLimiter(tenantID string) *tenantLimite
 		}
 	}
 
-	// We created a new limiter, update the gauge
+	// We created a new limiter, update the counter and gauge
+	count := r.activeCount.Add(1)
 	if r.metrics != nil {
-		// Count active limiters
-		var count int
-		r.limiters.Range(func(_, _ any) bool {
-			count++
-			return true
-		})
 		r.metrics.active.Set(float64(count))
 	}
 
@@ -301,10 +300,5 @@ func (r *RateLimitInterceptor) UnaryServerInterceptor() grpc.UnaryServerIntercep
 // ActiveLimiters returns the number of active per-tenant rate limiters.
 // Useful for testing.
 func (r *RateLimitInterceptor) ActiveLimiters() int {
-	var count int
-	r.limiters.Range(func(_, _ any) bool {
-		count++
-		return true
-	})
-	return count
+	return int(r.activeCount.Load())
 }

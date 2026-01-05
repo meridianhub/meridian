@@ -357,3 +357,22 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, config.CleanupInterval)
 	assert.Equal(t, 1*time.Hour, config.IdleTimeout)
 }
+
+func TestRateLimitInterceptor_StopIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	registry := testRegistry()
+	metrics := NewRateLimitMetrics(registry)
+
+	config := RateLimitInterceptorConfig{
+		BurstSize:       10,
+		RefillRate:      1 * time.Hour,
+		CleanupInterval: 1 * time.Hour,
+	}
+	interceptor := NewRateLimitInterceptor(config, metrics)
+
+	// Stop should be safe to call multiple times without panicking
+	interceptor.Stop()
+	interceptor.Stop()
+	interceptor.Stop()
+}
