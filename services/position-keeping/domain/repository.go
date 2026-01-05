@@ -141,4 +141,8 @@ type PositionRepository interface {
 	// Groups by (InstrumentCode, BucketKey) and sums amounts.
 	// Returns an empty slice if no positions exist.
 	ListAggregatedByAccount(ctx context.Context, accountID string) ([]*AggregatedPosition, error)
+
+	// GetPositionCount returns the count of positions for an account.
+	// This is useful for pagination and monitoring position growth.
+	GetPositionCount(ctx context.Context, accountID string) (int64, error)
 }

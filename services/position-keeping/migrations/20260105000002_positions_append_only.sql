@@ -47,6 +47,7 @@ CREATE INDEX "idx_position_reference_id" ON "position" ("reference_id");
 CREATE INDEX "idx_position_created_at" ON "position" ("created_at");
 
 -- Add validation constraint for dimension values
+-- NOTE: Keep in sync with domain.ValidDimensions in services/position-keeping/domain/position.go
 ALTER TABLE "position"
   ADD CONSTRAINT "chk_position_dimension"
   CHECK ("dimension" IN ('Monetary', 'Energy', 'Compute', 'Carbon', 'Time', 'Physical', 'Custom'));
