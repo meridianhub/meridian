@@ -9,6 +9,12 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// testMoneyForBookingLog creates a Money value for use in booking log tests.
+func testMoneyForBookingLog(amount int64, currency Currency) Money {
+	inst := MustCurrencyToInstrument(currency)
+	return NewMoney(decimal.NewFromInt(amount), inst)
+}
+
 func TestNewFinancialBookingLog(t *testing.T) {
 	tests := []struct {
 		name                 string
@@ -270,7 +276,7 @@ func TestFinancialBookingLog_WithPosting(t *testing.T) {
 		CurrencyGBP,
 	)
 
-	money, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	money := testMoneyForBookingLog(100, CurrencyGBP)
 	posting1, _ := NewLedgerPosting(
 		original.ID,
 		PostingDirectionDebit,
@@ -440,7 +446,7 @@ func TestFinancialBookingLog_ImmutabilityChain(t *testing.T) {
 
 	originalID := original.ID
 
-	money, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	money := testMoneyForBookingLog(100, CurrencyGBP)
 	posting, _ := NewLedgerPosting(
 		original.ID,
 		PostingDirectionDebit,
