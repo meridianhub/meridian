@@ -18,6 +18,9 @@ import (
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 )
 
+// ErrInstrumentConfigInvalid indicates that the config is missing required fields.
+var ErrInstrumentConfigInvalid = errors.New("either Target or ServiceName must be provided")
+
 // InstrumentCheckerConfig holds configuration for the instrument checker.
 type InstrumentCheckerConfig struct {
 	// Target is the gRPC server address (e.g., "localhost:50051").
@@ -157,7 +160,7 @@ func createInstrumentConnection(ctx context.Context, cfg InstrumentCheckerConfig
 		return grpc.NewClient(cfg.Target, dialOpts...)
 	}
 
-	return nil, errors.New("either Target or ServiceName must be provided")
+	return nil, ErrInstrumentConfigInvalid
 }
 
 // InstrumentCheckResult contains the result of an instrument existence check.
@@ -461,7 +464,7 @@ func (m *MockInstrumentChecker) GetAttributeSchema(_ context.Context, code strin
 	if def, ok := m.Instruments[code]; ok {
 		return def.AttributeSchema, nil
 	}
-	return "", fmt.Errorf("instrument %s not found", code)
+	return "", fmt.Errorf("%w: %s", ErrInstrumentNotFound, code)
 }
 
 // Stats implements InstrumentCheckerInterface.

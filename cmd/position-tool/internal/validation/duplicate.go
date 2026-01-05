@@ -214,7 +214,7 @@ func (dc *DuplicateChecker) CheckBatch(ctx context.Context, rows []ImportRow) (m
 // PreloadFromDatabase loads existing measurement IDs into the bloom filter.
 // This should be called before processing begins to seed the filter with
 // known duplicates, reducing database lookups during validation.
-func (dc *DuplicateChecker) PreloadFromDatabase(ctx context.Context, measurementIDs []string) {
+func (dc *DuplicateChecker) PreloadFromDatabase(_ context.Context, measurementIDs []string) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 

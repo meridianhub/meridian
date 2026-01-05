@@ -2,6 +2,7 @@ package validation
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -120,19 +121,19 @@ func (sv *SchemaValidator) getOrCompileSchema(schemaJSON string) (*jsonschema.Sc
 
 // convertValidationError converts jsonschema errors to our error types.
 func (sv *SchemaValidator) convertValidationError(err error) error {
-	validationErr, ok := err.(*jsonschema.ValidationError)
-	if !ok {
+	var validationErr *jsonschema.ValidationError
+	if !errors.As(err, &validationErr) {
 		return &SchemaValidationError{
 			Path:    "/",
 			Message: err.Error(),
 		}
 	}
 
-	errors := sv.extractValidationErrors(validationErr)
-	if len(errors) == 1 {
-		return errors[0]
+	errs := sv.extractValidationErrors(validationErr)
+	if len(errs) == 1 {
+		return errs[0]
 	}
-	return &MultiSchemaError{Errors: errors}
+	return &MultiSchemaError{Errors: errs}
 }
 
 // extractValidationErrors recursively extracts all validation errors.

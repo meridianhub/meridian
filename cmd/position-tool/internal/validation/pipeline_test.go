@@ -2,6 +2,7 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -110,7 +111,8 @@ func TestPipeline_ValidateRow_DuplicateMeasurement(t *testing.T) {
 	// Check that it's a duplicate error
 	hasDupeError := false
 	for _, err := range rowErr2.Errors {
-		if _, ok := err.(*DuplicateError); ok {
+		var dupeErr *DuplicateError
+		if errors.As(err, &dupeErr) {
 			hasDupeError = true
 			break
 		}
@@ -145,7 +147,8 @@ func TestPipeline_ValidateRow_InstrumentNotFound(t *testing.T) {
 	// Check for instrument not found error
 	hasInstError := false
 	for _, err := range rowErr.Errors {
-		if fe, ok := err.(*FieldError); ok && fe.Field == "instrument_code" {
+		var fe *FieldError
+		if errors.As(err, &fe) && fe.Field == "instrument_code" {
 			hasInstError = true
 			break
 		}
@@ -299,11 +302,11 @@ func TestPipeline_ValidateWithCallback(t *testing.T) {
 	err = pipeline.ValidateWithCallback(
 		context.Background(),
 		rows,
-		func(row *ImportRow) error {
+		func(_ *ImportRow) error {
 			validCount++
 			return nil
 		},
-		func(row *ImportRow, rowErr *RowValidationError) error {
+		func(_ *ImportRow, _ *RowValidationError) error {
 			invalidCount++
 			return nil
 		},
@@ -464,8 +467,8 @@ func TestStreamingValidator(t *testing.T) {
 	assert.Greater(t, summary.Duration.Nanoseconds(), int64(0))
 }
 
-func TestValidationSummary_CacheHitRate(t *testing.T) {
-	summary := &ValidationSummary{
+func TestSummary_CacheHitRate(t *testing.T) {
+	summary := &Summary{
 		InstrumentCacheHits:   80,
 		InstrumentCacheMisses: 20,
 	}
@@ -474,12 +477,12 @@ func TestValidationSummary_CacheHitRate(t *testing.T) {
 	assert.InDelta(t, 80.0, rate, 0.1)
 
 	// Zero case
-	emptySum := &ValidationSummary{}
+	emptySum := &Summary{}
 	assert.Equal(t, 0.0, emptySum.CacheHitRate())
 }
 
-func TestValidationSummary_BloomFilterEffectiveness(t *testing.T) {
-	summary := &ValidationSummary{
+func TestSummary_BloomFilterEffectiveness(t *testing.T) {
+	summary := &Summary{
 		DuplicateCount:            90,
 		BloomFilterFalsePositives: 10,
 	}
@@ -488,6 +491,6 @@ func TestValidationSummary_BloomFilterEffectiveness(t *testing.T) {
 	assert.InDelta(t, 90.0, effectiveness, 0.1)
 
 	// Zero hits case - 100% effectiveness
-	emptySum := &ValidationSummary{}
+	emptySum := &Summary{}
 	assert.Equal(t, 100.0, emptySum.BloomFilterEffectiveness())
 }

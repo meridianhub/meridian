@@ -327,6 +327,8 @@ func protoToOperation(op auditv1.AuditOperation) string {
 		return "UPDATE"
 	case auditv1.AuditOperation_AUDIT_OPERATION_DELETE:
 		return "DELETE"
+	case auditv1.AuditOperation_AUDIT_OPERATION_INITIAL_IMPORT:
+		return "INITIAL_IMPORT"
 	case auditv1.AuditOperation_AUDIT_OPERATION_UNSPECIFIED:
 		return ""
 	}

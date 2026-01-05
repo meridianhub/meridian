@@ -11,4 +11,4 @@
 //
 // All components are designed for high-throughput bulk operations with
 // proper error handling, progress reporting, and audit trail generation.
-package shared
+package infra

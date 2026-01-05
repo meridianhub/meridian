@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/cmd/position-tool/internal/exporter"
-	"github.com/meridianhub/meridian/cmd/position-tool/internal/shared"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/infra"
 	"github.com/spf13/cobra"
 )
 
@@ -253,13 +253,13 @@ func executeExport(ctx context.Context, cfg *exportConfig) (*exportResult, error
 	}
 
 	// Set up progress tracker with console output
-	tracker := shared.NewProgressTracker(shared.ProgressTrackerConfig{
+	tracker := infra.NewProgressTracker(infra.ProgressTrackerConfig{
 		DryRun: cfg.DryRun,
-		OnProgress: func(event shared.ProgressEvent) {
+		OnProgress: func(event infra.ProgressEvent) {
 			switch event.Type {
-			case shared.ProgressEventStarted:
+			case infra.ProgressEventStarted:
 				fmt.Printf("\n  Starting export: %s\n", event.Message)
-			case shared.ProgressEventBatchComplete:
+			case infra.ProgressEventBatchComplete:
 				// Calculate progress percentage
 				var pct float64
 				if event.TotalExpected > 0 {
@@ -267,9 +267,9 @@ func executeExport(ctx context.Context, cfg *exportConfig) (*exportResult, error
 				}
 				fmt.Printf("\r  Progress: %d/%d rows (%.1f%%) - %s",
 					event.TotalProcessed, event.TotalExpected, pct, formatDuration(event.Duration))
-			case shared.ProgressEventComplete:
+			case infra.ProgressEventComplete:
 				fmt.Printf("\n  %s\n", event.Message)
-			case shared.ProgressEventError:
+			case infra.ProgressEventError:
 				fmt.Printf("\n  Error: %v\n", event.Error)
 			}
 		},

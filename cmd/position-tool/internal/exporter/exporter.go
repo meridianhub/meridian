@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/meridianhub/meridian/cmd/position-tool/internal/shared"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/infra"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
 )
@@ -117,7 +117,7 @@ func New(pool *pgxpool.Pool, logger *slog.Logger) (*Exporter, error) {
 // Export streams positions from the database to a CSV file.
 // It supports filtering by instrument, account, and date range.
 // Progress events are sent to the provided tracker.
-func (e *Exporter) Export(ctx context.Context, opts ExportOptions, tracker *shared.ProgressTracker) (*ExportResult, error) {
+func (e *Exporter) Export(ctx context.Context, opts ExportOptions, tracker *infra.ProgressTracker) (*ExportResult, error) {
 	// Normalize options
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = DefaultBatchSize
@@ -187,7 +187,7 @@ func (e *Exporter) executeExport(
 	tenantCtx context.Context,
 	opts ExportOptions,
 	writer *CSVWriter,
-	tracker *shared.ProgressTracker,
+	tracker *infra.ProgressTracker,
 	totalCount int64,
 	attrKeys []string,
 ) (*ExportResult, error) {

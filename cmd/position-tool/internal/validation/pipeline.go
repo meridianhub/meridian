@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// Sentinel errors for pipeline configuration.
+var (
+	// ErrNilInstrumentChecker indicates that the instrument checker is nil.
+	ErrNilInstrumentChecker = errors.New("instrument checker cannot be nil")
+)
+
 // PipelineConfig configures the validation pipeline.
 type PipelineConfig struct {
 	// DuplicateChecker validates measurement ID uniqueness.
@@ -75,7 +81,7 @@ func NewPipeline(cfg PipelineConfig) (*Pipeline, error) {
 		return nil, ErrNilDuplicateChecker
 	}
 	if cfg.InstrumentChecker == nil {
-		return nil, errors.New("instrument checker cannot be nil")
+		return nil, ErrNilInstrumentChecker
 	}
 
 	fieldValidator := cfg.FieldValidator
@@ -107,6 +113,8 @@ func NewPipeline(cfg PipelineConfig) (*Pipeline, error) {
 
 // ValidateRow validates a single row through all validation layers.
 // Returns a RowValidationError containing all errors found.
+//
+//nolint:gocognit,gocyclo // Validation pipeline intentionally handles multiple validation layers in sequence
 func (p *Pipeline) ValidateRow(ctx context.Context, row *ImportRow) *RowValidationError {
 	atomic.AddInt64(&p.totalRows, 1)
 
@@ -191,7 +199,7 @@ func (p *Pipeline) ValidateRow(ctx context.Context, row *ImportRow) *RowValidati
 	// Layer 4: Attribute schema validation
 	if schema, ok := p.instrumentSchemas[row.InstrumentCode]; ok && schema != "" {
 		if err := p.schemaValidator.Validate(row.Attributes, schema); err != nil {
-			rowErr.AddError(fmt.Errorf("%w: %v", ErrInvalidAttributeSchema, err))
+			rowErr.AddError(fmt.Errorf("%w: %w", ErrInvalidAttributeSchema, err))
 			atomic.AddInt64(&p.schemaErrors, 1)
 		}
 	}
@@ -223,6 +231,8 @@ func (p *Pipeline) ValidateBatch(ctx context.Context, rows []ImportRow) map[int]
 
 // ValidateWithCallback validates rows and calls the callback for each row.
 // Returns the first error if failFast is true and validation fails.
+//
+//nolint:gocognit // Callback-based validation requires handling multiple paths
 func (p *Pipeline) ValidateWithCallback(
 	ctx context.Context,
 	rows []ImportRow,
@@ -260,11 +270,11 @@ func (p *Pipeline) ValidateWithCallback(
 }
 
 // Summary returns a summary of the validation run.
-func (p *Pipeline) Summary() *ValidationSummary {
+func (p *Pipeline) Summary() *Summary {
 	dupeStats := p.duplicateChecker.Stats()
 	instStats := p.instrumentChecker.Stats()
 
-	return &ValidationSummary{
+	return &Summary{
 		TotalRows:                 int(atomic.LoadInt64(&p.totalRows)),
 		ValidRows:                 int(atomic.LoadInt64(&p.validRows)),
 		InvalidRows:               int(atomic.LoadInt64(&p.invalidRows)),
@@ -326,7 +336,7 @@ func (sv *StreamingValidator) Validate(ctx context.Context, row *ImportRow) *Row
 }
 
 // Summary returns the validation summary with duration.
-func (sv *StreamingValidator) Summary() *ValidationSummary {
+func (sv *StreamingValidator) Summary() *Summary {
 	summary := sv.pipeline.Summary()
 	summary.Duration = time.Since(sv.start)
 	return summary

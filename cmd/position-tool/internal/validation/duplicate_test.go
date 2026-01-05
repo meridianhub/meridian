@@ -44,7 +44,7 @@ func TestDuplicateChecker_Check_WithinFileDuplicate(t *testing.T) {
 
 func TestDuplicateChecker_Check_DatabaseDuplicate(t *testing.T) {
 	// Mock database lookup that returns measurement-db-1 as existing
-	dbLookup := func(ctx context.Context, ids []string) (map[string]bool, error) {
+	dbLookup := func(_ context.Context, ids []string) (map[string]bool, error) {
 		result := make(map[string]bool)
 		for _, id := range ids {
 			if id == "measurement-db-1" {
@@ -70,7 +70,7 @@ func TestDuplicateChecker_Check_DatabaseDuplicate(t *testing.T) {
 
 func TestDuplicateChecker_Check_BloomFilterFalsePositive(t *testing.T) {
 	// Mock database lookup that always returns false (not found)
-	dbLookup := func(ctx context.Context, ids []string) (map[string]bool, error) {
+	dbLookup := func(_ context.Context, _ []string) (map[string]bool, error) {
 		return make(map[string]bool), nil
 	}
 
@@ -96,7 +96,7 @@ func TestDuplicateChecker_Check_BloomFilterFalsePositive(t *testing.T) {
 }
 
 func TestDuplicateChecker_CheckBatch(t *testing.T) {
-	dbLookup := func(ctx context.Context, ids []string) (map[string]bool, error) {
+	dbLookup := func(_ context.Context, ids []string) (map[string]bool, error) {
 		result := make(map[string]bool)
 		for _, id := range ids {
 			if id == "existing-in-db" {

@@ -184,7 +184,10 @@ func isValidInstrumentCode(code string) bool {
 	}
 
 	for _, c := range code {
-		if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+		isUpper := c >= 'A' && c <= 'Z'
+		isDigit := c >= '0' && c <= '9'
+		isUnderscore := c == '_'
+		if !isUpper && !isDigit && !isUnderscore {
 			return false
 		}
 	}

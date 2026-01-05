@@ -71,7 +71,7 @@ func (e *RowValidationError) Error() string {
 		return fmt.Sprintf("line %d: %v", e.LineNumber, e.Errors[0])
 	}
 
-	var msgs []string
+	msgs := make([]string, 0, len(e.Errors))
 	for _, err := range e.Errors {
 		msgs = append(msgs, err.Error())
 	}
@@ -139,7 +139,7 @@ func (e *MultiSchemaError) Error() string {
 		return e.Errors[0].Error()
 	}
 
-	var msgs []string
+	msgs := make([]string, 0, len(e.Errors))
 	for _, err := range e.Errors {
 		msgs = append(msgs, err.Error())
 	}

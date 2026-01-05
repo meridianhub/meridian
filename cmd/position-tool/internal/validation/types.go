@@ -49,8 +49,8 @@ type ValidatedRow struct {
 	ComputedBucketKey string
 }
 
-// ValidationSummary contains statistics about the validation run.
-type ValidationSummary struct {
+// Summary contains statistics about the validation run.
+type Summary struct {
 	// TotalRows is the total number of rows processed.
 	TotalRows int
 
@@ -90,7 +90,7 @@ type ValidationSummary struct {
 }
 
 // CacheHitRate returns the instrument cache hit rate as a percentage.
-func (s *ValidationSummary) CacheHitRate() float64 {
+func (s *Summary) CacheHitRate() float64 {
 	total := s.InstrumentCacheHits + s.InstrumentCacheMisses
 	if total == 0 {
 		return 0
@@ -99,7 +99,7 @@ func (s *ValidationSummary) CacheHitRate() float64 {
 }
 
 // BloomFilterEffectiveness returns the percentage of bloom filter hits that were true positives.
-func (s *ValidationSummary) BloomFilterEffectiveness() float64 {
+func (s *Summary) BloomFilterEffectiveness() float64 {
 	totalHits := s.DuplicateCount + s.BloomFilterFalsePositives
 	if totalHits == 0 {
 		return 100 // No hits means 100% effectiveness (no false positives)
