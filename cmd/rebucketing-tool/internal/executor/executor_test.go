@@ -57,12 +57,12 @@ func TestNewPositionUpdateExecutor(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNilPool)
 	})
 
-	t.Run("returns error for invalid config", func(t *testing.T) {
+	t.Run("validates pool before config", func(t *testing.T) {
 		config := &Config{BatchSize: 0}
 		_, err := NewPositionUpdateExecutor(nil, config, nil)
 
 		require.Error(t, err)
-		// Will fail on nil pool first
+		// Pool is validated before config, so nil pool error is returned first
 		assert.ErrorIs(t, err, ErrNilPool)
 	})
 }

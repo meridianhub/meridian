@@ -250,17 +250,37 @@ func (c *SettlementLockChecker) findPositionsWithInstrument(ctx context.Context,
 	ctx = clients.PropagateCorrelationID(ctx)
 	ctx = clients.PropagateOrganization(ctx)
 
-	// Query position logs - we look for logs that might contain positions with this instrument.
-	// The position log metadata typically contains instrument information.
-	// We query with POSTED status to find finalized positions.
 	var positionLogIDs []string
+	var pageToken string
 
+	for {
+		pageIDs, nextToken, err := c.fetchPostedPositionLogsPage(ctx, pageToken, instrumentCode, instrumentVersion)
+		if err != nil {
+			return nil, err
+		}
+		positionLogIDs = append(positionLogIDs, pageIDs...)
+
+		if nextToken == "" {
+			break
+		}
+		pageToken = nextToken
+	}
+
+	return positionLogIDs, nil
+}
+
+// fetchPostedPositionLogsPage fetches a single page of posted position logs and filters by instrument.
+func (c *SettlementLockChecker) fetchPostedPositionLogsPage(ctx context.Context, pageToken string, instrumentCode string, instrumentVersion int) ([]string, string, error) {
+	var logIDs []string
+	var nextPageToken string
 	var lastErr error
+
 	err := clients.Retry(ctx, c.retryConfig, func() error {
 		resp, err := c.positionKeepingClient.ListFinancialPositionLogs(ctx, &positionkeepingv1.ListFinancialPositionLogsRequest{
 			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
 			Pagination: &commonv1.Pagination{
-				PageSize: 100,
+				PageSize:  100,
+				PageToken: pageToken,
 			},
 		})
 		if err != nil {
@@ -268,30 +288,42 @@ func (c *SettlementLockChecker) findPositionsWithInstrument(ctx context.Context,
 			return err
 		}
 
-		// Filter logs that reference this instrument version
-		// In a real implementation, this would filter by instrument metadata
-		for _, log := range resp.Logs {
-			// Check if the log's transaction entries reference this instrument
-			// This is a simplified check - in production, we'd have more sophisticated
-			// metadata queries or a dedicated instrument-position index
-			for _, entry := range log.TransactionLogEntries {
-				if containsInstrumentReference(entry, instrumentCode, instrumentVersion) {
-					positionLogIDs = append(positionLogIDs, log.LogId)
-					break
-				}
-			}
-		}
+		logIDs = c.filterLogIDsWithInstrument(resp.Logs, instrumentCode, instrumentVersion)
 
+		if resp.Pagination != nil {
+			nextPageToken = resp.Pagination.NextPageToken
+		}
 		return nil
 	})
 	if err != nil {
 		if lastErr != nil {
-			return nil, lastErr
+			return nil, "", lastErr
 		}
-		return nil, err
+		return nil, "", err
 	}
 
-	return positionLogIDs, nil
+	return logIDs, nextPageToken, nil
+}
+
+// filterLogIDsWithInstrument filters position log IDs that reference the specified instrument.
+func (c *SettlementLockChecker) filterLogIDsWithInstrument(logs []*positionkeepingv1.FinancialPositionLog, instrumentCode string, instrumentVersion int) []string {
+	var logIDs []string
+	for _, log := range logs {
+		if logHasInstrumentRef(log, instrumentCode, instrumentVersion) {
+			logIDs = append(logIDs, log.LogId)
+		}
+	}
+	return logIDs
+}
+
+// logHasInstrumentRef checks if a log has any entry referencing the instrument.
+func logHasInstrumentRef(log *positionkeepingv1.FinancialPositionLog, instrumentCode string, instrumentVersion int) bool {
+	for _, entry := range log.TransactionLogEntries {
+		if containsInstrumentReference(entry, instrumentCode, instrumentVersion) {
+			return true
+		}
+	}
+	return false
 }
 
 // containsInstrumentReference checks if a transaction log entry references the specified instrument.
@@ -343,40 +375,87 @@ func (c *SettlementLockChecker) findFinalizedSettlements(ctx context.Context, po
 	var finalizedSettlements []string
 
 	for _, logID := range positionLogIDs {
-		var lastErr error
-		err := clients.Retry(ctx, c.retryConfig, func() error {
-			// Query booking logs that reference this position log
-			// and have POSTED (finalized) status
-			resp, err := c.financialAccountingClient.ListFinancialBookingLogs(ctx, &financialaccountingv1.ListFinancialBookingLogsRequest{
-				Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
-				Pagination: &commonv1.Pagination{
-					PageSize: 100,
-				},
-			})
-			if err != nil {
-				lastErr = err
-				return err
-			}
-
-			// Check if any booking log references this position log
-			for _, bookingLog := range resp.FinancialBookingLogs {
-				if bookingLogReferencesPosition(bookingLog, logID) {
-					finalizedSettlements = append(finalizedSettlements, bookingLog.Id)
-				}
-			}
-
-			return nil
-		})
+		settlements, err := c.findSettlementsForPosition(ctx, logID)
 		if err != nil {
 			// Log but continue - we want to find all possible locks
 			c.logger.Warn("failed to query booking logs for position",
 				"position_log_id", logID,
-				"error", lastErr,
+				"error", err,
 			)
+			continue
 		}
+		finalizedSettlements = append(finalizedSettlements, settlements...)
 	}
 
 	return finalizedSettlements, nil
+}
+
+// findSettlementsForPosition queries all pages of booking logs for a single position.
+func (c *SettlementLockChecker) findSettlementsForPosition(ctx context.Context, logID string) ([]string, error) {
+	var settlements []string
+	var pageToken string
+
+	for {
+		pageSettlements, nextToken, err := c.fetchBookingLogsPage(ctx, pageToken, logID)
+		if err != nil {
+			return nil, err
+		}
+		settlements = append(settlements, pageSettlements...)
+
+		if nextToken == "" {
+			break
+		}
+		pageToken = nextToken
+	}
+
+	return settlements, nil
+}
+
+// fetchBookingLogsPage fetches a single page of booking logs and filters by position reference.
+func (c *SettlementLockChecker) fetchBookingLogsPage(ctx context.Context, pageToken string, logID string) ([]string, string, error) {
+	var settlements []string
+	var nextPageToken string
+	var lastErr error
+
+	err := clients.Retry(ctx, c.retryConfig, func() error {
+		resp, err := c.financialAccountingClient.ListFinancialBookingLogs(ctx, &financialaccountingv1.ListFinancialBookingLogsRequest{
+			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+			Pagination: &commonv1.Pagination{
+				PageSize:  100,
+				PageToken: pageToken,
+			},
+		})
+		if err != nil {
+			lastErr = err
+			return err
+		}
+
+		settlements = filterBookingLogsByPosition(resp.FinancialBookingLogs, logID)
+
+		if resp.Pagination != nil {
+			nextPageToken = resp.Pagination.NextPageToken
+		}
+		return nil
+	})
+	if err != nil {
+		if lastErr != nil {
+			return nil, "", lastErr
+		}
+		return nil, "", err
+	}
+
+	return settlements, nextPageToken, nil
+}
+
+// filterBookingLogsByPosition filters booking log IDs that reference the specified position.
+func filterBookingLogsByPosition(logs []*financialaccountingv1.FinancialBookingLog, logID string) []string {
+	var settlements []string
+	for _, bookingLog := range logs {
+		if bookingLogReferencesPosition(bookingLog, logID) {
+			settlements = append(settlements, bookingLog.Id)
+		}
+	}
+	return settlements
 }
 
 // bookingLogReferencesPosition checks if a booking log references a position log.

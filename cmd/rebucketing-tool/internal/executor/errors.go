@@ -57,6 +57,9 @@ type TransactionRollbackError struct {
 
 // Error implements the error interface.
 func (e *TransactionRollbackError) Error() string {
+	if e.Cause == nil {
+		return "transaction rolled back"
+	}
 	return "transaction rolled back: " + e.Cause.Error()
 }
 
@@ -84,6 +87,9 @@ type AuditLogWriteError struct {
 
 // Error implements the error interface.
 func (e *AuditLogWriteError) Error() string {
+	if e.Cause == nil {
+		return "audit log write failed for position " + e.PositionID
+	}
 	return "audit log write failed for position " + e.PositionID + ": " + e.Cause.Error()
 }
 

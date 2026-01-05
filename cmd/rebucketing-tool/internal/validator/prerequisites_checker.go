@@ -232,13 +232,35 @@ func (c *PrerequisitesChecker) findPositionsWithInstrumentVersion(ctx context.Co
 	ctx = clients.PropagateOrganization(ctx)
 
 	var positions []positionInfo
+	var pageToken string
 
+	for {
+		pagePositions, nextToken, err := c.fetchPositionLogsPage(ctx, pageToken, instrumentCode, instrumentVersion)
+		if err != nil {
+			return nil, err
+		}
+		positions = append(positions, pagePositions...)
+
+		if nextToken == "" {
+			break
+		}
+		pageToken = nextToken
+	}
+
+	return positions, nil
+}
+
+// fetchPositionLogsPage fetches a single page of position logs and filters by instrument.
+func (c *PrerequisitesChecker) fetchPositionLogsPage(ctx context.Context, pageToken string, instrumentCode string, instrumentVersion int) ([]positionInfo, string, error) {
+	var positions []positionInfo
+	var nextPageToken string
 	var lastErr error
+
 	err := clients.Retry(ctx, c.retryConfig, func() error {
-		// Query all position logs and filter by instrument reference
 		resp, err := c.positionKeepingClient.ListFinancialPositionLogs(ctx, &positionkeepingv1.ListFinancialPositionLogsRequest{
 			Pagination: &commonv1.Pagination{
-				PageSize: 100,
+				PageSize:  100,
+				PageToken: pageToken,
 			},
 		})
 		if err != nil {
@@ -246,29 +268,45 @@ func (c *PrerequisitesChecker) findPositionsWithInstrumentVersion(ctx context.Co
 			return err
 		}
 
-		// Filter logs that reference this instrument version
-		for _, log := range resp.Logs {
-			for _, entry := range log.TransactionLogEntries {
-				if containsInstrumentReference(entry, instrumentCode, instrumentVersion) {
-					positions = append(positions, positionInfo{
-						LogID:     log.LogId,
-						AccountID: log.AccountId,
-					})
-					break
-				}
-			}
-		}
+		positions = c.filterLogsWithInstrument(resp.Logs, instrumentCode, instrumentVersion)
 
+		if resp.Pagination != nil {
+			nextPageToken = resp.Pagination.NextPageToken
+		}
 		return nil
 	})
 	if err != nil {
 		if lastErr != nil {
-			return nil, lastErr
+			return nil, "", lastErr
 		}
-		return nil, err
+		return nil, "", err
 	}
 
-	return positions, nil
+	return positions, nextPageToken, nil
+}
+
+// filterLogsWithInstrument filters position logs that reference the specified instrument.
+func (c *PrerequisitesChecker) filterLogsWithInstrument(logs []*positionkeepingv1.FinancialPositionLog, instrumentCode string, instrumentVersion int) []positionInfo {
+	var positions []positionInfo
+	for _, log := range logs {
+		if c.logContainsInstrument(log, instrumentCode, instrumentVersion) {
+			positions = append(positions, positionInfo{
+				LogID:     log.LogId,
+				AccountID: log.AccountId,
+			})
+		}
+	}
+	return positions
+}
+
+// logContainsInstrument checks if a log has any entry referencing the instrument.
+func (c *PrerequisitesChecker) logContainsInstrument(log *positionkeepingv1.FinancialPositionLog, instrumentCode string, instrumentVersion int) bool {
+	for _, entry := range log.TransactionLogEntries {
+		if containsInstrumentReference(entry, instrumentCode, instrumentVersion) {
+			return true
+		}
+	}
+	return false
 }
 
 // countRawMeasurements counts the raw measurements associated with the given positions.
@@ -375,33 +413,53 @@ func (c *PrerequisitesChecker) countActiveInstrumentUsage(ctx context.Context, i
 
 	cutoffTime := time.Now().Add(-lookbackDuration)
 	activeCount := 0
+	var pageToken string
 
-	var lastErr error
-	err := clients.Retry(ctx, c.retryConfig, func() error {
-		resp, err := c.positionKeepingClient.ListFinancialPositionLogs(ctx, &positionkeepingv1.ListFinancialPositionLogsRequest{
-			Status: commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
-			Pagination: &commonv1.Pagination{
-				PageSize: 100,
-			},
+	for {
+		var lastErr error
+		var nextPageToken string
+		var done bool
+
+		err := clients.Retry(ctx, c.retryConfig, func() error {
+			resp, err := c.positionKeepingClient.ListFinancialPositionLogs(ctx, &positionkeepingv1.ListFinancialPositionLogsRequest{
+				Status: commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+				Pagination: &commonv1.Pagination{
+					PageSize:  100,
+					PageToken: pageToken,
+				},
+			})
+			if err != nil {
+				lastErr = err
+				return err
+			}
+
+			activeCount += c.countRecentInstrumentReferences(resp.Logs, cutoffTime, instrumentCode, instrumentVersion)
+
+			// Check for more pages
+			if resp.Pagination != nil && resp.Pagination.NextPageToken != "" {
+				nextPageToken = resp.Pagination.NextPageToken
+			} else {
+				done = true
+			}
+
+			return nil
 		})
 		if err != nil {
-			lastErr = err
-			return err
+			cause := lastErr
+			if cause == nil {
+				cause = err
+			}
+			return 0, &ValidationError{
+				Operation: "active_use_check",
+				Message:   "failed to query recent positions",
+				Cause:     cause,
+			}
 		}
 
-		activeCount = c.countRecentInstrumentReferences(resp.Logs, cutoffTime, instrumentCode, instrumentVersion)
-		return nil
-	})
-	if err != nil {
-		cause := lastErr
-		if cause == nil {
-			cause = err
+		if done {
+			break
 		}
-		return 0, &ValidationError{
-			Operation: "active_use_check",
-			Message:   "failed to query recent positions",
-			Cause:     cause,
-		}
+		pageToken = nextPageToken
 	}
 
 	return activeCount, nil

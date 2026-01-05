@@ -46,7 +46,7 @@ func (s *MeasurementStreamer) StreamMeasurements(
 	// Get total count first for progress tracking
 	total, err := s.countMeasurements(ctx, config)
 	if err != nil {
-		return fmt.Errorf("%w: failed to count measurements: %w", ErrMeasurementStream, err)
+		return fmt.Errorf("%w: failed to count measurements: %s", ErrMeasurementStream, err.Error())
 	}
 
 	if total == 0 {
@@ -68,7 +68,7 @@ func (s *MeasurementStreamer) StreamMeasurements(
 		// Fetch next batch
 		records, err := s.fetchBatch(ctx, config, lastID)
 		if err != nil {
-			return fmt.Errorf("%w: failed to fetch batch %d: %w", ErrMeasurementStream, batch, err)
+			return fmt.Errorf("%w: failed to fetch batch %d: %s", ErrMeasurementStream, batch, err.Error())
 		}
 
 		if len(records) == 0 {
