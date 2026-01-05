@@ -1,13 +1,13 @@
 # Meridian - Universal Transaction Integrity Engine
 
-The Operating System for the Real-World Economy - an open source, cloud-native transaction integrity
+The Operating System for the Real-World Economy - an open-source, cloud-native transaction integrity
 engine supporting finance, energy, and infrastructure assets.
 
 ## Mission
 
-Meridian is what you get when 10x Banking and Murex have a baby, built with the operational physics
-of Kraken. We are building the first **Open-Source Transaction Integrity Engine** designed to manage
-the convergence of Finance, Energy, and Infrastructure.
+Meridian combines the real-time ledger rigor of 10x Banking, the multi-asset sophistication of Murex,
+and the high-frequency resilience of Kraken. We are building the first **Open-Source Transaction
+Integrity Engine** designed to manage the convergence of Finance, Energy, and Infrastructure.
 
 ### The Three DNA Strands
 
@@ -40,7 +40,7 @@ slow for the energy grid. Meridian operates at the speed of infrastructure.
 
 ### Vision
 
-We are entering the era of **Real World Assets (RWA)**. The UN needs to track digital vouchers
+We are entering the era of **Real-World Assets (RWA)**. The UN needs to track digital vouchers
 (Murex logic) on flaky networks (Kraken logic). AI Clouds need to bill for GPU milliseconds
 (Kraken logic) with financial rigor (10x logic).
 
