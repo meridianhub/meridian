@@ -144,9 +144,12 @@ func (s *Service) RetrieveInstrument(ctx context.Context, req *pb.RetrieveInstru
 }
 
 // ListInstruments returns instruments matching the filter criteria.
+// NOTE: The underlying registry only supports ListActive. Filtering by
+// DRAFT or DEPRECATED status will return empty results. This is a known
+// limitation that should be addressed by extending InstrumentRegistry.
 func (s *Service) ListInstruments(ctx context.Context, req *pb.ListInstrumentsRequest) (*pb.ListInstrumentsResponse, error) {
-	// Currently registry only supports ListActive
-	// TODO: Add support for filtering by status and pagination
+	// TODO(universal-asset-system.13): Add ListAll/ListByStatus to InstrumentRegistry
+	// Currently registry only supports ListActive, so non-ACTIVE filters return empty.
 	defs, err := s.registry.ListActive(ctx)
 	if err != nil {
 		s.logger.Error("failed to list instruments", "error", err)
@@ -532,6 +535,10 @@ func domainDimensionToProto(d registry.Dimension) pb.Dimension {
 		return pb.Dimension_DIMENSION_COMPUTE
 	case registry.DimensionQuantity:
 		return pb.Dimension_DIMENSION_COUNT
+	case "CARBON":
+		return pb.Dimension_DIMENSION_CARBON
+	case "DATA":
+		return pb.Dimension_DIMENSION_DATA
 	default:
 		return pb.Dimension_DIMENSION_UNSPECIFIED
 	}

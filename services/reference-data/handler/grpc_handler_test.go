@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func newMockRegistry() *mockRegistry {
 }
 
 func (m *mockRegistry) key(code string, version int) string {
-	return code + ":" + string(rune(version+'0'))
+	return code + ":" + strconv.Itoa(version)
 }
 
 func (m *mockRegistry) GetDefinition(_ context.Context, code string, version int) (*registry.InstrumentDefinition, error) {
