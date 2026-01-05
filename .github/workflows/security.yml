@@ -207,7 +207,7 @@ jobs:
         echo "File size: $(du -h sbom.spdx.json | cut -f1)"
 
     - name: Upload SBOM artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: sbom
         path: sbom.spdx.json
