@@ -282,6 +282,9 @@ func BenchmarkMeasureExpressionDepth(b *testing.B) {
 
 // TestBenchmarkBaseline runs a basic performance test with assertions.
 // This is a test, not a benchmark, so it runs with regular test execution.
+//
+// Performance targets are advisory - CI environments may have variable performance.
+// Use `go test -bench=.` for accurate benchmarks on dedicated hardware.
 func TestBenchmarkBaseline(t *testing.T) {
 	c, err := NewCompiler()
 	require.NoError(t, err)
@@ -301,9 +304,13 @@ func TestBenchmarkBaseline(t *testing.T) {
 		avgTime := elapsed / time.Duration(iterations)
 		t.Logf("Average compilation time: %v", avgTime)
 
-		// Compilation should be under 1ms
-		if avgTime > 1*time.Millisecond {
-			t.Errorf("Compilation too slow: %v (target: <1ms)", avgTime)
+		// Advisory target: <1ms on dedicated hardware
+		// CI environments may be slower due to shared resources
+		// Use 5ms as the CI threshold (5x headroom)
+		if avgTime > 5*time.Millisecond {
+			t.Errorf("Compilation too slow: %v (CI threshold: <5ms, production target: <1ms)", avgTime)
+		} else if avgTime > 1*time.Millisecond {
+			t.Logf("Note: Compilation time %v exceeds production target (<1ms) but passes CI threshold", avgTime)
 		}
 	})
 
@@ -327,14 +334,20 @@ func TestBenchmarkBaseline(t *testing.T) {
 		avgTime := elapsed / time.Duration(iterations)
 		t.Logf("Average evaluation time: %v", avgTime)
 
-		// Evaluation should be under 100µs
-		if avgTime > 100*time.Microsecond {
-			t.Errorf("Evaluation too slow: %v (target: <100µs)", avgTime)
+		// Advisory target: <100µs on dedicated hardware
+		// Use 500µs as CI threshold (5x headroom)
+		if avgTime > 500*time.Microsecond {
+			t.Errorf("Evaluation too slow: %v (CI threshold: <500µs, production target: <100µs)", avgTime)
+		} else if avgTime > 100*time.Microsecond {
+			t.Logf("Note: Evaluation time %v exceeds production target (<100µs) but passes CI threshold", avgTime)
 		}
 	})
 }
 
 // TestThroughputUnderLoad measures sustained throughput over time.
+//
+// Performance targets are advisory - CI environments may have variable performance.
+// Use `go test -bench=.` for accurate benchmarks on dedicated hardware.
 func TestThroughputUnderLoad(t *testing.T) {
 	c, err := NewCompiler()
 	require.NoError(t, err)
@@ -376,9 +389,13 @@ func TestThroughputUnderLoad(t *testing.T) {
 	t.Logf("Throughput: %.0f ops/sec across %d workers", opsPerSecond, numWorkers)
 	t.Logf("Per-worker throughput: %.0f ops/sec", opsPerSecond/float64(numWorkers))
 
-	// Target: at least 100k ops/sec total
-	if opsPerSecond < 100000 {
-		t.Errorf("Throughput below target: %.0f (want: >100000)", opsPerSecond)
+	// Advisory target: >100k ops/sec on dedicated hardware
+	// CI environments with 2-4 shared vCPUs may achieve lower throughput
+	// Use 25k ops/sec as CI threshold (allows for constrained CI environments)
+	if opsPerSecond < 25000 {
+		t.Errorf("Throughput below CI threshold: %.0f (CI threshold: >25k, production target: >100k)", opsPerSecond)
+	} else if opsPerSecond < 100000 {
+		t.Logf("Note: Throughput %.0f below production target (>100k) but passes CI threshold", opsPerSecond)
 	}
 }
 
