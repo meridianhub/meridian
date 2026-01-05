@@ -6,12 +6,18 @@ triggers:
   - Querying what replaced a deprecated instrument
   - Managing instrument version evolution with breaking changes
   - Migrating positions from old to new instrument versions
+  - Trading deprecated instruments for successor instruments
+  - Validating ledger entries against instrument status
 instructions: |
   When deprecating an instrument, optionally set successor_id to point to the replacement
   instrument. This creates a 1-to-1 forward lineage chain (A -> B -> C). Use recursive
   CTE queries to traverse the chain to find the current active instrument. Successor must
   be ACTIVE and have the same dimension. Write-once semantics: once successor_id is set,
   it cannot be changed.
+
+  MIGRATION RULE: Position migration is modeled as a trade (sell deprecated, buy successor).
+  Deprecated instruments allow DEBITS (selling out) but REJECT CREDITS (buying in). This
+  enforcement happens in Financial Accounting/Position Keeping, not Reference Data.
 ---
 
 # 22. Instrument Successor Lineage
@@ -321,8 +327,74 @@ This is correct behavior because:
 2. **Audit trail**: Historical entries should reflect what was recorded at the time
 3. **Position calculation**: Sum of entries gives position in the original instrument
 
-Migration to the successor instrument requires explicit action (transfer, conversion)
-that creates new ledger entries in the successor instrument.
+### Position Migration via Trades
+
+Migration from a deprecated instrument to its successor is modeled as a **trade** -
+this keeps the ledger model consistent and leverages the existing Financial Accounting
+infrastructure:
+
+```
+Deprecated Position          Trade                    New Position
+─────────────────────────────────────────────────────────────────────────────
+USD_V1: 1,000.00    →    Sell USD_V1 / Buy USD_V2    →    USD_V2: 1,000.00
+                              ↑
+                    Valuation Engine determines rate
+                    (1:1 for same currency, or
+                     10:1 for stock split, etc.)
+```
+
+**The key rule for deprecated instruments:**
+
+| Operation | Allowed | Rationale |
+|-----------|---------|-----------|
+| Debit (sell out of) | ✅ Yes | This is how you exit positions in deprecated instruments |
+| Credit (buy into) | ❌ No | Prevent new positions in deprecated instruments |
+
+This asymmetric rule means:
+
+1. **No new exposure**: Clients cannot acquire positions in deprecated instruments
+2. **Clean exit path**: Existing positions can be sold/converted to the successor
+3. **Valuation Engine decides rate**: The conversion factor (1:1, 10:1, etc.) is
+   determined by the yet-to-be-defined Valuation Engine, not Reference Data
+
+**Where this is enforced:**
+
+- **Reference Data**: Only manages the `successor_id` pointer - does NOT enforce
+  trading rules (it has no knowledge of ledger operations)
+- **Financial Accounting / Position Keeping**: Validates instrument status on ledger
+  entry creation - rejects credits to DEPRECATED instruments with clear error message
+  pointing to the successor
+
+```go
+// In Financial Accounting ledger entry validation
+func (s *LedgerService) ValidateEntry(ctx context.Context, entry *LedgerEntry) error {
+    instrument, err := s.refData.GetDefinition(ctx, entry.InstrumentCode, entry.InstrumentVersion)
+    if err != nil {
+        return err
+    }
+
+    // Allow debits from deprecated instruments (this is the migration path)
+    // Reject credits to deprecated instruments (no new positions)
+    if instrument.Status == StatusDeprecated && entry.Amount.IsPositive() {
+        return &DeprecatedInstrumentError{
+            InstrumentID: instrument.ID,
+            SuccessorID:  instrument.SuccessorID,
+            Message:      "Cannot credit deprecated instrument; use successor instead",
+        }
+    }
+
+    return nil
+}
+```
+
+**Future: Valuation Engine ADR**
+
+The Valuation Engine (future ADR/PRD) will provide:
+
+- Conversion rates between deprecated and successor instruments
+- Historical rate lookups for audit/reconciliation
+- Rate validation rules (e.g., same-dimension instruments must have rate)
+- Bulk migration rate schedules for planned deprecations
 
 ## Scenarios Not Handled
 
