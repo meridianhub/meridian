@@ -139,8 +139,6 @@ func TestInstrumentForMeasurementType_UnknownTypes_FallbackToOperation(t *testin
 		"unknown",
 		"custom_metric",
 		"",
-		"TRANSACTION", // uppercase should not match (case-sensitive)
-		"Transaction",
 		"api-call", // wrong separator
 	}
 
@@ -150,6 +148,29 @@ func TestInstrumentForMeasurementType_UnknownTypes_FallbackToOperation(t *testin
 			// Should fallback to InstrumentOperation
 			assert.Equal(t, "OPERATION", inst.Code)
 			assert.Equal(t, InstrumentOperation, inst)
+		})
+	}
+}
+
+func TestInstrumentForMeasurementType_CaseInsensitive(t *testing.T) {
+	// Mapping should be case-insensitive for convenience
+	tests := []struct {
+		input    string
+		expected quantity.Instrument
+	}{
+		{"transaction", InstrumentTransaction},
+		{"TRANSACTION", InstrumentTransaction},
+		{"Transaction", InstrumentTransaction},
+		{"API_CALL", InstrumentAPICall},
+		{"Api_Call", InstrumentAPICall},
+		{"STORAGE_GB_HOUR", InstrumentStorageGBHour},
+		{"Compute_Hour", InstrumentComputeHour},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			inst := InstrumentForMeasurementType(tt.input)
+			assert.Equal(t, tt.expected, inst)
 		})
 	}
 }
