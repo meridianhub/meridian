@@ -81,12 +81,16 @@ func MustNewMoney(currencyCode string, amountCents int64) Money {
 
 // ToMinorUnits converts the Money amount to minor units (cents).
 // This provides backward compatibility for code that needs cents.
+// Panics if called on a zero-value Money (invalid instrument).
 //
 // Example:
 //
 //	money, _ := NewMoney("GBP", 10000) // £100.00
 //	cents := ToMinorUnits(money)       // Returns 10000
 func ToMinorUnits(m Money) int64 {
+	if m.Instrument.Code == "" {
+		panic("ToMinorUnits: called on zero-value Money with no instrument")
+	}
 	// Shift amount left by precision to convert major units to minor units
 	// e.g., 100.00 with precision 2 becomes 10000
 	shifted := m.Amount.Shift(int32(m.Instrument.Precision))
@@ -95,6 +99,10 @@ func ToMinorUnits(m Money) int64 {
 
 // CurrencyCode returns the currency code string from a Money value.
 // This provides backward compatibility for code that accessed m.Currency().
+// Panics if called on a zero-value Money (invalid instrument).
 func CurrencyCode(m Money) string {
+	if m.Instrument.Code == "" {
+		panic("CurrencyCode: called on zero-value Money with no instrument")
+	}
 	return m.Instrument.Code
 }
