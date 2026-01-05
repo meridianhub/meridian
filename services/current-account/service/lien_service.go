@@ -160,8 +160,13 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			return errTxInsufficientFunds
 		}
 
-		// Create lien domain object
-		lien, err = domain.NewLien(account.ID(), lienAmount, req.PaymentOrderReference, nil)
+		// Get bucket_id from request (Phase 1: use empty string if not provided)
+		// The bucket_id is stored for future bucket-aware position tracking.
+		// For Phase 1, solvency validation still uses total account balance.
+		bucketID := req.BucketId // Will be empty string if not provided (proto default)
+
+		// Create lien domain object with bucket awareness
+		lien, err = domain.NewLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil)
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
@@ -681,6 +686,7 @@ func toLienProto(lien *domain.Lien) *pb.Lien {
 		PaymentOrderReference: lien.PaymentOrderReference,
 		CreatedAt:             timestamppb.New(lien.CreatedAt),
 		UpdatedAt:             timestamppb.New(lien.UpdatedAt),
+		BucketId:              lien.BucketID,
 	}
 }
 
