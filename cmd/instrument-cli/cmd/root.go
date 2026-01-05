@@ -2,18 +2,34 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
+	"strings"
+	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/spf13/cobra"
 )
 
-// serviceURL is the reference data service URL.
-var serviceURL string
+// Version information set at build time.
+var (
+	Version   = "dev"
+	GitCommit = "unknown"
+	BuildDate = "unknown"
+)
+
+// Global flags.
+var (
+	serviceURL   string
+	timeout      time.Duration
+	insecureMode bool
+)
 
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
-	Use:   "instrument-cli",
-	Short: "Instrument simulation CLI for Meridian platform",
+	Use:     "instrument-cli",
+	Short:   "Instrument simulation CLI for Meridian platform",
+	Version: fmt.Sprintf("%s (commit: %s, built: %s)", Version, GitCommit, BuildDate),
 	Long: `instrument-cli is a command-line tool for simulating instrument transactions
 in the Meridian platform.
 
@@ -24,6 +40,10 @@ and position previews without persisting data. This is useful for:
   - Debugging validation failures in production
   - Understanding how attributes map to bucket IDs
   - Previewing position records before creation
+
+Exit Codes:
+  0 - Success (validation passed)
+  1 - Failure (validation failed or error occurred)
 
 Examples:
   # Simulate a USD transaction
@@ -46,7 +66,13 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&serviceURL, "service-url", getEnvOrDefault("REFERENCE_DATA_SERVICE_URL", "localhost:8080"), "Reference data service URL")
+	rootCmd.PersistentFlags().StringVar(&serviceURL, "service-url",
+		getEnvOrDefault("REFERENCE_DATA_SERVICE_URL", fmt.Sprintf("localhost:%d", ports.Gateway)),
+		"Reference data service URL")
+	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second,
+		"gRPC call timeout")
+	rootCmd.PersistentFlags().BoolVar(&insecureMode, "insecure", false,
+		"Use insecure connection (no TLS). Required for local development.")
 }
 
 // getEnvOrDefault returns the environment variable value or a default.
@@ -55,4 +81,38 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// handleGRPCError handles gRPC errors and prints user-friendly messages.
+// Returns exit code: 0 for success, 1 for errors.
+func handleGRPCError(err error, operation string) int {
+	if err == nil {
+		return 0
+	}
+
+	errStr := err.Error()
+
+	switch {
+	case strings.Contains(errStr, "NotFound"):
+		fmt.Fprintf(os.Stderr, "Error: %s not found\n", operation)
+		return 1
+	case strings.Contains(errStr, "InvalidArgument"):
+		fmt.Fprintf(os.Stderr, "Error: Invalid input for %s: %v\n", operation, err)
+		return 1
+	case strings.Contains(errStr, "FailedPrecondition"):
+		fmt.Fprintf(os.Stderr, "Error: Operation not allowed for %s: %v\n", operation, err)
+		return 1
+	case strings.Contains(errStr, "Unavailable"):
+		fmt.Fprintf(os.Stderr, "Error: Reference Data service unavailable: %v\n", err)
+		return 1
+	case strings.Contains(errStr, "DeadlineExceeded"):
+		fmt.Fprintf(os.Stderr, "Error: Request timeout for %s\n", operation)
+		return 1
+	case strings.Contains(errStr, "connection refused"):
+		fmt.Fprintf(os.Stderr, "Error: Cannot connect to %s. Is the service running?\n", serviceURL)
+		return 1
+	default:
+		fmt.Fprintf(os.Stderr, "Error: %s failed: %v\n", operation, err)
+		return 1
+	}
 }

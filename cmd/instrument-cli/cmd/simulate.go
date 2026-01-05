@@ -3,8 +3,10 @@ package cmd
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/cel-go/cel"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
@@ -29,49 +31,50 @@ var (
 	ErrValidationReturnType = errors.New("validation expression must return boolean")
 	ErrBucketKeyReturnType  = errors.New("bucket key expression must return string")
 	ErrErrorMsgReturnType   = errors.New("error message expression must return string")
+	ErrValidationFailed     = errors.New("validation failed")
 )
 
 // SimulateResult contains the outcome of a simulation run.
 type SimulateResult struct {
 	// Input parameters
-	TenantID   string
-	Instrument string
-	Version    int
-	Amount     string
-	Attributes map[string]string
-	ValidFrom  *time.Time
-	ValidTo    *time.Time
-	Source     string
+	TenantID   string            `json:"tenant_id"`
+	Instrument string            `json:"instrument"`
+	Version    int               `json:"version,omitempty"`
+	Amount     string            `json:"amount"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+	ValidFrom  *time.Time        `json:"valid_from,omitempty"`
+	ValidTo    *time.Time        `json:"valid_to,omitempty"`
+	Source     string            `json:"source,omitempty"`
 
-	// Instrument definition
-	InstrumentDef *pb.InstrumentDefinition
+	// Instrument definition (excluded from JSON)
+	InstrumentDef *pb.InstrumentDefinition `json:"-"`
 
 	// Validation results
-	ValidationPassed bool
-	ValidationErrors []string
+	ValidationPassed bool     `json:"validation_passed"`
+	ValidationErrors []string `json:"validation_errors,omitempty"`
 
 	// Bucket key results
-	BucketID       string
-	BucketIDErrors []string
+	BucketID       string   `json:"bucket_id"`
+	BucketIDErrors []string `json:"bucket_id_errors,omitempty"`
 
 	// Position preview
-	PositionPreview *PositionPreview
+	PositionPreview *PositionPreview `json:"position_preview,omitempty"`
 
 	// Error message (if validation failed)
-	CustomErrorMessage string
+	CustomErrorMessage string `json:"error_message,omitempty"`
 }
 
 // PositionPreview represents a preview of the position record structure.
 type PositionPreview struct {
-	InstrumentCode string
-	Version        int
-	BucketID       string
-	Amount         string
-	Dimension      string
-	Attributes     map[string]string
-	ValidFrom      *time.Time
-	ValidTo        *time.Time
-	Source         string
+	InstrumentCode string            `json:"instrument_code"`
+	Version        int               `json:"version"`
+	BucketID       string            `json:"bucket_id"`
+	Amount         string            `json:"amount"`
+	Dimension      string            `json:"dimension"`
+	Attributes     map[string]string `json:"attributes,omitempty"`
+	ValidFrom      *time.Time        `json:"valid_from,omitempty"`
+	ValidTo        *time.Time        `json:"valid_to,omitempty"`
+	Source         string            `json:"source,omitempty"`
 }
 
 var (
@@ -110,8 +113,12 @@ Examples:
     --amount=10 --valid-from=2024-01-01T00:00:00Z --valid-to=2024-12-31T23:59:59Z
 
   # JSON output for scripting
-  instrument-cli simulate --tenant=acme_bank --instrument=USD --amount=100 --json`,
-	RunE: runSimulate,
+  instrument-cli simulate --tenant=acme_bank --instrument=USD --amount=100 --json
+
+  # Local development (insecure connection)
+  instrument-cli simulate --insecure --tenant=acme_bank --instrument=USD --amount=100`,
+	RunE:          runSimulateWrapper,
+	SilenceErrors: true, // We handle errors ourselves for proper exit codes
 }
 
 func init() {
@@ -132,8 +139,30 @@ func init() {
 	_ = simulateCmd.MarkFlagRequired("amount")
 }
 
+// runSimulateWrapper handles exit codes for the simulate command.
+// This wrapper exists to avoid exitAfterDefer linter warnings by keeping
+// os.Exit calls separate from functions with deferred cleanup.
+func runSimulateWrapper(cmd *cobra.Command, args []string) error {
+	err := runSimulate(cmd, args)
+	if err == nil {
+		return nil
+	}
+
+	// Handle validation failure - exit 1 (output already printed)
+	if errors.Is(err, ErrValidationFailed) {
+		os.Exit(1)
+	}
+
+	// For other errors, print and exit
+	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	os.Exit(1)
+	return nil // unreachable but satisfies compiler
+}
+
 func runSimulate(cmd *cobra.Command, _ []string) error {
-	ctx := cmd.Context()
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+	defer cancel()
 
 	// Parse attributes
 	attributes, err := parseAttributes(attrs)
@@ -161,7 +190,8 @@ func runSimulate(cmd *cobra.Command, _ []string) error {
 	// Fetch instrument definition
 	instrDef, err := fetchInstrument(ctx, tenantID, instrument, version)
 	if err != nil {
-		return fmt.Errorf("failed to fetch instrument: %w", err)
+		handleGRPCError(err, fmt.Sprintf("Instrument %s", instrument))
+		return fmt.Errorf("fetch instrument: %w", err)
 	}
 
 	// Run simulation
@@ -178,14 +208,16 @@ func runSimulate(cmd *cobra.Command, _ []string) error {
 
 	// Output results
 	if outputJSON {
-		printJSONResult(result)
+		if err := printJSONResult(result); err != nil {
+			return fmt.Errorf("failed to encode JSON: %w", err)
+		}
 	} else {
 		printFormattedResult(result)
 	}
 
-	// Exit with non-zero code if validation failed
+	// Return error if validation failed (wrapper handles exit code)
 	if !result.ValidationPassed {
-		os.Exit(1)
+		return ErrValidationFailed
 	}
 
 	return nil
@@ -204,8 +236,16 @@ func parseAttributes(attrs []string) (map[string]string, error) {
 }
 
 func fetchInstrument(ctx context.Context, tenantID, code string, version int) (*pb.InstrumentDefinition, error) {
+	// Configure transport credentials
+	var creds credentials.TransportCredentials
+	if insecureMode {
+		creds = insecure.NewCredentials()
+	} else {
+		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+	}
+
 	// Create gRPC connection
-	conn, err := grpc.NewClient(serviceURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(serviceURL, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
@@ -523,33 +563,10 @@ func printPositionPreviewSection(result *SimulateResult) {
 	fmt.Println("└────────────────────────────────────────────────────────────────────────┘")
 }
 
-func printJSONResult(result *SimulateResult) {
-	// Simple JSON output for scripting
-	fmt.Println("{")
-	fmt.Printf("  \"tenant_id\": %q,\n", result.TenantID)
-	fmt.Printf("  \"instrument\": %q,\n", result.Instrument)
-	if result.InstrumentDef != nil {
-		fmt.Printf("  \"version\": %d,\n", result.InstrumentDef.Version)
-	}
-	fmt.Printf("  \"amount\": %q,\n", result.Amount)
-	fmt.Printf("  \"validation_passed\": %t,\n", result.ValidationPassed)
-	if len(result.ValidationErrors) > 0 {
-		fmt.Printf("  \"validation_errors\": %q,\n", strings.Join(result.ValidationErrors, "; "))
-	}
-	fmt.Printf("  \"bucket_id\": %q,\n", result.BucketID)
-	if result.CustomErrorMessage != "" {
-		fmt.Printf("  \"error_message\": %q,\n", result.CustomErrorMessage)
-	}
-	if result.PositionPreview != nil {
-		fmt.Printf("  \"position_preview\": {\n")
-		fmt.Printf("    \"instrument_code\": %q,\n", result.PositionPreview.InstrumentCode)
-		fmt.Printf("    \"version\": %d,\n", result.PositionPreview.Version)
-		fmt.Printf("    \"bucket_id\": %q,\n", result.PositionPreview.BucketID)
-		fmt.Printf("    \"amount\": %q,\n", result.PositionPreview.Amount)
-		fmt.Printf("    \"dimension\": %q\n", result.PositionPreview.Dimension)
-		fmt.Printf("  }\n")
-	}
-	fmt.Println("}")
+func printJSONResult(result *SimulateResult) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
 }
 
 func sortedKeys(m map[string]string) []string {
@@ -562,11 +579,11 @@ func sortedKeys(m map[string]string) []string {
 }
 
 func truncate(s string, maxLen int) string {
+	if maxLen < 4 {
+		maxLen = 4 // Minimum length to show "..."
+	}
 	if len(s) <= maxLen {
 		return s
 	}
 	return s[:maxLen-3] + "..."
 }
-
-// Ensure cel.Program is used (imported for type checking)
-var _ cel.Program

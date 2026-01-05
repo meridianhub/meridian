@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,6 +50,7 @@ func TestParseAttributes(t *testing.T) {
 			got, err := parseAttributes(tt.attrs)
 			if tt.wantErr {
 				assert.Error(t, err)
+				assert.True(t, errors.Is(err, ErrAttributeFormat))
 				return
 			}
 			require.NoError(t, err)
@@ -84,19 +86,57 @@ func TestDimensionToString(t *testing.T) {
 
 func TestTruncate(t *testing.T) {
 	tests := []struct {
+		name   string
 		input  string
 		maxLen int
 		want   string
 	}{
-		{"short", 10, "short"},
-		{"exactly_10", 10, "exactly_10"},
-		{"this is too long", 10, "this is..."},
-		{"", 10, ""},
-		{"hello", 3, "..."},
+		{
+			name:   "short string within limit",
+			input:  "short",
+			maxLen: 10,
+			want:   "short",
+		},
+		{
+			name:   "string at exact limit",
+			input:  "exactly_10",
+			maxLen: 10,
+			want:   "exactly_10",
+		},
+		{
+			name:   "string exceeds limit",
+			input:  "this is too long",
+			maxLen: 10,
+			want:   "this is...",
+		},
+		{
+			name:   "empty string",
+			input:  "",
+			maxLen: 10,
+			want:   "",
+		},
+		{
+			name:   "maxLen below minimum enforces minimum",
+			input:  "hello",
+			maxLen: 3,
+			want:   "h...", // minLen enforced to 4, then truncates
+		},
+		{
+			name:   "maxLen of zero enforces minimum",
+			input:  "testing",
+			maxLen: 0,
+			want:   "t...", // minLen enforced to 4
+		},
+		{
+			name:   "short string with small maxLen",
+			input:  "hi",
+			maxLen: 2,
+			want:   "hi", // len(s) <= enforced minLen of 4
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			got := truncate(tt.input, tt.maxLen)
 			assert.Equal(t, tt.want, got)
 		})
@@ -223,6 +263,25 @@ func TestSimulate_CustomErrorMessage(t *testing.T) {
 	assert.Equal(t, "Transaction of 100.00 failed validation", result.CustomErrorMessage)
 }
 
+func TestSimulate_ErrorMessageExpressionTypeError(t *testing.T) {
+	// Error message expression returns boolean instead of string
+	instrDef := &pb.InstrumentDefinition{
+		Code:                   "USD",
+		Version:                1,
+		Dimension:              pb.Dimension_DIMENSION_CURRENCY,
+		Precision:              2,
+		Status:                 pb.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+		ValidationExpression:   "false",
+		ErrorMessageExpression: "true", // Returns bool, not string
+		CreatedAt:              timestamppb.Now(),
+	}
+
+	result := simulate(instrDef, map[string]string{}, "100.00", nil, nil, "")
+	assert.False(t, result.ValidationPassed)
+	// Error message should be empty because expression returned wrong type
+	assert.Empty(t, result.CustomErrorMessage)
+}
+
 func TestGenerateDefaultBucketKey(t *testing.T) {
 	// Same code+version should generate same key
 	key1 := generateDefaultBucketKey("USD", 1)
@@ -236,4 +295,20 @@ func TestGenerateDefaultBucketKey(t *testing.T) {
 	// Different version should generate different key
 	key4 := generateDefaultBucketKey("USD", 2)
 	assert.NotEqual(t, key1, key4)
+}
+
+func TestSentinelErrors(t *testing.T) {
+	// Verify sentinel errors are properly defined
+	assert.NotNil(t, ErrAttributeFormat)
+	assert.NotNil(t, ErrValidationReturnType)
+	assert.NotNil(t, ErrBucketKeyReturnType)
+	assert.NotNil(t, ErrErrorMsgReturnType)
+	assert.NotNil(t, ErrValidationFailed)
+
+	// Verify error messages are descriptive
+	assert.Contains(t, ErrAttributeFormat.Error(), "key=value")
+	assert.Contains(t, ErrValidationReturnType.Error(), "boolean")
+	assert.Contains(t, ErrBucketKeyReturnType.Error(), "string")
+	assert.Contains(t, ErrErrorMsgReturnType.Error(), "string")
+	assert.Contains(t, ErrValidationFailed.Error(), "validation")
 }
