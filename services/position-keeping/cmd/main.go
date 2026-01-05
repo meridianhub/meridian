@@ -15,6 +15,7 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/app"
 	"github.com/meridianhub/meridian/services/position-keeping/observability"
 	"github.com/meridianhub/meridian/services/position-keeping/service"
+	"github.com/meridianhub/meridian/services/position-keeping/worker"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
@@ -143,6 +144,38 @@ func run(logger *slog.Logger) error {
 		outboxWorker.Start(workerCtx)
 	} else {
 		logger.Info("event outbox worker disabled (kafka not configured)")
+	}
+
+	// Initialize and start compaction worker (if enabled)
+	var compactionWorker *worker.CompactionWorker
+	var compactionWorkerCancel context.CancelFunc
+	if config.Compaction.Enabled {
+		compactionConfig := worker.CompactionConfig{
+			RunInterval:       config.Compaction.RunInterval,
+			FragmentThreshold: config.Compaction.FragmentThreshold,
+			BatchSize:         config.Compaction.BatchSize,
+		}
+		var workerErr error
+		compactionWorker, workerErr = worker.NewCompactionWorker(container.DBPool, compactionConfig, logger)
+		if workerErr != nil {
+			return fmt.Errorf("failed to create compaction worker: %w", workerErr)
+		}
+
+		// Start compaction worker in background
+		var compactionWorkerCtx context.Context
+		compactionWorkerCtx, compactionWorkerCancel = context.WithCancel(context.Background())
+		defer compactionWorkerCancel() // Safety net; primary shutdown goes through explicit cancellation
+		go func() {
+			if err := compactionWorker.Start(compactionWorkerCtx); err != nil {
+				logger.Error("compaction worker error", "error", err)
+			}
+		}()
+		logger.Info("compaction worker started",
+			"run_interval", config.Compaction.RunInterval,
+			"fragment_threshold", config.Compaction.FragmentThreshold,
+			"batch_size", config.Compaction.BatchSize)
+	} else {
+		logger.Info("compaction worker disabled")
 	}
 
 	// Create idempotency service
@@ -309,6 +342,16 @@ func run(logger *slog.Logger) error {
 		}
 		outboxWorker.Stop() // Blocks until current batch completes and Kafka flush finishes
 		logger.Info("event outbox worker stopped")
+	}
+
+	// Shutdown compaction worker
+	if compactionWorker != nil {
+		logger.Info("stopping compaction worker...")
+		if compactionWorkerCancel != nil {
+			compactionWorkerCancel() // Cancel context first to signal worker to stop
+		}
+		compactionWorker.Stop() // Blocks until current compaction iteration completes
+		logger.Info("compaction worker stopped")
 	}
 
 	// Create shutdown context with timeout

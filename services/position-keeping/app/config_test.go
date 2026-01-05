@@ -528,6 +528,217 @@ func TestGetEnvAsSlice_WithWhitespace(t *testing.T) {
 	}
 }
 
+func TestValidate_CompactionConfigDefaults(t *testing.T) {
+	config := &Config{
+		Server: ServerConfig{
+			Port:                    "50053",
+			GracefulShutdownTimeout: 30 * time.Second,
+		},
+		Database: DatabaseConfig{
+			URL:          "postgres://localhost:5432/db",
+			MaxOpenConns: 10,
+			MaxIdleConns: 5,
+		},
+		Observability: ObservabilityConfig{
+			SamplingRate: 0.5,
+		},
+		Compaction: CompactionConfig{
+			Enabled:           true,
+			RunInterval:       5 * time.Minute,
+			FragmentThreshold: 100,
+			BatchSize:         50,
+		},
+	}
+
+	if err := config.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestValidate_CompactionDisabledSkipsValidation(t *testing.T) {
+	config := &Config{
+		Server: ServerConfig{
+			Port:                    "50053",
+			GracefulShutdownTimeout: 30 * time.Second,
+		},
+		Database: DatabaseConfig{
+			URL:          "postgres://localhost:5432/db",
+			MaxOpenConns: 10,
+			MaxIdleConns: 5,
+		},
+		Observability: ObservabilityConfig{
+			SamplingRate: 0.5,
+		},
+		Compaction: CompactionConfig{
+			Enabled:           false,
+			RunInterval:       0, // Invalid but should be skipped
+			FragmentThreshold: 0, // Invalid but should be skipped
+			BatchSize:         0, // Invalid but should be skipped
+		},
+	}
+
+	if err := config.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil when compaction disabled", err)
+	}
+}
+
+func TestValidate_CompactionInvalidRunInterval(t *testing.T) {
+	config := &Config{
+		Server: ServerConfig{
+			Port:                    "50053",
+			GracefulShutdownTimeout: 30 * time.Second,
+		},
+		Database: DatabaseConfig{
+			URL:          "postgres://localhost:5432/db",
+			MaxOpenConns: 10,
+			MaxIdleConns: 5,
+		},
+		Observability: ObservabilityConfig{
+			SamplingRate: 0.5,
+		},
+		Compaction: CompactionConfig{
+			Enabled:           true,
+			RunInterval:       0, // Invalid
+			FragmentThreshold: 100,
+			BatchSize:         50,
+		},
+	}
+
+	err := config.Validate()
+	if err == nil {
+		t.Error("Validate() error = nil, want error for zero run interval")
+	}
+	if err != ErrInvalidCompactionInterval {
+		t.Errorf("Validate() error = %v, want ErrInvalidCompactionInterval", err)
+	}
+}
+
+func TestValidate_CompactionInvalidFragmentThreshold(t *testing.T) {
+	tests := []struct {
+		name      string
+		threshold int
+	}{
+		{"zero", 0},
+		{"one", 1}, // Must be at least 2 (need 2+ rows to compact)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				Server: ServerConfig{
+					Port:                    "50053",
+					GracefulShutdownTimeout: 30 * time.Second,
+				},
+				Database: DatabaseConfig{
+					URL:          "postgres://localhost:5432/db",
+					MaxOpenConns: 10,
+					MaxIdleConns: 5,
+				},
+				Observability: ObservabilityConfig{
+					SamplingRate: 0.5,
+				},
+				Compaction: CompactionConfig{
+					Enabled:           true,
+					RunInterval:       5 * time.Minute,
+					FragmentThreshold: tt.threshold,
+					BatchSize:         50,
+				},
+			}
+
+			err := config.Validate()
+			if err == nil {
+				t.Errorf("Validate() error = nil, want error for threshold %d", tt.threshold)
+			}
+			if err != ErrInvalidFragmentThreshold {
+				t.Errorf("Validate() error = %v, want ErrInvalidFragmentThreshold", err)
+			}
+		})
+	}
+}
+
+func TestValidate_CompactionInvalidBatchSize(t *testing.T) {
+	config := &Config{
+		Server: ServerConfig{
+			Port:                    "50053",
+			GracefulShutdownTimeout: 30 * time.Second,
+		},
+		Database: DatabaseConfig{
+			URL:          "postgres://localhost:5432/db",
+			MaxOpenConns: 10,
+			MaxIdleConns: 5,
+		},
+		Observability: ObservabilityConfig{
+			SamplingRate: 0.5,
+		},
+		Compaction: CompactionConfig{
+			Enabled:           true,
+			RunInterval:       5 * time.Minute,
+			FragmentThreshold: 100,
+			BatchSize:         0, // Invalid
+		},
+	}
+
+	err := config.Validate()
+	if err == nil {
+		t.Error("Validate() error = nil, want error for zero batch size")
+	}
+	if err != ErrInvalidCompactionBatchSize {
+		t.Errorf("Validate() error = %v, want ErrInvalidCompactionBatchSize", err)
+	}
+}
+
+func TestLoadConfig_CompactionDefaults(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	// Verify compaction defaults
+	if !config.Compaction.Enabled {
+		t.Error("Compaction.Enabled = false, want true")
+	}
+	if config.Compaction.RunInterval != 5*time.Minute {
+		t.Errorf("Compaction.RunInterval = %v, want 5m", config.Compaction.RunInterval)
+	}
+	if config.Compaction.FragmentThreshold != 100 {
+		t.Errorf("Compaction.FragmentThreshold = %d, want 100", config.Compaction.FragmentThreshold)
+	}
+	if config.Compaction.BatchSize != 50 {
+		t.Errorf("Compaction.BatchSize = %d, want 50", config.Compaction.BatchSize)
+	}
+}
+
+func TestLoadConfig_CompactionCustomValues(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	t.Setenv("COMPACTION_ENABLED", "false")
+	t.Setenv("COMPACTION_RUN_INTERVAL", "10m")
+	t.Setenv("COMPACTION_FRAGMENT_THRESHOLD", "200")
+	t.Setenv("COMPACTION_BATCH_SIZE", "100")
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	// Verify custom values
+	if config.Compaction.Enabled {
+		t.Error("Compaction.Enabled = true, want false")
+	}
+	if config.Compaction.RunInterval != 10*time.Minute {
+		t.Errorf("Compaction.RunInterval = %v, want 10m", config.Compaction.RunInterval)
+	}
+	if config.Compaction.FragmentThreshold != 200 {
+		t.Errorf("Compaction.FragmentThreshold = %d, want 200", config.Compaction.FragmentThreshold)
+	}
+	if config.Compaction.BatchSize != 100 {
+		t.Errorf("Compaction.BatchSize = %d, want 100", config.Compaction.BatchSize)
+	}
+}
+
 // clearEnv clears environment variables used in tests
 func clearEnv(t *testing.T) {
 	t.Helper()
@@ -540,6 +751,8 @@ func clearEnv(t *testing.T) {
 		"REDIS_POOL_SIZE", "REDIS_CONN_MAX_IDLE_TIME",
 		"SERVICE_NAME", "SERVICE_VERSION", "ENVIRONMENT", "OTLP_ENDPOINT",
 		"SAMPLING_RATE", "LOG_LEVEL", "METRICS_ENABLED", "METRICS_PORT",
+		"COMPACTION_ENABLED", "COMPACTION_RUN_INTERVAL",
+		"COMPACTION_FRAGMENT_THRESHOLD", "COMPACTION_BATCH_SIZE",
 	}
 	for _, key := range envVars {
 		_ = os.Unsetenv(key)
