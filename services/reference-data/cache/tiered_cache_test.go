@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,7 +65,7 @@ func (m *mockSource) addDefinition(tenantID string, def *registry.InstrumentDefi
 }
 
 func sourceKey(tenantID, code string, version int) string {
-	return tenantID + ":" + code + ":" + string(rune(version+'0'))
+	return tenantID + ":" + code + ":" + strconv.Itoa(version)
 }
 
 // mockCELCompiler is a test implementation of CELCompiler.
