@@ -284,7 +284,7 @@ func (r *RateLimitInterceptor) UnaryServerInterceptor() grpc.UnaryServerIntercep
 					"method", info.FullMethod)
 			}
 			return nil, status.Errorf(codes.ResourceExhausted,
-				"rate limit exceeded for tenant %s: max %d requests per minute",
+				"rate limit exceeded for tenant %s: burst capacity %d exhausted, try again later",
 				tenantStr, r.config.BurstSize)
 		}
 
