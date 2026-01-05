@@ -284,7 +284,7 @@ func TestPostgresRegistry_SystemInstrumentProtection(t *testing.T) {
 	})
 
 	t.Run("DeprecateInstrument rejects system instrument", func(t *testing.T) {
-		err := reg.DeprecateInstrument(ctx, "GBP", 1)
+		err := reg.DeprecateInstrument(ctx, "GBP", 1, nil)
 		require.ErrorIs(t, err, registry.ErrSystemInstrumentReadOnly)
 	})
 
@@ -330,7 +330,7 @@ func TestPostgresRegistry_LifecycleTransitions(t *testing.T) {
 		require.NoError(t, reg.CreateDraft(ctx, def))
 		require.NoError(t, reg.ActivateInstrument(ctx, "LIFECYCLE2", 1))
 
-		err := reg.DeprecateInstrument(ctx, "LIFECYCLE2", 1)
+		err := reg.DeprecateInstrument(ctx, "LIFECYCLE2", 1, nil)
 		require.NoError(t, err)
 
 		// Verify status changed
@@ -363,7 +363,7 @@ func TestPostgresRegistry_LifecycleTransitions(t *testing.T) {
 		}
 		require.NoError(t, reg.CreateDraft(ctx, def))
 
-		err := reg.DeprecateInstrument(ctx, "LIFECYCLE4", 1)
+		err := reg.DeprecateInstrument(ctx, "LIFECYCLE4", 1, nil)
 		require.ErrorIs(t, err, registry.ErrNotActive)
 	})
 }

@@ -124,7 +124,7 @@ func (r *PostgresRegistry) GetDefinition(ctx context.Context, code string, versi
 			SELECT id, code, version, dimension, precision, status, is_system,
 				validation_expression, fungibility_key_expression, error_message_expression,
 				attribute_schema, display_name, description,
-				created_at, updated_at, activated_at, deprecated_at
+				created_at, updated_at, activated_at, deprecated_at, successor_id
 			FROM instrument_definition
 			WHERE code = $1 AND version = $2`
 
@@ -156,7 +156,7 @@ func (r *PostgresRegistry) GetActiveDefinition(ctx context.Context, code string)
 			SELECT id, code, version, dimension, precision, status, is_system,
 				validation_expression, fungibility_key_expression, error_message_expression,
 				attribute_schema, display_name, description,
-				created_at, updated_at, activated_at, deprecated_at
+				created_at, updated_at, activated_at, deprecated_at, successor_id
 			FROM instrument_definition
 			WHERE code = $1 AND status = 'ACTIVE'
 			ORDER BY version DESC
@@ -190,7 +190,7 @@ func (r *PostgresRegistry) ListActive(ctx context.Context) ([]*InstrumentDefinit
 			SELECT id, code, version, dimension, precision, status, is_system,
 				validation_expression, fungibility_key_expression, error_message_expression,
 				attribute_schema, display_name, description,
-				created_at, updated_at, activated_at, deprecated_at
+				created_at, updated_at, activated_at, deprecated_at, successor_id
 			FROM instrument_definition
 			WHERE status = 'ACTIVE'
 			ORDER BY code, version DESC`
@@ -386,7 +386,9 @@ func (r *PostgresRegistry) ActivateInstrument(ctx context.Context, code string, 
 }
 
 // DeprecateInstrument transitions an instrument from ACTIVE to DEPRECATED.
-func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string, version int) error {
+// If successorID is provided, the database trigger validates that the successor exists,
+// is ACTIVE, and has the same dimension as the deprecated instrument.
+func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string, version int, successorID *uuid.UUID) error {
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
 		// Check current state
 		var isSystem bool
@@ -409,17 +411,24 @@ func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string,
 			return ErrNotActive
 		}
 
-		// Transition to DEPRECATED
+		// Transition to DEPRECATED with optional successor
 		now := time.Now()
 		updateQuery := `
 			UPDATE instrument_definition SET
 				status = 'DEPRECATED',
 				deprecated_at = $1,
-				updated_at = $1
+				updated_at = $1,
+				successor_id = $4
 			WHERE code = $2 AND version = $3`
 
-		_, err = tx.Exec(ctx, updateQuery, now, code, version)
+		_, err = tx.Exec(ctx, updateQuery, now, code, version, successorID)
 		if err != nil {
+			// Check if the error is from the successor validation trigger
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "P0001" { // raise_exception
+				// The trigger raises exceptions for invalid successor
+				return ErrSuccessorInvalid
+			}
 			return fmt.Errorf("failed to deprecate instrument: %w", err)
 		}
 
@@ -616,12 +625,13 @@ func (r *PostgresRegistry) scanInstrumentDefinition(row pgx.Row) (*InstrumentDef
 	var def InstrumentDefinition
 	var dimension, status string
 	var validationExpr, errorMsgExpr, displayName, description sql.NullString
+	var successorID *uuid.UUID
 
 	err := row.Scan(
 		&def.ID, &def.Code, &def.Version, &dimension, &def.Precision, &status, &def.IsSystem,
 		&validationExpr, &def.FungibilityKeyExpression, &errorMsgExpr,
 		&def.AttributeSchema, &displayName, &description,
-		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt,
+		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt, &successorID,
 	)
 	if err != nil {
 		return nil, err
@@ -629,6 +639,7 @@ func (r *PostgresRegistry) scanInstrumentDefinition(row pgx.Row) (*InstrumentDef
 
 	def.Dimension = Dimension(dimension)
 	def.Status = Status(status)
+	def.SuccessorID = successorID
 
 	if validationExpr.Valid {
 		def.ValidationExpression = validationExpr.String
@@ -651,12 +662,13 @@ func (r *PostgresRegistry) scanInstrumentDefinitionFromRows(rows pgx.Rows) (*Ins
 	var def InstrumentDefinition
 	var dimension, status string
 	var validationExpr, errorMsgExpr, displayName, description sql.NullString
+	var successorID *uuid.UUID
 
 	err := rows.Scan(
 		&def.ID, &def.Code, &def.Version, &dimension, &def.Precision, &status, &def.IsSystem,
 		&validationExpr, &def.FungibilityKeyExpression, &errorMsgExpr,
 		&def.AttributeSchema, &displayName, &description,
-		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt,
+		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt, &successorID,
 	)
 	if err != nil {
 		return nil, err
@@ -664,6 +676,7 @@ func (r *PostgresRegistry) scanInstrumentDefinitionFromRows(rows pgx.Rows) (*Ins
 
 	def.Dimension = Dimension(dimension)
 	def.Status = Status(status)
+	def.SuccessorID = successorID
 
 	if validationExpr.Valid {
 		def.ValidationExpression = validationExpr.String
