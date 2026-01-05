@@ -473,6 +473,39 @@ func TestLienRepository_SumActiveAmountByAccountIDAndBucket_ExcludesExecuted(t *
 	assert.Equal(t, int64(20000), total)
 }
 
+func TestLienRepository_SumActiveAmountByAccountIDAndBucket_CurrencyInconsistency(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	accountID := uuid.New()
+	bucketID := "test-bucket"
+
+	// Create active lien in GBP
+	amount1, _ := domain.NewMoney("GBP", 20000)
+	lien1, _ := domain.NewLien(accountID, amount1, bucketID, "PO-001", nil)
+	require.NoError(t, repo.Create(ctx, lien1))
+
+	// Manually insert lien with different currency (simulating data corruption)
+	corruptedEntity := &LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             accountID,
+		AmountCents:           15000,
+		Currency:              "EUR", // Different currency - data corruption
+		BucketID:              bucketID,
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-CORRUPT",
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+	require.NoError(t, db.Create(corruptedEntity).Error)
+
+	// Sum should return currency inconsistency error
+	_, err := repo.SumActiveAmountByAccountIDAndBucket(ctx, accountID, bucketID)
+	assert.ErrorIs(t, err, ErrLienCurrencyInconsistent)
+}
+
 func TestLienRepository_CreateWithExpiration(t *testing.T) {
 	db, ctx, cleanup := setupLienTestDB(t)
 	defer cleanup()

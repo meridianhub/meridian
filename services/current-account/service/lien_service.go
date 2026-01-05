@@ -162,7 +162,12 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 		// Get bucket_id from request (Phase 1: use empty string if not provided)
 		// The bucket_id is stored for future bucket-aware position tracking.
-		// For Phase 1, solvency validation still uses total account balance.
+		//
+		// TODO(tm:universal-asset-system.26): Phase 2 will implement bucket-aware solvency validation.
+		// Currently, solvency is validated against total account balance regardless of bucket.
+		// When Phase 2 is implemented, liens with a bucket_id should validate solvency against
+		// only the balance within that specific fungibility bucket, using the bucket-scoped
+		// SumActiveAmountByAccountIDAndBucket query already available in the repository.
 		bucketID := req.BucketId // Will be empty string if not provided (proto default)
 
 		// Create lien domain object with bucket awareness
