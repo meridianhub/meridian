@@ -138,10 +138,11 @@ func (w *CompactionWorker) Start(ctx context.Context) error {
 	defer ticker.Stop()
 
 	// Run initial compaction immediately
-	// Add to WaitGroup before calling to prevent race with Stop()
-	w.wg.Add(1)
-	w.runCompactionIteration(ctx)
-	w.wg.Done()
+	// Use tryStartIteration to safely add to WaitGroup only if not stopped
+	if w.tryStartIteration() {
+		w.runCompactionIteration(ctx)
+		w.wg.Done()
+	}
 
 	for {
 		select {
@@ -388,7 +389,10 @@ func consolidatePositions(positions []PositionRow) consolidatedPosition {
 // compactBucket consolidates all position rows for a specific bucket into a single row.
 // Returns the number of original rows consolidated.
 func (w *CompactionWorker) compactBucket(ctx context.Context, accountID, instrumentCode, bucketKey string) (int, error) {
-	tx, err := w.pool.Begin(ctx)
+	// Use RepeatableRead isolation for correctness with FOR UPDATE locks
+	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel: pgx.RepeatableRead,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}

@@ -170,7 +170,7 @@ func run(logger *slog.Logger) error {
 				logger.Error("compaction worker error", "error", err)
 			}
 		}()
-		logger.Info("compaction worker started",
+		logger.Info("compaction worker enabled",
 			"run_interval", config.Compaction.RunInterval,
 			"fragment_threshold", config.Compaction.FragmentThreshold,
 			"batch_size", config.Compaction.BatchSize)
