@@ -140,7 +140,7 @@ func TestMigration_AppliesCleanly(t *testing.T) {
 		"id", "code", "version", "dimension", "precision", "status",
 		"validation_expression", "fungibility_key_expression", "error_message_expression",
 		"attribute_schema", "display_name", "description",
-		"created_at", "activated_at", "deprecated_at",
+		"created_at", "updated_at", "activated_at", "deprecated_at",
 	}
 
 	rows, err := tc.pool.Query(ctx, `
