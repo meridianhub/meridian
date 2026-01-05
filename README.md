@@ -1,8 +1,44 @@
-# Meridian - BIAN-Compliant Open Banking Ledger
+# Meridian
 
-An open source, cloud-native core banking engine following BIAN (Banking Industry Architecture Network) standards.
+**Trust Your Numbers.** Open-source treasury infrastructure for the modern economy.
 
-**What it demonstrates:**
+> **Status: Active Development** | Core ledger, audit trails, and saga orchestration implemented.
+> Valuation/settlement integrations are architectural placeholders.
+
+## Mission
+
+When your system accuses someone of a shortfall, you need absolute certainty. Meridian is
+open-source treasury infrastructure designed to prove itself - every position recorded with
+atomic audit trails, every transaction path traceable, every balance verifiable.
+
+### Measure
+
+Every position recorded with atomic audit trails. Parent-child transaction lineage preserved.
+Idempotent operations mean the same request twice produces the same result once. The accused
+can demand proof - and get it.
+
+### Value
+
+Value does not always look like currency anymore. Kilowatt-hours, tonnes of CO₂, commodity
+units - the economy runs on assets that traditional ledgers cannot handle. Multi-asset
+architecture handles diverse units with the same rigour as pounds and euros. Proper
+dimensional typing prevents nonsense calculations at compile time.
+
+### Settle
+
+When settlement fails, it cascades. Livelihoods depend on money arriving when promised,
+not stuck in a partial state that requires manual intervention. Lien-based fund reservation
+ensures availability before commitment. Saga orchestration with automatic compensation -
+if anything fails, the system unwinds cleanly. Settlement completes or reverts.
+
+### Why Trust It
+
+Meridian is infrastructure you actually own. BIAN-compliant architecture means your team speaks
+the same technical language as the world's largest banks. Kubernetes-native, horizontally scalable,
+built for growth. Every deployment builds institutional expertise that stays with you.
+Full sovereignty. Open access. Verify everything.
+
+## What it Demonstrates
 
 - BIAN-compliant service domain architecture
 - Modern microservices patterns for financial systems
@@ -10,8 +46,40 @@ An open source, cloud-native core banking engine following BIAN (Banking Industr
 - Protocol Buffer-based API design
 - Event-driven architecture with Kafka
 - Kubernetes-native deployment
+- Multi-asset ledger capabilities with dimensional type safety
+  ([ADR-0013](docs/adr/0013-generic-asset-quantity-types.md))
+- Tenant-defined instrument catalogs with CEL validation
+  ([ADR-0014](docs/adr/0014-financial-instrument-reference-data.md))
 
-**Features**:
+## Multi-Asset Capabilities
+
+Meridian's [Quantity\[D\] type system](docs/adr/0013-generic-asset-quantity-types.md) separates
+physics (compile-time dimensional safety) from policy (runtime instrument definitions), enabling
+universal transaction integrity across asset classes.
+
+### Monetary Dimension
+
+| Instrument Type | Example | Valuation Approach |
+|-----------------|---------|---------------------|
+| Currency | USD, EUR, GBP | Identity (implemented) |
+| Debt | Bonds, Loans | Market price × accrued interest |
+| Equity | Shares, Stock | Market price |
+| Derivatives | Options, Futures | Pricing model |
+
+### Commodity Dimension
+
+| Instrument Type | Example | Valuation Approach |
+|-----------------|---------|---------------------|
+| Utility Units | kWh, therms | Rate schedule |
+| Compute Resources | GPU-hours, vCPU-seconds | Spot pricing |
+| Environmental Credits | tCO₂e | Exchange pricing |
+| Physical Goods | kg, units | Market pricing |
+
+*Valuation providers are pluggable. Currency identity is implemented; other valuation
+approaches show the extensibility model. See [ADR-0013](docs/adr/0013-generic-asset-quantity-types.md)
+for the ValuationProvider interface.*
+
+## Features
 
 - Production-grade architecture patterns for financial systems
 - Comprehensive API design with Protocol Buffers
@@ -21,31 +89,36 @@ An open source, cloud-native core banking engine following BIAN (Banking Industr
 
 ```text
 meridian/
-├── services/                    # BIAN service domains (domain-centric)
-│   ├── current-account/         # Customer-facing account management
+├── services/                    # Service implementations
+│   ├── current-account/         # CurrentAccount service
 │   │   ├── cmd/                 # Entry point and Dockerfile
 │   │   ├── domain/              # Business logic and entities
 │   │   ├── adapters/            # Persistence, messaging adapters
 │   │   ├── service/             # gRPC service implementation
-│   │   ├── clients/             # Inter-service clients
-│   │   ├── migrations/          # Database migrations
+│   │   ├── client/              # Service-owned gRPC client
 │   │   ├── atlas/               # Atlas schema config
+│   │   ├── migrations/          # Database migrations
 │   │   └── k8s/                 # Kubernetes manifests
-│   ├── financial-accounting/    # Double-entry general ledger
-│   ├── party/                   # Customer and party reference data
-│   ├── payment-order/           # Payment execution
-│   ├── position-keeping/        # Pre-ledger transaction log
-│   └── tenant/                  # Multi-tenant platform management
+│   ├── financial-accounting/    # FinancialAccounting service
+│   ├── gateway/                 # Gateway service
+│   ├── party/                   # Party service
+│   ├── payment-order/           # PaymentOrder service
+│   ├── position-keeping/        # PositionKeeping service
+│   ├── reference-data/          # ReferenceData service
+│   ├── tenant/                  # Tenant service
+│   ├── audit-worker/            # Audit log processor
+│   └── utilization-metering-consumer/  # Usage metering
 ├── shared/                      # Cross-service shared code
 │   ├── platform/                # Infrastructure (auth, db, kafka, observability)
 │   ├── domain/                  # Shared domain models and primitives
-│   └── pkg/                     # Shared utilities (health, idempotency)
-├── utilities/                   # CLI tools
-│   ├── meridian/                # Main CLI
+│   └── pkg/                     # Shared utilities (health, idempotency, clients)
+├── cmd/                         # CLI tools
+│   └── tenantctl/               # Tenant management CLI
+├── utilities/                   # Development utilities
 │   ├── atlas-loader/            # Migration schema loader
 │   └── horizon-demo/            # Demo utility
 ├── api/proto/                   # Protocol Buffer API definitions
-├── deployments/k8s/             # Shared Kubernetes resources (base, overlays)
+├── deployments/k8s/             # Shared Kubernetes resources
 └── docs/                        # Documentation and ADRs
 ```
 
@@ -60,6 +133,7 @@ This implementation includes the following BIAN service domains:
 | [**Party**][svc-party] | Party Reference Data Directory | Customer and party reference data management | Yes | [OAS3][bian-party] |
 | [**PaymentOrder**][svc-po] | Payment Order | Payment initiation, saga orchestration, and settlement | No | [OAS3][bian-po] |
 | [**PositionKeeping**][svc-pk] | Position Keeping | Pre-ledger transaction log and position tracking | Yes | [OAS3][bian-pk] |
+| [**ReferenceData**][svc-rd] | Financial Instrument Reference Data Management | Tenant-defined instrument catalog with CEL validation | Yes | [OAS3][bian-rd] |
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
 Services marked as "Standalone" can operate independently; others require upstream dependencies.
@@ -71,22 +145,25 @@ Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bia
 [bian-party]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PartyReferenceDataDirectory.yaml
 [bian-po]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PaymentOrder.yaml
 [bian-pk]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PositionKeeping.yaml
+[bian-rd]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/FinancialInstrumentReferenceDataManagement.yaml
 [svc-ca]: services/current-account/
 [svc-fa]: services/financial-accounting/
 [svc-party]: services/party/
 [svc-po]: services/payment-order/
 [svc-pk]: services/position-keeping/
+[svc-rd]: services/reference-data/
 [svc-tenant]: services/tenant/
 
 ### Infrastructure Services
 
-| Service | Purpose | Standalone |
-|---------|---------|:----------:|
-| [**Tenant**][svc-tenant] | Multi-tenant platform management with PostgreSQL schema-per-tenant isolation | Yes |
+| Service | Purpose |
+|---------|---------|
+| [**Tenant**][svc-tenant] | Multi-tenant platform management with schema-per-tenant isolation |
+| **Gateway** | API gateway for external access |
+| **audit-worker** | Processes audit log outbox entries |
+| **utilization-metering-consumer** | Usage metering for billing |
 
-The Tenant service is not part of the BIAN standard but is essential for shared-cluster deployments
-requiring data isolation between organizations. It provides schema-based multi-tenancy where each
-tenant's data is isolated in a dedicated PostgreSQL schema (`org_{tenant_id}`).
+These services are not part of the BIAN standard but provide platform infrastructure.
 
 ## Technology Stack
 
@@ -178,6 +255,10 @@ skill](docs/skills/schema-evolution.md)
 - Adapter pattern for layer translation
 - Local development with Tilt
 - Standard service directory structure
+- [Universal Quantity Type System](docs/adr/0013-generic-asset-quantity-types.md) - Dimensional type
+  safety for multi-asset ledger
+- [Financial Instrument Reference Data](docs/adr/0014-financial-instrument-reference-data.md) -
+  Tenant-defined instrument catalog with CEL validation
 
 **Architecture diagrams:**
 
@@ -192,7 +273,8 @@ Protocol Buffer definitions for all services are in [api/proto/](api/proto/).
 
 **Key APIs**:
 
-- Common types: Money, AccountType, Currency, Pagination
+- Common types: Quantity[D], Money, AccountType, Currency, Pagination
+- Financial instruments: Dimensional type system with runtime instrument definitions
 - Error codes: Categorized by domain (general, financial, BIAN-specific)
 - Health checks: Standard health service for all components
 

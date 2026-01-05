@@ -94,3 +94,74 @@ type MeasurementRepository interface {
 	// Returns an empty slice if no measurements exist for the log.
 	FindByPositionLogID(ctx context.Context, positionLogID uuid.UUID) ([]*Measurement, error)
 }
+
+// PositionRepository defines the contract for persisting position records
+// using an append-only write pattern.
+//
+// IMPORTANT: This repository enforces append-only semantics for O(1) constant-time
+// inserts without locks. Position consolidation is deferred to read-time aggregation
+// or background compaction (Phase 2).
+//
+// Design rationale:
+//   - Insert() is the ONLY write method - no Update() or Upsert()
+//   - Each measurement creates a new position row, never merges on write
+//   - Database trigger prevents UPDATE on amount column
+//   - Achieves O(1) writes without locks for high-throughput scenarios
+//
+// FUTURE: Background compaction (Phase 2) will be documented in ADR-00XX.
+// Compaction considerations:
+//   - Compacted records will be marked with a compaction_batch_id
+//   - reference_id chain will be preserved for audit trail
+//   - RecordCount in AggregatedPosition will reflect pre-compaction counts
+type PositionRepository interface {
+	// Insert persists a new Position record to the database.
+	// This is the ONLY write method - append-only semantics are enforced.
+	// Returns ErrConflict if a position with the same ID already exists.
+	Insert(ctx context.Context, position *Position) error
+
+	// InsertBatch persists multiple Position records atomically.
+	// If any position fails to persist, the entire batch is rolled back.
+	// Returns ErrConflict if any position has a duplicate ID.
+	InsertBatch(ctx context.Context, positions []*Position) error
+
+	// FindByID retrieves a Position by its ID.
+	// Returns ErrNotFound if the position doesn't exist.
+	FindByID(ctx context.Context, id uuid.UUID) (*Position, error)
+
+	// GetAggregatedPosition retrieves the consolidated position for a specific
+	// (AccountID, InstrumentCode, BucketKey) combination by summing all records.
+	// Returns nil if no positions exist for the combination.
+	GetAggregatedPosition(ctx context.Context, accountID, instrumentCode, bucketKey string) (*AggregatedPosition, error)
+
+	// ListByAccount retrieves all position records for an account with pagination.
+	// Returns an empty slice if no positions exist.
+	ListByAccount(ctx context.Context, accountID string, limit, offset int) ([]*Position, error)
+
+	// ListAggregatedByAccount retrieves all aggregated positions for an account.
+	// Groups by (InstrumentCode, BucketKey) and sums amounts.
+	// Returns an empty slice if no positions exist.
+	ListAggregatedByAccount(ctx context.Context, accountID string) ([]*AggregatedPosition, error)
+
+	// GetPositionCount returns the count of positions for an account.
+	// This is useful for pagination and monitoring position growth.
+	GetPositionCount(ctx context.Context, accountID string) (int64, error)
+
+	// GetAggregatedPositions retrieves all aggregated positions for an account/instrument
+	// combination, grouped by BucketKey using pure SQL GROUP BY.
+	// This is a READ-ONLY operation with no side effects - it does NOT trigger compaction.
+	// Returns aggregates sorted by BucketKey for deterministic output.
+	// Returns an empty slice if no positions exist.
+	//
+	// DESIGN: Read operations are decoupled from write load - high read volume
+	// does not affect write throughput or trigger background jobs.
+	GetAggregatedPositions(ctx context.Context, accountID, instrumentCode string) ([]*AggregatedPosition, error)
+
+	// GetBucketDetails retrieves all raw position records for a specific
+	// (AccountID, InstrumentCode, BucketKey) combination.
+	// This is a READ-ONLY operation with no side effects.
+	// Returns positions sorted by CreatedAt descending for most recent first.
+	// Returns an empty slice if no positions exist for the bucket.
+	//
+	// Use case: Drill-down from aggregated view to individual position records.
+	GetBucketDetails(ctx context.Context, accountID, instrumentCode, bucketKey string, limit, offset int) ([]*Position, error)
+}

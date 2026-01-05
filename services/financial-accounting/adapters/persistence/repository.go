@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/shopspring/decimal"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -23,11 +24,30 @@ const (
 	MaxPageSize = 1000
 )
 
-var decimalHundred = decimal.NewFromInt(100)
+// decimalFromMinorUnits converts minor units (int64) to decimal amount based on precision.
+// For precision 2: 10050 -> 100.50
+// For precision 0: 100 -> 100
+// For precision 6: 1234567 -> 1.234567
+func decimalFromMinorUnits(minorUnits int64, precision int) decimal.Decimal {
+	divisor := decimal.New(1, int32(precision))
+	return decimal.NewFromInt(minorUnits).Div(divisor)
+}
 
-// decimalFromCents converts cents (int64) to decimal amount
-func decimalFromCents(cents int64) decimal.Decimal {
-	return decimal.NewFromInt(cents).Div(decimalHundred)
+// decimalToMinorUnits converts a decimal amount to minor units based on precision.
+// For precision 2: 100.50 -> 10050
+// For precision 0: 100 -> 100
+// For precision 6: 1.234567 -> 1234567
+// Returns error if the result has fractional units that cannot be represented.
+func decimalToMinorUnits(amount decimal.Decimal, precision int) (int64, error) {
+	multiplier := decimal.New(1, int32(precision))
+	scaled := amount.Mul(multiplier)
+
+	// Validate no fractional units
+	if !scaled.Equal(scaled.Truncate(0)) {
+		return 0, ErrFractionalCents
+	}
+
+	return scaled.IntPart(), nil
 }
 
 var (
@@ -252,24 +272,37 @@ func (r *LedgerRepository) UpdatePosting(ctx context.Context, posting *domain.Le
 	})
 }
 
-// toPostingEntity converts domain model to database entity
+// toPostingEntity converts domain model to database entity.
+//
+// The conversion extracts instrument metadata from the Money type and stores it
+// in the entity for reconstruction during retrieval. This supports multi-asset
+// quantities including both monetary (USD, EUR) and commodity (KWH, GPU_HOUR) instruments.
 func toPostingEntity(posting *domain.LedgerPosting) (LedgerPostingEntity, error) {
-	// Convert decimal amount to cents (multiply by 100)
-	scaled := posting.Amount.Amount().Mul(decimalHundred)
+	// Extract instrument from the Money type
+	instrument := posting.Amount.Instrument
 
-	// Validate that the amount can be represented exactly in cents (no fractional cents)
-	if !scaled.Equal(scaled.Truncate(0)) {
-		return LedgerPostingEntity{}, ErrFractionalCents
+	// Convert decimal amount to minor units based on instrument precision
+	amountMinorUnits, err := decimalToMinorUnits(posting.Amount.Amount, instrument.Precision)
+	if err != nil {
+		return LedgerPostingEntity{}, err
 	}
 
-	amountCents := scaled.IntPart()
+	// Handle nil attributes - use empty map for JSONB default
+	attributes := posting.Attributes
+	if attributes == nil {
+		attributes = make(map[string]string)
+	}
 
 	return LedgerPostingEntity{
 		ID:                    posting.ID,
 		FinancialBookingLogID: posting.FinancialBookingLogID,
 		PostingDirection:      string(posting.Direction),
-		AmountCents:           amountCents,
-		Currency:              string(posting.Amount.Currency()),
+		AmountMinorUnits:      amountMinorUnits,
+		Currency:              instrument.Code,      // Instrument code (e.g., "USD", "KWH")
+		DimensionType:         instrument.Dimension, // "CURRENCY", "ENERGY", etc.
+		InstrumentVersion:     instrument.Version,   // Schema version
+		InstrumentPrecision:   instrument.Precision, // Decimal places
+		Attributes:            datatypes.NewJSONType(attributes),
 		AccountID:             posting.AccountID,
 		ValueDate:             posting.ValueDate,
 		PostingResult:         posting.PostingResult,
@@ -279,11 +312,59 @@ func toPostingEntity(posting *domain.LedgerPosting) (LedgerPostingEntity, error)
 	}, nil
 }
 
-// toPostingDomain converts database entity to domain model
+// toPostingDomain converts database entity to domain model.
+//
+// The conversion reconstructs the Instrument from stored fields and creates
+// the appropriate Money type. For backward compatibility, missing dimension/version/precision
+// fields default to currency values (dimension="CURRENCY", version=1, precision=2).
 func toPostingDomain(entity *LedgerPostingEntity) *domain.LedgerPosting {
-	// Convert cents to decimal (divide by 100)
-	amount := decimalFromCents(entity.AmountCents)
-	money, _ := domain.NewMoney(amount, domain.Currency(entity.Currency))
+	// Handle backward compatibility for existing rows
+	dimensionType := entity.DimensionType
+	if dimensionType == "" {
+		dimensionType = domain.DimensionCurrency
+	}
+
+	instrumentVersion := entity.InstrumentVersion
+	if instrumentVersion == 0 {
+		instrumentVersion = 1
+	}
+
+	instrumentPrecision := entity.InstrumentPrecision
+	if instrumentPrecision == 0 && dimensionType == domain.DimensionCurrency {
+		// Default precision for currencies is 2 (cents)
+		instrumentPrecision = 2
+	}
+
+	// Reconstruct instrument from stored fields
+	// Note: NewInstrument validates inputs; for data from DB we trust it's valid
+	instrument, err := domain.NewInstrument(
+		entity.Currency,     // Code (e.g., "USD", "KWH")
+		instrumentVersion,   // Version
+		dimensionType,       // Dimension ("CURRENCY", "ENERGY", etc.)
+		instrumentPrecision, // Precision
+	)
+	if err != nil {
+		// Fallback: create minimal instrument for backward compatibility
+		// This should rarely happen for valid data, but handles edge cases
+		instrument = domain.Instrument{
+			Code:      entity.Currency,
+			Version:   instrumentVersion,
+			Dimension: dimensionType,
+			Precision: instrumentPrecision,
+		}
+	}
+
+	// Convert minor units back to decimal based on precision
+	amount := decimalFromMinorUnits(entity.AmountMinorUnits, instrumentPrecision)
+
+	// Create Money quantity
+	money := domain.NewMoney(amount, instrument)
+
+	// Extract attributes from JSONB
+	attributes := entity.Attributes.Data()
+	if attributes == nil {
+		attributes = make(map[string]string)
+	}
 
 	return &domain.LedgerPosting{
 		ID:                    entity.ID,
@@ -296,6 +377,7 @@ func toPostingDomain(entity *LedgerPostingEntity) *domain.LedgerPosting {
 		Status:                domain.TransactionStatus(entity.Status),
 		CorrelationID:         entity.CorrelationID,
 		CreatedAt:             entity.CreatedAt,
+		Attributes:            attributes,
 	}
 }
 

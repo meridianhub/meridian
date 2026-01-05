@@ -37,6 +37,7 @@ type Lien struct {
 	ID                    uuid.UUID
 	AccountID             uuid.UUID
 	Amount                Money
+	BucketID              string // Fungibility key / bucket identifier for bucket-aware reservations
 	Status                LienStatus
 	PaymentOrderReference string
 	TerminationReason     string
@@ -46,8 +47,10 @@ type Lien struct {
 	UpdatedAt             time.Time
 }
 
-// NewLien creates a new lien in ACTIVE status
-func NewLien(accountID uuid.UUID, amount Money, paymentOrderReference string, expiresAt *time.Time) (*Lien, error) {
+// NewLien creates a new lien in ACTIVE status.
+// The bucketID parameter specifies the fungibility key / bucket identifier for bucket-aware reservations.
+// For single-bucket liens (Phase 1), this determines which specific pool of funds the lien is placed against.
+func NewLien(accountID uuid.UUID, amount Money, bucketID string, paymentOrderReference string, expiresAt *time.Time) (*Lien, error) {
 	if !amount.IsPositive() {
 		return nil, ErrInvalidLienAmount
 	}
@@ -57,6 +60,7 @@ func NewLien(accountID uuid.UUID, amount Money, paymentOrderReference string, ex
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		Amount:                amount,
+		BucketID:              bucketID,
 		Status:                LienStatusActive,
 		PaymentOrderReference: paymentOrderReference,
 		ExpiresAt:             expiresAt,

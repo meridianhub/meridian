@@ -22,15 +22,16 @@
 //
 // # gRPC Operations
 //
-// This PR (Part 1 of 3) implements the following operations:
+// Implemented operations:
 //   - InitiateFinancialPositionLog: Create a new financial position log with idempotency support
+//   - InitiateFinancialPositionLogBatch: Create multiple logs atomically in a single batch
 //   - RetrieveFinancialPositionLog: Fetch a log by ID
 //   - ListFinancialPositionLogs: Query logs with filtering and pagination
+//   - UpdateFinancialPositionLog: Update an existing log with optimistic locking
 //
-// Future PRs will add:
-//   - UpdateFinancialPositionLog: Update an existing log (Part 2)
-//   - ControlFinancialPositionLog: Manage log lifecycle (Part 2)
-//   - BulkImportTransactions: Import multiple transactions atomically (Part 3)
+// Future work:
+//   - ControlFinancialPositionLog: Manage log lifecycle transitions
+//   - BulkImportTransactions: Import multiple transactions atomically
 //
 // # Error Handling
 //

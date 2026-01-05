@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/meridianhub/meridian/services/payment-order/domain"
 )
 
 // MockGateway errors
@@ -93,9 +95,9 @@ func (g *MockGateway) SendPayment(ctx context.Context, req PaymentRequest) (Paym
 	}
 
 	// Check for deterministic failures first (no RNG needed)
-	// ToMinorUnitsUnchecked is acceptable here: this is mock/test code with small test values
+	// domain.ToMinorUnits is used here: this is mock/test code with small test values
 	if g.config.DeterministicFailures {
-		amountCents := req.Amount.ToMinorUnitsUnchecked()
+		amountCents := domain.ToMinorUnits(req.Amount)
 		if amountCents%100 == 99 {
 			return PaymentResponse{
 				GatewayReferenceID: generateGatewayReferenceID(),

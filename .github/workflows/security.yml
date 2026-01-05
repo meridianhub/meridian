@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.25.5'
         cache: true
@@ -46,10 +46,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.25.5'
         cache: true
@@ -83,7 +83,7 @@ jobs:
         fi
 
     - name: Upload Gosec results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       if: always()
       with:
         sarif_file: gosec-results.sarif
@@ -94,10 +94,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Run Trivy vulnerability scanner (repo scan)
-      uses: aquasecurity/trivy-action@0.28.0
+      uses: aquasecurity/trivy-action@0.33.1
       with:
         scan-type: 'fs'
         scan-ref: '.'
@@ -107,7 +107,7 @@ jobs:
         exit-code: '1'  # Fail on critical/high vulnerabilities
 
     - name: Upload Trivy results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       if: always()
       with:
         sarif_file: 'trivy-repo-results.sarif'
@@ -119,7 +119,7 @@ jobs:
     needs: [govulncheck, gosec]  # Only scan image if code passes security checks
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up buf
       uses: bufbuild/buf-setup-action@v1
@@ -138,7 +138,7 @@ jobs:
           .
 
     - name: Run Trivy vulnerability scanner (image scan)
-      uses: aquasecurity/trivy-action@0.28.0
+      uses: aquasecurity/trivy-action@0.33.1
       with:
         image-ref: 'meridian:security-scan'
         format: 'sarif'
@@ -148,7 +148,7 @@ jobs:
         exit-code: '1'  # Fail on critical/high vulnerabilities with available fixes
 
     - name: Upload Trivy image results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       if: always()
       with:
         sarif_file: 'trivy-image-results.sarif'
@@ -160,7 +160,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Dependency Review
       uses: actions/dependency-review-action@v4
@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up buf
       uses: bufbuild/buf-setup-action@v1
@@ -191,7 +191,7 @@ jobs:
           .
 
     - name: Generate SBOM with Syft
-      uses: anchore/sbom-action@v0.20.11
+      uses: anchore/sbom-action@v0.21.0
       with:
         image: meridian:sbom
         format: spdx-json
@@ -207,7 +207,7 @@ jobs:
         echo "File size: $(du -h sbom.spdx.json | cut -f1)"
 
     - name: Upload SBOM artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: sbom
         path: sbom.spdx.json
@@ -218,7 +218,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0  # Full history for secret scanning
 

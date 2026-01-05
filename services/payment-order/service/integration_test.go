@@ -1106,8 +1106,7 @@ func TestIntegration_MoneyPrecision_ThroughAllTranslations(t *testing.T) {
 			// Verify amount is persisted correctly
 			po, err := repo.FindByID(ctx, poID)
 			require.NoError(t, err)
-			amountCents, err := po.Amount.ToMinorUnits()
-			require.NoError(t, err)
+			amountCents := domain.ToMinorUnits(po.Amount)
 			assert.Equal(t, tc.expectedCents, amountCents,
 				"Amount should be correctly converted to cents")
 		})

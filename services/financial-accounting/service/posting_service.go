@@ -50,12 +50,23 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 
 	// Convert cents to decimal
 	amount := decimalFromCents(event.AmountCents)
-	money, err := domain.NewMoney(amount, domain.Currency(event.Currency))
+
+	// Parse currency and convert to instrument
+	currency, err := domain.ParseCurrency(event.Currency)
 	if err != nil {
 		timer.ObserveError(observability.ErrorCategoryValidation)
 		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
-		return fmt.Errorf("failed to create money: %w", err)
+		return fmt.Errorf("invalid currency: %w", err)
 	}
+
+	instrument, err := domain.CurrencyToInstrument(currency)
+	if err != nil {
+		timer.ObserveError(observability.ErrorCategoryValidation)
+		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
+		return fmt.Errorf("failed to create instrument: %w", err)
+	}
+
+	money := domain.NewMoney(amount, instrument)
 
 	// Create debit posting (customer account)
 	debitPosting, err := domain.NewLedgerPosting(
@@ -150,13 +161,13 @@ func (s *PostingService) ValidateDoubleEntry(ctx context.Context, bookingLogID u
 	for _, posting := range postings {
 		// Capture currency from first posting (all postings in a booking log have same currency)
 		if currency == "" {
-			currency = posting.Amount.CurrencyCode()
+			currency = posting.Amount.Instrument.Code
 		}
 		switch posting.Direction {
 		case domain.PostingDirectionDebit:
-			debitTotal = debitTotal.Add(posting.Amount.Amount())
+			debitTotal = debitTotal.Add(posting.Amount.Amount)
 		case domain.PostingDirectionCredit:
-			creditTotal = creditTotal.Add(posting.Amount.Amount())
+			creditTotal = creditTotal.Add(posting.Amount.Amount)
 		}
 	}
 

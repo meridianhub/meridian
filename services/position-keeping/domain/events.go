@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -59,15 +60,15 @@ func (e *TransactionCaptured) OccurredAt() time.Time {
 func (e *TransactionCaptured) ToProto() interface{} {
 	// Convert decimal amount to minor units (cents, pence, sen, etc.)
 	// This is currency-aware: JPY has 0 decimal places, others have 2
-	// Using ToMinorUnitsUnchecked() since event amounts should be validated before this point
-	amountCents := e.Amount.ToMinorUnitsUnchecked()
+	// Using MoneyToMinorUnitsUnchecked since event amounts should be validated before this point
+	amountCents := MoneyToMinorUnitsUnchecked(e.Amount)
 
 	return &eventsv1.TransactionCapturedEvent{
 		LogId:         e.LogID.String(),
 		AccountId:     e.AccountID,
 		TransactionId: e.TransactionID.String(),
 		AmountCents:   amountCents,
-		Currency:      currencyToProto(e.Amount.Currency()),
+		Currency:      currencyToProto(MoneyCurrency(e.Amount)),
 		Direction:     e.Direction.String(),
 		Source:        e.Source.String(),
 		Description:   e.Description,
@@ -75,6 +76,9 @@ func (e *TransactionCaptured) ToProto() interface{} {
 		CorrelationId: e.CorrelationID,
 		Timestamp:     timestamppb.New(e.Timestamp),
 		Version:       e.Version,
+		// Universal Asset System: InstrumentAmount provides full multi-asset support
+		// while legacy fields (amount_cents, currency) are maintained for backward compatibility
+		InstrumentAmount: moneyToInstrumentAmountProto(e.Amount),
 	}
 }
 
@@ -409,5 +413,17 @@ func reconciliationStatusToString(status ReconciliationStatus) string {
 		return "unreconciled"
 	default:
 		return "unreconciled"
+	}
+}
+
+// moneyToInstrumentAmountProto converts a domain Money quantity to a protobuf InstrumentAmount.
+// This supports the Universal Asset System by providing full instrument metadata in events.
+func moneyToInstrumentAmountProto(m Money) *quantityv1.InstrumentAmount {
+	return &quantityv1.InstrumentAmount{
+		Amount:         m.Amount.String(),
+		InstrumentCode: m.Instrument.Code,
+		Version:        int32(m.Instrument.Version),
+		// Note: Attributes, ValidFrom, ValidTo, and Source are optional and not set for simple Money
+		// These can be populated when the domain model supports them (e.g., for time-bound assets)
 	}
 }

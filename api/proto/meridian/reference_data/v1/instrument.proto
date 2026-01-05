@@ -1,0 +1,428 @@
+syntax = "proto3";
+
+package meridian.reference_data.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1;referencedatav1";
+
+// InstrumentStatus defines the lifecycle state of an instrument definition.
+enum InstrumentStatus {
+  // INSTRUMENT_STATUS_UNSPECIFIED means the status is unknown.
+  INSTRUMENT_STATUS_UNSPECIFIED = 0;
+  // INSTRUMENT_STATUS_DRAFT means the instrument is being defined and cannot be used.
+  INSTRUMENT_STATUS_DRAFT = 1;
+  // INSTRUMENT_STATUS_ACTIVE means the instrument is available for use.
+  INSTRUMENT_STATUS_ACTIVE = 2;
+  // INSTRUMENT_STATUS_DEPRECATED means the instrument is no longer recommended for new use.
+  INSTRUMENT_STATUS_DEPRECATED = 3;
+}
+
+// Dimension defines the physical or conceptual dimension an instrument measures.
+enum Dimension {
+  // DIMENSION_UNSPECIFIED means the dimension is unknown.
+  DIMENSION_UNSPECIFIED = 0;
+  // DIMENSION_CURRENCY represents monetary values (USD, EUR, GBP).
+  DIMENSION_CURRENCY = 1;
+  // DIMENSION_ENERGY represents energy quantities (KWH, MWH, THERM).
+  DIMENSION_ENERGY = 2;
+  // DIMENSION_MASS represents mass quantities (KG, TON, LB).
+  DIMENSION_MASS = 3;
+  // DIMENSION_VOLUME represents volume quantities (LITRE, GALLON, BARREL).
+  DIMENSION_VOLUME = 4;
+  // DIMENSION_TIME represents time quantities (SECOND, HOUR, DAY).
+  DIMENSION_TIME = 5;
+  // DIMENSION_COMPUTE represents computational resources (GPU_HOUR, CPU_SECOND).
+  DIMENSION_COMPUTE = 6;
+  // DIMENSION_CARBON represents carbon credits or emissions (TONNE_CO2E).
+  DIMENSION_CARBON = 7;
+  // DIMENSION_DATA represents data quantities (GB, TB).
+  DIMENSION_DATA = 8;
+  // DIMENSION_COUNT represents countable items (units, tokens, vouchers).
+  DIMENSION_COUNT = 9;
+}
+
+// InstrumentDefinition defines a type of tradeable or measurable asset.
+// This is the reference data that describes how instrument amounts are validated and pooled.
+message InstrumentDefinition {
+  // id is the unique identifier for this definition (UUID).
+  string id = 1 [(buf.validate.field).string.uuid = true];
+
+  // Note: tenant_id is NOT included here. Tenant isolation is handled at the
+  // database schema level - each tenant has their own schema. The tenant context
+  // flows through request headers and is extracted by interceptors for schema routing.
+
+  // code is the unique instrument code within the tenant (e.g., "USD", "KWH").
+  string code = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // version is the schema version for this definition (monotonically increasing).
+  int32 version = 4 [(buf.validate.field).int32.gte = 1];
+
+  // dimension is the physical or conceptual dimension this instrument measures.
+  // DIMENSION_UNSPECIFIED (0) is rejected - instruments must have a defined dimension.
+  Dimension dimension = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // precision is the number of decimal places for this instrument (0-18).
+  int32 precision = 6 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 18
+  }];
+
+  // status is the lifecycle state of this definition.
+  // INSTRUMENT_STATUS_UNSPECIFIED (0) is rejected - instruments must have a defined status.
+  InstrumentStatus status = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // validation_expression is a CEL expression to validate instrument amounts.
+  // Example: "amount > 0 && (attributes.batch_id != '' || instrument.dimension == 'CURRENCY')"
+  string validation_expression = 8 [(buf.validate.field).string.max_len = 2048];
+
+  // fungibility_key_expression is a CEL expression to generate the poolability key.
+  // Amounts with the same key can be pooled together.
+  // Example: "instrument_code + ':' + string(version)" for fully fungible instruments.
+  // Example: "instrument_code + ':' + attributes.batch_id" for batch-segregated inventory.
+  string fungibility_key_expression = 9 [(buf.validate.field).string.max_len = 2048];
+
+  // error_message_expression is a CEL expression to generate custom validation error messages.
+  // Example: "'Invalid amount: ' + string(amount) + ' for instrument ' + instrument_code"
+  string error_message_expression = 10 [(buf.validate.field).string.max_len = 2048];
+
+  // attribute_schema is a JSON Schema defining valid attributes for this instrument.
+  // Example: {"type":"object","properties":{"batch_id":{"type":"string"}}}
+  string attribute_schema = 11 [(buf.validate.field).string.max_len = 16384];
+
+  // display_name is the human-readable name for this instrument.
+  string display_name = 12 [(buf.validate.field).string.max_len = 128];
+
+  // description provides additional context about this instrument.
+  string description = 13 [(buf.validate.field).string.max_len = 1024];
+
+  // created_at is when this definition was created.
+  google.protobuf.Timestamp created_at = 14 [(buf.validate.field).required = true];
+
+  // activated_at is when this definition became active (null if never activated).
+  google.protobuf.Timestamp activated_at = 15;
+
+  // deprecated_at is when this definition was deprecated (null if not deprecated).
+  google.protobuf.Timestamp deprecated_at = 16;
+
+  // is_system indicates this instrument was seeded during tenant provisioning.
+  // System instruments are read-only (cannot be modified or deleted by tenants).
+  // Examples: USD, EUR, GBP - platform-wide instruments available to all tenants.
+  bool is_system = 17;
+
+  // successor_id is the UUID of the instrument that replaces this one when deprecated.
+  // This creates a forward lineage chain: when querying a deprecated instrument,
+  // clients can follow successor_id to find the current replacement.
+  // Only set when status is DEPRECATED. Empty string if no successor designated.
+  string successor_id = 18 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+// ========================================
+// Service Definition
+// ========================================
+
+// ReferenceDataService manages instrument definitions - the reference data
+// that describes how different asset types (currencies, energy, compute, etc.)
+// are validated and pooled.
+service ReferenceDataService {
+  // RegisterInstrument creates a new instrument definition in DRAFT status.
+  // Returns ALREADY_EXISTS if code+version exists.
+  // Returns INVALID_ARGUMENT if CEL expressions fail compilation.
+  rpc RegisterInstrument(RegisterInstrumentRequest) returns (RegisterInstrumentResponse);
+
+  // UpdateInstrument modifies a DRAFT instrument definition.
+  // Returns NOT_FOUND if instrument doesn't exist.
+  // Returns PERMISSION_DENIED if instrument is a system instrument.
+  // Returns FAILED_PRECONDITION if not in DRAFT status.
+  rpc UpdateInstrument(UpdateInstrumentRequest) returns (UpdateInstrumentResponse);
+
+  // RetrieveInstrument fetches a specific instrument by code and version.
+  // Returns NOT_FOUND if instrument doesn't exist.
+  rpc RetrieveInstrument(RetrieveInstrumentRequest) returns (RetrieveInstrumentResponse);
+
+  // ListInstruments returns instruments matching the filter criteria.
+  // Supports filtering by status and pagination.
+  rpc ListInstruments(ListInstrumentsRequest) returns (ListInstrumentsResponse);
+
+  // ActivateInstrument transitions an instrument from DRAFT to ACTIVE.
+  // Returns PERMISSION_DENIED if instrument is a system instrument.
+  // Returns FAILED_PRECONDITION if not in DRAFT status.
+  rpc ActivateInstrument(ActivateInstrumentRequest) returns (ActivateInstrumentResponse);
+
+  // DeprecateInstrument transitions an instrument from ACTIVE to DEPRECATED.
+  // Returns PERMISSION_DENIED if instrument is a system instrument.
+  // Returns FAILED_PRECONDITION if not in ACTIVE status.
+  rpc DeprecateInstrument(DeprecateInstrumentRequest) returns (DeprecateInstrumentResponse);
+
+  // EvaluateInstrument is a CEL playground endpoint for testing expressions.
+  // Compiles and evaluates CEL expressions without persisting anything.
+  // Returns compilation errors or evaluation results.
+  rpc EvaluateInstrument(EvaluateInstrumentRequest) returns (EvaluateInstrumentResponse);
+
+  // GetAttributeSchema returns the JSON Schema describing valid attributes
+  // for client discovery and form generation.
+  rpc GetAttributeSchema(GetAttributeSchemaRequest) returns (GetAttributeSchemaResponse);
+}
+
+// ========================================
+// Request/Response Messages
+// ========================================
+
+// RegisterInstrumentRequest contains the data to create a new instrument definition.
+message RegisterInstrumentRequest {
+  // code is the unique instrument code (e.g., "USD", "KWH").
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // dimension is the physical or conceptual dimension.
+  Dimension dimension = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // precision is the number of decimal places (0-18).
+  int32 precision = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 18
+  }];
+
+  // validation_expression is a CEL expression for validating amounts.
+  string validation_expression = 4 [(buf.validate.field).string.max_len = 2048];
+
+  // fungibility_key_expression is a CEL expression for generating bucket keys.
+  string fungibility_key_expression = 5 [(buf.validate.field).string.max_len = 2048];
+
+  // error_message_expression is a CEL expression for custom error messages.
+  string error_message_expression = 6 [(buf.validate.field).string.max_len = 2048];
+
+  // attribute_schema is a JSON Schema for validating attributes.
+  string attribute_schema = 7 [(buf.validate.field).string.max_len = 16384];
+
+  // display_name is a human-readable name.
+  string display_name = 8 [(buf.validate.field).string.max_len = 128];
+
+  // description provides additional context.
+  string description = 9 [(buf.validate.field).string.max_len = 1024];
+}
+
+// RegisterInstrumentResponse returns the newly created instrument definition.
+message RegisterInstrumentResponse {
+  // instrument is the created instrument in DRAFT status.
+  InstrumentDefinition instrument = 1;
+}
+
+// UpdateInstrumentRequest modifies an existing DRAFT instrument definition.
+message UpdateInstrumentRequest {
+  // code identifies which instrument to update.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // version identifies which version to update.
+  int32 version = 2 [(buf.validate.field).int32.gte = 1];
+
+  // validation_expression is a CEL expression for validating amounts.
+  string validation_expression = 3 [(buf.validate.field).string.max_len = 2048];
+
+  // fungibility_key_expression is a CEL expression for generating bucket keys.
+  string fungibility_key_expression = 4 [(buf.validate.field).string.max_len = 2048];
+
+  // error_message_expression is a CEL expression for custom error messages.
+  string error_message_expression = 5 [(buf.validate.field).string.max_len = 2048];
+
+  // attribute_schema is a JSON Schema for validating attributes.
+  string attribute_schema = 6 [(buf.validate.field).string.max_len = 16384];
+
+  // display_name is a human-readable name.
+  string display_name = 7 [(buf.validate.field).string.max_len = 128];
+
+  // description provides additional context.
+  string description = 8 [(buf.validate.field).string.max_len = 1024];
+}
+
+// UpdateInstrumentResponse returns the updated instrument definition.
+message UpdateInstrumentResponse {
+  // instrument is the updated instrument definition.
+  InstrumentDefinition instrument = 1;
+}
+
+// RetrieveInstrumentRequest identifies which instrument to retrieve.
+message RetrieveInstrumentRequest {
+  // code identifies the instrument.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // version specifies which version to retrieve.
+  // If 0, returns the latest ACTIVE version.
+  int32 version = 2 [(buf.validate.field).int32.gte = 0];
+}
+
+// RetrieveInstrumentResponse returns the requested instrument definition.
+message RetrieveInstrumentResponse {
+  // instrument is the requested instrument definition.
+  InstrumentDefinition instrument = 1;
+}
+
+// ListInstrumentsRequest specifies filtering and pagination for listing instruments.
+message ListInstrumentsRequest {
+  // status_filter returns only instruments with this status.
+  // If UNSPECIFIED, returns all instruments.
+  InstrumentStatus status_filter = 1;
+
+  // page_size limits the number of results (max 100).
+  int32 page_size = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // page_token for pagination (from previous response).
+  string page_token = 3;
+}
+
+// ListInstrumentsResponse returns a page of instrument definitions.
+message ListInstrumentsResponse {
+  // instruments is the list of matching instruments.
+  repeated InstrumentDefinition instruments = 1;
+
+  // next_page_token for pagination (empty if no more results).
+  string next_page_token = 2;
+}
+
+// ActivateInstrumentRequest transitions an instrument from DRAFT to ACTIVE.
+message ActivateInstrumentRequest {
+  // code identifies the instrument to activate.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // version identifies which version to activate.
+  int32 version = 2 [(buf.validate.field).int32.gte = 1];
+}
+
+// ActivateInstrumentResponse returns the activated instrument definition.
+message ActivateInstrumentResponse {
+  // instrument is the activated instrument now in ACTIVE status.
+  InstrumentDefinition instrument = 1;
+}
+
+// DeprecateInstrumentRequest transitions an instrument from ACTIVE to DEPRECATED.
+message DeprecateInstrumentRequest {
+  // code identifies the instrument to deprecate.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // version identifies which version to deprecate.
+  int32 version = 2 [(buf.validate.field).int32.gte = 1];
+
+  // successor_id optionally specifies the UUID of the replacement instrument.
+  // When provided, the deprecated instrument will point to this successor,
+  // creating a lineage chain for clients to follow to the current version.
+  // The successor must exist and be in ACTIVE status.
+  string successor_id = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+// DeprecateInstrumentResponse returns the deprecated instrument definition.
+message DeprecateInstrumentResponse {
+  // instrument is the deprecated instrument now in DEPRECATED status.
+  InstrumentDefinition instrument = 1;
+}
+
+// EvaluateInstrumentRequest is for the CEL playground - test expressions without saving.
+message EvaluateInstrumentRequest {
+  // validation_expression is a CEL expression to compile and evaluate.
+  string validation_expression = 1 [(buf.validate.field).string.max_len = 2048];
+
+  // fungibility_key_expression is a CEL expression to compile and evaluate.
+  string fungibility_key_expression = 2 [(buf.validate.field).string.max_len = 2048];
+
+  // error_message_expression is a CEL expression to compile and evaluate.
+  string error_message_expression = 3 [(buf.validate.field).string.max_len = 2048];
+
+  // test_attributes is a map of key-value pairs for CEL evaluation context.
+  map<string, string> test_attributes = 4;
+
+  // test_amount is the amount value for CEL evaluation context.
+  string test_amount = 5;
+
+  // test_valid_from is the validity start time for CEL evaluation context.
+  google.protobuf.Timestamp test_valid_from = 6;
+
+  // test_valid_to is the validity end time for CEL evaluation context.
+  google.protobuf.Timestamp test_valid_to = 7;
+
+  // test_source is the source identifier for CEL evaluation context.
+  string test_source = 8;
+}
+
+// EvaluateInstrumentResponse returns CEL compilation and evaluation results.
+message EvaluateInstrumentResponse {
+  // compile_errors contains any CEL compilation errors.
+  // Empty if all expressions compiled successfully.
+  repeated string compile_errors = 1;
+
+  // validation_result is the boolean result of the validation expression.
+  // Only populated if validation_expression compiled successfully.
+  bool validation_result = 2;
+
+  // fungibility_key is the generated bucket key.
+  // Only populated if fungibility_key_expression compiled successfully.
+  string fungibility_key = 3;
+
+  // error_message is the generated custom error message.
+  // Only populated if error_message_expression compiled successfully.
+  string error_message = 4;
+}
+
+// GetAttributeSchemaRequest identifies which attribute schema to retrieve.
+message GetAttributeSchemaRequest {
+  // code optionally retrieves schema for a specific instrument.
+  // If empty, returns the default schema for all standard attributes.
+  string code = 1 [(buf.validate.field).string.max_len = 32];
+
+  // version specifies which version's schema to retrieve.
+  // If 0 and code is provided, returns latest ACTIVE version's schema.
+  int32 version = 2 [(buf.validate.field).int32.gte = 0];
+}
+
+// GetAttributeSchemaResponse returns the JSON Schema for valid attributes.
+message GetAttributeSchemaResponse {
+  // json_schema is the JSON Schema describing valid attributes.
+  // Follows JSON Schema Draft 2020-12.
+  string json_schema = 1;
+
+  // instrument_code is set if a specific instrument's schema was requested.
+  string instrument_code = 2;
+
+  // instrument_version is set if a specific instrument's schema was requested.
+  int32 instrument_version = 3;
+}

@@ -57,7 +57,11 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		financial_booking_log_id UUID NOT NULL,
 		posting_direction VARCHAR(20) NOT NULL,
 		amount_cents BIGINT NOT NULL,
-		currency VARCHAR(3) NOT NULL,
+		currency VARCHAR(32) NOT NULL,
+		dimension_type VARCHAR(20) DEFAULT 'CURRENCY',
+		instrument_version INTEGER DEFAULT 1,
+		instrument_precision INTEGER DEFAULT 2,
+		attributes JSONB DEFAULT '{}',
 		account_id VARCHAR(255) NOT NULL,
 		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
 		posting_result TEXT,
@@ -135,8 +139,8 @@ func TestProcessDeposit(t *testing.T) {
 		t.Errorf("Failed to find debit posting: %v", err)
 	}
 
-	if debitEntity.AmountCents != 10000 {
-		t.Errorf("Expected debit amount 10000, got %d", debitEntity.AmountCents)
+	if debitEntity.AmountMinorUnits != 10000 {
+		t.Errorf("Expected debit amount 10000, got %d", debitEntity.AmountMinorUnits)
 	}
 
 	if debitEntity.Status != "POSTED" {
@@ -150,8 +154,8 @@ func TestProcessDeposit(t *testing.T) {
 		t.Errorf("Failed to find credit posting: %v", err)
 	}
 
-	if creditEntity.AmountCents != 10000 {
-		t.Errorf("Expected credit amount 10000, got %d", creditEntity.AmountCents)
+	if creditEntity.AmountMinorUnits != 10000 {
+		t.Errorf("Expected credit amount 10000, got %d", creditEntity.AmountMinorUnits)
 	}
 
 	// Verify same booking log ID
@@ -273,7 +277,8 @@ func TestValidateDoubleEntry_Unbalanced(t *testing.T) {
 	bookingLogID := uuid.New()
 
 	// Create unbalanced entries manually
-	debitMoney, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	debitMoney := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 	debit, _ := domain.NewLedgerPosting(
 		bookingLogID,
 		domain.PostingDirectionDebit,
@@ -285,7 +290,7 @@ func TestValidateDoubleEntry_Unbalanced(t *testing.T) {
 	_ = debit.Post("test")
 	_ = repo.SavePosting(ctx, debit)
 
-	creditMoney, _ := domain.NewMoney(decimal.NewFromInt(50), domain.CurrencyGBP) // Different amount
+	creditMoney := domain.NewMoney(decimal.NewFromInt(50), gbpInstrument) // Different amount
 	credit, _ := domain.NewLedgerPosting(
 		bookingLogID,
 		domain.PostingDirectionCredit,

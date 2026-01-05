@@ -12,7 +12,7 @@ instructions: |
   Root layout: api/ for proto/OpenAPI, docs/ for all documentation, services/ for microservices, shared/ for libraries.
   Service structure: cmd/, domain/, adapters/, service/, observability/.
   Place persistence code in adapters/persistence/, messaging in adapters/messaging/.
-  Use observability/ for metrics and health checks. Use clients/ for inter-service clients.
+  Use observability/ for metrics and health checks. Use client/ for service-owned gRPC clients.
   All documentation belongs in docs/ - not scattered in service directories.
 ---
 
@@ -34,7 +34,7 @@ Following the codebase reorganization (#215, #216) that moved from a monolithic 
 | `domain/` | ✓ | ✓ | ✓ | ✓ |
 | `adapters/` | ✓ | ✓ | ✓ | ✓ |
 | `service/` | ✓ | ✓ | ✓ | ✓ |
-| `clients/` | ✓ | ✓ (.gitkeep) | ✗ | ✗ |
+| `client/` | ✓ | ✓ | ✓ | ✗ |
 | `observability/` | ✓ | ✗ (uses `app/`) | ✗ | ✓ |
 | `app/` | ✗ | ✓ | ✗ | ✗ |
 | `interceptors/` | ✗ | ✓ | ✗ | ✗ |
@@ -182,9 +182,8 @@ services/{service-name}/
 │   ├── metrics.go         # Prometheus metrics
 │   └── health.go          # Health check implementations
 │
-├── clients/                # OPTIONAL: Inter-service gRPC clients
-│   ├── {service}_client.go
-│   └── circuitbreaker.go
+├── client/                 # OPTIONAL: Service-owned gRPC client
+│   └── client.go           # Client for other services to import
 │
 ├── app/                    # OPTIONAL: Application bootstrap (complex services)
 │   ├── config.go          # Configuration loading
@@ -220,7 +219,7 @@ services/{service-name}/
 
 | Directory | When to Add | Example Use Case |
 |-----------|-------------|------------------|
-| `clients/` | Service calls other services | current-account calling financial-accounting |
+| `client/` | Service exports client for others | party exporting client for current-account |
 | `app/` | Complex initialization logic | Services needing DI containers, complex config |
 | `adapters/messaging/` | Kafka integration | Event publishing/consuming |
 | `adapters/gateway/` | External API integration | ISO 20022 gateway adapters |

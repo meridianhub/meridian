@@ -1,0 +1,10 @@
+{
+  "allowlist": [
+    "dependabot[bot]",
+    "dependabot-preview[bot]",
+    "renovate[bot]",
+    "github-actions[bot]",
+    "mergify[bot]",
+    "allcontributors[bot]"
+  ]
+}

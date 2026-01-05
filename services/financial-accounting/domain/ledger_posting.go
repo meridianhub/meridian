@@ -22,6 +22,10 @@ var (
 
 // LedgerPosting represents a single posting in double-entry bookkeeping
 // Pure domain model with business logic, no persistence concerns
+//
+// The Amount field uses the generic Qty[Monetary] type (aliased as Money) from
+// the Universal Asset System, enabling type-safe monetary operations with
+// compile-time dimension checking.
 type LedgerPosting struct {
 	ID                    uuid.UUID
 	FinancialBookingLogID uuid.UUID
@@ -33,6 +37,11 @@ type LedgerPosting struct {
 	Status                TransactionStatus
 	CorrelationID         string
 	CreatedAt             time.Time
+
+	// Attributes stores contextual metadata for the posting.
+	// This can include information like source system, transaction type,
+	// or other domain-specific context needed for audit or processing.
+	Attributes map[string]string
 }
 
 // NewLedgerPosting creates a new ledger posting with validation.
@@ -74,6 +83,7 @@ func NewLedgerPosting(
 		Status:                TransactionStatusPending,
 		CorrelationID:         correlationID,
 		CreatedAt:             time.Now(),
+		Attributes:            make(map[string]string),
 	}, nil
 }
 

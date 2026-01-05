@@ -62,12 +62,12 @@ func TestNewMoney(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			if !money.Amount().Equal(tt.amount) {
-				t.Errorf("Expected amount %v, got %v", tt.amount, money.Amount())
+			if !money.Amount.Equal(tt.amount) {
+				t.Errorf("Expected amount %v, got %v", tt.amount, money.Amount)
 			}
 
-			if money.Currency() != tt.currency {
-				t.Errorf("Expected currency %v, got %v", tt.currency, money.Currency())
+			if MoneyCurrency(money) != tt.currency {
+				t.Errorf("Expected currency %v, got %v", tt.currency, MoneyCurrency(money))
 			}
 		})
 	}
@@ -115,8 +115,8 @@ func TestMoney_Add(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			if !result.Amount().Equal(tt.expectedAmount) {
-				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, result.Amount())
+			if !result.Amount.Equal(tt.expectedAmount) {
+				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, result.Amount)
 			}
 		})
 	}
@@ -164,8 +164,8 @@ func TestMoney_Subtract(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			if !result.Amount().Equal(tt.expectedAmount) {
-				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, result.Amount())
+			if !result.Amount.Equal(tt.expectedAmount) {
+				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, result.Amount)
 			}
 		})
 	}
@@ -285,7 +285,8 @@ func TestMoney_String(t *testing.T) {
 	}{
 		{"GBP with decimals", decimal.NewFromFloat(123.45), CurrencyGBP, "123.45 GBP"},
 		{"USD whole number", decimal.NewFromInt(100), CurrencyUSD, "100.00 USD"},
-		{"JPY zero decimals", decimal.NewFromInt(10000), CurrencyJPY, "10000.00 JPY"},
+		// JPY has 0 decimal places, so no decimals are shown (correct behavior)
+		{"JPY zero decimals", decimal.NewFromInt(10000), CurrencyJPY, "10000 JPY"},
 		{"negative amount", decimal.NewFromFloat(-50.99), CurrencyEUR, "-50.99 EUR"},
 		{"zero amount", decimal.Zero, CurrencyGBP, "0.00 GBP"},
 	}
@@ -362,12 +363,12 @@ func TestMoney_ToMinorUnits(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewMoney() error = %v", err)
 			}
-			got, err := money.ToMinorUnits()
+			got, err := MoneyToMinorUnits(money)
 			if err != nil {
-				t.Fatalf("ToMinorUnits() error = %v", err)
+				t.Fatalf("MoneyToMinorUnits() error = %v", err)
 			}
 			if got != tt.want {
-				t.Errorf("Money.ToMinorUnits() = %v, want %v", got, tt.want)
+				t.Errorf("MoneyToMinorUnits() = %v, want %v", got, tt.want)
 			}
 		})
 	}

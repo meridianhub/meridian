@@ -779,13 +779,14 @@ go test ./services/{service}/... -v -count=1
 
 ### Inter-Service Clients (Optional)
 
-**Location**: `services/{service}/clients/`
+**Location**: `services/{service}/client/`
 
 If your service needs to call other services:
 
-- Implement gRPC clients with circuit breakers
+- Create service-owned gRPC client using `shared/pkg/clients` for resilience
 - Reference: `docs/guides/circuit-breaker-usage.md`
-- Reference: `services/current-account/clients/`
+- Reference: `services/position-keeping/client/client.go` (canonical example)
+- Reference: `shared/pkg/clients/doc.go` for migration guidance
 
 ### Event Publishing (Optional)
 

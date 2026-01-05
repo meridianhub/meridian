@@ -1,6 +1,4 @@
 // Package service implements gRPC services for the payment order domain
-//
-//nolint:staticcheck // Uses AmountCents() for payment processing (deprecated for backward compatibility)
 package service
 
 import (
@@ -443,13 +441,14 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	}
 
 	// Convert domain currency to proto currency
-	protoCurrency := mappers.DomainCurrencyToProto(po.Amount.Currency())
+	currencyCode := domain.CurrencyCode(po.Amount)
+	protoCurrency := mappers.CurrencyCodeToProto(currencyCode)
 	if protoCurrency == commonpb.Currency_CURRENCY_UNSPECIFIED {
 		o.logger.Warn("unsupported currency for ledger posting - payment will be marked as failed",
-			"currency", string(po.Amount.Currency()),
+			"currency", currencyCode,
 			"payment_order_id", po.ID.String(),
 			"supported_currencies", "GBP, USD, EUR")
-		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, po.Amount.Currency())
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, currencyCode)
 	}
 
 	// Step 1: Create a BookingLog in PENDING status
@@ -480,10 +479,11 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	// google.type.Money uses Units (whole currency units) + Nanos (10^-9 fraction).
 	// Example: 199 cents = 1 unit + 990,000,000 nanos = 1.99 currency units.
 	// Formula: Units = cents / 100, Nanos = (cents % 100) * 10,000,000
+	amountCents := domain.ToMinorUnits(po.Amount)
 	postingAmount := &money.Money{
-		CurrencyCode: string(po.Amount.Currency()),
-		Units:        po.Amount.AmountCents() / 100,
-		Nanos:        int32((po.Amount.AmountCents() % 100) * 10000000),
+		CurrencyCode: currencyCode,
+		Units:        amountCents / 100,
+		Nanos:        int32((amountCents % 100) * 10000000),
 	}
 	valueDate := timestamppb.Now()
 
@@ -514,7 +514,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	o.logger.Debug("created debit posting",
 		"booking_log_id", bookingLogID,
 		"account_id", po.DebtorAccountID,
-		"amount_cents", po.Amount.AmountCents(),
+		"amount_cents", amountCents,
 		"payment_order_id", po.ID.String())
 
 	// Step 3: Create CREDIT posting (gateway contra-account - liability to processor)
@@ -546,7 +546,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	o.logger.Debug("created credit posting",
 		"booking_log_id", bookingLogID,
 		"account_id", contraAccountID,
-		"amount_cents", po.Amount.AmountCents(),
+		"amount_cents", amountCents,
 		"payment_order_id", po.ID.String())
 
 	// Step 4: Update BookingLog status to POSTED (balanced entries are now complete)
@@ -575,8 +575,8 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 		"payment_order_id", po.ID.String(),
 		"debtor_account", po.DebtorAccountID,
 		"contra_account", contraAccountID,
-		"amount_cents", po.Amount.AmountCents(),
-		"currency", string(po.Amount.Currency()))
+		"amount_cents", amountCents,
+		"currency", currencyCode)
 
 	return bookingLogID, nil
 }

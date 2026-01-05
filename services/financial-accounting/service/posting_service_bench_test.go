@@ -190,13 +190,11 @@ func BenchmarkValidateDoubleEntry_MultiplePostings(b *testing.B) {
 	ctx := context.Background()
 
 	bookingLogID := uuid.New()
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
 
 	// Create multiple balanced posting pairs
 	for i := 0; i < 10; i++ {
-		money, err := domain.NewMoney(decimal.NewFromInt(int64(100+i)), domain.CurrencyGBP)
-		if err != nil {
-			b.Fatal(err)
-		}
+		money := domain.NewMoney(decimal.NewFromInt(int64(100+i)), gbpInstrument)
 
 		debit, err := domain.NewLedgerPosting(
 			bookingLogID,
@@ -287,13 +285,11 @@ func BenchmarkGetPostingsByBookingLog_ManyPostings(b *testing.B) {
 			ctx := context.Background()
 
 			bookingLogID := uuid.New()
+			gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
 
 			// Create many postings for the same booking log
 			for i := 0; i < postingCount; i++ {
-				money, err := domain.NewMoney(decimal.NewFromInt(int64(100)), domain.CurrencyGBP)
-				if err != nil {
-					b.Fatal(err)
-				}
+				money := domain.NewMoney(decimal.NewFromInt(int64(100)), gbpInstrument)
 				direction := domain.PostingDirectionDebit
 				if i%2 == 1 {
 					direction = domain.PostingDirectionCredit

@@ -611,12 +611,12 @@ func (r *PostgresRepository) insertTransactionLogEntries(ctx context.Context, tx
 
 	for _, entry := range entries {
 		// Convert decimal amount to cents (int64)
-		amountCents := decimalToCents(entry.Amount.Amount())
+		amountCents := decimalToCents(entry.Amount.Amount)
 
 		batch.Queue(query,
 			entry.CreatedAt, userID, entry.CreatedAt, userID,
 			entry.EntryID, financialPosLogID, entry.TransactionID, entry.AccountID,
-			amountCents, entry.Amount.Currency().String(), entry.Direction.String(),
+			amountCents, entry.Amount.Instrument.Code, entry.Direction.String(),
 			entry.Timestamp, nullStringValue(entry.Description), nullStringValue(entry.Reference), entry.Source.String(),
 		)
 	}
