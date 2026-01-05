@@ -9,10 +9,16 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// Helper function to create Money for tests using the new Qty[Monetary] type
+func testMoney(amount int64, currency Currency) Money {
+	inst := MustCurrencyToInstrument(currency)
+	return NewMoney(decimal.NewFromInt(amount), inst)
+}
+
 func TestNewLedgerPosting(t *testing.T) {
-	validMoney, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
-	zeroMoney, _ := NewMoney(decimal.Zero, CurrencyGBP)
-	negativeMoney, _ := NewMoney(decimal.NewFromInt(-100), CurrencyGBP)
+	validMoney := testMoney(100, CurrencyGBP)
+	zeroMoney := testMoney(0, CurrencyGBP)
+	negativeMoney := testMoney(-100, CurrencyGBP)
 
 	tests := []struct {
 		name          string
@@ -118,7 +124,7 @@ func TestNewLedgerPosting(t *testing.T) {
 }
 
 func TestLedgerPosting_Post(t *testing.T) {
-	money, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	money := testMoney(100, CurrencyGBP)
 	posting, _ := NewLedgerPosting(
 		uuid.New(),
 		PostingDirectionDebit,
@@ -149,7 +155,7 @@ func TestLedgerPosting_Post(t *testing.T) {
 }
 
 func TestLedgerPosting_Fail(t *testing.T) {
-	money, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	money := testMoney(100, CurrencyGBP)
 	posting, _ := NewLedgerPosting(
 		uuid.New(),
 		PostingDirectionDebit,
@@ -169,7 +175,7 @@ func TestLedgerPosting_Fail(t *testing.T) {
 	}
 
 	// Test cannot fail already posted
-	money2, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	money2 := testMoney(100, CurrencyGBP)
 	posting2, _ := NewLedgerPosting(
 		uuid.New(),
 		PostingDirectionCredit,
@@ -187,7 +193,7 @@ func TestLedgerPosting_Fail(t *testing.T) {
 }
 
 func TestLedgerPosting_IsPosted(t *testing.T) {
-	money, _ := NewMoney(decimal.NewFromInt(100), CurrencyGBP)
+	money := testMoney(100, CurrencyGBP)
 	posting, _ := NewLedgerPosting(
 		uuid.New(),
 		PostingDirectionDebit,

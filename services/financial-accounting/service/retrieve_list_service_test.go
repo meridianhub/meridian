@@ -37,7 +37,7 @@ func TestRetrieveLedgerPosting_DefensiveTests(t *testing.T) {
 					ID:                    validPostingID, // Use the pre-generated ID
 					FinancialBookingLogID: bookingLogID,
 					PostingDirection:      "DEBIT",
-					AmountCents:           10000, // $100.00
+					AmountMinorUnits:      10000, // $100.00
 					Currency:              "GBP",
 					AccountID:             "ACC-123",
 					ValueDate:             time.Now().UTC(),
@@ -162,7 +162,7 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 					ID:                    postingID,
 					FinancialBookingLogID: uuid.New(),
 					PostingDirection:      "DEBIT",
-					AmountCents:           0, // Zero amount
+					AmountMinorUnits:      0, // Zero amount
 					Currency:              "GBP",
 					AccountID:             "ACC-123",
 					ValueDate:             time.Now().UTC(),
@@ -187,7 +187,7 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 					ID:                    postingID,
 					FinancialBookingLogID: uuid.New(),
 					PostingDirection:      "CREDIT",
-					AmountCents:           9223372036854775807, // Max int64
+					AmountMinorUnits:      9223372036854775807, // Max int64
 					Currency:              "USD",
 					AccountID:             "ACC-999",
 					ValueDate:             time.Now().UTC(),
@@ -212,7 +212,7 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 					ID:                    postingID,
 					FinancialBookingLogID: uuid.New(),
 					PostingDirection:      "DEBIT",
-					AmountCents:           5000,
+					AmountMinorUnits:      5000,
 					Currency:              "EUR",
 					AccountID:             "ACC-456",
 					ValueDate:             time.Now().UTC(),
@@ -236,7 +236,7 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 					ID:                    postingID,
 					FinancialBookingLogID: uuid.New(),
 					PostingDirection:      "CREDIT",
-					AmountCents:           -15050, // -$150.50
+					AmountMinorUnits:      -15050, // -$150.50
 					Currency:              "USD",
 					AccountID:             "ACC-789",
 					ValueDate:             time.Now().UTC(),
