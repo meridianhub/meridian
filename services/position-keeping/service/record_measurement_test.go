@@ -497,7 +497,8 @@ func TestDomain_Measurement_NewMeasurement_Validation(t *testing.T) {
 				tt.value,
 				tt.unit,
 				tt.timestamp,
-				nil,
+				nil, // metadata
+				"",  // bucket_id (empty for these tests)
 				"test-user",
 			)
 
@@ -1447,4 +1448,272 @@ func TestRecordMeasurement_BucketKey_ErrorReturnsInvalidArgument(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 	mockCache.AssertExpectations(t)
 	mockMeasurementRepo.AssertNotCalled(t, "Create")
+}
+
+// =============================================================================
+// Bucket ID Domain Handoff Tests (Subtask 20.3)
+// =============================================================================
+
+// TestRecordMeasurement_BucketID_PassedToDomain verifies that the bucket_id from
+// CEL validation is correctly passed to the domain.Measurement struct.
+func TestRecordMeasurement_BucketID_PassedToDomain(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Create a bucket key program that returns a fixed key
+	// This simulates a real bucket_key([...]) expression
+	bucketKeyProgram := createTestBucketKeyProgram(t, `"bucket-" + attributes["region"]`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: bucketKeyProgram,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+
+	// Capture the measurement passed to Create to verify bucket_id
+	var capturedMeasurement *domain.Measurement
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).
+		Run(func(args mock.Arguments) {
+			capturedMeasurement = args.Get(1).(*domain.Measurement)
+		}).
+		Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"region": "eu-west-1",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+
+	// Verify bucket_id was passed to domain
+	require.NotNil(t, capturedMeasurement)
+	assert.Equal(t, "bucket-eu-west-1", capturedMeasurement.BucketID)
+
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_BucketID_EmptyWhenNoBucketKeyProgram verifies that
+// bucket_id is empty string when no bucket key expression is defined.
+func TestRecordMeasurement_BucketID_EmptyWhenNoBucketKeyProgram(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Instrument with NO bucket key program
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: nil,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+
+	// Capture the measurement passed to Create
+	var capturedMeasurement *domain.Measurement
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).
+		Run(func(args mock.Arguments) {
+			capturedMeasurement = args.Get(1).(*domain.Measurement)
+		}).
+		Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"region": "eu-west-1",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify bucket_id is empty when no program defined
+	require.NotNil(t, capturedMeasurement)
+	assert.Empty(t, capturedMeasurement.BucketID)
+
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_BucketID_EmptyWhenNoCacheConfigured verifies that
+// bucket_id is empty string when instrument cache is not configured.
+func TestRecordMeasurement_BucketID_EmptyWhenNoCacheConfigured(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	// Create service WITHOUT instrument cache
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		// No WithInstrumentCache - cache is nil
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+
+	// Capture the measurement passed to Create
+	var capturedMeasurement *domain.Measurement
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).
+		Run(func(args mock.Arguments) {
+			capturedMeasurement = args.Get(1).(*domain.Measurement)
+		}).
+		Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"region": "eu-west-1",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verify bucket_id is empty when no cache configured
+	require.NotNil(t, capturedMeasurement)
+	assert.Empty(t, capturedMeasurement.BucketID)
+
+	mockRepo.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestDomain_Measurement_BucketID_StoredInStruct verifies that BucketID is
+// correctly stored in the Measurement struct.
+func TestDomain_Measurement_BucketID_StoredInStruct(t *testing.T) {
+	positionLogID := uuid.New()
+	now := time.Now().UTC()
+
+	measurement, err := domain.NewMeasurement(
+		positionLogID,
+		domain.MeasurementTypeKWh,
+		decimal.NewFromFloat(100.5),
+		"kWh",
+		now.Add(-1*time.Hour),
+		map[string]string{"region": "eu-west-1"},
+		"test-bucket-key-12345",
+		"test-user",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, measurement)
+	assert.Equal(t, "test-bucket-key-12345", measurement.BucketID)
+}
+
+// TestDomain_Measurement_BucketID_CanBeEmpty verifies that BucketID can be empty.
+func TestDomain_Measurement_BucketID_CanBeEmpty(t *testing.T) {
+	positionLogID := uuid.New()
+	now := time.Now().UTC()
+
+	measurement, err := domain.NewMeasurement(
+		positionLogID,
+		domain.MeasurementTypeKWh,
+		decimal.NewFromFloat(100.5),
+		"kWh",
+		now.Add(-1*time.Hour),
+		nil,
+		"", // Empty bucket_id is valid
+		"test-user",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, measurement)
+	assert.Empty(t, measurement.BucketID)
 }

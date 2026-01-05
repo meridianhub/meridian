@@ -107,13 +107,11 @@ func (s *PositionKeepingService) RecordMeasurement(
 		return nil, err
 	}
 
-	// The bucket ID from validation can be used in subtask 20.3 to pass to the domain
-	_ = validationResult // TODO: subtask 20.3 will use validationResult.BucketID
-
 	// Get user from context for audit
 	userID := audit.GetUserFromContext(ctx)
 
-	// Create measurement domain object
+	// Create measurement domain object with bucket_id from CEL validation
+	// The bucket_id enables fungibility-based position aggregation
 	measurement, err := domain.NewMeasurement(
 		positionLog.LogID,
 		measurementType,
@@ -121,6 +119,7 @@ func (s *PositionKeepingService) RecordMeasurement(
 		req.GetUnit(),
 		measurementTimestamp,
 		metadata,
+		validationResult.BucketID,
 		userID,
 	)
 	if err != nil {
