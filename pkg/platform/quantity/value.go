@@ -73,4 +73,9 @@ type Value interface {
 	//       total, err := asset.Add(otherAsset)
 	//   }
 	AsAsset() (Asset, bool)
+
+	// String returns a human-readable representation of the quantity.
+	// Format: "<amount> <instrument-code>" (e.g., "100.00 USD", "500.1234 KWH").
+	// Useful for debugging and logging mixed collections.
+	String() string
 }

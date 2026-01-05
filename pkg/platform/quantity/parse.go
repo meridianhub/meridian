@@ -63,16 +63,14 @@ func ParseQuantity(amount decimal.Decimal, inst Instrument) (Value, error) {
 	switch inst.Dimension {
 	case DimensionCurrency:
 		return New[Monetary](amount, inst), nil
-	case "ENERGY", "MASS", "VOLUME", "TIME", "COMPUTE", "CARBON", "DATA", "COUNT":
-		return New[Commodity](amount, inst), nil
+	case "":
+		return nil, ErrUnknownDimension
 	default:
-		// This case handles empty or invalid dimensions.
-		// For validated instruments, this should never occur.
-		if inst.Dimension == "" {
+		// Use ValidDimensions map to avoid duplicating dimension list.
+		// For properly validated instruments, this check should always pass.
+		if !ValidDimensions[inst.Dimension] {
 			return nil, ErrUnknownDimension
 		}
-		// If it's a valid dimension we don't recognize (future-proofing),
-		// treat it as a commodity.
 		return New[Commodity](amount, inst), nil
 	}
 }

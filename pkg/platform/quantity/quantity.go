@@ -336,7 +336,7 @@ func (q Qty[D]) GetInstrument() Instrument {
 
 // AsMoney attempts to convert this quantity to a Money (Qty[Monetary]) type.
 // Returns (value, true) if this is a monetary quantity (instrument.Dimension == "CURRENCY"),
-// or (zero, false) if this is a commodity quantity.
+// or (zero, false) if this is a commodity quantity or if dimension is empty/invalid.
 // Implements Value.AsMoney.
 func (q Qty[D]) AsMoney() (Money, bool) {
 	if q.Instrument.Dimension == DimensionCurrency {
