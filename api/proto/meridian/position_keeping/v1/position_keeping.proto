@@ -537,4 +537,104 @@ service PositionKeepingService {
       }
     };
   }
+
+  // UpdatePosition is UNIMPLEMENTED - positions use append-only semantics.
+  // Position updates are forbidden to ensure O(1) write performance and audit trail integrity.
+  // To modify a position, create a new position record with the adjustment amount.
+  // Returns: UNIMPLEMENTED status code.
+  rpc UpdatePosition(UpdatePositionRequest) returns (UpdatePositionResponse) {
+    option (google.api.http) = {
+      put: "/v1/positions/{position_id}"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      deprecated: true
+      responses: {
+        key: "501"
+        value: {
+          description: "Position updates are not implemented - append-only mode enforced"
+        }
+      }
+    };
+  }
+
+  // MergePositions is UNIMPLEMENTED - positions use append-only semantics.
+  // Position merging is forbidden at write time to ensure O(1) write performance.
+  // Position consolidation is deferred to read-time aggregation or background compaction.
+  // Returns: UNIMPLEMENTED status code.
+  rpc MergePositions(MergePositionsRequest) returns (MergePositionsResponse) {
+    option (google.api.http) = {
+      post: "/v1/positions/merge"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      deprecated: true
+      responses: {
+        key: "501"
+        value: {
+          description: "Position merging is not implemented - append-only mode enforced"
+        }
+      }
+    };
+  }
+}
+
+// UpdatePositionRequest is reserved for future use.
+// Currently blocked - positions use append-only write semantics.
+message UpdatePositionRequest {
+  // position_id is the identifier of the position to update.
+  string position_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // new_amount is the updated position amount.
+  string new_amount = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+    pattern: "^-?\\d+(\\.\\d+)?$"
+  }];
+}
+
+// UpdatePositionResponse is reserved for future use.
+// Currently blocked - positions use append-only write semantics.
+message UpdatePositionResponse {
+  // This response is never returned - the RPC always returns UNIMPLEMENTED.
+}
+
+// MergePositionsRequest is reserved for future use.
+// Currently blocked - positions use append-only write semantics.
+message MergePositionsRequest {
+  // account_id is the account whose positions should be merged.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+
+  // instrument_code is the instrument to merge positions for.
+  string instrument_code = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 32
+    }
+  ];
+
+  // bucket_key is the bucket key to merge positions for.
+  string bucket_key = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+// MergePositionsResponse is reserved for future use.
+// Currently blocked - positions use append-only write semantics.
+message MergePositionsResponse {
+  // This response is never returned - the RPC always returns UNIMPLEMENTED.
 }
