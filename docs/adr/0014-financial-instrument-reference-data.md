@@ -535,6 +535,214 @@ VALUES
 **Note**: Fiat currencies use `'true'` for validation (no attributes required) and
 `'a == b'` for fungibility (all positions of same currency are fungible).
 
+### Multi-Asset Instrument Examples
+
+The following examples demonstrate CEL expressions for real-world commodity instruments.
+See [ADR-0013](0013-generic-asset-quantity-types.md) for corresponding Go usage examples.
+
+#### Energy Instrument (KWH)
+
+Energy positions require time-of-use period for tariff calculation:
+
+```sql
+-- Energy: Kilowatt Hour with time-of-use pricing
+INSERT INTO instrument_definitions
+    (tenant_id, code, version, dimension, precision,
+     validation_expression, fungibility_expression, display_name, description)
+VALUES
+    ('tenant-uuid-here', 'KWH', 1, 'Commodity', 4,
+     -- Validation: tou_period must be 0-47 (half-hourly slots), tariff_zone required
+     'has(attrs.tou_period) && int(attrs.tou_period) >= 0 && int(attrs.tou_period) <= 47 && has(attrs.tariff_zone)',
+     -- Fungibility: same time period AND same zone can merge
+     'a.tou_period == b.tou_period && a.tariff_zone == b.tariff_zone',
+     'Kilowatt Hour',
+     'Energy consumption unit for time-of-use metering and billing');
+```
+
+**CEL validation logic**:
+- `has(attrs.tou_period)` - Time-of-use period is required
+- `int(attrs.tou_period) >= 0 && int(attrs.tou_period) <= 47` - Valid half-hourly slot (48 per day)
+- `has(attrs.tariff_zone)` - Tariff zone is required for pricing
+
+**Fungibility rule**: Positions can only merge if they have the same `tou_period` AND `tariff_zone`.
+This ensures accurate tariff calculation - peak and off-peak energy cannot be combined.
+
+#### Carbon Credit Instrument (VCU)
+
+Voluntary carbon units require vintage tracking for compliance:
+
+```sql
+-- Carbon: Voluntary Carbon Unit with vintage and registry tracking
+INSERT INTO instrument_definitions
+    (tenant_id, code, version, dimension, precision,
+     validation_expression, fungibility_expression, display_name, description)
+VALUES
+    ('tenant-uuid-here', 'VCU', 1, 'Commodity', 0,
+     -- Validation: vintage year must be between 2000 and current year
+     'has(attrs.vintage) && int(attrs.vintage) >= 2000 && int(attrs.vintage) <= timestamp(now()).getFullYear() && has(attrs.project_id) && has(attrs.registry) && attrs.registry in ["VERRA", "GOLD_STANDARD", "ACR", "CAR"]',
+     -- Fungibility: same vintage + project + registry can merge
+     'a.vintage == b.vintage && a.project_id == b.project_id && a.registry == b.registry',
+     'Voluntary Carbon Unit',
+     'Carbon credit representing 1 tonne CO2 equivalent offset');
+```
+
+**CEL validation logic**:
+- `int(attrs.vintage) >= 2000 && int(attrs.vintage) <= timestamp(now()).getFullYear()` - Vintage cannot be in the future
+- `attrs.registry in ["VERRA", "GOLD_STANDARD", "ACR", "CAR"]` - Registry must be recognized
+
+**Fungibility rule**: Credits from the same project, registry, and vintage can merge.
+Different registries require separate positions for regulatory compliance.
+
+#### Compute Credit Instrument (GPU-HOUR)
+
+Cloud compute resources tracked by region and instance type:
+
+```sql
+-- Compute: GPU Hour for cloud billing
+INSERT INTO instrument_definitions
+    (tenant_id, code, version, dimension, precision,
+     validation_expression, fungibility_expression, display_name, description)
+VALUES
+    ('tenant-uuid-here', 'GPU-HOUR', 1, 'Commodity', 4,
+     -- Validation: region and instance_type are required
+     'has(attrs.region) && has(attrs.instance_type) && size(attrs.region) > 0 && size(attrs.instance_type) > 0',
+     -- Fungibility: same region AND instance type can merge
+     'a.region == b.region && a.instance_type == b.instance_type',
+     'GPU Compute Hour',
+     'Compute resource unit for GPU-accelerated workloads');
+```
+
+**CEL validation logic**:
+- `has(attrs.region) && size(attrs.region) > 0` - Non-empty region required
+- `has(attrs.instance_type) && size(attrs.instance_type) > 0` - Non-empty instance type required
+
+**Fungibility rule**: Usage from same region and instance type can merge.
+Different regions have different pricing, so they must be tracked separately.
+
+#### Custom Tenant Instrument: Rice Voucher
+
+Complete example of a tenant creating a custom instrument for food distribution:
+
+```go
+package ngo
+
+import (
+    "context"
+
+    "github.com/google/uuid"
+    "meridian/services/reference-data/domain"
+)
+
+// RegisterRiceVoucher creates a custom instrument for an NGO food distribution program.
+// Vouchers are redeemable for 1kg of rice at distribution centers.
+func RegisterRiceVoucher(
+    ctx context.Context,
+    referenceData InstrumentReferenceDataService,
+    ngoTenantID uuid.UUID,
+) error {
+    def := domain.InstrumentDefinition{
+        TenantID:  ngoTenantID,
+        Code:      "RICE-VOUCHER",
+        Version:   1,
+        Dimension: "Commodity",
+        Precision: 0, // Whole vouchers only
+
+        // Validation: expiry must be in the future, quality grade must be valid
+        ValidationExpression: `has(attrs.expiry_date) &&
+            timestamp(attrs.expiry_date) > now() &&
+            has(attrs.quality_grade) &&
+            attrs.quality_grade in ["A", "B", "C"]`,
+
+        // Fungibility: same expiry date AND quality grade can merge
+        FungibilityExpression: `a.expiry_date == b.expiry_date &&
+            a.quality_grade == b.quality_grade`,
+
+        DisplayName: "Rice Voucher",
+        Description: "Redeemable voucher for 1kg of rice at distribution centers",
+    }
+
+    return referenceData.Register(ctx, def)
+}
+```
+
+**Equivalent SQL**:
+
+```sql
+INSERT INTO instrument_definitions
+    (tenant_id, code, version, dimension, precision,
+     validation_expression, fungibility_expression, display_name, description)
+VALUES
+    ('ngo-tenant-uuid', 'RICE-VOUCHER', 1, 'Commodity', 0,
+     'has(attrs.expiry_date) && timestamp(attrs.expiry_date) > now() && has(attrs.quality_grade) && attrs.quality_grade in ["A", "B", "C"]',
+     'a.expiry_date == b.expiry_date && a.quality_grade == b.quality_grade',
+     'Rice Voucher',
+     'Redeemable voucher for 1kg of rice at distribution centers');
+```
+
+### Instrument Version Evolution
+
+When requirements change, create a new version rather than modifying existing definitions.
+This example shows how a Rice Voucher evolves from v1 to v2:
+
+**Version 1** (original): Only expiry_date required
+
+```sql
+-- Original: only expiry tracking
+INSERT INTO instrument_definitions
+    (tenant_id, code, version, dimension, precision,
+     validation_expression, fungibility_expression, display_name)
+VALUES
+    ('ngo-tenant-uuid', 'RICE-VOUCHER', 1, 'Commodity', 0,
+     'has(attrs.expiry_date) && timestamp(attrs.expiry_date) > now()',
+     'a.expiry_date == b.expiry_date',
+     'Rice Voucher');
+```
+
+**Version 2** (evolved): Quality grade now required for regulatory compliance
+
+```sql
+-- New version: adds quality_grade requirement
+INSERT INTO instrument_definitions
+    (tenant_id, code, version, dimension, precision,
+     validation_expression, fungibility_expression, display_name)
+VALUES
+    ('ngo-tenant-uuid', 'RICE-VOUCHER', 2, 'Commodity', 0,
+     'has(attrs.expiry_date) && timestamp(attrs.expiry_date) > now() && has(attrs.quality_grade) && attrs.quality_grade in ["A", "B", "C"]',
+     'a.expiry_date == b.expiry_date && a.quality_grade == b.quality_grade',
+     'Rice Voucher');
+```
+
+**Migration behavior**:
+
+```go
+// Existing v1 positions remain valid - they keep their version
+existingPosition := Position{
+    InstrumentCode:    "RICE-VOUCHER",
+    InstrumentVersion: 1, // Stays at v1
+    Attributes:        map[string]string{"expiry_date": "2025-06-30"},
+}
+
+// New positions use v2 and require quality_grade
+newPosition := Position{
+    InstrumentCode:    "RICE-VOUCHER",
+    InstrumentVersion: 2, // Uses latest version
+    Attributes: map[string]string{
+        "expiry_date":   "2025-12-31",
+        "quality_grade": "A",
+    },
+}
+
+// v1 and v2 positions are NOT fungible - different versions are distinct
+// To migrate v1 to v2: create a trade (debit v1, credit v2 with added attribute)
+```
+
+**Key principles**:
+
+1. **Immutability**: Once created, a version never changes
+2. **Coexistence**: Old and new versions exist simultaneously
+3. **Non-fungibility**: Different versions cannot be merged (v1 position =/= v2 position)
+4. **Migration-as-Trade**: Converting v1 to v2 requires explicit ledger entries
+
 ### gRPC API (BIAN Operations)
 
 ```protobuf
