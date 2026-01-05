@@ -96,16 +96,22 @@ func (r *MeasurementRepository) Create(ctx context.Context, measurement *domain.
 	query := `
 		INSERT INTO measurement (
 			id, created_at, created_by, updated_at, updated_by,
-			financial_position_log_id, measurement_type, value, unit, timestamp, metadata
+			financial_position_log_id, measurement_type, value, unit, timestamp, metadata, bucket_id
 		) VALUES (
 			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11
+			$6, $7, $8, $9, $10, $11, $12
 		)`
+
+	// Convert empty bucket_id to NULL for database storage
+	var bucketID *string
+	if measurement.BucketID != "" {
+		bucketID = &measurement.BucketID
+	}
 
 	_, err = tx.Exec(ctx, query,
 		measurement.ID, measurement.CreatedAt, userID, measurement.UpdatedAt, userID,
 		dbPositionLogID, measurement.MeasurementType.String(), measurement.Value,
-		measurement.Unit, measurement.Timestamp, metadataJSON,
+		measurement.Unit, measurement.Timestamp, metadataJSON, bucketID,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -144,7 +150,7 @@ func (r *MeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 
 	// Join with financial_position_log to get the log_id (domain ID) from the db ID
 	query := `
-		SELECT m.id, fpl.log_id, m.measurement_type, m.value, m.unit, m.timestamp, m.metadata,
+		SELECT m.id, fpl.log_id, m.measurement_type, m.value, m.unit, m.timestamp, m.metadata, m.bucket_id,
 			m.created_at, m.created_by, m.updated_at, m.updated_by
 		FROM measurement m
 		JOIN financial_position_log fpl ON m.financial_position_log_id = fpl.id
@@ -153,6 +159,7 @@ func (r *MeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 	var measurement domain.Measurement
 	var measurementType string
 	var metadataJSON sql.NullString
+	var bucketID sql.NullString
 
 	err = tx.QueryRow(ctx, query, id).Scan(
 		&measurement.ID,
@@ -162,6 +169,7 @@ func (r *MeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 		&measurement.Unit,
 		&measurement.Timestamp,
 		&metadataJSON,
+		&bucketID,
 		&measurement.CreatedAt,
 		&measurement.CreatedBy,
 		&measurement.UpdatedAt,
@@ -180,6 +188,10 @@ func (r *MeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 		if err := json.Unmarshal([]byte(metadataJSON.String), &measurement.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 		}
+	}
+
+	if bucketID.Valid {
+		measurement.BucketID = bucketID.String
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -218,7 +230,7 @@ func (r *MeasurementRepository) FindByPositionLogID(ctx context.Context, positio
 	}
 
 	query := `
-		SELECT m.id, $1::uuid as log_id, m.measurement_type, m.value, m.unit, m.timestamp, m.metadata,
+		SELECT m.id, $1::uuid as log_id, m.measurement_type, m.value, m.unit, m.timestamp, m.metadata, m.bucket_id,
 			m.created_at, m.created_by, m.updated_at, m.updated_by
 		FROM measurement m
 		WHERE m.financial_position_log_id = $2 AND m.deleted_at IS NULL
@@ -235,6 +247,7 @@ func (r *MeasurementRepository) FindByPositionLogID(ctx context.Context, positio
 		var measurement domain.Measurement
 		var measurementType string
 		var metadataJSON sql.NullString
+		var bucketID sql.NullString
 
 		err := rows.Scan(
 			&measurement.ID,
@@ -244,6 +257,7 @@ func (r *MeasurementRepository) FindByPositionLogID(ctx context.Context, positio
 			&measurement.Unit,
 			&measurement.Timestamp,
 			&metadataJSON,
+			&bucketID,
 			&measurement.CreatedAt,
 			&measurement.CreatedBy,
 			&measurement.UpdatedAt,
@@ -259,6 +273,10 @@ func (r *MeasurementRepository) FindByPositionLogID(ctx context.Context, positio
 			if err := json.Unmarshal([]byte(metadataJSON.String), &measurement.Metadata); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 			}
+		}
+
+		if bucketID.Valid {
+			measurement.BucketID = bucketID.String
 		}
 
 		measurements = append(measurements, &measurement)
@@ -298,16 +316,22 @@ func (r *MeasurementRepository) CreateWithTx(ctx context.Context, tx pgx.Tx, mea
 	query := `
 		INSERT INTO measurement (
 			id, created_at, created_by, updated_at, updated_by,
-			financial_position_log_id, measurement_type, value, unit, timestamp, metadata
+			financial_position_log_id, measurement_type, value, unit, timestamp, metadata, bucket_id
 		) VALUES (
 			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11
+			$6, $7, $8, $9, $10, $11, $12
 		)`
+
+	// Convert empty bucket_id to NULL for database storage
+	var bucketID *string
+	if measurement.BucketID != "" {
+		bucketID = &measurement.BucketID
+	}
 
 	_, err = tx.Exec(ctx, query,
 		measurement.ID, measurement.CreatedAt, userID, measurement.UpdatedAt, userID,
 		dbPositionLogID, measurement.MeasurementType.String(), measurement.Value,
-		measurement.Unit, measurement.Timestamp, metadataJSON,
+		measurement.Unit, measurement.Timestamp, metadataJSON, bucketID,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError

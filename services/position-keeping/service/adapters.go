@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	"github.com/google/cel-go/cel"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -14,8 +16,54 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 )
 
+// CachedInstrument contains the instrument definition and precompiled CEL programs.
+// This is a local type that mirrors the reference-data cache type to avoid
+// circular dependencies.
+type CachedInstrument struct {
+	// InstrumentCode is the unique code for the instrument.
+	InstrumentCode string
+
+	// ValidationProgram is the precompiled CEL program for validation.
+	// May be nil if no validation expression is defined.
+	ValidationProgram cel.Program
+
+	// BucketKeyProgram is the precompiled CEL program for bucket key generation.
+	// May be nil if no bucket key expression is defined.
+	// When evaluated, returns a SHA256 hex string (64 characters) representing
+	// the bucket/fungibility key for the measurement.
+	BucketKeyProgram cel.Program
+}
+
+// InstrumentCache provides an interface for looking up instrument definitions
+// with precompiled CEL validation programs.
+//
+// This interface allows the position-keeping service to validate measurements
+// against instrument definitions without depending directly on the reference-data
+// service implementation.
+type InstrumentCache interface {
+	// GetOrLoad retrieves a cached instrument or loads it via loadFn on cache miss.
+	// The loadFn should load from the repository and compile CEL programs as needed.
+	// Returns the cached instrument or an error if loading fails.
+	GetOrLoad(ctx context.Context, code string, version int, loadFn func() (*CachedInstrument, error)) (*CachedInstrument, error)
+}
+
+// BucketCounter provides an interface for counting buckets per account/instrument.
+// This is used to enforce cardinality limits and prevent "Infinite Buckets" DOS attacks.
+//
+// The cardinality limit protects against malicious or misconfigured instruments that
+// could create unbounded numbers of buckets, consuming excessive storage and degrading
+// query performance.
+type BucketCounter interface {
+	// CountBuckets returns the number of distinct buckets for an account and instrument.
+	// Returns the count and any error encountered during the query.
+	CountBuckets(ctx context.Context, accountID string, instrumentCode string) (int, error)
+}
+
 // ErrEmptyUUID is returned when UUID string is empty
 var ErrEmptyUUID = errors.New("UUID string is empty")
+
+// ErrInstrumentNotFound is returned when an instrument is not found in the cache.
+var ErrInstrumentNotFound = errors.New("instrument not found")
 
 // toProtoFinancialPositionLog converts a domain FinancialPositionLog to its protobuf representation.
 func toProtoFinancialPositionLog(log *domain.FinancialPositionLog) *positionkeepingv1.FinancialPositionLog {

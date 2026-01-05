@@ -82,10 +82,15 @@ type Measurement struct {
 	Unit                   string
 	Timestamp              time.Time
 	Metadata               map[string]string
-	CreatedAt              time.Time
-	CreatedBy              string
-	UpdatedAt              time.Time
-	UpdatedBy              string
+	// BucketID is the fungibility bucket key computed from measurement attributes.
+	// Used for position aggregation - measurements with the same bucket_id can be
+	// aggregated together. Empty string if no bucket key expression is defined
+	// for the instrument.
+	BucketID  string
+	CreatedAt time.Time
+	CreatedBy string
+	UpdatedAt time.Time
+	UpdatedBy string
 }
 
 // NewMeasurement creates a new Measurement with validation.
@@ -95,6 +100,9 @@ type Measurement struct {
 //   - unit is empty
 //   - timestamp is in the future
 //   - positionLogID is the nil UUID
+//
+// The bucketID parameter is optional (can be empty string) - it represents
+// the fungibility bucket computed from measurement attributes via CEL expression.
 func NewMeasurement(
 	positionLogID uuid.UUID,
 	measurementType MeasurementType,
@@ -102,6 +110,7 @@ func NewMeasurement(
 	unit string,
 	timestamp time.Time,
 	metadata map[string]string,
+	bucketID string,
 	createdBy string,
 ) (*Measurement, error) {
 	// Validate position log ID
@@ -138,6 +147,7 @@ func NewMeasurement(
 		Unit:                   unit,
 		Timestamp:              timestamp,
 		Metadata:               metadata,
+		BucketID:               bucketID,
 		CreatedAt:              now,
 		CreatedBy:              createdBy,
 		UpdatedAt:              now,

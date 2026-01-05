@@ -27,6 +27,12 @@ var (
 	ErrMeasurementRepoNil = errors.New("position keeping service: measurement repository cannot be nil")
 )
 
+// MaxBucketsPerAccountInstrument is the maximum number of distinct buckets allowed
+// per account/instrument combination. This is a safety valve to prevent "Infinite Buckets"
+// DOS attacks where a malicious or misconfigured instrument could create unbounded
+// numbers of buckets. Most legitimate accounts will have far fewer buckets.
+const MaxBucketsPerAccountInstrument = 10000
+
 // PositionKeepingService implements the gRPC service for Position Keeping operations.
 type PositionKeepingService struct {
 	positionkeepingv1.UnimplementedPositionKeepingServiceServer
@@ -34,6 +40,33 @@ type PositionKeepingService struct {
 	measurementRepo domain.MeasurementRepository
 	eventPublisher  domain.EventPublisher
 	idempotency     idempotency.Service
+	// instrumentCache is OPTIONAL - if nil, CEL validation is skipped.
+	// This allows backwards compatibility with existing deployments.
+	instrumentCache InstrumentCache
+	// bucketCounter is OPTIONAL - if nil, cardinality checking is skipped.
+	// Used to enforce MaxBucketsPerAccountInstrument limit.
+	bucketCounter BucketCounter
+}
+
+// Option configures optional dependencies for PositionKeepingService.
+type Option func(*PositionKeepingService)
+
+// WithInstrumentCache sets an optional instrument cache for CEL validation.
+// If not set or set to nil, CEL validation is skipped for backwards compatibility.
+func WithInstrumentCache(cache InstrumentCache) Option {
+	return func(s *PositionKeepingService) {
+		s.instrumentCache = cache
+	}
+}
+
+// WithBucketCounter sets an optional bucket counter for cardinality enforcement.
+// If not set or set to nil, cardinality checking is skipped.
+// When set, the service will reject measurements that would exceed
+// MaxBucketsPerAccountInstrument buckets for any account/instrument combination.
+func WithBucketCounter(counter BucketCounter) Option {
+	return func(s *PositionKeepingService) {
+		s.bucketCounter = counter
+	}
 }
 
 // NewPositionKeepingService creates a new PositionKeepingService with dependency injection.
@@ -44,12 +77,16 @@ type PositionKeepingService struct {
 //   - eventPublisher: Publishes domain events (must not be nil)
 //   - idempotencySvc: Ensures exactly-once processing of idempotent operations (must not be nil)
 //
-// Returns an error if any dependency is nil.
+// Optional dependencies can be provided via Option functions:
+//   - WithInstrumentCache: Enables CEL validation of measurements against instrument definitions
+//
+// Returns an error if any required dependency is nil.
 func NewPositionKeepingService(
 	repository domain.FinancialPositionLogRepository,
 	measurementRepo domain.MeasurementRepository,
 	eventPublisher domain.EventPublisher,
 	idempotencySvc idempotency.Service,
+	opts ...Option,
 ) (*PositionKeepingService, error) {
 	if repository == nil {
 		return nil, ErrRepositoryNil
@@ -64,12 +101,19 @@ func NewPositionKeepingService(
 		return nil, ErrIdempotencyServiceNil
 	}
 
-	return &PositionKeepingService{
+	svc := &PositionKeepingService{
 		repository:      repository,
 		measurementRepo: measurementRepo,
 		eventPublisher:  eventPublisher,
 		idempotency:     idempotencySvc,
-	}, nil
+	}
+
+	// Apply optional configurations
+	for _, opt := range opts {
+		opt(svc)
+	}
+
+	return svc, nil
 }
 
 // RetrieveFinancialPositionLog retrieves a financial position log by ID.
