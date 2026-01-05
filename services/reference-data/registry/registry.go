@@ -83,7 +83,7 @@ type InstrumentDefinition struct {
 	Code string
 
 	// Version allows multiple versions of the same instrument code.
-	// Use 0 as a special value meaning "latest active version" in queries.
+	// Versions start at 1. Use GetActiveDefinition to retrieve the latest active version.
 	Version int
 
 	// Dimension categorizes what this instrument measures.

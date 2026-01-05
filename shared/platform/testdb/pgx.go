@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -177,8 +178,8 @@ func SetupTenantSchemaForPgx(t *testing.T, pool *pgxpool.Pool, tenantID string, 
 
 	ctx := context.Background()
 
-	// Create the tenant schema
-	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName))
+	// Create the tenant schema using proper SQL identifier quoting
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName)))
 	if err != nil {
 		t.Fatalf("Failed to create tenant schema %s: %v", schemaName, err)
 	}
@@ -193,7 +194,7 @@ func SetupTenantSchemaForPgx(t *testing.T, pool *pgxpool.Pool, tenantID string, 
 
 	cleanup := func() {
 		cleanupCtx := context.Background()
-		_, _ = pool.Exec(cleanupCtx, fmt.Sprintf("DROP SCHEMA IF EXISTS %q CASCADE", schemaName))
+		_, _ = pool.Exec(cleanupCtx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
 	}
 
 	return tenantCtx, cleanup
@@ -240,7 +241,7 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 		_ = tx.Rollback(ctx)
 	}()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %q, public", schemaName))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
 	if err != nil {
 		t.Fatalf("Failed to set search_path: %v", err)
 	}
