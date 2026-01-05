@@ -58,6 +58,12 @@ func TestTransactionCaptured_ToProto(t *testing.T) {
 	assert.Equal(t, "CORR-123", proto.CorrelationId)
 	assert.Equal(t, int64(1), proto.Version)
 	assert.NotNil(t, proto.Timestamp)
+
+	// Verify InstrumentAmount is populated for multi-asset support
+	require.NotNil(t, proto.InstrumentAmount, "InstrumentAmount should be populated")
+	assert.Equal(t, "100", proto.InstrumentAmount.Amount)
+	assert.Equal(t, "GBP", proto.InstrumentAmount.InstrumentCode)
+	assert.Equal(t, int32(1), proto.InstrumentAmount.Version)
 }
 
 func TestTransactionCaptured_ToProto_JPY(t *testing.T) {
@@ -93,6 +99,12 @@ func TestTransactionCaptured_ToProto_JPY(t *testing.T) {
 	// JPY has 0 decimal places, so no multiplication by 100
 	assert.Equal(t, int64(1000), proto.AmountCents, "JPY should not be multiplied by 100")
 	assert.Equal(t, commonv1.Currency_CURRENCY_JPY, proto.Currency)
+
+	// Verify InstrumentAmount is populated for JPY
+	require.NotNil(t, proto.InstrumentAmount, "InstrumentAmount should be populated")
+	assert.Equal(t, "1000", proto.InstrumentAmount.Amount)
+	assert.Equal(t, "JPY", proto.InstrumentAmount.InstrumentCode)
+	assert.Equal(t, int32(1), proto.InstrumentAmount.Version)
 }
 
 func TestTransactionAmended_EventType(t *testing.T) {
