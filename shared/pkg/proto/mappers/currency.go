@@ -9,20 +9,27 @@ import (
 // DomainCurrencyToProto converts a domain currency to its protobuf Currency enum equivalent.
 // Returns Currency_CURRENCY_UNSPECIFIED for unsupported currencies.
 func DomainCurrencyToProto(currency money.Currency) commonpb.Currency {
-	switch currency {
-	case money.CurrencyGBP:
+	return CurrencyCodeToProto(string(currency))
+}
+
+// CurrencyCodeToProto converts a currency code string to its protobuf Currency enum equivalent.
+// This function supports the new quantity.Money type which uses string currency codes.
+// Returns Currency_CURRENCY_UNSPECIFIED for unsupported currencies.
+func CurrencyCodeToProto(currencyCode string) commonpb.Currency {
+	switch currencyCode {
+	case "GBP":
 		return commonpb.Currency_CURRENCY_GBP
-	case money.CurrencyUSD:
+	case "USD":
 		return commonpb.Currency_CURRENCY_USD
-	case money.CurrencyEUR:
+	case "EUR":
 		return commonpb.Currency_CURRENCY_EUR
-	case money.CurrencyJPY:
+	case "JPY":
 		return commonpb.Currency_CURRENCY_JPY
-	case money.CurrencyCHF:
+	case "CHF":
 		return commonpb.Currency_CURRENCY_CHF
-	case money.CurrencyCAD:
+	case "CAD":
 		return commonpb.Currency_CURRENCY_CAD
-	case money.CurrencyAUD:
+	case "AUD":
 		return commonpb.Currency_CURRENCY_AUD
 	default:
 		return commonpb.Currency_CURRENCY_UNSPECIFIED

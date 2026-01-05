@@ -199,7 +199,12 @@ func (r *PositionRepository) InsertBatch(ctx context.Context, positions []*domai
 
 // FindByID retrieves a Position by its ID.
 // Returns domain.ErrNotFound if the position doesn't exist.
+//
+// NOTE: This method uses a transaction for multi-tenant schema isolation.
+// SET LOCAL search_path only works within a transaction boundary.
+// See ADR-0016 for schema-per-tenant architecture details.
 func (r *PositionRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Position, error) {
+	// Transaction required for SET LOCAL search_path (multi-tenant schema isolation)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -256,6 +261,8 @@ func (r *PositionRepository) FindByID(ctx context.Context, id uuid.UUID) (*domai
 // GetAggregatedPosition retrieves the consolidated position for a specific
 // (AccountID, InstrumentCode, BucketKey) combination by summing all records.
 // Returns nil if no positions exist for the combination.
+//
+// NOTE: Transaction required for SET LOCAL search_path (multi-tenant schema isolation).
 func (r *PositionRepository) GetAggregatedPosition(ctx context.Context, accountID, instrumentCode, bucketKey string) (*domain.AggregatedPosition, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -307,6 +314,8 @@ func (r *PositionRepository) GetAggregatedPosition(ctx context.Context, accountI
 
 // ListByAccount retrieves all position records for an account with pagination.
 // Returns an empty slice if no positions exist.
+//
+// NOTE: Transaction required for SET LOCAL search_path (multi-tenant schema isolation).
 func (r *PositionRepository) ListByAccount(ctx context.Context, accountID string, limit, offset int) ([]*domain.Position, error) {
 	if limit <= 0 {
 		return nil, ErrInvalidLimit
@@ -353,6 +362,8 @@ func (r *PositionRepository) ListByAccount(ctx context.Context, accountID string
 // ListAggregatedByAccount retrieves all aggregated positions for an account.
 // Groups by (InstrumentCode, BucketKey) and sums amounts.
 // Returns an empty slice if no positions exist.
+//
+// NOTE: Transaction required for SET LOCAL search_path (multi-tenant schema isolation).
 func (r *PositionRepository) ListAggregatedByAccount(ctx context.Context, accountID string) ([]*domain.AggregatedPosition, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -525,6 +536,8 @@ var _ domain.PositionRepository = (*PositionRepository)(nil)
 
 // GetPositionCount returns the count of positions matching the criteria.
 // This is useful for pagination and monitoring.
+//
+// NOTE: Transaction required for SET LOCAL search_path (multi-tenant schema isolation).
 func (r *PositionRepository) GetPositionCount(ctx context.Context, accountID string) (int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

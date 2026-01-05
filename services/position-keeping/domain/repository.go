@@ -107,6 +107,12 @@ type MeasurementRepository interface {
 //   - Each measurement creates a new position row, never merges on write
 //   - Database trigger prevents UPDATE on amount column
 //   - Achieves O(1) writes without locks for high-throughput scenarios
+//
+// FUTURE: Background compaction (Phase 2) will be documented in ADR-00XX.
+// Compaction considerations:
+//   - Compacted records will be marked with a compaction_batch_id
+//   - reference_id chain will be preserved for audit trail
+//   - RecordCount in AggregatedPosition will reflect pre-compaction counts
 type PositionRepository interface {
 	// Insert persists a new Position record to the database.
 	// This is the ONLY write method - append-only semantics are enforced.

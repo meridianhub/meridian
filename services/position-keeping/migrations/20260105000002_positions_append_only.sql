@@ -35,6 +35,11 @@ CREATE INDEX "idx_position_aggregation" ON "position" ("account_id", "instrument
 -- Index for soft delete filtering
 CREATE INDEX "idx_position_deleted_at" ON "position" ("deleted_at");
 
+-- Partial composite index for active positions queries (optimizes GetAggregatedPosition, ListByAccount)
+-- More efficient than separate indexes for queries filtering on deleted_at IS NULL
+CREATE INDEX "idx_position_active" ON "position" ("account_id", "instrument_code", "bucket_key")
+WHERE deleted_at IS NULL;
+
 -- Index for reference lookups (linking to measurements/transactions)
 CREATE INDEX "idx_position_reference_id" ON "position" ("reference_id");
 

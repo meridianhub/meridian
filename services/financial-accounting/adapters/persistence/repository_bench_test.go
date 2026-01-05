@@ -57,10 +57,8 @@ func setupBenchContainer(b *testing.B) *benchTestContainer {
 func createBenchPosting(b *testing.B, bookingLogID uuid.UUID, direction domain.PostingDirection, accountID string) *domain.LedgerPosting {
 	b.Helper()
 
-	money, err := domain.NewMoney(decimal.NewFromFloat(100.50), domain.CurrencyGBP)
-	if err != nil {
-		b.Fatal(err)
-	}
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromFloat(100.50), gbpInstrument)
 
 	posting, err := domain.NewLedgerPosting(
 		bookingLogID,

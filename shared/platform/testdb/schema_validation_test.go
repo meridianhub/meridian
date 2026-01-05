@@ -491,8 +491,11 @@ func testLedgerPostingEntity(t *testing.T, db *gorm.DB) {
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
 		PostingDirection:      "DEBIT",
-		AmountCents:           15000,
+		AmountMinorUnits:      15000,
 		Currency:              "GBP",
+		DimensionType:         "CURRENCY",
+		InstrumentVersion:     1,
+		InstrumentPrecision:   2,
 		AccountID:             "ACC-LEDGER-001",
 		ValueDate:             time.Now(),
 		PostingResult:         "SUCCESS",
@@ -517,6 +520,9 @@ func testLedgerPostingEntity(t *testing.T, db *gorm.DB) {
 		t.Fatalf("Failed to read LedgerPostingEntity - schema mismatch detected: %v", err)
 	}
 
-	assert.Equal(t, entity.AmountCents, retrieved.AmountCents)
+	assert.Equal(t, entity.AmountMinorUnits, retrieved.AmountMinorUnits)
 	assert.Equal(t, entity.PostingDirection, retrieved.PostingDirection)
+	assert.Equal(t, entity.DimensionType, retrieved.DimensionType)
+	assert.Equal(t, entity.InstrumentVersion, retrieved.InstrumentVersion)
+	assert.Equal(t, entity.InstrumentPrecision, retrieved.InstrumentPrecision)
 }

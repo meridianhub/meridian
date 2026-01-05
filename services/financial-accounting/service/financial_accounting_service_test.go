@@ -927,7 +927,8 @@ func TestUpdateLedgerPosting_DefensiveTests(t *testing.T) {
 
 	// Helper to create a posting in a specific state
 	createPosting := func(status domain.TransactionStatus) *domain.LedgerPosting {
-		amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+		gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+		amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 		posting := &domain.LedgerPosting{
 			ID:                    validPostingID,
 			FinancialBookingLogID: validBookingLogID,

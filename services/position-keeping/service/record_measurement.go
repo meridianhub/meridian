@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	"github.com/meridianhub/meridian/pkg/platform/quantity"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/audit"
@@ -97,10 +99,19 @@ func (s *PositionKeepingService) RecordMeasurement(
 		metadata[k] = v
 	}
 
+	// Perform CEL validation and bucket key generation if instrument cache is configured
+	// The measurement_type field maps to the instrument code
+	instrumentCode := req.GetMeasurementType()
+	validationResult, err := s.validateMeasurementWithCEL(ctx, instrumentCode, req.GetValue(), metadata, positionLog.AccountID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Get user from context for audit
 	userID := audit.GetUserFromContext(ctx)
 
-	// Create measurement domain object
+	// Create measurement domain object with bucket_id from CEL validation
+	// The bucket_id enables fungibility-based position aggregation
 	measurement, err := domain.NewMeasurement(
 		positionLog.LogID,
 		measurementType,
@@ -108,6 +119,7 @@ func (s *PositionKeepingService) RecordMeasurement(
 		req.GetUnit(),
 		measurementTimestamp,
 		metadata,
+		validationResult.BucketID,
 		userID,
 	)
 	if err != nil {
@@ -238,4 +250,154 @@ func (s *PositionKeepingService) checkMeasurementIdempotencyAndAcquireLock(
 	}
 
 	return &key, nil, nil
+}
+
+// MeasurementValidationResult contains the result of CEL validation and bucket key generation.
+type MeasurementValidationResult struct {
+	// BucketID is the generated bucket key for the measurement.
+	// Empty string if no bucket key expression is defined for the instrument.
+	BucketID string
+}
+
+// validateMeasurementWithCEL performs CEL-based validation of measurement attributes
+// against the instrument definition and generates a bucket key if configured.
+// This is optional - if instrumentCache is nil, validation is skipped for backwards compatibility.
+//
+// The CEL program receives the following variables:
+//   - attributes: map[string]string of measurement metadata
+//   - amount: string representation of the measurement value
+//   - valid_from: zero time (for future use)
+//   - valid_to: zero time (for future use)
+//   - source: extracted from metadata["source"] or empty string
+//
+// Returns the validation result (including bucket ID) and nil error if validation passes.
+// Returns nil result and gRPC INVALID_ARGUMENT error if validation fails.
+// Returns nil result and gRPC NOT_FOUND error if instrument is not found.
+// Returns nil result and gRPC RESOURCE_EXHAUSTED error if bucket cardinality limit exceeded.
+func (s *PositionKeepingService) validateMeasurementWithCEL(
+	ctx context.Context,
+	instrumentCode string,
+	amount string,
+	metadata map[string]string,
+	accountID string,
+) (*MeasurementValidationResult, error) {
+	// Skip validation if instrument cache is not configured (backwards compatibility)
+	if s.instrumentCache == nil {
+		return &MeasurementValidationResult{}, nil
+	}
+
+	// Acquire an AttributeBag from pool for efficient memory reuse
+	bag := quantity.AcquireAttributeBag()
+	defer quantity.ReleaseAttributeBag(bag)
+
+	// Populate AttributeBag from metadata
+	for k, v := range metadata {
+		bag.Set(k, v)
+	}
+
+	// Look up instrument from cache using measurement_type as the code
+	// Use version=1 for now; could be made configurable in the future
+	const instrumentVersion = 1
+	instrument, err := s.instrumentCache.GetOrLoad(ctx, instrumentCode, instrumentVersion, func() (*CachedInstrument, error) {
+		// The loadFn should never be called if the cache is properly configured
+		// with a backing repository. For now, return not found to trigger the error path.
+		return nil, fmt.Errorf("%w: %s", ErrInstrumentNotFound, instrumentCode)
+	})
+	if err != nil {
+		// Instrument not found - record metric and return error
+		RecordValidationFailure(instrumentCode, ValidationFailureReasonInstrumentNotFound)
+		return nil, status.Errorf(codes.NotFound,
+			"instrument definition not found for measurement type '%s': %v", instrumentCode, err)
+	}
+
+	// Build the activation context for CEL evaluation
+	// The CEL program expects these specific variable names
+	source := metadata["source"]
+	attributesMap := bag.ToMap()
+	activation := map[string]any{
+		"attributes": attributesMap,
+		"amount":     amount,
+		"valid_from": time.Time{}, // Zero time for now
+		"valid_to":   time.Time{}, // Zero time for now
+		"source":     source,
+	}
+
+	// Run validation if instrument has a validation program
+	if instrument.ValidationProgram != nil {
+		result, _, err := instrument.ValidationProgram.Eval(activation)
+		if err != nil {
+			// CEL evaluation error - record metric and return error
+			RecordValidationFailure(instrumentCode, ValidationFailureReasonCELError)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"validation error for measurement type '%s': %v", instrumentCode, err)
+		}
+
+		// The validation program should return a boolean
+		valid, ok := result.Value().(bool)
+		if !ok {
+			// Unexpected return type from CEL - treat as error
+			RecordValidationFailure(instrumentCode, ValidationFailureReasonCELError)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"validation error for measurement type '%s': expression did not return boolean", instrumentCode)
+		}
+
+		if !valid {
+			// Validation rejected the measurement - record metric and return error
+			RecordValidationFailure(instrumentCode, ValidationFailureReasonCELRejected)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"measurement validation failed for type '%s': attributes do not satisfy validation rules", instrumentCode)
+		}
+	}
+
+	// Generate bucket key if instrument has a bucket key program
+	var bucketID string
+	if instrument.BucketKeyProgram != nil {
+		// Bucket key program only needs the attributes map
+		bucketActivation := map[string]any{
+			"attributes": attributesMap,
+		}
+
+		result, _, err := instrument.BucketKeyProgram.Eval(bucketActivation)
+		if err != nil {
+			// CEL evaluation error - record metric and return error
+			RecordValidationFailure(instrumentCode, ValidationFailureReasonBucketKeyError)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"bucket key generation error for measurement type '%s': %v", instrumentCode, err)
+		}
+
+		// The bucket key program should return a string (SHA256 hex)
+		key, ok := result.Value().(string)
+		if !ok {
+			RecordValidationFailure(instrumentCode, ValidationFailureReasonBucketKeyError)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"bucket key generation error for measurement type '%s': expression did not return string", instrumentCode)
+		}
+
+		bucketID = key
+
+		// Check cardinality limit if bucket counter is configured
+		if s.bucketCounter != nil && bucketID != "" {
+			count, err := s.bucketCounter.CountBuckets(ctx, accountID, instrumentCode)
+			if err != nil {
+				// Log the error but don't fail the request - cardinality check is defensive
+				// The system should still work if the counter is unavailable
+				// However, for strict enforcement, we could return an error here
+				return nil, status.Errorf(codes.Internal,
+					"failed to check bucket cardinality for account '%s' instrument '%s': %v",
+					accountID, instrumentCode, err)
+			}
+
+			if count >= MaxBucketsPerAccountInstrument {
+				// Cardinality limit exceeded - record metric and return error
+				RecordCardinalityViolation(instrumentCode)
+				return nil, status.Errorf(codes.ResourceExhausted,
+					"bucket cardinality limit exceeded for account/instrument: %d buckets (limit: %d)",
+					count, MaxBucketsPerAccountInstrument)
+			}
+		}
+	}
+
+	return &MeasurementValidationResult{
+		BucketID: bucketID,
+	}, nil
 }

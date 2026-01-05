@@ -16,7 +16,20 @@ var (
 	ErrEmptyBucketKey = errors.New("bucket key cannot be empty")
 	// ErrPositionUpdateForbidden is returned when attempting to update a position (append-only)
 	ErrPositionUpdateForbidden = errors.New("position updates are forbidden: append-only mode enforced")
+	// Note: ErrInvalidDimension is declared in quantity.go and reused here
 )
+
+// ValidDimensions contains the set of valid dimension values.
+// These map to the database CHECK constraint.
+var ValidDimensions = map[string]bool{
+	"Monetary": true,
+	"Energy":   true,
+	"Compute":  true,
+	"Carbon":   true,
+	"Time":     true,
+	"Physical": true,
+	"Custom":   true,
+}
 
 // Position represents a single position record in the append-only positions table.
 // Each position record is immutable once written - new measurements create new rows.
@@ -81,6 +94,10 @@ func NewPosition(
 	}
 	if bucketKey == "" {
 		return nil, ErrEmptyBucketKey
+	}
+	// Validate dimension at domain layer to fail fast before database rejection
+	if dimension != "" && !ValidDimensions[dimension] {
+		return nil, ErrInvalidDimension
 	}
 
 	now := time.Now().UTC()

@@ -59,7 +59,11 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		financial_booking_log_id UUID NOT NULL,
 		posting_direction VARCHAR(10) NOT NULL,
 		amount_cents BIGINT NOT NULL,
-		currency VARCHAR(3) NOT NULL,
+		currency VARCHAR(32) NOT NULL,
+		dimension_type VARCHAR(20) DEFAULT 'CURRENCY',
+		instrument_version INTEGER DEFAULT 1,
+		instrument_precision INTEGER DEFAULT 2,
+		attributes JSONB DEFAULT '{}',
 		account_id VARCHAR(255) NOT NULL,
 		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
 		posting_result VARCHAR(1000),
@@ -155,9 +159,9 @@ func TestSavePosting_Success(t *testing.T) {
 	}
 	require.NoError(t, db.Create(bookingLog).Error)
 
-	// Create posting
-	money, err := domain.NewMoney(decimal.NewFromFloat(100.50), "GBP")
-	require.NoError(t, err)
+	// Create posting - using CurrencyToInstrument to convert currency to instrument
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromFloat(100.50), gbpInstrument)
 
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
@@ -173,15 +177,15 @@ func TestSavePosting_Success(t *testing.T) {
 	}
 
 	// Save posting
-	err = repo.SavePosting(ctx, posting)
-	assert.NoError(t, err)
+	saveErr := repo.SavePosting(ctx, posting)
+	assert.NoError(t, saveErr)
 
 	// Verify posting was saved
 	retrieved, err := repo.GetPosting(ctx, posting.ID)
 	require.NoError(t, err)
 	assert.Equal(t, posting.ID, retrieved.ID)
 	assert.Equal(t, posting.AccountID, retrieved.AccountID)
-	assert.Equal(t, int64(10050), retrieved.Amount.Amount().Mul(decimal.NewFromInt(100)).IntPart())
+	assert.Equal(t, int64(10050), retrieved.Amount.Amount.Mul(decimal.NewFromInt(100)).IntPart())
 }
 
 func TestSavePostingsInTransaction_Success(t *testing.T) {
@@ -208,7 +212,8 @@ func TestSavePostingsInTransaction_Success(t *testing.T) {
 	require.NoError(t, db.Create(bookingLog).Error)
 
 	// Create two postings (debit and credit for double-entry)
-	money, _ := domain.NewMoney(decimal.NewFromInt(100), "GBP")
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 
 	postings := []*domain.LedgerPosting{
 		{
@@ -254,7 +259,8 @@ func TestSavePostingsInTransaction_RollbackOnError(t *testing.T) {
 	bookingLogID := uuid.New()
 
 	// Create posting with invalid fractional cents (should fail)
-	moneyWithFraction, _ := domain.NewMoney(decimal.NewFromFloat(100.123), "GBP")
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	moneyWithFraction := domain.NewMoney(decimal.NewFromFloat(100.123), gbpInstrument)
 
 	postings := []*domain.LedgerPosting{
 		{
@@ -314,7 +320,8 @@ func TestGetPostingsByBookingLogID_OrderedByCreatedAt(t *testing.T) {
 	require.NoError(t, db.Create(bookingLog).Error)
 
 	// Create postings with different timestamps
-	money, _ := domain.NewMoney(decimal.NewFromInt(100), "GBP")
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 	now := time.Now()
 
 	posting1 := &domain.LedgerPosting{
@@ -360,7 +367,8 @@ func TestForeignKeyConstraint_ViolationPrevented(t *testing.T) {
 	defer cleanup()
 
 	// Try to create a posting without corresponding booking log (FK violation)
-	money, _ := domain.NewMoney(decimal.NewFromInt(100), "GBP")
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
 		FinancialBookingLogID: uuid.New(), // Non-existent booking log ID
@@ -450,7 +458,8 @@ func TestSoftDelete(t *testing.T) {
 	require.NoError(t, db.Create(bookingLog).Error)
 
 	// Create posting
-	money, _ := domain.NewMoney(decimal.NewFromInt(100), "GBP")
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
@@ -549,7 +558,8 @@ func TestForeignKeyOnDeleteRestrict(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), bookingLogCount, "Booking log should be inserted")
 
-	money, _ := domain.NewMoney(decimal.NewFromInt(100), "GBP")
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
@@ -629,7 +639,11 @@ func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 		financial_booking_log_id UUID NOT NULL,
 		posting_direction VARCHAR(10) NOT NULL,
 		amount_cents BIGINT NOT NULL,
-		currency VARCHAR(3) NOT NULL,
+		currency VARCHAR(32) NOT NULL,
+		dimension_type VARCHAR(20) DEFAULT 'CURRENCY',
+		instrument_version INTEGER DEFAULT 1,
+		instrument_precision INTEGER DEFAULT 2,
+		attributes JSONB DEFAULT '{}',
 		account_id VARCHAR(255) NOT NULL,
 		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
 		posting_result VARCHAR(1000),
@@ -831,8 +845,11 @@ func TestAuditLedgerPostingCreate(t *testing.T) {
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
 		PostingDirection:      "DEBIT",
-		AmountCents:           10050,
+		AmountMinorUnits:      10050,
 		Currency:              "GBP",
+		DimensionType:         "CURRENCY",
+		InstrumentVersion:     1,
+		InstrumentPrecision:   2,
 		AccountID:             "ACC-001",
 		ValueDate:             time.Now(),
 		Status:                "PENDING",
@@ -877,8 +894,11 @@ func TestAuditLedgerPostingUpdate(t *testing.T) {
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
 		PostingDirection:      "DEBIT",
-		AmountCents:           10050,
+		AmountMinorUnits:      10050,
 		Currency:              "GBP",
+		DimensionType:         "CURRENCY",
+		InstrumentVersion:     1,
+		InstrumentPrecision:   2,
 		AccountID:             "ACC-001",
 		ValueDate:             time.Now(),
 		Status:                "PENDING",

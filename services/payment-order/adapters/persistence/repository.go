@@ -397,14 +397,14 @@ func (r *PaymentOrderRepository) Update(ctx context.Context, po *domain.PaymentO
 
 // toEntity converts domain model to database entity
 func toEntity(po *domain.PaymentOrder) *PaymentOrderEntity {
-	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
-	// so overflow (>92 quadrillion cents) cannot occur for valid payment orders
+	// domain.ToMinorUnits safely converts Money to minor units (cents).
+	// The domain layer validates amounts before persistence, ensuring valid values.
 	entity := &PaymentOrderEntity{
 		ID:                    po.ID,
 		DebtorAccountID:       po.DebtorAccountID,
 		CreditorReference:     po.CreditorReference,
-		AmountCents:           po.Amount.ToMinorUnitsUnchecked(),
-		Currency:              string(po.Amount.Currency()),
+		AmountCents:           domain.ToMinorUnits(po.Amount),
+		Currency:              domain.CurrencyCode(po.Amount),
 		Status:                string(po.Status),
 		LienID:                po.LienID,
 		GatewayReferenceID:    po.GatewayReferenceID,

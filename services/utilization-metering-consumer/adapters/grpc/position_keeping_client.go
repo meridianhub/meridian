@@ -177,6 +177,16 @@ func (c *PositionKeepingGRPCClient) RecordMeasurement(ctx context.Context, measu
 }
 
 // buildRecordMeasurementRequest converts a domain Measurement to a proto request.
+//
+// This method maps the auditdomain.Measurement to the RecordMeasurementRequest proto,
+// leveraging the Universal Asset System's typed instrument definitions to provide
+// richer metadata for Position Keeping.
+//
+// The mapping uses:
+//   - AssetCode as measurement_type (e.g., "MERIDIAN-CURRENT-ACCOUNT-OPS")
+//   - Quantity.String() as value (decimal precision preserved)
+//   - Instrument-derived unit from the measurement type attribute
+//   - Instrument metadata for typed quantity reconstruction on Position Keeping side
 func (c *PositionKeepingGRPCClient) buildRecordMeasurementRequest(measurement *auditdomain.Measurement) *positionkeepingv1.RecordMeasurementRequest {
 	// Map measurement fields to proto request
 	// measurement_type is derived from AssetCode (e.g., "MERIDIAN-CURRENT-ACCOUNT-OPS")
@@ -186,11 +196,18 @@ func (c *PositionKeepingGRPCClient) buildRecordMeasurementRequest(measurement *a
 	// Value is the quantity as a decimal string
 	value := measurement.Quantity.String()
 
-	// Unit is derived from the attributes or defaults to "operations"
-	unit := "operations"
-	if unitAttr, ok := measurement.Attributes["unit"]; ok {
-		unit = unitAttr
+	// Get the typed instrument based on the unit attribute.
+	// This provides proper instrument metadata for Position Keeping to reconstruct
+	// typed quantities using the Universal Asset System.
+	unitAttr := "operation" // default unit type
+	if attr, ok := measurement.Attributes["unit"]; ok {
+		unitAttr = attr
 	}
+	instrument := domain.InstrumentForMeasurementType(unitAttr)
+
+	// Use the instrument's dimension as the unit (e.g., "COUNT", "DATA", "COMPUTE")
+	// This is more semantically accurate than the raw unit attribute
+	unit := instrument.Dimension
 
 	// Timestamp from the period start (audit events are point-in-time)
 	timestamp := timestamppb.New(measurement.Period.Start)
@@ -203,6 +220,14 @@ func (c *PositionKeepingGRPCClient) buildRecordMeasurementRequest(measurement *a
 	// Add source info to metadata
 	metadata["source"] = measurement.Source
 	metadata["quality_score"] = fmt.Sprintf("%d", measurement.QualityScore)
+
+	// Add instrument metadata for typed quantity reconstruction.
+	// Position Keeping can use these fields to create properly typed quantities
+	// using the Universal Asset System's InstrumentAmount proto or domain types.
+	metadata["instrument_code"] = instrument.Code
+	metadata["instrument_version"] = fmt.Sprintf("%d", instrument.Version)
+	metadata["instrument_dimension"] = instrument.Dimension
+	metadata["instrument_precision"] = fmt.Sprintf("%d", instrument.Precision)
 
 	// Position state ID is the AccountID (the billing account for this tenant)
 	positionStateID := measurement.AccountID.String()
