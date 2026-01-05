@@ -120,6 +120,15 @@ message InstrumentDefinition {
   // System instruments are read-only (cannot be modified or deleted by tenants).
   // Examples: USD, EUR, GBP - platform-wide instruments available to all tenants.
   bool is_system = 17;
+
+  // successor_id is the UUID of the instrument that replaces this one when deprecated.
+  // This creates a forward lineage chain: when querying a deprecated instrument,
+  // clients can follow successor_id to find the current replacement.
+  // Only set when status is DEPRECATED. Empty string if no successor designated.
+  string successor_id = 18 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
 }
 
 // ========================================
@@ -331,6 +340,15 @@ message DeprecateInstrumentRequest {
 
   // version identifies which version to deprecate.
   int32 version = 2 [(buf.validate.field).int32.gte = 1];
+
+  // successor_id optionally specifies the UUID of the replacement instrument.
+  // When provided, the deprecated instrument will point to this successor,
+  // creating a lineage chain for clients to follow to the current version.
+  // The successor must exist and be in ACTIVE status.
+  string successor_id = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
 }
 
 // DeprecateInstrumentResponse returns the deprecated instrument definition.

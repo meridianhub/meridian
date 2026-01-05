@@ -71,6 +71,10 @@ var (
 
 	// ErrAlreadyExists is returned when creating an instrument with existing code+version.
 	ErrAlreadyExists = errors.New("instrument with this code and version already exists")
+
+	// ErrSuccessorInvalid is returned when the specified successor instrument is invalid.
+	// A valid successor must exist, be in ACTIVE status, have the same dimension, and not be self-referential.
+	ErrSuccessorInvalid = errors.New("successor instrument is invalid: must exist, be ACTIVE, have same dimension, and not be self-referential")
 )
 
 // InstrumentDefinition represents a measurement unit, currency, or asset type
@@ -136,6 +140,12 @@ type InstrumentDefinition struct {
 
 	// DeprecatedAt is when this definition transitioned to DEPRECATED (nil if not deprecated).
 	DeprecatedAt *time.Time
+
+	// SuccessorID is the UUID of the instrument that replaces this one when deprecated.
+	// This creates a forward lineage chain: when querying a deprecated instrument,
+	// clients can follow SuccessorID to find the current replacement.
+	// Only set when Status is DEPRECATED. Nil if no successor designated.
+	SuccessorID *uuid.UUID
 }
 
 // AttributeBag represents the input data for CEL validation.
@@ -201,8 +211,10 @@ type InstrumentRegistry interface {
 	// DeprecateInstrument transitions an instrument from ACTIVE to DEPRECATED.
 	// Returns ErrSystemInstrumentReadOnly if the instrument has is_system=true.
 	// Returns ErrNotActive if not currently in ACTIVE status.
+	// Returns ErrSuccessorInvalid if successorID is provided but refers to an invalid instrument.
 	// Instruments in DEPRECATED status remain valid for existing positions but are not used for new ones.
-	DeprecateInstrument(ctx context.Context, code string, version int) error
+	// The successorID optionally points to the replacement instrument (must be ACTIVE with same dimension).
+	DeprecateInstrument(ctx context.Context, code string, version int, successorID *uuid.UUID) error
 
 	// ValidateAttributes executes the CEL validation expression against the provided attributes.
 	// Returns ValidationResult indicating whether the attributes are valid.

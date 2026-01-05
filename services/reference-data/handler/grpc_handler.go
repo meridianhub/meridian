@@ -214,7 +214,17 @@ func (s *Service) ActivateInstrument(ctx context.Context, req *pb.ActivateInstru
 
 // DeprecateInstrument transitions an instrument from ACTIVE to DEPRECATED.
 func (s *Service) DeprecateInstrument(ctx context.Context, req *pb.DeprecateInstrumentRequest) (*pb.DeprecateInstrumentResponse, error) {
-	if err := s.registry.DeprecateInstrument(ctx, req.Code, int(req.Version)); err != nil {
+	// Parse optional successor_id from request
+	var successorID *uuid.UUID
+	if req.SuccessorId != "" {
+		parsed, err := uuid.Parse(req.SuccessorId)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid successor_id: %v", err)
+		}
+		successorID = &parsed
+	}
+
+	if err := s.registry.DeprecateInstrument(ctx, req.Code, int(req.Version), successorID); err != nil {
 		return nil, s.mapDomainError(err, "DeprecateInstrument", req.Code)
 	}
 
@@ -226,7 +236,8 @@ func (s *Service) DeprecateInstrument(ctx context.Context, req *pb.DeprecateInst
 
 	s.logger.Info("instrument deprecated",
 		"code", req.Code,
-		"version", req.Version)
+		"version", req.Version,
+		"successorId", req.SuccessorId)
 
 	return &pb.DeprecateInstrumentResponse{
 		Instrument: domainToProto(def),
@@ -446,6 +457,12 @@ func (s *Service) mapDomainError(err error, operation, code string) error {
 			"code", code)
 		return status.Errorf(codes.FailedPrecondition, "invalid state transition: %v", err)
 
+	case errors.Is(err, registry.ErrSuccessorInvalid):
+		s.logger.Warn("invalid successor instrument",
+			"operation", operation,
+			"code", code)
+		return status.Errorf(codes.FailedPrecondition, "successor instrument is invalid: must exist, be ACTIVE, and have same dimension")
+
 	default:
 		s.logger.Error("internal error",
 			"operation", operation,
@@ -483,6 +500,9 @@ func domainToProto(def *registry.InstrumentDefinition) *pb.InstrumentDefinition 
 	}
 	if def.DeprecatedAt != nil {
 		proto.DeprecatedAt = timestamppb.New(*def.DeprecatedAt)
+	}
+	if def.SuccessorID != nil {
+		proto.SuccessorId = def.SuccessorID.String()
 	}
 
 	return proto

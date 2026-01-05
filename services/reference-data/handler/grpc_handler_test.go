@@ -154,7 +154,7 @@ func (m *mockRegistry) ActivateInstrument(_ context.Context, code string, versio
 	return nil
 }
 
-func (m *mockRegistry) DeprecateInstrument(_ context.Context, code string, version int) error {
+func (m *mockRegistry) DeprecateInstrument(_ context.Context, code string, version int, successorID *uuid.UUID) error {
 	if m.deprecateErr != nil {
 		return m.deprecateErr
 	}
@@ -172,6 +172,7 @@ func (m *mockRegistry) DeprecateInstrument(_ context.Context, code string, versi
 	now := time.Now()
 	def.DeprecatedAt = &now
 	def.UpdatedAt = now
+	def.SuccessorID = successorID
 	return nil
 }
 
@@ -687,6 +688,7 @@ func TestErrorMapping(t *testing.T) {
 		{"AlreadyExists", registry.ErrAlreadyExists, codes.AlreadyExists},
 		{"OptimisticLock", registry.ErrOptimisticLock, codes.Aborted},
 		{"InvalidStateTransition", registry.ErrInvalidStateTransition, codes.FailedPrecondition},
+		{"SuccessorInvalid", registry.ErrSuccessorInvalid, codes.FailedPrecondition},
 		{"Unknown", errMockUnknown, codes.Internal},
 	}
 

@@ -284,7 +284,7 @@ func TestPostgresRegistry_SystemInstrumentProtection(t *testing.T) {
 	})
 
 	t.Run("DeprecateInstrument rejects system instrument", func(t *testing.T) {
-		err := reg.DeprecateInstrument(ctx, "GBP", 1)
+		err := reg.DeprecateInstrument(ctx, "GBP", 1, nil)
 		require.ErrorIs(t, err, registry.ErrSystemInstrumentReadOnly)
 	})
 
@@ -330,7 +330,7 @@ func TestPostgresRegistry_LifecycleTransitions(t *testing.T) {
 		require.NoError(t, reg.CreateDraft(ctx, def))
 		require.NoError(t, reg.ActivateInstrument(ctx, "LIFECYCLE2", 1))
 
-		err := reg.DeprecateInstrument(ctx, "LIFECYCLE2", 1)
+		err := reg.DeprecateInstrument(ctx, "LIFECYCLE2", 1, nil)
 		require.NoError(t, err)
 
 		// Verify status changed
@@ -363,7 +363,7 @@ func TestPostgresRegistry_LifecycleTransitions(t *testing.T) {
 		}
 		require.NoError(t, reg.CreateDraft(ctx, def))
 
-		err := reg.DeprecateInstrument(ctx, "LIFECYCLE4", 1)
+		err := reg.DeprecateInstrument(ctx, "LIFECYCLE4", 1, nil)
 		require.ErrorIs(t, err, registry.ErrNotActive)
 	})
 }
@@ -641,5 +641,185 @@ func TestPostgresRegistry_ValidateAttributesWithTimestamps(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.False(t, result.Valid)
+	})
+}
+
+func TestPostgresRegistry_DeprecateWithSuccessor(t *testing.T) {
+	reg, pool := setupTestRegistry(t)
+	ctx := setupTenantContext(t, pool, "test-tenant-successor")
+
+	t.Run("deprecate with valid successor succeeds", func(t *testing.T) {
+		// Create and activate the old instrument
+		oldDef := &registry.InstrumentDefinition{
+			Code:      "OLD_V1",
+			Version:   1,
+			Dimension: registry.DimensionMonetary,
+			Precision: 2,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, oldDef))
+		require.NoError(t, reg.ActivateInstrument(ctx, "OLD_V1", 1))
+
+		// Create and activate the successor instrument
+		newDef := &registry.InstrumentDefinition{
+			Code:      "NEW_V2",
+			Version:   1,
+			Dimension: registry.DimensionMonetary, // Same dimension
+			Precision: 2,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, newDef))
+		require.NoError(t, reg.ActivateInstrument(ctx, "NEW_V2", 1))
+
+		// Deprecate old with successor
+		err := reg.DeprecateInstrument(ctx, "OLD_V1", 1, &newDef.ID)
+		require.NoError(t, err)
+
+		// Verify successor was set
+		result, err := reg.GetDefinition(ctx, "OLD_V1", 1)
+		require.NoError(t, err)
+		assert.Equal(t, registry.StatusDeprecated, result.Status)
+		assert.NotNil(t, result.SuccessorID)
+		assert.Equal(t, newDef.ID, *result.SuccessorID)
+	})
+
+	t.Run("deprecate with non-existent successor fails", func(t *testing.T) {
+		def := &registry.InstrumentDefinition{
+			Code:      "NOSUCC",
+			Version:   1,
+			Dimension: registry.DimensionMonetary,
+			Precision: 2,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+		require.NoError(t, reg.ActivateInstrument(ctx, "NOSUCC", 1))
+
+		// Try to deprecate with non-existent successor
+		fakeID := uuid.New()
+		err := reg.DeprecateInstrument(ctx, "NOSUCC", 1, &fakeID)
+		require.ErrorIs(t, err, registry.ErrSuccessorInvalid)
+	})
+
+	t.Run("deprecate with DRAFT successor fails", func(t *testing.T) {
+		def := &registry.InstrumentDefinition{
+			Code:      "DRAFTSUCC1",
+			Version:   1,
+			Dimension: registry.DimensionMonetary,
+			Precision: 2,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+		require.NoError(t, reg.ActivateInstrument(ctx, "DRAFTSUCC1", 1))
+
+		// Create successor but keep in DRAFT
+		successor := &registry.InstrumentDefinition{
+			Code:      "DRAFTSUCC2",
+			Version:   1,
+			Dimension: registry.DimensionMonetary,
+			Precision: 2,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, successor))
+		// NOT activated - still DRAFT
+
+		err := reg.DeprecateInstrument(ctx, "DRAFTSUCC1", 1, &successor.ID)
+		require.ErrorIs(t, err, registry.ErrSuccessorInvalid)
+	})
+
+	t.Run("deprecate with different dimension successor fails", func(t *testing.T) {
+		def := &registry.InstrumentDefinition{
+			Code:      "DIMTEST1",
+			Version:   1,
+			Dimension: registry.DimensionMonetary,
+			Precision: 2,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+		require.NoError(t, reg.ActivateInstrument(ctx, "DIMTEST1", 1))
+
+		// Create successor with different dimension
+		successor := &registry.InstrumentDefinition{
+			Code:      "DIMTEST2",
+			Version:   1,
+			Dimension: registry.DimensionEnergy, // Different dimension!
+			Precision: 3,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, successor))
+		require.NoError(t, reg.ActivateInstrument(ctx, "DIMTEST2", 1))
+
+		err := reg.DeprecateInstrument(ctx, "DIMTEST1", 1, &successor.ID)
+		require.ErrorIs(t, err, registry.ErrSuccessorInvalid)
+	})
+
+	t.Run("deprecate with self as successor fails", func(t *testing.T) {
+		def := &registry.InstrumentDefinition{
+			Code:      "SELFREF",
+			Version:   1,
+			Dimension: registry.DimensionMonetary,
+			Precision: 2,
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+		require.NoError(t, reg.ActivateInstrument(ctx, "SELFREF", 1))
+
+		// Try to set self as successor
+		err := reg.DeprecateInstrument(ctx, "SELFREF", 1, &def.ID)
+		require.ErrorIs(t, err, registry.ErrSuccessorInvalid)
+	})
+}
+
+func TestPostgresRegistry_SuccessorWriteOnce(t *testing.T) {
+	reg, pool := setupTestRegistry(t)
+	ctx := setupTenantContext(t, pool, "test-tenant-writeonce")
+
+	// Create old instrument and two potential successors
+	oldDef := &registry.InstrumentDefinition{
+		Code:      "WRITEONCE_OLD",
+		Version:   1,
+		Dimension: registry.DimensionMonetary,
+		Precision: 2,
+	}
+	require.NoError(t, reg.CreateDraft(ctx, oldDef))
+	require.NoError(t, reg.ActivateInstrument(ctx, "WRITEONCE_OLD", 1))
+
+	successor1 := &registry.InstrumentDefinition{
+		Code:      "WRITEONCE_NEW1",
+		Version:   1,
+		Dimension: registry.DimensionMonetary,
+		Precision: 2,
+	}
+	require.NoError(t, reg.CreateDraft(ctx, successor1))
+	require.NoError(t, reg.ActivateInstrument(ctx, "WRITEONCE_NEW1", 1))
+
+	successor2 := &registry.InstrumentDefinition{
+		Code:      "WRITEONCE_NEW2",
+		Version:   1,
+		Dimension: registry.DimensionMonetary,
+		Precision: 2,
+	}
+	require.NoError(t, reg.CreateDraft(ctx, successor2))
+	require.NoError(t, reg.ActivateInstrument(ctx, "WRITEONCE_NEW2", 1))
+
+	t.Run("cannot change successor_id once set", func(t *testing.T) {
+		// Deprecate with first successor
+		err := reg.DeprecateInstrument(ctx, "WRITEONCE_OLD", 1, &successor1.ID)
+		require.NoError(t, err)
+
+		// Verify successor was set
+		result, err := reg.GetDefinition(ctx, "WRITEONCE_OLD", 1)
+		require.NoError(t, err)
+		assert.Equal(t, successor1.ID, *result.SuccessorID)
+
+		// Try to change successor - this should fail via trigger
+		// We need to attempt an UPDATE directly since the API doesn't expose this
+		// The trigger should reject this attempt
+		tenantID, _ := tenant.FromContext(ctx)
+		schemaName := tenantID.SchemaName()
+
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+
+		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+		require.NoError(t, err)
+
+		_, err = tx.Exec(ctx, `UPDATE instrument_definition SET successor_id = $1 WHERE code = 'WRITEONCE_OLD' AND version = 1`, successor2.ID)
+		// Should fail due to write-once trigger
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "write-once")
+
+		_ = tx.Rollback(ctx)
 	})
 }
