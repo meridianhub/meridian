@@ -5,6 +5,18 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/meridianhub/meridian/pkg/platform/quantity"
+)
+
+// Test instruments for utilization metering - all use COUNT dimension with precision 0.
+var (
+	transactionInstrument, _ = quantity.NewInstrument("TRANSACTION", 1, "COUNT", 0)
+	apiCallInstrument, _     = quantity.NewInstrument("API_CALL", 1, "COUNT", 0)
+	operationInstrument, _   = quantity.NewInstrument("OPERATION", 1, "COUNT", 0)
+	storageGBInstrument, _   = quantity.NewInstrument("STORAGE_GB", 1, "DATA", 2)
+	computeHourInstrument, _ = quantity.NewInstrument("COMPUTE_HOUR", 1, "COMPUTE", 4)
 )
 
 func TestUtilizationMeasurement_Creation(t *testing.T) {
@@ -14,8 +26,7 @@ func TestUtilizationMeasurement_Creation(t *testing.T) {
 		TenantID:      "tenant-123",
 		ServiceName:   "current-account",
 		OperationType: "CreateAccount",
-		Quantity:      1,
-		UnitOfMeasure: "transaction",
+		Amount:        quantity.NewAssetFromInt(1, transactionInstrument),
 		Timestamp:     now,
 		CorrelationID: "corr-456",
 	}
@@ -23,32 +34,32 @@ func TestUtilizationMeasurement_Creation(t *testing.T) {
 	assert.Equal(t, "tenant-123", measurement.TenantID)
 	assert.Equal(t, "current-account", measurement.ServiceName)
 	assert.Equal(t, "CreateAccount", measurement.OperationType)
-	assert.Equal(t, int64(1), measurement.Quantity)
-	assert.Equal(t, "transaction", measurement.UnitOfMeasure)
+	assert.Equal(t, int64(1), measurement.Amount.Amount.IntPart())
+	assert.Equal(t, "TRANSACTION", measurement.Amount.Instrument.Code)
 	assert.Equal(t, now, measurement.Timestamp)
 	assert.Equal(t, "corr-456", measurement.CorrelationID)
 }
 
 func TestUtilizationMeasurement_DifferentQuantities(t *testing.T) {
 	tests := []struct {
-		name     string
-		quantity int64
+		name   string
+		amount int64
 	}{
 		{
-			name:     "single transaction",
-			quantity: 1,
+			name:   "single transaction",
+			amount: 1,
 		},
 		{
-			name:     "batch of 10 operations",
-			quantity: 10,
+			name:   "batch of 10 operations",
+			amount: 10,
 		},
 		{
-			name:     "large batch",
-			quantity: 1000,
+			name:   "large batch",
+			amount: 1000,
 		},
 		{
-			name:     "zero quantity (edge case)",
-			quantity: 0,
+			name:   "zero quantity (edge case)",
+			amount: 0,
 		},
 	}
 
@@ -58,53 +69,52 @@ func TestUtilizationMeasurement_DifferentQuantities(t *testing.T) {
 				TenantID:      "tenant-test",
 				ServiceName:   "test-service",
 				OperationType: "TestOperation",
-				Quantity:      tt.quantity,
-				UnitOfMeasure: "operation",
+				Amount:        quantity.NewAssetFromInt(tt.amount, operationInstrument),
 				Timestamp:     time.Now(),
 				CorrelationID: "test-corr",
 			}
 
-			assert.Equal(t, tt.quantity, measurement.Quantity)
+			assert.Equal(t, tt.amount, measurement.Amount.Amount.IntPart())
 		})
 	}
 }
 
-func TestUtilizationMeasurement_DifferentUnitsOfMeasure(t *testing.T) {
+func TestUtilizationMeasurement_DifferentInstrumentTypes(t *testing.T) {
 	tests := []struct {
-		name          string
-		unitOfMeasure string
-		quantity      int64
-		description   string
+		name        string
+		instrument  quantity.Instrument
+		amount      int64
+		description string
 	}{
 		{
-			name:          "transaction count",
-			unitOfMeasure: "transaction",
-			quantity:      1,
-			description:   "Single transaction",
+			name:        "transaction count",
+			instrument:  transactionInstrument,
+			amount:      1,
+			description: "Single transaction",
 		},
 		{
-			name:          "API call count",
-			unitOfMeasure: "api_call",
-			quantity:      5,
-			description:   "Multiple API calls",
+			name:        "API call count",
+			instrument:  apiCallInstrument,
+			amount:      5,
+			description: "Multiple API calls",
 		},
 		{
-			name:          "storage in gigabytes",
-			unitOfMeasure: "storage_gb",
-			quantity:      100,
-			description:   "Storage usage",
+			name:        "storage in gigabytes",
+			instrument:  storageGBInstrument,
+			amount:      100,
+			description: "Storage usage",
 		},
 		{
-			name:          "compute hours",
-			unitOfMeasure: "compute_hours",
-			quantity:      24,
-			description:   "Compute resource usage",
+			name:        "compute hours",
+			instrument:  computeHourInstrument,
+			amount:      24,
+			description: "Compute resource usage",
 		},
 		{
-			name:          "operation count",
-			unitOfMeasure: "operation",
-			quantity:      1,
-			description:   "Generic operation",
+			name:        "operation count",
+			instrument:  operationInstrument,
+			amount:      1,
+			description: "Generic operation",
 		},
 	}
 
@@ -114,14 +124,13 @@ func TestUtilizationMeasurement_DifferentUnitsOfMeasure(t *testing.T) {
 				TenantID:      "tenant-test",
 				ServiceName:   "test-service",
 				OperationType: "TestOperation",
-				Quantity:      tt.quantity,
-				UnitOfMeasure: tt.unitOfMeasure,
+				Amount:        quantity.NewAssetFromInt(tt.amount, tt.instrument),
 				Timestamp:     time.Now(),
 				CorrelationID: "test-corr",
 			}
 
-			assert.Equal(t, tt.unitOfMeasure, measurement.UnitOfMeasure)
-			assert.Equal(t, tt.quantity, measurement.Quantity)
+			assert.Equal(t, tt.instrument.Code, measurement.Amount.Instrument.Code)
+			assert.Equal(t, tt.amount, measurement.Amount.Amount.IntPart())
 		})
 	}
 }
@@ -142,8 +151,7 @@ func TestUtilizationMeasurement_AllServiceTypes(t *testing.T) {
 				TenantID:      "tenant-test",
 				ServiceName:   service,
 				OperationType: "TestOperation",
-				Quantity:      1,
-				UnitOfMeasure: "operation",
+				Amount:        quantity.NewAssetFromInt(1, operationInstrument),
 				Timestamp:     time.Now(),
 				CorrelationID: "test-corr",
 			}
@@ -186,8 +194,7 @@ func TestUtilizationMeasurement_OperationTypes(t *testing.T) {
 				TenantID:      "tenant-test",
 				ServiceName:   "test-service",
 				OperationType: tt.operationType,
-				Quantity:      1,
-				UnitOfMeasure: "operation",
+				Amount:        quantity.NewAssetFromInt(1, operationInstrument),
 				Timestamp:     time.Now(),
 				CorrelationID: "test-corr",
 			}
@@ -230,8 +237,7 @@ func TestUtilizationMeasurement_TenantIDs(t *testing.T) {
 				TenantID:      tt.tenantID,
 				ServiceName:   "test-service",
 				OperationType: "TestOperation",
-				Quantity:      1,
-				UnitOfMeasure: "operation",
+				Amount:        quantity.NewAssetFromInt(1, operationInstrument),
 				Timestamp:     time.Now(),
 				CorrelationID: "test-corr",
 			}
@@ -248,8 +254,7 @@ func TestUtilizationMeasurement_TimestampPrecision(t *testing.T) {
 		TenantID:      "tenant-test",
 		ServiceName:   "test-service",
 		OperationType: "TestOperation",
-		Quantity:      1,
-		UnitOfMeasure: "operation",
+		Amount:        quantity.NewAssetFromInt(1, operationInstrument),
 		Timestamp:     now,
 		CorrelationID: "test-corr",
 	}
@@ -259,6 +264,22 @@ func TestUtilizationMeasurement_TimestampPrecision(t *testing.T) {
 	assert.Equal(t, now.UnixNano(), measurement.Timestamp.UnixNano())
 }
 
+func TestUtilizationMeasurement_ZeroValueAmount(t *testing.T) {
+	// Test that measurements can be created with zero-valued quantity
+	// This might happen during testing or edge cases
+	measurement := &UtilizationMeasurement{
+		TenantID:      "tenant-test",
+		ServiceName:   "test-service",
+		OperationType: "TestOperation",
+		Amount:        quantity.ZeroAsset(operationInstrument),
+		Timestamp:     time.Now(),
+		CorrelationID: "test-corr",
+	}
+
+	assert.True(t, measurement.Amount.IsZero())
+	assert.Equal(t, "OPERATION", measurement.Amount.Instrument.Code)
+}
+
 func TestUtilizationMeasurement_EmptyFields(t *testing.T) {
 	// Test that measurements can be created with empty/zero values
 	// This might happen during testing or error scenarios
@@ -266,8 +287,7 @@ func TestUtilizationMeasurement_EmptyFields(t *testing.T) {
 		TenantID:      "",
 		ServiceName:   "",
 		OperationType: "",
-		Quantity:      0,
-		UnitOfMeasure: "",
+		Amount:        quantity.Asset{}, // zero-value Asset
 		Timestamp:     time.Time{},
 		CorrelationID: "",
 	}
@@ -275,8 +295,7 @@ func TestUtilizationMeasurement_EmptyFields(t *testing.T) {
 	assert.Equal(t, "", measurement.TenantID)
 	assert.Equal(t, "", measurement.ServiceName)
 	assert.Equal(t, "", measurement.OperationType)
-	assert.Equal(t, int64(0), measurement.Quantity)
-	assert.Equal(t, "", measurement.UnitOfMeasure)
+	assert.True(t, measurement.Amount.IsZero())
 	assert.True(t, measurement.Timestamp.IsZero())
 	assert.Equal(t, "", measurement.CorrelationID)
 }
@@ -310,8 +329,7 @@ func TestUtilizationMeasurement_CorrelationIDFormats(t *testing.T) {
 				TenantID:      "tenant-test",
 				ServiceName:   "test-service",
 				OperationType: "TestOperation",
-				Quantity:      1,
-				UnitOfMeasure: "operation",
+				Amount:        quantity.NewAssetFromInt(1, operationInstrument),
 				Timestamp:     time.Now(),
 				CorrelationID: tt.correlationID,
 			}
@@ -319,4 +337,75 @@ func TestUtilizationMeasurement_CorrelationIDFormats(t *testing.T) {
 			assert.Equal(t, tt.correlationID, measurement.CorrelationID)
 		})
 	}
+}
+
+// =============================================================================
+// Quantity operations tests - verifying the Universal Asset System integration
+// =============================================================================
+
+func TestUtilizationMeasurement_QuantityOperations_Addition(t *testing.T) {
+	// Test that quantities from the same instrument can be added
+	amount1 := quantity.NewAssetFromInt(5, transactionInstrument)
+	amount2 := quantity.NewAssetFromInt(3, transactionInstrument)
+
+	result, err := amount1.Add(amount2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(8), result.Amount.IntPart())
+	assert.Equal(t, "TRANSACTION", result.Instrument.Code)
+}
+
+func TestUtilizationMeasurement_QuantityOperations_Comparison(t *testing.T) {
+	// Test that quantities from the same instrument can be compared
+	amount1 := quantity.NewAssetFromInt(5, transactionInstrument)
+	amount2 := quantity.NewAssetFromInt(10, transactionInstrument)
+
+	cmp, err := amount1.Compare(amount2)
+	require.NoError(t, err)
+	assert.Equal(t, -1, cmp) // amount1 < amount2
+
+	lt, err := amount1.LessThan(amount2)
+	require.NoError(t, err)
+	assert.True(t, lt)
+}
+
+func TestUtilizationMeasurement_QuantityOperations_DifferentInstrumentsFail(t *testing.T) {
+	// Test that quantities from different instruments cannot be combined
+	transactionAmount := quantity.NewAssetFromInt(5, transactionInstrument)
+	apiCallAmount := quantity.NewAssetFromInt(3, apiCallInstrument)
+
+	_, err := transactionAmount.Add(apiCallAmount)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, quantity.ErrInstrumentMismatch)
+}
+
+func TestUtilizationMeasurement_QuantityString(t *testing.T) {
+	// Test the string representation of utilization quantities
+	amount := quantity.NewAssetFromInt(42, transactionInstrument)
+	assert.Equal(t, "42 TRANSACTION", amount.String())
+
+	storageAmount := quantity.NewAssetFromInt(100, storageGBInstrument)
+	assert.Equal(t, "100.00 STORAGE_GB", storageAmount.String())
+}
+
+func TestUtilizationMeasurement_InstrumentDimension(t *testing.T) {
+	// Verify the instrument dimension is correctly set for utilization types
+	assert.Equal(t, "COUNT", transactionInstrument.Dimension)
+	assert.Equal(t, "COUNT", apiCallInstrument.Dimension)
+	assert.Equal(t, "COUNT", operationInstrument.Dimension)
+	assert.Equal(t, "DATA", storageGBInstrument.Dimension)
+	assert.Equal(t, "COMPUTE", computeHourInstrument.Dimension)
+
+	// All should be commodities, not currencies
+	assert.True(t, transactionInstrument.IsCommodity())
+	assert.True(t, apiCallInstrument.IsCommodity())
+	assert.True(t, storageGBInstrument.IsCommodity())
+	assert.False(t, transactionInstrument.IsMonetary())
+}
+
+func TestUtilizationMeasurement_InstrumentPrecision(t *testing.T) {
+	// Verify precision for different utilization types
+	assert.Equal(t, 0, transactionInstrument.Precision) // Whole transactions
+	assert.Equal(t, 0, apiCallInstrument.Precision)     // Whole API calls
+	assert.Equal(t, 2, storageGBInstrument.Precision)   // Two decimal places for storage
+	assert.Equal(t, 4, computeHourInstrument.Precision) // Four decimal places for compute time
 }
