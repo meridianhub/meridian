@@ -125,16 +125,18 @@ func NewProgressTracker(config ProgressTrackerConfig) *ProgressTracker {
 // Should be called once before any batch processing.
 func (pt *ProgressTracker) Start(_ context.Context, message string) {
 	pt.mu.Lock()
-	defer pt.mu.Unlock()
-
 	pt.startTime = time.Now()
 	pt.started = true
+	startTime := pt.startTime
+	totalExpected := pt.totalExpected
+	pt.mu.Unlock()
 
+	// Emit outside lock to avoid deadlock if callback accesses progress state
 	pt.emit(ProgressEvent{
 		Type:          ProgressEventStarted,
-		TotalExpected: pt.totalExpected,
+		TotalExpected: totalExpected,
 		Message:       message,
-		Timestamp:     pt.startTime,
+		Timestamp:     startTime,
 	})
 }
 
@@ -142,18 +144,22 @@ func (pt *ProgressTracker) Start(_ context.Context, message string) {
 // Should be called after each batch is successfully processed.
 func (pt *ProgressTracker) BatchComplete(_ context.Context, positionsInBatch int, message string) {
 	pt.mu.Lock()
-	defer pt.mu.Unlock()
-
 	pt.batchCount++
 	pt.totalProcessed += positionsInBatch
+	batchCount := pt.batchCount
+	totalProcessed := pt.totalProcessed
+	totalExpected := pt.totalExpected
+	duration := time.Since(pt.startTime)
+	pt.mu.Unlock()
 
+	// Emit outside lock to avoid deadlock if callback accesses progress state
 	pt.emit(ProgressEvent{
 		Type:             ProgressEventBatchComplete,
-		BatchNumber:      pt.batchCount,
+		BatchNumber:      batchCount,
 		PositionsInBatch: positionsInBatch,
-		TotalProcessed:   pt.totalProcessed,
-		TotalExpected:    pt.totalExpected,
-		Duration:         time.Since(pt.startTime),
+		TotalProcessed:   totalProcessed,
+		TotalExpected:    totalExpected,
+		Duration:         duration,
 		Message:          message,
 		Timestamp:        time.Now(),
 	})
@@ -163,16 +169,20 @@ func (pt *ProgressTracker) BatchComplete(_ context.Context, positionsInBatch int
 // The operation may continue after an error depending on the caller's policy.
 func (pt *ProgressTracker) Error(_ context.Context, err error, message string) {
 	pt.mu.Lock()
-	defer pt.mu.Unlock()
-
 	pt.lastError = err
+	batchNumber := pt.batchCount + 1 // The failing batch
+	totalProcessed := pt.totalProcessed
+	totalExpected := pt.totalExpected
+	duration := time.Since(pt.startTime)
+	pt.mu.Unlock()
 
+	// Emit outside lock to avoid deadlock if callback accesses progress state
 	pt.emit(ProgressEvent{
 		Type:           ProgressEventError,
-		BatchNumber:    pt.batchCount + 1, // The failing batch
-		TotalProcessed: pt.totalProcessed,
-		TotalExpected:  pt.totalExpected,
-		Duration:       time.Since(pt.startTime),
+		BatchNumber:    batchNumber,
+		TotalProcessed: totalProcessed,
+		TotalExpected:  totalExpected,
+		Duration:       duration,
 		Message:        message,
 		Error:          err,
 		Timestamp:      time.Now(),
@@ -183,35 +193,47 @@ func (pt *ProgressTracker) Error(_ context.Context, err error, message string) {
 // Should be called once after all processing is done.
 func (pt *ProgressTracker) Complete(_ context.Context, message string) {
 	pt.mu.Lock()
-	defer pt.mu.Unlock()
-
 	pt.completed = true
+	batchCount := pt.batchCount
+	totalProcessed := pt.totalProcessed
+	totalExpected := pt.totalExpected
+	duration := time.Since(pt.startTime)
+	pt.mu.Unlock()
 
+	// Emit outside lock to avoid deadlock if callback accesses progress state
 	pt.emit(ProgressEvent{
 		Type:           ProgressEventComplete,
-		BatchNumber:    pt.batchCount,
-		TotalProcessed: pt.totalProcessed,
-		TotalExpected:  pt.totalExpected,
-		Duration:       time.Since(pt.startTime),
+		BatchNumber:    batchCount,
+		TotalProcessed: totalProcessed,
+		TotalExpected:  totalExpected,
+		Duration:       duration,
 		Message:        message,
 		Timestamp:      time.Now(),
 	})
 }
 
 // emit sends a progress event to configured listeners.
+// Note: This method expects the caller to NOT hold the mutex, as it may call
+// external callbacks that could deadlock if they try to access progress state.
 func (pt *ProgressTracker) emit(event ProgressEvent) {
-	// Send to channel if configured
-	if pt.eventChan != nil {
+	// Capture callback references while holding lock briefly
+	pt.mu.RLock()
+	eventChan := pt.eventChan
+	onProgress := pt.onProgress
+	pt.mu.RUnlock()
+
+	// Send to channel if configured (outside lock)
+	if eventChan != nil {
 		select {
-		case pt.eventChan <- event:
+		case eventChan <- event:
 		default:
 			// Channel is full or closed - skip to avoid blocking
 		}
 	}
 
-	// Call callback if configured
-	if pt.onProgress != nil {
-		pt.onProgress(event)
+	// Call callback if configured (outside lock)
+	if onProgress != nil {
+		onProgress(event)
 	}
 }
 

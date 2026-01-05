@@ -209,16 +209,28 @@ func (m *PostgresManager) StartImport(ctx context.Context, tenantID, sourceFile 
 		UpdatedAt:    time.Now(),
 	}
 
-	// Insert into database
+	// Insert into database. Use ON CONFLICT to handle re-import of failed/cancelled imports.
+	// The unique constraint is on (tenant_id, source_file, file_checksum).
 	query := `
 		INSERT INTO import_manifest (
 			id, tenant_id, source_file, file_checksum,
 			total_rows, processed_rows, success_count, failure_count,
 			status, rollback_sql, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		ON CONFLICT (tenant_id, source_file, file_checksum)
+		WHERE status IN ('FAILED', 'CANCELLED')
+		DO UPDATE SET
+			status = EXCLUDED.status,
+			processed_rows = EXCLUDED.processed_rows,
+			success_count = EXCLUDED.success_count,
+			failure_count = EXCLUDED.failure_count,
+			rollback_sql = EXCLUDED.rollback_sql,
+			updated_at = EXCLUDED.updated_at
+		RETURNING id
 	`
 
-	_, err = m.pool.Exec(ctx, query,
+	var returnedID uuid.UUID
+	err = m.pool.QueryRow(ctx, query,
 		checkpoint.ManifestID,
 		checkpoint.TenantID,
 		checkpoint.SourceFile,
@@ -231,10 +243,13 @@ func (m *PostgresManager) StartImport(ctx context.Context, tenantID, sourceFile 
 		nil, // rollback_sql initially empty
 		checkpoint.CreatedAt,
 		checkpoint.UpdatedAt,
-	)
+	).Scan(&returnedID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create checkpoint: %w", err)
 	}
+
+	// Update checkpoint ID if we reused an existing row
+	checkpoint.ManifestID = returnedID
 
 	return checkpoint, nil
 }
@@ -398,8 +413,15 @@ func (m *PostgresManager) Resume(ctx context.Context, tenantID, sourceFile strin
 			ErrChecksumMismatch, checkpoint.FileChecksum, checksum)
 	}
 
-	// Reset status to running for resumption
+	// Reset status to running for resumption and persist the change
 	checkpoint.Status = StatusRunning
+	_, err = m.pool.Exec(ctx, `
+		UPDATE import_manifest SET status = $2, updated_at = NOW()
+		WHERE id = $1
+	`, checkpoint.ManifestID, string(StatusRunning))
+	if err != nil {
+		return nil, fmt.Errorf("failed to update checkpoint status for resumption: %w", err)
+	}
 
 	return checkpoint, nil
 }

@@ -151,11 +151,24 @@ func (dc *DuplicateChecker) CheckBatch(ctx context.Context, rows []ImportRow) (m
 	var potentialDBDuplicates []string
 	potentialDBRowMap := make(map[string]int) // measurementID -> lineNumber
 
+	// Track within-batch entries that have been seen but not yet confirmed
+	batchSeen := make(map[string]int)
+
 	for _, row := range rows {
 		result := &CheckResult{}
 
-		// Check for within-file duplicates first
+		// Check for within-file duplicates first (from previous batches)
 		if existingLine, exists := dc.seen[row.MeasurementID]; exists {
+			dc.withinFileDupes++
+			dc.truePositives++
+			result.IsDuplicate = true
+			result.ExistingLineNumber = existingLine
+			results[row.LineNumber] = result
+			continue
+		}
+
+		// Check for within-batch duplicates (current batch)
+		if existingLine, exists := batchSeen[row.MeasurementID]; exists {
 			dc.withinFileDupes++
 			dc.truePositives++
 			result.IsDuplicate = true
@@ -178,6 +191,9 @@ func (dc *DuplicateChecker) CheckBatch(ctx context.Context, rows []ImportRow) (m
 			dc.filter.Add([]byte(row.MeasurementID))
 			dc.seen[row.MeasurementID] = row.LineNumber
 		}
+
+		// Track in batch to catch duplicates within this batch
+		batchSeen[row.MeasurementID] = row.LineNumber
 	}
 
 	// Batch database lookup for potential duplicates

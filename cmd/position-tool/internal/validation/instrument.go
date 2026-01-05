@@ -89,9 +89,10 @@ type InstrumentChecker struct {
 	createMissing bool
 
 	// cache stores instrument definitions keyed by "code:version"
-	cache    map[string]*CachedInstrument
-	cacheTTL time.Duration
-	mu       sync.RWMutex
+	cache     map[string]*CachedInstrument
+	cacheSize int
+	cacheTTL  time.Duration
+	mu        sync.RWMutex
 
 	// Stats
 	cacheHits   int64
@@ -115,6 +116,7 @@ func NewInstrumentChecker(ctx context.Context, cfg InstrumentCheckerConfig) (*In
 		logger:        cfg.Logger,
 		createMissing: cfg.CreateMissingInstruments,
 		cache:         make(map[string]*CachedInstrument),
+		cacheSize:     cfg.CacheSize,
 		cacheTTL:      cfg.CacheTTL,
 	}, nil
 }
@@ -193,11 +195,11 @@ func (ic *InstrumentChecker) Check(ctx context.Context, code string, version int
 	}
 	atomic.AddInt64(&ic.cacheMisses, 1)
 
-	// Fetch from service
-	ctx, cancel := context.WithTimeout(ctx, ic.timeout)
+	// Fetch from service with timeout
+	rpcCtx, cancel := context.WithTimeout(ctx, ic.timeout)
 	defer cancel()
 
-	resp, err := ic.client.RetrieveInstrument(ctx, &referencedatav1.RetrieveInstrumentRequest{
+	resp, err := ic.client.RetrieveInstrument(rpcCtx, &referencedatav1.RetrieveInstrumentRequest{
 		Code:    code,
 		Version: int32(version),
 	})
@@ -205,6 +207,7 @@ func (ic *InstrumentChecker) Check(ctx context.Context, code string, version int
 		st, ok := status.FromError(err)
 		if ok && st.Code() == codes.NotFound {
 			// Instrument not found - optionally create it
+			// Use original context for creation to get fresh timeout
 			if ic.createMissing {
 				return ic.createInstrument(ctx, code)
 			}
@@ -230,8 +233,12 @@ func (ic *InstrumentChecker) createInstrument(ctx context.Context, code string) 
 		"status", "DRAFT",
 	)
 
+	// Apply fresh timeout for creation
+	rpcCtx, cancel := context.WithTimeout(ctx, ic.timeout)
+	defer cancel()
+
 	// Create with minimal required fields - dimension defaults to QUANTITY
-	resp, err := ic.client.RegisterInstrument(ctx, &referencedatav1.RegisterInstrumentRequest{
+	resp, err := ic.client.RegisterInstrument(rpcCtx, &referencedatav1.RegisterInstrumentRequest{
 		Code:        code,
 		Dimension:   referencedatav1.Dimension_DIMENSION_COUNT,
 		Precision:   2, // Default precision
@@ -268,12 +275,12 @@ func (ic *InstrumentChecker) CheckBatch(ctx context.Context, codes []string, ver
 				Definition: cached.Definition,
 			}
 		} else {
-			atomic.AddInt64(&ic.cacheMisses, 1)
+			// Note: Don't increment cacheMisses here - Check() will do it
 			uncached = append(uncached, code)
 		}
 	}
 
-	// Fetch uncached instruments
+	// Fetch uncached instruments (Check() handles cacheMisses counter)
 	for _, code := range uncached {
 		result, err := ic.Check(ctx, code, version)
 		if err != nil {
@@ -336,14 +343,56 @@ func (ic *InstrumentChecker) getFromCache(code string, version int) *CachedInstr
 }
 
 // addToCache adds an instrument to the cache.
+// If the cache is at capacity, expired entries are evicted first.
+// If still at capacity, the oldest entry is evicted.
 func (ic *InstrumentChecker) addToCache(code string, version int, def *referencedatav1.InstrumentDefinition) {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
 
 	key := cacheKey(code, version)
+
+	// If cache is at capacity, evict entries
+	if ic.cacheSize > 0 && len(ic.cache) >= ic.cacheSize {
+		ic.evictExpiredLocked()
+
+		// If still at capacity, evict the oldest entry
+		if len(ic.cache) >= ic.cacheSize {
+			ic.evictOldestLocked()
+		}
+	}
+
 	ic.cache[key] = &CachedInstrument{
 		Definition: def,
 		CachedAt:   time.Now(),
+	}
+}
+
+// evictExpiredLocked removes all expired entries from the cache.
+// Caller must hold the write lock.
+func (ic *InstrumentChecker) evictExpiredLocked() {
+	now := time.Now()
+	for key, cached := range ic.cache {
+		if now.Sub(cached.CachedAt) > ic.cacheTTL {
+			delete(ic.cache, key)
+		}
+	}
+}
+
+// evictOldestLocked removes the oldest entry from the cache.
+// Caller must hold the write lock.
+func (ic *InstrumentChecker) evictOldestLocked() {
+	var oldestKey string
+	var oldestTime time.Time
+
+	for key, cached := range ic.cache {
+		if oldestKey == "" || cached.CachedAt.Before(oldestTime) {
+			oldestKey = key
+			oldestTime = cached.CachedAt
+		}
+	}
+
+	if oldestKey != "" {
+		delete(ic.cache, oldestKey)
 	}
 }
 

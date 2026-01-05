@@ -289,7 +289,8 @@ func (e *Exporter) countPositions(ctx context.Context, opts ExportOptions) (int6
 }
 
 // discoverAttributeKeys samples positions to find all unique attribute keys.
-func (e *Exporter) discoverAttributeKeys(ctx context.Context, _ ExportOptions) ([]string, error) {
+// It respects the same filters as the export to ensure attribute columns match the exported data.
+func (e *Exporter) discoverAttributeKeys(ctx context.Context, opts ExportOptions) ([]string, error) {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -300,8 +301,7 @@ func (e *Exporter) discoverAttributeKeys(ctx context.Context, _ ExportOptions) (
 		return nil, err
 	}
 
-	// Query distinct JSONB keys from attributes column
-	// This samples the first 1000 rows to discover keys efficiently
+	// Build query with same filters as export to discover only relevant attribute keys
 	query := `
 		SELECT DISTINCT jsonb_object_keys(attributes)
 		FROM (
@@ -309,11 +309,37 @@ func (e *Exporter) discoverAttributeKeys(ctx context.Context, _ ExportOptions) (
 			FROM position
 			WHERE deleted_at IS NULL
 				AND attributes IS NOT NULL
-				AND attributes != '{}'::jsonb
-			LIMIT 1000
-		) subq`
+				AND attributes != '{}'::jsonb`
 
-	rows, err := tx.Query(ctx, query)
+	var args []any
+	argNum := 1
+
+	if opts.InstrumentCode != "" {
+		query += fmt.Sprintf(" AND instrument_code = $%d", argNum)
+		args = append(args, opts.InstrumentCode)
+		argNum++
+	}
+
+	if opts.AccountID != "" {
+		query += fmt.Sprintf(" AND account_id = $%d", argNum)
+		args = append(args, opts.AccountID)
+		argNum++
+	}
+
+	if opts.FromTime != nil {
+		query += fmt.Sprintf(" AND created_at >= $%d", argNum)
+		args = append(args, *opts.FromTime)
+		argNum++
+	}
+
+	if opts.ToTime != nil {
+		query += fmt.Sprintf(" AND created_at <= $%d", argNum)
+		args = append(args, *opts.ToTime)
+	}
+
+	query += " LIMIT 1000) subq"
+
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying attribute keys: %w", err)
 	}

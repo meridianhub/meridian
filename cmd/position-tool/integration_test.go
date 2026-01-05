@@ -236,24 +236,10 @@ func runMigrations(t *testing.T, pool *pgxpool.Pool) {
 func getTestdataPath(t *testing.T, filename string) string {
 	t.Helper()
 
-	// Get the directory of the test file
-	_, thisFile, _, ok := getCallerInfo()
-	if !ok {
-		// Fallback: use relative path from current working directory
-		cwd, err := os.Getwd()
-		require.NoError(t, err)
-		return filepath.Join(cwd, "cmd", "position-tool", "testdata", filename)
-	}
-
-	return filepath.Join(filepath.Dir(thisFile), "testdata", filename)
-}
-
-// getCallerInfo is a helper to get caller information.
-// Returns empty if not available (for fallback handling).
-func getCallerInfo() (pc uintptr, file string, line int, ok bool) {
-	// Try to find the test file in the call stack
-	// This is a simplified version - in real code you'd use runtime.Caller
-	return 0, "", 0, false
+	// Use relative path from current working directory
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	return filepath.Join(cwd, "cmd", "position-tool", "testdata", filename)
 }
 
 // computeFileChecksum calculates SHA256 checksum of a file.

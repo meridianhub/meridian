@@ -230,6 +230,10 @@ func isValidDecimalString(s string) bool {
 
 // truncateForDisplay truncates a string for display in error messages.
 func truncateForDisplay(s string, maxLen int) string {
+	if maxLen < 4 {
+		// Minimum length needed for truncation with "..."
+		maxLen = 4
+	}
 	if len(s) <= maxLen {
 		return s
 	}
