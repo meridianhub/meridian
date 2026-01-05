@@ -453,6 +453,16 @@ func (m *PostgresManager) ResumeByID(ctx context.Context, manifestID uuid.UUID) 
 			ErrChecksumMismatch, checkpoint.FileChecksum, checksum)
 	}
 
+	// Reset status to running for resumption and persist the change
+	checkpoint.Status = StatusRunning
+	_, err = m.pool.Exec(ctx, `
+		UPDATE import_manifest SET status = $2, updated_at = NOW()
+		WHERE id = $1
+	`, checkpoint.ManifestID, string(StatusRunning))
+	if err != nil {
+		return nil, fmt.Errorf("failed to update checkpoint status for resumption: %w", err)
+	}
+
 	return checkpoint, nil
 }
 

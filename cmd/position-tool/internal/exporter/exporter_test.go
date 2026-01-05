@@ -254,17 +254,17 @@ func TestCSVWriter_HeaderCount(t *testing.T) {
 		{
 			name:          "no attributes",
 			attributeKeys: nil,
-			expectedCount: 7, // fixed columns only
+			expectedCount: 6, // 6 fixed columns only (bucket_key excluded)
 		},
 		{
 			name:          "one attribute",
 			attributeKeys: []string{"zone"},
-			expectedCount: 8,
+			expectedCount: 7,
 		},
 		{
 			name:          "multiple attributes",
 			attributeKeys: []string{"zone", "source", "category"},
-			expectedCount: 10,
+			expectedCount: 9,
 		},
 	}
 

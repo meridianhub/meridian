@@ -203,7 +203,7 @@ func (w *CSVWriter) BytesWritten() int64 {
 
 // HeaderCount returns the number of columns in the CSV.
 func (w *CSVWriter) HeaderCount() int {
-	return 7 + len(w.attributeKeys) // 7 fixed columns + attribute columns
+	return 6 + len(w.attributeKeys) // 6 fixed columns + attribute columns
 }
 
 // AttributeKeys returns the sorted list of attribute keys used as columns.
