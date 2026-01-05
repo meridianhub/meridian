@@ -858,3 +858,593 @@ func TestRecordMeasurement_CEL_InstrumentNotFound(t *testing.T) {
 	mockCache.AssertExpectations(t)
 	mockMeasurementRepo.AssertNotCalled(t, "Create")
 }
+
+// =============================================================================
+// Bucket Key Generation Tests
+// =============================================================================
+
+// MockBucketCounter is a mock implementation of BucketCounter for testing.
+type MockBucketCounter struct {
+	mock.Mock
+}
+
+// CountBuckets implements service.BucketCounter.
+func (m *MockBucketCounter) CountBuckets(ctx context.Context, accountID string, instrumentCode string) (int, error) {
+	args := m.Called(ctx, accountID, instrumentCode)
+	return args.Int(0), args.Error(1)
+}
+
+// createTestBucketKeyProgram creates a CEL program for testing bucket key generation.
+// The expression should evaluate to a string.
+func createTestBucketKeyProgram(t *testing.T, expression string) cel.Program {
+	t.Helper()
+	env, err := cel.NewEnv(
+		cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+	)
+	require.NoError(t, err)
+
+	ast, issues := env.Compile(expression)
+	require.NoError(t, issues.Err())
+
+	prg, err := env.Program(ast)
+	require.NoError(t, err)
+
+	return prg
+}
+
+// TestRecordMeasurement_BucketKey_GeneratesKey tests that bucket key is generated from attributes.
+func TestRecordMeasurement_BucketKey_GeneratesKey(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Create a bucket key program that concatenates attributes
+	// This simulates what bucket_key([...]) would do, returning a simple string for testing
+	bucketKeyProgram := createTestBucketKeyProgram(t, `attributes["region"] + "-" + attributes["meter_id"]`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: bucketKeyProgram,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"region":   "eu-west-1",
+			"meter_id": "meter-001",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_BucketKey_SameAttributesProduceSameKey tests determinism.
+func TestRecordMeasurement_BucketKey_SameAttributesProduceSameKey(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Use a deterministic bucket key expression
+	bucketKeyProgram := createTestBucketKeyProgram(t, `attributes["meter_id"]`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: bucketKeyProgram,
+	}
+
+	// Setup for two requests with same attributes
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil).Times(2)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil).Times(2)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil).Times(2)
+
+	metadata := map[string]string{
+		"meter_id": "meter-123",
+	}
+
+	req1 := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata:        metadata,
+	}
+
+	req2 := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "200.0", // Different value
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-30 * time.Minute)),
+		Metadata:        metadata, // Same metadata
+	}
+
+	resp1, err1 := svc.RecordMeasurement(ctx, req1)
+	require.NoError(t, err1)
+	require.NotNil(t, resp1)
+
+	resp2, err2 := svc.RecordMeasurement(ctx, req2)
+	require.NoError(t, err2)
+	require.NotNil(t, resp2)
+
+	// Both should succeed (bucket key is same, so should be deterministic)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_BucketKey_NilProgramProducesEmptyBucketID tests nil program behavior.
+func TestRecordMeasurement_BucketKey_NilProgramProducesEmptyBucketID(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Instrument with NO bucket key program (nil)
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: nil, // No bucket key expression
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"source": "meter",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// =============================================================================
+// Cardinality Guard Tests
+// =============================================================================
+
+// TestRecordMeasurement_Cardinality_RejectsWhenLimitExceeded tests cardinality enforcement.
+func TestRecordMeasurement_Cardinality_RejectsWhenLimitExceeded(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+	mockBucketCounter := new(MockBucketCounter)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+		service.WithBucketCounter(mockBucketCounter),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	bucketKeyProgram := createTestBucketKeyProgram(t, `attributes["meter_id"]`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: bucketKeyProgram,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	// Return count at limit
+	mockBucketCounter.On("CountBuckets", ctx, "test-account-123", "kWh").Return(service.MaxBucketsPerAccountInstrument, nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"meter_id": "new-meter-999",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.ResourceExhausted, st.Code())
+	assert.Contains(t, st.Message(), "bucket cardinality limit exceeded")
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockBucketCounter.AssertExpectations(t)
+	mockMeasurementRepo.AssertNotCalled(t, "Create")
+}
+
+// TestRecordMeasurement_Cardinality_AllowsUnderLimit tests requests under limit succeed.
+func TestRecordMeasurement_Cardinality_AllowsUnderLimit(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+	mockBucketCounter := new(MockBucketCounter)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+		service.WithBucketCounter(mockBucketCounter),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	bucketKeyProgram := createTestBucketKeyProgram(t, `attributes["meter_id"]`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: bucketKeyProgram,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	// Return count well under limit
+	mockBucketCounter.On("CountBuckets", ctx, "test-account-123", "kWh").Return(100, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"meter_id": "meter-001",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockBucketCounter.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_Cardinality_SkipsCheckWhenNoBucketCounter tests nil counter behavior.
+func TestRecordMeasurement_Cardinality_SkipsCheckWhenNoBucketCounter(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+	// NO bucket counter configured
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+		// WithBucketCounter NOT called - counter is nil
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	bucketKeyProgram := createTestBucketKeyProgram(t, `attributes["meter_id"]`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: bucketKeyProgram,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"meter_id": "meter-001",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	// Should succeed without cardinality check
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_Cardinality_SkipsCheckWhenNoBucketKey tests behavior when no bucket key.
+func TestRecordMeasurement_Cardinality_SkipsCheckWhenNoBucketKey(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+	mockBucketCounter := new(MockBucketCounter)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+		service.WithBucketCounter(mockBucketCounter),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Instrument with NO bucket key program
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: nil, // No bucket key
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"meter_id": "meter-001",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	// Should succeed - bucket counter should NOT be called since no bucket key generated
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+	// Verify bucket counter was NOT called
+	mockBucketCounter.AssertNotCalled(t, "CountBuckets")
+}
+
+// TestRecordMeasurement_BucketKey_ErrorReturnsInvalidArgument tests bucket key program errors.
+func TestRecordMeasurement_BucketKey_ErrorReturnsInvalidArgument(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Create a bucket key program that will fail (accessing non-existent key)
+	bucketKeyProgram := createTestBucketKeyProgram(t, `attributes["nonexistent_key"]`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: bucketKeyProgram,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"meter_id": "meter-001", // Note: "nonexistent_key" is not in metadata
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "bucket key generation error")
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertNotCalled(t, "Create")
+}

@@ -27,6 +27,12 @@ var (
 	ErrMeasurementRepoNil = errors.New("position keeping service: measurement repository cannot be nil")
 )
 
+// MaxBucketsPerAccountInstrument is the maximum number of distinct buckets allowed
+// per account/instrument combination. This is a safety valve to prevent "Infinite Buckets"
+// DOS attacks where a malicious or misconfigured instrument could create unbounded
+// numbers of buckets. Most legitimate accounts will have far fewer buckets.
+const MaxBucketsPerAccountInstrument = 10000
+
 // PositionKeepingService implements the gRPC service for Position Keeping operations.
 type PositionKeepingService struct {
 	positionkeepingv1.UnimplementedPositionKeepingServiceServer
@@ -37,6 +43,9 @@ type PositionKeepingService struct {
 	// instrumentCache is OPTIONAL - if nil, CEL validation is skipped.
 	// This allows backwards compatibility with existing deployments.
 	instrumentCache InstrumentCache
+	// bucketCounter is OPTIONAL - if nil, cardinality checking is skipped.
+	// Used to enforce MaxBucketsPerAccountInstrument limit.
+	bucketCounter BucketCounter
 }
 
 // Option configures optional dependencies for PositionKeepingService.
@@ -47,6 +56,16 @@ type Option func(*PositionKeepingService)
 func WithInstrumentCache(cache InstrumentCache) Option {
 	return func(s *PositionKeepingService) {
 		s.instrumentCache = cache
+	}
+}
+
+// WithBucketCounter sets an optional bucket counter for cardinality enforcement.
+// If not set or set to nil, cardinality checking is skipped.
+// When set, the service will reject measurements that would exceed
+// MaxBucketsPerAccountInstrument buckets for any account/instrument combination.
+func WithBucketCounter(counter BucketCounter) Option {
+	return func(s *PositionKeepingService) {
+		s.bucketCounter = counter
 	}
 }
 

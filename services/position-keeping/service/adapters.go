@@ -26,6 +26,12 @@ type CachedInstrument struct {
 	// ValidationProgram is the precompiled CEL program for validation.
 	// May be nil if no validation expression is defined.
 	ValidationProgram cel.Program
+
+	// BucketKeyProgram is the precompiled CEL program for bucket key generation.
+	// May be nil if no bucket key expression is defined.
+	// When evaluated, returns a SHA256 hex string (64 characters) representing
+	// the bucket/fungibility key for the measurement.
+	BucketKeyProgram cel.Program
 }
 
 // InstrumentCache provides an interface for looking up instrument definitions
@@ -39,6 +45,18 @@ type InstrumentCache interface {
 	// The loadFn should load from the repository and compile CEL programs as needed.
 	// Returns the cached instrument or an error if loading fails.
 	GetOrLoad(ctx context.Context, code string, version int, loadFn func() (*CachedInstrument, error)) (*CachedInstrument, error)
+}
+
+// BucketCounter provides an interface for counting buckets per account/instrument.
+// This is used to enforce cardinality limits and prevent "Infinite Buckets" DOS attacks.
+//
+// The cardinality limit protects against malicious or misconfigured instruments that
+// could create unbounded numbers of buckets, consuming excessive storage and degrading
+// query performance.
+type BucketCounter interface {
+	// CountBuckets returns the number of distinct buckets for an account and instrument.
+	// Returns the count and any error encountered during the query.
+	CountBuckets(ctx context.Context, accountID string, instrumentCode string) (int, error)
 }
 
 // ErrEmptyUUID is returned when UUID string is empty
