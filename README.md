@@ -122,15 +122,6 @@ meridian/
 └── docs/                        # Documentation and ADRs
 ```
 
-**Services**: [CurrentAccount](#bian-service-domains) ·
-[FinancialAccounting](#bian-service-domains) ·
-[Party](#bian-service-domains) ·
-[PaymentOrder](#bian-service-domains) ·
-[PositionKeeping](#bian-service-domains) ·
-[ReferenceData](#bian-service-domains) ·
-[Tenant](#infrastructure-services) ·
-[Gateway](#infrastructure-services)
-
 ## BIAN Service Domains
 
 This implementation includes the following BIAN service domains:
