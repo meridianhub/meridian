@@ -41,6 +41,10 @@ var (
 
 	// ErrInvalidDecimalString is returned when a string cannot be parsed as a decimal.
 	ErrInvalidDecimalString = errors.New("invalid decimal string")
+
+	// ErrDimensionMismatch is returned when the instrument's dimension does not match
+	// the expected type parameter dimension (Monetary vs Commodity).
+	ErrDimensionMismatch = errors.New("dimension mismatch: instrument dimension does not match type parameter")
 )
 
 // Qty represents an amount of a specific instrument with compile-time dimension safety.
@@ -96,6 +100,40 @@ func Zero[D Dimension](instrument Instrument) Qty[D] {
 		Amount:     decimal.Zero,
 		Instrument: instrument,
 	}
+}
+
+// NewQuantityValidated creates a new Qty with validation that the instrument's dimension
+// matches the type parameter D.
+//
+// This function provides runtime validation that the instrument is appropriate for
+// the requested dimension type:
+//   - For Qty[Monetary]: instrument.Dimension must be "CURRENCY"
+//   - For Qty[Commodity]: instrument.Dimension must NOT be "CURRENCY"
+//
+// Use this function when you have an instrument from an external source (database,
+// proto, API) and want to ensure type safety before creating a typed quantity.
+//
+// Example:
+//
+//	inst, _ := NewInstrument("USD", 1, "CURRENCY", 2)
+//	money, err := NewQuantityValidated[Monetary](amount, inst) // OK
+//	asset, err := NewQuantityValidated[Commodity](amount, inst) // Error: dimension mismatch
+//
+// For cases where you want automatic dimension detection without type parameters,
+// use ParseQuantity instead.
+func NewQuantityValidated[D Dimension](amount decimal.Decimal, inst Instrument) (Qty[D], error) {
+	var zero D
+	switch any(zero).(type) {
+	case Monetary:
+		if inst.Dimension != DimensionCurrency {
+			return Qty[D]{}, ErrDimensionMismatch
+		}
+	case Commodity:
+		if inst.Dimension == DimensionCurrency {
+			return Qty[D]{}, ErrDimensionMismatch
+		}
+	}
+	return New[D](amount, inst), nil
 }
 
 // Add returns a new quantity that is the sum of q and other.
@@ -272,6 +310,50 @@ func (q Qty[D]) Round() Qty[D] {
 // String returns a human-readable representation of the quantity.
 func (q Qty[D]) String() string {
 	return fmt.Sprintf("%s %s", q.Amount.StringFixed(int32(q.Instrument.Precision)), q.Instrument.Code)
+}
+
+// =============================================================================
+// Value interface implementation
+// =============================================================================
+
+// DimensionName returns the dimension string from the instrument.
+// Implements Value.DimensionName.
+func (q Qty[D]) DimensionName() string {
+	return q.Instrument.Dimension
+}
+
+// GetAmount returns the decimal amount of this quantity.
+// Implements Value.GetAmount.
+func (q Qty[D]) GetAmount() decimal.Decimal {
+	return q.Amount
+}
+
+// GetInstrument returns the instrument identifying this quantity's asset type.
+// Implements Value.GetInstrument.
+func (q Qty[D]) GetInstrument() Instrument {
+	return q.Instrument
+}
+
+// AsMoney attempts to convert this quantity to a Money (Qty[Monetary]) type.
+// Returns (value, true) if this is a monetary quantity (instrument.Dimension == "CURRENCY"),
+// or (zero, false) if this is a commodity quantity or if dimension is empty/invalid.
+// Implements Value.AsMoney.
+func (q Qty[D]) AsMoney() (Money, bool) {
+	if q.Instrument.Dimension == DimensionCurrency {
+		return New[Monetary](q.Amount, q.Instrument), true
+	}
+	return Money{}, false
+}
+
+// AsAsset attempts to convert this quantity to an Asset (Qty[Commodity]) type.
+// Returns (value, true) if this is a commodity quantity (instrument.Dimension != "CURRENCY"),
+// or (zero, false) if this is a monetary quantity.
+// Implements Value.AsAsset.
+func (q Qty[D]) AsAsset() (Asset, bool) {
+	if q.Instrument.Dimension != DimensionCurrency && q.Instrument.Dimension != "" {
+		return New[Commodity](q.Amount, q.Instrument), true
+	}
+	return Asset{}, false
 }
 
 // Money is a type alias for monetary quantities (currencies like USD, EUR, GBP).
