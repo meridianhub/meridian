@@ -83,9 +83,19 @@ type loadTestContainer struct {
 	positionRepo *persistence.PositionRepository
 }
 
+// testingTB is the common interface between *testing.T and *testing.B.
+// This allows setupLoadTestContainer to be used in both tests and benchmarks.
+type testingTB interface {
+	Helper()
+	Fatalf(format string, args ...interface{})
+	Logf(format string, args ...interface{})
+	Cleanup(func())
+}
+
 // setupLoadTestContainer creates a PostgreSQL container optimized for load testing.
-func setupLoadTestContainer(t *testing.T) *loadTestContainer {
-	t.Helper()
+// Accepts both *testing.T and *testing.B via the testingTB interface.
+func setupLoadTestContainer(tb testingTB) *loadTestContainer {
+	tb.Helper()
 	ctx := context.Background()
 
 	pgContainer, err := postgres.Run(ctx,
@@ -99,21 +109,29 @@ func setupLoadTestContainer(t *testing.T) *loadTestContainer {
 				wait.ForListeningPort("5432/tcp"),
 			).WithDeadline(60*time.Second)),
 	)
-	require.NoError(t, err, "Failed to start PostgreSQL container")
+	if err != nil {
+		tb.Fatalf("Failed to start PostgreSQL container: %v", err)
+	}
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping,public")
-	require.NoError(t, err, "Failed to get connection string")
+	if err != nil {
+		tb.Fatalf("Failed to get connection string: %v", err)
+	}
 
 	// Configure pool with higher limits for load testing
 	poolConfig, err := pgxpool.ParseConfig(connStr)
-	require.NoError(t, err, "Failed to parse pool config")
+	if err != nil {
+		tb.Fatalf("Failed to parse pool config: %v", err)
+	}
 	poolConfig.MaxConns = 50
 	poolConfig.MinConns = 10
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	require.NoError(t, err, "Failed to create connection pool")
+	if err != nil {
+		tb.Fatalf("Failed to create connection pool: %v", err)
+	}
 
-	loadSchema(t, pool)
+	loadSchemaWithTB(tb, pool)
 
 	return &loadTestContainer{
 		container:    pgContainer,
@@ -123,25 +141,29 @@ func setupLoadTestContainer(t *testing.T) *loadTestContainer {
 }
 
 // cleanup releases container resources.
-func (tc *loadTestContainer) cleanup(t *testing.T) {
-	t.Helper()
+func (tc *loadTestContainer) cleanup(tb testingTB) {
+	tb.Helper()
 	ctx := context.Background()
 
 	if tc.pool != nil {
 		tc.pool.Close()
 	}
 	if tc.container != nil {
-		require.NoError(t, tc.container.Terminate(ctx))
+		if err := tc.container.Terminate(ctx); err != nil {
+			tb.Fatalf("Failed to terminate container: %v", err)
+		}
 	}
 }
 
-// loadSchema creates the position table and indexes.
-func loadSchema(t *testing.T, pool *pgxpool.Pool) {
-	t.Helper()
+// loadSchemaWithTB creates the position table and indexes using testingTB interface.
+func loadSchemaWithTB(tb testingTB, pool *pgxpool.Pool) {
+	tb.Helper()
 	ctx := context.Background()
 
 	_, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS position_keeping`)
-	require.NoError(t, err)
+	if err != nil {
+		tb.Fatalf("Failed to create schema: %v", err)
+	}
 
 	_, err = pool.Exec(ctx, `
 		CREATE TABLE position_keeping.position (
@@ -159,7 +181,9 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			PRIMARY KEY (id)
 		)
 	`)
-	require.NoError(t, err)
+	if err != nil {
+		tb.Fatalf("Failed to create position table: %v", err)
+	}
 
 	// Create indexes matching production
 	_, err = pool.Exec(ctx, `
@@ -169,7 +193,9 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 		CREATE INDEX idx_position_active ON position_keeping.position (account_id, instrument_code, bucket_key)
 			WHERE deleted_at IS NULL;
 	`)
-	require.NoError(t, err)
+	if err != nil {
+		tb.Fatalf("Failed to create position indexes: %v", err)
+	}
 }
 
 // generateBucketKey generates a SHA256 hash bucket key from attributes.
@@ -376,8 +402,8 @@ func TestSQLBucketKeyLookup(t *testing.T) {
 
 // BenchmarkSQLBucketKeyLookup benchmarks SQL bucket key lookups.
 func BenchmarkSQLBucketKeyLookup(b *testing.B) {
-	tc := setupLoadTestContainer(&testing.T{})
-	defer tc.cleanup(&testing.T{})
+	tc := setupLoadTestContainer(b)
+	defer tc.cleanup(b)
 
 	ctx := context.Background()
 
@@ -494,8 +520,8 @@ func TestGroupByBucketKeyAggregation(t *testing.T) {
 
 // BenchmarkGroupByBucketKey benchmarks GROUP BY bucket_key aggregation.
 func BenchmarkGroupByBucketKey(b *testing.B) {
-	tc := setupLoadTestContainer(&testing.T{})
-	defer tc.cleanup(&testing.T{})
+	tc := setupLoadTestContainer(b)
+	defer tc.cleanup(b)
 
 	ctx := context.Background()
 
