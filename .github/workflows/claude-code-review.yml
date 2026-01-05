@@ -62,9 +62,13 @@ jobs:
           allowed-conclusions: success
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
+
+      - name: Get current date
+        id: date
+        run: echo "current_date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
 
       - name: Run Claude Code Review
         id: claude-review
@@ -77,7 +81,7 @@ jobs:
             PR NUMBER: ${{ github.event.pull_request.number }}
 
             IMPORTANT CONTEXT:
-            - Current date: December 2025 or later
+            - Today's date is ${{ steps.date.outputs.current_date }}
             - Go version: This project uses Go 1.25+ which is the current stable release
             - Do not flag Go version references (like "Go 1.25") as errors or future versions
 

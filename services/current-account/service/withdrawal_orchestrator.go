@@ -18,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	"github.com/meridianhub/meridian/shared/domain/money"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/proto/mappers"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -314,7 +315,7 @@ func (o *WithdrawalOrchestrator) addPostLedgerStep(
 					ProductServiceReference: account.AccountID(),
 					BusinessUnitReference:   "current-account-service",
 					ChartOfAccountsRules:    "WITHDRAWAL",
-					BaseCurrency:            mappers.DomainCurrencyToProto(amount.Currency()),
+					BaseCurrency:            mappers.DomainCurrencyToProto(money.Currency(amount.Currency())),
 					IdempotencyKey: &commonpb.IdempotencyKey{
 						Key: fmt.Sprintf("booking-log-%s", transactionID),
 					},

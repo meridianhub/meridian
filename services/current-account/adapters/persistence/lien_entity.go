@@ -19,6 +19,10 @@ type LienEntity struct {
 	AmountCents int64  `gorm:"not null;check:amount_cents > 0"`
 	Currency    string `gorm:"not null;size:3"`
 
+	// Bucket identifier for bucket-aware reservations (fungibility key)
+	// Empty string represents the default bucket for backward compatibility
+	BucketID string `gorm:"column:bucket_id;size:255;not null;default:'';index:idx_lien_account_bucket"`
+
 	// Lifecycle state
 	Status string `gorm:"not null;size:20;index:idx_lien_account_status;check:status IN ('ACTIVE','EXECUTED','TERMINATED')"`
 

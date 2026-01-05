@@ -23,16 +23,38 @@ type InstrumentUpdatedEvent struct {
 	Version int
 }
 
+// Invalidator defines the interface for cache invalidation operations.
+// Both InstrumentCache (L1 only) and TieredInstrumentCache (L1+L2) implement
+// this interface, allowing the EventSubscriber to work with either.
+type Invalidator interface {
+	// InvalidateCode removes all versions of an instrument code from the cache.
+	// For tiered caches, this propagates to all cache layers (L1 and L2).
+	InvalidateCode(ctx context.Context, code string)
+}
+
+// Verify that our cache implementations satisfy the Invalidator interface.
+var (
+	_ Invalidator = (*InstrumentCache)(nil)
+	_ Invalidator = (*TieredInstrumentCache)(nil)
+)
+
 // EventSubscriber handles Kafka events for distributed cache invalidation.
 // The actual Kafka subscription is wired up by the service layer - this
 // component provides the handler interface.
+//
+// When configured with a TieredInstrumentCache, invalidation events will
+// propagate to both L1 (in-memory) and L2 (Redis) cache layers.
 type EventSubscriber struct {
-	cache *InstrumentCache
+	cache Invalidator
 }
 
 // NewEventSubscriber creates a new EventSubscriber that will invalidate
 // cache entries when instrument update events are received.
-func NewEventSubscriber(cache *InstrumentCache) *EventSubscriber {
+//
+// The cache parameter can be either:
+// - *InstrumentCache for L1-only invalidation
+// - *TieredInstrumentCache for dual-layer (L1+L2) invalidation
+func NewEventSubscriber(cache Invalidator) *EventSubscriber {
 	return &EventSubscriber{
 		cache: cache,
 	}

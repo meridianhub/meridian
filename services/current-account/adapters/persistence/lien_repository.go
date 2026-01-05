@@ -281,6 +281,48 @@ func (r *LienRepository) SumActiveAmountByAccountID(ctx context.Context, account
 	return totalCents, nil
 }
 
+// SumActiveAmountByAccountIDAndBucket returns the total amount of active non-expired liens
+// for a specific account and bucket in cents.
+// Returns ErrLienCurrencyInconsistent if liens with different currencies exist (indicates data corruption).
+// In multi-org mode, this query is scoped to the organization from context.
+func (r *LienRepository) SumActiveAmountByAccountIDAndBucket(ctx context.Context, accountID uuid.UUID, bucketID string) (int64, error) {
+	// Capture timestamp once to ensure consistency between the two queries
+	now := time.Now()
+	var currencyCount int64
+	var totalCents int64
+
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// First, check for currency consistency (defensive check for data corruption)
+		countResult := tx.Model(&LienEntity{}).
+			Where("account_id = ? AND bucket_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+				accountID, bucketID, string(domain.LienStatusActive), now).
+			Select("COUNT(DISTINCT currency)").
+			Scan(&currencyCount)
+
+		if countResult.Error != nil {
+			return countResult.Error
+		}
+
+		if currencyCount > 1 {
+			return ErrLienCurrencyInconsistent
+		}
+
+		// Sum active non-expired liens for the specific bucket
+		result := tx.Model(&LienEntity{}).
+			Where("account_id = ? AND bucket_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+				accountID, bucketID, string(domain.LienStatusActive), now).
+			Select("COALESCE(SUM(amount_cents), 0)").
+			Scan(&totalCents)
+
+		return result.Error
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return totalCents, nil
+}
+
 // toLienEntity converts domain model to database entity
 func toLienEntity(lien *domain.Lien) *LienEntity {
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
@@ -290,6 +332,7 @@ func toLienEntity(lien *domain.Lien) *LienEntity {
 		AccountID:             lien.AccountID,
 		AmountCents:           lien.Amount.ToMinorUnitsUnchecked(),
 		Currency:              string(lien.Amount.Currency()),
+		BucketID:              lien.BucketID,
 		Status:                string(lien.Status),
 		PaymentOrderReference: lien.PaymentOrderReference,
 		TerminationReason:     lien.TerminationReason,
@@ -311,6 +354,7 @@ func toLienDomain(entity *LienEntity) (*domain.Lien, error) {
 		ID:                    entity.ID,
 		AccountID:             entity.AccountID,
 		Amount:                amount,
+		BucketID:              entity.BucketID,
 		Status:                domain.LienStatus(entity.Status),
 		PaymentOrderReference: entity.PaymentOrderReference,
 		TerminationReason:     entity.TerminationReason,

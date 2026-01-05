@@ -60,6 +60,7 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
 		currency VARCHAR(3) NOT NULL,
+		bucket_id VARCHAR(255) NOT NULL DEFAULT '',
 		status VARCHAR(20) NOT NULL,
 		payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
 		termination_reason TEXT,
@@ -272,7 +273,7 @@ func TestExecuteLien_Success(t *testing.T) {
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-127", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-127", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
@@ -304,7 +305,7 @@ func TestExecuteLien_Idempotent(t *testing.T) {
 	// Create and execute a lien
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-128", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-128", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
@@ -355,7 +356,7 @@ func TestTerminateLien_Success(t *testing.T) {
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-129", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-129", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
@@ -387,7 +388,7 @@ func TestTerminateLien_Idempotent(t *testing.T) {
 	// Create lien
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-130", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-130", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
@@ -421,7 +422,7 @@ func TestRetrieveLien_Success(t *testing.T) {
 	// Create lien
 	lienAmount, err := domain.NewMoney("GBP", 25000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-131", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-131", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
@@ -697,7 +698,7 @@ func TestExecuteLien_IdempotencyReturnsCachedResponse(t *testing.T) {
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-1", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-IDEMP-1", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
@@ -751,7 +752,7 @@ func TestExecuteLien_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-2", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-IDEMP-2", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
@@ -794,7 +795,7 @@ func TestExecuteLien_IdempotencyProceedsWithoutKey(t *testing.T) {
 	// Create lien for £500
 	lienAmount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
-	lien, err := domain.NewLien(account.ID(), lienAmount, "PO-IDEMP-3", nil)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-IDEMP-3", nil)
 	require.NoError(t, err)
 	require.NoError(t, lienRepo.Create(ctx, lien))
 
@@ -841,4 +842,126 @@ func TestExecuteLien_IdempotencyCleanupOnFailure(t *testing.T) {
 
 	// Verify pending state was cleaned up
 	require.False(t, mockIdemp.isPending(idempKey), "pending state should be cleaned up after failure")
+}
+
+func TestInitiateLien_WithBucketID(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	// Create account with balance
+	createTestAccountWithBalance(t, ctx, repo, "ACC-BUCKET-001", 100000) // £1000
+
+	req := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        500,
+				Nanos:        0, // £500
+			},
+		},
+		PaymentOrderReference: "PO-BUCKET-123",
+		BucketId:              "bucket-A",
+	}
+
+	resp, err := svc.InitiateLien(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Lien)
+	require.NotEmpty(t, resp.Lien.LienId)
+	require.Equal(t, pb.LienStatus_LIEN_STATUS_ACTIVE, resp.Lien.Status)
+	require.Equal(t, "bucket-A", resp.Lien.BucketId, "bucket_id should be stored and returned")
+
+	// Retrieve the lien and verify bucket_id persisted
+	retrieveResp, err := svc.RetrieveLien(ctx, &pb.RetrieveLienRequest{LienId: resp.Lien.LienId})
+	require.NoError(t, err)
+	require.Equal(t, "bucket-A", retrieveResp.Lien.BucketId, "bucket_id should be persisted and retrievable")
+}
+
+func TestInitiateLien_WithoutBucketID_DefaultsToEmptyString(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	// Create account with balance
+	createTestAccountWithBalance(t, ctx, repo, "ACC-BUCKET-002", 100000) // £1000
+
+	req := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-002",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        500,
+				Nanos:        0, // £500
+			},
+		},
+		PaymentOrderReference: "PO-BUCKET-456",
+		// BucketId not provided - should default to empty string
+	}
+
+	resp, err := svc.InitiateLien(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Lien)
+	require.Equal(t, "", resp.Lien.BucketId, "bucket_id should default to empty string when not provided")
+}
+
+func TestInitiateLien_MultipleBuckets_IndependentLiens(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	// Create account with £1000 balance
+	createTestAccountWithBalance(t, ctx, repo, "ACC-BUCKET-003", 100000) // £1000
+
+	// Create lien for bucket-A (£500)
+	req1 := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-003",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 500},
+		},
+		PaymentOrderReference: "PO-BUCKET-A",
+		BucketId:              "bucket-A",
+	}
+	resp1, err := svc.InitiateLien(ctx, req1)
+	require.NoError(t, err)
+	require.Equal(t, "bucket-A", resp1.Lien.BucketId)
+	require.Equal(t, int64(500), resp1.AvailableBalance.Amount.Units) // £1000 - £500 = £500
+
+	// Create lien for bucket-B (£300)
+	req2 := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-003",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 300},
+		},
+		PaymentOrderReference: "PO-BUCKET-B",
+		BucketId:              "bucket-B",
+	}
+	resp2, err := svc.InitiateLien(ctx, req2)
+	require.NoError(t, err)
+	require.Equal(t, "bucket-B", resp2.Lien.BucketId)
+	// Phase 1: solvency is against total balance, so available = £1000 - £500 - £300 = £200
+	require.Equal(t, int64(200), resp2.AvailableBalance.Amount.Units)
+
+	// Create lien for default bucket (empty string) (£100)
+	req3 := &pb.InitiateLienRequest{
+		AccountId: "ACC-BUCKET-003",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{CurrencyCode: "GBP", Units: 100},
+		},
+		PaymentOrderReference: "PO-DEFAULT",
+		// BucketId not provided
+	}
+	resp3, err := svc.InitiateLien(ctx, req3)
+	require.NoError(t, err)
+	require.Equal(t, "", resp3.Lien.BucketId)
+	require.Equal(t, int64(100), resp3.AvailableBalance.Amount.Units) // £200 - £100 = £100
 }

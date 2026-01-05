@@ -37,9 +37,10 @@ import (
 // TestContainer holds the test database container, connection pool, and repository instance.
 // It provides a complete testing environment with proper cleanup.
 type TestContainer struct {
-	container *postgres.PostgresContainer
-	Pool      *pgxpool.Pool
-	Repo      *persistence.PostgresRepository
+	container    *postgres.PostgresContainer
+	Pool         *pgxpool.Pool
+	Repo         *persistence.PostgresRepository
+	PositionRepo *persistence.PositionRepository
 }
 
 // SetupTestContainer creates a PostgreSQL testcontainer with the position_keeping schema loaded.
@@ -98,13 +99,15 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 	// Load schema
 	loadSchema(t, pool)
 
-	// Create repository
+	// Create repositories
 	repo := persistence.NewPostgresRepository(pool)
+	positionRepo := persistence.NewPositionRepository(pool)
 
 	return &TestContainer{
-		container: pgContainer,
-		Pool:      pool,
-		Repo:      repo,
+		container:    pgContainer,
+		Pool:         pool,
+		Repo:         repo,
+		PositionRepo: positionRepo,
 	}
 }
 
@@ -257,4 +260,75 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 		)
 	`)
 	require.NoError(t, err, "Failed to create audit_trail_entry table")
+
+	// Create position table (append-only)
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE position_keeping.position (
+			id uuid NOT NULL DEFAULT gen_random_uuid(),
+			created_at timestamptz NOT NULL DEFAULT now(),
+			created_by character varying(100) NOT NULL,
+			deleted_at timestamptz NULL,
+			account_id character varying(34) NOT NULL,
+			instrument_code character varying(32) NOT NULL,
+			bucket_key character varying(256) NOT NULL,
+			amount decimal(38, 18) NOT NULL,
+			dimension character varying(32) NOT NULL DEFAULT 'Monetary',
+			attributes jsonb NULL,
+			reference_id uuid NULL,
+			PRIMARY KEY (id)
+		)
+	`)
+	require.NoError(t, err, "Failed to create position table")
+
+	// Create position indexes (matching production migration)
+	_, err = pool.Exec(ctx, `
+		CREATE INDEX idx_position_account_id ON position_keeping.position (account_id);
+		CREATE INDEX idx_position_aggregation ON position_keeping.position (account_id, instrument_code, bucket_key);
+		CREATE INDEX idx_position_deleted_at ON position_keeping.position (deleted_at);
+		CREATE INDEX idx_position_active ON position_keeping.position (account_id, instrument_code, bucket_key)
+			WHERE deleted_at IS NULL;
+		CREATE INDEX idx_position_reference_id ON position_keeping.position (reference_id);
+		CREATE INDEX idx_position_created_at ON position_keeping.position (created_at);
+	`)
+	require.NoError(t, err, "Failed to create position indexes")
+
+	// Create append-only trigger function (matches production migration)
+	_, err = pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION position_keeping.positions_append_only()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			IF OLD.amount IS DISTINCT FROM NEW.amount THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on amount column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.account_id IS DISTINCT FROM NEW.account_id THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on account_id column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.instrument_code IS DISTINCT FROM NEW.instrument_code THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on instrument_code column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.bucket_key IS DISTINCT FROM NEW.bucket_key THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on bucket_key column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.reference_id IS DISTINCT FROM NEW.reference_id THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on reference_id column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql
+	`)
+	require.NoError(t, err, "Failed to create append-only trigger function")
+
+	// Create append-only trigger
+	_, err = pool.Exec(ctx, `
+		CREATE TRIGGER positions_append_only
+			BEFORE UPDATE ON position_keeping.position
+			FOR EACH ROW
+			EXECUTE FUNCTION position_keeping.positions_append_only()
+	`)
+	require.NoError(t, err, "Failed to create append-only trigger")
 }
