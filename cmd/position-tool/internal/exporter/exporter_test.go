@@ -56,12 +56,12 @@ func TestCSVWriter_WriteRow(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
 	require.Len(t, lines, 2, "should have header and one data row")
 
-	// Verify header
+	// Verify header (bucket_key excluded - computed from attributes during import)
 	header := lines[0]
 	assert.Contains(t, header, "account_id")
 	assert.Contains(t, header, "instrument_code")
 	assert.Contains(t, header, "amount")
-	assert.Contains(t, header, "bucket_key")
+	assert.NotContains(t, header, "bucket_key") // bucket_key is NOT exported
 	assert.Contains(t, header, "dimension")
 	assert.Contains(t, header, "created_at")
 	assert.Contains(t, header, "reference_id")
@@ -73,7 +73,7 @@ func TestCSVWriter_WriteRow(t *testing.T) {
 	assert.Contains(t, dataRow, "acc-001")
 	assert.Contains(t, dataRow, "KWH")
 	assert.Contains(t, dataRow, "1000.5")
-	assert.Contains(t, dataRow, "zone-a:solar:2024-01")
+	// Note: bucket_key value "zone-a:solar:2024-01" is not in export
 	assert.Contains(t, dataRow, "Energy")
 	assert.Contains(t, dataRow, refID.String())
 	assert.Contains(t, dataRow, "zone-a")

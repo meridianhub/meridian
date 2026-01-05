@@ -61,8 +61,8 @@ func TestPipeline_ValidateRow_MissingRequiredFields(t *testing.T) {
 
 	rowErr := pipeline.ValidateRow(context.Background(), row)
 	assert.True(t, rowErr.HasErrors())
-	// Should have errors for account_id, instrument_code, amount, bucket_key
-	assert.GreaterOrEqual(t, len(rowErr.Errors), 4)
+	// Should have errors for account_id, instrument_code, amount (bucket_key is computed, not required)
+	assert.GreaterOrEqual(t, len(rowErr.Errors), 3)
 }
 
 func TestPipeline_ValidateRow_DuplicateMeasurement(t *testing.T) {

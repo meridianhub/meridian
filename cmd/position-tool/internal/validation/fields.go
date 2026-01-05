@@ -29,10 +29,8 @@ func DefaultRequiredFields() []RequiredField {
 			Name:      "amount",
 			Extractor: func(r *ImportRow) string { return r.Amount },
 		},
-		{
-			Name:      "bucket_key",
-			Extractor: func(r *ImportRow) string { return r.BucketKey },
-		},
+		// Note: bucket_key is NOT a required field - it is computed from attributes
+		// using the instrument's fungibility key expression (CEL).
 	}
 }
 

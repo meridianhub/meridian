@@ -51,10 +51,12 @@ CSV Format:
   - account_id: The account identifier (UUID)
 
   Optional columns:
-  - bucket_id: Pre-computed bucket ID (if omitted, computed from attributes)
   - valid_from: Validity start time (RFC3339)
   - valid_to: Validity end time (RFC3339)
   - attr_*: Attribute columns (e.g., attr_vintage_year, attr_registry)
+
+  Note: bucket_key is NOT imported directly - it is computed from attributes using
+  the instrument's fungibility key expression (CEL).
 
 Exit Codes:
   0 - Success (all rows imported or dry-run validation passed)

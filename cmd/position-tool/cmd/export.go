@@ -53,11 +53,13 @@ CSV Output Format:
   - account_id: Account identifier
   - instrument_code: The instrument code
   - amount: Position amount
-  - bucket_key: The bucket identifier
   - dimension: Asset dimension (Monetary, Energy, etc.)
   - created_at: Record creation timestamp (RFC3339)
   - reference_id: Reference to source event
   - attr_*: Attribute columns (dynamic based on position data)
+
+  Note: bucket_key is NOT exported - it is computed from attributes using
+  the instrument's fungibility key expression (CEL) during import.
 
 Exit Codes:
   0 - Success

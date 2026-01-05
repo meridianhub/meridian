@@ -102,11 +102,12 @@ func (w *CSVWriter) writeHeader() error {
 // buildHeaders returns the header row for the CSV.
 func (w *CSVWriter) buildHeaders() []string {
 	// Fixed columns
+	// Note: bucket_key is NOT exported - it is computed from attributes using
+	// the instrument's fungibility key expression (CEL) during import.
 	headers := []string{
 		"account_id",
 		"instrument_code",
 		"amount",
-		"bucket_key",
 		"dimension",
 		"created_at",
 		"reference_id",
@@ -122,12 +123,11 @@ func (w *CSVWriter) buildHeaders() []string {
 
 // buildRecord converts a PositionRow to a CSV record.
 func (w *CSVWriter) buildRecord(pos PositionRow) []string {
-	// Fixed columns
+	// Fixed columns (bucket_key excluded - computed from attributes during import)
 	record := []string{
 		pos.AccountID,
 		pos.InstrumentCode,
 		pos.Amount.String(),
-		pos.BucketKey,
 		pos.Dimension,
 		pos.CreatedAt.Format(time.RFC3339),
 		formatUUID(pos.ReferenceID),
