@@ -181,7 +181,8 @@ func (r *RateLimitInterceptor) cleanupIdleLimiters() {
 			return true // Skip malformed entry
 		}
 		tl.mu.Lock()
-		idle := now.Sub(tl.lastUsed) > r.config.IdleTimeout
+		idleDuration := now.Sub(tl.lastUsed)
+		idle := idleDuration > r.config.IdleTimeout
 		tl.mu.Unlock()
 
 		if idle {
@@ -189,7 +190,7 @@ func (r *RateLimitInterceptor) cleanupIdleLimiters() {
 			if r.config.Logger != nil {
 				r.config.Logger.Debug("evicted idle rate limiter",
 					"tenant", key,
-					"idle_duration", now.Sub(tl.lastUsed))
+					"idle_duration", idleDuration)
 			}
 		} else {
 			activeCount++
