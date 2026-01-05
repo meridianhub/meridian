@@ -82,8 +82,8 @@ universal transaction integrity across asset classes.
 
 ```text
 meridian/
-├── services/                    # BIAN service domains
-│   ├── current-account/         # Customer-facing account management
+├── services/                    # Service implementations
+│   ├── current-account/         # CurrentAccount service
 │   │   ├── cmd/                 # Entry point and Dockerfile
 │   │   ├── domain/              # Business logic and entities
 │   │   ├── adapters/            # Persistence, messaging adapters
@@ -92,12 +92,13 @@ meridian/
 │   │   ├── atlas/               # Atlas schema config
 │   │   ├── migrations/          # Database migrations
 │   │   └── k8s/                 # Kubernetes manifests
-│   ├── financial-accounting/    # Double-entry general ledger
-│   ├── gateway/                 # API gateway
-│   ├── party/                   # Customer and party reference data
-│   ├── payment-order/           # Payment execution
-│   ├── position-keeping/        # Pre-ledger transaction log
-│   ├── tenant/                  # Multi-tenant platform management
+│   ├── financial-accounting/    # FinancialAccounting service
+│   ├── gateway/                 # Gateway service
+│   ├── party/                   # Party service
+│   ├── payment-order/           # PaymentOrder service
+│   ├── position-keeping/        # PositionKeeping service
+│   ├── reference-data/          # ReferenceData service
+│   ├── tenant/                  # Tenant service
 │   ├── audit-worker/            # Audit log processor
 │   └── utilization-metering-consumer/  # Usage metering
 ├── shared/                      # Cross-service shared code
@@ -113,6 +114,15 @@ meridian/
 ├── deployments/k8s/             # Shared Kubernetes resources
 └── docs/                        # Documentation and ADRs
 ```
+
+**Services**: [CurrentAccount](#bian-service-domains) ·
+[FinancialAccounting](#bian-service-domains) ·
+[Party](#bian-service-domains) ·
+[PaymentOrder](#bian-service-domains) ·
+[PositionKeeping](#bian-service-domains) ·
+[ReferenceData](#bian-service-domains) ·
+[Tenant](#infrastructure-services) ·
+[Gateway](#infrastructure-services)
 
 ## BIAN Service Domains
 
