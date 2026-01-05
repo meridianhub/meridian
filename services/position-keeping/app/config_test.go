@@ -608,7 +608,7 @@ func TestValidate_CompactionInvalidRunInterval(t *testing.T) {
 	if err == nil {
 		t.Error("Validate() error = nil, want error for zero run interval")
 	}
-	if err != ErrInvalidCompactionInterval {
+	if !errors.Is(err, ErrInvalidCompactionInterval) {
 		t.Errorf("Validate() error = %v, want ErrInvalidCompactionInterval", err)
 	}
 }
@@ -649,7 +649,7 @@ func TestValidate_CompactionInvalidFragmentThreshold(t *testing.T) {
 			if err == nil {
 				t.Errorf("Validate() error = nil, want error for threshold %d", tt.threshold)
 			}
-			if err != ErrInvalidFragmentThreshold {
+			if !errors.Is(err, ErrInvalidFragmentThreshold) {
 				t.Errorf("Validate() error = %v, want ErrInvalidFragmentThreshold", err)
 			}
 		})
@@ -682,7 +682,7 @@ func TestValidate_CompactionInvalidBatchSize(t *testing.T) {
 	if err == nil {
 		t.Error("Validate() error = nil, want error for zero batch size")
 	}
-	if err != ErrInvalidCompactionBatchSize {
+	if !errors.Is(err, ErrInvalidCompactionBatchSize) {
 		t.Errorf("Validate() error = %v, want ErrInvalidCompactionBatchSize", err)
 	}
 }
