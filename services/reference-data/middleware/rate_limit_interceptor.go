@@ -94,7 +94,7 @@ func NewRateLimitMetrics(registry prometheus.Registerer) *RateLimitMetrics {
 				Name:      "requests_blocked_total",
 				Help:      "Total number of requests blocked by the rate limiter",
 			},
-			[]string{"tenant", "method"},
+			[]string{"tenant"},
 		),
 		active: prometheus.NewGauge(
 			prometheus.GaugeOpts{
@@ -227,6 +227,10 @@ func (r *RateLimitInterceptor) getOrCreateLimiter(tenantID string) *tenantLimite
 	if loaded {
 		// Another goroutine created the limiter first, use that one
 		if actualTL, typeOK := actual.(*tenantLimiter); typeOK {
+			// Update lastUsed on the winner's limiter
+			actualTL.mu.Lock()
+			actualTL.lastUsed = time.Now()
+			actualTL.mu.Unlock()
 			return actualTL
 		}
 	}
@@ -273,7 +277,7 @@ func (r *RateLimitInterceptor) UnaryServerInterceptor() grpc.UnaryServerIntercep
 		if !tl.limiter.Allow() {
 			// Rate limit exceeded
 			if r.metrics != nil {
-				r.metrics.blocked.WithLabelValues(tenantStr, info.FullMethod).Inc()
+				r.metrics.blocked.WithLabelValues(tenantStr).Inc()
 			}
 			if r.config.Logger != nil {
 				r.config.Logger.Warn("rate limit exceeded",

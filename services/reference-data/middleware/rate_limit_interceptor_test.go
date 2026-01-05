@@ -309,7 +309,7 @@ func TestRateLimitMetrics_Increment(t *testing.T) {
 
 	// Check blocked counter
 	blockedMetric := &dto.Metric{}
-	err = metrics.blocked.WithLabelValues("metrics_tenant", RegisterInstrumentMethod).Write(blockedMetric)
+	err = metrics.blocked.WithLabelValues("metrics_tenant").Write(blockedMetric)
 	require.NoError(t, err)
 	assert.Equal(t, float64(1), blockedMetric.Counter.GetValue())
 }
