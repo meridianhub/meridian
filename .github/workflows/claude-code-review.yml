@@ -80,19 +80,50 @@ jobs:
         id: cache-claude
         uses: actions/cache@v4
         with:
-          path: ~/.local/bin/claude
-          key: claude-code-${{ env.CLAUDE_CODE_VERSION }}-linux-x64
+          # Cache the entire directory - installer may create multiple files
+          path: ~/.local/bin
+          # v2: invalidate bad cache from previous version
+          key: claude-code-${{ env.CLAUDE_CODE_VERSION }}-linux-x64-v2
+
+      - name: Validate cached Claude Code
+        if: steps.pr.outputs.number && steps.cache-claude.outputs.cache-hit == 'true'
+        id: validate-cache
+        run: |
+          # Check if cached binary is valid (exists, executable, reasonable size)
+          if [ -f ~/.local/bin/claude ] && [ -x ~/.local/bin/claude ]; then
+            SIZE=$(stat -c%s ~/.local/bin/claude 2>/dev/null || stat -f%z ~/.local/bin/claude 2>/dev/null || echo "0")
+            # Claude Code binary should be at least 10MB
+            if [ "$SIZE" -gt 10000000 ]; then
+              echo "Cache valid: claude binary is ${SIZE} bytes"
+              echo "valid=true" >> $GITHUB_OUTPUT
+            else
+              echo "::warning::Cache invalid: claude binary too small (${SIZE} bytes), will reinstall"
+              rm -f ~/.local/bin/claude
+              echo "valid=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::warning::Cache invalid: claude binary missing or not executable, will reinstall"
+            echo "valid=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Install Claude Code
-        if: steps.pr.outputs.number && steps.cache-claude.outputs.cache-hit != 'true'
+        if: steps.pr.outputs.number && (steps.cache-claude.outputs.cache-hit != 'true' || steps.validate-cache.outputs.valid != 'true')
         run: |
           echo "Installing Claude Code v${{ env.CLAUDE_CODE_VERSION }}..."
           mkdir -p ~/.local/bin
           for attempt in 1 2 3 4 5; do
             echo "Installation attempt $attempt..."
             if curl -fsSL https://claude.ai/install.sh | bash -s -- "${{ env.CLAUDE_CODE_VERSION }}"; then
-              echo "Claude Code installed successfully"
-              break
+              # Verify installation succeeded
+              if [ -f ~/.local/bin/claude ] && [ -x ~/.local/bin/claude ]; then
+                SIZE=$(stat -c%s ~/.local/bin/claude 2>/dev/null || stat -f%z ~/.local/bin/claude 2>/dev/null || echo "0")
+                if [ "$SIZE" -gt 10000000 ]; then
+                  echo "Claude Code installed successfully (${SIZE} bytes)"
+                  break
+                else
+                  echo "::warning::Installation produced invalid binary (${SIZE} bytes)"
+                fi
+              fi
             fi
             if [ $attempt -eq 5 ]; then
               echo "::error::Failed to install Claude Code after 5 attempts"
@@ -108,7 +139,9 @@ jobs:
         if: steps.pr.outputs.number
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # Final verification - this will fail the job if claude isn't working
           ~/.local/bin/claude --version
+          echo "Claude Code ready"
 
       - name: Run Claude Code Review
         if: steps.pr.outputs.number
