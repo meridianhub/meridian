@@ -1,4 +1,4 @@
-// Package shared provides core utilities for the position-tool commands.
+// Package infra provides core infrastructure utilities for the position-tool commands.
 //
 // This package contains reusable infrastructure components shared between
 // the `rebucket` and `import` subcommands, including:
