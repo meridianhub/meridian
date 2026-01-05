@@ -1,3 +1,21 @@
+---
+name: prd-universal-asset-system
+description: Extend Meridian's ledger from fiat-only to multi-asset support with dimensional safety
+triggers:
+  - Implementing multi-asset or universal asset support
+  - Working on InstrumentType, Quantity, or asset definitions
+  - Adding new asset types (commodities, energy, vouchers)
+  - Designing tenant-specific asset catalogs
+  - Implementing dimensional safety or asset quantity types
+  - Working on reference data service
+instructions: |
+  This PRD defines the Universal Asset System for multi-asset ledger support.
+  Key patterns: Use Go generics for dimensional safety (Monetary vs Commodity).
+  Assets are configured via database, not code. Each tenant has isolated catalog.
+  Refer to ADR-0013 (Quantity Types) and ADR-0014 (Reference Data) for implementation.
+  Immutable proto contracts are defined in Zero-State Contract section - never modify.
+---
+
 # PRD: Universal Asset System
 
 **Status:** Draft
