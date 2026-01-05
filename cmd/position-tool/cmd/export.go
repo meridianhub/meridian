@@ -8,6 +8,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/exporter"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +29,7 @@ var (
 	exportFrom       string
 	exportTo         string
 	exportAccountID  string
+	exportBatchSize  int
 )
 
 // exportCmd represents the export command.
@@ -39,22 +43,21 @@ file. It supports filtering by instrument, date range, and account.
 
 Features:
   - Filtering by instrument code
-  - Date range filtering (positions valid during the range)
+  - Date range filtering (positions created during the range)
   - Account-specific exports
   - Progress reporting for large exports
   - Streaming output for memory efficiency
 
 CSV Output Format:
   The CSV will include headers and the following columns:
-  - instrument_code: The instrument code
-  - version: Instrument version
-  - bucket_id: The bucket identifier
-  - amount: Position amount
   - account_id: Account identifier
-  - valid_from: Validity start time (RFC3339)
-  - valid_to: Validity end time (RFC3339)
-  - created_at: Record creation timestamp
-  - attr_*: Attribute columns (dynamic based on instrument)
+  - instrument_code: The instrument code
+  - amount: Position amount
+  - bucket_key: The bucket identifier
+  - dimension: Asset dimension (Monetary, Energy, etc.)
+  - created_at: Record creation timestamp (RFC3339)
+  - reference_id: Reference to source event
+  - attr_*: Attribute columns (dynamic based on position data)
 
 Exit Codes:
   0 - Success
@@ -91,11 +94,13 @@ func init() {
 	exportCmd.Flags().StringVar(&exportInstrument, "instrument", "",
 		"Filter by instrument code")
 	exportCmd.Flags().StringVar(&exportFrom, "from", "",
-		"Filter positions valid from this date (YYYY-MM-DD or RFC3339)")
+		"Filter positions created from this date (YYYY-MM-DD or RFC3339)")
 	exportCmd.Flags().StringVar(&exportTo, "to", "",
-		"Filter positions valid to this date (YYYY-MM-DD or RFC3339)")
+		"Filter positions created to this date (YYYY-MM-DD or RFC3339)")
 	exportCmd.Flags().StringVar(&exportAccountID, "account-id", "",
 		"Filter by account ID")
+	exportCmd.Flags().IntVar(&exportBatchSize, "batch-size", exporter.DefaultBatchSize,
+		"Number of rows to fetch per database query")
 
 	_ = exportCmd.MarkFlagRequired("output")
 }
@@ -104,6 +109,10 @@ func init() {
 func runExportWrapper(cmd *cobra.Command, args []string) error {
 	err := runExport(cmd, args)
 	if err != nil {
+		// Don't print interrupted as an error
+		if errors.Is(err, exporter.ErrExportInterrupted) {
+			return nil
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -151,6 +160,7 @@ func runExport(_ *cobra.Command, _ []string) error {
 		"from", exportFrom,
 		"to", exportTo,
 		"account_id", exportAccountID,
+		"batch_size", exportBatchSize,
 		"dry_run", dryRun,
 	)
 
@@ -164,14 +174,22 @@ func runExport(_ *cobra.Command, _ []string) error {
 		From:       fromTime,
 		To:         toTime,
 		AccountID:  exportAccountID,
+		BatchSize:  exportBatchSize,
 		DryRun:     dryRun,
 		DBUrl:      dbURL,
 	})
-	if err != nil {
+
+	elapsed := time.Since(start)
+
+	// Handle interruption (still print results)
+	if errors.Is(err, exporter.ErrExportInterrupted) {
+		printExportResult(result, elapsed)
 		return err
 	}
 
-	elapsed := time.Since(start)
+	if err != nil {
+		return err
+	}
 
 	// Print results
 	printExportResult(result, elapsed)
@@ -202,6 +220,7 @@ type exportConfig struct {
 	From       *time.Time
 	To         *time.Time
 	AccountID  string
+	BatchSize  int
 	DryRun     bool
 	DBUrl      string
 }
@@ -213,42 +232,76 @@ type exportResult struct {
 	FileSizeBytes  int64
 	Interrupted    bool
 	InterruptedRow int64
+	AttributeKeys  []string
 }
 
 // executeExport performs the actual export operation.
-// TODO: Implement full export logic in a future subtask
 func executeExport(ctx context.Context, cfg *exportConfig) (*exportResult, error) {
 	logger := slog.Default()
 
-	// Placeholder implementation
-	if cfg.DryRun {
-		logger.Info("dry-run mode: would export positions",
-			"output", cfg.Output,
-			"tenant", cfg.TenantID,
-		)
+	// Create database connection pool
+	pool, err := pgxpool.New(ctx, cfg.DBUrl)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to database: %w", err)
+	}
+	defer pool.Close()
 
-		return &exportResult{
-			TotalRows:  0, // Would be actual count from query
-			OutputFile: cfg.Output,
-		}, nil
+	// Create exporter
+	exp, err := exporter.New(pool, logger)
+	if err != nil {
+		return nil, fmt.Errorf("creating exporter: %w", err)
 	}
 
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		logger.Info("export interrupted")
-		return &exportResult{
-			Interrupted:    true,
-			InterruptedRow: 0,
-			OutputFile:     cfg.Output,
-		}, nil
-	default:
+	// Set up progress tracker with console output
+	tracker := shared.NewProgressTracker(shared.ProgressTrackerConfig{
+		DryRun: cfg.DryRun,
+		OnProgress: func(event shared.ProgressEvent) {
+			switch event.Type {
+			case shared.ProgressEventStarted:
+				fmt.Printf("\n  Starting export: %s\n", event.Message)
+			case shared.ProgressEventBatchComplete:
+				// Calculate progress percentage
+				var pct float64
+				if event.TotalExpected > 0 {
+					pct = float64(event.TotalProcessed) / float64(event.TotalExpected) * 100
+				}
+				fmt.Printf("\r  Progress: %d/%d rows (%.1f%%) - %s",
+					event.TotalProcessed, event.TotalExpected, pct, formatDuration(event.Duration))
+			case shared.ProgressEventComplete:
+				fmt.Printf("\n  %s\n", event.Message)
+			case shared.ProgressEventError:
+				fmt.Printf("\n  Error: %v\n", event.Error)
+			}
+		},
+	})
+
+	// Build export options
+	opts := exporter.ExportOptions{
+		OutputPath:     cfg.Output,
+		TenantID:       cfg.TenantID,
+		InstrumentCode: cfg.Instrument,
+		AccountID:      cfg.AccountID,
+		FromTime:       cfg.From,
+		ToTime:         cfg.To,
+		BatchSize:      cfg.BatchSize,
+		DryRun:         cfg.DryRun,
 	}
 
+	// Execute export
+	result, err := exp.Export(ctx, opts, tracker)
+	if err != nil && !errors.Is(err, exporter.ErrExportInterrupted) {
+		return nil, err
+	}
+
+	// Convert to exportResult
 	return &exportResult{
-		TotalRows:  0,
-		OutputFile: cfg.Output,
-	}, nil
+		TotalRows:      result.TotalRows,
+		OutputFile:     result.OutputFile,
+		FileSizeBytes:  result.FileSizeBytes,
+		Interrupted:    result.Interrupted,
+		InterruptedRow: result.InterruptedRow,
+		AttributeKeys:  result.AttributeKeys,
+	}, err
 }
 
 // printExportResult outputs the export results in a formatted report.
@@ -274,7 +327,17 @@ func printExportResult(result *exportResult, elapsed time.Duration) {
 	if result.FileSizeBytes > 0 {
 		fmt.Printf("    File Size:       %s\n", formatBytes(result.FileSizeBytes))
 	}
+	if len(result.AttributeKeys) > 0 {
+		fmt.Printf("    Attribute Cols:  %d\n", len(result.AttributeKeys))
+	}
 	fmt.Println()
+
+	// Calculate and display throughput
+	if elapsed.Seconds() > 0 && result.TotalRows > 0 {
+		rowsPerSec := float64(result.TotalRows) / elapsed.Seconds()
+		fmt.Printf("  Throughput:        %.0f rows/sec\n", rowsPerSec)
+		fmt.Println()
+	}
 
 	if result.Interrupted {
 		fmt.Println("  STATUS: INTERRUPTED")
