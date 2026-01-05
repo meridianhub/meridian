@@ -18,6 +18,7 @@ type Config struct {
 	Redis         RedisConfig
 	Auth          AuthConfig
 	Observability ObservabilityConfig
+	Compaction    CompactionConfig
 }
 
 // ServerConfig holds gRPC server configuration
@@ -104,6 +105,18 @@ type ObservabilityConfig struct {
 	MetricsPort string
 }
 
+// CompactionConfig holds background compaction worker configuration
+type CompactionConfig struct {
+	// Enabled indicates if the compaction worker is enabled
+	Enabled bool
+	// RunInterval is how often the compaction worker runs (e.g., 5 minutes)
+	RunInterval time.Duration
+	// FragmentThreshold is the minimum number of rows in a bucket to trigger compaction
+	FragmentThreshold int
+	// BatchSize is the maximum number of buckets to compact per run
+	BatchSize int
+}
+
 // LoadConfig loads configuration from environment variables with defaults
 func LoadConfig() (*Config, error) {
 	config := &Config{
@@ -113,6 +126,7 @@ func LoadConfig() (*Config, error) {
 		Redis:         loadRedisConfig(),
 		Auth:          loadAuthConfig(),
 		Observability: loadObservabilityConfig(),
+		Compaction:    loadCompactionConfig(),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -195,17 +209,30 @@ func loadObservabilityConfig() ObservabilityConfig {
 	}
 }
 
+// loadCompactionConfig loads background compaction worker configuration from environment variables
+func loadCompactionConfig() CompactionConfig {
+	return CompactionConfig{
+		Enabled:           env.GetEnvAsBool("COMPACTION_ENABLED", true),
+		RunInterval:       env.GetEnvAsDuration("COMPACTION_RUN_INTERVAL", 5*time.Minute),
+		FragmentThreshold: env.GetEnvAsInt("COMPACTION_FRAGMENT_THRESHOLD", 100),
+		BatchSize:         env.GetEnvAsInt("COMPACTION_BATCH_SIZE", 50),
+	}
+}
+
 // Validation errors
 var (
-	ErrEmptyPort              = fmt.Errorf("server port must not be empty")
-	ErrEmptyDatabaseURL       = fmt.Errorf("database URL must not be empty")
-	ErrInvalidMaxOpenConns    = fmt.Errorf("database max open connections must be at least 1")
-	ErrInvalidMaxIdleConns    = fmt.Errorf("database max idle connections must be non-negative")
-	ErrKafkaBrokersEmpty      = fmt.Errorf("kafka brokers must not be empty when kafka is enabled")
-	ErrInvalidSamplingRate    = fmt.Errorf("sampling rate must be between 0.0 and 1.0")
-	ErrContainerCloseFailures = fmt.Errorf("errors during container close")
-	ErrMaxOpenConnsOverflow   = fmt.Errorf("max open connections exceeds int32 limit")
-	ErrMaxIdleConnsOverflow   = fmt.Errorf("max idle connections exceeds int32 limit")
+	ErrEmptyPort                  = fmt.Errorf("server port must not be empty")
+	ErrEmptyDatabaseURL           = fmt.Errorf("database URL must not be empty")
+	ErrInvalidMaxOpenConns        = fmt.Errorf("database max open connections must be at least 1")
+	ErrInvalidMaxIdleConns        = fmt.Errorf("database max idle connections must be non-negative")
+	ErrKafkaBrokersEmpty          = fmt.Errorf("kafka brokers must not be empty when kafka is enabled")
+	ErrInvalidSamplingRate        = fmt.Errorf("sampling rate must be between 0.0 and 1.0")
+	ErrContainerCloseFailures     = fmt.Errorf("errors during container close")
+	ErrMaxOpenConnsOverflow       = fmt.Errorf("max open connections exceeds int32 limit")
+	ErrMaxIdleConnsOverflow       = fmt.Errorf("max idle connections exceeds int32 limit")
+	ErrInvalidCompactionInterval  = fmt.Errorf("compaction run interval must be greater than zero")
+	ErrInvalidFragmentThreshold   = fmt.Errorf("compaction fragment threshold must be at least 2")
+	ErrInvalidCompactionBatchSize = fmt.Errorf("compaction batch size must be at least 1")
 )
 
 // Validate validates the configuration
@@ -241,6 +268,19 @@ func (c *Config) Validate() error {
 
 	if c.Observability.SamplingRate < 0.0 || c.Observability.SamplingRate > 1.0 {
 		return ErrInvalidSamplingRate
+	}
+
+	// Compaction validation (only when enabled)
+	if c.Compaction.Enabled {
+		if c.Compaction.RunInterval <= 0 {
+			return ErrInvalidCompactionInterval
+		}
+		if c.Compaction.FragmentThreshold < 2 {
+			return ErrInvalidFragmentThreshold
+		}
+		if c.Compaction.BatchSize < 1 {
+			return ErrInvalidCompactionBatchSize
+		}
 	}
 
 	return nil
