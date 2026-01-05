@@ -11,7 +11,8 @@ The diagram below shows how services communicate at runtime across all protocols
 flowchart LR
     subgraph External["External Systems"]
         User["User/Client"]
-        Gateway["Payment Gateway"]
+        PayGW["Payment Gateway"]
+        AuthProvider["Auth Provider<br/>(JWKS)"]
     end
 
     subgraph Admin["Admin Tools"]
@@ -19,30 +20,39 @@ flowchart LR
     end
 
     subgraph Platform["Meridian Platform"]
+        subgraph Edge["Edge Layer"]
+            GW["Gateway<br/>:8080"]
+        end
+
         subgraph Services["Domain Services"]
             CA["CurrentAccount<br/>:50057"]
             PK["PositionKeeping<br/>:50053"]
             FA["FinancialAccounting<br/>:50052"]
             Party["Party<br/>:50055"]
             PO["PaymentOrder<br/>:50054, :8080"]
+            RD["ReferenceData<br/>:50051"]
         end
 
         subgraph Infrastructure["Infrastructure"]
             Tenant["Tenant<br/>:50056"]
             AW["audit-worker<br/>:8080"]
+            UMC["utilization-metering<br/>-consumer :8080"]
             DB[("CockroachDB<br/>:26257")]
             Kafka@{ shape: das, label: "Kafka :9092" }
             Redis@{ shape: das, label: "Redis :6379" }
         end
     end
 
+    %% External connections via Gateway
+    User -->|"HTTP/REST"| GW
+    AuthProvider -.->|"JWKS fetch"| GW
+    GW -->|"Proxy (gRPC)"| CA
+    GW -->|"Proxy (gRPC)"| PO
+    GW -->|"Proxy (gRPC)"| Party
+    PayGW -->|"HTTP Webhook"| PO
+
     %% Admin tool connections
     TenantCtl -->|"gRPC"| Tenant
-
-    %% External connections
-    User -->|"gRPC / REST"| CA
-    User -->|"gRPC / REST"| PO
-    Gateway -->|"HTTP Webhook"| PO
 
     %% gRPC inter-service calls
     CA -->|"RetrieveParty (gRPC)"| Party
@@ -50,10 +60,16 @@ flowchart LR
     CA -->|"CaptureLedgerPosting (gRPC)"| FA
     PO -->|"InitiateLien (gRPC)"| CA
     Tenant -.->|"RegisterParty (gRPC, optional)"| Party
+    Tenant -->|"Seed instruments"| RD
+    PK -.->|"GetInstrument (gRPC)"| RD
 
     %% Kafka event streaming
     PK -->|"Publish Events"| Kafka
     Kafka -->|"Consume Events"| FA
+
+    %% Utilization metering (billing)
+    Kafka -->|"Audit Events"| UMC
+    UMC -->|"RecordMeasurement (gRPC)"| PK
 
     %% Database connections
     CA -->|"SQL"| DB
@@ -62,24 +78,30 @@ flowchart LR
     Party -->|"SQL"| DB
     PO -->|"SQL"| DB
     Tenant -->|"SQL"| DB
+    RD -->|"SQL"| DB
+    GW -->|"SQL (tenant lookup)"| DB
 
-    %% Redis (optional idempotency)
+    %% Redis (optional caching/idempotency)
     PK -.->|"Idempotency"| Redis
     FA -.->|"Idempotency"| Redis
     PO -.->|"Idempotency"| Redis
+    GW -.->|"Tenant cache"| Redis
+    RD -.->|"Instrument cache"| Redis
 
     %% audit-worker connections
     AW -->|"Poll outbox"| DB
     AW -->|"Write audit log"| DB
 
     classDef service fill:#4a90d9,stroke:#2d5a87,color:#fff
+    classDef edge fill:#e91e63,stroke:#880e4f,color:#fff
     classDef storage fill:#50c878,stroke:#2d7a4a,color:#fff
     classDef external fill:#ff9800,stroke:#e65100,color:#fff
     classDef admin fill:#9c27b0,stroke:#6a1b9a,color:#fff
 
-    class CA,PK,FA,Party,PO service
-    class Tenant,AW,DB,Kafka,Redis storage
-    class User,Gateway external
+    class CA,PK,FA,Party,PO,RD service
+    class GW edge
+    class Tenant,AW,UMC,DB,Kafka,Redis storage
+    class User,PayGW,AuthProvider external
     class TenantCtl admin
 ```
 
@@ -87,6 +109,7 @@ flowchart LR
 
 - Solid arrows (`-->`) = Required runtime dependency
 - Dashed arrows (`-.->`) = Optional runtime dependency
+- Pink boxes = Edge layer (API gateway)
 - Blue boxes = Domain services (BIAN service domains)
 - Green boxes = Infrastructure (platform services, databases, messaging)
 - Purple boxes = Admin tools (CLI)
@@ -100,11 +123,15 @@ All inter-service communication uses gRPC with Protocol Buffers:
 
 | Source | Target | Method | Purpose |
 |--------|--------|--------|---------|
+| Gateway | Backend Services | HTTP Proxy | Route authenticated requests to gRPC services |
 | CurrentAccount | Party | `RetrieveParty()` | Verify party exists and is active |
 | CurrentAccount | PositionKeeping | `InitiateFinancialPositionLog()` | Create position log for account |
 | CurrentAccount | FinancialAccounting | `CaptureLedgerPosting()` | Record double-entry posting |
 | PaymentOrder | CurrentAccount | `InitiateLien()` | Reserve funds for payment |
 | Tenant | Party | `RegisterParty()` | Register org party (optional) |
+| Tenant | ReferenceData | SQL seed | Seed system instruments during provisioning |
+| PositionKeeping | ReferenceData | `GetInstrument()` | Retrieve instrument definitions |
+| UtilizationMeteringConsumer | PositionKeeping | `RecordMeasurement()` | Record billing measurements to tenant-zero |
 
 **Note:** CurrentAccount uses a `ValidateParty()` client wrapper that calls `RetrieveParty()` and
 validates the party status is ACTIVE.
@@ -122,6 +149,7 @@ Event-driven communication for eventual consistency:
 | Publisher | Topic Pattern | Consumer | Purpose |
 |-----------|---------------|----------|---------|
 | PositionKeeping | `position-keeping.transaction-*.v1` | FinancialAccounting | Trigger ledger postings |
+| All Services | `*.audit.events` | UtilizationMeteringConsumer | Platform billing via tenant-zero |
 
 **Event Types:**
 
@@ -200,13 +228,16 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 
 | Service | gRPC Port | HTTP Port | Metrics Port |
 |---------|-----------|-----------|--------------|
+| Gateway | - | 8080 | 8080 |
 | CurrentAccount | 50057 | - | 9090 |
 | PositionKeeping | 50053 | - | 9090 |
 | FinancialAccounting | 50052 | - | 9090 |
 | Party | 50055 | - | 9090 |
 | PaymentOrder | 50054 | 8080 | 9090 |
+| ReferenceData | 50051 | - | 9090 |
 | Tenant | 50056 | - | 9090 |
 | audit-worker | - | 8080 | 8080 |
+| utilization-metering-consumer | - | 8080 | 8080 |
 
 ## Observability
 
@@ -270,6 +301,71 @@ See [ADR-0009](../docs/adr/0009-application-level-audit-logging.md) for architec
 - **Atomicity**: Outbox fallback committed with business operation (same transaction)
 - **No Lost Audits**: Dual-path ensures delivery even during Kafka outages
 - **Eventual Consistency**: Audit records appear in `audit_log` within ~100ms
+
+### Gateway Service
+
+The Gateway provides a multi-tenant API gateway for authenticated access to backend services.
+
+**Responsibilities:**
+
+- **JWT Authentication**: Validates Bearer tokens using JWKS (JSON Web Key Set)
+- **API Key Authentication**: Validates service-to-service API keys with rate limiting
+- **Tenant Resolution**: Extracts tenant identity from subdomain or headers
+- **Request Proxying**: Routes authenticated requests to backend gRPC services
+
+**Configuration:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `BASE_DOMAIN` | Yes | Base domain for subdomain-based tenant identification |
+| `DATABASE_URL` | Yes | PostgreSQL connection string for tenant lookups |
+| `AUTH_ENABLED` | No | Enable JWT/API key authentication (default: false) |
+| `JWKS_URL` | When AUTH_ENABLED | JWKS endpoint URL for JWT validation |
+| `BACKENDS` | No | JSON array of backend route mappings |
+
+See [services/gateway/README.md](gateway/README.md) for full configuration options.
+
+### Reference Data Service
+
+The Reference Data service manages instrument definitions for the Universal Quantity Type System.
+It is aligned with the BIAN Reference Data Directory domain.
+
+**Responsibilities:**
+
+- **Instrument Registry**: Manage currency, energy, and asset type definitions
+- **CEL Validation**: Compile and execute validation rules for quantities
+- **Fungibility Rules**: Define bucket key generation for position aggregation
+- **System vs Tenant Instruments**: Pre-defined instruments seeded by Tenant service
+
+**Instrument Lifecycle:**
+
+```text
+DRAFT → ACTIVE → DEPRECATED
+```
+
+- **DRAFT**: Editable, not usable in transactions
+- **ACTIVE**: Immutable, validation enforced
+- **DEPRECATED**: Read-only, not for new transactions
+
+See [services/reference-data/README.md](reference-data/README.md) for full documentation.
+
+### Utilization Metering Consumer
+
+The Utilization Metering Consumer is a centralized Kafka consumer for platform billing.
+
+**Responsibilities:**
+
+- Consumes audit events from all 6 domain services
+- Transforms audit events into utilization measurements
+- Records measurements to Position Keeping's tenant-zero for billing
+
+**Architecture:**
+
+- **Single deployment** consuming from multiple topics (not per-service)
+- **HPA scaling** based on Kafka consumer lag (1-5 replicas)
+- **Tenant-zero isolation** for platform billing data
+
+See [services/utilization-metering-consumer/k8s/README.md](utilization-metering-consumer/k8s/README.md) for deployment details.
 
 ## Service-Owned Client Libraries
 
@@ -361,6 +457,7 @@ When `Resilience` is configured, clients automatically include:
 | FinancialAccounting | `services/financial-accounting/client` | 50052 |
 | CurrentAccount | `services/current-account/client` | 50057 |
 | Tenant | `services/tenant/client` | 50056 |
+| ReferenceData | `services/reference-data/client` | 50051 |
 
 ## Service Directory Structure
 
