@@ -2,11 +2,14 @@
 
 **Trust Your Numbers.** Open-source treasury infrastructure for the modern economy.
 
+> **Status: Active Development** | Core ledger, audit trails, and saga orchestration implemented.
+> Valuation/settlement integrations are architectural placeholders.
+
 ## Mission
 
 When your system accuses someone of a shortfall, you need absolute certainty. Meridian is
-open-source treasury infrastructure that proves itself - every position recorded with atomic
-audit trails, every transaction path traceable, every balance verifiable.
+open-source treasury infrastructure designed to prove itself - every position recorded with
+atomic audit trails, every transaction path traceable, every balance verifiable.
 
 ### Measure
 
@@ -19,14 +22,14 @@ can demand proof - and get it.
 Value does not always look like currency anymore. Kilowatt-hours, tonnes of CO₂, commodity
 units - the economy runs on assets that traditional ledgers cannot handle. Multi-asset
 architecture handles diverse units with the same rigour as pounds and euros. Proper
-dimensional typing prevents nonsense calculations. One system, any asset class.
+dimensional typing prevents nonsense calculations at compile time.
 
 ### Settle
 
 When settlement fails, it cascades. Livelihoods depend on money arriving when promised,
 not stuck in a partial state that requires manual intervention. Lien-based fund reservation
-guarantees availability before commitment. Saga orchestration with automatic compensation -
-if anything fails, the system unwinds cleanly. Settlement completes or reverts. No orphaned debits.
+ensures availability before commitment. Saga orchestration with automatic compensation -
+if anything fails, the system unwinds cleanly. Settlement completes or reverts.
 
 ### Why Trust It
 
@@ -56,12 +59,12 @@ universal transaction integrity across asset classes.
 
 ### Monetary Dimension
 
-| Instrument Type | Example | Settlement Function |
+| Instrument Type | Example | Valuation Approach |
 |-----------------|---------|---------------------|
-| Currency | USD, EUR, GBP | Identity or FX Rate |
-| Debt | Bonds, Loans | Market Price + Accrued Interest |
-| Equity | Shares, Stock | Market Price |
-| Derivatives | Options, Futures | Pricing Model |
+| Currency | USD, EUR, GBP | Identity (implemented) |
+| Debt | Bonds, Loans | Market price × accrued interest |
+| Equity | Shares, Stock | Market price |
+| Derivatives | Options, Futures | Pricing model |
 
 ### Commodity Dimension
 
@@ -71,6 +74,10 @@ universal transaction integrity across asset classes.
 | Compute Resources | GPU-hours, vCPU-seconds | Spot pricing |
 | Environmental Credits | tCO₂e | Exchange pricing |
 | Physical Goods | kg, units | Market pricing |
+
+*Valuation providers are pluggable. Currency identity is implemented; other valuation
+approaches show the extensibility model. See [ADR-0013](docs/adr/0013-generic-asset-quantity-types.md)
+for the ValuationProvider interface.*
 
 ## Features
 
