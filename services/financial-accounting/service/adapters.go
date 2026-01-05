@@ -39,6 +39,10 @@ func parseUUID(s string) (uuid.UUID, error) {
 }
 
 // fromProtoMoney converts protobuf Money to domain Money.
+//
+// The conversion creates an Instrument from the proto currency code and constructs
+// a Qty[Monetary] type. The proto google.type.Money uses currency codes (ISO 4217)
+// which are mapped to instruments with dimension "CURRENCY".
 func fromProtoMoney(protoMoney *money.Money) (domain.Money, error) {
 	if protoMoney == nil {
 		return domain.Money{}, ErrNilMoney
@@ -52,20 +56,30 @@ func fromProtoMoney(protoMoney *money.Money) (domain.Money, error) {
 		amount = amount.Add(nanosPart)
 	}
 
+	// Parse and validate currency code
 	currency, err := domain.ParseCurrency(protoMoney.CurrencyCode)
 	if err != nil {
 		return domain.Money{}, fmt.Errorf("invalid currency: %w", err)
 	}
 
-	return domain.NewMoney(amount, currency)
+	// Convert Currency to Instrument for Qty[Monetary] construction
+	instrument, err := domain.CurrencyToInstrument(currency)
+	if err != nil {
+		return domain.Money{}, fmt.Errorf("failed to create instrument: %w", err)
+	}
+
+	return domain.NewMoney(amount, instrument), nil
 }
 
 // toProtoMoney converts domain Money to protobuf google.type.Money.
 // Preserves full decimal precision up to 9 decimal places (nanosecond precision).
+//
+// The conversion extracts the instrument code (which is the currency code for monetary
+// instruments) and the decimal amount to construct the proto message.
 func toProtoMoney(m domain.Money) *money.Money {
 	// Convert decimal amount to units and nanos
 	// For example: 123.456789 USD -> units: 123, nanos: 456789000
-	amount := m.Amount()
+	amount := m.Amount
 	units := amount.IntPart()
 	fraction := amount.Sub(amount.Truncate(0))
 	nanos := fraction.Mul(decimal.NewFromInt(1_000_000_000)).IntPart()
@@ -79,7 +93,7 @@ func toProtoMoney(m domain.Money) *money.Money {
 	}
 
 	return &money.Money{
-		CurrencyCode: string(m.Currency()),
+		CurrencyCode: m.Instrument.Code, // Use instrument code (e.g., "USD", "GBP")
 		Units:        units,
 		Nanos:        int32(nanos), // #nosec G115 -- Safely clamped to int32 range above
 	}

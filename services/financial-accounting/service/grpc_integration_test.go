@@ -98,7 +98,11 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 		financial_booking_log_id UUID NOT NULL REFERENCES %q.financial_booking_log(id) ON DELETE RESTRICT,
 		posting_direction TEXT NOT NULL,
 		amount_cents BIGINT NOT NULL,
-		currency TEXT NOT NULL,
+		currency VARCHAR(32) NOT NULL,
+		dimension_type VARCHAR(20) DEFAULT 'CURRENCY',
+		instrument_version INTEGER DEFAULT 1,
+		instrument_precision INTEGER DEFAULT 2,
+		attributes JSONB DEFAULT '{}',
 		account_id TEXT NOT NULL,
 		value_date TIMESTAMP NOT NULL,
 		posting_result TEXT,
@@ -631,7 +635,8 @@ func TestRetrieveLedgerPosting_Integration_Success(t *testing.T) {
 
 	// Create booking log and posting
 	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
-	amount, _ := domain.NewMoney(decimal.NewFromFloat(100.50), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromFloat(100.50), gbpInstrument)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
@@ -707,7 +712,8 @@ func TestUpdateLedgerPosting_Integration_PendingToPosted(t *testing.T) {
 
 	// Create booking log and pending posting
 	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
-	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
@@ -749,7 +755,8 @@ func TestUpdateLedgerPosting_Integration_PendingToFailed(t *testing.T) {
 	defer cancel()
 
 	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
-	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
@@ -785,7 +792,8 @@ func TestUpdateLedgerPosting_Integration_InvalidTransition(t *testing.T) {
 
 	// Create already POSTED posting
 	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
-	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 	posting := &domain.LedgerPosting{
 		ID:                    uuid.New(),
 		FinancialBookingLogID: bookingLogID,
@@ -850,7 +858,8 @@ func TestListLedgerPostings_Integration_Success(t *testing.T) {
 
 	// Create booking log and multiple postings
 	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
-	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 
 	for i := 0; i < 5; i++ {
 		posting := &domain.LedgerPosting{
@@ -891,7 +900,8 @@ func TestListLedgerPostings_Integration_FilterByBookingLogID(t *testing.T) {
 	bookingLogID1 := createTestBookingLog(t, ts.db, ts.ctx)
 	bookingLogID2 := createTestBookingLog(t, ts.db, ts.ctx)
 
-	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 
 	// Create 3 postings for first booking log
 	for i := 0; i < 3; i++ {
@@ -949,7 +959,8 @@ func TestListLedgerPostings_Integration_FilterByDirection(t *testing.T) {
 	defer cancel()
 
 	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
-	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 
 	// Create 2 debit and 3 credit postings
 	for i := 0; i < 2; i++ {
@@ -1005,7 +1016,8 @@ func TestListLedgerPostings_Integration_Pagination(t *testing.T) {
 	defer cancel()
 
 	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
-	amount, _ := domain.NewMoney(decimal.NewFromInt(100), domain.CurrencyGBP)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
 
 	// Create 10 postings
 	for i := 0; i < 10; i++ {
@@ -1294,8 +1306,11 @@ func createTestPosting(t *testing.T, db *gorm.DB, ctx context.Context, bookingLo
 		ID:                    postingID,
 		FinancialBookingLogID: bookingLogID,
 		PostingDirection:      direction,
-		AmountCents:           amountCents,
+		AmountMinorUnits:      amountCents,
 		Currency:              "GBP",
+		DimensionType:         "CURRENCY",
+		InstrumentVersion:     1,
+		InstrumentPrecision:   2,
 		AccountID:             "ACC-" + uuid.New().String()[:8],
 		ValueDate:             time.Now(),
 		Status:                "PENDING",
