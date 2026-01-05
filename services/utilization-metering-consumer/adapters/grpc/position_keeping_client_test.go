@@ -296,25 +296,82 @@ func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest(t *testing.T) {
 
 	assert.Equal(t, "MERIDIAN-CURRENT-ACCOUNT-OPS", req.MeasurementType)
 	assert.Equal(t, "1", req.Value)
-	assert.Equal(t, "operations", req.Unit)
+	// Unit now uses instrument dimension (COUNT for operation type)
+	assert.Equal(t, "COUNT", req.Unit)
 	assert.Equal(t, measurement.AccountID.String(), req.PositionStateId)
 	assert.NotNil(t, req.Timestamp)
 
-	// Check metadata
+	// Check metadata from measurement attributes
 	assert.Equal(t, "current_account", req.Metadata["service"])
 	assert.Equal(t, "INSERT", req.Metadata["operation"])
 	assert.Equal(t, "AUDIT_STREAM", req.Metadata["source"])
 	assert.Equal(t, "100", req.Metadata["quality_score"])
+
+	// Check instrument metadata for typed quantity reconstruction
+	assert.Equal(t, "OPERATION", req.Metadata["instrument_code"])
+	assert.Equal(t, "1", req.Metadata["instrument_version"])
+	assert.Equal(t, "COUNT", req.Metadata["instrument_dimension"])
+	assert.Equal(t, "0", req.Metadata["instrument_precision"])
 }
 
-func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_CustomUnit(t *testing.T) {
+func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_TransactionUnit(t *testing.T) {
 	client := &PositionKeepingGRPCClient{}
 	measurement := createTestMeasurement()
-	measurement.Attributes["unit"] = "kWh"
+	measurement.Attributes["unit"] = "transaction"
 
 	req := client.buildRecordMeasurementRequest(measurement)
 
-	assert.Equal(t, "kWh", req.Unit)
+	// Unit uses instrument dimension
+	assert.Equal(t, "COUNT", req.Unit)
+	// Instrument metadata reflects TRANSACTION instrument
+	assert.Equal(t, "TRANSACTION", req.Metadata["instrument_code"])
+	assert.Equal(t, "1", req.Metadata["instrument_version"])
+	assert.Equal(t, "COUNT", req.Metadata["instrument_dimension"])
+	assert.Equal(t, "0", req.Metadata["instrument_precision"])
+}
+
+func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_StorageUnit(t *testing.T) {
+	client := &PositionKeepingGRPCClient{}
+	measurement := createTestMeasurement()
+	measurement.Attributes["unit"] = "storage_gb_hour"
+
+	req := client.buildRecordMeasurementRequest(measurement)
+
+	// Unit uses instrument dimension
+	assert.Equal(t, "DATA", req.Unit)
+	// Instrument metadata reflects STORAGE_GB_HOUR instrument
+	assert.Equal(t, "STORAGE_GB_HOUR", req.Metadata["instrument_code"])
+	assert.Equal(t, "1", req.Metadata["instrument_version"])
+	assert.Equal(t, "DATA", req.Metadata["instrument_dimension"])
+	assert.Equal(t, "6", req.Metadata["instrument_precision"])
+}
+
+func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_ComputeUnit(t *testing.T) {
+	client := &PositionKeepingGRPCClient{}
+	measurement := createTestMeasurement()
+	measurement.Attributes["unit"] = "compute_hour"
+
+	req := client.buildRecordMeasurementRequest(measurement)
+
+	// Unit uses instrument dimension
+	assert.Equal(t, "COMPUTE", req.Unit)
+	// Instrument metadata reflects COMPUTE_HOUR instrument
+	assert.Equal(t, "COMPUTE_HOUR", req.Metadata["instrument_code"])
+	assert.Equal(t, "1", req.Metadata["instrument_version"])
+	assert.Equal(t, "COMPUTE", req.Metadata["instrument_dimension"])
+	assert.Equal(t, "6", req.Metadata["instrument_precision"])
+}
+
+func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_UnknownUnit(t *testing.T) {
+	client := &PositionKeepingGRPCClient{}
+	measurement := createTestMeasurement()
+	measurement.Attributes["unit"] = "unknown_type"
+
+	req := client.buildRecordMeasurementRequest(measurement)
+
+	// Unknown unit types default to OPERATION instrument
+	assert.Equal(t, "COUNT", req.Unit)
+	assert.Equal(t, "OPERATION", req.Metadata["instrument_code"])
 }
 
 func TestNewPositionKeepingClient_ValidationErrors(t *testing.T) {
