@@ -2,7 +2,9 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -472,4 +474,316 @@ func BenchmarkInstrumentCache_Get_Parallel(b *testing.B) {
 			i++
 		}
 	})
+}
+
+// Tests for GetOrLoad and singleflight deduplication
+
+func TestInstrumentCache_GetOrLoad_CacheHit(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := newTestContext("tenant1")
+
+	// Pre-populate cache
+	instrument := newTestInstrument("USD", 1)
+	cache.Put(ctx, "USD", 1, instrument)
+
+	var loadCalled int32
+
+	// GetOrLoad should return cached value without calling loadFn
+	result, err := cache.GetOrLoad(ctx, "USD", 1, func() (*CachedInstrument, error) {
+		atomic.AddInt32(&loadCalled, 1)
+		return newTestInstrument("USD", 1), nil
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "USD", result.Definition.Code)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&loadCalled), "loadFn should not be called on cache hit")
+}
+
+func TestInstrumentCache_GetOrLoad_CacheMiss(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := newTestContext("tenant1")
+
+	var loadCalled int32
+
+	// GetOrLoad should call loadFn on cache miss
+	result, err := cache.GetOrLoad(ctx, "USD", 1, func() (*CachedInstrument, error) {
+		atomic.AddInt32(&loadCalled, 1)
+		return newTestInstrument("USD", 1), nil
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "USD", result.Definition.Code)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&loadCalled), "loadFn should be called once on cache miss")
+
+	// Verify it was cached
+	cached := cache.Get(ctx, "USD", 1)
+	require.NotNil(t, cached)
+	assert.Equal(t, "USD", cached.Definition.Code)
+}
+
+func TestInstrumentCache_GetOrLoad_LoadError(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := newTestContext("tenant1")
+
+	expectedErr := errors.New("database error") //nolint:err113 // test sentinel error
+
+	result, err := cache.GetOrLoad(ctx, "USD", 1, func() (*CachedInstrument, error) {
+		return nil, expectedErr
+	})
+
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, expectedErr)
+
+	// Verify nothing was cached
+	cached := cache.Get(ctx, "USD", 1)
+	assert.Nil(t, cached)
+}
+
+func TestInstrumentCache_GetOrLoad_MissingTenant(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := context.Background() // No tenant
+
+	result, err := cache.GetOrLoad(ctx, "USD", 1, func() (*CachedInstrument, error) {
+		return newTestInstrument("USD", 1), nil
+	})
+
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrTenantContextRequired)
+}
+
+func TestInstrumentCache_GetOrLoad_SingleflightDeduplication(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := newTestContext("tenant1")
+
+	var loadCalled int32
+	const concurrency = 100
+
+	// Barrier to ensure all goroutines start at the same time
+	var wg sync.WaitGroup
+	startCh := make(chan struct{})
+
+	wg.Add(concurrency)
+	results := make([]*CachedInstrument, concurrency)
+	errs := make([]error, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			<-startCh // Wait for start signal
+
+			results[idx], errs[idx] = cache.GetOrLoad(ctx, "USD", 1, func() (*CachedInstrument, error) {
+				atomic.AddInt32(&loadCalled, 1)
+				// Simulate some load time to increase overlap window
+				time.Sleep(10 * time.Millisecond)
+				return newTestInstrument("USD", 1), nil
+			})
+		}(i)
+	}
+
+	// Release all goroutines simultaneously
+	close(startCh)
+	wg.Wait()
+
+	// All requests should succeed
+	for i := 0; i < concurrency; i++ {
+		require.NoError(t, errs[i], "request %d failed", i)
+		require.NotNil(t, results[i], "request %d returned nil", i)
+		assert.Equal(t, "USD", results[i].Definition.Code)
+	}
+
+	// Singleflight should have deduplicated to exactly 1 call
+	assert.Equal(t, int32(1), atomic.LoadInt32(&loadCalled),
+		"singleflight should deduplicate %d concurrent requests to 1 loadFn call", concurrency)
+}
+
+func TestInstrumentCache_GetOrLoad_SingleflightTenantIsolation(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx1 := newTestContext("tenant1")
+	ctx2 := newTestContext("tenant2")
+
+	var loadCalled1, loadCalled2 int32
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Both tenants request the same code+version concurrently
+	go func() {
+		defer wg.Done()
+		_, _ = cache.GetOrLoad(ctx1, "USD", 1, func() (*CachedInstrument, error) {
+			atomic.AddInt32(&loadCalled1, 1)
+			time.Sleep(10 * time.Millisecond)
+			return newTestInstrument("USD", 1), nil
+		})
+	}()
+
+	go func() {
+		defer wg.Done()
+		_, _ = cache.GetOrLoad(ctx2, "USD", 1, func() (*CachedInstrument, error) {
+			atomic.AddInt32(&loadCalled2, 1)
+			time.Sleep(10 * time.Millisecond)
+			return newTestInstrument("USD", 1), nil
+		})
+	}()
+
+	wg.Wait()
+
+	// Each tenant should have its own load call (singleflight key includes tenant)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&loadCalled1), "tenant1 should have called loadFn once")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&loadCalled2), "tenant2 should have called loadFn once")
+}
+
+// Tests for InvalidateCode
+
+func TestInstrumentCache_InvalidateCode_AllVersions(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := newTestContext("tenant1")
+
+	// Put multiple versions of the same code
+	cache.Put(ctx, "USD", 1, newTestInstrument("USD", 1))
+	cache.Put(ctx, "USD", 2, newTestInstrument("USD", 2))
+	cache.Put(ctx, "USD", 3, newTestInstrument("USD", 3))
+	cache.Put(ctx, "EUR", 1, newTestInstrument("EUR", 1)) // Different code
+
+	// Verify all are cached
+	assert.NotNil(t, cache.Get(ctx, "USD", 1))
+	assert.NotNil(t, cache.Get(ctx, "USD", 2))
+	assert.NotNil(t, cache.Get(ctx, "USD", 3))
+	assert.NotNil(t, cache.Get(ctx, "EUR", 1))
+
+	// Invalidate all USD versions
+	cache.InvalidateCode(ctx, "USD")
+
+	// All USD versions should be gone
+	assert.Nil(t, cache.Get(ctx, "USD", 1), "USD v1 should be invalidated")
+	assert.Nil(t, cache.Get(ctx, "USD", 2), "USD v2 should be invalidated")
+	assert.Nil(t, cache.Get(ctx, "USD", 3), "USD v3 should be invalidated")
+
+	// EUR should still be cached
+	assert.NotNil(t, cache.Get(ctx, "EUR", 1), "EUR should not be affected")
+}
+
+func TestInstrumentCache_InvalidateCode_TenantIsolation(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx1 := newTestContext("tenant1")
+	ctx2 := newTestContext("tenant2")
+
+	// Put USD for both tenants
+	cache.Put(ctx1, "USD", 1, newTestInstrument("USD", 1))
+	cache.Put(ctx1, "USD", 2, newTestInstrument("USD", 2))
+	cache.Put(ctx2, "USD", 1, newTestInstrument("USD", 1))
+	cache.Put(ctx2, "USD", 2, newTestInstrument("USD", 2))
+
+	// Invalidate USD for tenant1 only
+	cache.InvalidateCode(ctx1, "USD")
+
+	// tenant1's USD should be gone
+	assert.Nil(t, cache.Get(ctx1, "USD", 1))
+	assert.Nil(t, cache.Get(ctx1, "USD", 2))
+
+	// tenant2's USD should still be cached
+	assert.NotNil(t, cache.Get(ctx2, "USD", 1), "tenant2 USD v1 should not be affected")
+	assert.NotNil(t, cache.Get(ctx2, "USD", 2), "tenant2 USD v2 should not be affected")
+}
+
+func TestInstrumentCache_InvalidateCode_MissingTenant(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := context.Background() // No tenant
+	validCtx := newTestContext("tenant1")
+
+	// Put something to verify operation is a no-op
+	cache.Put(validCtx, "USD", 1, newTestInstrument("USD", 1))
+
+	// Should be a no-op without panic
+	cache.InvalidateCode(ctx, "USD")
+
+	// Original entry should still exist
+	assert.NotNil(t, cache.Get(validCtx, "USD", 1))
+}
+
+func TestInstrumentCache_InvalidateCode_EmptyCache(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := newTestContext("tenant1")
+
+	// Should be a no-op without panic (tenant cache doesn't exist yet)
+	cache.InvalidateCode(ctx, "USD")
+
+	// Verify no side effects by checking stats
+	size, _ := cache.Stats(ctx)
+	assert.Equal(t, 0, size)
+}
+
+// Tests for PurgeInstrument
+
+func TestInstrumentCache_PurgeInstrument_AllVersions(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := newTestContext("tenant1")
+
+	// Put multiple versions
+	cache.Put(ctx, "GBP", 1, newTestInstrument("GBP", 1))
+	cache.Put(ctx, "GBP", 2, newTestInstrument("GBP", 2))
+	cache.Put(ctx, "JPY", 1, newTestInstrument("JPY", 1))
+
+	// PurgeInstrument should behave like InvalidateCode
+	cache.PurgeInstrument(ctx, "GBP")
+
+	// All GBP versions should be gone
+	assert.Nil(t, cache.Get(ctx, "GBP", 1))
+	assert.Nil(t, cache.Get(ctx, "GBP", 2))
+
+	// JPY should still be cached
+	assert.NotNil(t, cache.Get(ctx, "JPY", 1))
+}
+
+// Tests for PurgeAll
+
+func TestInstrumentCache_PurgeAll_TenantScoped(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx1 := newTestContext("tenant1")
+	ctx2 := newTestContext("tenant2")
+
+	// Put entries for both tenants
+	cache.Put(ctx1, "USD", 1, newTestInstrument("USD", 1))
+	cache.Put(ctx1, "EUR", 1, newTestInstrument("EUR", 1))
+	cache.Put(ctx1, "GBP", 1, newTestInstrument("GBP", 1))
+	cache.Put(ctx2, "JPY", 1, newTestInstrument("JPY", 1))
+	cache.Put(ctx2, "CHF", 1, newTestInstrument("CHF", 1))
+
+	// Verify initial state
+	size1, _ := cache.Stats(ctx1)
+	size2, _ := cache.Stats(ctx2)
+	assert.Equal(t, 3, size1)
+	assert.Equal(t, 2, size2)
+
+	// PurgeAll for tenant1 only
+	cache.PurgeAll(ctx1)
+
+	// tenant1 should be empty
+	assert.Nil(t, cache.Get(ctx1, "USD", 1))
+	assert.Nil(t, cache.Get(ctx1, "EUR", 1))
+	assert.Nil(t, cache.Get(ctx1, "GBP", 1))
+	size1After, _ := cache.Stats(ctx1)
+	assert.Equal(t, 0, size1After)
+
+	// tenant2 should be unaffected
+	assert.NotNil(t, cache.Get(ctx2, "JPY", 1), "tenant2 JPY should not be affected")
+	assert.NotNil(t, cache.Get(ctx2, "CHF", 1), "tenant2 CHF should not be affected")
+	size2After, _ := cache.Stats(ctx2)
+	assert.Equal(t, 2, size2After)
+}
+
+func TestInstrumentCache_PurgeAll_MissingTenant(t *testing.T) {
+	cache := NewInstrumentCache()
+	ctx := context.Background() // No tenant
+	validCtx := newTestContext("tenant1")
+
+	// Put something to verify operation is a no-op
+	cache.Put(validCtx, "USD", 1, newTestInstrument("USD", 1))
+
+	// Should be a no-op without panic
+	cache.PurgeAll(ctx)
+
+	// Original entry should still exist
+	assert.NotNil(t, cache.Get(validCtx, "USD", 1))
 }

@@ -4,12 +4,15 @@ package cache
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/rand/v2"
 	"sync"
 	"time"
 
 	"github.com/google/cel-go/cel"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/meridianhub/meridian/services/reference-data/registry"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -26,6 +29,14 @@ const (
 	// DefaultTTLJitter is the maximum random variation added to TTL.
 	// This prevents thundering herd when many entries expire simultaneously.
 	DefaultTTLJitter = 30 * time.Second
+)
+
+var (
+	// ErrTenantContextRequired is returned when a tenant context is required but not present.
+	ErrTenantContextRequired = errors.New("tenant context required")
+
+	// ErrUnexpectedResultType is returned when singleflight returns an unexpected type.
+	ErrUnexpectedResultType = errors.New("unexpected result type from singleflight")
 )
 
 // Key uniquely identifies an instrument within a tenant's cache.
@@ -76,6 +87,10 @@ type InstrumentCache struct {
 
 	// ttlJitter is the maximum random variation added to TTL
 	ttlJitter time.Duration
+
+	// sfGroup deduplicates concurrent cache misses for the same key.
+	// The singleflight key includes tenant ID to maintain isolation.
+	sfGroup singleflight.Group
 }
 
 // Option configures an InstrumentCache.
@@ -191,6 +206,96 @@ func (c *InstrumentCache) InvalidateAll(ctx context.Context) {
 	defer c.mu.Unlock()
 
 	delete(c.tenantCaches, tenantID)
+}
+
+// GetOrLoad retrieves a cached instrument or loads it via loadFn on cache miss.
+// Concurrent requests for the same key will share a single loadFn call via singleflight.
+// The loadFn should load from the repository and compile CEL programs as needed.
+// Returns nil and error if loading fails or tenant context is missing.
+func (c *InstrumentCache) GetOrLoad(
+	ctx context.Context,
+	code string,
+	version int,
+	loadFn func() (*CachedInstrument, error),
+) (*CachedInstrument, error) {
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil, ErrTenantContextRequired
+	}
+
+	// Fast path: check cache first
+	if cached := c.Get(ctx, code, version); cached != nil {
+		return cached, nil
+	}
+
+	// Slow path: use singleflight to deduplicate concurrent loads
+	sfKey := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
+
+	result, err, _ := c.sfGroup.Do(sfKey, func() (interface{}, error) {
+		// Double-check cache after acquiring singleflight slot
+		// Another goroutine might have populated the cache
+		if cached := c.Get(ctx, code, version); cached != nil {
+			return cached, nil
+		}
+
+		// Load from source
+		instrument, err := loadFn()
+		if err != nil {
+			return nil, err
+		}
+
+		// Store in cache
+		c.Put(ctx, code, version, instrument)
+
+		return instrument, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	cached, ok := result.(*CachedInstrument)
+	if !ok {
+		return nil, ErrUnexpectedResultType
+	}
+
+	return cached, nil
+}
+
+// InvalidateCode removes all versions of an instrument code for the tenant in context.
+// This is useful when an instrument is updated and all cached versions should be invalidated.
+func (c *InstrumentCache) InvalidateCode(ctx context.Context, code string) {
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		return
+	}
+
+	cache := c.getTenantCache(tenantID)
+	if cache == nil {
+		return
+	}
+
+	// Iterate through all keys and remove those matching the code
+	keys := cache.Keys()
+	for _, key := range keys {
+		if key.Code == code {
+			cache.Remove(key)
+		}
+	}
+}
+
+// PurgeAll clears ALL cached entries for the tenant in context.
+// This is an admin method for emergency cache clearing.
+// Note: This is equivalent to InvalidateAll but named for admin clarity.
+func (c *InstrumentCache) PurgeAll(ctx context.Context) {
+	c.InvalidateAll(ctx)
+}
+
+// PurgeInstrument removes all versions of an instrument for the tenant in context.
+// This is an admin method for emergency instrument-specific cache clearing.
+// Note: This is equivalent to InvalidateCode but named for admin clarity.
+func (c *InstrumentCache) PurgeInstrument(ctx context.Context, code string) {
+	c.InvalidateCode(ctx, code)
 }
 
 // Stats returns cache statistics for the tenant in context.
