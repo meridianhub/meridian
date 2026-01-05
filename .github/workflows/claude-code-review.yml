@@ -1,89 +1,87 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+  workflow_run:
+    workflows: ["Test", "Build", "Quality"]
+    types: [completed]
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # Only run when ALL conditions are met:
+    # 1. The triggering workflow succeeded
+    # 2. It was triggered by a pull request (not push to develop/main)
+    # 3. Not a Dependabot PR (they're automated dependency updates)
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login != 'dependabot[bot]'
 
     runs-on: ubuntu-latest
-    timeout-minutes: 45  # Increased to accommodate wait times for tests (12m) + build (15m) + linting (8m) + review time
+    timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: read
       id-token: write
-      checks: read
       actions: read
 
     steps:
-      # Wait for critical CI checks to complete before reviewing
-      # Each step has individual timeout to fail fast if checks hang
-      - name: Wait for Tests
-        uses: lewagon/wait-on-check-action@v1.3.4
-        timeout-minutes: 12  # Tests may take up to 12 minutes under load
+      - name: Get PR number
+        id: pr
+        uses: actions/github-script@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: 'Run Tests'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-          allowed-conclusions: success
+          script: |
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id
+            });
 
-      - name: Wait for Build
-        uses: lewagon/wait-on-check-action@v1.3.4
-        timeout-minutes: 15  # Docker builds can take up to 15 minutes under load
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: 'Build Docker Image'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-          allowed-conclusions: success
+            // Get PR number from the workflow run
+            const pulls = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${context.payload.workflow_run.head_branch}`,
+              state: 'open'
+            });
 
-      - name: Wait for Linting
-        uses: lewagon/wait-on-check-action@v1.3.4
-        timeout-minutes: 8  # Linting may take longer under load
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: 'golangci-lint'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-          allowed-conclusions: success
+            if (pulls.data.length === 0) {
+              console.log('No open PR found for this branch');
+              return;
+            }
+
+            const prNumber = pulls.data[0].number;
+            console.log(`Found PR #${prNumber}`);
+            core.setOutput('number', prNumber);
 
       - name: Checkout repository
+        if: steps.pr.outputs.number
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 1
 
       - name: Get current date
+        if: steps.pr.outputs.number
         id: date
         run: echo "current_date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
 
       - name: Run Claude Code Review
+        if: steps.pr.outputs.number
         id: claude-review
-        continue-on-error: true  # Don't fail the workflow if Claude Code times out or has service issues
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR NUMBER: ${{ steps.pr.outputs.number }}
 
             IMPORTANT CONTEXT:
             - Today's date is ${{ steps.date.outputs.current_date }}
             - Go version: This project uses Go 1.25+ which is the current stable release
             - Do not flag Go version references (like "Go 1.25") as errors or future versions
+            - CI has already passed (tests, build, linting) - focus on code quality
 
             Please review this pull request and provide feedback on:
             - Code quality and best practices
@@ -94,23 +92,17 @@ jobs:
 
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            Use `gh pr comment ${{ steps.pr.outputs.number }}` with your Bash tool to leave your review as a comment on the PR.
 
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
           # Using Opus 4.5 for higher quality code reviews
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
 
-      # Always succeed even if Claude Code times out or fails
-      # This prevents blocking PRs when Claude Code has service issues
       - name: Report Final Status
-        if: always()
+        if: always() && steps.pr.outputs.number
         run: |
           if [ "${{ steps.claude-review.outcome }}" == "success" ]; then
-            echo "✅ Claude Code review completed successfully"
+            echo "✅ Claude Code review completed successfully for PR #${{ steps.pr.outputs.number }}"
           elif [ "${{ steps.claude-review.outcome }}" == "failure" ] || [ "${{ steps.claude-review.outcome }}" == "cancelled" ]; then
-            echo "⚠️  Claude Code review timed out or failed - this is non-blocking"
-            echo "All required checks (tests, build, lint) have passed"
+            echo "⚠️  Claude Code review failed or was cancelled - this is non-blocking"
           fi
           exit 0
-
