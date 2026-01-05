@@ -67,6 +67,11 @@ BEGIN
 
       -- If successor_id is provided, validate it
       IF NEW."successor_id" IS NOT NULL THEN
+        -- Cannot designate self as successor
+        IF NEW."successor_id" = NEW."id" THEN
+          RAISE EXCEPTION 'Instrument cannot designate itself as its own successor';
+        END IF;
+
         -- Look up the successor instrument
         SELECT "id", "status", "dimension"
         INTO successor_record

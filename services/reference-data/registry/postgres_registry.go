@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -426,8 +427,18 @@ func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string,
 			// Check if the error is from the successor validation trigger
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "P0001" { // raise_exception
-				// The trigger raises exceptions for invalid successor
-				return ErrSuccessorInvalid
+				// Map specific trigger errors based on error message
+				msg := pgErr.Message
+				switch {
+				case strings.Contains(msg, "successor"):
+					return ErrSuccessorInvalid
+				case strings.Contains(msg, "Cannot transition"):
+					return ErrInvalidStateTransition
+				case strings.Contains(msg, "Cannot modify"):
+					return ErrInvalidStatus
+				default:
+					return fmt.Errorf("%w: %s", ErrInvalidStatus, msg)
+				}
 			}
 			return fmt.Errorf("failed to deprecate instrument: %w", err)
 		}
