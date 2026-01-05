@@ -35,8 +35,8 @@ func TestNewFinancialPositionLog_CustomOptions(t *testing.T) {
 	// Verify the transaction entry has correct amount
 	entries := log.TransactionLogEntries
 	require.Len(t, entries, 1)
-	assert.Equal(t, customAmount.String(), entries[0].Amount.Amount().String())
-	assert.Equal(t, domain.CurrencyUSD, entries[0].Amount.Currency())
+	assert.Equal(t, customAmount.String(), entries[0].Amount.Amount.String())
+	assert.Equal(t, domain.CurrencyUSD, domain.MoneyCurrency(entries[0].Amount))
 	assert.Equal(t, domain.PostingDirectionCredit, entries[0].Direction)
 }
 
@@ -78,16 +78,16 @@ func TestNewBulkTransactionCapturedEvent(t *testing.T) {
 
 func TestDefaultMoneyHelpers(t *testing.T) {
 	gbp := testfixtures.DefaultGBPMoney(t)
-	assert.Equal(t, domain.CurrencyGBP, gbp.Currency())
-	assert.Equal(t, "100", gbp.Amount().String())
+	assert.Equal(t, domain.CurrencyGBP, domain.MoneyCurrency(gbp))
+	assert.Equal(t, "100", gbp.Amount.String())
 
 	usd := testfixtures.DefaultUSDMoney(t)
-	assert.Equal(t, domain.CurrencyUSD, usd.Currency())
-	assert.Equal(t, "100", usd.Amount().String())
+	assert.Equal(t, domain.CurrencyUSD, domain.MoneyCurrency(usd))
+	assert.Equal(t, "100", usd.Amount.String())
 
 	jpy := testfixtures.DefaultJPYMoney(t)
-	assert.Equal(t, domain.CurrencyJPY, jpy.Currency())
-	assert.Equal(t, "10000", jpy.Amount().String())
+	assert.Equal(t, domain.CurrencyJPY, domain.MoneyCurrency(jpy))
+	assert.Equal(t, "10000", jpy.Amount.String())
 }
 
 func TestFixtures_ChainedOptions(t *testing.T) {

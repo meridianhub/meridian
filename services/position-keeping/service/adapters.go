@@ -70,7 +70,7 @@ func toProtoTransactionLogEntry(entry *domain.TransactionLogEntry) *positionkeep
 func toProtoMoneyAmount(domainMoney domain.Money) *commonv1.MoneyAmount {
 	// Convert decimal to units and nanos
 	// For example: 123.456789 GBP -> units: 123, nanos: 456789000
-	amount := domainMoney.Amount()
+	amount := domainMoney.Amount
 	units := amount.IntPart()
 	fraction := amount.Sub(amount.Truncate(0))
 	nanos := fraction.Mul(decimal.NewFromInt(1000000000)).IntPart()
@@ -84,7 +84,7 @@ func toProtoMoneyAmount(domainMoney domain.Money) *commonv1.MoneyAmount {
 
 	return &commonv1.MoneyAmount{
 		Amount: &money.Money{
-			CurrencyCode: domainMoney.Currency().String(),
+			CurrencyCode: string(domain.MoneyCurrency(domainMoney)),
 			Units:        units,
 			Nanos:        int32(nanos), // #nosec G115 -- Safely clamped to int32 range above
 		},

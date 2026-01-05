@@ -59,15 +59,15 @@ func (e *TransactionCaptured) OccurredAt() time.Time {
 func (e *TransactionCaptured) ToProto() interface{} {
 	// Convert decimal amount to minor units (cents, pence, sen, etc.)
 	// This is currency-aware: JPY has 0 decimal places, others have 2
-	// Using ToMinorUnitsUnchecked() since event amounts should be validated before this point
-	amountCents := e.Amount.ToMinorUnitsUnchecked()
+	// Using MoneyToMinorUnitsUnchecked since event amounts should be validated before this point
+	amountCents := MoneyToMinorUnitsUnchecked(e.Amount)
 
 	return &eventsv1.TransactionCapturedEvent{
 		LogId:         e.LogID.String(),
 		AccountId:     e.AccountID,
 		TransactionId: e.TransactionID.String(),
 		AmountCents:   amountCents,
-		Currency:      currencyToProto(e.Amount.Currency()),
+		Currency:      currencyToProto(MoneyCurrency(e.Amount)),
 		Direction:     e.Direction.String(),
 		Source:        e.Source.String(),
 		Description:   e.Description,
