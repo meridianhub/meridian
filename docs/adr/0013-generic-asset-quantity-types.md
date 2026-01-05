@@ -353,6 +353,237 @@ pricing, just like energy tariffs - the FX provider is simply another ValuationP
 market data feeds, custom tenant logic). The ledger doesn't implement the math -
 it just routes to the right provider based on instrument type.
 
+### Multi-Asset Examples
+
+The following examples demonstrate how the Quantity[D] type system handles real-world
+multi-asset scenarios.
+
+#### Energy Position with Time-of-Use Pricing
+
+Energy metering requires tracking consumption by time period for tariff calculation:
+
+```go
+package energy
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/shopspring/decimal"
+    "meridian/shared/domain/quantity"
+)
+
+// RecordEnergyUsage creates a position for energy consumption with time-of-use attributes.
+// The tou_period (0-47) represents half-hourly slots in a day.
+func RecordEnergyUsage(
+    ctx context.Context,
+    refData InstrumentReferenceDataService,
+    positionKeeping PositionKeepingService,
+    tenantID, accountID string,
+    kwhUsed decimal.Decimal,
+    touPeriod int,
+    tariffZone string,
+) error {
+    // Load KWH instrument from Reference Data
+    compiled, err := refData.RetrieveLatest(ctx, tenantID, "KWH")
+    if err != nil {
+        return fmt.Errorf("load KWH instrument: %w", err)
+    }
+
+    // Create position with time-of-use attributes
+    position := quantity.Physical{
+        Amount:     kwhUsed,
+        Instrument: compiled.Definition.ToFinancialInstrument(),
+    }
+
+    attrs := map[string]string{
+        "tou_period":  fmt.Sprintf("%d", touPeriod), // 0-47 for half-hourly slots
+        "tariff_zone": tariffZone,
+    }
+
+    // Validate attributes against instrument schema
+    if err := refData.ValidateAttributes(ctx, compiled, attrs); err != nil {
+        return fmt.Errorf("invalid energy attributes: %w", err)
+    }
+
+    // Record measurement - separate positions per tou_period (fungibility rules)
+    // Positions with different tou_period values cannot be merged
+    return positionKeeping.RecordMeasurement(ctx, accountID, position, attrs)
+}
+```
+
+#### Carbon Credit Trading with Vintage Tracking
+
+Carbon credits require vintage and registry tracking for compliance:
+
+```go
+package carbon
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/shopspring/decimal"
+    "meridian/shared/domain/quantity"
+)
+
+// TransferCarbonCredits moves voluntary carbon units between accounts.
+// VCU-2024 (v1) and VCU-2025 (v1) are separate instrument codes.
+// Same vintage from different registries tracked separately via attributes.
+func TransferCarbonCredits(
+    ctx context.Context,
+    refData InstrumentReferenceDataService,
+    ledger LedgerService,
+    tenantID string,
+    fromAccount, toAccount string,
+    tonnes decimal.Decimal,
+    vintage, projectID, registry string,
+) error {
+    // Load VCU instrument - code includes vintage year
+    instrumentCode := fmt.Sprintf("VCU-%s", vintage)
+    compiled, err := refData.RetrieveLatest(ctx, tenantID, instrumentCode)
+    if err != nil {
+        return fmt.Errorf("load %s instrument: %w", instrumentCode, err)
+    }
+
+    // Create position for carbon credits
+    vcuPosition := quantity.Physical{
+        Amount:     tonnes, // Tonnes CO2 equivalent
+        Instrument: compiled.Definition.ToFinancialInstrument(),
+    }
+
+    attrs := map[string]string{
+        "vintage":    vintage,
+        "project_id": projectID,
+        "registry":   registry, // e.g., "VERRA", "GOLD_STANDARD"
+    }
+
+    // Validate attributes - registry must be recognized
+    if err := refData.ValidateAttributes(ctx, compiled, attrs); err != nil {
+        return fmt.Errorf("invalid carbon credit attributes: %w", err)
+    }
+
+    // Fungibility check: same project + registry + vintage can merge
+    // Different registries = different positions (regulatory requirement)
+    return ledger.Transfer(ctx, fromAccount, toAccount, vcuPosition, attrs)
+}
+```
+
+#### GPU-Hour Metering for Cloud Billing
+
+Compute resources tracked by region and instance type:
+
+```go
+package compute
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/shopspring/decimal"
+    "meridian/shared/domain/quantity"
+)
+
+// RecordComputeUsage tracks GPU compute consumption for billing.
+// Different regions and instance types are non-fungible for pricing accuracy.
+func RecordComputeUsage(
+    ctx context.Context,
+    refData InstrumentReferenceDataService,
+    positionKeeping PositionKeepingService,
+    tenantID, accountID string,
+    gpuHours decimal.Decimal,
+    region, instanceType string,
+) error {
+    // Load GPU-HOUR instrument
+    compiled, err := refData.RetrieveLatest(ctx, tenantID, "GPU-HOUR")
+    if err != nil {
+        return fmt.Errorf("load GPU-HOUR instrument: %w", err)
+    }
+
+    // Create compute position
+    computePosition := quantity.Physical{
+        Amount:     gpuHours, // e.g., 2.5 GPU-hours
+        Instrument: compiled.Definition.ToFinancialInstrument(),
+    }
+
+    attrs := map[string]string{
+        "region":        region,        // e.g., "us-east-1"
+        "instance_type": instanceType,  // e.g., "p4d.24xlarge"
+    }
+
+    // Positions are only fungible within same region + instance type
+    // This ensures accurate pricing (spot rates vary by region)
+    return positionKeeping.RecordMeasurement(ctx, accountID, computePosition, attrs)
+}
+```
+
+### Temporal Pricing for Energy Tariffs
+
+Energy tariffs vary by time of day. The valuation layer handles this complexity:
+
+```go
+// TariffRate represents a time-bound energy price
+type TariffRate struct {
+    TariffZone  string
+    TOUPeriod   int             // 0-47 (half-hourly)
+    PricePerKWH decimal.Decimal // Rate in settlement currency
+    ValidFrom   time.Time
+    ValidTo     time.Time
+}
+
+// EnergyValuationProvider implements ValuationProvider for energy positions
+type EnergyValuationProvider struct {
+    tariffService TariffService
+}
+
+func (p *EnergyValuationProvider) Valuate(
+    ctx context.Context,
+    req ValuationRequest,
+) (ValuationResponse, error) {
+    // Extract attributes from position
+    touPeriod, _ := strconv.Atoi(req.Attributes["tou_period"])
+    tariffZone := req.Attributes["tariff_zone"]
+
+    // Lookup tariff rate for the specific time period
+    rate, err := p.tariffService.GetRate(ctx, tariffZone, touPeriod, req.ValuationTime)
+    if err != nil {
+        return ValuationResponse{}, fmt.Errorf("tariff lookup: %w", err)
+    }
+
+    // Value = Amount * TariffRate
+    // 150 kWh * £0.35/kWh = £52.50
+    valuedAmount := req.Position.Amount.Mul(rate.PricePerKWH)
+
+    return ValuationResponse{
+        OriginalPosition: req.Position,
+        ValuedAmount: quantity.Money{
+            Amount:     valuedAmount,
+            Instrument: p.settlementCurrency,
+        },
+        Rate:          rate.PricePerKWH,
+        ValuationTime: req.ValuationTime,
+    }, nil
+}
+
+func (p *EnergyValuationProvider) Supports(instrumentType InstrumentType, code string) bool {
+    return instrumentType == InstrumentTypeCommodity && strings.HasPrefix(code, "KWH")
+}
+```
+
+### Valuation Complexity by Instrument Type
+
+| Instrument | Position Unit | Valuation Complexity | Provider |
+|------------|---------------|---------------------|----------|
+| Same-currency Fiat | GBP 100.00 | Identity (1:1) | IdentityProvider |
+| Cross-currency Fiat | USD 100.00 | FX rate at timestamp | FXProvider |
+| Energy | 150 kWh | Tariff x Time-of-Use x Zone | TariffProvider |
+| Compute | 10 GPU-hours | Spot price x Region x Instance | ComputePricingProvider |
+| Carbon Credits | 50 tCO2e | Exchange price x Vintage x Registry | CarbonMarketProvider |
+| Inventory | 500 kg Rice | Market price x Quality grade | CommodityMarketProvider |
+
+**Key insight**: Position Keeping is simple (track amounts by attributes). Valuation is
+where the complexity lives, and it's handled by pluggable providers, not the core ledger.
+
 ### Why Dimensions, Not Specific Types?
 
 **The alternative** (from earlier drafts) was `Quantity[Currency]`, `Quantity[EnergyUnit]`, etc.
