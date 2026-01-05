@@ -429,12 +429,13 @@ func (r *PostgresRegistry) DeprecateInstrument(ctx context.Context, code string,
 			if errors.As(err, &pgErr) && pgErr.Code == "P0001" { // raise_exception
 				// Map specific trigger errors based on error message
 				msg := pgErr.Message
+				msgLower := strings.ToLower(msg)
 				switch {
-				case strings.Contains(msg, "successor"):
+				case strings.Contains(msgLower, "successor"):
 					return ErrSuccessorInvalid
-				case strings.Contains(msg, "Cannot transition"):
+				case strings.Contains(msgLower, "cannot transition"):
 					return ErrInvalidStateTransition
-				case strings.Contains(msg, "Cannot modify"):
+				case strings.Contains(msgLower, "cannot modify"):
 					return ErrInvalidStatus
 				default:
 					return fmt.Errorf("%w: %s", ErrInvalidStatus, msg)

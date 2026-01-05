@@ -73,8 +73,8 @@ var (
 	ErrAlreadyExists = errors.New("instrument with this code and version already exists")
 
 	// ErrSuccessorInvalid is returned when the specified successor instrument is invalid.
-	// A valid successor must exist and be in ACTIVE status.
-	ErrSuccessorInvalid = errors.New("successor instrument is invalid: must exist and be ACTIVE")
+	// A valid successor must exist, be in ACTIVE status, have the same dimension, and not be self-referential.
+	ErrSuccessorInvalid = errors.New("successor instrument is invalid: must exist, be ACTIVE, have same dimension, and not be self-referential")
 )
 
 // InstrumentDefinition represents a measurement unit, currency, or asset type

@@ -436,6 +436,38 @@ A (DEPRECATED) -> B (DEPRECATED) -> C (ACTIVE)
 **This works**: Recursive CTE traverses to find C as the current active instrument.
 However, if B is deprecated before clients update from A, they may briefly see B.
 
+### Circular Lineage Prevention
+
+The trigger validation naturally prevents circular references:
+
+```
+Scenario: A → B, then attempt B → A
+
+1. A is ACTIVE
+2. Deprecate A with successor B (B must be ACTIVE) ✅
+3. A is now DEPRECATED, B is ACTIVE
+4. Attempt to deprecate B with successor A
+   └─> FAILS: A is DEPRECATED, not ACTIVE ❌
+```
+
+The "successor must be ACTIVE" constraint prevents circular chains because an instrument
+that is already in the lineage chain (A) would have to be DEPRECATED to be there. The
+trigger also explicitly rejects self-referential successors (A → A).
+
+### Chain Depth Limits
+
+The recursive CTE query includes a depth limit of 10 to prevent runaway queries:
+
+```sql
+WHERE l.depth < 10  -- Defensive limit
+```
+
+**Note**: This limit is enforced on the read side only. There is no write-time
+enforcement preventing chains longer than 10. In practice, chains this long indicate
+a process problem (too many rapid deprecations) rather than a technical one. If
+enforcement is needed, a trigger could be added to validate chain depth before
+allowing a new successor to be set.
+
 ## Future Considerations
 
 ### Deprecation Reason
