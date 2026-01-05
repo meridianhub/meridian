@@ -1,7 +1,11 @@
 // Package domain contains the core domain models for utilization metering.
 package domain
 
-import "time"
+import (
+	"time"
+
+	"github.com/meridianhub/meridian/pkg/platform/quantity"
+)
 
 // UtilizationMeasurement represents a single utilization measurement derived from an audit event.
 // This will be sent to Position Keeping service as a position change for tenant-zero billing.
@@ -16,13 +20,10 @@ type UtilizationMeasurement struct {
 	// OperationType is the operation that was performed (e.g., "CreateAccount", "ProcessPayment")
 	OperationType string
 
-	// Quantity is the measured quantity for billing purposes
-	// Examples: 1 (for transaction count), bytes processed, API calls made
-	Quantity int64
-
-	// UnitOfMeasure describes what is being measured
-	// Examples: "transaction", "api_call", "storage_gb"
-	UnitOfMeasure string
+	// Amount is the measured quantity for billing purposes using the Universal Asset System.
+	// The instrument identifies what is being measured (TRANSACTION, API_CALL, STORAGE_GB, etc.)
+	// Examples: 1 TRANSACTION, 5 API_CALL, 100 STORAGE_GB
+	Amount quantity.Asset
 
 	// Timestamp is when the utilization occurred
 	Timestamp time.Time
