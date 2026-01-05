@@ -50,7 +50,7 @@ jobs:
         run: buf generate
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.7.2
           args: --timeout=5m --config=.golangci.yml
