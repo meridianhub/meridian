@@ -35,18 +35,6 @@ const (
 // ErrRedisClientRequired is returned when Redis client is nil.
 var ErrRedisClientRequired = errors.New("redis client is required")
 
-// RedisL2CacheConfig holds configuration for the Redis L2 cache.
-type RedisL2CacheConfig struct {
-	// KeyPrefix is the prefix for all Redis keys (default: "refdata").
-	KeyPrefix string
-
-	// BaseTTL is the base TTL for cached entries (default: 1 hour).
-	BaseTTL time.Duration
-
-	// TTLJitter is the maximum random variation added to TTL (default: 5 min).
-	TTLJitter time.Duration
-}
-
 // RedisL2CacheOption configures a RedisL2Cache.
 type RedisL2CacheOption func(*RedisL2Cache)
 
@@ -177,6 +165,7 @@ func (c *RedisL2Cache) Invalidate(ctx context.Context, code string, version int)
 
 // InvalidateCode removes all versions of an instrument code for the tenant.
 // Uses pattern matching with SCAN to find and delete all matching keys.
+// Uses UNLINK instead of DEL for non-blocking deletion.
 func (c *RedisL2Cache) InvalidateCode(ctx context.Context, code string) {
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
@@ -195,7 +184,8 @@ func (c *RedisL2Cache) InvalidateCode(ctx context.Context, code string) {
 		}
 
 		if len(keys) > 0 {
-			_ = c.client.Del(ctx, keys...).Err()
+			// Use UNLINK for non-blocking deletion (Redis 4.0+)
+			_ = c.client.Unlink(ctx, keys...).Err()
 		}
 
 		cursor = nextCursor
@@ -207,6 +197,7 @@ func (c *RedisL2Cache) InvalidateCode(ctx context.Context, code string) {
 
 // InvalidateAll removes all instrument cache entries for the tenant.
 // Uses pattern matching with SCAN to find and delete all matching keys.
+// Uses UNLINK instead of DEL for non-blocking deletion.
 func (c *RedisL2Cache) InvalidateAll(ctx context.Context) {
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
@@ -225,7 +216,8 @@ func (c *RedisL2Cache) InvalidateAll(ctx context.Context) {
 		}
 
 		if len(keys) > 0 {
-			_ = c.client.Del(ctx, keys...).Err()
+			// Use UNLINK for non-blocking deletion (Redis 4.0+)
+			_ = c.client.Unlink(ctx, keys...).Err()
 		}
 
 		cursor = nextCursor

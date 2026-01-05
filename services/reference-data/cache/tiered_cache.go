@@ -95,6 +95,10 @@ type TieredCache interface {
 }
 
 // TieredCacheStats contains statistics for monitoring cache performance.
+//
+// Note: Stats are read with atomic loads but not as an atomic snapshot.
+// Under high concurrency, individual counters may reflect slightly
+// different points in time. This is acceptable for monitoring purposes.
 type TieredCacheStats struct {
 	// L1Size is the current number of entries in the L1 cache for this tenant.
 	L1Size int
