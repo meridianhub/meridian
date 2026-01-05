@@ -460,7 +460,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		"payment_order_id", po.ID.String(),
 		"debtor_account_id", po.DebtorAccountID,
 		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", string(po.Amount.Currency()),
+		"currency", domain.CurrencyCode(po.Amount),
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", correlationID)
 
@@ -932,8 +932,8 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 	}
 
 	// Record metrics
-	poobservability.RecordCompletion(string(po.Amount.Currency()))
-	poobservability.RecordPaymentAmount(string(po.Amount.Currency()), "completed", safeMinorUnits(po.Amount))
+	poobservability.RecordCompletion(domain.CurrencyCode(po.Amount))
+	poobservability.RecordPaymentAmount(domain.CurrencyCode(po.Amount), "completed", safeMinorUnits(po.Amount))
 
 	// Execute lien asynchronously with retry mechanism
 	// The lien execution status is tracked in the payment order for reconciliation
@@ -970,7 +970,7 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		"gateway_reference_id", po.GatewayReferenceID,
 		"ledger_booking_id", ledgerBookingID,
 		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", string(po.Amount.Currency()),
+		"currency", domain.CurrencyCode(po.Amount),
 		"lien_id", po.LienID,
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", po.CorrelationID)
@@ -996,8 +996,8 @@ func (s *Service) handleRejectedStatus(ctx context.Context, po *domain.PaymentOr
 	}
 
 	// Record metrics after successful persistence to ensure accuracy
-	poobservability.RecordRejection(string(po.Amount.Currency()), poobservability.ErrorCategoryGatewayRejected)
-	poobservability.RecordPaymentAmount(string(po.Amount.Currency()), "rejected", safeMinorUnits(po.Amount))
+	poobservability.RecordRejection(domain.CurrencyCode(po.Amount), poobservability.ErrorCategoryGatewayRejected)
+	poobservability.RecordPaymentAmount(domain.CurrencyCode(po.Amount), "rejected", safeMinorUnits(po.Amount))
 
 	// Audit log for rejection
 	s.logger.Info("payment order rejected via gateway callback",
@@ -1005,7 +1005,7 @@ func (s *Service) handleRejectedStatus(ctx context.Context, po *domain.PaymentOr
 		"gateway_reference_id", po.GatewayReferenceID,
 		"gateway_message", gatewayMessage,
 		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", string(po.Amount.Currency()),
+		"currency", domain.CurrencyCode(po.Amount),
 		"lien_id", po.LienID,
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", po.CorrelationID)
@@ -1113,7 +1113,7 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 		"reason", req.CancellationReason,
 		"cancelled_by", req.CancelledBy,
 		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", string(po.Amount.Currency()),
+		"currency", domain.CurrencyCode(po.Amount),
 		"idempotency_key", po.IdempotencyKey,
 		"correlation_id", po.CorrelationID)
 
@@ -1294,7 +1294,7 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		"reason", req.ReversalReason,
 		"reversed_by", req.ReversedBy,
 		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", string(po.Amount.Currency()),
+		"currency", domain.CurrencyCode(po.Amount),
 		"original_ledger_booking_id", originalLedgerBookingID,
 		"compensating_booking_id", compensatingBookingID,
 		"correlation_id", po.CorrelationID)
@@ -1398,8 +1398,8 @@ func toProto(po *domain.PaymentOrder) *pb.PaymentOrder {
 // This is a lossless conversion since cents are exact representations.
 // The inverse operation protoToMoney uses symmetric rounding for any sub-cent precision.
 func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
-	// Use safeMinorUnits for the conversion - logs error internally if overflow occurs
-	amountCents := safeMinorUnits(m)
+	// Use domain.ToMinorUnits for the conversion
+	amountCents := domain.ToMinorUnits(m)
 	units := amountCents / 100
 	remainder := amountCents % 100
 	// #nosec G115 - remainder is always -99 to 99
@@ -1407,27 +1407,18 @@ func toMoneyAmount(m domain.Money) *commonpb.MoneyAmount {
 
 	return &commonpb.MoneyAmount{
 		Amount: &money.Money{
-			CurrencyCode: string(m.Currency()),
+			CurrencyCode: domain.CurrencyCode(m),
 			Units:        units,
 			Nanos:        nanos,
 		},
 	}
 }
 
-// safeMinorUnits converts Money to minor units (cents) with overflow protection.
-// Returns 0 if overflow occurs (should not happen in practice for valid payments).
+// safeMinorUnits converts Money to minor units (cents).
 // Used for logging and metrics where returning an error is not practical.
+// The new quantity package uses arbitrary precision, so overflow is not a concern.
 func safeMinorUnits(m domain.Money) int64 {
-	cents, err := m.ToMinorUnits()
-	if err != nil {
-		// This should never happen in practice - int64 max is ~92 quadrillion cents
-		// Log the anomaly for visibility, then return 0 rather than panicking
-		slog.Error("amount overflow in metrics conversion",
-			"currency", m.Currency(),
-			"error", err)
-		return 0
-	}
-	return cents
+	return domain.ToMinorUnits(m)
 }
 
 // protoToMoney converts proto MoneyAmount to domain Money
@@ -1535,12 +1526,13 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 	}
 
 	// Convert domain currency to proto currency
-	protoCurrency := mappers.DomainCurrencyToProto(po.Amount.Currency())
+	currencyCode := domain.CurrencyCode(po.Amount)
+	protoCurrency := mappers.CurrencyCodeToProto(currencyCode)
 	if protoCurrency == commonpb.Currency_CURRENCY_UNSPECIFIED {
 		s.logger.Warn("unsupported currency for reversal posting",
-			"currency", string(po.Amount.Currency()),
+			"currency", currencyCode,
 			"payment_order_id", po.ID.String())
-		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, po.Amount.Currency())
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, currencyCode)
 	}
 
 	// Step 1: Create a BookingLog in PENDING status for the reversal
@@ -1567,12 +1559,9 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 		"reason", reason)
 
 	// Convert amount from cents to google.type.Money format
-	amountCents, err := po.Amount.ToMinorUnits()
-	if err != nil {
-		return "", fmt.Errorf("amount overflow for reversal posting: %w", err)
-	}
+	amountCents := domain.ToMinorUnits(po.Amount)
 	postingAmount := &money.Money{
-		CurrencyCode: string(po.Amount.Currency()),
+		CurrencyCode: currencyCode,
 		Units:        amountCents / 100,
 		Nanos:        int32((amountCents % 100) * 10000000),
 	}
@@ -1669,7 +1658,7 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 		"debtor_account", po.DebtorAccountID,
 		"contra_account", contraAccountID,
 		"amount_cents", amountCents,
-		"currency", string(po.Amount.Currency()),
+		"currency", currencyCode,
 		"reason", reason)
 
 	return reversalBookingLogID, nil
