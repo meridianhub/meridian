@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -47,7 +46,7 @@ func (r *PositionRepository) setSearchPath(ctx context.Context, tx pgx.Tx) error
 		return nil
 	}
 
-	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
+	schemaName := pgx.Identifier{tenantID.SchemaName()}.Sanitize()
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
 	_, err := tx.Exec(ctx, query)
 	if err != nil {

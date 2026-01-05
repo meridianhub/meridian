@@ -213,6 +213,16 @@ func TestPositionRepository_AppendOnlyTrigger(t *testing.T) {
 		assert.Contains(t, err.Error(), "bucket_key")
 	})
 
+	t.Run("UPDATE on reference_id column raises trigger exception", func(t *testing.T) {
+		_, err := tc.Pool.Exec(ctx,
+			"UPDATE position_keeping.position SET reference_id = $2 WHERE id = $1",
+			pos.ID, uuid.New(),
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "append-only")
+		assert.Contains(t, err.Error(), "reference_id")
+	})
+
 	t.Run("UPDATE on attributes column succeeds (allowed)", func(t *testing.T) {
 		_, err := tc.Pool.Exec(ctx,
 			`UPDATE position_keeping.position SET attributes = '{"note": "allowed"}'::jsonb WHERE id = $1`,

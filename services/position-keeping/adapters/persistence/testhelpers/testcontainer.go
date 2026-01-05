@@ -280,15 +280,19 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 	`)
 	require.NoError(t, err, "Failed to create position table")
 
-	// Create position indexes
+	// Create position indexes (matching production migration)
 	_, err = pool.Exec(ctx, `
 		CREATE INDEX idx_position_account_id ON position_keeping.position (account_id);
 		CREATE INDEX idx_position_aggregation ON position_keeping.position (account_id, instrument_code, bucket_key);
 		CREATE INDEX idx_position_deleted_at ON position_keeping.position (deleted_at);
+		CREATE INDEX idx_position_active ON position_keeping.position (account_id, instrument_code, bucket_key)
+			WHERE deleted_at IS NULL;
+		CREATE INDEX idx_position_reference_id ON position_keeping.position (reference_id);
+		CREATE INDEX idx_position_created_at ON position_keeping.position (created_at);
 	`)
 	require.NoError(t, err, "Failed to create position indexes")
 
-	// Create append-only trigger function
+	// Create append-only trigger function (matches production migration)
 	_, err = pool.Exec(ctx, `
 		CREATE OR REPLACE FUNCTION position_keeping.positions_append_only()
 		RETURNS TRIGGER AS $$
@@ -307,6 +311,10 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			END IF;
 			IF OLD.bucket_key IS DISTINCT FROM NEW.bucket_key THEN
 				RAISE EXCEPTION 'positions table is append-only - UPDATE on bucket_key column is forbidden'
+					USING ERRCODE = 'P0001';
+			END IF;
+			IF OLD.reference_id IS DISTINCT FROM NEW.reference_id THEN
+				RAISE EXCEPTION 'positions table is append-only - UPDATE on reference_id column is forbidden'
 					USING ERRCODE = 'P0001';
 			END IF;
 			RETURN NEW;
