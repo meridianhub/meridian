@@ -1,51 +1,39 @@
-# Meridian - Universal Transaction Integrity Engine
+# Meridian
 
-The Operating System for the Real-World Economy - an open-source, cloud-native transaction integrity
-engine supporting finance, energy, and infrastructure assets.
+**Trust Your Numbers.** Open-source treasury infrastructure for the modern economy.
 
 ## Mission
 
-Meridian combines the real-time ledger rigor of 10x Banking, the multi-asset sophistication of Murex,
-and the high-frequency resilience of Kraken. We are building the first **Open-Source Transaction
-Integrity Engine** designed to manage the convergence of Finance, Energy, and Infrastructure.
+When your system accuses someone of a shortfall, you need absolute certainty. Meridian is
+open-source treasury infrastructure that proves itself - every position recorded with atomic
+audit trails, every transaction path traceable, every balance verifiable.
 
-### The Three DNA Strands
+### Measure
 
-#### 10x Banking DNA (The Core)
+Every position recorded with atomic audit trails. Parent-child transaction lineage preserved.
+Idempotent operations mean the same request twice produces the same result once. The accused
+can demand proof - and get it.
 
-Real-time ledgers, BIAN compliance, strict double-entry accounting, immutable audit trails.
-Saga patterns guarantee mathematical correctness. Because whether you are moving money or
-megawatts, you cannot lose data.
+### Value
 
-#### Murex DNA (The Brain)
+Value does not always look like currency anymore. Kilowatt-hours, tonnes of CO₂, commodity
+units - the economy runs on assets that traditional ledgers cannot handle. Multi-asset
+architecture handles diverse units with the same rigour as pounds and euros. Proper
+dimensional typing prevents nonsense calculations. One system, any asset class.
 
-Multi-asset architecture at the core: Energy (kWh), Compute (GPU-Hours), Carbon Credits
-treated exactly like financial instruments. Modern companies hold inventory, energy contracts,
-and digital rights - not just cash.
+### Settle
 
-#### Kraken DNA (The Muscle)
+When settlement fails, it cascades. Livelihoods depend on money arriving when promised,
+not stuck in a partial state that requires manual intervention. Lien-based fund reservation
+guarantees availability before commitment. Saga orchestration with automatic compensation -
+if anything fails, the system unwinds cleanly. Settlement completes or reverts. No orphaned debits.
 
-Time-Bound Quality Ladder and High-Frequency Buffer for massive streams of physical data.
-Handle Estimates vs. Actuals reconciliation without locking the database. Banks are too
-slow for the energy grid. Meridian operates at the speed of infrastructure.
+### Why Trust It
 
-### Market Positioning
-
-| Player | Limitation |
-|--------|------------|
-| Murex | $10M+/year, 3-year installs, built for Trading Floors not Operations |
-| 10x / Thought Machine | Brilliant banks, but Fiat Only - cannot track kWh or vouchers natively |
-| Kraken | Proprietary and Closed - unavailable unless you are a massive utility |
-| **Meridian** | **Open Source and Universal** - accessible to NGOs, AI startups, energy co-ops |
-
-### Vision
-
-We are entering the era of **Real-World Assets (RWA)**. The UN needs to track digital vouchers
-(Murex logic) on flaky networks (Kraken logic). AI Clouds need to bill for GPU milliseconds
-(Kraken logic) with financial rigor (10x logic).
-
-Meridian is the Infrastructure Layer that powers this new economy. We provide the Physics
-of Value so builders can focus on the product.
+Meridian is infrastructure you actually own. BIAN-compliant architecture means your team speaks
+the same technical language as the world's largest banks. Kubernetes-native, horizontally scalable,
+built for growth. Every deployment builds institutional expertise that stays with you.
+Full sovereignty. Open access. Verify everything.
 
 ## What it Demonstrates
 
@@ -77,12 +65,12 @@ universal transaction integrity across asset classes.
 
 ### Commodity Dimension
 
-| Instrument Type | Example | Settlement Function |
+| Instrument Type | Example | Valuation Approach |
 |-----------------|---------|---------------------|
-| Energy | kWh, MWh, Therms | Tariff x Time-of-Use |
-| Compute | GPU-hours, vCPU-seconds | Spot Price x Region |
-| Carbon Credits | tCO2e | Exchange Price x Vintage |
-| Physical Inventory | kg, units | Market Price x Quality |
+| Utility Units | kWh, therms | Rate schedule |
+| Compute Resources | GPU-hours, vCPU-seconds | Spot pricing |
+| Environmental Credits | tCO₂e | Exchange pricing |
+| Physical Goods | kg, units | Market pricing |
 
 ## Features
 
