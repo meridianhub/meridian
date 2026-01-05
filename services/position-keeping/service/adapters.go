@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	"github.com/google/cel-go/cel"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -14,8 +16,36 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 )
 
+// CachedInstrument contains the instrument definition and precompiled CEL programs.
+// This is a local type that mirrors the reference-data cache type to avoid
+// circular dependencies.
+type CachedInstrument struct {
+	// InstrumentCode is the unique code for the instrument.
+	InstrumentCode string
+
+	// ValidationProgram is the precompiled CEL program for validation.
+	// May be nil if no validation expression is defined.
+	ValidationProgram cel.Program
+}
+
+// InstrumentCache provides an interface for looking up instrument definitions
+// with precompiled CEL validation programs.
+//
+// This interface allows the position-keeping service to validate measurements
+// against instrument definitions without depending directly on the reference-data
+// service implementation.
+type InstrumentCache interface {
+	// GetOrLoad retrieves a cached instrument or loads it via loadFn on cache miss.
+	// The loadFn should load from the repository and compile CEL programs as needed.
+	// Returns the cached instrument or an error if loading fails.
+	GetOrLoad(ctx context.Context, code string, version int, loadFn func() (*CachedInstrument, error)) (*CachedInstrument, error)
+}
+
 // ErrEmptyUUID is returned when UUID string is empty
 var ErrEmptyUUID = errors.New("UUID string is empty")
+
+// ErrInstrumentNotFound is returned when an instrument is not found in the cache.
+var ErrInstrumentNotFound = errors.New("instrument not found")
 
 // toProtoFinancialPositionLog converts a domain FinancialPositionLog to its protobuf representation.
 func toProtoFinancialPositionLog(log *domain.FinancialPositionLog) *positionkeepingv1.FinancialPositionLog {

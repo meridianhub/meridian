@@ -34,6 +34,20 @@ type PositionKeepingService struct {
 	measurementRepo domain.MeasurementRepository
 	eventPublisher  domain.EventPublisher
 	idempotency     idempotency.Service
+	// instrumentCache is OPTIONAL - if nil, CEL validation is skipped.
+	// This allows backwards compatibility with existing deployments.
+	instrumentCache InstrumentCache
+}
+
+// Option configures optional dependencies for PositionKeepingService.
+type Option func(*PositionKeepingService)
+
+// WithInstrumentCache sets an optional instrument cache for CEL validation.
+// If not set or set to nil, CEL validation is skipped for backwards compatibility.
+func WithInstrumentCache(cache InstrumentCache) Option {
+	return func(s *PositionKeepingService) {
+		s.instrumentCache = cache
+	}
 }
 
 // NewPositionKeepingService creates a new PositionKeepingService with dependency injection.
@@ -44,12 +58,16 @@ type PositionKeepingService struct {
 //   - eventPublisher: Publishes domain events (must not be nil)
 //   - idempotencySvc: Ensures exactly-once processing of idempotent operations (must not be nil)
 //
-// Returns an error if any dependency is nil.
+// Optional dependencies can be provided via Option functions:
+//   - WithInstrumentCache: Enables CEL validation of measurements against instrument definitions
+//
+// Returns an error if any required dependency is nil.
 func NewPositionKeepingService(
 	repository domain.FinancialPositionLogRepository,
 	measurementRepo domain.MeasurementRepository,
 	eventPublisher domain.EventPublisher,
 	idempotencySvc idempotency.Service,
+	opts ...Option,
 ) (*PositionKeepingService, error) {
 	if repository == nil {
 		return nil, ErrRepositoryNil
@@ -64,12 +82,19 @@ func NewPositionKeepingService(
 		return nil, ErrIdempotencyServiceNil
 	}
 
-	return &PositionKeepingService{
+	svc := &PositionKeepingService{
 		repository:      repository,
 		measurementRepo: measurementRepo,
 		eventPublisher:  eventPublisher,
 		idempotency:     idempotencySvc,
-	}, nil
+	}
+
+	// Apply optional configurations
+	for _, opt := range opts {
+		opt(svc)
+	}
+
+	return svc, nil
 }
 
 // RetrieveFinancialPositionLog retrieves a financial position log by ID.

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/cel-go/cel"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -511,4 +512,349 @@ func TestDomain_Measurement_NewMeasurement_Validation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// =============================================================================
+// CEL Validation Tests
+// =============================================================================
+
+// MockInstrumentCache is a mock implementation of InstrumentCache for testing.
+type MockInstrumentCache struct {
+	mock.Mock
+}
+
+// GetOrLoad implements service.InstrumentCache.
+func (m *MockInstrumentCache) GetOrLoad(ctx context.Context, code string, version int, _ func() (*service.CachedInstrument, error)) (*service.CachedInstrument, error) {
+	args := m.Called(ctx, code, version)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*service.CachedInstrument), args.Error(1)
+}
+
+// createTestCELProgram creates a CEL program for testing validation.
+// The expression should evaluate to a boolean.
+func createTestCELProgram(t *testing.T, expression string) cel.Program {
+	t.Helper()
+	env, err := cel.NewEnv(
+		cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("amount", cel.StringType),
+		cel.Variable("valid_from", cel.TimestampType),
+		cel.Variable("valid_to", cel.TimestampType),
+		cel.Variable("source", cel.StringType),
+	)
+	require.NoError(t, err)
+
+	ast, issues := env.Compile(expression)
+	require.NoError(t, issues.Err())
+
+	prg, err := env.Program(ast)
+	require.NoError(t, err)
+
+	return prg
+}
+
+// TestRecordMeasurement_CEL_ValidationPasses tests that valid attributes pass CEL validation.
+func TestRecordMeasurement_CEL_ValidationPasses(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	// Create service with instrument cache
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Create a CEL program that validates the source attribute exists
+	validationProgram := createTestCELProgram(t, `"source" in attributes`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:    "kWh",
+		ValidationProgram: validationProgram,
+	}
+
+	// Setup mock expectations
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"source": "smart-meter", // This satisfies the CEL expression
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_CEL_ValidationRejects tests that invalid attributes are rejected.
+func TestRecordMeasurement_CEL_ValidationRejects(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Create a CEL program that requires a specific source attribute
+	validationProgram := createTestCELProgram(t, `"source" in attributes && attributes["source"] == "approved-meter"`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:    "kWh",
+		ValidationProgram: validationProgram,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"source": "unknown-meter", // This does NOT satisfy the CEL expression
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "validation failed")
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertNotCalled(t, "Create")
+}
+
+// TestRecordMeasurement_CEL_NilCacheSkipsValidation tests that nil cache skips validation.
+func TestRecordMeasurement_CEL_NilCacheSkipsValidation(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	// Create service WITHOUT instrument cache (nil)
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		// No WithInstrumentCache - cache is nil
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		// No metadata - would normally fail validation, but cache is nil
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_CEL_NilValidationProgramPasses tests that nil validation program passes.
+func TestRecordMeasurement_CEL_NilValidationProgramPasses(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	// Instrument with NO validation program (nil)
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:    "kWh",
+		ValidationProgram: nil, // No validation expression defined
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		// No metadata - validation is skipped because program is nil
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_CEL_InstrumentNotFound tests error when instrument is not found.
+func TestRecordMeasurement_CEL_InstrumentNotFound(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	// Cache returns not found error
+	mockCache.On("GetOrLoad", ctx, "unknown-instrument", 1).Return(nil, service.ErrInstrumentNotFound)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "unknown-instrument",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+	assert.Contains(t, st.Message(), "instrument definition not found")
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertNotCalled(t, "Create")
 }
