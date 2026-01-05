@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	cadomain "github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -98,7 +97,7 @@ func BenchmarkRepository_Create(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		amount, _ := cadomain.NewMoney("GBP", 10000)
+		amount, _ := domain.NewMoney("GBP", 10000)
 		po, _ := domain.NewPaymentOrder(
 			"acc-123",
 			"cred-ref",
@@ -123,7 +122,7 @@ func BenchmarkRepository_FindByID(b *testing.B) {
 	repo := NewPaymentOrderRepository(db)
 
 	// Create a payment order to retrieve
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	if err != nil {
 		b.Fatalf("setup: NewMoney failed: %v", err)
 	}
@@ -155,7 +154,7 @@ func BenchmarkRepository_FindByIdempotencyKey(b *testing.B) {
 	repo := NewPaymentOrderRepository(db)
 
 	// Create a payment order to retrieve
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	if err != nil {
 		b.Fatalf("setup: NewMoney failed: %v", err)
 	}
@@ -187,7 +186,7 @@ func BenchmarkRepository_FindByGatewayReferenceID(b *testing.B) {
 	repo := NewPaymentOrderRepository(db)
 
 	// Create a payment order with gateway reference
-	amount, err := cadomain.NewMoney("GBP", 10000)
+	amount, err := domain.NewMoney("GBP", 10000)
 	if err != nil {
 		b.Fatalf("setup: NewMoney failed: %v", err)
 	}
@@ -245,7 +244,7 @@ func BenchmarkRepository_Update(b *testing.B) {
 	orderInfos := make([]orderInfo, poolSize)
 
 	for i := 0; i < poolSize; i++ {
-		amount, err := cadomain.NewMoney("GBP", 10000)
+		amount, err := domain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
 		}
@@ -317,7 +316,7 @@ func BenchmarkRepository_FindByDebtorAccountIDWithCursor(b *testing.B) {
 
 			// Pre-populate payment orders
 			for i := 0; i < bm.numOrders; i++ {
-				amount, err := cadomain.NewMoney("GBP", int64(1000+i))
+				amount, err := domain.NewMoney("GBP", int64(1000+i))
 				if err != nil {
 					b.Fatalf("setup: NewMoney failed: %v", err)
 				}
@@ -362,7 +361,7 @@ func BenchmarkRepository_StateTransitionSequence(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		// Create
-		amount, err := cadomain.NewMoney("GBP", 10000)
+		amount, err := domain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("NewMoney failed: %v", err)
 		}
@@ -463,7 +462,7 @@ func BenchmarkCursor_EncodeDecode(b *testing.B) {
 // BenchmarkEntityConversion benchmarks domain<->entity conversion.
 func BenchmarkEntityConversion(b *testing.B) {
 	b.Run("toEntity", func(b *testing.B) {
-		amount, err := cadomain.NewMoney("GBP", 10000)
+		amount, err := domain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
 		}
@@ -490,7 +489,7 @@ func BenchmarkEntityConversion(b *testing.B) {
 	})
 
 	b.Run("toDomain", func(b *testing.B) {
-		amount, err := cadomain.NewMoney("GBP", 10000)
+		amount, err := domain.NewMoney("GBP", 10000)
 		if err != nil {
 			b.Fatalf("setup: NewMoney failed: %v", err)
 		}
