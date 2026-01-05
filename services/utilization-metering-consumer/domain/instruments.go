@@ -12,6 +12,8 @@
 package domain
 
 import (
+	"sort"
+
 	"github.com/meridianhub/meridian/pkg/platform/quantity"
 )
 
@@ -73,7 +75,7 @@ func mustInstrument(code string, version uint32, dimension string, precision int
 // InstrumentForMeasurementType returns the appropriate instrument for a given unit of measure.
 // This maps legacy string-based unit types to typed instruments.
 //
-// Supported measurement types:
+// Supported measurement types (case-sensitive, lowercase expected):
 //   - "transaction" -> InstrumentTransaction
 //   - "api_call" -> InstrumentAPICall
 //   - "operation" -> InstrumentOperation
@@ -81,6 +83,7 @@ func mustInstrument(code string, version uint32, dimension string, precision int
 //   - "compute_hour" -> InstrumentComputeHour
 //
 // If the measurement type is not recognized, InstrumentOperation is returned as a fallback.
+// Note: The mapping is case-sensitive - use lowercase measurement type strings.
 func InstrumentForMeasurementType(unitOfMeasure string) quantity.Instrument {
 	if inst, ok := instrumentsByMeasurementType[unitOfMeasure]; ok {
 		return inst
@@ -101,12 +104,14 @@ func AllInstruments() []quantity.Instrument {
 	}
 }
 
-// SupportedMeasurementTypes returns all supported measurement type strings.
+// SupportedMeasurementTypes returns all supported measurement type strings in sorted order.
 // These are the valid values for the unitOfMeasure parameter in InstrumentForMeasurementType.
+// The slice is sorted alphabetically for deterministic output in documentation and logging.
 func SupportedMeasurementTypes() []string {
 	types := make([]string, 0, len(instrumentsByMeasurementType))
 	for t := range instrumentsByMeasurementType {
 		types = append(types, t)
 	}
+	sort.Strings(types)
 	return types
 }

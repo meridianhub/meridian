@@ -10,13 +10,16 @@ import (
 	"github.com/meridianhub/meridian/pkg/platform/quantity"
 )
 
-// Test instruments for utilization metering - all use COUNT dimension with precision 0.
+// Test instruments mirror the production instruments from instruments.go.
+// These are defined separately to avoid import cycles and to test instrument creation.
+// See instruments.go for production instrument definitions.
 var (
 	transactionInstrument, _ = quantity.NewInstrument("TRANSACTION", 1, "COUNT", 0)
 	apiCallInstrument, _     = quantity.NewInstrument("API_CALL", 1, "COUNT", 0)
 	operationInstrument, _   = quantity.NewInstrument("OPERATION", 1, "COUNT", 0)
-	storageGBInstrument, _   = quantity.NewInstrument("STORAGE_GB", 1, "DATA", 2)
-	computeHourInstrument, _ = quantity.NewInstrument("COMPUTE_HOUR", 1, "COMPUTE", 4)
+	// Note: precision matches production instruments (6 for fractional units)
+	storageGBInstrument, _   = quantity.NewInstrument("STORAGE_GB_HOUR", 1, "DATA", 6)
+	computeHourInstrument, _ = quantity.NewInstrument("COMPUTE_HOUR", 1, "COMPUTE", 6)
 )
 
 func TestUtilizationMeasurement_Creation(t *testing.T) {
@@ -383,8 +386,9 @@ func TestUtilizationMeasurement_QuantityString(t *testing.T) {
 	amount := quantity.NewAssetFromInt(42, transactionInstrument)
 	assert.Equal(t, "42 TRANSACTION", amount.String())
 
+	// Storage instrument uses 6 decimal places and full code name
 	storageAmount := quantity.NewAssetFromInt(100, storageGBInstrument)
-	assert.Equal(t, "100.00 STORAGE_GB", storageAmount.String())
+	assert.Equal(t, "100.000000 STORAGE_GB_HOUR", storageAmount.String())
 }
 
 func TestUtilizationMeasurement_InstrumentDimension(t *testing.T) {
@@ -403,9 +407,9 @@ func TestUtilizationMeasurement_InstrumentDimension(t *testing.T) {
 }
 
 func TestUtilizationMeasurement_InstrumentPrecision(t *testing.T) {
-	// Verify precision for different utilization types
-	assert.Equal(t, 0, transactionInstrument.Precision) // Whole transactions
-	assert.Equal(t, 0, apiCallInstrument.Precision)     // Whole API calls
-	assert.Equal(t, 2, storageGBInstrument.Precision)   // Two decimal places for storage
-	assert.Equal(t, 4, computeHourInstrument.Precision) // Four decimal places for compute time
+	// Verify precision for different utilization types matches production instruments
+	assert.Equal(t, 0, transactionInstrument.Precision) // Whole transactions (COUNT)
+	assert.Equal(t, 0, apiCallInstrument.Precision)     // Whole API calls (COUNT)
+	assert.Equal(t, 6, storageGBInstrument.Precision)   // Six decimal places for storage (DATA)
+	assert.Equal(t, 6, computeHourInstrument.Precision) // Six decimal places for compute time (COMPUTE)
 }
