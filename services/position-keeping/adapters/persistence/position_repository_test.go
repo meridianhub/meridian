@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/persistence/testhelpers"
@@ -609,4 +610,319 @@ func TestPositionRepository_EnergyPositions(t *testing.T) {
 	// Jan 2: 1750.0
 	assert.True(t, decimal.NewFromFloat(1750.0).Equal(jan2Agg.TotalAmount))
 	assert.Equal(t, int64(1), jan2Agg.RecordCount)
+}
+
+// TestPositionRepository_GetAggregatedPositions tests GROUP BY bucket aggregation
+func TestPositionRepository_GetAggregatedPositions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-AGG-BUCKETS"
+	instrumentCode := "KWH"
+
+	// Insert positions across 3 buckets
+	bucketData := []struct {
+		bucket  string
+		amounts []float64
+	}{
+		{"bucket-a", []float64{100.0, 50.0}},      // Total: 150.0, Count: 2
+		{"bucket-b", []float64{200.0}},            // Total: 200.0, Count: 1
+		{"bucket-c", []float64{10.0, 20.0, 30.0}}, // Total: 60.0, Count: 3
+	}
+
+	for _, bd := range bucketData {
+		for _, amt := range bd.amounts {
+			pos, err := domain.NewPosition(
+				accountID,
+				instrumentCode,
+				bd.bucket,
+				decimal.NewFromFloat(amt),
+				"Energy",
+				nil,
+				uuid.Nil,
+				"system",
+			)
+			require.NoError(t, err)
+			err = tc.PositionRepo.Insert(ctx, pos)
+			require.NoError(t, err)
+		}
+	}
+
+	t.Run("returns aggregates grouped by bucket_key", func(t *testing.T) {
+		aggregates, err := tc.PositionRepo.GetAggregatedPositions(ctx, accountID, instrumentCode)
+		require.NoError(t, err)
+		require.Len(t, aggregates, 3)
+
+		// Results should be sorted by bucket_key
+		assert.Equal(t, "bucket-a", aggregates[0].BucketKey)
+		assert.Equal(t, "bucket-b", aggregates[1].BucketKey)
+		assert.Equal(t, "bucket-c", aggregates[2].BucketKey)
+
+		// Verify amounts
+		assert.True(t, decimal.NewFromFloat(150.0).Equal(aggregates[0].TotalAmount))
+		assert.True(t, decimal.NewFromFloat(200.0).Equal(aggregates[1].TotalAmount))
+		assert.True(t, decimal.NewFromFloat(60.0).Equal(aggregates[2].TotalAmount))
+
+		// Verify counts
+		assert.Equal(t, int64(2), aggregates[0].RecordCount)
+		assert.Equal(t, int64(1), aggregates[1].RecordCount)
+		assert.Equal(t, int64(3), aggregates[2].RecordCount)
+	})
+
+	t.Run("returns empty slice for non-existent account", func(t *testing.T) {
+		aggregates, err := tc.PositionRepo.GetAggregatedPositions(ctx, "NON-EXISTENT", instrumentCode)
+		require.NoError(t, err)
+		assert.Empty(t, aggregates)
+	})
+
+	t.Run("returns empty slice for non-existent instrument", func(t *testing.T) {
+		aggregates, err := tc.PositionRepo.GetAggregatedPositions(ctx, accountID, "XYZ-FAKE")
+		require.NoError(t, err)
+		assert.Empty(t, aggregates)
+	})
+}
+
+// TestPositionRepository_GetAggregatedPositions_ScalePerformance tests aggregation performance at scale
+func TestPositionRepository_GetAggregatedPositions_ScalePerformance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-SCALE-TEST"
+	instrumentCode := "GPU_HOUR"
+
+	// Insert 10,000 positions across 100 buckets
+	const numBuckets = 100
+	const positionsPerBucket = 100
+
+	positions := make([]*domain.Position, 0, numBuckets*positionsPerBucket)
+	for b := 0; b < numBuckets; b++ {
+		bucketKey := strings.ReplaceAll(uuid.NewString(), "-", "")[:8] + "-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:4]
+		for p := 0; p < positionsPerBucket; p++ {
+			pos, err := domain.NewPosition(
+				accountID,
+				instrumentCode,
+				bucketKey,
+				decimal.NewFromFloat(1.0),
+				"Compute",
+				nil,
+				uuid.Nil,
+				"system",
+			)
+			require.NoError(t, err)
+			positions = append(positions, pos)
+		}
+	}
+
+	// Bulk insert for speed
+	err := tc.PositionRepo.InsertBatch(ctx, positions)
+	require.NoError(t, err)
+
+	// Verify total count
+	count, err := tc.PositionRepo.GetPositionCount(ctx, accountID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(numBuckets*positionsPerBucket), count)
+
+	// Measure aggregation time
+	start := time.Now()
+	aggregates, err := tc.PositionRepo.GetAggregatedPositions(ctx, accountID, instrumentCode)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Len(t, aggregates, numBuckets)
+
+	// Each bucket should have sum of 100 (100 positions × 1.0)
+	for _, agg := range aggregates {
+		assert.True(t, decimal.NewFromFloat(float64(positionsPerBucket)).Equal(agg.TotalAmount),
+			"bucket %s should sum to %d", agg.BucketKey, positionsPerBucket)
+		assert.Equal(t, int64(positionsPerBucket), agg.RecordCount)
+	}
+
+	// Task requires <50ms for 10,000 positions across 100 buckets
+	t.Logf("GetAggregatedPositions with %d positions across %d buckets completed in %v",
+		numBuckets*positionsPerBucket, numBuckets, elapsed)
+	assert.Less(t, elapsed.Milliseconds(), int64(50), "aggregation should complete in <50ms")
+}
+
+// TestPositionRepository_GetBucketDetails tests bucket detail retrieval
+func TestPositionRepository_GetBucketDetails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-BUCKET-DETAILS"
+	instrumentCode := "CARBON_CREDIT"
+	targetBucket := "vintage-2024"
+	otherBucket := "vintage-2023"
+
+	// Insert 50 positions in target bucket
+	for i := 0; i < 50; i++ {
+		pos, err := domain.NewPosition(
+			accountID,
+			instrumentCode,
+			targetBucket,
+			decimal.NewFromFloat(float64(i+1)),
+			"Carbon",
+			map[string]string{"vintage": "2024", "index": strings.ReplaceAll(uuid.NewString(), "-", "")[:8]},
+			uuid.New(),
+			"system",
+		)
+		require.NoError(t, err)
+		err = tc.PositionRepo.Insert(ctx, pos)
+		require.NoError(t, err)
+	}
+
+	// Insert some positions in other bucket (should not be returned)
+	for i := 0; i < 5; i++ {
+		pos, err := domain.NewPosition(
+			accountID,
+			instrumentCode,
+			otherBucket,
+			decimal.NewFromFloat(999.0),
+			"Carbon",
+			nil,
+			uuid.Nil,
+			"system",
+		)
+		require.NoError(t, err)
+		err = tc.PositionRepo.Insert(ctx, pos)
+		require.NoError(t, err)
+	}
+
+	t.Run("returns all positions for bucket", func(t *testing.T) {
+		positions, err := tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, targetBucket, 100, 0)
+		require.NoError(t, err)
+		assert.Len(t, positions, 50)
+
+		// Verify all positions belong to target bucket
+		for _, pos := range positions {
+			assert.Equal(t, targetBucket, pos.BucketKey)
+			assert.Equal(t, accountID, pos.AccountID)
+			assert.Equal(t, instrumentCode, pos.InstrumentCode)
+		}
+	})
+
+	t.Run("returns positions with attributes deserialized", func(t *testing.T) {
+		positions, err := tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, targetBucket, 10, 0)
+		require.NoError(t, err)
+		require.NotEmpty(t, positions)
+
+		// First position should have attributes
+		pos := positions[0]
+		assert.NotNil(t, pos.Attributes)
+		assert.Equal(t, "2024", pos.Attributes["vintage"])
+	})
+
+	t.Run("pagination works correctly", func(t *testing.T) {
+		// First page
+		page1, err := tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, targetBucket, 20, 0)
+		require.NoError(t, err)
+		assert.Len(t, page1, 20)
+
+		// Second page
+		page2, err := tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, targetBucket, 20, 20)
+		require.NoError(t, err)
+		assert.Len(t, page2, 20)
+
+		// Third page (partial)
+		page3, err := tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, targetBucket, 20, 40)
+		require.NoError(t, err)
+		assert.Len(t, page3, 10) // Only 10 remaining
+
+		// Verify no duplicates between pages
+		seenIDs := make(map[uuid.UUID]bool)
+		for _, pos := range page1 {
+			seenIDs[pos.ID] = true
+		}
+		for _, pos := range page2 {
+			assert.False(t, seenIDs[pos.ID], "duplicate ID found in page2")
+			seenIDs[pos.ID] = true
+		}
+		for _, pos := range page3 {
+			assert.False(t, seenIDs[pos.ID], "duplicate ID found in page3")
+		}
+	})
+
+	t.Run("returns empty slice for non-existent bucket", func(t *testing.T) {
+		positions, err := tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, "non-existent-bucket", 100, 0)
+		require.NoError(t, err)
+		assert.Empty(t, positions)
+	})
+
+	t.Run("invalid limit returns error", func(t *testing.T) {
+		_, err := tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, targetBucket, 0, 0)
+		require.Error(t, err)
+
+		_, err = tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, targetBucket, -1, 0)
+		require.Error(t, err)
+	})
+}
+
+// TestPositionRepository_ReadOperationsNoSideEffects verifies read operations are pure
+func TestPositionRepository_ReadOperationsNoSideEffects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-READ-ONLY"
+	instrumentCode := "TIME_VOUCHER"
+	bucketKey := "session-001"
+
+	// Insert some positions
+	for i := 0; i < 10; i++ {
+		pos, err := domain.NewPosition(
+			accountID,
+			instrumentCode,
+			bucketKey,
+			decimal.NewFromFloat(float64(i+1)),
+			"Time",
+			nil,
+			uuid.Nil,
+			"system",
+		)
+		require.NoError(t, err)
+		err = tc.PositionRepo.Insert(ctx, pos)
+		require.NoError(t, err)
+	}
+
+	// Get initial count
+	initialCount, err := tc.PositionRepo.GetPositionCount(ctx, accountID)
+	require.NoError(t, err)
+
+	// Execute multiple read operations
+	for i := 0; i < 100; i++ {
+		_, err = tc.PositionRepo.GetAggregatedPositions(ctx, accountID, instrumentCode)
+		require.NoError(t, err)
+		_, err = tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, bucketKey, 100, 0)
+		require.NoError(t, err)
+		_, err = tc.PositionRepo.GetAggregatedPosition(ctx, accountID, instrumentCode, bucketKey)
+		require.NoError(t, err)
+	}
+
+	// Verify count unchanged (no side effects, no compaction triggered)
+	finalCount, err := tc.PositionRepo.GetPositionCount(ctx, accountID)
+	require.NoError(t, err)
+	assert.Equal(t, initialCount, finalCount, "read operations should not modify position count")
+
+	// Verify positions unchanged
+	positions, err := tc.PositionRepo.GetBucketDetails(ctx, accountID, instrumentCode, bucketKey, 100, 0)
+	require.NoError(t, err)
+	assert.Len(t, positions, 10, "read operations should not modify positions")
 }

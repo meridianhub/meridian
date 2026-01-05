@@ -145,4 +145,23 @@ type PositionRepository interface {
 	// GetPositionCount returns the count of positions for an account.
 	// This is useful for pagination and monitoring position growth.
 	GetPositionCount(ctx context.Context, accountID string) (int64, error)
+
+	// GetAggregatedPositions retrieves all aggregated positions for an account/instrument
+	// combination, grouped by BucketKey using pure SQL GROUP BY.
+	// This is a READ-ONLY operation with no side effects - it does NOT trigger compaction.
+	// Returns aggregates sorted by BucketKey for deterministic output.
+	// Returns an empty slice if no positions exist.
+	//
+	// DESIGN: Read operations are decoupled from write load - high read volume
+	// does not affect write throughput or trigger background jobs.
+	GetAggregatedPositions(ctx context.Context, accountID, instrumentCode string) ([]*AggregatedPosition, error)
+
+	// GetBucketDetails retrieves all raw position records for a specific
+	// (AccountID, InstrumentCode, BucketKey) combination.
+	// This is a READ-ONLY operation with no side effects.
+	// Returns positions sorted by CreatedAt descending for most recent first.
+	// Returns an empty slice if no positions exist for the bucket.
+	//
+	// Use case: Drill-down from aggregated view to individual position records.
+	GetBucketDetails(ctx context.Context, accountID, instrumentCode, bucketKey string, limit, offset int) ([]*Position, error)
 }
