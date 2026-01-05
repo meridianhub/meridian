@@ -251,3 +251,31 @@ func (m Money) Compare(other Money) (int, error) {
 func (m Money) String() string {
 	return m.qty.String()
 }
+
+// ToMinorUnits returns the amount in minor units (cents, pence, etc.) as int64.
+// Returns an error if the resulting value would overflow int64.
+// This method is kept for backward compatibility with existing persistence layer code.
+func (m Money) ToMinorUnits() (int64, error) {
+	precision := m.qty.Instrument.Precision
+	shifted := m.qty.Amount.Shift(int32(precision))
+	rounded := shifted.RoundBank(0)
+
+	// Check for overflow - int64 max is approximately 9.2e18
+	if rounded.Abs().GreaterThan(decimal.NewFromInt(9223372036854775807)) {
+		return 0, ErrAmountOverflow
+	}
+	return rounded.IntPart(), nil
+}
+
+// ToMinorUnitsUnchecked returns the amount in minor units without overflow checking.
+// Use only when the caller can guarantee the amount is within int64 range.
+// Panics if overflow would occur (caught by decimal's IntPart).
+//
+// This is safe for persistence layer use because:
+// - Domain layer validates amounts before persistence
+// - Reasonable monetary amounts (<= 92 quadrillion cents) cannot overflow
+func (m Money) ToMinorUnitsUnchecked() int64 {
+	precision := m.qty.Instrument.Precision
+	shifted := m.qty.Amount.Shift(int32(precision))
+	return shifted.RoundBank(0).IntPart()
+}

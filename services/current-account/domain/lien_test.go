@@ -15,17 +15,30 @@ func TestNewLien_Success(t *testing.T) {
 	amount, err := NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
-	lien, err := NewLien(accountID, amount, "PO-001", nil)
+	lien, err := NewLien(accountID, amount, "bucket-123", "PO-001", nil)
 
 	require.NoError(t, err)
 	assert.NotEqual(t, uuid.Nil, lien.ID)
 	assert.Equal(t, accountID, lien.AccountID)
 	assert.Equal(t, int64(10000), lien.Amount.AmountCents())
 	assert.Equal(t, CurrencyGBP, lien.Amount.Currency())
+	assert.Equal(t, "bucket-123", lien.BucketID)
 	assert.Equal(t, LienStatusActive, lien.Status)
 	assert.Equal(t, "PO-001", lien.PaymentOrderReference)
 	assert.Equal(t, 1, lien.Version)
 	assert.Nil(t, lien.ExpiresAt)
+}
+
+func TestNewLien_EmptyBucketID(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	// Empty bucket ID is valid (default bucket for backward compatibility)
+	lien, err := NewLien(accountID, amount, "", "PO-001", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "", lien.BucketID)
 }
 
 func TestNewLien_WithExpiration(t *testing.T) {
@@ -34,7 +47,7 @@ func TestNewLien_WithExpiration(t *testing.T) {
 	require.NoError(t, err)
 	expiresAt := time.Now().Add(24 * time.Hour)
 
-	lien, err := NewLien(accountID, amount, "PO-001", &expiresAt)
+	lien, err := NewLien(accountID, amount, "", "PO-001", &expiresAt)
 
 	require.NoError(t, err)
 	require.NotNil(t, lien.ExpiresAt)
@@ -46,7 +59,7 @@ func TestNewLien_ZeroAmount_Fails(t *testing.T) {
 	amount, err := NewMoney("GBP", 0)
 	require.NoError(t, err)
 
-	_, err = NewLien(accountID, amount, "PO-001", nil)
+	_, err = NewLien(accountID, amount, "", "PO-001", nil)
 
 	assert.ErrorIs(t, err, ErrInvalidLienAmount)
 }
@@ -56,7 +69,7 @@ func TestNewLien_NegativeAmount_Fails(t *testing.T) {
 	amount, err := NewMoney("GBP", -10000)
 	require.NoError(t, err)
 
-	_, err = NewLien(accountID, amount, "PO-001", nil)
+	_, err = NewLien(accountID, amount, "", "PO-001", nil)
 
 	assert.ErrorIs(t, err, ErrInvalidLienAmount)
 }
