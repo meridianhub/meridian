@@ -294,6 +294,11 @@ message Lien {
 
   // updated_at is when the lien was last modified
   google.protobuf.Timestamp updated_at = 7 [(buf.validate.field).required = true];
+
+  // bucket_id is the fungibility key / bucket identifier for bucket-aware reservations.
+  // For Phase 1, this is stored for future bucket-aware position tracking.
+  // Empty string represents the default bucket.
+  string bucket_id = 8 [(buf.validate.field).string = {max_len: 255}];
 }
 
 // Request to initiate a new current account
@@ -626,6 +631,11 @@ message InitiateLienRequest {
 
   // idempotency_key ensures exactly-once lien creation for retry scenarios
   meridian.common.v1.IdempotencyKey idempotency_key = 4;
+
+  // bucket_id is the fungibility key / bucket identifier for bucket-aware reservations.
+  // For Phase 1, this is optional - if not provided, defaults to empty string (default bucket).
+  // Future phases will support CEL expressions to compute bucket_id from transaction attributes.
+  string bucket_id = 5 [(buf.validate.field).string = {max_len: 255}];
 }
 
 // Response for initiating a lien

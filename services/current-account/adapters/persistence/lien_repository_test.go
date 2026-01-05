@@ -36,6 +36,7 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
 		currency VARCHAR(3) NOT NULL,
+		bucket_id VARCHAR(255) NOT NULL DEFAULT '',
 		status VARCHAR(20) NOT NULL,
 		payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
 		termination_reason TEXT,
@@ -66,7 +67,7 @@ func TestLienRepository_Create(t *testing.T) {
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
-	lien, err := domain.NewLien(accountID, amount, "PO-001", nil)
+	lien, err := domain.NewLien(accountID, amount, "bucket-abc", "PO-001", nil)
 	require.NoError(t, err)
 
 	err = repo.Create(ctx, lien)
@@ -82,6 +83,7 @@ func TestLienRepository_Create(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(10000), amountCents)
 	assert.Equal(t, domain.CurrencyGBP, retrieved.Amount.Currency())
+	assert.Equal(t, "bucket-abc", retrieved.BucketID)
 	assert.Equal(t, domain.LienStatusActive, retrieved.Status)
 	assert.Equal(t, "PO-001", retrieved.PaymentOrderReference)
 }
@@ -106,17 +108,17 @@ func TestLienRepository_FindByAccountID(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create two liens for same account
-	lien1, err := domain.NewLien(accountID, amount, "PO-001", nil)
+	lien1, err := domain.NewLien(accountID, amount, "", "PO-001", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, lien1))
 
-	lien2, err := domain.NewLien(accountID, amount, "PO-002", nil)
+	lien2, err := domain.NewLien(accountID, amount, "", "PO-002", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, lien2))
 
 	// Create lien for different account
 	otherAccountID := uuid.New()
-	lien3, err := domain.NewLien(otherAccountID, amount, "PO-003", nil)
+	lien3, err := domain.NewLien(otherAccountID, amount, "", "PO-003", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, lien3))
 
@@ -136,19 +138,19 @@ func TestLienRepository_FindActiveByAccountID(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create active lien
-	activeLien, err := domain.NewLien(accountID, amount, "PO-001", nil)
+	activeLien, err := domain.NewLien(accountID, amount, "", "PO-001", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, activeLien))
 
 	// Create and execute a lien
-	executedLien, err := domain.NewLien(accountID, amount, "PO-002", nil)
+	executedLien, err := domain.NewLien(accountID, amount, "", "PO-002", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, executedLien))
 	require.NoError(t, executedLien.Execute())
 	require.NoError(t, repo.Update(ctx, executedLien))
 
 	// Create and terminate a lien
-	terminatedLien, err := domain.NewLien(accountID, amount, "PO-003", nil)
+	terminatedLien, err := domain.NewLien(accountID, amount, "", "PO-003", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, terminatedLien))
 	require.NoError(t, terminatedLien.Terminate("Cancelled"))
@@ -172,13 +174,13 @@ func TestLienRepository_FindActiveByAccountID_ExcludesExpired(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create active lien without expiration
-	activeLien, err := domain.NewLien(accountID, amount, "PO-001", nil)
+	activeLien, err := domain.NewLien(accountID, amount, "", "PO-001", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, activeLien))
 
 	// Create active lien with past expiration (should be excluded)
 	past := time.Now().Add(-1 * time.Hour)
-	expiredLien, err := domain.NewLien(accountID, amount, "PO-002", &past)
+	expiredLien, err := domain.NewLien(accountID, amount, "", "PO-002", &past)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, expiredLien))
 
@@ -199,7 +201,7 @@ func TestLienRepository_FindByPaymentOrderReference(t *testing.T) {
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
-	lien, err := domain.NewLien(accountID, amount, "PO-UNIQUE-123", nil)
+	lien, err := domain.NewLien(accountID, amount, "", "PO-UNIQUE-123", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, lien))
 
@@ -228,7 +230,7 @@ func TestLienRepository_Update_Execute(t *testing.T) {
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
-	lien, err := domain.NewLien(accountID, amount, "PO-001", nil)
+	lien, err := domain.NewLien(accountID, amount, "", "PO-001", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, lien))
 
@@ -253,7 +255,7 @@ func TestLienRepository_Update_Terminate(t *testing.T) {
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
-	lien, err := domain.NewLien(accountID, amount, "PO-001", nil)
+	lien, err := domain.NewLien(accountID, amount, "", "PO-001", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, lien))
 
@@ -280,7 +282,7 @@ func TestLienRepository_OptimisticLocking(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create initial lien
-	lien, err := domain.NewLien(accountID, amount, "PO-001", nil)
+	lien, err := domain.NewLien(accountID, amount, "", "PO-001", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, lien))
 
@@ -317,16 +319,16 @@ func TestLienRepository_SumActiveAmountByAccountID(t *testing.T) {
 
 	// Create active liens
 	amount1, _ := domain.NewMoney("GBP", 20000) // £200
-	lien1, _ := domain.NewLien(accountID, amount1, "PO-001", nil)
+	lien1, _ := domain.NewLien(accountID, amount1, "", "PO-001", nil)
 	require.NoError(t, repo.Create(ctx, lien1))
 
 	amount2, _ := domain.NewMoney("GBP", 15000) // £150
-	lien2, _ := domain.NewLien(accountID, amount2, "PO-002", nil)
+	lien2, _ := domain.NewLien(accountID, amount2, "", "PO-002", nil)
 	require.NoError(t, repo.Create(ctx, lien2))
 
 	// Create and execute a lien (should not be counted)
 	amount3, _ := domain.NewMoney("GBP", 10000)
-	lien3, _ := domain.NewLien(accountID, amount3, "PO-003", nil)
+	lien3, _ := domain.NewLien(accountID, amount3, "", "PO-003", nil)
 	require.NoError(t, repo.Create(ctx, lien3))
 	require.NoError(t, lien3.Execute())
 	require.NoError(t, repo.Update(ctx, lien3))
@@ -347,13 +349,13 @@ func TestLienRepository_SumActiveAmountByAccountID_ExcludesExpired(t *testing.T)
 
 	// Create active lien
 	amount1, _ := domain.NewMoney("GBP", 20000)
-	lien1, _ := domain.NewLien(accountID, amount1, "PO-001", nil)
+	lien1, _ := domain.NewLien(accountID, amount1, "", "PO-001", nil)
 	require.NoError(t, repo.Create(ctx, lien1))
 
 	// Create expired active lien (should not be counted)
 	past := time.Now().Add(-1 * time.Hour)
 	amount2, _ := domain.NewMoney("GBP", 15000)
-	lien2, _ := domain.NewLien(accountID, amount2, "PO-002", &past)
+	lien2, _ := domain.NewLien(accountID, amount2, "", "PO-002", &past)
 	require.NoError(t, repo.Create(ctx, lien2))
 
 	// Sum should only include non-expired active liens
@@ -372,7 +374,7 @@ func TestLienRepository_SumActiveAmountByAccountID_CurrencyInconsistency(t *test
 
 	// Create active lien in GBP
 	amount1, _ := domain.NewMoney("GBP", 20000)
-	lien1, _ := domain.NewLien(accountID, amount1, "PO-001", nil)
+	lien1, _ := domain.NewLien(accountID, amount1, "", "PO-001", nil)
 	require.NoError(t, repo.Create(ctx, lien1))
 
 	// Manually insert lien with different currency (simulating data corruption)
@@ -381,6 +383,7 @@ func TestLienRepository_SumActiveAmountByAccountID_CurrencyInconsistency(t *test
 		AccountID:             accountID,
 		AmountCents:           15000,
 		Currency:              "EUR", // Different currency - data corruption
+		BucketID:              "",
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-CORRUPT",
 		Version:               1,
@@ -407,6 +410,102 @@ func TestLienRepository_SumActiveAmountByAccountID_NoLiens(t *testing.T) {
 	assert.Equal(t, int64(0), total)
 }
 
+func TestLienRepository_SumActiveAmountByAccountIDAndBucket(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	accountID := uuid.New()
+
+	// Create liens in bucket "bucket-a"
+	amount1, _ := domain.NewMoney("GBP", 20000) // 200 GBP
+	lien1, _ := domain.NewLien(accountID, amount1, "bucket-a", "PO-001", nil)
+	require.NoError(t, repo.Create(ctx, lien1))
+
+	amount2, _ := domain.NewMoney("GBP", 15000) // 150 GBP
+	lien2, _ := domain.NewLien(accountID, amount2, "bucket-a", "PO-002", nil)
+	require.NoError(t, repo.Create(ctx, lien2))
+
+	// Create liens in bucket "bucket-b"
+	amount3, _ := domain.NewMoney("GBP", 30000) // 300 GBP
+	lien3, _ := domain.NewLien(accountID, amount3, "bucket-b", "PO-003", nil)
+	require.NoError(t, repo.Create(ctx, lien3))
+
+	// Sum for bucket-a should be 35000 cents (200 + 150 GBP)
+	totalA, err := repo.SumActiveAmountByAccountIDAndBucket(ctx, accountID, "bucket-a")
+	require.NoError(t, err)
+	assert.Equal(t, int64(35000), totalA)
+
+	// Sum for bucket-b should be 30000 cents (300 GBP)
+	totalB, err := repo.SumActiveAmountByAccountIDAndBucket(ctx, accountID, "bucket-b")
+	require.NoError(t, err)
+	assert.Equal(t, int64(30000), totalB)
+
+	// Sum for non-existent bucket should be 0
+	totalC, err := repo.SumActiveAmountByAccountIDAndBucket(ctx, accountID, "bucket-c")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), totalC)
+}
+
+func TestLienRepository_SumActiveAmountByAccountIDAndBucket_ExcludesExecuted(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	accountID := uuid.New()
+	bucketID := "test-bucket"
+
+	// Create active lien
+	amount1, _ := domain.NewMoney("GBP", 20000)
+	lien1, _ := domain.NewLien(accountID, amount1, bucketID, "PO-001", nil)
+	require.NoError(t, repo.Create(ctx, lien1))
+
+	// Create and execute a lien (should not be counted)
+	amount2, _ := domain.NewMoney("GBP", 10000)
+	lien2, _ := domain.NewLien(accountID, amount2, bucketID, "PO-002", nil)
+	require.NoError(t, repo.Create(ctx, lien2))
+	require.NoError(t, lien2.Execute())
+	require.NoError(t, repo.Update(ctx, lien2))
+
+	// Sum should only include active lien
+	total, err := repo.SumActiveAmountByAccountIDAndBucket(ctx, accountID, bucketID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(20000), total)
+}
+
+func TestLienRepository_SumActiveAmountByAccountIDAndBucket_CurrencyInconsistency(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	accountID := uuid.New()
+	bucketID := "test-bucket"
+
+	// Create active lien in GBP
+	amount1, _ := domain.NewMoney("GBP", 20000)
+	lien1, _ := domain.NewLien(accountID, amount1, bucketID, "PO-001", nil)
+	require.NoError(t, repo.Create(ctx, lien1))
+
+	// Manually insert lien with different currency (simulating data corruption)
+	corruptedEntity := &LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             accountID,
+		AmountCents:           15000,
+		Currency:              "EUR", // Different currency - data corruption
+		BucketID:              bucketID,
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-CORRUPT",
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+	require.NoError(t, db.Create(corruptedEntity).Error)
+
+	// Sum should return currency inconsistency error
+	_, err := repo.SumActiveAmountByAccountIDAndBucket(ctx, accountID, bucketID)
+	assert.ErrorIs(t, err, ErrLienCurrencyInconsistent)
+}
+
 func TestLienRepository_CreateWithExpiration(t *testing.T) {
 	db, ctx, cleanup := setupLienTestDB(t)
 	defer cleanup()
@@ -417,7 +516,7 @@ func TestLienRepository_CreateWithExpiration(t *testing.T) {
 	require.NoError(t, err)
 	expiresAt := time.Now().Add(24 * time.Hour)
 
-	lien, err := domain.NewLien(accountID, amount, "PO-001", &expiresAt)
+	lien, err := domain.NewLien(accountID, amount, "", "PO-001", &expiresAt)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctx, lien))
 
@@ -436,6 +535,7 @@ func TestToLienDomain_InvalidCurrency_ReturnsError(t *testing.T) {
 		AccountID:             uuid.New(),
 		AmountCents:           10000,
 		Currency:              "", // Invalid: empty currency
+		BucketID:              "",
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-001",
 		Version:               1,
@@ -461,6 +561,7 @@ func TestLienRepository_FindByID_CorruptedData_ReturnsError(t *testing.T) {
 		AccountID:             uuid.New(),
 		AmountCents:           10000,
 		Currency:              "", // Corrupted
+		BucketID:              "",
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-CORRUPT",
 		Version:               1,
@@ -484,7 +585,7 @@ func TestLienRepository_FindByAccountID_PartialCorruption_ReturnsError(t *testin
 
 	// Create valid lien
 	validAmount, _ := domain.NewMoney("GBP", 10000)
-	validLien, _ := domain.NewLien(accountID, validAmount, "PO-001", nil)
+	validLien, _ := domain.NewLien(accountID, validAmount, "", "PO-001", nil)
 	require.NoError(t, repo.Create(ctx, validLien))
 
 	// Manually insert corrupted lien for same account
@@ -493,6 +594,7 @@ func TestLienRepository_FindByAccountID_PartialCorruption_ReturnsError(t *testin
 		AccountID:             accountID,
 		AmountCents:           5000,
 		Currency:              "", // Corrupted
+		BucketID:              "",
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-CORRUPT",
 		Version:               1,
@@ -515,7 +617,7 @@ func TestLienRepository_Update_NonExistent_ReturnsError(t *testing.T) {
 
 	// Create a lien in memory but don't save it
 	amount, _ := domain.NewMoney("GBP", 10000)
-	lien, _ := domain.NewLien(uuid.New(), amount, "PO-001", nil)
+	lien, _ := domain.NewLien(uuid.New(), amount, "", "PO-001", nil)
 
 	// Try to update non-existent lien
 	err := repo.Update(ctx, lien)
@@ -555,6 +657,7 @@ func setupMultiTenantLienTestDB(t *testing.T, tenantIDs ...string) (*gorm.DB, ma
 			account_id UUID NOT NULL,
 			amount_cents BIGINT NOT NULL,
 			currency VARCHAR(3) NOT NULL,
+			bucket_id VARCHAR(255) NOT NULL DEFAULT '',
 			status VARCHAR(20) NOT NULL,
 			payment_order_reference VARCHAR(255) NOT NULL UNIQUE,
 			termination_reason TEXT,
@@ -589,7 +692,7 @@ func TestLienRepository_TenantIsolation_FindByID_CrossTenantReturnsNotFound(t *t
 	amount, err := domain.NewMoney("GBP", 10000)
 	require.NoError(t, err)
 
-	lien, err := domain.NewLien(accountID, amount, "PO-CROSS-TENANT-001", nil)
+	lien, err := domain.NewLien(accountID, amount, "", "PO-CROSS-TENANT-001", nil)
 	require.NoError(t, err)
 
 	err = repo.Create(ctxOrg123, lien)
@@ -624,24 +727,24 @@ func TestLienRepository_TenantIsolation_FindActiveByAccountID_OnlyReturnsTenantD
 	require.NoError(t, err)
 
 	// Create liens in tenant_alpha
-	lienAlpha1, err := domain.NewLien(sharedAccountID, amount, "PO-ALPHA-001", nil)
+	lienAlpha1, err := domain.NewLien(sharedAccountID, amount, "", "PO-ALPHA-001", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctxAlpha, lienAlpha1))
 
-	lienAlpha2, err := domain.NewLien(sharedAccountID, amount, "PO-ALPHA-002", nil)
+	lienAlpha2, err := domain.NewLien(sharedAccountID, amount, "", "PO-ALPHA-002", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctxAlpha, lienAlpha2))
 
 	// Create liens in tenant_beta with same account ID
-	lienBeta1, err := domain.NewLien(sharedAccountID, amount, "PO-BETA-001", nil)
+	lienBeta1, err := domain.NewLien(sharedAccountID, amount, "", "PO-BETA-001", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctxBeta, lienBeta1))
 
-	lienBeta2, err := domain.NewLien(sharedAccountID, amount, "PO-BETA-002", nil)
+	lienBeta2, err := domain.NewLien(sharedAccountID, amount, "", "PO-BETA-002", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctxBeta, lienBeta2))
 
-	lienBeta3, err := domain.NewLien(sharedAccountID, amount, "PO-BETA-003", nil)
+	lienBeta3, err := domain.NewLien(sharedAccountID, amount, "", "PO-BETA-003", nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(ctxBeta, lienBeta3))
 
@@ -685,7 +788,7 @@ func TestLienRepository_TenantIsolation_FindByIDForUpdate_WrongTenantReturnsNotF
 	amount, err := domain.NewMoney("GBP", 50000)
 	require.NoError(t, err)
 
-	lien, err := domain.NewLien(accountID, amount, "PO-LOCKED-001", nil)
+	lien, err := domain.NewLien(accountID, amount, "", "PO-LOCKED-001", nil)
 	require.NoError(t, err)
 
 	err = repo.Create(ctxOwner, lien)
@@ -720,7 +823,7 @@ func TestLienRepository_TenantIsolation_Update_WrongTenantCannotModify(t *testin
 	amount, err := domain.NewMoney("GBP", 25000)
 	require.NoError(t, err)
 
-	lien, err := domain.NewLien(accountID, amount, "PO-PROTECTED-001", nil)
+	lien, err := domain.NewLien(accountID, amount, "", "PO-PROTECTED-001", nil)
 	require.NoError(t, err)
 
 	err = repo.Create(ctxOwner, lien)
@@ -737,6 +840,7 @@ func TestLienRepository_TenantIsolation_Update_WrongTenantCannotModify(t *testin
 		ID:                    lien.ID,
 		AccountID:             accountID,
 		Amount:                amount,
+		BucketID:              "",
 		Status:                domain.LienStatusTerminated, // Trying to terminate
 		PaymentOrderReference: lien.PaymentOrderReference,
 		TerminationReason:     "Malicious termination attempt",
@@ -779,20 +883,20 @@ func TestLienRepository_TenantIsolation_SumActiveAmount_OnlyCountsTenantData(t *
 
 	// Create liens in tenant A: 100 + 200 = 300 GBP
 	amountA1, _ := domain.NewMoney("GBP", 10000) // 100 GBP
-	lienA1, _ := domain.NewLien(sharedAccountID, amountA1, "PO-SUM-A-001", nil)
+	lienA1, _ := domain.NewLien(sharedAccountID, amountA1, "", "PO-SUM-A-001", nil)
 	require.NoError(t, repo.Create(ctxA, lienA1))
 
 	amountA2, _ := domain.NewMoney("GBP", 20000) // 200 GBP
-	lienA2, _ := domain.NewLien(sharedAccountID, amountA2, "PO-SUM-A-002", nil)
+	lienA2, _ := domain.NewLien(sharedAccountID, amountA2, "", "PO-SUM-A-002", nil)
 	require.NoError(t, repo.Create(ctxA, lienA2))
 
 	// Create liens in tenant B: 500 + 750 = 1250 GBP
 	amountB1, _ := domain.NewMoney("GBP", 50000) // 500 GBP
-	lienB1, _ := domain.NewLien(sharedAccountID, amountB1, "PO-SUM-B-001", nil)
+	lienB1, _ := domain.NewLien(sharedAccountID, amountB1, "", "PO-SUM-B-001", nil)
 	require.NoError(t, repo.Create(ctxB, lienB1))
 
 	amountB2, _ := domain.NewMoney("GBP", 75000) // 750 GBP
-	lienB2, _ := domain.NewLien(sharedAccountID, amountB2, "PO-SUM-B-002", nil)
+	lienB2, _ := domain.NewLien(sharedAccountID, amountB2, "", "PO-SUM-B-002", nil)
 	require.NoError(t, repo.Create(ctxB, lienB2))
 
 	// Sum from tenant A should be 30000 cents (300 GBP)
@@ -825,15 +929,15 @@ func TestLienRepository_TenantIsolation_CountActive_OnlyCountsTenantData(t *test
 	amount, _ := domain.NewMoney("GBP", 10000)
 
 	// Create 2 liens in tenant X
-	lienX1, _ := domain.NewLien(sharedAccountID, amount, "PO-COUNT-X-001", nil)
+	lienX1, _ := domain.NewLien(sharedAccountID, amount, "", "PO-COUNT-X-001", nil)
 	require.NoError(t, repo.Create(ctxX, lienX1))
 
-	lienX2, _ := domain.NewLien(sharedAccountID, amount, "PO-COUNT-X-002", nil)
+	lienX2, _ := domain.NewLien(sharedAccountID, amount, "", "PO-COUNT-X-002", nil)
 	require.NoError(t, repo.Create(ctxX, lienX2))
 
 	// Create 5 liens in tenant Y
 	for i := 1; i <= 5; i++ {
-		lien, _ := domain.NewLien(sharedAccountID, amount, fmt.Sprintf("PO-COUNT-Y-%03d", i), nil)
+		lien, _ := domain.NewLien(sharedAccountID, amount, "", fmt.Sprintf("PO-COUNT-Y-%03d", i), nil)
 		require.NoError(t, repo.Create(ctxY, lien))
 	}
 
@@ -865,7 +969,7 @@ func TestLienRepository_TenantIsolation_FindByPaymentOrderReference_CrossTenantN
 	amount, _ := domain.NewMoney("GBP", 10000)
 	paymentOrderRef := "PO-UNIQUE-CROSS-TENANT-REF"
 
-	lien, _ := domain.NewLien(accountID, amount, paymentOrderRef, nil)
+	lien, _ := domain.NewLien(accountID, amount, "", paymentOrderRef, nil)
 	require.NoError(t, repo.Create(ctxOwner, lien))
 
 	// Owner can find by payment order reference
