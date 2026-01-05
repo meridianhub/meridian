@@ -424,6 +424,63 @@ func TestRate_Convert_IdentityRate(t *testing.T) {
 	assert.Equal(t, testUSD, result.Instrument)
 }
 
+func TestRate_Convert_DoesNotMutateInput(t *testing.T) {
+	rate, err := NewRate(testUSD, testEUR, decimal.NewFromFloat(0.85), time.Time{}, time.Time{})
+	require.NoError(t, err)
+
+	input := NewMoney(decimal.NewFromFloat(100.00), testUSD)
+	original := input.Amount
+
+	_, err = rate.Convert(input)
+	require.NoError(t, err)
+
+	assert.True(t, original.Equal(input.Amount), "input should not be mutated")
+}
+
+func TestRate_Convert_ZeroAndSmallAmounts(t *testing.T) {
+	rate, err := NewRate(testUSD, testEUR, decimal.NewFromFloat(0.85), time.Time{}, time.Time{})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name           string
+		inputAmount    string
+		expectedAmount string
+	}{
+		{
+			name:           "zero amount",
+			inputAmount:    "0.00",
+			expectedAmount: "0.00",
+		},
+		{
+			name:           "very small amount that stays non-zero",
+			inputAmount:    "0.02",
+			expectedAmount: "0.02", // 0.02 * 0.85 = 0.017 rounds to 0.02
+		},
+		{
+			name:           "very small amount that rounds to zero",
+			inputAmount:    "0.005",
+			expectedAmount: "0.00", // 0.005 * 0.85 = 0.00425 rounds to 0.00
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inputAmount, err := decimal.NewFromString(tt.inputAmount)
+			require.NoError(t, err)
+
+			input := NewMoney(inputAmount, testUSD)
+			result, err := rate.Convert(input)
+			require.NoError(t, err)
+
+			expectedAmount, err := decimal.NewFromString(tt.expectedAmount)
+			require.NoError(t, err)
+
+			assert.True(t, expectedAmount.Equal(result.Amount),
+				"expected %s, got %s", tt.expectedAmount, result.Amount.String())
+		})
+	}
+}
+
 func TestRate_IsValidAt(t *testing.T) {
 	jan1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	jun15 := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
