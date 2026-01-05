@@ -1,8 +1,53 @@
-# Meridian - BIAN-Compliant Open Banking Ledger
+# Meridian - Universal Transaction Integrity Engine
 
-An open source, cloud-native core banking engine following BIAN (Banking Industry Architecture Network) standards.
+The Operating System for the Real-World Economy - an open source, cloud-native transaction integrity
+engine supporting finance, energy, and infrastructure assets.
 
-**What it demonstrates:**
+## Mission
+
+Meridian is what you get when 10x Banking and Murex have a baby, built with the operational physics
+of Kraken. We are building the first **Open-Source Transaction Integrity Engine** designed to manage
+the convergence of Finance, Energy, and Infrastructure.
+
+### The Three DNA Strands
+
+#### 10x Banking DNA (The Core)
+
+Real-time ledgers, BIAN compliance, strict double-entry accounting, immutable audit trails.
+Saga patterns guarantee mathematical correctness. Because whether you are moving money or
+megawatts, you cannot lose data.
+
+#### Murex DNA (The Brain)
+
+Multi-asset architecture at the core: Energy (kWh), Compute (GPU-Hours), Carbon Credits
+treated exactly like financial instruments. Modern companies hold inventory, energy contracts,
+and digital rights - not just cash.
+
+#### Kraken DNA (The Muscle)
+
+Time-Bound Quality Ladder and High-Frequency Buffer for massive streams of physical data.
+Handle Estimates vs. Actuals reconciliation without locking the database. Banks are too
+slow for the energy grid. Meridian operates at the speed of infrastructure.
+
+### Market Positioning
+
+| Player | Limitation |
+|--------|------------|
+| Murex | $10M+/year, 3-year installs, built for Trading Floors not Operations |
+| 10x / Thought Machine | Brilliant banks, but Fiat Only - cannot track kWh or vouchers natively |
+| Kraken | Proprietary and Closed - unavailable unless you are a massive utility |
+| **Meridian** | **Open Source and Universal** - accessible to NGOs, AI startups, energy co-ops |
+
+### Vision
+
+We are entering the era of **Real World Assets (RWA)**. The UN needs to track digital vouchers
+(Murex logic) on flaky networks (Kraken logic). AI Clouds need to bill for GPU milliseconds
+(Kraken logic) with financial rigor (10x logic).
+
+Meridian is the Infrastructure Layer that powers this new economy. We provide the Physics
+of Value so builders can focus on the product.
+
+## What it Demonstrates
 
 - BIAN-compliant service domain architecture
 - Modern microservices patterns for financial systems
@@ -10,8 +55,36 @@ An open source, cloud-native core banking engine following BIAN (Banking Industr
 - Protocol Buffer-based API design
 - Event-driven architecture with Kafka
 - Kubernetes-native deployment
+- Multi-asset ledger capabilities with dimensional type safety
+  ([ADR-0013](docs/adr/0013-generic-asset-quantity-types.md))
+- Tenant-defined instrument catalogs with CEL validation
+  ([ADR-0014](docs/adr/0014-financial-instrument-reference-data.md))
 
-**Features**:
+## Multi-Asset Capabilities
+
+Meridian's [Quantity\[D\] type system](docs/adr/0013-generic-asset-quantity-types.md) separates
+physics (compile-time dimensional safety) from policy (runtime instrument definitions), enabling
+universal transaction integrity across asset classes.
+
+### Monetary Dimension
+
+| Instrument Type | Example | Settlement Function |
+|-----------------|---------|---------------------|
+| Currency | USD, EUR, GBP | Identity or FX Rate |
+| Debt | Bonds, Loans | Market Price + Accrued Interest |
+| Equity | Shares, Stock | Market Price |
+| Derivatives | Options, Futures | Pricing Model |
+
+### Commodity Dimension
+
+| Instrument Type | Example | Settlement Function |
+|-----------------|---------|---------------------|
+| Energy | kWh, MWh, Therms | Tariff x Time-of-Use |
+| Compute | GPU-hours, vCPU-seconds | Spot Price x Region |
+| Carbon Credits | tCO2e | Exchange Price x Vintage |
+| Physical Inventory | kg, units | Market Price x Quality |
+
+## Features
 
 - Production-grade architecture patterns for financial systems
 - Comprehensive API design with Protocol Buffers
@@ -64,6 +137,7 @@ This implementation includes the following BIAN service domains:
 | [**Party**][svc-party] | Party Reference Data Directory | Customer and party reference data management | Yes | [OAS3][bian-party] |
 | [**PaymentOrder**][svc-po] | Payment Order | Payment initiation, saga orchestration, and settlement | No | [OAS3][bian-po] |
 | [**PositionKeeping**][svc-pk] | Position Keeping | Pre-ledger transaction log and position tracking | Yes | [OAS3][bian-pk] |
+| [**ReferenceData**][svc-rd] | Financial Instrument Reference Data Management | Tenant-defined instrument catalog with CEL validation | Yes | [OAS3][bian-rd] |
 
 Each service domain follows BIAN's control record pattern with behavior qualifiers for operations.
 Services marked as "Standalone" can operate independently; others require upstream dependencies.
@@ -75,11 +149,13 @@ Reference specifications: [BIAN Service Landscape 13.0.0](https://github.com/bia
 [bian-party]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PartyReferenceDataDirectory.yaml
 [bian-po]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PaymentOrder.yaml
 [bian-pk]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PositionKeeping.yaml
+[bian-rd]: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/FinancialInstrumentReferenceDataManagement.yaml
 [svc-ca]: services/current-account/
 [svc-fa]: services/financial-accounting/
 [svc-party]: services/party/
 [svc-po]: services/payment-order/
 [svc-pk]: services/position-keeping/
+[svc-rd]: services/reference-data/
 [svc-tenant]: services/tenant/
 
 ### Infrastructure Services
@@ -183,6 +259,10 @@ skill](docs/skills/schema-evolution.md)
 - Adapter pattern for layer translation
 - Local development with Tilt
 - Standard service directory structure
+- [Universal Quantity Type System](docs/adr/0013-generic-asset-quantity-types.md) - Dimensional type
+  safety for multi-asset ledger
+- [Financial Instrument Reference Data](docs/adr/0014-financial-instrument-reference-data.md) -
+  Tenant-defined instrument catalog with CEL validation
 
 **Architecture diagrams:**
 
@@ -197,7 +277,8 @@ Protocol Buffer definitions for all services are in [api/proto/](api/proto/).
 
 **Key APIs**:
 
-- Common types: Money, AccountType, Currency, Pagination
+- Common types: Quantity[D], Money, AccountType, Currency, Pagination
+- Financial instruments: Dimensional type system with runtime instrument definitions
 - Error codes: Categorized by domain (general, financial, BIAN-specific)
 - Health checks: Standard health service for all components
 
