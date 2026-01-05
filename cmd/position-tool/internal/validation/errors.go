@@ -171,5 +171,9 @@ func (e *DuplicateError) Error() string {
 
 // Is allows errors.Is to match DuplicateError instances.
 func (e *DuplicateError) Is(target error) bool {
-	return errors.Is(target, ErrDuplicateMeasurement)
+	_, ok := target.(*DuplicateError)
+	if ok {
+		return true
+	}
+	return target == ErrDuplicateMeasurement
 }

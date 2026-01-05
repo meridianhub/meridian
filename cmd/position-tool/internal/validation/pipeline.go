@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -61,8 +62,9 @@ type Pipeline struct {
 	failFast                 bool
 	logger                   *slog.Logger
 
-	// Cached instrument schemas keyed by instrument code
+	// Cached instrument schemas keyed by instrument code (protected by schemasMu)
 	instrumentSchemas map[string]string
+	schemasMu         sync.RWMutex
 
 	// Stats (atomic)
 	totalRows          int64
@@ -177,7 +179,9 @@ func (p *Pipeline) ValidateRow(ctx context.Context, row *ImportRow) *RowValidati
 		} else {
 			// Instrument is valid - cache schema for attribute validation
 			if result.Definition != nil && result.Definition.AttributeSchema != "" {
+				p.schemasMu.Lock()
 				p.instrumentSchemas[row.InstrumentCode] = result.Definition.AttributeSchema
+				p.schemasMu.Unlock()
 			}
 
 			// Track auto-created instruments
@@ -197,7 +201,10 @@ func (p *Pipeline) ValidateRow(ctx context.Context, row *ImportRow) *RowValidati
 	}
 
 	// Layer 4: Attribute schema validation
-	if schema, ok := p.instrumentSchemas[row.InstrumentCode]; ok && schema != "" {
+	p.schemasMu.RLock()
+	schema, ok := p.instrumentSchemas[row.InstrumentCode]
+	p.schemasMu.RUnlock()
+	if ok && schema != "" {
 		if err := p.schemaValidator.Validate(row.Attributes, schema); err != nil {
 			rowErr.AddError(fmt.Errorf("%w: %w", ErrInvalidAttributeSchema, err))
 			atomic.AddInt64(&p.schemaErrors, 1)
@@ -299,7 +306,9 @@ func (p *Pipeline) Reset() {
 	atomic.StoreInt64(&p.instrumentErrors, 0)
 	atomic.StoreInt64(&p.schemaErrors, 0)
 	atomic.StoreInt64(&p.instrumentsCreated, 0)
+	p.schemasMu.Lock()
 	p.instrumentSchemas = make(map[string]string)
+	p.schemasMu.Unlock()
 }
 
 // Close releases resources used by the pipeline.

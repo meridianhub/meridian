@@ -16,7 +16,7 @@ func TestNewImportAuditLogger(t *testing.T) {
 		})
 		require.NotNil(t, logger)
 		assert.NotEmpty(t, logger.ImportID())
-		assert.Equal(t, 0, logger.EventsPublished())
+		assert.Equal(t, int64(0), logger.EventsPublished())
 	})
 
 	t.Run("uses provided import ID", func(t *testing.T) {
@@ -60,13 +60,13 @@ func TestImportAuditLogger_NilPublisher(t *testing.T) {
 	t.Run("LogBatchImport is no-op with nil publisher", func(t *testing.T) {
 		err := logger.LogBatchImport(ctx, 1, 100, "acc-123", "USD", "test-user")
 		assert.NoError(t, err)
-		assert.Equal(t, 0, logger.EventsPublished())
+		assert.Equal(t, int64(0), logger.EventsPublished())
 	})
 
 	t.Run("LogImportComplete is no-op with nil publisher", func(t *testing.T) {
 		err := logger.LogImportComplete(ctx, 1000, 10, 5*time.Minute, "test-user")
 		assert.NoError(t, err)
-		assert.Equal(t, 0, logger.EventsPublished())
+		assert.Equal(t, int64(0), logger.EventsPublished())
 	})
 }
 
@@ -86,7 +86,7 @@ func TestNoOpAuditLogger(t *testing.T) {
 	err = logger.LogImportComplete(ctx, 100, 1, time.Second, "user")
 	assert.NoError(t, err)
 
-	assert.Equal(t, 0, logger.EventsPublished())
+	assert.Equal(t, int64(0), logger.EventsPublished())
 }
 
 func TestImportAuditLoggerConfig(t *testing.T) {
@@ -120,12 +120,12 @@ func TestImportAuditLogger_ImportID(t *testing.T) {
 func TestImportAuditLogger_EventsPublished(t *testing.T) {
 	// Without a real publisher, EventsPublished stays at 0
 	logger := NewImportAuditLogger(ImportAuditLoggerConfig{})
-	assert.Equal(t, 0, logger.EventsPublished())
+	assert.Equal(t, int64(0), logger.EventsPublished())
 
 	// Even after "logging" events, count stays 0 with nil publisher
 	ctx := context.Background()
 	_ = logger.LogBatchImport(ctx, 1, 100, "acc", "USD", "user")
-	assert.Equal(t, 0, logger.EventsPublished())
+	assert.Equal(t, int64(0), logger.EventsPublished())
 }
 
 func BenchmarkImportAuditLogger_LogBatchImport_NilPublisher(b *testing.B) {
@@ -135,7 +135,7 @@ func BenchmarkImportAuditLogger_LogBatchImport_NilPublisher(b *testing.B) {
 	})
 
 	b.ResetTimer()
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		_ = logger.LogBatchImport(ctx, 1, 100, "acc-123", "USD", "test-user")
 	}
 }

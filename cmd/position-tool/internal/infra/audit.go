@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,8 +35,8 @@ type ImportAuditLogger struct {
 	importID      string
 	correlationID string
 
-	// Statistics
-	eventsPublished int
+	// Statistics (atomic for thread safety)
+	eventsPublished int64
 }
 
 // ImportAuditLoggerConfig contains configuration for creating an ImportAuditLogger.
@@ -140,7 +141,7 @@ func (l *ImportAuditLogger) LogBatchImport(
 		return errors.Join(ErrAuditPublishFailed, err)
 	}
 
-	l.eventsPublished++
+	atomic.AddInt64(&l.eventsPublished, 1)
 	return nil
 }
 
@@ -193,7 +194,7 @@ func (l *ImportAuditLogger) LogImportComplete(
 		return errors.Join(ErrAuditPublishFailed, err)
 	}
 
-	l.eventsPublished++
+	atomic.AddInt64(&l.eventsPublished, 1)
 	return nil
 }
 
@@ -203,8 +204,8 @@ func (l *ImportAuditLogger) ImportID() string {
 }
 
 // EventsPublished returns the number of audit events published so far.
-func (l *ImportAuditLogger) EventsPublished() int {
-	return l.eventsPublished
+func (l *ImportAuditLogger) EventsPublished() int64 {
+	return atomic.LoadInt64(&l.eventsPublished)
 }
 
 // NoOpAuditLogger returns an ImportAuditLogger that does nothing.
