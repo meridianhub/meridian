@@ -34,6 +34,10 @@ import (
 // can represent all values without loss of precision.
 const MaxPrecision = 18
 
+// DimensionCurrency is the canonical name for the currency dimension.
+// Use this constant when checking or setting monetary dimensions.
+const DimensionCurrency = "CURRENCY"
+
 // InstrumentCodePattern defines the valid format for instrument codes.
 // Codes must start with an uppercase letter and contain only uppercase letters,
 // digits, and underscores. Examples: "USD", "KWH", "GPU_HOUR", "CARBON_CREDIT".
@@ -42,15 +46,15 @@ var InstrumentCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 // ValidDimensions is the set of valid dimension string values.
 // These correspond to the proto enum values in instrument.proto.
 var ValidDimensions = map[string]bool{
-	"CURRENCY": true,
-	"ENERGY":   true,
-	"MASS":     true,
-	"VOLUME":   true,
-	"TIME":     true,
-	"COMPUTE":  true,
-	"CARBON":   true,
-	"DATA":     true,
-	"COUNT":    true,
+	DimensionCurrency: true,
+	"ENERGY":          true,
+	"MASS":            true,
+	"VOLUME":          true,
+	"TIME":            true,
+	"COMPUTE":         true,
+	"CARBON":          true,
+	"DATA":            true,
+	"COUNT":           true,
 }
 
 // Sentinel errors for instrument validation.
@@ -117,7 +121,8 @@ func NewInstrument(code string, version uint32, dimension string, precision int)
 		return Instrument{}, err
 	}
 
-	if err := validateDimension(dimension); err != nil {
+	normalizedDimension, err := normalizeDimension(dimension)
+	if err != nil {
 		return Instrument{}, err
 	}
 
@@ -128,7 +133,7 @@ func NewInstrument(code string, version uint32, dimension string, precision int)
 	return Instrument{
 		Code:      code,
 		Version:   version,
-		Dimension: dimension,
+		Dimension: normalizedDimension,
 		Precision: precision,
 	}, nil
 }
@@ -150,14 +155,14 @@ func validateCode(code string) error {
 	return nil
 }
 
-// validateDimension checks that a dimension string is valid.
-func validateDimension(dimension string) error {
-	// Normalize to uppercase for comparison
+// normalizeDimension validates and normalizes a dimension string to uppercase.
+// Returns the normalized dimension if valid, or an error if invalid.
+func normalizeDimension(dimension string) (string, error) {
 	normalized := strings.ToUpper(dimension)
 	if !ValidDimensions[normalized] {
-		return fmt.Errorf("%w: %s", ErrInvalidDimension, dimension)
+		return "", fmt.Errorf("%w: %s", ErrInvalidDimension, dimension)
 	}
-	return nil
+	return normalized, nil
 }
 
 // validatePrecision checks that precision is within valid range.
@@ -186,24 +191,26 @@ func (i Instrument) String() string {
 
 // IsMonetary returns true if this instrument represents a monetary value (currency).
 func (i Instrument) IsMonetary() bool {
-	return i.Dimension == "CURRENCY"
+	return i.Dimension == DimensionCurrency
 }
 
 // IsCommodity returns true if this instrument represents a non-monetary asset.
 func (i Instrument) IsCommodity() bool {
-	return i.Dimension != "CURRENCY" && i.Dimension != ""
+	return i.Dimension != DimensionCurrency && i.Dimension != ""
 }
 
 // Validate checks that the instrument is valid.
 // This can be used to validate instruments that were created without using NewInstrument
 // (e.g., deserialized from storage or received over the wire).
+// Note: Unlike NewInstrument, Validate does not normalize the dimension - it expects
+// the dimension to already be in canonical uppercase form.
 func (i Instrument) Validate() error {
 	if err := validateCode(i.Code); err != nil {
 		return err
 	}
 
-	if err := validateDimension(i.Dimension); err != nil {
-		return err
+	if !ValidDimensions[i.Dimension] {
+		return fmt.Errorf("%w: %s", ErrInvalidDimension, i.Dimension)
 	}
 
 	return validatePrecision(i.Precision)

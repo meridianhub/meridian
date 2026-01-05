@@ -2,6 +2,7 @@ package quantity
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -129,6 +130,11 @@ func TestNewInstrument_ValidCases(t *testing.T) {
 			}
 			if inst.Precision != tt.precision {
 				t.Errorf("Precision = %v, want %v", inst.Precision, tt.precision)
+			}
+			// Verify dimension is normalized to uppercase
+			expectedDimension := strings.ToUpper(tt.dimension)
+			if inst.Dimension != expectedDimension {
+				t.Errorf("Dimension = %v, want %v", inst.Dimension, expectedDimension)
 			}
 		})
 	}
@@ -395,6 +401,49 @@ func TestInstrumentCodePattern_Examples(t *testing.T) {
 	for _, code := range invalidCodes {
 		if InstrumentCodePattern.MatchString(code) {
 			t.Errorf("invalid code %q should not match pattern", code)
+		}
+	}
+}
+
+func TestNewInstrument_DimensionNormalization(t *testing.T) {
+	// Test that lowercase dimensions are normalized to uppercase
+	inst, err := NewInstrument("USD", 1, "currency", 2)
+	if err != nil {
+		t.Fatalf("NewInstrument() unexpected error: %v", err)
+	}
+
+	// The dimension should be normalized to uppercase
+	if inst.Dimension != DimensionCurrency {
+		t.Errorf("Dimension = %v, want %s (normalized)", inst.Dimension, DimensionCurrency)
+	}
+
+	// IsMonetary should work correctly with normalized dimension
+	if !inst.IsMonetary() {
+		t.Error("IsMonetary() = false, want true (dimension was normalized)")
+	}
+
+	// IsCommodity should be false for CURRENCY
+	if inst.IsCommodity() {
+		t.Error("IsCommodity() = true, want false (CURRENCY is not a commodity)")
+	}
+
+	// Validate should pass since dimension was normalized
+	if err := inst.Validate(); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+}
+
+func TestNewInstrument_MixedCaseDimension(t *testing.T) {
+	// Various mixed case inputs should all normalize correctly
+	cases := []string{"currency", "Currency", "CURRENCY", "CuRrEnCy"}
+	for _, dim := range cases {
+		inst, err := NewInstrument("TEST", 1, dim, 2)
+		if err != nil {
+			t.Errorf("NewInstrument with dimension %q: unexpected error: %v", dim, err)
+			continue
+		}
+		if inst.Dimension != DimensionCurrency {
+			t.Errorf("NewInstrument with dimension %q: got %q, want %s", dim, inst.Dimension, DimensionCurrency)
 		}
 	}
 }
