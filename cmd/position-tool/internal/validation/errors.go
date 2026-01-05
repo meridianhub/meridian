@@ -1,0 +1,175 @@
+// Package validation provides a multi-layered validation pipeline for bulk position imports.
+// It validates CSV rows for duplicates, required fields, instrument existence, and attribute schemas.
+package validation
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// Sentinel errors for validation operations.
+var (
+	// ErrDuplicateMeasurement indicates a measurement ID already exists.
+	ErrDuplicateMeasurement = errors.New("duplicate measurement ID")
+
+	// ErrMissingRequiredField indicates a mandatory field is empty.
+	ErrMissingRequiredField = errors.New("missing required field")
+
+	// ErrInstrumentNotFound indicates the instrument code does not exist.
+	ErrInstrumentNotFound = errors.New("instrument not found")
+
+	// ErrInstrumentNotActive indicates the instrument exists but is not in ACTIVE status.
+	ErrInstrumentNotActive = errors.New("instrument is not in ACTIVE status")
+
+	// ErrInvalidAttributeSchema indicates attributes do not conform to the instrument's schema.
+	ErrInvalidAttributeSchema = errors.New("attributes do not conform to instrument schema")
+
+	// ErrNilConfig indicates the validation configuration is nil.
+	ErrNilConfig = errors.New("validation configuration cannot be nil")
+
+	// ErrNilDuplicateChecker indicates the duplicate checker is required but nil.
+	ErrNilDuplicateChecker = errors.New("duplicate checker cannot be nil")
+)
+
+// FieldError represents a validation error for a specific field.
+type FieldError struct {
+	// Field is the name of the field that failed validation.
+	Field string
+
+	// Value is the actual value that was invalid.
+	Value string
+
+	// Reason describes why the validation failed.
+	Reason string
+}
+
+// Error implements the error interface.
+func (e *FieldError) Error() string {
+	if e.Value == "" {
+		return fmt.Sprintf("field %q: %s", e.Field, e.Reason)
+	}
+	return fmt.Sprintf("field %q: %s (value: %q)", e.Field, e.Reason, e.Value)
+}
+
+// RowValidationError contains all validation errors for a single row.
+// Multiple errors are collected rather than failing on the first error.
+type RowValidationError struct {
+	// LineNumber is the 1-indexed line number in the source CSV.
+	LineNumber int
+
+	// Errors contains all validation errors for this row.
+	Errors []error
+}
+
+// Error implements the error interface.
+func (e *RowValidationError) Error() string {
+	if len(e.Errors) == 0 {
+		return fmt.Sprintf("line %d: no errors", e.LineNumber)
+	}
+	if len(e.Errors) == 1 {
+		return fmt.Sprintf("line %d: %v", e.LineNumber, e.Errors[0])
+	}
+
+	var msgs []string
+	for _, err := range e.Errors {
+		msgs = append(msgs, err.Error())
+	}
+	return fmt.Sprintf("line %d: %d validation errors: [%s]", e.LineNumber, len(e.Errors), strings.Join(msgs, "; "))
+}
+
+// HasErrors returns true if this row has any validation errors.
+func (e *RowValidationError) HasErrors() bool {
+	return len(e.Errors) > 0
+}
+
+// AddError appends a validation error to this row.
+func (e *RowValidationError) AddError(err error) {
+	if err != nil {
+		e.Errors = append(e.Errors, err)
+	}
+}
+
+// AddFieldError creates and appends a field-specific error.
+func (e *RowValidationError) AddFieldError(field, value, reason string) {
+	e.Errors = append(e.Errors, &FieldError{
+		Field:  field,
+		Value:  value,
+		Reason: reason,
+	})
+}
+
+// Unwrap returns the underlying errors for errors.Is/As support.
+func (e *RowValidationError) Unwrap() []error {
+	return e.Errors
+}
+
+// SchemaValidationError represents a JSON Schema validation failure.
+type SchemaValidationError struct {
+	// Path is the JSON pointer path to the invalid field (e.g., "/vintage_year").
+	Path string
+
+	// Message is the validation error message from the schema validator.
+	Message string
+
+	// SchemaPath is the path in the schema that caused the validation failure.
+	SchemaPath string
+}
+
+// Error implements the error interface.
+func (e *SchemaValidationError) Error() string {
+	if e.SchemaPath != "" {
+		return fmt.Sprintf("schema validation failed at %q: %s (schema: %s)", e.Path, e.Message, e.SchemaPath)
+	}
+	return fmt.Sprintf("schema validation failed at %q: %s", e.Path, e.Message)
+}
+
+// MultiSchemaError contains multiple schema validation errors.
+type MultiSchemaError struct {
+	// Errors contains all schema validation errors.
+	Errors []*SchemaValidationError
+}
+
+// Error implements the error interface.
+func (e *MultiSchemaError) Error() string {
+	if len(e.Errors) == 0 {
+		return "no schema validation errors"
+	}
+	if len(e.Errors) == 1 {
+		return e.Errors[0].Error()
+	}
+
+	var msgs []string
+	for _, err := range e.Errors {
+		msgs = append(msgs, err.Error())
+	}
+	return fmt.Sprintf("%d schema validation errors: [%s]", len(e.Errors), strings.Join(msgs, "; "))
+}
+
+// DuplicateError provides details about a duplicate measurement.
+type DuplicateError struct {
+	// MeasurementID is the ID that was found to be a duplicate.
+	MeasurementID string
+
+	// ExistingLineNumber is the line number of the earlier occurrence (if available).
+	ExistingLineNumber int
+
+	// InDatabase indicates if the duplicate was found in the database.
+	InDatabase bool
+}
+
+// Error implements the error interface.
+func (e *DuplicateError) Error() string {
+	if e.InDatabase {
+		return fmt.Sprintf("measurement %q already exists in database", e.MeasurementID)
+	}
+	if e.ExistingLineNumber > 0 {
+		return fmt.Sprintf("measurement %q duplicates line %d", e.MeasurementID, e.ExistingLineNumber)
+	}
+	return fmt.Sprintf("duplicate measurement: %q", e.MeasurementID)
+}
+
+// Is allows errors.Is to match DuplicateError instances.
+func (e *DuplicateError) Is(target error) bool {
+	return errors.Is(target, ErrDuplicateMeasurement)
+}
