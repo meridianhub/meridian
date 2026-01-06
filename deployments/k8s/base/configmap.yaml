@@ -16,3 +16,6 @@ data:
   readiness_check_path: "/health/ready"
   liveness_check_path: "/health/live"
   startup_check_path: "/health/startup"
+  # Schema to process audit entries from (required)
+  # For local dev, use public schema since we don't have schema-per-tenant
+  AUDIT_SCHEMA: "public"
