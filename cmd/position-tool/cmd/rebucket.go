@@ -219,7 +219,7 @@ func executeRebucket(ctx context.Context, cfg *rebucketConfig) (*rebucketResult,
 	defer deps.close()
 
 	// Fetch positions for the instrument
-	positions, err := fetchPositionsForInstrument(ctx, pool, cfg)
+	positions, err := fetchPositionsForInstrument(ctx, pool, cfg, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +355,7 @@ type positionRecord struct {
 }
 
 // fetchPositionsForInstrument retrieves all positions for the given instrument.
-func fetchPositionsForInstrument(ctx context.Context, pool *pgxpool.Pool, cfg *rebucketConfig) ([]positionRecord, error) {
+func fetchPositionsForInstrument(ctx context.Context, pool *pgxpool.Pool, cfg *rebucketConfig, logger *slog.Logger) ([]positionRecord, error) {
 	query := `
 		SELECT id, account_id, instrument_code, bucket_key, amount, dimension,
 		       attributes, reference_id, created_at, created_by
@@ -409,6 +409,10 @@ func fetchPositionsForInstrument(ctx context.Context, pool *pgxpool.Pool, cfg *r
 		// Parse attributes JSON
 		if len(attrsJSON) > 0 {
 			if parseErr := parseAttributesJSON(attrsJSON, &pos.Attributes); parseErr != nil {
+				logger.Warn("failed to parse position attributes, using empty map",
+					"position_id", pos.ID,
+					"error", parseErr,
+				)
 				pos.Attributes = make(map[string]string)
 			}
 		} else {
@@ -520,7 +524,16 @@ func buildRebucketingPlan(
 
 		var referenceID uuid.UUID
 		if pos.ReferenceID != "" {
-			referenceID, _ = parseUUID(pos.ReferenceID)
+			var parseErr error
+			referenceID, parseErr = parseUUID(pos.ReferenceID)
+			if parseErr != nil {
+				logger.Warn("failed to parse reference ID, using nil UUID",
+					"position_id", pos.ID,
+					"reference_id", pos.ReferenceID,
+					"error", parseErr,
+				)
+				// Continue with nil UUID rather than failing the entire position
+			}
 		}
 
 		plan.AffectedPositions = append(plan.AffectedPositions, rebucket.AffectedPosition{

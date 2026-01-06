@@ -19,8 +19,13 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
-// DefaultBatchSize is the default number of positions to process per batch.
-const DefaultBatchSize = 500
+// Batch size limits.
+const (
+	// DefaultBatchSize is the default number of positions to process per batch.
+	DefaultBatchSize = 500
+	// MaxBatchSize is the maximum allowed batch size to prevent memory issues.
+	MaxBatchSize = 10000
+)
 
 // Executor errors.
 var (
@@ -29,7 +34,7 @@ var (
 	// ErrInvalidBatchSize indicates the batch size is not positive.
 	ErrInvalidBatchSize = errors.New("batch size must be positive")
 	// ErrBatchSizeTooLarge indicates the batch size exceeds the maximum allowed.
-	ErrBatchSizeTooLarge = errors.New("batch size cannot exceed 10000")
+	ErrBatchSizeTooLarge = fmt.Errorf("batch size cannot exceed %d", MaxBatchSize)
 	// ErrNilPlan indicates the rebucketing plan is nil.
 	ErrNilPlan = errors.New("rebucketing plan cannot be nil")
 	// ErrPositionNotFound indicates a position was not found or already deleted.
@@ -60,7 +65,7 @@ func (c *Config) Validate() error {
 	if c.BatchSize <= 0 {
 		return ErrInvalidBatchSize
 	}
-	if c.BatchSize > 10000 {
+	if c.BatchSize > MaxBatchSize {
 		return ErrBatchSizeTooLarge
 	}
 	return nil
@@ -341,6 +346,10 @@ func (e *Executor) beginTx(ctx context.Context) (pgx.Tx, error) {
 }
 
 // setSearchPath sets the PostgreSQL search_path for multi-tenant isolation.
+// Security: TenantID is validated at construction (NewTenantID) to contain only
+// alphanumeric characters and underscores (1-50 chars), and pgx.Identifier.Sanitize()
+// provides proper PostgreSQL identifier quoting. This double-validation approach
+// prevents SQL injection in the search_path.
 func (e *Executor) setSearchPath(ctx context.Context, tx pgx.Tx) error {
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
@@ -348,6 +357,7 @@ func (e *Executor) setSearchPath(ctx context.Context, tx pgx.Tx) error {
 		return nil
 	}
 
+	// SchemaName() returns "org_" + lowercase(tenantID), validated at construction
 	schemaName := pgx.Identifier{tenantID.SchemaName()}.Sanitize()
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
 	_, err := tx.Exec(ctx, query)
