@@ -9,7 +9,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cobra"
+
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/adapters/csv"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/checkpoint"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/infra"
+	"github.com/meridianhub/meridian/cmd/position-tool/internal/validation"
+	"github.com/meridianhub/meridian/pkg/platform/quantity"
+	"github.com/meridianhub/meridian/services/position-keeping/domain"
 )
 
 // Import command errors.
@@ -18,6 +28,10 @@ var (
 	ErrSourceNotFound = errors.New("source file not found")
 	// ErrImportValidationFailed is returned when import completes with validation errors.
 	ErrImportValidationFailed = errors.New("import completed with validation errors")
+	// ErrInstrumentNotFound is returned when an instrument lookup fails.
+	ErrInstrumentNotFound = errors.New("instrument not found")
+	// ErrOperationNotSupported is returned when an operation is not supported by the adapter.
+	ErrOperationNotSupported = errors.New("operation not supported by instrument checker")
 )
 
 // Import command flags.
@@ -194,46 +208,509 @@ type importResult struct {
 }
 
 // executeImport performs the actual import operation.
-// TODO(tm:universal-asset-system.36.9): Implement full import logic with checkpoint persistence
+// It integrates CSV parsing, validation pipeline, and batch insertion with checkpoint persistence.
 func executeImport(ctx context.Context, cfg *importConfig) (*importResult, error) {
 	logger := slog.Default()
 
-	// Placeholder implementation - see Task Master subtask 36.9
-	if cfg.DryRun {
-		logger.Info("dry-run mode: would validate and import positions",
-			"source", cfg.Source,
-			"tenant", cfg.TenantID,
-		)
+	// Set up database connection
+	pool, err := pgxpool.New(ctx, cfg.DBUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer pool.Close()
 
-		// Simulate counting rows for dry-run output
-		return &importResult{
-			TotalRows:        0, // Would be actual count from CSV
-			ImportedRows:     0,
-			SkippedRows:      0,
-			ValidationErrors: 0,
-			ManifestID:       uuid.New(),
-		}, nil
+	// Create checkpoint manager
+	checkpointMgr, err := checkpoint.NewManager(pool)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create checkpoint manager: %w", err)
 	}
 
-	// Check for context cancellation (graceful shutdown)
+	// Start or resume checkpoint
+	var cp *checkpoint.Checkpoint
+	if cfg.ResumeManifestID != nil {
+		cp, err = checkpointMgr.ResumeByID(ctx, *cfg.ResumeManifestID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resume checkpoint: %w", err)
+		}
+		logger.Info("resuming import from checkpoint",
+			"manifest_id", cp.ManifestID,
+			"processed_rows", cp.ProcessedRows,
+		)
+	} else {
+		cp, err = checkpointMgr.StartImport(ctx, cfg.TenantID, cfg.Source)
+		if err != nil {
+			return nil, fmt.Errorf("failed to start import: %w", err)
+		}
+	}
+
+	// Dry-run mode: validate without persisting
+	if cfg.DryRun {
+		return executeDryRun(ctx, cfg, cp, pool, logger)
+	}
+
+	// Execute live import with checkpoint support
+	return executeLiveImport(ctx, cfg, cp, checkpointMgr, pool, logger)
+}
+
+// executeDryRun validates the CSV without persisting positions.
+func executeDryRun(ctx context.Context, cfg *importConfig, cp *checkpoint.Checkpoint, _ *pgxpool.Pool, logger *slog.Logger) (*importResult, error) {
+	result := &importResult{ManifestID: cp.ManifestID}
+
+	// Open CSV file
+	file, err := os.Open(cfg.Source)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	// Create instrument checker for gRPC-based instrument lookup
+	instrumentChecker, err := validation.NewInstrumentChecker(ctx, validation.InstrumentCheckerConfig{
+		Target: getEnvOrDefault("REFERENCE_DATA_URL", "localhost:50051"),
+		Logger: logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create instrument checker: %w", err)
+	}
+	defer func() { _ = instrumentChecker.Close() }()
+
+	// Create instrument registry adapter for CSV parser
+	registry := &instrumentCheckerRegistry{checker: instrumentChecker}
+
+	// Create CSV parser
+	csvParser := csv.NewParser(registry)
+
+	// Set up validation pipeline (minimal for dry-run - no DB lookups needed)
+	duplicateChecker := validation.NewDuplicateChecker(validation.DefaultBloomFilterConfig(), nil)
+
+	pipeline, err := validation.NewPipeline(validation.PipelineConfig{
+		DuplicateChecker:  duplicateChecker,
+		InstrumentChecker: instrumentChecker,
+		Logger:            logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create validation pipeline: %w", err)
+	}
+	defer func() { _ = pipeline.Close() }()
+
+	// Parse and validate CSV
+	parseConfig := csv.ParseConfig{
+		BatchSize:     cfg.BatchSize,
+		SkipEmptyRows: true,
+	}
+
+	parseResult, err := csvParser.Parse(ctx, file, parseConfig, func(batch csv.RowBatch) error {
+		// Validate each row in the batch
+		for _, csvRow := range batch.Rows {
+			validationRow := csvRowToValidationRow(&csvRow)
+			rowErr := pipeline.ValidateRow(ctx, validationRow)
+			if rowErr != nil && rowErr.HasErrors() {
+				result.ValidationErrors++
+			} else {
+				result.ImportedRows++
+			}
+		}
+		// Parse errors are counted via parseResult.ErrorCount after parsing completes
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("CSV parsing failed: %w", err)
+	}
+
+	result.TotalRows = int64(parseResult.RowCount) + int64(parseResult.ErrorCount)
+	result.ValidationErrors += int64(parseResult.ErrorCount)
+
+	logger.Info("dry-run validation complete",
+		"total_rows", result.TotalRows,
+		"valid_rows", result.ImportedRows,
+		"validation_errors", result.ValidationErrors,
+	)
+
+	return result, nil
+}
+
+// importProcessor encapsulates the state and dependencies for processing import rows.
+// It reduces cognitive complexity by separating row processing from orchestration.
+type importProcessor struct {
+	cfg               *importConfig
+	cp                *checkpoint.Checkpoint
+	result            *importResult
+	instrumentChecker *validation.InstrumentChecker
+	celEval           *infra.CELEvaluator
+	pipeline          *validation.Pipeline
+	batchInserter     *infra.BatchInserter
+	logger            *slog.Logger
+	fungibilityExprs  map[string]string // keyed by instrument code
+}
+
+// processRow handles validation and insertion of a single CSV row.
+// Returns an error only for fatal errors that should stop processing.
+func (p *importProcessor) processRow(ctx context.Context, csvRow *csv.ImportRow) error {
+	// Skip rows before the resume point
+	if p.cp.ProcessedRows > 0 && csvRow.LineNumber <= p.cp.LastProcessedLine {
+		return nil
+	}
+
+	// Get fungibility expression for this instrument (cached per instrument code)
+	fungibilityExpr, ok := p.fungibilityExprs[csvRow.InstrumentCode]
+	if !ok {
+		if instResult, instErr := p.instrumentChecker.Check(ctx, csvRow.InstrumentCode, 0); instErr == nil && instResult.Definition != nil {
+			fungibilityExpr = instResult.Definition.FungibilityKeyExpression
+			p.fungibilityExprs[csvRow.InstrumentCode] = fungibilityExpr
+		}
+	}
+
+	// Compute bucket key using CEL
+	bucketKey, computed := p.tryComputeBucketKey(csvRow, fungibilityExpr)
+	if !computed {
+		return nil // Validation error already recorded
+	}
+
+	// Validate the row
+	validationRow := csvRowToValidationRow(csvRow)
+	validationRow.BucketKey = bucketKey
+	if rowErr := p.pipeline.ValidateRow(ctx, validationRow); rowErr != nil && rowErr.HasErrors() {
+		p.cp.IncrementFailure(1)
+		p.result.ValidationErrors++
+		return nil
+	}
+
+	// Create and insert position
+	return p.createAndInsertPosition(ctx, csvRow, bucketKey)
+}
+
+// tryComputeBucketKey evaluates the CEL expression to generate the bucket key.
+// Returns (bucketKey, true) on success, or ("", false) if evaluation fails.
+func (p *importProcessor) tryComputeBucketKey(csvRow *csv.ImportRow, fungibilityExpr string) (string, bool) {
+	if fungibilityExpr == "" {
+		return "", true
+	}
+	bucketKey, err := p.celEval.EvaluateBucketKey(fungibilityExpr, csvRow.Attributes)
+	if err != nil {
+		p.logger.Warn("bucket key evaluation failed", "line", csvRow.LineNumber, "error", err)
+		p.cp.IncrementFailure(1)
+		p.result.ValidationErrors++
+		return "", false
+	}
+	return bucketKey, true
+}
+
+// createAndInsertPosition creates a domain.Position and adds it to the batch inserter.
+// Returns an error only for fatal errors that should stop processing.
+func (p *importProcessor) createAndInsertPosition(ctx context.Context, csvRow *csv.ImportRow, bucketKey string) error {
+	amount, err := decimal.NewFromString(csvRow.Amount)
+	if err != nil {
+		p.recordValidationFailure()
+		return nil //nolint:nilerr // Validation failures are non-fatal
+	}
+
+	position, err := domain.NewPosition(
+		csvRow.AccountID,
+		csvRow.InstrumentCode,
+		bucketKey,
+		amount,
+		"", // Dimension set from instrument definition
+		csvRow.Attributes,
+		uuid.New(),
+		p.cfg.TenantID,
+	)
+	if err != nil {
+		p.recordValidationFailure()
+		return nil //nolint:nilerr // Validation failures are non-fatal
+	}
+
+	if err := p.batchInserter.Add(ctx, position); err != nil {
+		return fmt.Errorf("failed to add position to batch: %w", err)
+	}
+
+	p.cp.IncrementSuccess(1)
+	p.result.ImportedRows++
+	p.cp.AddRollbackStatement(fmt.Sprintf("DELETE FROM positions WHERE id = '%s'", position.ID))
+	return nil
+}
+
+// recordValidationFailure increments the failure counters.
+func (p *importProcessor) recordValidationFailure() {
+	p.cp.IncrementFailure(1)
+	p.result.ValidationErrors++
+}
+
+// processBatch handles a batch of CSV rows during import.
+// Returns context.Canceled if the context is cancelled, nil otherwise.
+func (p *importProcessor) processBatch(ctx context.Context, batch csv.RowBatch, checkpointMgr *checkpoint.PostgresManager) error {
 	select {
 	case <-ctx.Done():
-		logger.Info("import interrupted, saving checkpoint")
-		return &importResult{
-			Interrupted:   true,
-			CheckpointRow: 0, // Would be actual checkpoint
-			ManifestID:    uuid.New(),
-		}, nil
+		return ctx.Err()
 	default:
 	}
+	for i := range batch.Rows {
+		if rowErr := p.processRow(ctx, &batch.Rows[i]); rowErr != nil {
+			return rowErr
+		}
+	}
+	for range batch.Errors {
+		p.cp.IncrementFailure(1)
+		p.result.ValidationErrors++
+	}
+	if updateErr := checkpointMgr.UpdateProgress(ctx, p.cp); updateErr != nil {
+		p.logger.Warn("failed to update checkpoint", "error", updateErr)
+	}
+	return nil
+}
 
-	return &importResult{
-		TotalRows:        0,
-		ImportedRows:     0,
-		SkippedRows:      0,
-		ValidationErrors: 0,
-		ManifestID:       uuid.New(),
-	}, nil
+// importDependencies holds initialized dependencies for live import.
+type importDependencies struct {
+	file              *os.File
+	instrumentChecker *validation.InstrumentChecker
+	csvParser         *csv.Parser
+	celEval           *infra.CELEvaluator
+	pipeline          *validation.Pipeline
+	batchInserter     *infra.BatchInserter
+}
+
+// close releases all resources held by import dependencies.
+func (d *importDependencies) close() {
+	if d.file != nil {
+		_ = d.file.Close()
+	}
+	if d.instrumentChecker != nil {
+		_ = d.instrumentChecker.Close()
+	}
+	if d.pipeline != nil {
+		_ = d.pipeline.Close()
+	}
+}
+
+// initImportDependencies creates all dependencies needed for live import.
+func initImportDependencies(ctx context.Context, cfg *importConfig, pool *pgxpool.Pool, logger *slog.Logger) (*importDependencies, error) {
+	deps := &importDependencies{}
+
+	var err error
+	deps.file, err = os.Open(cfg.Source)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open source file: %w", err)
+	}
+
+	deps.instrumentChecker, err = validation.NewInstrumentChecker(ctx, validation.InstrumentCheckerConfig{
+		Target:                   getEnvOrDefault("REFERENCE_DATA_URL", "localhost:50051"),
+		CreateMissingInstruments: cfg.CreateInstruments,
+		Logger:                   logger,
+	})
+	if err != nil {
+		deps.close()
+		return nil, fmt.Errorf("failed to create instrument checker: %w", err)
+	}
+
+	deps.csvParser = csv.NewParser(&instrumentCheckerRegistry{checker: deps.instrumentChecker})
+
+	deps.celEval, err = infra.NewCELEvaluatorDefault()
+	if err != nil {
+		deps.close()
+		return nil, fmt.Errorf("failed to create CEL evaluator: %w", err)
+	}
+
+	deps.pipeline, err = validation.NewPipeline(validation.PipelineConfig{
+		DuplicateChecker:         validation.NewDuplicateChecker(validation.DefaultBloomFilterConfig(), createDuplicateLookup(pool)),
+		InstrumentChecker:        deps.instrumentChecker,
+		CreateMissingInstruments: cfg.CreateInstruments,
+		Logger:                   logger,
+	})
+	if err != nil {
+		deps.close()
+		return nil, fmt.Errorf("failed to create validation pipeline: %w", err)
+	}
+
+	deps.batchInserter, err = infra.NewBatchInserter(infra.BatchInserterConfig{
+		Pool:      pool,
+		BatchSize: cfg.BatchSize,
+		OnBatchComplete: func(batchNum, positionsInBatch, totalInserted int) {
+			logger.Debug("batch inserted", "batch", batchNum, "count", positionsInBatch, "total", totalInserted)
+		},
+	})
+	if err != nil {
+		deps.close()
+		return nil, fmt.Errorf("failed to create batch inserter: %w", err)
+	}
+
+	return deps, nil
+}
+
+// handleImportInterrupt handles cleanup when import is interrupted.
+func handleImportInterrupt(_ context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, logger *slog.Logger) *importResult {
+	// Use fresh context for cleanup since the original may be canceled.
+	// This is intentional - we need cleanup to succeed even when the parent context is done.
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:contextcheck
+	defer cancel()
+
+	if flushErr := deps.batchInserter.Flush(cleanupCtx); flushErr != nil { //nolint:contextcheck
+		logger.Warn("failed to flush batch on interrupt", "error", flushErr)
+	}
+	if cancelErr := checkpointMgr.Cancel(cleanupCtx, cp); cancelErr != nil { //nolint:contextcheck
+		logger.Warn("failed to save checkpoint on interrupt", "error", cancelErr)
+	}
+	result.Interrupted = true
+	result.CheckpointRow = int64(cp.ProcessedRows)
+	result.TotalRows = int64(cp.TotalRows)
+	logger.Info("import interrupted, checkpoint saved", "checkpoint_row", cp.ProcessedRows, "manifest_id", cp.ManifestID)
+	return result
+}
+
+// finalizeImport flushes remaining positions and marks checkpoint complete.
+func finalizeImport(ctx context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, parseResult *csv.ParseResult, logger *slog.Logger) (*importResult, error) {
+	if flushErr := deps.batchInserter.Flush(ctx); flushErr != nil {
+		if markErr := checkpointMgr.Fail(ctx, cp, flushErr); markErr != nil {
+			logger.Warn("failed to mark checkpoint as failed", "error", markErr)
+		}
+		return nil, fmt.Errorf("failed to flush final batch: %w", flushErr)
+	}
+
+	cp.SetTotalRows(parseResult.RowCount + parseResult.ErrorCount)
+	if completeErr := checkpointMgr.Complete(ctx, cp); completeErr != nil {
+		logger.Warn("failed to complete checkpoint", "error", completeErr)
+	}
+
+	result.TotalRows = int64(parseResult.RowCount) + int64(parseResult.ErrorCount)
+	logger.Info("import complete", "total_rows", result.TotalRows, "imported", result.ImportedRows, "errors", result.ValidationErrors, "manifest_id", result.ManifestID)
+	return result, nil
+}
+
+// executeLiveImport performs the actual import with checkpoint persistence.
+func executeLiveImport(ctx context.Context, cfg *importConfig, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, pool *pgxpool.Pool, logger *slog.Logger) (*importResult, error) {
+	result := &importResult{ManifestID: cp.ManifestID}
+
+	deps, err := initImportDependencies(ctx, cfg, pool, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer deps.close()
+
+	proc := &importProcessor{
+		cfg: cfg, cp: cp, result: result,
+		instrumentChecker: deps.instrumentChecker, celEval: deps.celEval,
+		pipeline: deps.pipeline, batchInserter: deps.batchInserter, logger: logger,
+		fungibilityExprs: make(map[string]string),
+	}
+
+	parseResult, parseErr := deps.csvParser.Parse(ctx, deps.file, csv.ParseConfig{BatchSize: cfg.BatchSize, SkipEmptyRows: true}, func(batch csv.RowBatch) error {
+		return proc.processBatch(ctx, batch, checkpointMgr)
+	})
+
+	return handleParseResult(ctx, deps, cp, checkpointMgr, result, parseResult, parseErr, logger)
+}
+
+// handleParseResult handles the outcome of CSV parsing and returns the final result.
+func handleParseResult(ctx context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, parseResult *csv.ParseResult, parseErr error, logger *slog.Logger) (*importResult, error) {
+	if errors.Is(parseErr, context.Canceled) {
+		return handleImportInterrupt(ctx, deps, cp, checkpointMgr, result, logger), nil
+	}
+	if parseErr != nil {
+		if failErr := checkpointMgr.Fail(ctx, cp, parseErr); failErr != nil {
+			logger.Warn("failed to mark checkpoint as failed", "error", failErr)
+		}
+		return nil, fmt.Errorf("import failed: %w", parseErr)
+	}
+	return finalizeImport(ctx, deps, cp, checkpointMgr, result, parseResult, logger)
+}
+
+// csvRowToValidationRow converts a CSV row to a validation row.
+func csvRowToValidationRow(csvRow *csv.ImportRow) *validation.ImportRow {
+	return &validation.ImportRow{
+		LineNumber:     csvRow.LineNumber,
+		AccountID:      csvRow.AccountID,
+		InstrumentCode: csvRow.InstrumentCode,
+		Amount:         csvRow.Amount,
+		Timestamp:      csvRow.Timestamp,
+		Attributes:     csvRow.Attributes,
+	}
+}
+
+// instrumentCheckerRegistry adapts the InstrumentChecker to the quantity.InstrumentRegistry interface.
+// This allows the CSV parser to use the gRPC-based instrument lookup from the validation package.
+type instrumentCheckerRegistry struct {
+	checker *validation.InstrumentChecker
+}
+
+// GetDefinition retrieves an instrument definition by code and version.
+func (r *instrumentCheckerRegistry) GetDefinition(ctx context.Context, code string, version int32) (*quantity.InstrumentDefinition, error) {
+	result, err := r.checker.Check(ctx, code, int(version))
+	if err != nil {
+		return nil, err
+	}
+	if !result.Exists {
+		return nil, fmt.Errorf("%w: %s", ErrInstrumentNotFound, code)
+	}
+	return protoToQuantityDefinition(result.Definition), nil
+}
+
+// GetActiveDefinition retrieves the active version of an instrument.
+func (r *instrumentCheckerRegistry) GetActiveDefinition(ctx context.Context, code string) (*quantity.InstrumentDefinition, error) {
+	return r.GetDefinition(ctx, code, 0)
+}
+
+// ListActive returns all active instrument definitions.
+func (r *instrumentCheckerRegistry) ListActive(_ context.Context) ([]*quantity.InstrumentDefinition, error) {
+	return nil, fmt.Errorf("%w: ListActive", ErrOperationNotSupported)
+}
+
+// CreateDraft creates a new instrument definition in DRAFT status.
+func (r *instrumentCheckerRegistry) CreateDraft(_ context.Context, _ *quantity.InstrumentDefinition) (*quantity.InstrumentDefinition, error) {
+	return nil, fmt.Errorf("%w: CreateDraft", ErrOperationNotSupported)
+}
+
+// ActivateInstrument transitions an instrument from DRAFT to ACTIVE status.
+func (r *instrumentCheckerRegistry) ActivateInstrument(_ context.Context, _ string, _ int32) error {
+	return fmt.Errorf("%w: ActivateInstrument", ErrOperationNotSupported)
+}
+
+// DeprecateInstrument transitions an instrument to DEPRECATED status.
+func (r *instrumentCheckerRegistry) DeprecateInstrument(_ context.Context, _ string, _ int32) error {
+	return fmt.Errorf("%w: DeprecateInstrument", ErrOperationNotSupported)
+}
+
+// protoToQuantityDefinition converts a protobuf InstrumentDefinition to quantity.InstrumentDefinition.
+func protoToQuantityDefinition(def *referencedatav1.InstrumentDefinition) *quantity.InstrumentDefinition {
+	if def == nil {
+		return nil
+	}
+	return &quantity.InstrumentDefinition{
+		ID:                       def.Id,
+		Code:                     def.Code,
+		Version:                  def.Version,
+		Dimension:                def.Dimension.String(),
+		Precision:                def.Precision,
+		Status:                   def.Status.String(),
+		FungibilityKeyExpression: def.FungibilityKeyExpression,
+		AttributeSchema:          def.AttributeSchema,
+		DisplayName:              def.DisplayName,
+		Description:              def.Description,
+	}
+}
+
+// createDuplicateLookup creates a database lookup function for duplicate detection.
+func createDuplicateLookup(pool *pgxpool.Pool) validation.DatabaseLookup {
+	return func(ctx context.Context, measurementIDs []string) (map[string]bool, error) {
+		if len(measurementIDs) == 0 {
+			return make(map[string]bool), nil
+		}
+
+		// Query positions by reference_id (which stores measurement IDs)
+		query := `SELECT DISTINCT reference_id::text FROM positions WHERE reference_id = ANY($1)`
+		rows, err := pool.Query(ctx, query, measurementIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query duplicates: %w", err)
+		}
+		defer rows.Close()
+
+		exists := make(map[string]bool)
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, fmt.Errorf("failed to scan duplicate: %w", err)
+			}
+			exists[id] = true
+		}
+
+		return exists, rows.Err()
+	}
 }
 
 // printImportResult outputs the import results in a formatted report.
