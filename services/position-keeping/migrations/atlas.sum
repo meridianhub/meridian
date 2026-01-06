@@ -1,4 +1,4 @@
-h1:74dL6z9RtkDuH7GyZxrbTeZaxlF9Re6bgsHikPevrF0=
+h1:OIenBk3GLCav+8CeYB/JDSO+y6ngz87gIg/hlZQDYOA=
 20251216000001_initial.sql h1:6OnEp0f+4nW5xTX8e9mIHgBrQgBeBUA2WHJCP2HdLkQ=
 20251217000001_audit_system.sql h1:bdOKALYedtSvgAN9OD6GdfcpHa4ls69t+N7g7gyiBSg=
 20251223000001_event_outbox.sql h1:tO/avMAYr1TbQ/Kpg4CtC4K2RlrZi3Gzbu3cuJ/KiOY=
@@ -8,3 +8,4 @@ h1:74dL6z9RtkDuH7GyZxrbTeZaxlF9Re6bgsHikPevrF0=
 20260105000001_measurement_bucket_id.sql h1:bBAv4j/304ifydNrITjEXqe9FN89/cc4QzBMVBkfGAc=
 20260105000002_positions_append_only.sql h1:pDUtCAt8gN+i0guep3pPGD4f5zC21ZxqEMABL0nN4uc=
 20260105000003_rebucketing_audit_log.sql h1:JPlrui4yTRkx7MWsWouNl5Z4EpE85dg6mSotFFMyRqY=
+20260105000004_import_manifest.sql h1:VIZ6Y9q6c0L79jez2LS+qw+mYVX/AqTUyTz6B2PTGW4=
