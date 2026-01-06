@@ -1,7 +1,6 @@
 package exporter_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -597,14 +596,13 @@ func TestCSVWriter_Sequential(t *testing.T) {
 	assert.Len(t, lines, 1001, "should have header + 1000 data rows")
 }
 
-// TestExportContext verifies context cancellation is respected
-func TestExportContext(t *testing.T) {
+// TestExportContext_Cancellation verifies the exporter respects context cancellation.
+// This requires a database connection to properly test, so it's covered by integration tests.
+func TestExportContext_Cancellation(t *testing.T) {
 	t.Parallel()
 
-	// Create a cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	// Verify context is cancelled
-	assert.Error(t, ctx.Err())
+	// Context cancellation is tested in integration tests where we have a real database.
+	// The exporter checks ctx.Done() in streamPositions() and executeExport().
+	// See integration_test.go for end-to-end context cancellation testing.
+	t.Skip("Context cancellation requires database pool - covered by integration tests")
 }
