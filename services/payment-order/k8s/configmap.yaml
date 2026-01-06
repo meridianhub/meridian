@@ -26,3 +26,14 @@ data:
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "payment-order-service"
   OTEL_SAMPLING_RATE: "0.1"
+
+  # Authentication configuration
+  AUTH_ENABLED: "false"
+
+  # Redis configuration
+  REDIS_URL: "redis://redis:6379"
+
+  # Gateway account configuration for local dev
+  # Maps gateway IDs to their contra-account (nostro/acquirer) for double-entry bookkeeping
+  GATEWAY_MOCK_ACCOUNT_ID: "00000000-0000-0000-0000-000000000001"
+  GATEWAY_MOCK_ACCOUNT_TYPE: "NOSTRO"

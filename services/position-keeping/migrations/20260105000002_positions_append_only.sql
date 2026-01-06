@@ -53,55 +53,12 @@ ALTER TABLE "position"
   CHECK ("dimension" IN ('Monetary', 'Energy', 'Compute', 'Carbon', 'Time', 'Physical', 'Custom'));
 
 -- ============================================================================
--- APPEND-ONLY ENFORCEMENT TRIGGER
+-- APPEND-ONLY ENFORCEMENT
 -- ============================================================================
--- This trigger enforces append-only semantics at the database level.
--- It prevents UPDATE operations on the amount column to guarantee data immutability.
--- This is critical for audit trail integrity and concurrent write performance.
-
--- Create the trigger function
-CREATE OR REPLACE FUNCTION positions_append_only()
-RETURNS TRIGGER AS $$
-BEGIN
-  -- Check if amount column is being modified
-  IF OLD.amount IS DISTINCT FROM NEW.amount THEN
-    RAISE EXCEPTION 'positions table is append-only - UPDATE on amount column is forbidden'
-      USING ERRCODE = 'P0001',
-            HINT = 'Create a new position record instead of updating the existing one';
-  END IF;
-
-  -- Also prevent modification of immutable fields
-  IF OLD.account_id IS DISTINCT FROM NEW.account_id THEN
-    RAISE EXCEPTION 'positions table is append-only - UPDATE on account_id column is forbidden'
-      USING ERRCODE = 'P0001';
-  END IF;
-
-  IF OLD.instrument_code IS DISTINCT FROM NEW.instrument_code THEN
-    RAISE EXCEPTION 'positions table is append-only - UPDATE on instrument_code column is forbidden'
-      USING ERRCODE = 'P0001';
-  END IF;
-
-  IF OLD.bucket_key IS DISTINCT FROM NEW.bucket_key THEN
-    RAISE EXCEPTION 'positions table is append-only - UPDATE on bucket_key column is forbidden'
-      USING ERRCODE = 'P0001';
-  END IF;
-
-  IF OLD.reference_id IS DISTINCT FROM NEW.reference_id THEN
-    RAISE EXCEPTION 'positions table is append-only - UPDATE on reference_id column is forbidden'
-      USING ERRCODE = 'P0001';
-  END IF;
-
-  -- Allow UPDATE only for deleted_at (soft delete) and attributes (metadata updates)
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create the trigger
-CREATE TRIGGER positions_append_only
-  BEFORE UPDATE ON "position"
-  FOR EACH ROW
-  EXECUTE FUNCTION positions_append_only();
+-- NOTE: PL/pgSQL triggers are not supported in CockroachDB.
+-- Append-only semantics are enforced at the application level by the repository.
+-- For PostgreSQL deployments, consider adding a trigger in a separate migration.
+-- This is documented in ADR-XXX (pending).
 
 -- Add comment documenting the append-only architecture
-COMMENT ON TABLE "position" IS 'Append-only position records for O(1) writes. Use INSERT only - UPDATE on amount is forbidden by trigger.';
-COMMENT ON TRIGGER positions_append_only ON "position" IS 'Enforces append-only semantics by preventing UPDATE on amount and identity columns.';
+COMMENT ON TABLE "position" IS 'Append-only position records for O(1) writes. Use INSERT only - UPDATE on amount is enforced at application level.';
