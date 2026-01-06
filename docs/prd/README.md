@@ -3,6 +3,10 @@
 This directory contains Product Requirements Documents for Meridian features. Like ADRs, these
 documents are configured as Claude Code skills that automatically load when relevant triggers match.
 
+## Master Roadmap
+
+**Start here:** [000-master-roadmap.md](000-master-roadmap.md) - The PRD of PRDs
+
 ## What are PRDs?
 
 PRDs define the requirements, design, and implementation approach for significant features. They:
@@ -16,6 +20,7 @@ PRDs define the requirements, design, and implementation approach for significan
 
 | PRD | Title | Status | Task Master Tag |
 |-----|-------|--------|-----------------|
+| [**000-Master Roadmap**](000-master-roadmap.md) | PRD of PRDs - all work streams | Draft | `master-roadmap` |
 | [Universal Asset System](universal-asset-system.md) | Multi-asset ledger support | Draft | `universal-asset-system` |
 | [Temporal Model Alignment](temporal-model-alignment-q1-2026.md) | Align with ADR-0017 periods | Draft | `temporal-model-alignment` |
 | [Platform Foundation](platform-foundation-q1-2026.md) | Deploy as hosted SaaS | Draft | `platform-foundation` |
