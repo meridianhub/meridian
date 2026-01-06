@@ -18,6 +18,7 @@ PRDs define the requirements, design, and implementation approach for significan
 |-----|-------|--------|-----------------|
 | [Universal Asset System](universal-asset-system.md) | Multi-asset ledger support | Draft | `universal-asset-system` |
 | [Temporal Model Alignment](temporal-model-alignment-q1-2026.md) | Align with ADR-0017 periods | Draft | `temporal-model-alignment` |
+| [Platform Foundation](platform-foundation-q1-2026.md) | Deploy as hosted SaaS | Draft | `platform-foundation` |
 
 ## Categories
 
@@ -25,6 +26,10 @@ PRDs define the requirements, design, and implementation approach for significan
 
 - [Universal Asset System](universal-asset-system.md) - Multi-asset support with dimensional safety
 - [Temporal Model Alignment](temporal-model-alignment-q1-2026.md) - Explicit period columns per ADR-0017
+
+### Infrastructure & Operations
+
+- [Platform Foundation](platform-foundation-q1-2026.md) - Deployment, identity, self-billing, UI, Stripe
 
 ## How PRD Skills Work
 
