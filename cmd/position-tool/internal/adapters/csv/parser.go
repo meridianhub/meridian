@@ -372,11 +372,12 @@ func (p *Parser) streamRemainingRows(ctx context.Context, csvReader *csv.Reader,
 			return lineNumber, err
 		}
 
-		lineNumber++
 		record, err := csvReader.Read()
 		if errors.Is(err, io.EOF) {
 			break
 		}
+		// Increment line number after successful read to ensure accurate error reporting
+		lineNumber++
 		if err != nil {
 			return lineNumber, fmt.Errorf("reading CSV at line %d: %w", lineNumber, err)
 		}

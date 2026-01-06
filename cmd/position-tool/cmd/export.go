@@ -108,6 +108,7 @@ func init() {
 }
 
 // runExportWrapper handles exit codes for the export command.
+// Errors propagate to Cobra which handles exit codes via Execute() in root.go.
 func runExportWrapper(cmd *cobra.Command, args []string) error {
 	err := runExport(cmd, args)
 	if err != nil {
@@ -116,7 +117,7 @@ func runExportWrapper(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 	return nil
 }
