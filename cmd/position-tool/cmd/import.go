@@ -194,11 +194,11 @@ type importResult struct {
 }
 
 // executeImport performs the actual import operation.
-// TODO: Implement full import logic in subtask 36.6
+// TODO(tm:universal-asset-system.36.9): Implement full import logic with checkpoint persistence
 func executeImport(ctx context.Context, cfg *importConfig) (*importResult, error) {
 	logger := slog.Default()
 
-	// Placeholder implementation - will be fully implemented in subtask 36.6
+	// Placeholder implementation - see Task Master subtask 36.9
 	if cfg.DryRun {
 		logger.Info("dry-run mode: would validate and import positions",
 			"source", cfg.Source,

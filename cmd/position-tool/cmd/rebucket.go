@@ -167,11 +167,11 @@ type rebucketResult struct {
 }
 
 // executeRebucket performs the actual rebucket operation.
-// TODO: Implement full rebucket logic - this integrates with rebucketing-tool internal packages
+// TODO(tm:universal-asset-system.36.10): Implement full rebucket logic with rebucketing-tool integration
 func executeRebucket(ctx context.Context, cfg *rebucketConfig) (*rebucketResult, error) {
 	logger := slog.Default()
 
-	// Placeholder implementation - will integrate with existing rebucketing-tool logic
+	// Placeholder implementation - see Task Master subtask 36.10
 	if cfg.DryRun {
 		logger.Info("dry-run mode: would recalculate bucket keys",
 			"instrument", cfg.Instrument,
