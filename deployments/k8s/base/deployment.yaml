@@ -59,6 +59,11 @@ spec:
             configMapKeyRef:
               name: audit-worker-config
               key: log_level
+        - name: AUDIT_SCHEMA
+          valueFrom:
+            configMapKeyRef:
+              name: audit-worker-config
+              key: AUDIT_SCHEMA
         - name: POD_NAME
           valueFrom:
             fieldRef:

@@ -35,3 +35,8 @@ data:
   WEBHOOK_REQUEST_TIMEOUT: "5s"
   # Maximum retry attempts for failed webhook deliveries
   WEBHOOK_MAX_RETRIES: "3"
+
+  # Authentication configuration
+  # Set to "true" to require JWT validation on gRPC calls
+  AUTH_ENABLED: "false"
+  # AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"

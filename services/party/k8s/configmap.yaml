@@ -23,3 +23,6 @@ data:
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "party-service"
   OTEL_SAMPLING_RATE: "0.1"
+
+  # Authentication configuration
+  AUTH_ENABLED: "false"
