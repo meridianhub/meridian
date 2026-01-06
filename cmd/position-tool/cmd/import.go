@@ -309,8 +309,7 @@ func executeDryRun(ctx context.Context, cfg *importConfig, cp *checkpoint.Checkp
 				result.ImportedRows++
 			}
 		}
-		// Count parse errors
-		result.ValidationErrors += int64(len(batch.Errors))
+		// Parse errors are counted via parseResult.ErrorCount after parsing completes
 		return nil
 	})
 	if err != nil {
@@ -340,7 +339,7 @@ type importProcessor struct {
 	pipeline          *validation.Pipeline
 	batchInserter     *infra.BatchInserter
 	logger            *slog.Logger
-	fungibilityExpr   string
+	fungibilityExprs  map[string]string // keyed by instrument code
 }
 
 // processRow handles validation and insertion of a single CSV row.
@@ -351,16 +350,18 @@ func (p *importProcessor) processRow(ctx context.Context, csvRow *csv.ImportRow)
 		return nil
 	}
 
-	// Get fungibility expression (only needed once per import)
-	if p.fungibilityExpr == "" {
+	// Get fungibility expression for this instrument (cached per instrument code)
+	fungibilityExpr, ok := p.fungibilityExprs[csvRow.InstrumentCode]
+	if !ok {
 		if instResult, instErr := p.instrumentChecker.Check(ctx, csvRow.InstrumentCode, 0); instErr == nil && instResult.Definition != nil {
-			p.fungibilityExpr = instResult.Definition.FungibilityKeyExpression
+			fungibilityExpr = instResult.Definition.FungibilityKeyExpression
+			p.fungibilityExprs[csvRow.InstrumentCode] = fungibilityExpr
 		}
 	}
 
 	// Compute bucket key using CEL
-	bucketKey, ok := p.tryComputeBucketKey(csvRow)
-	if !ok {
+	bucketKey, computed := p.tryComputeBucketKey(csvRow, fungibilityExpr)
+	if !computed {
 		return nil // Validation error already recorded
 	}
 
@@ -379,11 +380,11 @@ func (p *importProcessor) processRow(ctx context.Context, csvRow *csv.ImportRow)
 
 // tryComputeBucketKey evaluates the CEL expression to generate the bucket key.
 // Returns (bucketKey, true) on success, or ("", false) if evaluation fails.
-func (p *importProcessor) tryComputeBucketKey(csvRow *csv.ImportRow) (string, bool) {
-	if p.fungibilityExpr == "" {
+func (p *importProcessor) tryComputeBucketKey(csvRow *csv.ImportRow, fungibilityExpr string) (string, bool) {
+	if fungibilityExpr == "" {
 		return "", true
 	}
-	bucketKey, err := p.celEval.EvaluateBucketKey(p.fungibilityExpr, csvRow.Attributes)
+	bucketKey, err := p.celEval.EvaluateBucketKey(fungibilityExpr, csvRow.Attributes)
 	if err != nil {
 		p.logger.Warn("bucket key evaluation failed", "line", csvRow.LineNumber, "error", err)
 		p.cp.IncrementFailure(1)
@@ -534,11 +535,16 @@ func initImportDependencies(ctx context.Context, cfg *importConfig, pool *pgxpoo
 }
 
 // handleImportInterrupt handles cleanup when import is interrupted.
-func handleImportInterrupt(ctx context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, logger *slog.Logger) *importResult {
-	if flushErr := deps.batchInserter.Flush(ctx); flushErr != nil {
+func handleImportInterrupt(_ context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, logger *slog.Logger) *importResult {
+	// Use fresh context for cleanup since the original may be canceled.
+	// This is intentional - we need cleanup to succeed even when the parent context is done.
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:contextcheck
+	defer cancel()
+
+	if flushErr := deps.batchInserter.Flush(cleanupCtx); flushErr != nil { //nolint:contextcheck
 		logger.Warn("failed to flush batch on interrupt", "error", flushErr)
 	}
-	if cancelErr := checkpointMgr.Cancel(ctx, cp); cancelErr != nil {
+	if cancelErr := checkpointMgr.Cancel(cleanupCtx, cp); cancelErr != nil { //nolint:contextcheck
 		logger.Warn("failed to save checkpoint on interrupt", "error", cancelErr)
 	}
 	result.Interrupted = true
@@ -581,6 +587,7 @@ func executeLiveImport(ctx context.Context, cfg *importConfig, cp *checkpoint.Ch
 		cfg: cfg, cp: cp, result: result,
 		instrumentChecker: deps.instrumentChecker, celEval: deps.celEval,
 		pipeline: deps.pipeline, batchInserter: deps.batchInserter, logger: logger,
+		fungibilityExprs: make(map[string]string),
 	}
 
 	parseResult, parseErr := deps.csvParser.Parse(ctx, deps.file, csv.ParseConfig{BatchSize: cfg.BatchSize, SkipEmptyRows: true}, func(batch csv.RowBatch) error {
