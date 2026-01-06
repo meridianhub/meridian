@@ -17,12 +17,14 @@ PRDs define the requirements, design, and implementation approach for significan
 | PRD | Title | Status | Task Master Tag |
 |-----|-------|--------|-----------------|
 | [Universal Asset System](universal-asset-system.md) | Multi-asset ledger support | Draft | `universal-asset-system` |
+| [Temporal Model Alignment](temporal-model-alignment-q1-2026.md) | Align with ADR-0017 periods | Draft | `temporal-model-alignment` |
 
 ## Categories
 
 ### Core Platform
 
 - [Universal Asset System](universal-asset-system.md) - Multi-asset support with dimensional safety
+- [Temporal Model Alignment](temporal-model-alignment-q1-2026.md) - Explicit period columns per ADR-0017
 
 ## How PRD Skills Work
 
