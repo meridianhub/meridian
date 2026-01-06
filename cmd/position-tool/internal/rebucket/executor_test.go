@@ -95,51 +95,12 @@ func TestDefaultConfig(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestNewExecutor_Validation(t *testing.T) {
-	tests := []struct {
-		name    string
-		pool    interface{} // nil for no pool
-		config  *Config
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name:    "nil pool returns error",
-			pool:    nil,
-			config:  DefaultConfig(),
-			wantErr: true,
-			errMsg:  ErrNilPool.Error(),
-		},
-		{
-			name:    "nil config uses defaults",
-			pool:    "placeholder", // will cast to nil anyway
-			config:  nil,
-			wantErr: true, // still fails because pool is nil
-			errMsg:  ErrNilPool.Error(),
-		},
-		{
-			name:   "invalid config returns error",
-			pool:   "placeholder",
-			config: &Config{BatchSize: -1},
-			// This test shows that with nil pool, we get pool error first
-			wantErr: true,
-			errMsg:  ErrNilPool.Error(),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			exec, err := NewExecutor(nil, tt.config, nil)
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, exec)
-				assert.Contains(t, err.Error(), tt.errMsg)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, exec)
-			}
-		})
-	}
+func TestNewExecutor_NilPool(t *testing.T) {
+	// Test that nil pool returns error
+	exec, err := NewExecutor(nil, DefaultConfig(), nil)
+	assert.Error(t, err)
+	assert.Nil(t, exec)
+	assert.ErrorIs(t, err, ErrNilPool)
 }
 
 func TestAffectedPosition_Fields(t *testing.T) {
