@@ -33,9 +33,10 @@ instructions: |
 
 **Related PRDs:**
 
-- [Position Keeping Balance Ownership](../../.taskmaster/docs/prd-position-keeping-balance-ownership.md) - **Required dependency**
+- **Position Keeping Balance Ownership** (Task Master tag: `position-keeping-balance`) - **Required dependency**
   - Defines that Position Keeping owns balance computation
   - This service queries Position Keeping for balance, does NOT store it locally
+  - Must be implemented before or alongside this service
 
 **Target Task Master Tag:** `internal-bank-account`
 
@@ -143,7 +144,7 @@ This indicates the service actively manages account lifecycles, not just tracks 
 
 > **Note**: Per BIAN architecture, Position Keeping owns balance computation. Internal Bank Account
 > queries Position Keeping for balance - it does NOT store balance locally. See
-> [Position Keeping Balance Ownership PRD](../../.taskmaster/docs/prd-position-keeping-balance-ownership.md).
+> Position Keeping Balance Ownership PRD (Task Master tag: `position-keeping-balance`).
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
@@ -402,24 +403,20 @@ message InternalBankAccountFacility {
   // correspondent holds correspondent bank details (for NOSTRO/VOSTRO)
   CorrespondentDetails correspondent = 8;
 
-  // current_balance is the real-time balance (O(1) query)
-  // Uses InstrumentAmount from quantity/v1/quantity.proto
-  meridian.quantity.v1.InstrumentAmount current_balance = 9;
-
-  // balance_updated_at is when the balance was last updated
-  google.protobuf.Timestamp balance_updated_at = 10;
+  // NOTE: No balance fields - balance is queried from Position Keeping service
+  // Use GetBalance RPC to retrieve current balance
 
   // attributes holds tenant-specific metadata
-  map<string, string> attributes = 11;
+  map<string, string> attributes = 9;
 
   // version for optimistic locking
-  int64 version = 12;
+  int64 version = 10;
 
   // created_at timestamp
-  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp created_at = 11;
 
   // updated_at timestamp
-  google.protobuf.Timestamp updated_at = 14;
+  google.protobuf.Timestamp updated_at = 12;
 }
 
 // =============================================================================
@@ -551,33 +548,9 @@ message GetBalanceResponse {
   google.protobuf.Timestamp balance_updated_at = 3;
 }
 
-// RecordPostingRequest updates the account balance after a ledger posting.
-// Called by FinancialAccounting service after each posting.
-message RecordPostingRequest {
-  string account_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-    pattern: "^[a-zA-Z0-9_-]+$"
-  }];
-
-  meridian.common.v1.PostingDirection direction = 2 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
-
-  meridian.quantity.v1.InstrumentAmount amount = 3 [(buf.validate.field).required = true];
-
-  // correlation_id links to the ledger posting
-  string correlation_id = 4;
-
-  meridian.common.v1.IdempotencyKey idempotency_key = 5;
-}
-
-message RecordPostingResponse {
-  string account_id = 1;
-  meridian.quantity.v1.InstrumentAmount new_balance = 2;
-  google.protobuf.Timestamp balance_updated_at = 3;
-}
+// NOTE: No RecordPostingRequest/Response - postings go through:
+//   FinancialAccounting → Position Keeping
+// This service queries Position Keeping for balance, it does not mutate balance.
 
 // =============================================================================
 // Service Definition
@@ -594,9 +567,8 @@ message RecordPostingResponse {
 //
 // Key capabilities:
 // - Account registry with full lifecycle management
-// - Real-time O(1) balance queries
+// - Balance queries via Position Keeping (source of truth)
 // - Multi-asset support (fiat, energy, compute, carbon, custom instruments)
-// - Integration with FinancialAccounting for balance updates
 service InternalBankAccountService {
   // InitiateInternalBankAccount creates a new internal account.
   // BIAN: Initiate Control Record (InCR)
@@ -703,7 +675,7 @@ CREATE TABLE internal_bank_account (
     )),
 
     -- NOTE: No balance columns - balance is computed by Position Keeping service
-    -- See: prd-position-keeping-balance-ownership.md
+    -- See: Position Keeping Balance Ownership PRD (position-keeping-balance tag)
 
     -- Correspondent bank details (for NOSTRO/VOSTRO)
     correspondent_bank_id VARCHAR(50),
