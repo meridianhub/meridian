@@ -1556,3 +1556,485 @@ func TestFinancialPositionLog_ReconciliationStatus_MultipleMarkReconciled(t *tes
 		t.Errorf("Version should remain %d, got %d", initialVersion, log.Version)
 	}
 }
+
+// ==========================================
+// Opening Balance Tests
+// ==========================================
+
+func TestNewFinancialPositionLogWithOpeningBalance_PositiveBalance(t *testing.T) {
+	positiveBalance := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+	effectiveDate := time.Now().UTC().Add(-24 * time.Hour) // Yesterday
+
+	log, err := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-001",
+		positiveBalance,
+		effectiveDate,
+		"MIGRATION-BATCH-001",
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify log is created
+	if log.LogID == uuid.Nil {
+		t.Error("Expected non-nil log ID")
+	}
+
+	if log.AccountID != "ACC-001" {
+		t.Errorf("Expected account ID ACC-001, got %v", log.AccountID)
+	}
+
+	// Verify opening balance is set
+	if !log.HasOpeningBalance() {
+		t.Error("Expected HasOpeningBalance to be true")
+	}
+
+	if !log.OpeningBalance.Equal(positiveBalance) {
+		t.Errorf("Expected opening balance %v, got %v", positiveBalance, log.OpeningBalance)
+	}
+
+	if log.OpeningBalanceRecordedAt.IsZero() {
+		t.Error("Expected OpeningBalanceRecordedAt to be set")
+	}
+
+	// Verify transaction entry was created
+	if log.EntryCount() != 1 {
+		t.Errorf("Expected 1 entry, got %d", log.EntryCount())
+	}
+
+	entry := log.TransactionLogEntries[0]
+
+	// Positive balance should create CREDIT direction
+	if entry.Direction != PostingDirectionCredit {
+		t.Errorf("Expected CREDIT direction for positive balance, got %v", entry.Direction)
+	}
+
+	// Entry amount should be the absolute value
+	if !entry.Amount.Equal(positiveBalance) {
+		t.Errorf("Expected entry amount %v, got %v", positiveBalance, entry.Amount)
+	}
+
+	// Verify source is OPENING_BALANCE
+	if entry.Source != TransactionSourceOpeningBalance {
+		t.Errorf("Expected source OPENING_BALANCE, got %v", entry.Source)
+	}
+
+	// Verify reference is migration reference
+	if entry.Reference != "MIGRATION-BATCH-001" {
+		t.Errorf("Expected reference MIGRATION-BATCH-001, got %v", entry.Reference)
+	}
+
+	// Verify timestamp is effective date
+	if !entry.Timestamp.Equal(effectiveDate) {
+		t.Errorf("Expected timestamp %v, got %v", effectiveDate, entry.Timestamp)
+	}
+
+	// Verify log is marked as POSTED
+	if log.StatusTracking.CurrentStatus != TransactionStatusPosted {
+		t.Errorf("Expected status POSTED, got %v", log.StatusTracking.CurrentStatus)
+	}
+
+	if !log.IsPosted() {
+		t.Error("Expected IsPosted to be true")
+	}
+
+	// Verify version incremented for posted status
+	if log.Version != 2 {
+		t.Errorf("Expected version 2, got %d", log.Version)
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_NegativeBalance(t *testing.T) {
+	negativeBalance := MustNewMoney(decimal.NewFromInt(-500), CurrencyGBP)
+	effectiveDate := time.Now().UTC().Add(-24 * time.Hour)
+
+	log, err := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-001",
+		negativeBalance,
+		effectiveDate,
+		"MIGRATION-BATCH-001",
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify opening balance stores the original negative value
+	if !log.OpeningBalance.Equal(negativeBalance) {
+		t.Errorf("Expected opening balance %v, got %v", negativeBalance, log.OpeningBalance)
+	}
+
+	// Verify transaction entry was created
+	if log.EntryCount() != 1 {
+		t.Errorf("Expected 1 entry, got %d", log.EntryCount())
+	}
+
+	entry := log.TransactionLogEntries[0]
+
+	// Negative balance should create DEBIT direction
+	if entry.Direction != PostingDirectionDebit {
+		t.Errorf("Expected DEBIT direction for negative balance, got %v", entry.Direction)
+	}
+
+	// Entry amount should be the absolute value (positive)
+	expectedAmount := MustNewMoney(decimal.NewFromInt(500), CurrencyGBP)
+	if !entry.Amount.Equal(expectedAmount) {
+		t.Errorf("Expected entry amount %v, got %v", expectedAmount, entry.Amount)
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_ZeroBalance(t *testing.T) {
+	zeroBalance, _ := Zero(CurrencyGBP)
+	effectiveDate := time.Now().UTC().Add(-24 * time.Hour)
+
+	log, err := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-001",
+		zeroBalance,
+		effectiveDate,
+		"MIGRATION-BATCH-001",
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify opening balance is set
+	if !log.HasOpeningBalance() {
+		t.Error("Expected HasOpeningBalance to be true for zero balance")
+	}
+
+	if !log.OpeningBalance.IsZero() {
+		t.Errorf("Expected zero opening balance, got %v", log.OpeningBalance)
+	}
+
+	// Zero balance should NOT create a transaction entry
+	if log.EntryCount() != 0 {
+		t.Errorf("Expected 0 entries for zero balance, got %d", log.EntryCount())
+	}
+
+	// Log should still be marked as POSTED
+	if log.StatusTracking.CurrentStatus != TransactionStatusPosted {
+		t.Errorf("Expected status POSTED, got %v", log.StatusTracking.CurrentStatus)
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_EmptyAccountID(t *testing.T) {
+	balance := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+	effectiveDate := time.Now().UTC().Add(-24 * time.Hour)
+
+	_, err := NewFinancialPositionLogWithOpeningBalance(
+		"", // Empty account ID
+		balance,
+		effectiveDate,
+		"MIGRATION-BATCH-001",
+	)
+
+	if err == nil {
+		t.Error("Expected error for empty account ID")
+	}
+
+	if !errors.Is(err, ErrEmptyAccountID) {
+		t.Errorf("Expected ErrEmptyAccountID, got %v", err)
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_FutureEffectiveDate(t *testing.T) {
+	balance := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+	futureDate := time.Now().UTC().Add(24 * time.Hour) // Tomorrow
+
+	_, err := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-001",
+		balance,
+		futureDate,
+		"MIGRATION-BATCH-001",
+	)
+
+	if err == nil {
+		t.Error("Expected error for future effective date")
+	}
+
+	if !errors.Is(err, ErrInvalidEffectiveDate) {
+		t.Errorf("Expected ErrInvalidEffectiveDate, got %v", err)
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_EdgeDateWithinTolerance(t *testing.T) {
+	balance := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+	// Effective date within 1 minute tolerance should succeed
+	edgeDate := time.Now().UTC().Add(30 * time.Second)
+
+	log, err := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-001",
+		balance,
+		edgeDate,
+		"MIGRATION-BATCH-001",
+	)
+	if err != nil {
+		t.Errorf("Expected success for date within tolerance, got error: %v", err)
+	}
+
+	if log == nil {
+		t.Error("Expected log to be created")
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_MigrationReferenceStored(t *testing.T) {
+	balance := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+	effectiveDate := time.Now().UTC().Add(-24 * time.Hour)
+	migrationRef := "LEGACY-SYSTEM-2024-Q4-BATCH-123"
+
+	log, err := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-001",
+		balance,
+		effectiveDate,
+		migrationRef,
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if log.EntryCount() != 1 {
+		t.Fatalf("Expected 1 entry, got %d", log.EntryCount())
+	}
+
+	entry := log.TransactionLogEntries[0]
+	if entry.Reference != migrationRef {
+		t.Errorf("Expected reference %v, got %v", migrationRef, entry.Reference)
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_ImmutabilityAfterCreation(t *testing.T) {
+	balance := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+	effectiveDate := time.Now().UTC().Add(-24 * time.Hour)
+
+	log, err := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-001",
+		balance,
+		effectiveDate,
+		"MIGRATION-BATCH-001",
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify the log is posted and entries cannot be added
+	newEntry, _ := NewTransactionLogEntry(
+		uuid.New(),
+		"ACC-001",
+		MustNewMoney(decimal.NewFromInt(100), CurrencyGBP),
+		PostingDirectionDebit,
+		time.Now(),
+		"New transaction",
+		"REF-002",
+		TransactionSourceManual,
+	)
+
+	err = log.AddEntry(newEntry)
+	if err == nil {
+		t.Error("Expected error when adding entry to posted log")
+	}
+
+	if !errors.Is(err, ErrAlreadyPosted) {
+		t.Errorf("Expected ErrAlreadyPosted, got %v", err)
+	}
+
+	// Entry count should remain at 1
+	if log.EntryCount() != 1 {
+		t.Errorf("Expected 1 entry, got %d", log.EntryCount())
+	}
+}
+
+func TestNewFinancialPositionLog_DefaultZeroOpeningBalance(t *testing.T) {
+	log, err := NewFinancialPositionLog("ACC-001", nil, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Default log should NOT have opening balance set
+	if log.HasOpeningBalance() {
+		t.Error("Expected HasOpeningBalance to be false for default constructor")
+	}
+
+	// OpeningBalanceRecordedAt should be zero time
+	if !log.OpeningBalanceRecordedAt.IsZero() {
+		t.Errorf("Expected zero OpeningBalanceRecordedAt, got %v", log.OpeningBalanceRecordedAt)
+	}
+
+	// OpeningBalance should be zero-valued Money
+	if !log.OpeningBalance.IsZero() {
+		t.Errorf("Expected zero OpeningBalance, got %v", log.OpeningBalance)
+	}
+}
+
+func TestHasOpeningBalance_DistinguishesBetweenConstructors(t *testing.T) {
+	// Log created with NewFinancialPositionLog
+	defaultLog, _ := NewFinancialPositionLog("ACC-001", nil, nil)
+
+	// Log created with NewFinancialPositionLogWithOpeningBalance
+	zeroBalance, _ := Zero(CurrencyGBP)
+	openingLog, _ := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-002",
+		zeroBalance,
+		time.Now().UTC().Add(-time.Hour),
+		"MIGRATION",
+	)
+
+	if defaultLog.HasOpeningBalance() {
+		t.Error("Default log should NOT have opening balance")
+	}
+
+	if !openingLog.HasOpeningBalance() {
+		t.Error("Opening balance log SHOULD have opening balance (even if zero amount)")
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_DecimalPrecision(t *testing.T) {
+	// Test with high precision decimal
+	preciseAmount := decimal.RequireFromString("1234.56789")
+	balance := MustNewMoney(preciseAmount, CurrencyGBP)
+	effectiveDate := time.Now().UTC().Add(-24 * time.Hour)
+
+	log, err := NewFinancialPositionLogWithOpeningBalance(
+		"ACC-001",
+		balance,
+		effectiveDate,
+		"MIGRATION-BATCH-001",
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify the precision is preserved
+	if !log.OpeningBalance.Amount.Equal(preciseAmount) {
+		t.Errorf("Expected opening balance amount %v, got %v", preciseAmount, log.OpeningBalance.Amount)
+	}
+
+	entry := log.TransactionLogEntries[0]
+	if !entry.Amount.Amount.Equal(preciseAmount) {
+		t.Errorf("Expected entry amount %v, got %v", preciseAmount, entry.Amount.Amount)
+	}
+}
+
+func TestNewFinancialPositionLogWithOpeningBalance_DifferentCurrencies(t *testing.T) {
+	currencies := []Currency{CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyJPY}
+
+	for _, currency := range currencies {
+		t.Run(string(currency), func(t *testing.T) {
+			amount := decimal.NewFromInt(1000)
+			if currency == CurrencyJPY {
+				// JPY has 0 decimal places
+				amount = decimal.NewFromInt(100000)
+			}
+
+			balance := MustNewMoney(amount, currency)
+			effectiveDate := time.Now().UTC().Add(-24 * time.Hour)
+
+			log, err := NewFinancialPositionLogWithOpeningBalance(
+				"ACC-001",
+				balance,
+				effectiveDate,
+				"MIGRATION-BATCH-001",
+			)
+			if err != nil {
+				t.Fatalf("Unexpected error for %v: %v", currency, err)
+			}
+
+			// Verify currency is preserved
+			if MoneyCurrency(log.OpeningBalance) != currency {
+				t.Errorf("Expected currency %v, got %v", currency, MoneyCurrency(log.OpeningBalance))
+			}
+
+			if log.EntryCount() > 0 {
+				entry := log.TransactionLogEntries[0]
+				if MoneyCurrency(entry.Amount) != currency {
+					t.Errorf("Expected entry currency %v, got %v", currency, MoneyCurrency(entry.Amount))
+				}
+			}
+		})
+	}
+}
+
+// ==========================================
+// Transaction Source Tests for New Sources
+// ==========================================
+
+func TestTransactionSource_OpeningBalance_IsValid(t *testing.T) {
+	if !TransactionSourceOpeningBalance.IsValid() {
+		t.Error("Expected OPENING_BALANCE to be valid")
+	}
+
+	if TransactionSourceOpeningBalance.String() != "OPENING_BALANCE" {
+		t.Errorf("Expected string OPENING_BALANCE, got %v", TransactionSourceOpeningBalance.String())
+	}
+}
+
+func TestTransactionSource_Migration_IsValid(t *testing.T) {
+	if !TransactionSourceMigration.IsValid() {
+		t.Error("Expected MIGRATION to be valid")
+	}
+
+	if TransactionSourceMigration.String() != "MIGRATION" {
+		t.Errorf("Expected string MIGRATION, got %v", TransactionSourceMigration.String())
+	}
+}
+
+func TestParseTransactionSource_NewSources(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected TransactionSource
+	}{
+		{"OPENING_BALANCE", TransactionSourceOpeningBalance},
+		{"MIGRATION", TransactionSourceMigration},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := ParseTransactionSource(tt.input)
+			if result != tt.expected {
+				t.Errorf("Expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestNewTransactionLogEntry_WithOpeningBalanceSource(t *testing.T) {
+	amount := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+
+	entry, err := NewTransactionLogEntry(
+		uuid.New(),
+		"ACC-001",
+		amount,
+		PostingDirectionCredit,
+		time.Now(),
+		"Opening balance",
+		"MIGRATION-REF",
+		TransactionSourceOpeningBalance,
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if entry.Source != TransactionSourceOpeningBalance {
+		t.Errorf("Expected source OPENING_BALANCE, got %v", entry.Source)
+	}
+}
+
+func TestNewTransactionLogEntry_WithMigrationSource(t *testing.T) {
+	amount := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+
+	entry, err := NewTransactionLogEntry(
+		uuid.New(),
+		"ACC-001",
+		amount,
+		PostingDirectionDebit,
+		time.Now(),
+		"Migrated transaction",
+		"LEGACY-REF",
+		TransactionSourceMigration,
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if entry.Source != TransactionSourceMigration {
+		t.Errorf("Expected source MIGRATION, got %v", entry.Source)
+	}
+}

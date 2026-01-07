@@ -24,6 +24,8 @@ var (
 	ErrTooManyAuditEntries = errors.New("maximum number of audit entries exceeded")
 	// ErrInvalidReconciliationStatus is returned when trying to mark as reconciled with unreconciled status
 	ErrInvalidReconciliationStatus = errors.New("reconciliation status must not be unreconciled when marking as reconciled")
+	// ErrInvalidEffectiveDate is returned when the effective date is invalid (e.g., in the future)
+	ErrInvalidEffectiveDate = errors.New("effective date cannot be in the future")
 )
 
 const (
@@ -43,16 +45,24 @@ const (
 // StatusTracking (MarkReconciled, MarkPosted, Reject, Amend, Fail, Cancel).
 // AddEntry does NOT increment Version as it represents accumulation within a draft
 // state rather than a lifecycle state transition.
+//
+// Opening Balance Support:
+// The OpeningBalance field stores the initial balance when the position log is created
+// during a migration scenario. This allows capturing existing balances from legacy systems
+// without requiring the full transaction history. The OpeningBalanceRecordedAt field tracks
+// when the opening balance was recorded. Both fields are immutable after initialization.
 type FinancialPositionLog struct {
-	LogID                 uuid.UUID
-	AccountID             string
-	TransactionLogEntries []*TransactionLogEntry
-	TransactionLineage    *TransactionLineage
-	AuditTrail            []*AuditTrailEntry
-	StatusTracking        *StatusTracking
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	Version               int64 // Optimistic lock version, incremented on status transitions
+	LogID                    uuid.UUID
+	AccountID                string
+	TransactionLogEntries    []*TransactionLogEntry
+	TransactionLineage       *TransactionLineage
+	AuditTrail               []*AuditTrailEntry
+	StatusTracking           *StatusTracking
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	Version                  int64 // Optimistic lock version, incremented on status transitions
+	OpeningBalance           Money // Initial balance for migration scenarios (immutable after init)
+	OpeningBalanceRecordedAt time.Time
 }
 
 // NewFinancialPositionLog creates a FinancialPositionLog for the given account, initializing identifiers, timestamps, version, empty entry and audit collections, and status tracking.
@@ -88,6 +98,101 @@ func NewFinancialPositionLog(
 	}
 
 	return log, nil
+}
+
+// NewFinancialPositionLogWithOpeningBalance creates a FinancialPositionLog with an opening balance
+// for migration scenarios. This constructor is used when bringing in existing account balances
+// from legacy systems where the full transaction history is not available.
+//
+// The opening balance is represented as a Money value which may be positive (CREDIT direction)
+// or negative (DEBIT direction). An opening balance transaction entry is automatically created
+// with TransactionSourceOpeningBalance source and TransactionStatusPosted status.
+//
+// Parameters:
+//   - accountID: The unique identifier for the account
+//   - openingBalance: The initial balance (positive for credit, negative for debit)
+//   - effectiveDate: The date when the opening balance becomes effective (cannot be in future)
+//   - migrationReference: A reference string identifying the migration source/batch
+//
+// Returns:
+//   - ErrEmptyAccountID when accountID is empty
+//   - ErrInvalidEffectiveDate when effectiveDate is in the future
+func NewFinancialPositionLogWithOpeningBalance(
+	accountID string,
+	openingBalance Money,
+	effectiveDate time.Time,
+	migrationReference string,
+) (*FinancialPositionLog, error) {
+	if accountID == "" {
+		return nil, ErrEmptyAccountID
+	}
+
+	now := time.Now().UTC()
+
+	// Validate effective date is not in the future (allow 1 minute tolerance for clock skew)
+	if effectiveDate.After(now.Add(time.Minute)) {
+		return nil, ErrInvalidEffectiveDate
+	}
+
+	// Determine posting direction based on balance sign
+	var direction PostingDirection
+	var entryAmount Money
+	if openingBalance.IsNegative() {
+		direction = PostingDirectionDebit
+		entryAmount = openingBalance.Negate()
+	} else {
+		direction = PostingDirectionCredit
+		entryAmount = openingBalance
+	}
+
+	// Create the log with opening balance
+	log := &FinancialPositionLog{
+		LogID:                    uuid.New(),
+		AccountID:                accountID,
+		TransactionLogEntries:    make([]*TransactionLogEntry, 0),
+		TransactionLineage:       nil, // No lineage for opening balance
+		AuditTrail:               make([]*AuditTrailEntry, 0),
+		StatusTracking:           NewStatusTracking(),
+		CreatedAt:                now,
+		UpdatedAt:                now,
+		Version:                  1,
+		OpeningBalance:           openingBalance,
+		OpeningBalanceRecordedAt: now,
+	}
+
+	// Create opening balance transaction entry only if amount is non-zero
+	if !openingBalance.IsZero() {
+		entry, err := NewTransactionLogEntry(
+			uuid.New(), // New transaction ID for the opening balance
+			accountID,
+			entryAmount,
+			direction,
+			effectiveDate,
+			"Opening balance",
+			migrationReference,
+			TransactionSourceOpeningBalance,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := log.AddEntry(entry); err != nil {
+			return nil, err
+		}
+	}
+
+	// Mark the opening balance transaction as posted (it's already finalized)
+	if err := log.StatusTracking.UpdateStatus(TransactionStatusPosted, "Opening balance established"); err != nil {
+		return nil, err
+	}
+	log.Version++
+
+	return log, nil
+}
+
+// HasOpeningBalance returns true if the log was created with an opening balance.
+func (l *FinancialPositionLog) HasOpeningBalance() bool {
+	return !l.OpeningBalanceRecordedAt.IsZero()
 }
 
 // AddEntry adds a new transaction entry to the log.

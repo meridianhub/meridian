@@ -12,6 +12,8 @@ const (
 	TransactionSourceAdjustment          TransactionSource = "ADJUSTMENT"           // Adjustment or correction entry
 	TransactionSourceCurrentAccount      TransactionSource = "CURRENT_ACCOUNT"      // From Current Account service
 	TransactionSourceFinancialAccounting TransactionSource = "FINANCIAL_ACCOUNTING" // From Financial Accounting service
+	TransactionSourceOpeningBalance      TransactionSource = "OPENING_BALANCE"      // Opening balance entry for migration
+	TransactionSourceMigration           TransactionSource = "MIGRATION"            // General migration entry from legacy systems
 )
 
 // IsValid checks if the transaction source is valid.
@@ -19,7 +21,8 @@ func (t TransactionSource) IsValid() bool {
 	switch t {
 	case TransactionSourceManual, TransactionSourceAutomated, TransactionSourceImported,
 		TransactionSourceReconciliation, TransactionSourceAdjustment,
-		TransactionSourceCurrentAccount, TransactionSourceFinancialAccounting:
+		TransactionSourceCurrentAccount, TransactionSourceFinancialAccounting,
+		TransactionSourceOpeningBalance, TransactionSourceMigration:
 		return true
 	}
 	return false
