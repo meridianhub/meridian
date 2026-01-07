@@ -661,8 +661,15 @@ Location: `services/internal-bank-account/migrations/20260106000001_initial.sql`
 CREATE TABLE internal_bank_account (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
+    -- Tenant isolation (per ADR-0016)
+    tenant_id VARCHAR(50) NOT NULL,
+
     -- Unique identifier (replaces hardcoded env vars)
-    account_id VARCHAR(100) NOT NULL UNIQUE,
+    -- Unique within tenant scope
+    account_id VARCHAR(100) NOT NULL,
+
+    -- Composite unique constraint for tenant isolation
+    CONSTRAINT uq_internal_bank_account_tenant_account UNIQUE (tenant_id, account_id),
 
     -- Human-readable code (e.g., "CLR-GBP-001")
     account_code VARCHAR(50) NOT NULL,
@@ -710,25 +717,31 @@ CREATE TABLE internal_bank_account (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indexes for common queries
-CREATE INDEX idx_internal_bank_account_type ON internal_bank_account(account_type);
-CREATE INDEX idx_internal_bank_account_instrument ON internal_bank_account(instrument_code);
-CREATE INDEX idx_internal_bank_account_dimension ON internal_bank_account(dimension);
-CREATE INDEX idx_internal_bank_account_status ON internal_bank_account(status);
+-- Indexes for common queries (tenant_id first for partition pruning)
+CREATE INDEX idx_internal_bank_account_tenant ON internal_bank_account(tenant_id);
+CREATE INDEX idx_internal_bank_account_tenant_type ON internal_bank_account(tenant_id, account_type);
+CREATE INDEX idx_internal_bank_account_tenant_instrument ON internal_bank_account(tenant_id, instrument_code);
+CREATE INDEX idx_internal_bank_account_tenant_status ON internal_bank_account(tenant_id, status);
 CREATE INDEX idx_internal_bank_account_code ON internal_bank_account(account_code);
 
 -- Status history for audit trail
 CREATE TABLE internal_bank_account_status_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    account_id VARCHAR(100) NOT NULL REFERENCES internal_bank_account(account_id),
+    tenant_id VARCHAR(50) NOT NULL,
+    account_id VARCHAR(100) NOT NULL,
     from_status VARCHAR(20) NOT NULL,
     to_status VARCHAR(20) NOT NULL,
     reason TEXT,
     changed_by VARCHAR(100),
-    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Foreign key to main table (tenant + account)
+    CONSTRAINT fk_status_history_account
+        FOREIGN KEY (tenant_id, account_id)
+        REFERENCES internal_bank_account(tenant_id, account_id)
 );
 
-CREATE INDEX idx_status_history_account ON internal_bank_account_status_history(account_id);
+CREATE INDEX idx_status_history_tenant_account ON internal_bank_account_status_history(tenant_id, account_id);
 CREATE INDEX idx_status_history_changed_at ON internal_bank_account_status_history(changed_at);
 
 -- Comments
