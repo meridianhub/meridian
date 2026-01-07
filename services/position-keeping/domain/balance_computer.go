@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -14,6 +15,12 @@ var (
 
 	// ErrNoInstrument is returned when unable to determine the instrument for a zero balance.
 	ErrNoInstrument = errors.New("unable to determine instrument for zero balance")
+
+	// ErrNilLog is returned when the financial position log is nil.
+	ErrNilLog = errors.New("financial position log cannot be nil")
+
+	// ErrNilCurrentAccountClient is returned when the current account client is nil.
+	ErrNilCurrentAccountClient = errors.New("current account client cannot be nil")
 )
 
 // BalanceComputer computes different balance types from transaction log entries.
@@ -260,4 +267,203 @@ func (bc *BalanceComputer) sumEntries(entries []*TransactionLogEntry, expectedIn
 	}
 
 	return sum, nil
+}
+
+// =============================================================================
+// LogBalanceComputer - Stateful Balance Computer with Lien Integration
+// =============================================================================
+
+// LogBalanceComputer computes balances for a specific FinancialPositionLog with
+// integrated lien (reserve) query capability via CurrentAccountClient.
+//
+// Unlike the stateless BalanceComputer, this type holds references to the log
+// and client, providing a more convenient API for computing all balance types
+// for a specific position log.
+//
+// Example usage:
+//
+//	lbc, err := NewLogBalanceComputer(log, openingBalance, currentAccountClient)
+//	if err != nil {
+//	    return err
+//	}
+//	currentBal, err := lbc.CurrentBalance()
+//	reserveBal, err := lbc.ReserveBalance(ctx)
+//	availableBal, err := lbc.AvailableBalance(ctx, overdraftLimit, true)
+type LogBalanceComputer struct {
+	log                  *FinancialPositionLog
+	openingBalance       Money
+	currentAccountClient CurrentAccountClient
+	computer             *BalanceComputer
+}
+
+// NewLogBalanceComputer creates a new LogBalanceComputer for the given position log.
+//
+// Parameters:
+//   - log: The financial position log to compute balances for (required)
+//   - openingBalance: The opening balance for this position (required)
+//   - client: Client for querying liens/amount blocks from Current Account (optional,
+//     nil if reserve balance computation via client is not needed)
+//
+// Returns ErrNilLog if log is nil.
+func NewLogBalanceComputer(log *FinancialPositionLog, openingBalance Money, client CurrentAccountClient) (*LogBalanceComputer, error) {
+	if log == nil {
+		return nil, ErrNilLog
+	}
+
+	return &LogBalanceComputer{
+		log:                  log,
+		openingBalance:       openingBalance,
+		currentAccountClient: client,
+		computer:             NewBalanceComputer(),
+	}, nil
+}
+
+// CurrentBalance calculates the current balance from opening balance plus all transactions.
+// Includes ALL transactions in the log regardless of status.
+//
+// For DEBIT entries: amount is added (increases the balance)
+// For CREDIT entries: amount is subtracted (decreases the balance)
+func (lbc *LogBalanceComputer) CurrentBalance() (Balance, error) {
+	return lbc.computer.ComputeCurrent(
+		lbc.openingBalance,
+		lbc.log.TransactionLogEntries,
+		time.Now().UTC(),
+	)
+}
+
+// ReserveBalance queries and sums all active liens (amount blocks) from Current Account.
+// Returns the total amount of funds reserved/blocked for this account.
+//
+// Requires the CurrentAccountClient to be configured. Returns ErrNilCurrentAccountClient
+// if the client was not provided during construction.
+//
+// The reserve balance represents funds that are held but not yet debited:
+// - Payment Order liens awaiting settlement
+// - Authorization holds
+// - Regulatory reservations
+func (lbc *LogBalanceComputer) ReserveBalance(ctx context.Context) (Balance, error) {
+	if lbc.currentAccountClient == nil {
+		return Balance{}, ErrNilCurrentAccountClient
+	}
+
+	// Query active amount blocks from Current Account
+	blocks, err := lbc.currentAccountClient.GetActiveAmountBlocks(ctx, lbc.log.AccountID)
+	if err != nil {
+		return Balance{}, err
+	}
+
+	// Sum all block amounts
+	reserveAmount := NewQty[Monetary](decimal.Zero, lbc.openingBalance.Instrument)
+	for _, block := range blocks {
+		// Validate instrument matches
+		if !block.Amount.Instrument.Equal(lbc.openingBalance.Instrument) {
+			return Balance{}, ErrInstrumentMismatch
+		}
+
+		reserveAmount, err = reserveAmount.Add(block.Amount)
+		if err != nil {
+			return Balance{}, err
+		}
+	}
+
+	return Balance{
+		Type:   BalanceTypeReserve,
+		Amount: reserveAmount,
+		AsOf:   time.Now().UTC(),
+	}, nil
+}
+
+// AvailableBalance calculates the available balance for immediate use.
+// Available = Current - Reserve + Overdraft (if enabled)
+//
+// This method queries the Current Account for active liens to compute the reserve,
+// then subtracts it from the current balance and optionally adds the overdraft limit.
+//
+// Requires the CurrentAccountClient to be configured. Returns ErrNilCurrentAccountClient
+// if the client was not provided during construction.
+func (lbc *LogBalanceComputer) AvailableBalance(ctx context.Context, overdraftLimit Money, overdraftEnabled bool) (Balance, error) {
+	// Get current balance
+	currentBal, err := lbc.CurrentBalance()
+	if err != nil {
+		return Balance{}, err
+	}
+
+	// Get reserve balance
+	reserveBal, err := lbc.ReserveBalance(ctx)
+	if err != nil {
+		return Balance{}, err
+	}
+
+	// Apply overdraft if enabled, otherwise use zero
+	effectiveOverdraft := NewQty[Monetary](decimal.Zero, lbc.openingBalance.Instrument)
+	if overdraftEnabled {
+		effectiveOverdraft = overdraftLimit
+	}
+
+	return lbc.computer.ComputeAvailable(
+		currentBal.Amount,
+		reserveBal.Amount,
+		effectiveOverdraft,
+		time.Now().UTC(),
+	)
+}
+
+// FreeBalance calculates the free (unencumbered) balance.
+// Free = Current - Reserve
+//
+// Requires the CurrentAccountClient to be configured. Returns ErrNilCurrentAccountClient
+// if the client was not provided during construction.
+func (lbc *LogBalanceComputer) FreeBalance(ctx context.Context) (Balance, error) {
+	// Get current balance
+	currentBal, err := lbc.CurrentBalance()
+	if err != nil {
+		return Balance{}, err
+	}
+
+	// Get reserve balance
+	reserveBal, err := lbc.ReserveBalance(ctx)
+	if err != nil {
+		return Balance{}, err
+	}
+
+	return lbc.computer.ComputeFree(
+		currentBal.Amount,
+		reserveBal.Amount,
+		time.Now().UTC(),
+	)
+}
+
+// OpeningBalance returns the opening balance for this position.
+func (lbc *LogBalanceComputer) OpeningBalance() Balance {
+	return lbc.computer.ComputeOpening(lbc.openingBalance, lbc.log.CreatedAt)
+}
+
+// ClosingBalance calculates the closing balance at a specific period end.
+// Only includes transactions with Timestamp <= periodEnd.
+func (lbc *LogBalanceComputer) ClosingBalance(periodEnd time.Time) (Balance, error) {
+	return lbc.computer.ComputeClosing(
+		lbc.openingBalance,
+		lbc.log.TransactionLogEntries,
+		periodEnd,
+	)
+}
+
+// LedgerBalance calculates the ledger balance from all entries in the log.
+// This represents the sum of all recorded transactions.
+//
+// Note: This sums ALL entries. For status-filtered ledger balance,
+// use the stateless BalanceComputer.ComputeLedger with pre-filtered entries.
+func (lbc *LogBalanceComputer) LedgerBalance() (Balance, error) {
+	if len(lbc.log.TransactionLogEntries) == 0 {
+		// Return zero balance with opening balance's instrument
+		return Balance{
+			Type:   BalanceTypeLedger,
+			Amount: NewQty[Monetary](decimal.Zero, lbc.openingBalance.Instrument),
+			AsOf:   time.Now().UTC(),
+		}, nil
+	}
+	return lbc.computer.ComputeLedgerFromEntries(
+		lbc.log.TransactionLogEntries,
+		time.Now().UTC(),
+	)
 }

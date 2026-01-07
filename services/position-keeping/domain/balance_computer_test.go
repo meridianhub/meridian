@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -902,4 +903,363 @@ func TestBalanceComputer_Errors(t *testing.T) {
 		assert.NotNil(t, ErrNoInstrument)
 		assert.Contains(t, ErrNoInstrument.Error(), "instrument")
 	})
+}
+
+// =============================================================================
+// LogBalanceComputer Tests
+// =============================================================================
+
+// mockCurrentAccountClient is a test double for CurrentAccountClient
+type mockCurrentAccountClient struct {
+	blocks []AmountBlock
+	err    error
+}
+
+func (m *mockCurrentAccountClient) GetActiveAmountBlocks(_ context.Context, _ string) ([]AmountBlock, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.blocks, nil
+}
+
+func createTestLog(t *testing.T, accountID string, entries []*TransactionLogEntry) *FinancialPositionLog {
+	t.Helper()
+	log, err := NewFinancialPositionLog(accountID, nil, nil)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		err := log.AddEntry(entry)
+		require.NoError(t, err)
+	}
+	return log
+}
+
+func TestNewLogBalanceComputer(t *testing.T) {
+	t.Run("creates with valid parameters", func(t *testing.T) {
+		log, _ := NewFinancialPositionLog("TEST-ACC-001", nil, nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		client := &mockCurrentAccountClient{}
+
+		lbc, err := NewLogBalanceComputer(log, opening, client)
+
+		require.NoError(t, err)
+		require.NotNil(t, lbc)
+	})
+
+	t.Run("creates without client (nil client allowed)", func(t *testing.T) {
+		log, _ := NewFinancialPositionLog("TEST-ACC-001", nil, nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+
+		lbc, err := NewLogBalanceComputer(log, opening, nil)
+
+		require.NoError(t, err)
+		require.NotNil(t, lbc)
+	})
+
+	t.Run("returns error for nil log", func(t *testing.T) {
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+
+		lbc, err := NewLogBalanceComputer(nil, opening, nil)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrNilLog)
+		assert.Nil(t, lbc)
+	})
+}
+
+func TestLogBalanceComputer_CurrentBalance(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("returns opening balance when no entries", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		result, err := lbc.CurrentBalance()
+
+		require.NoError(t, err)
+		assert.Equal(t, BalanceTypeCurrent, result.Type)
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(1000)))
+	})
+
+	t.Run("adds DEBIT entries to opening balance", func(t *testing.T) {
+		entries := []*TransactionLogEntry{
+			newTestEntry(t, decimal.NewFromInt(100), CurrencyGBP, PostingDirectionDebit, now),
+			newTestEntry(t, decimal.NewFromInt(200), CurrencyGBP, PostingDirectionDebit, now),
+		}
+		log := createTestLog(t, "TEST-ACC-001", entries)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		result, err := lbc.CurrentBalance()
+
+		require.NoError(t, err)
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(1300))) // 1000 + 100 + 200
+	})
+
+	t.Run("subtracts CREDIT entries from opening balance", func(t *testing.T) {
+		entries := []*TransactionLogEntry{
+			newTestEntry(t, decimal.NewFromInt(100), CurrencyGBP, PostingDirectionCredit, now),
+		}
+		log := createTestLog(t, "TEST-ACC-001", entries)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		result, err := lbc.CurrentBalance()
+
+		require.NoError(t, err)
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(900))) // 1000 - 100
+	})
+}
+
+func TestLogBalanceComputer_ReserveBalance(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns error when client is nil", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		_, err := lbc.ReserveBalance(ctx)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrNilCurrentAccountClient)
+	})
+
+	t.Run("returns zero when no blocks", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		client := &mockCurrentAccountClient{blocks: []AmountBlock{}}
+		lbc, _ := NewLogBalanceComputer(log, opening, client)
+
+		result, err := lbc.ReserveBalance(ctx)
+
+		require.NoError(t, err)
+		assert.Equal(t, BalanceTypeReserve, result.Type)
+		assert.True(t, result.Amount.Amount.IsZero())
+	})
+
+	t.Run("sums all block amounts", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		client := &mockCurrentAccountClient{
+			blocks: []AmountBlock{
+				{BlockID: "B1", Amount: MustNewMoney(decimal.NewFromInt(100), CurrencyGBP), BlockType: AmountBlockTypePending},
+				{BlockID: "B2", Amount: MustNewMoney(decimal.NewFromInt(200), CurrencyGBP), BlockType: AmountBlockTypePending},
+				{BlockID: "B3", Amount: MustNewMoney(decimal.NewFromInt(50), CurrencyGBP), BlockType: AmountBlockTypeTemporary},
+			},
+		}
+		lbc, _ := NewLogBalanceComputer(log, opening, client)
+
+		result, err := lbc.ReserveBalance(ctx)
+
+		require.NoError(t, err)
+		assert.Equal(t, BalanceTypeReserve, result.Type)
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(350))) // 100 + 200 + 50
+	})
+
+	t.Run("returns error for currency mismatch", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		client := &mockCurrentAccountClient{
+			blocks: []AmountBlock{
+				{BlockID: "B1", Amount: MustNewMoney(decimal.NewFromInt(100), CurrencyUSD), BlockType: AmountBlockTypePending},
+			},
+		}
+		lbc, _ := NewLogBalanceComputer(log, opening, client)
+
+		_, err := lbc.ReserveBalance(ctx)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInstrumentMismatch)
+	})
+
+	t.Run("propagates client errors", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		expectedErr := assert.AnError
+		client := &mockCurrentAccountClient{err: expectedErr}
+		lbc, _ := NewLogBalanceComputer(log, opening, client)
+
+		_, err := lbc.ReserveBalance(ctx)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, expectedErr)
+	})
+}
+
+func TestLogBalanceComputer_AvailableBalance(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	t.Run("computes Available = Current - Reserve + Overdraft", func(t *testing.T) {
+		entries := []*TransactionLogEntry{
+			newTestEntry(t, decimal.NewFromInt(500), CurrencyGBP, PostingDirectionDebit, now),
+		}
+		log := createTestLog(t, "TEST-ACC-001", entries)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		overdraft := MustNewMoney(decimal.NewFromInt(200), CurrencyGBP)
+		client := &mockCurrentAccountClient{
+			blocks: []AmountBlock{
+				{BlockID: "B1", Amount: MustNewMoney(decimal.NewFromInt(300), CurrencyGBP), BlockType: AmountBlockTypePending},
+			},
+		}
+		lbc, _ := NewLogBalanceComputer(log, opening, client)
+
+		result, err := lbc.AvailableBalance(ctx, overdraft, true)
+
+		require.NoError(t, err)
+		assert.Equal(t, BalanceTypeAvailable, result.Type)
+		// Current = 1000 + 500 = 1500
+		// Reserve = 300
+		// Available = 1500 - 300 + 200 = 1400
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(1400)))
+	})
+
+	t.Run("ignores overdraft when disabled", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		overdraft := MustNewMoney(decimal.NewFromInt(500), CurrencyGBP)
+		client := &mockCurrentAccountClient{
+			blocks: []AmountBlock{
+				{BlockID: "B1", Amount: MustNewMoney(decimal.NewFromInt(200), CurrencyGBP), BlockType: AmountBlockTypePending},
+			},
+		}
+		lbc, _ := NewLogBalanceComputer(log, opening, client)
+
+		result, err := lbc.AvailableBalance(ctx, overdraft, false)
+
+		require.NoError(t, err)
+		// Current = 1000, Reserve = 200, Overdraft = 0 (disabled)
+		// Available = 1000 - 200 + 0 = 800
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(800)))
+	})
+
+	t.Run("returns error when client is nil", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		overdraft := MustNewMoney(decimal.NewFromInt(500), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		_, err := lbc.AvailableBalance(ctx, overdraft, true)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrNilCurrentAccountClient)
+	})
+}
+
+func TestLogBalanceComputer_FreeBalance(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("computes Free = Current - Reserve", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		client := &mockCurrentAccountClient{
+			blocks: []AmountBlock{
+				{BlockID: "B1", Amount: MustNewMoney(decimal.NewFromInt(300), CurrencyGBP), BlockType: AmountBlockTypePending},
+			},
+		}
+		lbc, _ := NewLogBalanceComputer(log, opening, client)
+
+		result, err := lbc.FreeBalance(ctx)
+
+		require.NoError(t, err)
+		assert.Equal(t, BalanceTypeFree, result.Type)
+		// Free = 1000 - 300 = 700
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(700)))
+	})
+
+	t.Run("can go negative when reserve exceeds current", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(100), CurrencyGBP)
+		client := &mockCurrentAccountClient{
+			blocks: []AmountBlock{
+				{BlockID: "B1", Amount: MustNewMoney(decimal.NewFromInt(300), CurrencyGBP), BlockType: AmountBlockTypePending},
+			},
+		}
+		lbc, _ := NewLogBalanceComputer(log, opening, client)
+
+		result, err := lbc.FreeBalance(ctx)
+
+		require.NoError(t, err)
+		// Free = 100 - 300 = -200
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(-200)))
+	})
+}
+
+func TestLogBalanceComputer_OpeningBalance(t *testing.T) {
+	t.Run("returns opening balance", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		result := lbc.OpeningBalance()
+
+		assert.Equal(t, BalanceTypeOpening, result.Type)
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(1000)))
+		assert.Equal(t, log.CreatedAt, result.AsOf)
+	})
+}
+
+func TestLogBalanceComputer_ClosingBalance(t *testing.T) {
+	baseTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2024, 1, 15, 18, 0, 0, 0, time.UTC)
+
+	t.Run("filters transactions by period end", func(t *testing.T) {
+		entries := []*TransactionLogEntry{
+			newTestEntry(t, decimal.NewFromInt(100), CurrencyGBP, PostingDirectionDebit, baseTime.Add(1*time.Hour)),     // included
+			newTestEntry(t, decimal.NewFromInt(200), CurrencyGBP, PostingDirectionDebit, periodEnd),                     // included
+			newTestEntry(t, decimal.NewFromInt(1000), CurrencyGBP, PostingDirectionDebit, periodEnd.Add(1*time.Second)), // excluded
+		}
+		log := createTestLog(t, "TEST-ACC-001", entries)
+		opening := MustNewMoney(decimal.NewFromInt(500), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		result, err := lbc.ClosingBalance(periodEnd)
+
+		require.NoError(t, err)
+		assert.Equal(t, BalanceTypeClosing, result.Type)
+		// 500 + 100 + 200 = 800 (1000 excluded)
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(800)))
+		assert.Equal(t, periodEnd, result.AsOf)
+	})
+}
+
+func TestLogBalanceComputer_LedgerBalance(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("returns zero for empty log", func(t *testing.T) {
+		log := createTestLog(t, "TEST-ACC-001", nil)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		result, err := lbc.LedgerBalance()
+
+		require.NoError(t, err)
+		assert.Equal(t, BalanceTypeLedger, result.Type)
+		assert.True(t, result.Amount.Amount.IsZero())
+	})
+
+	t.Run("sums all entries", func(t *testing.T) {
+		entries := []*TransactionLogEntry{
+			newTestEntry(t, decimal.NewFromInt(100), CurrencyGBP, PostingDirectionDebit, now),
+			newTestEntry(t, decimal.NewFromInt(200), CurrencyGBP, PostingDirectionDebit, now),
+			newTestEntry(t, decimal.NewFromInt(50), CurrencyGBP, PostingDirectionCredit, now),
+		}
+		log := createTestLog(t, "TEST-ACC-001", entries)
+		opening := MustNewMoney(decimal.NewFromInt(1000), CurrencyGBP)
+		lbc, _ := NewLogBalanceComputer(log, opening, nil)
+
+		result, err := lbc.LedgerBalance()
+
+		require.NoError(t, err)
+		assert.Equal(t, BalanceTypeLedger, result.Type)
+		// 100 + 200 - 50 = 250
+		assert.True(t, result.Amount.Amount.Equal(decimal.NewFromInt(250)))
+	})
+}
+
+func TestAmountBlockType_Constants(t *testing.T) {
+	assert.Equal(t, AmountBlockType("PENDING"), AmountBlockTypePending)
+	assert.Equal(t, AmountBlockType("FINAL"), AmountBlockTypeFinal)
+	assert.Equal(t, AmountBlockType("TEMPORARY"), AmountBlockTypeTemporary)
 }
