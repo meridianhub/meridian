@@ -31,6 +31,12 @@ instructions: |
 - [0015 - Standard Service Directory Structure](../adr/0015-standard-service-directory-structure.md)
 - [0016 - Tenant ID Naming Strategy](../adr/0016-tenant-id-naming-strategy.md)
 
+**Related PRDs:**
+
+- [Position Keeping Balance Ownership](../../.taskmaster/docs/prd-position-keeping-balance-ownership.md) - **Required dependency**
+  - Defines that Position Keeping owns balance computation
+  - This service queries Position Keeping for balance, does NOT store it locally
+
 **Target Task Master Tag:** `internal-bank-account`
 
 ---
@@ -133,14 +139,18 @@ This indicates the service actively manages account lifecycles, not just tracks 
 | FR-2.3 | Balance operations SHALL use the `InstrumentAmount` type from `quantity/v1` | P0 |
 | FR-2.4 | System SHALL enforce instrument consistency for all postings to an account | P0 |
 
-#### FR-3: Real-Time Balance Tracking
+#### FR-3: Balance Retrieval (via Position Keeping)
+
+> **Note**: Per BIAN architecture, Position Keeping owns balance computation. Internal Bank Account
+> queries Position Keeping for balance - it does NOT store balance locally. See
+> [Position Keeping Balance Ownership PRD](../../.taskmaster/docs/prd-position-keeping-balance-ownership.md).
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-3.1 | System SHALL maintain current balance for each account updated on every posting | P0 |
-| FR-3.2 | Balance queries SHALL be O(1) complexity (no ledger aggregation) | P0 |
-| FR-3.3 | System SHALL track balance_updated_at timestamp | P0 |
-| FR-3.4 | System SHALL support balance reconciliation against ledger aggregation | P1 |
+| FR-3.1 | System SHALL query Position Keeping for current balance | P0 |
+| FR-3.2 | Balance queries SHALL return O(1) response (Position Keeping pre-computes) | P0 |
+| FR-3.3 | System SHALL support all BIAN balance types: CURRENT, AVAILABLE, LEDGER, RESERVE | P1 |
+| FR-3.4 | System SHALL pass overdraft configuration to Position Keeping for available balance calculation | P1 |
 
 #### FR-4: Account Lifecycle Management
 
@@ -161,8 +171,10 @@ This indicates the service actively manages account lifecycles, not just tracks 
 | FR-5.3 | ControlInternalBankAccountFacility - Lifecycle state transitions | P0 |
 | FR-5.4 | RetrieveInternalBankAccountFacility - Get account by ID | P0 |
 | FR-5.5 | ListInternalBankAccountFacilities - Query accounts with filters | P0 |
-| FR-5.6 | RecordPosting - Update balance (called by FinancialAccounting) | P0 |
-| FR-5.7 | GetBalance - O(1) balance query | P0 |
+| FR-5.6 | GetBalance - Query balance from Position Keeping | P0 |
+
+> **Note**: No `RecordPosting` RPC - postings are recorded via FinancialAccounting → Position Keeping.
+> This service is a registry/metadata service, not a balance mutator.
 
 #### FR-6: Correspondent Bank Support (Nostro/Vostro)
 
@@ -178,26 +190,24 @@ This indicates the service actively manages account lifecycles, not just tracks 
 
 | ID | Requirement | Target |
 |----|-------------|--------|
-| NFR-1.1 | Balance query latency | < 5ms p99 |
+| NFR-1.1 | Balance query latency (via Position Keeping) | < 50ms p99 |
 | NFR-1.2 | Account creation latency | < 50ms p99 |
-| NFR-1.3 | RecordPosting latency | < 10ms p99 |
-| NFR-1.4 | Concurrent postings per account | 1000/sec |
+| NFR-1.3 | Account lookup latency | < 5ms p99 |
 
 #### NFR-2: Reliability
 
 | ID | Requirement | Target |
 |----|-------------|--------|
 | NFR-2.1 | Service availability | 99.9% |
-| NFR-2.2 | Data durability | 99.999999% |
-| NFR-2.3 | Balance accuracy | 100% (eventual consistency < 1s) |
+| NFR-2.2 | Data durability (account registry) | 99.999999% |
 
 #### NFR-3: Scalability
 
 | ID | Requirement | Target |
 |----|-------------|--------|
-| NFR-3.1 | Accounts per tenant | 10,000+ |
-| NFR-3.2 | Tenants per deployment | 1,000+ |
-| NFR-3.3 | Postings per day | 10M+ |
+| NFR-3.1 | Accounts per schema (tenant) | 10,000+ |
+| NFR-3.2 | Schemas per deployment | 1,000+ |
+| NFR-3.3 | Balance queries per day | 10M+ |
 
 ---
 
@@ -635,21 +645,17 @@ service InternalBankAccountService {
     };
   }
 
-  // GetBalance retrieves the current balance (O(1) operation).
+  // GetBalance retrieves balance from Position Keeping service.
+  // This service does not store balance - Position Keeping is the source of truth.
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse) {
     option (google.api.http) = {
       get: "/v1/internal-bank-accounts/{account_id}/balance"
     };
   }
 
-  // RecordPosting updates the balance after a ledger posting.
-  // Called by FinancialAccounting service.
-  rpc RecordPosting(RecordPostingRequest) returns (RecordPostingResponse) {
-    option (google.api.http) = {
-      post: "/v1/internal-bank-accounts/{account_id}/postings"
-      body: "*"
-    };
-  }
+  // NOTE: No RecordPosting RPC - postings are recorded via:
+  //   FinancialAccounting → Position Keeping
+  // This service is a registry for account metadata, not a balance mutator.
 }
 ```
 
@@ -696,9 +702,8 @@ CREATE TABLE internal_bank_account (
         'ACTIVE', 'SUSPENDED', 'CLOSED'
     )),
 
-    -- Real-time balance (O(1) query)
-    current_balance_amount DECIMAL(38, 18) NOT NULL DEFAULT 0,
-    balance_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- NOTE: No balance columns - balance is computed by Position Keeping service
+    -- See: prd-position-keeping-balance-ownership.md
 
     -- Correspondent bank details (for NOSTRO/VOSTRO)
     correspondent_bank_id VARCHAR(50),
@@ -739,45 +744,74 @@ CREATE INDEX idx_status_history_changed_at ON internal_bank_account_status_histo
 -- Comments
 COMMENT ON TABLE internal_bank_account IS 'BIAN Internal Bank Account - Non-customer-facing accounts for bank operations';
 COMMENT ON COLUMN internal_bank_account.account_id IS 'Unique identifier replacing hardcoded environment variables';
-COMMENT ON COLUMN internal_bank_account.current_balance_amount IS 'Real-time balance updated on every posting (O(1) query)';
 COMMENT ON COLUMN internal_bank_account.dimension IS 'Asset dimension from Universal Asset System';
 ```
 
 ### Integration Points
 
-#### 1. FinancialAccounting Integration
+#### 1. Position Keeping Integration (Balance Queries)
 
-After creating a ledger posting, FinancialAccounting calls `RecordPosting`:
+Internal Bank Account queries Position Keeping for balance - it does NOT store balance locally:
 
 ```go
-// In financial-accounting/service/posting_service.go
-func (s *PostingService) CaptureLedgerPosting(ctx context.Context, req *Request) error {
-    // 1. Create ledger posting (existing logic)
-    posting, err := s.createPosting(ctx, req)
+// In internal-bank-account/service/balance_service.go
+func (s *Service) GetBalance(ctx context.Context, req *GetBalanceRequest) (*GetBalanceResponse, error) {
+    // 1. Validate account exists and is active
+    account, err := s.accountRepo.FindByID(ctx, req.AccountId)
     if err != nil {
-        return err
+        return nil, err
+    }
+    if account.Status() != StatusActive {
+        return nil, ErrAccountNotActive
     }
 
-    // 2. Update internal account balance (if it's an internal account)
-    _, err = s.internalAccountClient.RecordPosting(ctx, &RecordPostingRequest{
-        AccountId:      req.AccountId,
-        Direction:      req.PostingDirection,
-        Amount:         req.PostingAmount,
-        CorrelationId:  posting.ID,
-        IdempotencyKey: req.IdempotencyKey,
+    // 2. Query Position Keeping for balance (source of truth)
+    balances, err := s.positionKeepingClient.GetAccountBalances(ctx, &positionkeeping.GetAccountBalancesRequest{
+        AccountId: account.AccountID(),
+        Currency:  account.InstrumentCode(),
     })
     if err != nil {
-        // Not found is OK - might be a customer account
-        if !errors.Is(err, ErrAccountNotFound) {
-            return err
-        }
+        return nil, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
     }
 
-    return nil
+    // 3. Return balance from Position Keeping
+    return &GetBalanceResponse{
+        AccountId:        account.AccountID(),
+        CurrentBalance:   balances.CurrentBalance,
+        AvailableBalance: balances.AvailableBalance,
+        AsOf:             balances.AsOf,
+    }, nil
 }
 ```
 
-#### 2. CurrentAccount Migration
+#### 2. FinancialAccounting Flow (Postings)
+
+Postings flow through FinancialAccounting → Position Keeping. Internal Bank Account is NOT involved:
+
+```text
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│ FinancialAccounting │────►│   Position Keeping  │     │ InternalBankAccount │
+│   (creates posting) │     │ (tracks positions)  │     │  (account registry) │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
+         │                           │                           │
+         │ 1. Create ledger entry    │                           │
+         │    (debit/credit)         │                           │
+         ├──────────────────────────►│                           │
+         │                           │ 2. Record transaction     │
+         │                           │    in position log        │
+         │                           │                           │
+         │                           │◄──────────────────────────┤
+         │                           │ 3. Query balance          │
+         │                           │    (when needed)          │
+         │                           │────────────────────────────►
+         │                           │                           │
+```
+
+> **Key Insight**: Internal Bank Account is a registry/metadata service.
+> It does NOT receive posting notifications or update balance.
+> Balance is always computed by Position Keeping from the transaction log.
+
+#### 3. CurrentAccount Migration
 
 Replace hardcoded environment variables with registry lookup:
 
@@ -800,7 +834,7 @@ func (s *Service) initializeAccounts(ctx context.Context) error {
 }
 ```
 
-#### 3. Tenant Provisioning
+#### 4. Tenant Provisioning
 
 When a new tenant is provisioned, create default internal accounts:
 
