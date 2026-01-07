@@ -46,6 +46,10 @@ type PositionKeepingService struct {
 	// bucketCounter is OPTIONAL - if nil, cardinality checking is skipped.
 	// Used to enforce MaxBucketsPerAccountInstrument limit.
 	bucketCounter BucketCounter
+	// currentAccountClient is OPTIONAL - if nil, Reserve/Available/Free balance
+	// computations will fail with a FailedPrecondition error.
+	// Used to query active liens (amount blocks) from Current Account service.
+	currentAccountClient domain.CurrentAccountClient
 }
 
 // Option configures optional dependencies for PositionKeepingService.
@@ -66,6 +70,15 @@ func WithInstrumentCache(cache InstrumentCache) Option {
 func WithBucketCounter(counter BucketCounter) Option {
 	return func(s *PositionKeepingService) {
 		s.bucketCounter = counter
+	}
+}
+
+// WithCurrentAccountClient sets an optional client for querying liens from Current Account.
+// If not set or set to nil, Reserve/Available/Free balance computations will return
+// a FailedPrecondition error, as these balances require lien information.
+func WithCurrentAccountClient(client domain.CurrentAccountClient) Option {
+	return func(s *PositionKeepingService) {
+		s.currentAccountClient = client
 	}
 }
 
