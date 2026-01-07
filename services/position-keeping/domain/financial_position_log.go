@@ -127,12 +127,12 @@ func NewFinancialPositionLogWithOpeningBalance(
 		return nil, ErrEmptyAccountID
 	}
 
+	now := time.Now().UTC()
+
 	// Validate effective date is not in the future (allow 1 minute tolerance for clock skew)
-	if effectiveDate.After(time.Now().UTC().Add(time.Minute)) {
+	if effectiveDate.After(now.Add(time.Minute)) {
 		return nil, ErrInvalidEffectiveDate
 	}
-
-	now := time.Now().UTC()
 
 	// Determine posting direction based on balance sign
 	var direction PostingDirection
