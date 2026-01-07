@@ -13,7 +13,7 @@ instructions: |
   Key patterns: Multi-asset support via InstrumentAmount, real-time O(1) balance queries.
   Uses Dimension from reference_data/v1, InstrumentAmount from quantity/v1.
   Service structure follows ADR-0015. Proto package: internal_bank_account (with underscores).
-  BIAN spec at: bian-public/bian-public-main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml
+  BIAN spec: https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml
 ---
 
 # PRD: Internal Bank Account Service
@@ -83,9 +83,9 @@ registry with real-time balance tracking, enabling:
 > for the booking of that part of a transaction in the bank world (so not in the
 > accounting world) that is not to be booked on a customer account."
 
-**Local BIAN Specification:**
+**BIAN Semantic API Specification:**
 
-- `bian-public/bian-public-main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml`
+- [InternalBankAccount.yaml](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml)
 
 **BIAN References:**
 
@@ -997,8 +997,8 @@ Each ledger stays balanced. External bank transfer settles the clearing accounts
 
 The implementation should align with the BIAN v13.0 Internal Bank Account semantic API.
 
-Local BIAN specification:
-`bian-public/bian-public-main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml`
+BIAN Semantic API specification:
+[InternalBankAccount.yaml](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/InternalBankAccount.yaml)
 
 Key BIAN operations from the spec:
 
