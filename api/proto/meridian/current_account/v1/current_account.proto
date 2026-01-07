@@ -719,6 +719,67 @@ message RetrieveLienResponse {
   Lien lien = 1 [(buf.validate.field).required = true];
 }
 
+// AmountBlockType defines the type of fund reservation
+// Used by Position Keeping to understand the nature of the block
+enum AmountBlockType {
+  // AMOUNT_BLOCK_TYPE_UNSPECIFIED is the default value and should not be used
+  AMOUNT_BLOCK_TYPE_UNSPECIFIED = 0;
+  // AMOUNT_BLOCK_TYPE_PENDING indicates a temporary hold pending settlement
+  // Example: Payment Order lien awaiting external payment confirmation
+  AMOUNT_BLOCK_TYPE_PENDING = 1;
+  // AMOUNT_BLOCK_TYPE_FINAL indicates a permanent reservation
+  // Example: Regulatory hold, court order freeze
+  AMOUNT_BLOCK_TYPE_FINAL = 2;
+  // AMOUNT_BLOCK_TYPE_TEMPORARY indicates a short-term hold
+  // Example: Authorization hold for card transactions
+  AMOUNT_BLOCK_TYPE_TEMPORARY = 3;
+}
+
+// AmountBlock represents a fund reservation from the perspective of Position Keeping.
+// This abstraction allows Position Keeping to query blocked amounts without coupling
+// to the specific Current Account lien implementation.
+message AmountBlock {
+  // block_id is the unique identifier for this block (maps to lien_id)
+  string block_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // amount is the reserved amount
+  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+
+  // block_type indicates the nature of the reservation
+  AmountBlockType block_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // purpose describes why the funds are blocked
+  // Example: "Payment Order: PO-12345", "Lien hold for settlement"
+  string purpose = 4 [(buf.validate.field).string = {max_len: 500}];
+
+  // expires_at is when the block expires (optional, null means no expiry)
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+// Request to retrieve active amount blocks for an account
+// Used by Position Keeping to query blocked funds for balance calculations
+message GetActiveAmountBlocksRequest {
+  // account_id is the account to query blocks for
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// Response containing active amount blocks for an account
+message GetActiveAmountBlocksResponse {
+  // blocks is the list of active amount blocks (ACTIVE status liens only)
+  repeated AmountBlock blocks = 1;
+}
+
 // Request to update a current account facility settings
 // BIAN: Update Control Record (UpCR) - Modify account configuration
 message UpdateCurrentAccountRequest {
@@ -925,6 +986,19 @@ service CurrentAccountService {
   rpc RetrieveLien(RetrieveLienRequest) returns (RetrieveLienResponse) {
     option (google.api.http) = {
       get: "/v1/liens/{lien_id}"
+    };
+  }
+
+  // GetActiveAmountBlocks retrieves active fund reservations for Position Keeping.
+  // Returns all ACTIVE (non-expired) liens mapped to AmountBlock representation.
+  // Used by Position Keeping service to query blocked amounts without coupling to lien details.
+  rpc GetActiveAmountBlocks(GetActiveAmountBlocksRequest) returns (GetActiveAmountBlocksResponse) {
+    option (google.api.http) = {
+      get: "/v1/current-accounts/{account_id}/amount-blocks"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get active amount blocks for an account"
+      description: "Retrieves all active fund reservations (liens) for Position Keeping balance calculations"
     };
   }
 

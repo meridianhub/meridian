@@ -965,3 +965,227 @@ func TestInitiateLien_MultipleBuckets_IndependentLiens(t *testing.T) {
 	require.Equal(t, "", resp3.Lien.BucketId)
 	require.Equal(t, int64(100), resp3.AvailableBalance.Amount.Units) // £200 - £100 = £100
 }
+
+// ============================================================================
+// GetActiveAmountBlocks Tests
+// ============================================================================
+
+func TestGetActiveAmountBlocks_ReturnsAllActiveLiens(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-BLOCKS-001", 100000)
+
+	// Create 3 active liens
+	for i := 1; i <= 3; i++ {
+		lienAmount, err := domain.NewMoney("GBP", int64(i*10000)) // £100, £200, £300
+		require.NoError(t, err)
+		lien, err := domain.NewLien(account.ID(), lienAmount, "", fmt.Sprintf("PO-BLOCKS-%d", i), nil)
+		require.NoError(t, err)
+		require.NoError(t, lienRepo.Create(ctx, lien))
+	}
+
+	// Query active amount blocks
+	req := &pb.GetActiveAmountBlocksRequest{
+		AccountId: "ACC-BLOCKS-001",
+	}
+
+	resp, err := svc.GetActiveAmountBlocks(ctx, req)
+	require.NoError(t, err)
+	require.Len(t, resp.Blocks, 3)
+
+	// Verify all blocks have correct type and purpose
+	for _, block := range resp.Blocks {
+		require.NotEmpty(t, block.BlockId)
+		require.Equal(t, pb.AmountBlockType_AMOUNT_BLOCK_TYPE_PENDING, block.BlockType)
+		require.Contains(t, block.Purpose, "Payment Order:")
+	}
+}
+
+func TestGetActiveAmountBlocks_FiltersOutExecutedLiens(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-BLOCKS-002", 100000)
+
+	// Create 3 liens
+	var lienIDs []uuid.UUID
+	for i := 1; i <= 3; i++ {
+		lienAmount, err := domain.NewMoney("GBP", int64(i*10000))
+		require.NoError(t, err)
+		lien, err := domain.NewLien(account.ID(), lienAmount, "", fmt.Sprintf("PO-BLOCKS-EXEC-%d", i), nil)
+		require.NoError(t, err)
+		require.NoError(t, lienRepo.Create(ctx, lien))
+		lienIDs = append(lienIDs, lien.ID)
+	}
+
+	// Execute one of the liens
+	executeReq := &pb.ExecuteLienRequest{LienId: lienIDs[0].String()}
+	_, err := svc.ExecuteLien(ctx, executeReq)
+	require.NoError(t, err)
+
+	// Query active amount blocks - should only return 2
+	req := &pb.GetActiveAmountBlocksRequest{
+		AccountId: "ACC-BLOCKS-002",
+	}
+
+	resp, err := svc.GetActiveAmountBlocks(ctx, req)
+	require.NoError(t, err)
+	require.Len(t, resp.Blocks, 2, "should only return active (non-executed) liens")
+
+	// Verify the executed lien is not in the response
+	executedLienID := lienIDs[0].String()
+	for _, block := range resp.Blocks {
+		require.NotEqual(t, executedLienID, block.BlockId, "executed lien should not be returned")
+	}
+}
+
+func TestGetActiveAmountBlocks_FiltersOutTerminatedLiens(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	// Create account with £1000 balance
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-BLOCKS-003", 100000)
+
+	// Create 3 liens
+	var lienIDs []uuid.UUID
+	for i := 1; i <= 3; i++ {
+		lienAmount, err := domain.NewMoney("GBP", int64(i*10000))
+		require.NoError(t, err)
+		lien, err := domain.NewLien(account.ID(), lienAmount, "", fmt.Sprintf("PO-BLOCKS-TERM-%d", i), nil)
+		require.NoError(t, err)
+		require.NoError(t, lienRepo.Create(ctx, lien))
+		lienIDs = append(lienIDs, lien.ID)
+	}
+
+	// Terminate one of the liens
+	terminateReq := &pb.TerminateLienRequest{LienId: lienIDs[1].String(), Reason: "Test cancellation"}
+	_, err := svc.TerminateLien(ctx, terminateReq)
+	require.NoError(t, err)
+
+	// Query active amount blocks - should only return 2
+	req := &pb.GetActiveAmountBlocksRequest{
+		AccountId: "ACC-BLOCKS-003",
+	}
+
+	resp, err := svc.GetActiveAmountBlocks(ctx, req)
+	require.NoError(t, err)
+	require.Len(t, resp.Blocks, 2, "should only return active (non-terminated) liens")
+
+	// Verify the terminated lien is not in the response
+	terminatedLienID := lienIDs[1].String()
+	for _, block := range resp.Blocks {
+		require.NotEqual(t, terminatedLienID, block.BlockId, "terminated lien should not be returned")
+	}
+}
+
+func TestGetActiveAmountBlocks_ReturnsEmptyForAccountWithNoLiens(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	// Create account with no liens
+	createTestAccountWithBalance(t, ctx, repo, "ACC-BLOCKS-EMPTY", 100000)
+
+	// Query active amount blocks
+	req := &pb.GetActiveAmountBlocksRequest{
+		AccountId: "ACC-BLOCKS-EMPTY",
+	}
+
+	resp, err := svc.GetActiveAmountBlocks(ctx, req)
+	require.NoError(t, err)
+	require.Empty(t, resp.Blocks)
+}
+
+func TestGetActiveAmountBlocks_AccountNotFound(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	req := &pb.GetActiveAmountBlocksRequest{
+		AccountId: "NON-EXISTENT-ACCOUNT",
+	}
+
+	_, err := svc.GetActiveAmountBlocks(ctx, req)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestGetActiveAmountBlocks_LienRepoNotConfigured(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil) // No lien repo
+
+	// Create account first
+	createTestAccountWithBalance(t, ctx, repo, "ACC-BLOCKS-NO-REPO", 100000)
+
+	req := &pb.GetActiveAmountBlocksRequest{
+		AccountId: "ACC-BLOCKS-NO-REPO",
+	}
+
+	_, err := svc.GetActiveAmountBlocks(ctx, req)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+	require.Contains(t, st.Message(), "lien operations not configured")
+}
+
+func TestGetActiveAmountBlocks_MapsAmountCorrectly(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	lienRepo := persistence.NewLienRepository(db)
+	svc := mustNewService(t, repo, lienRepo)
+
+	// Create account
+	account := createTestAccountWithBalance(t, ctx, repo, "ACC-BLOCKS-AMOUNT", 100000)
+
+	// Create lien for £123.45 (12345 cents)
+	lienAmount, err := domain.NewMoney("GBP", 12345)
+	require.NoError(t, err)
+	lien, err := domain.NewLien(account.ID(), lienAmount, "", "PO-AMOUNT-TEST", nil)
+	require.NoError(t, err)
+	require.NoError(t, lienRepo.Create(ctx, lien))
+
+	// Query active amount blocks
+	req := &pb.GetActiveAmountBlocksRequest{
+		AccountId: "ACC-BLOCKS-AMOUNT",
+	}
+
+	resp, err := svc.GetActiveAmountBlocks(ctx, req)
+	require.NoError(t, err)
+	require.Len(t, resp.Blocks, 1)
+
+	block := resp.Blocks[0]
+	require.Equal(t, lien.ID.String(), block.BlockId)
+	require.Equal(t, "GBP", block.Amount.Amount.CurrencyCode)
+	require.Equal(t, int64(123), block.Amount.Amount.Units, "should map to £123")
+	require.Equal(t, int32(450000000), block.Amount.Amount.Nanos, "should map to .45")
+	require.Equal(t, "Payment Order: PO-AMOUNT-TEST", block.Purpose)
+}
