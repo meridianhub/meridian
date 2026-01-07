@@ -21,9 +21,6 @@ var (
 
 	// ErrNilCurrentAccountClient is returned when the current account client is nil.
 	ErrNilCurrentAccountClient = errors.New("current account client cannot be nil")
-
-	// ErrNoOpeningBalance is returned when opening balance is required but not available.
-	ErrNoOpeningBalance = errors.New("opening balance is required for balance computation")
 )
 
 // BalanceComputer computes different balance types from transaction log entries.
