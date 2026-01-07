@@ -781,3 +781,74 @@ func (s *Service) calculateAvailableBalance(ctx context.Context, accountID uuid.
 	}
 	return availableMoney
 }
+
+// GetActiveAmountBlocks retrieves active fund reservations for Position Keeping.
+// Returns all ACTIVE (non-expired) liens mapped to AmountBlock representation.
+// Used by Position Keeping service to query blocked amounts without coupling to lien details.
+func (s *Service) GetActiveAmountBlocks(ctx context.Context, req *pb.GetActiveAmountBlocksRequest) (*pb.GetActiveAmountBlocksResponse, error) {
+	start := time.Now()
+	operationStatus := operationStatusSuccess
+	defer func() {
+		caobservability.RecordOperationDuration("get_active_amount_blocks", operationStatus, time.Since(start))
+	}()
+
+	// Validate lien repository is configured
+	if s.lienRepo == nil {
+		operationStatus = opStatusLienRepoNil
+		return nil, status.Error(codes.FailedPrecondition, "lien operations not configured")
+	}
+
+	// Retrieve account to validate it exists and get the internal UUID
+	account, err := s.repo.FindByID(ctx, req.AccountId)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+		}
+		operationStatus = opStatusRetrieveFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	// Retrieve active liens for the account
+	liens, err := s.lienRepo.FindActiveByAccountID(ctx, account.ID())
+	if err != nil {
+		operationStatus = opStatusRetrieveFailed
+		s.logger.Error("failed to retrieve active liens",
+			"account_id", req.AccountId,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve active liens: %v", err)
+	}
+
+	// Convert liens to AmountBlock representation
+	blocks := make([]*pb.AmountBlock, 0, len(liens))
+	for _, lien := range liens {
+		block := toAmountBlockProto(lien)
+		blocks = append(blocks, block)
+	}
+
+	s.logger.Debug("retrieved active amount blocks",
+		"account_id", req.AccountId,
+		"block_count", len(blocks))
+
+	return &pb.GetActiveAmountBlocksResponse{
+		Blocks: blocks,
+	}, nil
+}
+
+// toAmountBlockProto converts a domain Lien to proto AmountBlock.
+// Liens are mapped to PENDING block type since they represent holds awaiting settlement.
+func toAmountBlockProto(lien *domain.Lien) *pb.AmountBlock {
+	block := &pb.AmountBlock{
+		BlockId:   lien.ID.String(),
+		Amount:    toMoneyAmount(lien.Amount),
+		BlockType: pb.AmountBlockType_AMOUNT_BLOCK_TYPE_PENDING, // All liens are pending holds
+		Purpose:   fmt.Sprintf("Payment Order: %s", lien.PaymentOrderReference),
+	}
+
+	// Only set expires_at if the lien has an expiry time
+	if lien.ExpiresAt != nil {
+		block.ExpiresAt = timestamppb.New(*lien.ExpiresAt)
+	}
+
+	return block
+}
