@@ -17,12 +17,14 @@ PRDs define the requirements, design, and implementation approach for significan
 | PRD | Title | Status | Task Master Tag |
 |-----|-------|--------|-----------------|
 | [Universal Asset System](universal-asset-system.md) | Multi-asset ledger support | Draft | `universal-asset-system` |
+| [Internal Bank Account](internal-bank-account.md) | Non-customer-facing account management | Draft | `internal-bank-account` |
 
 ## Categories
 
 ### Core Platform
 
 - [Universal Asset System](universal-asset-system.md) - Multi-asset support with dimensional safety
+- [Internal Bank Account](internal-bank-account.md) - BIAN service for clearing, nostro/vostro accounts
 
 ## How PRD Skills Work
 
