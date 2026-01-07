@@ -378,6 +378,31 @@ func (c *Client) RetrieveLien(ctx context.Context, req *currentaccountv1.Retriev
 	return resp, nil
 }
 
+// GetActiveAmountBlocks retrieves active fund reservations for balance calculations.
+// Used by Position Keeping to query blocked amounts without coupling to lien details.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) GetActiveAmountBlocks(ctx context.Context, req *currentaccountv1.GetActiveAmountBlocksRequest) (*currentaccountv1.GetActiveAmountBlocksResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "GetActiveAmountBlocks", func() (*currentaccountv1.GetActiveAmountBlocksResponse, error) {
+			return c.currentAccount.GetActiveAmountBlocks(ctx, req)
+		})
+	}
+
+	resp, err := c.currentAccount.GetActiveAmountBlocks(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active amount blocks: %w", err)
+	}
+
+	return resp, nil
+}
+
 // Close terminates the gRPC connection gracefully.
 func (c *Client) Close() error {
 	if c.conn != nil {
