@@ -522,13 +522,13 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 			"account_id", account.AccountID(),
 			"transaction_id", transactionID,
 			"error", err)
-		// Transaction succeeded but balance fetch failed - return response with stale balance
-		// The deposit was recorded in Position Keeping, client can retry balance query
+		// Transaction succeeded but balance fetch failed - leave balance fields nil
+		// Client should call RetrieveCurrentAccount to get accurate balance
+	} else {
+		// Update response with balance from Position Keeping
+		resp.NewBalance = toMoneyAmount(account.Balance())
+		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
 	}
-
-	// Update response with balance from Position Keeping
-	resp.NewBalance = toMoneyAmount(account.Balance())
-	resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
 
 	// Record business metrics on success
 	caobservability.RecordDeposit(string(account.Balance().Currency()))
@@ -864,13 +864,13 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 			"account_id", account.AccountID(),
 			"transaction_id", transactionID,
 			"error", err)
-		// Transaction succeeded but balance fetch failed - return response with stale balance
-		// The withdrawal was recorded in Position Keeping, client can retry balance query
+		// Transaction succeeded but balance fetch failed - leave balance fields nil
+		// Client should call RetrieveCurrentAccount to get accurate balance
+	} else {
+		// Update response with balance from Position Keeping
+		resp.NewBalance = toMoneyAmount(account.Balance())
+		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
 	}
-
-	// Update response with balance from Position Keeping
-	resp.NewBalance = toMoneyAmount(account.Balance())
-	resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
 
 	// Record business metrics on success
 	caobservability.RecordWithdrawal(string(account.Balance().Currency()))
