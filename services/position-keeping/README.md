@@ -1,6 +1,6 @@
 ---
 name: position-keeping-service
-description: BIAN transaction log for immutable financial transaction history and position tracking
+description: BIAN transaction log for immutable financial transaction history, position tracking, and balance computation
 triggers:
   - Designing transaction capture and position keeping systems
   - Implementing financial audit trails and reconciliation workflows
@@ -8,14 +8,24 @@ triggers:
   - Building event-driven transaction systems
   - Understanding capacity limits and state machines for financial data
   - Handling optimistic concurrency control in transactional systems
+  - Querying account balances (7 BIAN balance types)
+  - Understanding balance computation responsibility
 instructions: |
-  PositionKeeping maintains immutable transaction history with comprehensive audit trails.
+  PositionKeeping maintains immutable transaction history with comprehensive audit trails
+  and serves as the authoritative source for balance computation.
 
   Key concepts:
   - FinancialPositionLog: Aggregate root with 10,000 entry limit
   - Transaction state machine: PENDING → RECONCILED → POSTED → REVERSED
   - Parent-child lineage for reversals and amendments
   - Kafka event publishing (fire-and-forget) for downstream consumers
+  - Balance ownership: Computes all 7 BIAN balance types (see Balance Calculation section)
+
+  Balance Query APIs:
+  - GetAccountBalance: Query single balance type
+  - GetAccountBalances: Query all 7 balance types for an account
+
+  Balance Types: OPENING, CLOSING, CURRENT, AVAILABLE, LEDGER, RESERVE, FREE
 
   Capacity limits:
   - MaxTransactionEntries: 10,000 per log
@@ -42,6 +52,8 @@ BIAN-compliant position keeping service for immutable financial transaction hist
 
 ## gRPC Methods
 
+### Position Log Operations
+
 | Method | HTTP | Purpose |
 |--------|------|---------|
 | `InitiateFinancialPositionLog` | `POST /v1/position-logs` | Create log with initial transaction |
@@ -49,6 +61,13 @@ BIAN-compliant position keeping service for immutable financial transaction hist
 | `ListFinancialPositionLogs` | `GET /v1/position-logs` | List with filters |
 | `UpdateFinancialPositionLog` | `PATCH /v1/position-logs/{id}` | State transitions |
 | `BulkImportTransactions` | `POST /v1/position-logs/bulk` | Batch import |
+
+### Balance Query Operations
+
+| Method | HTTP | Purpose |
+|--------|------|---------|
+| `GetAccountBalance` | `GET /v1/accounts/{account_id}/balance/{balance_type}` | Query single balance type |
+| `GetAccountBalances` | `GET /v1/accounts/{account_id}/balances` | Query all balance types |
 
 ## Domain Model
 
@@ -298,8 +317,127 @@ Version field required for all updates. Returns conflict error on mismatch.
 
 POSTED logs cannot be modified. Returns `ErrAlreadyPosted`.
 
+## Balance Calculation Responsibility
+
+Position Keeping is the authoritative source for account balance computation. This design
+follows BIAN service domain principles where Position Keeping owns the transaction log and
+therefore has the data required to compute accurate balances.
+
+### Balance Types (BIAN-Compliant)
+
+Position Keeping computes 7 balance types per account:
+
+| Balance Type | Proto Enum | Computation |
+|--------------|------------|-------------|
+| **Opening** | `BALANCE_TYPE_OPENING` | Balance at start of accounting period |
+| **Closing** | `BALANCE_TYPE_CLOSING` | Balance at end of accounting period |
+| **Current** | `BALANCE_TYPE_CURRENT` | Sum of all POSTED transactions (real-time) |
+| **Available** | `BALANCE_TYPE_AVAILABLE` | Current minus holds, liens, and reserves |
+| **Ledger** | `BALANCE_TYPE_LEDGER` | Book balance (may differ from current due to holds) |
+| **Reserve** | `BALANCE_TYPE_RESERVE` | Amount held in reserve (not available for use) |
+| **Free** | `BALANCE_TYPE_FREE` | Unencumbered balance (current minus all encumbrances) |
+
+### Balance Calculation Formulas
+
+```text
+CURRENT   = Σ(POSTED transactions: credits - debits)
+AVAILABLE = CURRENT - RESERVE - ACTIVE_LIENS
+LEDGER    = CURRENT (excluding pending transactions)
+FREE      = CURRENT - RESERVE - HOLDS
+```
+
+### Balance Query APIs
+
+**GetAccountBalance** - Query a single balance type:
+
+```go
+// Request
+req := &pk.GetAccountBalanceRequest{
+    AccountId:   "ACC-12345678",
+    BalanceType: pk.BALANCE_TYPE_AVAILABLE,
+    Currency:    "GBP",  // Optional: filter by currency
+}
+
+// Response
+resp := &pk.GetAccountBalanceResponse{
+    AccountId:   "ACC-12345678",
+    BalanceType: pk.BALANCE_TYPE_AVAILABLE,
+    Amount:      &common.MoneyAmount{Units: 1500, Nanos: 0, CurrencyCode: "GBP"},
+    AsOf:        timestamppb.Now(),
+}
+```
+
+**GetAccountBalances** - Query all balance types:
+
+```go
+// Request
+req := &pk.GetAccountBalancesRequest{
+    AccountId: "ACC-12345678",
+    Currency:  "GBP",  // Optional
+}
+
+// Response contains all 7 balance types
+resp := &pk.GetAccountBalancesResponse{
+    AccountId: "ACC-12345678",
+    Balances: []*pk.BalanceEntry{
+        {BalanceType: pk.BALANCE_TYPE_OPENING, Amount: ...},
+        {BalanceType: pk.BALANCE_TYPE_CLOSING, Amount: ...},
+        {BalanceType: pk.BALANCE_TYPE_CURRENT, Amount: ...},
+        {BalanceType: pk.BALANCE_TYPE_AVAILABLE, Amount: ...},
+        {BalanceType: pk.BALANCE_TYPE_LEDGER, Amount: ...},
+        {BalanceType: pk.BALANCE_TYPE_RESERVE, Amount: ...},
+        {BalanceType: pk.BALANCE_TYPE_FREE, Amount: ...},
+    },
+    AsOf: timestamppb.Now(),
+}
+```
+
+### Balance Query Sequence
+
+```mermaid
+sequenceDiagram
+    participant CA as CurrentAccount
+    participant PK as PositionKeeping
+    participant DB as PositionKeeping DB
+
+    CA->>PK: GetAccountBalances(accountID)
+    PK->>DB: Query POSTED transactions
+    DB-->>PK: Transaction entries
+    PK->>PK: Compute balance types
+    PK-->>CA: BalanceEntry[] (7 types)
+```
+
+### Performance Characteristics
+
+| Operation | Complexity | Notes |
+|-----------|------------|-------|
+| `GetAccountBalance` | O(n) | Aggregates over POSTED transactions |
+| `GetAccountBalances` | O(n) | Single pass computes all types |
+
+**Optimization:** Balance snapshots may be cached or materialized for high-traffic accounts.
+
+### Opening Balance Support
+
+For account migration scenarios, Position Keeping supports initializing accounts with an
+opening balance:
+
+```go
+// InitiateWithOpeningBalance creates a position log with a synthetic
+// opening balance transaction for migration purposes
+req := &pk.InitiateFinancialPositionLogRequest{
+    AccountId: "ACC-12345678",
+    OpeningBalance: &common.MoneyAmount{
+        Units:        10000,
+        CurrencyCode: "GBP",
+    },
+}
+```
+
+This creates an initial transaction entry that establishes the account's starting position.
+
 ## References
 
 - [BIAN Position Keeping Specification](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PositionKeeping.yaml)
 - [Service Architecture](../README.md)
 - [Proto Definitions](../../api/proto/meridian/position_keeping/v1/)
+- [ADR-0023: Balance Delegation to Position Keeping](../../docs/adr/0023-balance-delegation-to-position-keeping.md)

@@ -1,7 +1,7 @@
 # CurrentAccount Service Behavioral API Contract
 
-**Document Version:** 1.0
-**Last Updated:** 2025-11-19
+**Document Version:** 1.1
+**Last Updated:** 2026-01-08
 **Status:** Active
 **BIAN Domain:** Current Account (Service Domain)
 **Proto Definition:** `api/proto/meridian/current_account/v1/current_account.proto`
@@ -9,6 +9,7 @@
 
 - [BIAN Service Boundaries](../bian-service-boundaries.md)
 - [Service Coupling Analysis](../service-coupling-analysis.md)
+- [ADR-0023: Balance Delegation to Position Keeping](../adr/0023-balance-delegation-to-position-keeping.md)
 
 ## Overview
 
@@ -24,9 +25,13 @@ The CurrentAccount service implements the BIAN Current Account service domain, m
 
 **Architectural Pattern:** Orchestration Layer (Instability I=1.00)
 
-- Depends on: PositionKeeping (balance queries), FinancialAccounting (ledger postings)
+- Depends on: PositionKeeping (balance queries via `GetAccountBalances`), FinancialAccounting (ledger postings)
 - No dependents: Client-facing service with no upstream consumers
 - High instability is expected and appropriate for this orchestration role
+
+**Balance Delegation (ADR-0023):** Balance is NOT stored in Current Account. All balance queries
+delegate to Position Keeping service which computes 7 BIAN balance types (OPENING, CLOSING,
+CURRENT, AVAILABLE, LEDGER, RESERVE, FREE) from the transaction log.
 
 ## State Machine
 
@@ -634,9 +639,12 @@ These invariants MUST hold at all times across all operations:
 
 ### Balance Invariants
 
+> **Note:** Balance is computed by Position Keeping service (ADR-0023). Current Account does NOT
+> store balance locally. These invariants are enforced by Position Keeping's balance computation.
+
 1. **Balance Constraint**: `current_balance >= -overdraft_limit` (if overdraft enabled) OR `current_balance >= 0` (if overdraft disabled)
-2. **Available Balance**: `available_balance = current_balance + (overdraft_enabled ? overdraft_limit : 0)`
-3. **Balance Consistency**: current_balance equals sum of all POSTED transactions from PositionKeeping
+2. **Available Balance**: `available_balance = current_balance + (overdraft_enabled ? overdraft_limit : 0) - active_liens`
+3. **Balance Source**: Balance is queried from PositionKeeping via `GetAccountBalances` RPC (7 BIAN types)
 4. **Zero Balance Closure**: Account can only transition to CLOSED if `current_balance == 0`
 
 ### Transaction Invariants
@@ -781,6 +789,65 @@ Compensation operations are idempotent:
    - Payment status tracking
    - Payment cancellation support
 
+## Balance Query Delegation
+
+Per ADR-0023, Current Account delegates all balance queries to Position Keeping service.
+
+### Balance Query Pattern
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CA as CurrentAccount
+    participant PK as PositionKeeping
+
+    Client->>CA: RetrieveCurrentAccount(accountID)
+    CA->>PK: GetAccountBalances(accountID)
+    PK->>PK: Compute from transaction log
+    PK-->>CA: BalanceEntry[] (7 types)
+    CA-->>Client: CurrentAccountFacility with balances
+```
+
+### BIAN Balance Types
+
+Position Keeping computes 7 BIAN-compliant balance types:
+
+| Balance Type | Description | Use Case |
+|--------------|-------------|----------|
+| `OPENING` | Balance at period start | Reconciliation, statements |
+| `CLOSING` | Balance at period end | Reconciliation, statements |
+| `CURRENT` | Real-time posted balance | Account display |
+| `AVAILABLE` | Available for withdrawal | Transaction validation |
+| `LEDGER` | Book balance | Accounting |
+| `RESERVE` | Held in reserve | Regulatory holds |
+| `FREE` | Unencumbered balance | Withdrawal limit |
+
+### Balance Query Implementation
+
+Current Account queries Position Keeping on every `RetrieveCurrentAccount` call:
+
+```go
+// Inside RetrieveCurrentAccount handler
+balances, err := s.positionKeepingClient.GetAccountBalances(ctx, &pk.GetAccountBalancesRequest{
+    AccountId: req.AccountId,
+})
+if err != nil {
+    // Circuit breaker handles transient failures
+    return nil, status.Error(codes.Unavailable, "Position Keeping unavailable")
+}
+
+// Map balances to response
+facility.CurrentBalance = mapBalancesToResponse(balances)
+```
+
+### Error Handling for Balance Queries
+
+| Error | Handling | Client Behavior |
+|-------|----------|-----------------|
+| Position Keeping unavailable | Circuit breaker, return UNAVAILABLE | Retry with backoff |
+| Timeout | Return DEADLINE_EXCEEDED | Retry with longer timeout |
+| Account not found in PK | Return balance as zero | Normal (new account) |
+
 ## Related Documentation
 
 - **Proto Schema**: `api/proto/meridian/current_account/v1/current_account.proto`
@@ -790,4 +857,5 @@ Compensation operations are idempotent:
 - **Financial Accounting Contract**: `docs/architecture/api-contracts/financial-accounting-contract.md`
 - **ADR-0002**: Microservices Per BIAN Domain
 - **ADR-0005**: Adapter Pattern Layer Translation
+- **ADR-0023**: Balance Delegation to Position Keeping
 - **BIAN Reference**: Current Account Service Domain (Release 13.0)
