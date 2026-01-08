@@ -60,6 +60,18 @@ type PositionKeepingClient interface {
 	// Supports pagination for efficient retrieval of large result sets.
 	ListFinancialPositionLogs(ctx context.Context, req *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error)
 
+	// GetAccountBalance retrieves a specific balance type for an account
+	//
+	// Used to query the current, available, ledger, or other balance types.
+	// Returns the balance amount with currency and timestamp.
+	GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error)
+
+	// GetAccountBalances retrieves all balance types for an account
+	//
+	// Returns all balance types (opening, closing, current, available, ledger, reserve, free)
+	// in a single call, useful for comprehensive account status display.
+	GetAccountBalances(ctx context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error)
+
 	// Close terminates the client connection gracefully
 	Close() error
 }
