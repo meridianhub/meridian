@@ -79,10 +79,13 @@ func TestExecuteWithdrawal_Success(t *testing.T) {
 	// Create account with $1000 balance (100000 cents)
 	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-WTH-001", 100000)
 
-	// Create mock clients with balance configured for Position Keeping
+	// Create mock clients with balance configured for Position Keeping.
+	// The mock returns the POST-withdrawal balance since Position Keeping is the source of truth
+	// and would have already recorded the DEBIT by the time we query the balance.
+	// Pre-withdrawal: $1000.00, Withdrawal: $100.50, Post-withdrawal: $899.50 (89950 cents)
 	mockPosKeeping := &mockPositionKeepingClient{
 		accountBalances: map[string]int64{
-			"ACC-WTH-001": 100000, // $1000
+			"ACC-WTH-001": 89950, // $899.50 post-withdrawal
 		},
 	}
 	mockFinAcct := &mockFinancialAccountingClient{}

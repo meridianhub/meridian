@@ -115,6 +115,138 @@ func TestDepositWhenClosed(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAccountClosed)
 }
 
+func TestPrepareForCredit(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+
+	// PrepareForCredit should succeed for active account
+	prepared, err := account.PrepareForCredit()
+	require.NoError(t, err)
+
+	// Balance should NOT change (Position Keeping is source of truth)
+	assert.Equal(t, account.Balance().AmountCents(), prepared.Balance().AmountCents())
+
+	// Version should be incremented for optimistic locking
+	assert.Equal(t, account.Version()+1, prepared.Version())
+
+	// UpdatedAt should be set
+	assert.True(t, prepared.UpdatedAt().After(account.UpdatedAt()) || prepared.UpdatedAt().Equal(account.UpdatedAt()))
+}
+
+func TestPrepareForCreditWhenFrozen(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "GB82WEST12345698765432", "PARTY-001", "GBP")
+	require.NoError(t, err)
+	account, _ = account.Freeze("Suspicious activity detected on account")
+
+	_, err = account.PrepareForCredit()
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountFrozen)
+}
+
+func TestPrepareForCreditWhenClosed(t *testing.T) {
+	// Build a closed account using builder (simulating a reconstructed account)
+	zeroMoney, _ := NewMoney("GBP", 0)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(zeroMoney).
+		WithAvailableBalance(zeroMoney).
+		WithStatus(AccountStatusClosed).
+		WithVersion(1).
+		Build()
+
+	_, err := account.PrepareForCredit()
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountClosed)
+}
+
+func TestPrepareForDebit(t *testing.T) {
+	balance, _ := NewMoney("GBP", 10000) // £100.00
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	withdrawAmount, _ := NewMoney("GBP", 5000) // £50.00
+
+	// PrepareForDebit should succeed for active account with sufficient funds
+	prepared, err := account.PrepareForDebit(withdrawAmount)
+	require.NoError(t, err)
+
+	// Balance should NOT change (Position Keeping is source of truth)
+	assert.Equal(t, account.Balance().AmountCents(), prepared.Balance().AmountCents())
+
+	// Version should be incremented for optimistic locking
+	assert.Equal(t, account.Version()+1, prepared.Version())
+}
+
+func TestPrepareForDebitInsufficientFunds(t *testing.T) {
+	balance, _ := NewMoney("GBP", 5000) // £50.00
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	withdrawAmount, _ := NewMoney("GBP", 10000) // £100.00 - more than available
+
+	_, err := account.PrepareForDebit(withdrawAmount)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInsufficientFunds)
+}
+
+func TestPrepareForDebitWhenFrozen(t *testing.T) {
+	balance, _ := NewMoney("GBP", 10000)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusFrozen).
+		WithFreezeReason("Suspicious activity").
+		WithVersion(1).
+		Build()
+
+	withdrawAmount, _ := NewMoney("GBP", 5000)
+	_, err := account.PrepareForDebit(withdrawAmount)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountFrozen)
+}
+
+func TestPrepareForDebitWhenClosed(t *testing.T) {
+	zeroMoney, _ := NewMoney("GBP", 0)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithAccountIdentification("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(zeroMoney).
+		WithAvailableBalance(zeroMoney).
+		WithStatus(AccountStatusClosed).
+		WithVersion(1).
+		Build()
+
+	withdrawAmount, _ := NewMoney("GBP", 5000)
+	_, err := account.PrepareForDebit(withdrawAmount)
+
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountClosed)
+}
+
 func TestWithdraw(t *testing.T) {
 	tests := []struct {
 		name          string

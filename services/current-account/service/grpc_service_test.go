@@ -411,7 +411,10 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	svc := mustNewService(t, repo, nil)
+	// Configure Position Keeping mock to return balance for ACC-001
+	svc := mustNewServiceWithPositionKeeping(t, repo, nil, map[string]int64{
+		"ACC-001": 150000, // 1500.00 GBP
+	})
 
 	// Create account first
 	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
@@ -440,6 +443,16 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 
 	if resp.Facility.AccountStatus != pb.AccountStatus_ACCOUNT_STATUS_ACTIVE {
 		t.Errorf("Expected ACTIVE status, got %v", resp.Facility.AccountStatus)
+	}
+
+	// Verify balance comes from Position Keeping (1500.00 GBP = 15.00 units)
+	if resp.Facility.CurrentBalance == nil {
+		t.Fatal("Expected current balance in response")
+	}
+	expectedUnits := int64(1500) // 150000 cents = 1500.00 GBP
+	if resp.Facility.CurrentBalance.CurrentBalance.Amount.Units != expectedUnits {
+		t.Errorf("Expected balance units %d, got %d",
+			expectedUnits, resp.Facility.CurrentBalance.CurrentBalance.Amount.Units)
 	}
 }
 
