@@ -482,8 +482,9 @@ func TestAuditConsumer_Start(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		// Expected case - Start is blocking, which is correct behavior
-		// Close will trigger shutdown via deferred Close() above
-		t.Log("Start is blocking as expected, test complete (defer will close consumer)")
+		// Explicitly close to trigger shutdown (defer also closes, but be explicit)
+		t.Log("Start is blocking as expected, closing consumer")
+		_ = consumer.Close()
 	}
 }
 
