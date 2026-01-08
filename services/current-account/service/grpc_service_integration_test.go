@@ -58,6 +58,8 @@ type mockPositionKeepingClient struct {
 	retrieveCalls   int
 	bulkImportCalls int
 	listCalls       int
+	// Balance configuration for GetAccountBalance
+	accountBalances map[string]int64 // accountID -> balance in cents
 }
 
 func (m *mockPositionKeepingClient) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
@@ -145,6 +147,36 @@ func (m *mockPositionKeepingClient) BulkImportTransactions(_ context.Context, _ 
 func (m *mockPositionKeepingClient) ListFinancialPositionLogs(_ context.Context, _ *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
 	m.listCalls++
 	return &positionkeepingv1.ListFinancialPositionLogsResponse{}, nil
+}
+
+func (m *mockPositionKeepingClient) GetAccountBalance(_ context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	// Return configured balance if available
+	var balanceCents int64
+	if m.accountBalances != nil {
+		balanceCents = m.accountBalances[req.AccountId]
+	}
+	// Convert cents to units.nanos format (e.g., 10050 cents = 100 units + 500000000 nanos)
+	units := balanceCents / 100
+	nanos := (balanceCents % 100) * 10000000
+	return &positionkeepingv1.GetAccountBalanceResponse{
+		AccountId:   req.AccountId,
+		BalanceType: req.BalanceType,
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        units,
+				Nanos:        int32(nanos),
+			},
+		},
+		AsOf: timestamppb.Now(),
+	}, nil
+}
+
+func (m *mockPositionKeepingClient) GetAccountBalances(_ context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
+	return &positionkeepingv1.GetAccountBalancesResponse{
+		AccountId: req.AccountId,
+		Balances:  []*positionkeepingv1.BalanceEntry{},
+	}, nil
 }
 
 func (m *mockPositionKeepingClient) Close() error {
@@ -434,15 +466,15 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	assert.NotEmpty(t, resp.TransactionId, "Transaction ID should be generated")
 	assert.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
 
-	// Verify balance is updated correctly
+	// Verify balance is updated correctly in response
+	// Note: Balance is now managed by Position Keeping service, not persisted locally
 	assert.NotNil(t, resp.NewBalance)
 	assert.Equal(t, int64(100), resp.NewBalance.Amount.Units)
 	assert.Equal(t, int32(500000000), resp.NewBalance.Amount.Nanos)
 
-	// Verify account persisted correctly
-	updatedAccount, err := repo.FindByID(ctx, "ACC-001")
+	// Verify account exists (balance not checked - Position Keeping is authoritative)
+	_, err = repo.FindByID(ctx, "ACC-001")
 	require.NoError(t, err)
-	assert.Equal(t, int64(10050), balanceCents(updatedAccount.Balance()), "Balance should be £100.50 = 10050 cents")
 
 	// Verify service calls
 	assert.Equal(t, 1, mockPosKeeping.initiateCalls, "PositionKeeping InitiateFinancialPositionLog should be called once")
@@ -709,14 +741,14 @@ func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
 	assert.NotEmpty(t, resp.TransactionId)
 	assert.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
 
-	// Verify balance is updated
+	// Verify balance is updated in response
+	// Note: Balance is now managed by Position Keeping service, not persisted locally
 	assert.NotNil(t, resp.NewBalance)
 	assert.Equal(t, int64(200), resp.NewBalance.Amount.Units)
 
-	// Verify account persisted
-	updatedAccount, err := repo.FindByID(ctx, "ACC-006")
+	// Verify account exists (balance not checked - Position Keeping is authoritative)
+	_, err = repo.FindByID(ctx, "ACC-006")
 	require.NoError(t, err)
-	assert.Equal(t, int64(20000), balanceCents(updatedAccount.Balance()))
 }
 
 // Double-Entry Bookkeeping Tests (with AccountConfig)

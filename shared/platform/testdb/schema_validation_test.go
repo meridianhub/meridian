@@ -208,6 +208,7 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 	accountID := uuid.New()
 	partyID := uuid.New() // References a party in Party Service (no local FK)
 	now := time.Now()
+	// Note: Balance fields removed - balance now computed by Position Keeping service
 	account := &capersistence.CurrentAccountEntity{
 		ID:                    accountID,
 		AccountID:             "ACC-LIEN-001",
@@ -216,10 +217,7 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		Currency:              "GBP",
 		Status:                "active",
 		PartyID:               partyID,
-		Balance:               50000,
-		AvailableBalance:      40000,
 		OverdraftLimit:        5000,
-		BalanceUpdatedAt:      &now, // Required by NOT NULL constraint in migration
 		CreatedAt:             now,
 		UpdatedAt:             now,
 		CreatedBy:             "system",
@@ -353,6 +351,7 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 	partyID := uuid.New() // References a party in Party Service
 
 	// Entity fields must match migration schema columns exactly
+	// Note: Balance fields removed - balance now computed by Position Keeping service
 	now := time.Now()
 	entity := &capersistence.CurrentAccountEntity{
 		ID:                    uuid.New(),
@@ -362,10 +361,7 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 		Currency:              "GBP",
 		Status:                "active",
 		PartyID:               partyID,
-		Balance:               10000,
-		AvailableBalance:      8000,
 		OverdraftLimit:        5000,
-		BalanceUpdatedAt:      &now, // Required by NOT NULL constraint in migration
 		CreatedAt:             now,
 		UpdatedAt:             now,
 		CreatedBy:             "system",
@@ -387,8 +383,8 @@ func testCurrentAccountEntity(t *testing.T, db *gorm.DB) {
 
 	// Verify data integrity
 	assert.Equal(t, entity.AccountIdentification, retrieved.AccountIdentification)
-	assert.Equal(t, entity.Balance, retrieved.Balance)
 	assert.Equal(t, entity.Currency, retrieved.Currency)
+	assert.Equal(t, entity.OverdraftLimit, retrieved.OverdraftLimit)
 }
 
 // testPaymentOrderEntity tests that PaymentOrderEntity works with the migrated schema

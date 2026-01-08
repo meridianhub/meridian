@@ -152,21 +152,19 @@ func (r *Repository) Save(ctx context.Context, account domain.CurrentAccount) er
 
 			// Optimistic locking: domain already incremented version during mutation.
 			// Check against original version (entity.Version - 1), then set to new version.
+			// Note: Balance fields not persisted - balance computation delegated to Position Keeping service.
 			originalVersion := entity.Version - 1
 			updateResult := tx.Model(&CurrentAccountEntity{}).
 				Where("account_identification = ? AND version = ?", entity.AccountIdentification, originalVersion).
 				Updates(map[string]interface{}{
-					"balance":            entity.Balance,
-					"available_balance":  entity.AvailableBalance,
-					"status":             entity.Status,
-					"freeze_reason":      entity.FreezeReason,
-					"status_history":     entity.StatusHistory,
-					"overdraft_limit":    entity.OverdraftLimit,
-					"overdraft_rate":     entity.OverdraftRate,
-					"balance_updated_at": entity.BalanceUpdatedAt,
-					"version":            entity.Version,
-					"updated_at":         entity.UpdatedAt,
-					"updated_by":         entity.UpdatedBy,
+					"status":          entity.Status,
+					"freeze_reason":   entity.FreezeReason,
+					"status_history":  entity.StatusHistory,
+					"overdraft_limit": entity.OverdraftLimit,
+					"overdraft_rate":  entity.OverdraftRate,
+					"version":         entity.Version,
+					"updated_at":      entity.UpdatedAt,
+					"updated_by":      entity.UpdatedBy,
 				})
 
 			if updateResult.Error != nil {
@@ -402,8 +400,6 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 	// Extract audit user from context (falls back to "system" if not available)
 	auditUser := audit.GetUserFromContext(ctx)
 
-	balanceUpdatedAt := account.BalanceUpdatedAt()
-
 	// Convert domain StatusHistory to persistence StatusHistoryJSON
 	domainHistory := account.StatusHistory()
 	statusHistory := make(StatusHistoryJSON, len(domainHistory))
@@ -426,6 +422,8 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 
 	// ToMinorUnitsUnchecked is safe here: domain layer validates amounts before persistence,
 	// so overflow (>92 quadrillion cents) cannot occur for valid accounts
+	// Note: Balance fields are not persisted to DB (gorm:"-") but kept on entity for
+	// in-memory round-trip and backward compatibility during migration to Position Keeping.
 	return &CurrentAccountEntity{
 		ID:                    account.ID(),
 		AccountID:             account.AccountID(),             // Business account identifier
@@ -434,11 +432,10 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 		Currency:              string(account.Balance().Currency()),
 		Status:                string(account.Status()),
 		PartyID:               partyUUID,
-		Balance:               account.Balance().ToMinorUnitsUnchecked(),
-		AvailableBalance:      account.AvailableBalance().ToMinorUnitsUnchecked(),
 		OverdraftLimit:        account.OverdraftLimit().ToMinorUnitsUnchecked(),
 		OverdraftRate:         account.OverdraftRate(),
-		BalanceUpdatedAt:      &balanceUpdatedAt,
+		Balance:               account.Balance().ToMinorUnitsUnchecked(),          // gorm:"-" - not persisted
+		AvailableBalance:      account.AvailableBalance().ToMinorUnitsUnchecked(), // gorm:"-" - not persisted
 		FreezeReason:          freezeReason,
 		StatusHistory:         statusHistory,
 		Version:               account.Version(),
@@ -451,16 +448,20 @@ func toEntity(ctx context.Context, account domain.CurrentAccount) (*CurrentAccou
 
 // toDomain converts database entity to domain model using the builder pattern.
 // Note: OverdraftEnabled is derived from OverdraftLimit > 0
+// Note: Balance fields are not persisted - balance computation delegated to Position Keeping service.
+// The service layer is responsible for populating balance from Position Keeping after retrieval.
 func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
-	// Use NewMoney constructor - errors indicate data corruption
+	// Balance fields are no longer persisted to the database.
+	// Use entity's in-memory balance fields if populated (e.g., from recent save),
+	// otherwise initialize with zero values.
+	// The service layer should populate from Position Keeping for authoritative balance.
 	balance, err := domain.NewMoney(entity.Currency, entity.Balance)
 	if err != nil {
-		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance from database: %w", err)
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
-
 	availableBalance, err := domain.NewMoney(entity.Currency, entity.AvailableBalance)
 	if err != nil {
-		return domain.CurrentAccount{}, fmt.Errorf("failed to create available balance from database: %w", err)
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create available balance: %w", err)
 	}
 
 	overdraftLimit, err := domain.NewMoney(entity.Currency, entity.OverdraftLimit)
@@ -471,11 +472,9 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	// Derive overdraft enabled from limit > 0
 	overdraftEnabled := entity.OverdraftLimit > 0
 
-	// Handle balance_updated_at - fallback to updated_at if null (for legacy rows)
+	// Balance is now computed by Position Keeping service, so use current time as placeholder.
+	// The service layer will update this when fetching balance from Position Keeping.
 	balanceUpdatedAt := entity.UpdatedAt
-	if entity.BalanceUpdatedAt != nil {
-		balanceUpdatedAt = *entity.BalanceUpdatedAt
-	}
 
 	// Convert persistence StatusHistoryJSON to domain StatusHistory
 	var statusHistory []domain.StatusChange
@@ -499,6 +498,8 @@ func toDomain(entity *CurrentAccountEntity) (domain.CurrentAccount, error) {
 	}
 
 	// Use builder pattern to construct immutable domain model
+	// Note: Balance comes from entity's in-memory fields (gorm:"-") if populated,
+	// otherwise zero. Service layer should fetch authoritative balance from Position Keeping.
 	return domain.NewCurrentAccountBuilder().
 		WithID(entity.ID).
 		WithAccountID(entity.AccountID).

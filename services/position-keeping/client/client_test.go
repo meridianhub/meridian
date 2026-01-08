@@ -1,137 +1,366 @@
-package client
+package client_test
 
 import (
+	"context"
+	"errors"
+	"net"
 	"testing"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genproto/googleapis/type/money"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	"github.com/meridianhub/meridian/services/position-keeping/client"
 )
 
-func TestNew_WithTarget(t *testing.T) {
-	client, cleanup, err := New(Config{
-		Target:  "localhost:50053",
-		Timeout: 10 * time.Second,
-	})
+// mockPositionKeepingServer implements the PositionKeepingServiceServer interface for testing.
+type mockPositionKeepingServer struct {
+	positionkeepingv1.UnimplementedPositionKeepingServiceServer
+
+	// GetAccountBalance behavior
+	getAccountBalanceResp *positionkeepingv1.GetAccountBalanceResponse
+	getAccountBalanceErr  error
+
+	// GetAccountBalances behavior
+	getAccountBalancesResp *positionkeepingv1.GetAccountBalancesResponse
+	getAccountBalancesErr  error
+}
+
+func (m *mockPositionKeepingServer) GetAccountBalance(
+	_ context.Context,
+	_ *positionkeepingv1.GetAccountBalanceRequest,
+) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	if m.getAccountBalanceErr != nil {
+		return nil, m.getAccountBalanceErr
+	}
+	return m.getAccountBalanceResp, nil
+}
+
+func (m *mockPositionKeepingServer) GetAccountBalances(
+	_ context.Context,
+	_ *positionkeepingv1.GetAccountBalancesRequest,
+) (*positionkeepingv1.GetAccountBalancesResponse, error) {
+	if m.getAccountBalancesErr != nil {
+		return nil, m.getAccountBalancesErr
+	}
+	return m.getAccountBalancesResp, nil
+}
+
+// setupTestServer creates a gRPC server with the mock service and returns client config.
+func setupTestServer(t *testing.T, mock *mockPositionKeepingServer) (client.Config, func()) {
+	t.Helper()
+
+	// Create a listener on a random port
+	var lc net.ListenConfig
+	lis, err := lc.Listen(context.Background(), "tcp", "localhost:0")
 	require.NoError(t, err)
-	require.NotNil(t, client)
-	require.NotNil(t, cleanup)
 
-	assert.NotNil(t, client.conn)
-	assert.NotNil(t, client.positionKeeping)
-	assert.Equal(t, 10*time.Second, client.timeout)
+	// Create and register the gRPC server
+	grpcServer := grpc.NewServer()
+	positionkeepingv1.RegisterPositionKeepingServiceServer(grpcServer, mock)
 
-	cleanup()
-}
+	// Start serving in a goroutine
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			t.Logf("gRPC server error: %v", err)
+		}
+	}()
 
-func TestNew_WithServiceName(t *testing.T) {
-	client, cleanup, err := New(Config{
-		ServiceName: "position-keeping",
-		Namespace:   "default",
-		Port:        50053,
-	})
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	require.NotNil(t, cleanup)
+	cleanup := func() {
+		grpcServer.GracefulStop()
+	}
 
-	assert.NotNil(t, client.conn)
-	assert.NotNil(t, client.positionKeeping)
-	assert.Equal(t, DefaultTimeout, client.timeout)
-
-	cleanup()
-}
-
-func TestNew_Defaults(t *testing.T) {
-	client, cleanup, err := New(Config{
-		Target: "localhost:50053",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	defer cleanup()
-
-	assert.Equal(t, DefaultTimeout, client.timeout)
-}
-
-func TestNew_RequiresTargetOrServiceName(t *testing.T) {
-	_, _, err := New(Config{})
-	assert.ErrorIs(t, err, ErrTargetRequired)
-}
-
-func TestNew_DefaultsApplied(t *testing.T) {
-	tests := []struct {
-		name     string
-		cfg      Config
-		wantPort int
-	}{
-		{
-			name:     "empty port defaults to 50053",
-			cfg:      Config{ServiceName: "position-keeping"},
-			wantPort: DefaultPort,
+	return client.Config{
+		Target:  lis.Addr().String(),
+		Timeout: 5 * time.Second,
+		DialOptions: []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
-		{
-			name:     "custom port preserved",
-			cfg:      Config{ServiceName: "position-keeping", Port: 9999},
-			wantPort: 9999,
+	}, cleanup
+}
+
+func TestGetAccountBalance_Success(t *testing.T) {
+	// Arrange
+	now := time.Now()
+	mock := &mockPositionKeepingServer{
+		getAccountBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			AccountId:   "acc-123",
+			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+			Amount: &commonv1.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        100,
+					Nanos:        500000000, // 0.50
+				},
+			},
+			AsOf: timestamppb.New(now),
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client, cleanup, err := New(tt.cfg)
-			require.NoError(t, err)
-			defer cleanup()
-			require.NotNil(t, client)
-		})
+	cfg, cleanup := setupTestServer(t, mock)
+	defer cleanup()
+
+	c, clientCleanup, err := client.New(cfg)
+	require.NoError(t, err)
+	defer clientCleanup()
+
+	// Act
+	resp, err := c.GetAccountBalance(context.Background(), &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   "acc-123",
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+	})
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "acc-123", resp.AccountId)
+	assert.Equal(t, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, resp.BalanceType)
+	assert.Equal(t, "GBP", resp.Amount.Amount.CurrencyCode)
+	assert.Equal(t, int64(100), resp.Amount.Amount.Units)
+	assert.Equal(t, int32(500000000), resp.Amount.Amount.Nanos)
+}
+
+func TestGetAccountBalance_NotFound(t *testing.T) {
+	// Arrange
+	mock := &mockPositionKeepingServer{
+		getAccountBalanceErr: status.Error(codes.NotFound, "account not found"),
 	}
-}
 
-func TestClose(t *testing.T) {
-	client, cleanup, err := New(Config{
-		Target: "localhost:50053",
-	})
-	require.NoError(t, err)
+	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	err = client.Close()
-	assert.NoError(t, err)
-}
-
-func TestClose_NilConn(t *testing.T) {
-	client := &Client{}
-	err := client.Close()
-	assert.NoError(t, err)
-}
-
-func TestConstants(t *testing.T) {
-	assert.Equal(t, 50053, DefaultPort)
-	assert.Equal(t, 30*time.Second, DefaultTimeout)
-	assert.Equal(t, "default", DefaultNamespace)
-	assert.Equal(t, "position-keeping", ServiceName)
-}
-
-func TestNew_WithResilience(t *testing.T) {
-	resilienceConfig := clients.DefaultResilientClientConfig("position-keeping-client")
-	client, cleanup, err := New(Config{
-		Target:     "localhost:50053",
-		Resilience: &resilienceConfig,
-	})
+	c, clientCleanup, err := client.New(cfg)
 	require.NoError(t, err)
-	require.NotNil(t, client)
+	defer clientCleanup()
+
+	// Act
+	resp, err := c.GetAccountBalance(context.Background(), &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   "nonexistent",
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+	})
+
+	// Assert
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "failed to get account balance")
+
+	// Verify underlying gRPC status
+	st, ok := status.FromError(errors.Unwrap(err))
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestGetAccountBalance_ServerError(t *testing.T) {
+	// Arrange
+	mock := &mockPositionKeepingServer{
+		getAccountBalanceErr: status.Error(codes.Internal, "database error"),
+	}
+
+	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	// Verify resilient client was created
-	assert.NotNil(t, client.resilient)
+	c, clientCleanup, err := client.New(cfg)
+	require.NoError(t, err)
+	defer clientCleanup()
+
+	// Act
+	resp, err := c.GetAccountBalance(context.Background(), &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   "acc-123",
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+	})
+
+	// Assert
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "failed to get account balance")
 }
 
-func TestNew_WithoutResilience(t *testing.T) {
-	client, cleanup, err := New(Config{
-		Target: "localhost:50053",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, client)
+func TestGetAccountBalances_Success(t *testing.T) {
+	// Arrange
+	now := time.Now()
+	mock := &mockPositionKeepingServer{
+		getAccountBalancesResp: &positionkeepingv1.GetAccountBalancesResponse{
+			AccountId: "acc-123",
+			Balances: []*positionkeepingv1.BalanceEntry{
+				{
+					BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+					Amount: &commonv1.MoneyAmount{
+						Amount: &money.Money{
+							CurrencyCode: "GBP",
+							Units:        1000,
+							Nanos:        0,
+						},
+					},
+				},
+				{
+					BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE,
+					Amount: &commonv1.MoneyAmount{
+						Amount: &money.Money{
+							CurrencyCode: "GBP",
+							Units:        800,
+							Nanos:        0,
+						},
+					},
+				},
+			},
+			AsOf: timestamppb.New(now),
+		},
+	}
+
+	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	// Verify resilient client was not created
-	assert.Nil(t, client.resilient)
+	c, clientCleanup, err := client.New(cfg)
+	require.NoError(t, err)
+	defer clientCleanup()
+
+	// Act
+	resp, err := c.GetAccountBalances(context.Background(), &positionkeepingv1.GetAccountBalancesRequest{
+		AccountId: "acc-123",
+	})
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "acc-123", resp.AccountId)
+	require.Len(t, resp.Balances, 2)
+
+	// Check current balance
+	assert.Equal(t, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, resp.Balances[0].BalanceType)
+	assert.Equal(t, int64(1000), resp.Balances[0].Amount.Amount.Units)
+
+	// Check available balance
+	assert.Equal(t, positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE, resp.Balances[1].BalanceType)
+	assert.Equal(t, int64(800), resp.Balances[1].Amount.Amount.Units)
+}
+
+func TestGetAccountBalances_NotFound(t *testing.T) {
+	// Arrange
+	mock := &mockPositionKeepingServer{
+		getAccountBalancesErr: status.Error(codes.NotFound, "account not found"),
+	}
+
+	cfg, cleanup := setupTestServer(t, mock)
+	defer cleanup()
+
+	c, clientCleanup, err := client.New(cfg)
+	require.NoError(t, err)
+	defer clientCleanup()
+
+	// Act
+	resp, err := c.GetAccountBalances(context.Background(), &positionkeepingv1.GetAccountBalancesRequest{
+		AccountId: "nonexistent",
+	})
+
+	// Assert
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "failed to get account balances")
+}
+
+func TestGetAccountBalances_EmptyResponse(t *testing.T) {
+	// Arrange
+	now := time.Now()
+	mock := &mockPositionKeepingServer{
+		getAccountBalancesResp: &positionkeepingv1.GetAccountBalancesResponse{
+			AccountId: "acc-new",
+			Balances:  []*positionkeepingv1.BalanceEntry{}, // No balances yet
+			AsOf:      timestamppb.New(now),
+		},
+	}
+
+	cfg, cleanup := setupTestServer(t, mock)
+	defer cleanup()
+
+	c, clientCleanup, err := client.New(cfg)
+	require.NoError(t, err)
+	defer clientCleanup()
+
+	// Act
+	resp, err := c.GetAccountBalances(context.Background(), &positionkeepingv1.GetAccountBalancesRequest{
+		AccountId: "acc-new",
+	})
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "acc-new", resp.AccountId)
+	assert.Empty(t, resp.Balances)
+}
+
+func TestGetAccountBalance_ContextCanceled(t *testing.T) {
+	// Arrange
+	mock := &mockPositionKeepingServer{
+		getAccountBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			AccountId: "acc-123",
+		},
+	}
+
+	cfg, cleanup := setupTestServer(t, mock)
+	defer cleanup()
+
+	c, clientCleanup, err := client.New(cfg)
+	require.NoError(t, err)
+	defer clientCleanup()
+
+	// Create an already-canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	resp, err := c.GetAccountBalance(ctx, &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   "acc-123",
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+	})
+
+	// Assert
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestGetAccountBalances_WithCurrencyFilter(t *testing.T) {
+	// Arrange
+	now := time.Now()
+	mock := &mockPositionKeepingServer{
+		getAccountBalancesResp: &positionkeepingv1.GetAccountBalancesResponse{
+			AccountId: "acc-123",
+			Balances: []*positionkeepingv1.BalanceEntry{
+				{
+					BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+					Amount: &commonv1.MoneyAmount{
+						Amount: &money.Money{
+							CurrencyCode: "USD",
+							Units:        500,
+							Nanos:        0,
+						},
+					},
+				},
+			},
+			AsOf: timestamppb.New(now),
+		},
+	}
+
+	cfg, cleanup := setupTestServer(t, mock)
+	defer cleanup()
+
+	c, clientCleanup, err := client.New(cfg)
+	require.NoError(t, err)
+	defer clientCleanup()
+
+	// Act - request with currency filter
+	resp, err := c.GetAccountBalances(context.Background(), &positionkeepingv1.GetAccountBalancesRequest{
+		AccountId: "acc-123",
+		Currency:  "USD",
+	})
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "acc-123", resp.AccountId)
+	require.Len(t, resp.Balances, 1)
+	assert.Equal(t, "USD", resp.Balances[0].Amount.Amount.CurrencyCode)
 }

@@ -351,6 +351,54 @@ func (c *Client) ListFinancialPositionLogs(ctx context.Context, req *positionkee
 	return resp, nil
 }
 
+// GetAccountBalance retrieves a specific balance type for an account.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "GetAccountBalance", func() (*positionkeepingv1.GetAccountBalanceResponse, error) {
+			return c.positionKeeping.GetAccountBalance(ctx, req)
+		})
+	}
+
+	resp, err := c.positionKeeping.GetAccountBalance(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account balance: %w", err)
+	}
+
+	return resp, nil
+}
+
+// GetAccountBalances retrieves all balance types for an account.
+// This is an idempotent read operation, so it uses circuit breaker with retry.
+func (c *Client) GetAccountBalances(ctx context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	// Use resilience patterns if configured (with retry for idempotent read)
+	if c.resilient != nil {
+		return clients.ExecuteWithResilience(ctx, c.resilient, "GetAccountBalances", func() (*positionkeepingv1.GetAccountBalancesResponse, error) {
+			return c.positionKeeping.GetAccountBalances(ctx, req)
+		})
+	}
+
+	resp, err := c.positionKeeping.GetAccountBalances(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account balances: %w", err)
+	}
+
+	return resp, nil
+}
+
 // Close terminates the gRPC connection gracefully.
 func (c *Client) Close() error {
 	if c.conn != nil {

@@ -112,6 +112,9 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			status_reason text NOT NULL,
 			failure_reason text NULL,
 			reconciliation_status character varying(20) NOT NULL,
+			opening_balance_amount decimal(38, 18) NOT NULL DEFAULT 0,
+			opening_balance_currency character(3) NOT NULL DEFAULT 'GBP',
+			opening_balance_recorded_at timestamptz NULL,
 			PRIMARY KEY (id)
 		)
 	`)
@@ -544,4 +547,93 @@ func TestPostgresRepository_ComplexAggregateHandling(t *testing.T) {
 	assert.Equal(t, 2, len(retrieved.TransactionLogEntries))
 	assert.Equal(t, "Test transaction", retrieved.TransactionLogEntries[0].Description)
 	assert.Equal(t, "Second transaction", retrieved.TransactionLogEntries[1].Description)
+}
+
+func TestPostgresRepository_OpeningBalancePersistence(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Create a log with a non-zero opening balance using the migration constructor
+	openingBalance, err := domain.NewMoney(decimal.NewFromFloat(1234.56), domain.CurrencyGBP)
+	require.NoError(t, err)
+
+	effectiveDate := time.Now().UTC().Add(-24 * time.Hour) // Yesterday
+	log, err := domain.NewFinancialPositionLogWithOpeningBalance(
+		testAccountID,
+		openingBalance,
+		effectiveDate,
+		"MIGRATION-REF-001",
+	)
+	require.NoError(t, err)
+
+	// Add an audit entry (required for create)
+	auditEntry, err := domain.NewAuditTrailEntry(
+		"test-user",
+		"create",
+		"Opening balance log created",
+		"127.0.0.1",
+		map[string]string{"system": "test"},
+	)
+	require.NoError(t, err)
+	err = log.AddAuditEntry(auditEntry)
+	require.NoError(t, err)
+
+	// Persist the log
+	err = tc.repo.Create(ctx, log)
+	require.NoError(t, err)
+
+	// Retrieve and verify opening balance fields round-trip correctly
+	retrieved, err := tc.repo.FindByID(ctx, log.LogID)
+	require.NoError(t, err)
+
+	// Verify opening balance amount and currency
+	assert.True(t, retrieved.OpeningBalance.Amount.Equal(decimal.NewFromFloat(1234.56)),
+		"Expected opening balance amount 1234.56, got %v", retrieved.OpeningBalance.Amount)
+	assert.Equal(t, string(domain.CurrencyGBP), retrieved.OpeningBalance.Instrument.Code,
+		"Expected opening balance currency GBP")
+
+	// Verify opening balance recorded at timestamp
+	assert.True(t, retrieved.HasOpeningBalance(),
+		"Expected HasOpeningBalance to be true")
+	assert.False(t, retrieved.OpeningBalanceRecordedAt.IsZero(),
+		"Expected OpeningBalanceRecordedAt to be set")
+
+	// Verify the transaction entry is also persisted
+	assert.Equal(t, 1, len(retrieved.TransactionLogEntries),
+		"Expected 1 transaction entry for opening balance")
+	entry := retrieved.TransactionLogEntries[0]
+	assert.Equal(t, domain.TransactionSourceOpeningBalance, entry.Source,
+		"Expected source OPENING_BALANCE")
+	assert.Equal(t, "MIGRATION-REF-001", entry.Reference,
+		"Expected migration reference in entry")
+}
+
+func TestPostgresRepository_ZeroOpeningBalanceRoundTrip(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Create a log using the standard constructor (zero opening balance)
+	log := createTestLog(t, "GB33BUKB20201555555557")
+
+	// Persist the log
+	err := tc.repo.Create(ctx, log)
+	require.NoError(t, err)
+
+	// Retrieve and verify zero opening balance round-trips correctly
+	retrieved, err := tc.repo.FindByID(ctx, log.LogID)
+	require.NoError(t, err)
+
+	// Default constructor should result in zero opening balance
+	assert.True(t, retrieved.OpeningBalance.IsZero(),
+		"Expected opening balance to be zero for default constructor")
+	assert.False(t, retrieved.HasOpeningBalance(),
+		"Expected HasOpeningBalance to be false for default constructor")
+
+	// Opening balance recorded at should be zero time
+	assert.True(t, retrieved.OpeningBalanceRecordedAt.IsZero(),
+		"Expected OpeningBalanceRecordedAt to be zero for default constructor")
 }

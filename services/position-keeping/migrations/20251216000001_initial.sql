@@ -19,6 +19,10 @@ CREATE TABLE "financial_position_log" (
   "status_reason" text NOT NULL,
   "failure_reason" text NULL,
   "reconciliation_status" character varying(20) NOT NULL,
+  -- Opening balance fields for migration scenarios (immutable after creation)
+  "opening_balance_amount" decimal(38, 18) NOT NULL DEFAULT 0,
+  "opening_balance_currency" character(3) NOT NULL DEFAULT 'GBP',
+  "opening_balance_recorded_at" timestamptz NULL,
   PRIMARY KEY ("id")
   -- Note: No FK to current_account database - services are independent per BIAN domain (ADR-002)
   -- Account validation is done at the application level via gRPC
@@ -124,3 +128,12 @@ ALTER TABLE "financial_position_log"
 ALTER TABLE "financial_position_log"
   ADD CONSTRAINT "chk_financial_position_log_reconciliation_status"
   CHECK ("reconciliation_status" IN ('UNRECONCILED', 'MATCHED', 'MISMATCHED', 'RESOLVED'));
+ALTER TABLE "financial_position_log"
+  ADD CONSTRAINT "chk_financial_position_log_opening_balance_currency"
+  CHECK (char_length("opening_balance_currency") = 3);
+
+-- Document opening balance semantics
+COMMENT ON COLUMN "financial_position_log"."opening_balance_amount" IS
+  'Opening balance amount in decimal form. Positive for credit balance, negative for overdrawn. Set during migration or account initialization. Immutable after creation.';
+COMMENT ON COLUMN "financial_position_log"."opening_balance_recorded_at" IS
+  'Timestamp when opening balance was recorded. NULL indicates no opening balance was set (default zero balance). Immutable after creation.';
