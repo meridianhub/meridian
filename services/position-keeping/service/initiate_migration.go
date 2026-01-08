@@ -80,12 +80,14 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 	}
 
 	// Publish OpeningBalanceRecorded event using fire-and-forget pattern
+	// (consistent with other endpoints in this service - Kafka producer configured with retries)
 	event := &domain.OpeningBalanceRecorded{
 		LogID:              log.LogID,
 		AccountID:          log.AccountID,
 		OpeningBalance:     openingBalance,
 		EffectiveDate:      effectiveDate,
 		MigrationReference: req.MigrationReference,
+		CorrelationID:      log.LogID.String(), // Use log ID as correlation ID for tracing
 		Timestamp:          time.Now().UTC(),
 		Version:            log.Version,
 	}
@@ -166,30 +168,40 @@ func (s *PositionKeepingService) checkMigrationIdempotencyAndAcquireLock(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check if operation was already completed
+	// Check if operation was already completed or in progress
 	result, err := s.idempotency.Check(ctx, key)
-	if err == nil && result.Status == idempotency.StatusCompleted {
-		// Return cached result
-		var cachedData struct {
-			LogID string `json:"log_id"`
-		}
-		if err := json.Unmarshal(result.Data, &cachedData); err != nil {
-			return nil, nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
-		}
+	if err == nil {
+		switch result.Status {
+		case idempotency.StatusCompleted:
+			// Return cached result
+			var cachedData struct {
+				LogID string `json:"log_id"`
+			}
+			if err := json.Unmarshal(result.Data, &cachedData); err != nil {
+				return nil, nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
+			}
 
-		logID, err := parseUUID(cachedData.LogID)
-		if err != nil {
-			return nil, nil, status.Errorf(codes.Internal, "cached idempotency response contains invalid log_id: %v", err)
-		}
+			logID, err := parseUUID(cachedData.LogID)
+			if err != nil {
+				return nil, nil, status.Errorf(codes.Internal, "cached idempotency response contains invalid log_id: %v", err)
+			}
 
-		log, err := s.repository.FindByID(ctx, logID)
-		if err != nil {
-			return nil, nil, status.Errorf(codes.Internal, "failed to load cached financial position log: %v", err)
-		}
+			log, err := s.repository.FindByID(ctx, logID)
+			if err != nil {
+				return nil, nil, status.Errorf(codes.Internal, "failed to load cached financial position log: %v", err)
+			}
 
-		return &key, &positionkeepingv1.InitiateWithOpeningBalanceResponse{
-			Log: toProtoFinancialPositionLog(log),
-		}, nil
+			return &key, &positionkeepingv1.InitiateWithOpeningBalanceResponse{
+				Log: toProtoFinancialPositionLog(log),
+			}, nil
+
+		case idempotency.StatusPending:
+			// Another request is currently processing this operation
+			return nil, nil, status.Errorf(codes.Aborted, "operation already in progress, please retry")
+
+		case idempotency.StatusFailed:
+			// Previous attempt failed - allow retry by proceeding to MarkPending
+		}
 	}
 
 	// Mark operation as pending to prevent concurrent execution

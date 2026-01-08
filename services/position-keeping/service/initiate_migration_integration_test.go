@@ -4,14 +4,12 @@ package service_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
@@ -21,7 +19,6 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
-	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
 // TestIntegration_InitiateWithOpeningBalance_PositiveBalance tests migrating an account
@@ -138,9 +135,9 @@ func TestIntegration_InitiateWithOpeningBalance_NegativeBalance(t *testing.T) {
 	assert.Equal(t, int32(-250000000), balanceResp.Amount.Amount.Nanos)
 }
 
-// TestIntegration_InitiateWithOpeningBalance_ConcurrentIdempotency tests that concurrent
-// migration requests with the same idempotency key return the same result.
-func TestIntegration_InitiateWithOpeningBalance_ConcurrentIdempotency(t *testing.T) {
+// TestIntegration_InitiateWithOpeningBalance_MultipleAccounts tests migrating multiple
+// different accounts in sequence to ensure isolation.
+func TestIntegration_InitiateWithOpeningBalance_MultipleAccounts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -149,97 +146,65 @@ func TestIntegration_InitiateWithOpeningBalance_ConcurrentIdempotency(t *testing
 	defer tc.Cleanup(t)
 
 	ctx := context.Background()
-	accountID := "ACC-MIGRATION-INT-003"
-	idempotencyKey := uuid.NewString()
-
 	effectiveDate := time.Now().Add(-24 * time.Hour)
-	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
-		AccountId: accountID,
-		OpeningBalance: &commonv1.MoneyAmount{
-			Amount: &money.Money{
-				CurrencyCode: "GBP",
-				Units:        1000,
-				Nanos:        0,
+
+	// Migrate multiple accounts with different balances
+	accounts := []struct {
+		accountID string
+		units     int64
+		nanos     int32
+	}{
+		{"ACC-MULTI-001", 1000, 0},
+		{"ACC-MULTI-002", 2500, 500000000}, // £2500.50
+		{"ACC-MULTI-003", -100, 0},         // Overdrawn
+	}
+
+	createdLogIDs := make(map[string]string)
+
+	for _, acc := range accounts {
+		req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+			AccountId: acc.accountID,
+			OpeningBalance: &commonv1.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "GBP",
+					Units:        acc.units,
+					Nanos:        acc.nanos,
+				},
 			},
-		},
-		EffectiveDate:      timestamppb.New(effectiveDate),
-		MigrationReference: "LEGACY-MIGRATION-003",
-		IdempotencyKey: &commonv1.IdempotencyKey{
-			Key: idempotencyKey,
-		},
+			EffectiveDate:      timestamppb.New(effectiveDate),
+			MigrationReference: "BULK-MIGRATION-001",
+		}
+
+		resp, err := tc.Service.InitiateWithOpeningBalance(ctx, req)
+		require.NoError(t, err, "Migration should succeed for %s", acc.accountID)
+		require.NotNil(t, resp, "Response should not be nil")
+		require.NotNil(t, resp.Log, "Log should not be nil")
+
+		createdLogIDs[acc.accountID] = resp.Log.LogId
 	}
 
-	// For this integration test, we need a real idempotency service that persists state.
-	// Since we're using a mock, we'll simulate idempotency by having the mock return
-	// consistent results for the same key.
-	mockIdempotency := new(MockIdempotencyService)
+	// Verify each account has its correct balance
+	for _, acc := range accounts {
+		balanceReq := &positionkeepingv1.GetAccountBalanceRequest{
+			AccountId:   acc.accountID,
+			BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+			Currency:    "GBP",
+		}
 
-	var firstLogID string
-	var once sync.Once
+		balanceResp, err := tc.Service.GetAccountBalance(ctx, balanceReq)
+		require.NoError(t, err, "Balance query should succeed for %s", acc.accountID)
 
-	// First call - check returns not found, mark pending, store result
-	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
-		Return(func(ctx context.Context, key idempotency.Key) *idempotency.Result {
-			// After first successful call, return completed status
-			if firstLogID != "" {
-				return &idempotency.Result{
-					Status: idempotency.StatusCompleted,
-					Data:   []byte(`{"log_id":"` + firstLogID + `"}`),
-				}
-			}
-			return nil
-		}, func(ctx context.Context, key idempotency.Key) error {
-			if firstLogID != "" {
-				return nil
-			}
-			return idempotency.ErrResultNotFound
-		})
-
-	mockIdempotency.On("MarkPending", ctx, mock.AnythingOfType("idempotency.Key"), mock.AnythingOfType("time.Duration")).
-		Return(nil)
-
-	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).
-		Run(func(args mock.Arguments) {
-			once.Do(func() {
-				// Simulate capturing the log ID from first successful call
-				// In reality, this would be stored in Redis/DB
-			})
-		}).
-		Return(nil)
-
-	// Make concurrent requests
-	var wg sync.WaitGroup
-	results := make([]*positionkeepingv1.InitiateWithOpeningBalanceResponse, 5)
-	errors := make([]error, 5)
-
-	// First request - this will succeed and set firstLogID
-	resp1, err1 := tc.Service.InitiateWithOpeningBalance(ctx, req)
-	require.NoError(t, err1, "First request should succeed")
-	firstLogID = resp1.Log.LogId
-
-	// Subsequent concurrent requests should return same log
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			// Need to re-fetch from repository for idempotent response
-			resp, err := tc.Service.InitiateWithOpeningBalance(ctx, req)
-			results[idx] = resp
-			errors[idx] = err
-		}(i)
+		assert.Equal(t, acc.units, balanceResp.Amount.Amount.Units,
+			"Balance units should match for %s", acc.accountID)
+		assert.Equal(t, acc.nanos, balanceResp.Amount.Amount.Nanos,
+			"Balance nanos should match for %s", acc.accountID)
 	}
 
-	wg.Wait()
-
-	// All responses should have the same log ID
-	for i, resp := range results {
-		if errors[i] != nil {
-			// Some may fail due to concurrent access, which is acceptable
-			continue
-		}
-		if resp != nil {
-			assert.Equal(t, firstLogID, resp.Log.LogId, "All responses should return same log ID")
-		}
+	// Verify all log IDs are unique
+	logIDSet := make(map[string]bool)
+	for _, logID := range createdLogIDs {
+		assert.False(t, logIDSet[logID], "Log IDs should be unique")
+		logIDSet[logID] = true
 	}
 }
 

@@ -389,6 +389,56 @@ func TestInitiateWithOpeningBalance_WithoutIdempotencyKey(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+func TestInitiateWithOpeningBalance_StatusPending(t *testing.T) {
+	// Arrange - Test that concurrent request returns Aborted when another is in progress
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
+
+	effectiveDate := time.Now().Add(-24 * time.Hour)
+	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+		AccountId: "migrated-account-001",
+		OpeningBalance: &commonv1.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        1500,
+				Nanos:        0,
+			},
+		},
+		EffectiveDate: timestamppb.New(effectiveDate),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.NewString(),
+		},
+	}
+
+	// Mock idempotency check - operation is pending (another request in progress)
+	pendingResult := &idempotency.Result{
+		Status: idempotency.StatusPending,
+	}
+
+	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
+		Return(pendingResult, nil)
+
+	// Act
+	resp, err := svc.InitiateWithOpeningBalance(ctx, req)
+
+	// Assert - Should return Aborted error
+	require.Error(t, err, "Expected error when operation is pending")
+	assert.Nil(t, resp, "Expected nil response when operation is pending")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.Aborted, st.Code(), "Expected Aborted error code")
+	assert.Contains(t, st.Message(), "operation already in progress")
+
+	// Verify that MarkPending was NOT called since we returned early
+	mockIdempotency.AssertNotCalled(t, "MarkPending")
+	mockRepo.AssertNotCalled(t, "Create")
+}
+
 func TestInitiateWithOpeningBalance_ZeroBalance(t *testing.T) {
 	// Arrange - Test zero opening balance (edge case)
 	ctx := context.Background()
