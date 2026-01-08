@@ -110,10 +110,19 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		return nil, status.Error(codes.InvalidArgument, "lien amount must be positive")
 	}
 
-	// Fetch balance from Position Keeping BEFORE entering transaction to avoid
-	// holding database locks during external service calls (deadlock prevention).
+	// Prefetch account and balance from Position Keeping BEFORE entering transaction
+	// to avoid holding database locks during external service calls (deadlock prevention).
 	// We'll re-validate sufficient funds inside the transaction with fresh lien totals.
-	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId, domain.Money{})
+	prefetchAccount, err := s.repo.FindByID(ctx, req.AccountId)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+		}
+		operationStatus = opStatusRetrieveFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId, prefetchAccount.Balance())
 	if err != nil {
 		operationStatus = opStatusRetrieveFailed
 		s.logger.Error("failed to prefetch balance from Position Keeping", "account_id", req.AccountId, "error", err)
@@ -940,12 +949,22 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string, 
 		return 0, nil
 	}
 
-	// Convert units.nanos to minor units (cents)
-	// Units are whole currency units, nanos are fractional parts (1 billionth)
-	// For GBP: 1.50 = 150 cents = (1 * 100) + (500000000 / 10000000)
 	units := resp.Amount.Amount.Units
 	nanos := resp.Amount.Amount.Nanos
-	cents := units*100 + int64(nanos/10000000)
+
+	// Validate units won't overflow when multiplied by 100
+	if units > math.MaxInt64/100 || units < math.MinInt64/100 {
+		return 0, ErrAmountOverflow
+	}
+
+	// Convert units.nanos to minor units (cents) with proper rounding
+	// Units are whole currency units, nanos are fractional parts (1 billionth)
+	// For GBP: 1.50 = 150 cents = (1 * 100) + rounded(500000000 / 10000000)
+	unitsCents := units * 100
+	// Round nanos instead of truncating (add 5000000 before division for rounding)
+	// Consistent with protoToMoney conversion logic
+	nanosCents := (nanos + 5000000) / 10000000
+	cents := unitsCents + int64(nanosCents)
 
 	return cents, nil
 }
