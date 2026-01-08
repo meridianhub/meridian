@@ -38,6 +38,9 @@ RUN test -x audit-worker && echo "Binary built successfully"
 # Runtime stage - distroless for minimal attack surface (~2MB base)
 FROM gcr.io/distroless/static-debian12
 
+# Copy timezone data from builder for time-sensitive operations
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
 # Copy binary from builder
 COPY --from=builder /build/audit-worker /audit-worker
 
