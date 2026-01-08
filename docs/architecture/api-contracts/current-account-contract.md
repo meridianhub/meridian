@@ -644,6 +644,8 @@ These invariants MUST hold at all times across all operations:
 
 1. **Balance Constraint**: `current_balance >= -overdraft_limit` (if overdraft enabled) OR `current_balance >= 0` (if overdraft disabled)
 2. **Available Balance**: `available_balance = current_balance + (overdraft_enabled ? overdraft_limit : 0) - active_liens`
+   > `active_liens` are fund holds created via `InitiateLien` operations (see [Lien Lifecycle](../../services/current-account/README.md#lien-lifecycle)).
+   > Only liens with status `ACTIVE` reduce available balance; `EXECUTED` and `TERMINATED` liens do not.
 3. **Balance Source**: Balance is queried from PositionKeeping via `GetAccountBalances` RPC (7 BIAN types)
 4. **Zero Balance Closure**: Account can only transition to CLOSED if `current_balance == 0`
 
