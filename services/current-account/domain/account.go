@@ -151,6 +151,93 @@ func (a CurrentAccount) Deposit(amount Money) (CurrentAccount, error) {
 	}, nil
 }
 
+// PrepareForCredit validates the account can receive a credit transaction and increments the
+// version for optimistic locking. This method does NOT mutate balance locally - balance is
+// managed externally by the Position Keeping service.
+//
+// Use this method when recording CREDIT transactions in Position Keeping while keeping
+// optimistic locking protection against concurrent modifications.
+func (a CurrentAccount) PrepareForCredit() (CurrentAccount, error) {
+	if a.status == AccountStatusFrozen {
+		return CurrentAccount{}, ErrAccountFrozen
+	}
+
+	if a.status == AccountStatusClosed {
+		return CurrentAccount{}, ErrAccountClosed
+	}
+
+	now := time.Now()
+	return CurrentAccount{
+		id:                    a.id,
+		accountID:             a.accountID,
+		accountIdentification: a.accountIdentification,
+		partyID:               a.partyID,
+		balance:               a.balance, // Balance NOT modified - Position Keeping is source of truth
+		availableBalance:      a.availableBalance,
+		status:                a.status,
+		freezeReason:          a.freezeReason,
+		statusHistory:         a.statusHistory,
+		overdraftLimit:        a.overdraftLimit,
+		overdraftEnabled:      a.overdraftEnabled,
+		overdraftRate:         a.overdraftRate,
+		balanceUpdatedAt:      a.balanceUpdatedAt,
+		version:               a.version + 1, // Version incremented for optimistic locking
+		createdAt:             a.createdAt,
+		updatedAt:             now,
+	}, nil
+}
+
+// PrepareForDebit validates the account can process a debit transaction (withdrawal) and
+// increments the version for optimistic locking. This method validates sufficient funds
+// but does NOT mutate balance locally - balance is managed externally by the Position
+// Keeping service.
+//
+// Use this method when recording DEBIT transactions in Position Keeping while keeping
+// optimistic locking protection against concurrent modifications.
+func (a CurrentAccount) PrepareForDebit(amount Money) (CurrentAccount, error) {
+	if !amount.IsPositive() {
+		return CurrentAccount{}, ErrInvalidAmount
+	}
+
+	if a.status == AccountStatusFrozen {
+		return CurrentAccount{}, ErrAccountFrozen
+	}
+
+	if a.status == AccountStatusClosed {
+		return CurrentAccount{}, ErrAccountClosed
+	}
+
+	if amount.Currency() != a.balance.Currency() {
+		return CurrentAccount{}, ErrCurrencyMismatch
+	}
+
+	// Check if sufficient funds (including overdraft via availableBalance)
+	cmp, _ := amount.Compare(a.availableBalance)
+	if cmp > 0 {
+		return CurrentAccount{}, ErrInsufficientFunds
+	}
+
+	now := time.Now()
+	return CurrentAccount{
+		id:                    a.id,
+		accountID:             a.accountID,
+		accountIdentification: a.accountIdentification,
+		partyID:               a.partyID,
+		balance:               a.balance, // Balance NOT modified - Position Keeping is source of truth
+		availableBalance:      a.availableBalance,
+		status:                a.status,
+		freezeReason:          a.freezeReason,
+		statusHistory:         a.statusHistory,
+		overdraftLimit:        a.overdraftLimit,
+		overdraftEnabled:      a.overdraftEnabled,
+		overdraftRate:         a.overdraftRate,
+		balanceUpdatedAt:      a.balanceUpdatedAt,
+		version:               a.version + 1, // Version incremented for optimistic locking
+		createdAt:             a.createdAt,
+		updatedAt:             now,
+	}, nil
+}
+
 // Withdraw removes funds from the account and returns a new account with the updated balance.
 // The original account is not modified.
 func (a CurrentAccount) Withdraw(amount Money) (CurrentAccount, error) {

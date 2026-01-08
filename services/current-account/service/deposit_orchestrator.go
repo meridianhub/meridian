@@ -74,9 +74,9 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator
 // Orchestrate executes the deposit saga with compensation on failure.
 //
 // Saga Steps (executed strictly sequentially - no concurrent execution):
-//  1. log_position: Create financial position log in PositionKeeping service
+//  1. log_position: Create CREDIT entry in PositionKeeping service (balance source of truth)
 //  2. post_ledger: Create booking log and dual ledger postings in FinancialAccounting service
-//  3. save_account: Persist updated account balance to database
+//  3. save_account: Persist account metadata (status, version) - balance NOT stored locally
 //
 // The saga uses the SagaOrchestrator which ensures steps run one at a time. Domain objects
 // (account, amount) are safely shared across steps since only one step executes at a time.
@@ -616,12 +616,14 @@ func (o *DepositOrchestrator) addSaveAccountStep(
 	transactionID string,
 ) {
 	saga.AddStep("save_account",
-		// Action: Persist the updated account balance
+		// Action: Persist account metadata (status, version for optimistic locking).
+		// Note: Balance is NOT persisted locally - Position Keeping is the source of truth.
+		// The repository's Save method excludes balance fields from persistence.
 		func(stepCtx context.Context) error {
 			o.logger.Info("executing save_account step",
 				"account_id", account.AccountID(),
 				"transaction_id", transactionID,
-				"new_balance", account.Balance().AmountCents())
+				"version", account.Version())
 
 			if err := o.repo.Save(stepCtx, account); err != nil {
 				return fmt.Errorf("failed to save account: %w", err)
@@ -629,7 +631,7 @@ func (o *DepositOrchestrator) addSaveAccountStep(
 
 			o.logger.Info("save_account step completed",
 				"account_id", account.AccountID(),
-				"new_balance", account.Balance().AmountCents())
+				"version", account.Version())
 
 			return nil
 		},

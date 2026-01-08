@@ -444,7 +444,12 @@ func TestExecuteDeposit_WithOrchestration_Success(t *testing.T) {
 	_ = createTestAccount(t, ctx, repo, "ACC-001")
 
 	// Create mock clients
-	mockPosKeeping := &mockPositionKeepingClient{}
+	// Configure Position Keeping mock to return the expected balance after deposit (£100.50 = 10050 cents)
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-001": 10050, // £100.50 in cents
+		},
+	}
 	mockFinAcct := &mockFinancialAccountingClient{}
 
 	// Create service with mocked clients
