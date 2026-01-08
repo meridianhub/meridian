@@ -316,6 +316,53 @@ message TransactionCancelledEvent {
   int64 version = 7 [(buf.validate.field).int64 = {gte: 1}];
 }
 
+// OpeningBalanceRecordedEvent represents an opening balance recorded during
+// account migration. Published when a legacy account is migrated with an initial
+// balance without full transaction history.
+message OpeningBalanceRecordedEvent {
+  // log_id uniquely identifies the financial position log created
+  string log_id = 1 [(buf.validate.field).string = {uuid: true}];
+
+  // account_id identifies the account this opening balance affects
+  string account_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // amount_cents is the opening balance amount in cents (or smallest currency unit)
+  // May be negative for overdrawn accounts
+  int64 amount_cents = 3;
+
+  // currency is the ISO 4217 currency code
+  meridian.common.v1.Currency currency = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // effective_date is when the opening balance becomes effective
+  google.protobuf.Timestamp effective_date = 5 [(buf.validate.field).required = true];
+
+  // migration_reference identifies the migration source or batch
+  string migration_reference = 6 [(buf.validate.field).string = {max_len: 255}];
+
+  // correlation_id links related events across services
+  string correlation_id = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 8 [(buf.validate.field).required = true];
+
+  // version is the aggregate version for optimistic locking
+  int64 version = 9 [(buf.validate.field).int64 = {gte: 1}];
+
+  // instrument_amount is the multi-asset representation of the opening balance.
+  // This field provides full instrument metadata (code, version, precision) for
+  // the Universal Asset System.
+  meridian.quantity.v1.InstrumentAmount instrument_amount = 10;
+}
+
 // BulkTransactionCapturedEvent represents multiple transactions captured
 // in a single batch operation. Useful for bulk imports or batch reconciliation.
 message BulkTransactionCapturedEvent {

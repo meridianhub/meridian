@@ -320,6 +320,54 @@ func (e *TransactionCancelled) ToProto() interface{} {
 	}
 }
 
+// OpeningBalanceRecorded represents a domain event when an opening balance is recorded
+// during account migration from a legacy system.
+type OpeningBalanceRecorded struct {
+	LogID              uuid.UUID
+	AccountID          string
+	OpeningBalance     Money
+	EffectiveDate      time.Time
+	MigrationReference string
+	CorrelationID      string
+	Timestamp          time.Time
+	Version            int64
+}
+
+// EventType returns the event type identifier.
+func (e *OpeningBalanceRecorded) EventType() string {
+	return "position_keeping.opening_balance_recorded.v1"
+}
+
+// AggregateID returns the log ID as the aggregate identifier.
+func (e *OpeningBalanceRecorded) AggregateID() string {
+	return e.LogID.String()
+}
+
+// OccurredAt returns when the event occurred.
+func (e *OpeningBalanceRecorded) OccurredAt() time.Time {
+	return e.Timestamp
+}
+
+// ToProto converts to protobuf representation.
+func (e *OpeningBalanceRecorded) ToProto() interface{} {
+	// Convert decimal amount to minor units (cents, pence, sen, etc.)
+	// This supports negative amounts for overdrawn accounts
+	amountCents := MoneyToMinorUnitsUnchecked(e.OpeningBalance)
+
+	return &eventsv1.OpeningBalanceRecordedEvent{
+		LogId:              e.LogID.String(),
+		AccountId:          e.AccountID,
+		AmountCents:        amountCents,
+		Currency:           currencyToProto(MoneyCurrency(e.OpeningBalance)),
+		EffectiveDate:      timestamppb.New(e.EffectiveDate),
+		MigrationReference: e.MigrationReference,
+		CorrelationId:      e.CorrelationID,
+		Timestamp:          timestamppb.New(e.Timestamp),
+		Version:            e.Version,
+		InstrumentAmount:   moneyToInstrumentAmountProto(e.OpeningBalance),
+	}
+}
+
 // BulkTransactionCaptured represents a domain event for bulk transaction captures.
 // Used when multiple transactions are captured in a single batch operation (e.g., file import).
 //

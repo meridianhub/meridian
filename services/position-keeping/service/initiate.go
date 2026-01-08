@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -165,6 +166,21 @@ func validateInitiateRequest(req *positionkeepingv1.InitiateFinancialPositionLog
 	return nil
 }
 
+// googleMoneyToDomain converts google.type.Money to domain.Money.
+// This is the shared conversion logic for all proto-to-domain money conversions.
+func googleMoneyToDomain(m *money.Money) (domain.Money, error) {
+	if m == nil {
+		return domain.Money{}, nil
+	}
+
+	// Units is the whole amount, nanos is the fractional amount (billionths)
+	amount := decimal.NewFromInt(m.Units)
+	nanos := decimal.NewFromInt(int64(m.Nanos)).Div(decimal.NewFromInt(1_000_000_000))
+	totalAmount := amount.Add(nanos)
+
+	return domain.NewMoney(totalAmount, domain.Currency(m.CurrencyCode))
+}
+
 // protoEntryToDomain converts a proto TransactionLogEntry to domain.
 // Returns (nil, nil) for nil input to handle optional proto fields.
 func protoEntryToDomain(proto *positionkeepingv1.TransactionLogEntry) (*domain.TransactionLogEntry, error) {
@@ -177,12 +193,7 @@ func protoEntryToDomain(proto *positionkeepingv1.TransactionLogEntry) (*domain.T
 		return nil, err
 	}
 
-	// Convert google.type.Money to domain.Money
-	amount := decimal.NewFromInt(proto.Amount.Amount.Units)
-	nanos := decimal.NewFromInt(int64(proto.Amount.Amount.Nanos)).Div(decimal.NewFromInt(1_000_000_000))
-	totalAmount := amount.Add(nanos)
-
-	money, err := domain.NewMoney(totalAmount, domain.Currency(proto.Amount.Amount.CurrencyCode))
+	money, err := googleMoneyToDomain(proto.Amount.Amount)
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +277,10 @@ func protoLineageToDomain(proto *positionkeepingv1.TransactionLineage) (*domain.
 
 // checkIdempotencyAndAcquireLock checks for completed operations and acquires a pending lock.
 // Returns the idempotency key (if provided), cached response (if exists), and any error.
+//
+// TODO(tm:position-keeping-balance.5): This function should be updated to handle StatusPending,
+// StatusFailed, and transient errors consistently with checkMigrationIdempotencyAndAcquireLock.
+// See initiate_migration.go for the improved pattern.
 func (s *PositionKeepingService) checkIdempotencyAndAcquireLock(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
