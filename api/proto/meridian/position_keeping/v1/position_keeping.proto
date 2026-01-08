@@ -48,6 +48,26 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   }
 };
 
+// BalanceType defines the type of balance being queried or reported.
+enum BalanceType {
+  // BALANCE_TYPE_UNSPECIFIED means the balance type is unknown.
+  BALANCE_TYPE_UNSPECIFIED = 0;
+  // BALANCE_TYPE_OPENING is the balance at the start of the accounting period.
+  BALANCE_TYPE_OPENING = 1;
+  // BALANCE_TYPE_CLOSING is the balance at the end of the accounting period.
+  BALANCE_TYPE_CLOSING = 2;
+  // BALANCE_TYPE_CURRENT is the real-time balance including all posted transactions.
+  BALANCE_TYPE_CURRENT = 3;
+  // BALANCE_TYPE_AVAILABLE is the balance available for withdrawal or use.
+  BALANCE_TYPE_AVAILABLE = 4;
+  // BALANCE_TYPE_LEDGER is the balance on the books (may differ from current due to holds).
+  BALANCE_TYPE_LEDGER = 5;
+  // BALANCE_TYPE_RESERVE is the amount held in reserve (not available for use).
+  BALANCE_TYPE_RESERVE = 6;
+  // BALANCE_TYPE_FREE is the unencumbered balance (current minus holds and reserves).
+  BALANCE_TYPE_FREE = 7;
+}
+
 // TransactionLogEntry represents a single entry in the financial position log.
 message TransactionLogEntry {
   // entry_id is the unique identifier for this log entry.
@@ -457,6 +477,92 @@ message RecordMeasurementResponse {
   google.protobuf.Timestamp recorded_at = 3 [(buf.validate.field).required = true];
 }
 
+// GetAccountBalanceRequest retrieves a specific balance type for an account.
+message GetAccountBalanceRequest {
+  // account_id is the account to retrieve the balance for.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // balance_type is the type of balance to retrieve.
+  BalanceType balance_type = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] /* Disallow UNSPECIFIED */
+  }];
+
+  // currency filters the balance by currency (optional, ISO 4217 format).
+  string currency = 3 [(buf.validate.field).string = {
+    max_len: 3
+    pattern: "^[A-Z]{0,3}$"
+  }];
+}
+
+// GetAccountBalanceResponse returns the requested balance.
+message GetAccountBalanceResponse {
+  // account_id is the account the balance pertains to.
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // balance_type is the type of balance returned.
+  BalanceType balance_type = 2 [(buf.validate.field).enum.defined_only = true];
+
+  // amount is the balance amount.
+  meridian.common.v1.MoneyAmount amount = 3 [(buf.validate.field).required = true];
+
+  // as_of is the timestamp representing when this balance was calculated.
+  google.protobuf.Timestamp as_of = 4 [(buf.validate.field).required = true];
+}
+
+// GetAccountBalancesRequest retrieves all balance types for an account.
+message GetAccountBalancesRequest {
+  // account_id is the account to retrieve balances for.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // currency filters balances by currency (optional, ISO 4217 format).
+  string currency = 2 [(buf.validate.field).string = {
+    max_len: 3
+    pattern: "^[A-Z]{0,3}$"
+  }];
+}
+
+// BalanceEntry represents a single balance type and its amount.
+message BalanceEntry {
+  // balance_type is the type of this balance.
+  BalanceType balance_type = 1 [(buf.validate.field).enum.defined_only = true];
+
+  // amount is the balance amount.
+  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+}
+
+// GetAccountBalancesResponse returns all balances for an account.
+message GetAccountBalancesResponse {
+  // account_id is the account the balances pertain to.
+  string account_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // balances contains all available balance types for this account.
+  repeated BalanceEntry balances = 2 [(buf.validate.field).repeated.max_items = 100];
+
+  // as_of is the timestamp representing when these balances were calculated.
+  google.protobuf.Timestamp as_of = 3 [(buf.validate.field).required = true];
+}
+
 // PositionKeepingService provides operations for managing financial position logs.
 service PositionKeepingService {
   // InitiateFinancialPositionLog creates a new financial position log.
@@ -535,6 +641,20 @@ service PositionKeepingService {
           description: "Measurement recorded successfully"
         }
       }
+    };
+  }
+
+  // GetAccountBalance retrieves a specific balance type for an account.
+  rpc GetAccountBalance(GetAccountBalanceRequest) returns (GetAccountBalanceResponse) {
+    option (google.api.http) = {
+      get: "/v1/accounts/{account_id}/balance/{balance_type}"
+    };
+  }
+
+  // GetAccountBalances retrieves all balance types for an account.
+  rpc GetAccountBalances(GetAccountBalancesRequest) returns (GetAccountBalancesResponse) {
+    option (google.api.http) = {
+      get: "/v1/accounts/{account_id}/balances"
     };
   }
 
