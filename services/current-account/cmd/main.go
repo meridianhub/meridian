@@ -261,14 +261,12 @@ func createServiceWithClients(
 	tracer *observability.Tracer,
 	idempotencyService idempotency.Service,
 ) (*service.Service, *serviceClients, error) {
-	// Load account configuration for clearing accounts
-	// This is optional - if not configured, deposits will use single-entry mode (backward compatible)
+	// Load account configuration for clearing accounts (required for double-entry bookkeeping)
 	accountConfig, cfgErr := config.LoadAccountConfig()
 	if cfgErr != nil {
-		// Log warning but continue - double-entry is optional for backward compatibility
 		logger.Warn("account configuration not loaded, double-entry bookkeeping disabled",
 			"error", cfgErr)
-		accountConfig = nil // Explicit nil for clarity
+		accountConfig = nil
 	} else {
 		logger.Info("account configuration loaded",
 			"deposit_clearing_account_id", accountConfig.DepositClearingAccountID)

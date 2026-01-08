@@ -717,45 +717,6 @@ func TestExecuteDeposit_WithOrchestration_ContextPropagation(t *testing.T) {
 	// correlation IDs in distributed traces.
 }
 
-// Test 8: Backward compatibility (no clients configured)
-
-// TestExecuteDeposit_WithoutClients_BackwardCompatibility verifies that
-// the service continues to work when clients are not configured, falling
-// back to simple database-only operation.
-//
-// This ensures backward compatibility with existing deployments that may
-// not have the downstream services available yet.
-func TestExecuteDeposit_WithoutClients_BackwardCompatibility(t *testing.T) {
-	// Setup
-	db, ctx, cleanup := setupIntegrationTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, ctx, repo, "ACC-006")
-
-	// Create service WITHOUT clients (backward compatibility mode)
-	svc := mustNewService(t, repo, nil)
-
-	// Execute deposit
-	req := createTestDepositRequest("ACC-006", 200, 0) // £200.00
-	resp, err := svc.ExecuteDeposit(ctx, req)
-
-	// Verify success
-	require.NoError(t, err)
-	assert.Equal(t, "ACC-006", resp.AccountId)
-	assert.NotEmpty(t, resp.TransactionId)
-	assert.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
-
-	// Verify balance is updated in response
-	// Note: Balance is now managed by Position Keeping service, not persisted locally
-	assert.NotNil(t, resp.NewBalance)
-	assert.Equal(t, int64(200), resp.NewBalance.Amount.Units)
-
-	// Verify account exists (balance not checked - Position Keeping is authoritative)
-	_, err = repo.FindByID(ctx, "ACC-006")
-	require.NoError(t, err)
-}
-
 // Double-Entry Bookkeeping Tests (with AccountConfig)
 
 // TestExecuteDeposit_DoubleEntry_CreatesDualPostings verifies that when AccountConfig
@@ -1055,49 +1016,6 @@ func TestExecuteDeposit_DoubleEntry_CreditPostingFailure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, originalBalance, balanceCents(updatedAccount.Balance()),
 		"Account balance should remain unchanged after failure and compensation")
-}
-
-// TestExecuteDeposit_SingleEntry_BackwardCompatibility verifies that deposits work
-// without AccountConfig (backward compatibility - single-entry mode).
-func TestExecuteDeposit_SingleEntry_BackwardCompatibility(t *testing.T) {
-	// Setup
-	db, ctx, cleanup := setupIntegrationTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	_ = createTestAccount(t, ctx, repo, "ACC-SE-001")
-
-	// Create mock clients
-	mockPosKeeping := &mockPositionKeepingClient{}
-	mockFinAcct := &mockFinancialAccountingClient{}
-
-	// Create service WITHOUT AccountConfig (single-entry/backward compatible mode)
-	svc := &Service{
-		repo:                repo,
-		posKeepingClient:    mockPosKeeping,
-		finAcctClient:       mockFinAcct,
-		accountConfig:       nil, // No AccountConfig - single-entry mode
-		logger:              testLogger(),
-		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
-	}
-
-	// Execute deposit
-	req := createTestDepositRequest("ACC-SE-001", 75, 0) // £75.00
-	resp, err := svc.ExecuteDeposit(ctx, req)
-
-	// Verify success
-	require.NoError(t, err, "Deposit should succeed")
-	assert.Equal(t, "ACC-SE-001", resp.AccountId)
-	assert.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
-
-	// Verify single posting (credit only, no debit)
-	assert.Equal(t, 1, mockFinAcct.captureCalls, "Should have 1 capture call (credit only)")
-	assert.Equal(t, 0, mockFinAcct.debitCaptureCalls, "Should have no debit posting")
-	assert.Equal(t, 1, mockFinAcct.creditCaptureCalls, "Should have 1 credit posting")
-
-	// Verify BookingLog flow
-	assert.Equal(t, 1, mockFinAcct.initiateCalls, "Should initiate 1 BookingLog")
-	assert.Equal(t, 1, mockFinAcct.updateCalls, "Should update BookingLog to POSTED")
 }
 
 // TestExecuteDeposit_DoubleEntry_ClearingAccountUsedForDebit verifies that the debit

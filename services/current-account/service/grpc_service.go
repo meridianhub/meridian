@@ -498,82 +498,41 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// Generate transaction ID (full UUID required by position-keeping service)
 	transactionID := uuid.New().String()
 
-	var resp *pb.ExecuteDepositResponse
-
-	// If clients are not configured, fall back to simple save (backward compatibility)
-	// In this mode, we still mutate and save local balance since Position Keeping is unavailable.
-	if s.posKeepingClient == nil || s.finAcctClient == nil {
-		// Execute deposit on domain model for backward compatibility mode only.
-		// The domain Deposit method validates status (frozen/closed) and mutates balance.
-		account, err = account.Deposit(amount)
-		if err != nil {
-			operationStatus = "deposit_failed"
-			if errors.Is(err, domain.ErrAccountFrozen) || errors.Is(err, domain.ErrAccountClosed) {
-				return nil, status.Errorf(codes.FailedPrecondition, "deposit failed: %v", err)
-			}
-			return nil, status.Errorf(codes.InvalidArgument, "deposit failed: %v", err)
+	// Prepare account for credit transaction (validates status, increments version for optimistic locking)
+	account, err = account.PrepareForCredit()
+	if err != nil {
+		operationStatus = "deposit_failed"
+		if errors.Is(err, domain.ErrAccountFrozen) || errors.Is(err, domain.ErrAccountClosed) {
+			return nil, status.Errorf(codes.FailedPrecondition, "deposit failed: %v", err)
 		}
-
-		s.logger.Info("executing deposit without transaction orchestration (clients not configured)",
-			"account_id", account.AccountID(),
-			"transaction_id", transactionID)
-
-		if err := s.repo.Save(ctx, account); err != nil {
-			operationStatus = opStatusSaveFailed
-			return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
-		}
-
-		// Record business metrics
-		caobservability.RecordDeposit(string(account.Balance().Currency()))
-		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
-
-		resp = &pb.ExecuteDepositResponse{
-			AccountId:        account.AccountID(),
-			TransactionId:    transactionID,
-			NewBalance:       toMoneyAmount(account.Balance()),
-			AvailableBalance: toMoneyAmount(account.AvailableBalance()),
-			Status:           pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED,
-		}
-	} else {
-		// Position Keeping is configured - record CREDIT transaction there.
-		// Balance is NOT mutated locally; Position Keeping is the source of truth.
-
-		// Prepare account for credit transaction (validates status, increments version for optimistic locking)
-		account, err = account.PrepareForCredit()
-		if err != nil {
-			operationStatus = "deposit_failed"
-			if errors.Is(err, domain.ErrAccountFrozen) || errors.Is(err, domain.ErrAccountClosed) {
-				return nil, status.Errorf(codes.FailedPrecondition, "deposit failed: %v", err)
-			}
-			return nil, status.Errorf(codes.InvalidArgument, "deposit failed: %v", err)
-		}
-
-		// Orchestrate transaction with saga pattern using dedicated orchestrator
-		resp, err = s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID)
-		if err != nil {
-			operationStatus = opStatusSagaFailed
-			return nil, err
-		}
-
-		// After saga completes, query Position Keeping for the new balance
-		account, err = s.hydrateAccountWithBalance(ctx, account)
-		if err != nil {
-			s.logger.Error("failed to retrieve updated balance from Position Keeping after deposit",
-				"account_id", account.AccountID(),
-				"transaction_id", transactionID,
-				"error", err)
-			// Transaction succeeded but balance fetch failed - return response with stale balance
-			// The deposit was recorded in Position Keeping, client can retry balance query
-		}
-
-		// Update response with balance from Position Keeping
-		resp.NewBalance = toMoneyAmount(account.Balance())
-		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
-
-		// Record business metrics on success
-		caobservability.RecordDeposit(string(account.Balance().Currency()))
-		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
+		return nil, status.Errorf(codes.InvalidArgument, "deposit failed: %v", err)
 	}
+
+	// Orchestrate transaction with saga pattern - Position Keeping is the source of truth for balance
+	resp, err := s.depositOrchestrator.Orchestrate(ctx, account, amount, transactionID)
+	if err != nil {
+		operationStatus = opStatusSagaFailed
+		return nil, err
+	}
+
+	// After saga completes, query Position Keeping for the new balance
+	account, err = s.hydrateAccountWithBalance(ctx, account)
+	if err != nil {
+		s.logger.Error("failed to retrieve updated balance from Position Keeping after deposit",
+			"account_id", account.AccountID(),
+			"transaction_id", transactionID,
+			"error", err)
+		// Transaction succeeded but balance fetch failed - return response with stale balance
+		// The deposit was recorded in Position Keeping, client can retry balance query
+	}
+
+	// Update response with balance from Position Keeping
+	resp.NewBalance = toMoneyAmount(account.Balance())
+	resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
+
+	// Record business metrics on success
+	caobservability.RecordDeposit(string(account.Balance().Currency()))
+	caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 	// Store successful result in Redis for future idempotency checks
 	if idempotencyKey != "" && s.idempotencyService != nil {
@@ -870,103 +829,52 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	// Generate transaction ID (full UUID required by position-keeping service)
 	transactionID := uuid.New().String()
 
-	var resp *pb.ExecuteWithdrawalResponse
-
-	// If clients are not configured, fall back to simple save (backward compatibility)
-	// In this mode, we still mutate and save local balance since Position Keeping is unavailable.
-	if s.posKeepingClient == nil || s.finAcctClient == nil {
-		// Execute withdrawal on domain model for backward compatibility mode only.
-		// The domain Withdraw method validates status, sufficient funds, and mutates balance.
-		account, err = account.Withdraw(amount)
-		if err != nil {
-			if errors.Is(err, domain.ErrInsufficientFunds) {
-				operationStatus = opStatusInsufficientFunds
-				return nil, status.Errorf(codes.FailedPrecondition, "insufficient funds for withdrawal")
-			}
-			if errors.Is(err, domain.ErrAccountFrozen) {
-				operationStatus = opStatusAccountFrozen
-				return nil, status.Errorf(codes.FailedPrecondition, "account is frozen")
-			}
-			if errors.Is(err, domain.ErrAccountClosed) {
-				operationStatus = opStatusAccountClosed
-				return nil, status.Errorf(codes.FailedPrecondition, "account is closed")
-			}
-			operationStatus = opStatusWithdrawalFailed
-			return nil, status.Errorf(codes.InvalidArgument, "withdrawal failed: %v", err)
+	// Prepare account for debit transaction (validates status, funds, increments version)
+	account, err = account.PrepareForDebit(amount)
+	if err != nil {
+		if errors.Is(err, domain.ErrInsufficientFunds) {
+			operationStatus = opStatusInsufficientFunds
+			availCents, _ := account.AvailableBalance().ToMinorUnits()
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"insufficient funds: requested %d cents, available %d cents", amountCents, availCents)
 		}
-
-		s.logger.Info("executing withdrawal without transaction orchestration (clients not configured)",
-			"account_id", account.AccountID(),
-			"transaction_id", transactionID)
-
-		if err := s.repo.Save(ctx, account); err != nil {
-			operationStatus = opStatusSaveFailed
-			return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
+		if errors.Is(err, domain.ErrAccountFrozen) {
+			operationStatus = opStatusAccountFrozen
+			return nil, status.Errorf(codes.FailedPrecondition, "account is frozen")
 		}
-
-		// Record business metrics
-		caobservability.RecordWithdrawal(string(account.Balance().Currency()))
-		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
-
-		resp = &pb.ExecuteWithdrawalResponse{
-			AccountId:        account.AccountID(),
-			TransactionId:    transactionID,
-			NewBalance:       toMoneyAmount(account.Balance()),
-			AvailableBalance: toMoneyAmount(account.AvailableBalance()),
-			Status:           pb.WithdrawalStatus_WITHDRAWAL_STATUS_COMPLETED,
-			Timestamp:        timestamppb.Now(),
+		if errors.Is(err, domain.ErrAccountClosed) {
+			operationStatus = opStatusAccountClosed
+			return nil, status.Errorf(codes.FailedPrecondition, "account is closed")
 		}
-	} else {
-		// Position Keeping is configured - record DEBIT transaction there.
-		// Balance is NOT mutated locally; Position Keeping is the source of truth.
-
-		// Prepare account for debit transaction (validates status, funds, increments version)
-		account, err = account.PrepareForDebit(amount)
-		if err != nil {
-			if errors.Is(err, domain.ErrInsufficientFunds) {
-				operationStatus = opStatusInsufficientFunds
-				availCents, _ := account.AvailableBalance().ToMinorUnits()
-				return nil, status.Errorf(codes.FailedPrecondition,
-					"insufficient funds: requested %d cents, available %d cents", amountCents, availCents)
-			}
-			if errors.Is(err, domain.ErrAccountFrozen) {
-				operationStatus = opStatusAccountFrozen
-				return nil, status.Errorf(codes.FailedPrecondition, "account is frozen")
-			}
-			if errors.Is(err, domain.ErrAccountClosed) {
-				operationStatus = opStatusAccountClosed
-				return nil, status.Errorf(codes.FailedPrecondition, "account is closed")
-			}
-			operationStatus = opStatusWithdrawalFailed
-			return nil, status.Errorf(codes.InvalidArgument, "withdrawal failed: %v", err)
-		}
-
-		// Orchestrate transaction with saga pattern using dedicated orchestrator
-		resp, err = s.withdrawalOrchestrator.Orchestrate(ctx, account, amount, transactionID)
-		if err != nil {
-			operationStatus = opStatusSagaFailed
-			return nil, err
-		}
-
-		// After saga completes, query Position Keeping for the new balance
-		account, err = s.hydrateAccountWithBalance(ctx, account)
-		if err != nil {
-			s.logger.Error("failed to retrieve updated balance from Position Keeping after withdrawal",
-				"account_id", account.AccountID(),
-				"transaction_id", transactionID,
-				"error", err)
-			// Transaction succeeded but balance fetch failed - return response with stale balance
-			// The withdrawal was recorded in Position Keeping, client can retry balance query
-		}
-
-		// Update response with balance from Position Keeping
-		resp.NewBalance = toMoneyAmount(account.Balance())
-		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
-
-		// Record business metrics on success
-		caobservability.RecordWithdrawal(string(account.Balance().Currency()))
-		caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
+		operationStatus = opStatusWithdrawalFailed
+		return nil, status.Errorf(codes.InvalidArgument, "withdrawal failed: %v", err)
 	}
+
+	// Orchestrate transaction with saga pattern - Position Keeping is the source of truth for balance
+	resp, err := s.withdrawalOrchestrator.Orchestrate(ctx, account, amount, transactionID)
+	if err != nil {
+		operationStatus = opStatusSagaFailed
+		return nil, err
+	}
+
+	// After saga completes, query Position Keeping for the new balance
+	account, err = s.hydrateAccountWithBalance(ctx, account)
+	if err != nil {
+		s.logger.Error("failed to retrieve updated balance from Position Keeping after withdrawal",
+			"account_id", account.AccountID(),
+			"transaction_id", transactionID,
+			"error", err)
+		// Transaction succeeded but balance fetch failed - return response with stale balance
+		// The withdrawal was recorded in Position Keeping, client can retry balance query
+	}
+
+	// Update response with balance from Position Keeping
+	resp.NewBalance = toMoneyAmount(account.Balance())
+	resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
+
+	// Record business metrics on success
+	caobservability.RecordWithdrawal(string(account.Balance().Currency()))
+	caobservability.RecordBalance(safeMinorUnits(account.Balance()), string(account.Balance().Currency()))
 
 	// Mark pending withdrawal as completed (if executing a pending withdrawal)
 	// TODO(tm:tech-debt-cleanup.33): This represents an eventual consistency tradeoff - if the

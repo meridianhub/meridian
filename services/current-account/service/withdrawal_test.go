@@ -907,41 +907,6 @@ func TestExecuteWithdrawal_IdempotencyCleanupOnFailure(t *testing.T) {
 }
 
 // =============================================================================
-// Backward Compatibility Tests
-// =============================================================================
-
-// TestExecuteWithdrawal_WithoutClients_BackwardCompatibility verifies that
-// withdrawal works without external clients (backward compatibility mode).
-func TestExecuteWithdrawal_WithoutClients_BackwardCompatibility(t *testing.T) {
-	db, ctx, cleanup := setupIntegrationTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	_ = createTestAccountWithBalance(t, ctx, repo, "ACC-WTH-COMPAT", 100000)
-
-	// Create service with Position Keeping (balance no longer stored locally)
-	svc := mustNewServiceWithPositionKeeping(t, repo, nil, map[string]int64{
-		"ACC-WTH-COMPAT": 100000, // $1000
-	})
-
-	req := createTestWithdrawalRequest("ACC-WTH-COMPAT", 200, 0)
-	resp, err := svc.ExecuteWithdrawal(ctx, req)
-
-	require.NoError(t, err)
-	assert.Equal(t, "ACC-WTH-COMPAT", resp.AccountId)
-	assert.NotEmpty(t, resp.TransactionId)
-	assert.Equal(t, pb.WithdrawalStatus_WITHDRAWAL_STATUS_COMPLETED, resp.Status)
-
-	// Verify balance update in response: $1000 - $200 = $800
-	// Note: Balance is now managed by Position Keeping service
-	assert.Equal(t, int64(800), resp.NewBalance.Amount.Units)
-
-	// Verify account exists (balance not checked - Position Keeping is authoritative)
-	_, err = repo.FindByID(ctx, "ACC-WTH-COMPAT")
-	require.NoError(t, err)
-}
-
-// =============================================================================
 // Validation Tests
 // =============================================================================
 
