@@ -30,7 +30,16 @@ type CurrentAccountEntity struct {
 	PartyID               uuid.UUID `gorm:"column:party_id;type:uuid;not null;index"`
 	OverdraftLimit        int64     `gorm:"column:overdraft_limit;not null;default:0"` // in smallest currency unit
 	OverdraftRate         float64   `gorm:"column:overdraft_rate;type:numeric(5,4);not null;default:0"`
-	// Note: Balance fields removed - balance computation delegated to Position Keeping service per BIAN architecture
+
+	// Balance fields - NOT persisted to database (gorm:"-"), but kept for in-memory use.
+	// Balance computation is delegated to Position Keeping service per BIAN architecture.
+	// These fields are populated by the repository from domain model for backward compatibility.
+	// The actual balance comes from Position Keeping service at runtime; these are placeholders
+	// that allow existing code to work during the transition period.
+	Balance          int64      `gorm:"-"` // in smallest currency unit (pence) - NOT PERSISTED
+	AvailableBalance int64      `gorm:"-"` // after pending transactions - NOT PERSISTED
+	BalanceUpdatedAt *time.Time `gorm:"-"` // NOT PERSISTED
+
 	OpenedAt     *time.Time `gorm:"column:opened_at;index"`
 	ClosedAt     *time.Time `gorm:"column:closed_at;index"`
 	FreezeReason *string    `gorm:"column:freeze_reason;type:varchar(1000)"` // Reason when account is frozen

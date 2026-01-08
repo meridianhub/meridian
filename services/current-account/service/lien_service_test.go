@@ -105,9 +105,12 @@ func TestInitiateLien_Success(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with account balance (£1000 = 100000 cents)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-001": 100000,
+	})
 
-	// Create account with £1000 balance
+	// Create account (balance comes from Position Keeping mock, not DB)
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-001", 100000) // 100000 cents = £1000
 
 	req := &pb.InitiateLienRequest{
@@ -139,7 +142,10 @@ func TestInitiateLien_InsufficientFunds(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £100 balance (10000 cents)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-002": 10000,
+	})
 
 	// Create account with £100 balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-002", 10000) // £100
@@ -197,7 +203,10 @@ func TestInitiateLien_CurrencyMismatch(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-003": 100000,
+	})
 
 	// Create GBP account
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-003", 100000)
@@ -228,7 +237,10 @@ func TestInitiateLien_Idempotent(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-IDEMP": 100000,
+	})
 
 	// Create account with £1000 balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP", 100000)
@@ -265,7 +277,10 @@ func TestExecuteLien_Success(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-004": 100000,
+	})
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-004", 100000)
@@ -297,7 +312,10 @@ func TestExecuteLien_Idempotent(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-005": 100000,
+	})
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-005", 100000)
@@ -348,7 +366,10 @@ func TestTerminateLien_Success(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-006": 100000,
+	})
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-006", 100000)
@@ -380,7 +401,10 @@ func TestTerminateLien_Idempotent(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-007": 100000,
+	})
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-007", 100000)
@@ -513,7 +537,10 @@ func TestMultipleLiens_AvailableBalanceCalculation(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-LIEN-MULTI": 100000,
+	})
 
 	// Create account with £1000 balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-MULTI", 100000)
@@ -787,7 +814,9 @@ func TestExecuteLien_IdempotencyProceedsWithoutKey(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
 	mockIdemp := newLienMockIdempotencyService()
-	svc := mustNewServiceWithIdempotency(t, repo, lienRepo, mockIdemp)
+	svc := mustNewServiceWithIdempotencyAndPositionKeeping(t, repo, lienRepo, mockIdemp, map[string]int64{
+		"ACC-LIEN-IDEMP-003": 100000, // £1000
+	})
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-LIEN-IDEMP-003", 100000)
@@ -850,7 +879,10 @@ func TestInitiateLien_WithBucketID(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-BUCKET-001": 100000,
+	})
 
 	// Create account with balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-BUCKET-001", 100000) // £1000
@@ -887,7 +919,10 @@ func TestInitiateLien_WithoutBucketID_DefaultsToEmptyString(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-BUCKET-002": 100000,
+	})
 
 	// Create account with balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-BUCKET-002", 100000) // £1000
@@ -917,7 +952,10 @@ func TestInitiateLien_MultipleBuckets_IndependentLiens(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-BUCKET-003": 100000,
+	})
 
 	// Create account with £1000 balance
 	createTestAccountWithBalance(t, ctx, repo, "ACC-BUCKET-003", 100000) // £1000
@@ -1013,7 +1051,10 @@ func TestGetActiveAmountBlocks_FiltersOutExecutedLiens(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance (needed for ExecuteLien response)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-BLOCKS-002": 100000,
+	})
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-BLOCKS-002", 100000)
@@ -1056,7 +1097,10 @@ func TestGetActiveAmountBlocks_FiltersOutTerminatedLiens(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewService(t, repo, lienRepo)
+	// Configure Position Keeping mock with £1000 balance (needed for TerminateLien response)
+	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
+		"ACC-BLOCKS-003": 100000,
+	})
 
 	// Create account with £1000 balance
 	account := createTestAccountWithBalance(t, ctx, repo, "ACC-BLOCKS-003", 100000)
