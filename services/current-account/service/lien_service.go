@@ -110,6 +110,16 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		return nil, status.Error(codes.InvalidArgument, "lien amount must be positive")
 	}
 
+	// Fetch balance from Position Keeping BEFORE entering transaction to avoid
+	// holding database locks during external service calls (deadlock prevention).
+	// We'll re-validate sufficient funds inside the transaction with fresh lien totals.
+	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId, domain.Money{})
+	if err != nil {
+		operationStatus = opStatusRetrieveFailed
+		s.logger.Error("failed to prefetch balance from Position Keeping", "account_id", req.AccountId, "error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+	}
+
 	// Use a transaction with pessimistic locking to prevent race conditions.
 	// Without FOR UPDATE, concurrent InitiateLien calls could both check available
 	// balance, see sufficient funds, and both create liens - resulting in over-reservation.
@@ -139,20 +149,15 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 			return errTxCurrencyMismatch
 		}
 
-		// Calculate available balance (within the lock)
+		// Calculate available balance using pre-fetched balance (no external call inside tx)
 		activeLiensTotal, err := txLienRepo.SumActiveAmountByAccountID(ctx, account.ID())
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxSumLiensFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
-		// Available = Current Balance - Active Liens
-		// Balance is fetched from Position Keeping service per BIAN architecture.
-		// Falls back to account.Balance() for backward compatibility during migration.
-		balanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId, account.Balance())
-		if err != nil {
-			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
-		}
-		availableBalance = balanceCents - activeLiensTotal
+		// Available = Pre-fetched Balance - Active Liens
+		// Balance was fetched from Position Keeping before entering transaction.
+		availableBalance = prefetchedBalanceCents - activeLiensTotal
 
 		// Check sufficient funds
 		lienCents, err := lienAmount.ToMinorUnits()
@@ -347,6 +352,24 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		return resp, nil
 	}
 
+	// Prefetch account and balance from Position Keeping BEFORE entering transaction
+	// to avoid holding database locks during external service calls (deadlock prevention).
+	prefetchAccount, err := s.repo.FindByUUID(ctx, lien.AccountID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			operationStatus = opStatusAccountNotFound
+			return nil, status.Errorf(codes.NotFound, "account not found for lien: %s", lien.AccountID)
+		}
+		operationStatus = opStatusRetrieveAccountFailed
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, prefetchAccount.AccountID(), prefetchAccount.Balance())
+	if err != nil {
+		operationStatus = opStatusRetrieveFailed
+		s.logger.Error("failed to prefetch balance from Position Keeping", "account_id", prefetchAccount.AccountID(), "error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+	}
+
 	// Execute atomically in a transaction with pessimistic locking to prevent race conditions.
 	// We lock both the lien and account to prevent concurrent execute/terminate operations.
 	var account *domain.CurrentAccount
@@ -377,9 +400,9 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 			return fmt.Errorf("%w: %v", errTxSaveAccount, txErr) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
-		// Hydrate account with balance from Position Keeping.
-		// Balance is no longer persisted - it comes from Position Keeping service.
-		accountResult, txErr = s.hydrateAccountWithBalance(ctx, accountResult)
+		// Reconstruct account with pre-fetched balance (no external call inside tx)
+		// Balance was fetched from Position Keeping before entering transaction.
+		accountResult, txErr = s.hydrateAccountWithPrefetchedBalance(accountResult, prefetchedBalanceCents)
 		if txErr != nil {
 			return fmt.Errorf("%w: %v", errTxDomainError, txErr) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
@@ -823,6 +846,49 @@ func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.
 		overdraftLimitCents, _ := account.OverdraftLimit().ToMinorUnits()
 		if overdraftLimitCents > 0 {
 			// Add overdraft to available balance
+			availableWithOverdraft, err := availableBalance.Add(account.OverdraftLimit())
+			if err == nil {
+				availableBalance = availableWithOverdraft
+			}
+		}
+	}
+
+	// Use builder to reconstruct account with new balance
+	return domain.NewCurrentAccountBuilder().
+		WithID(account.ID()).
+		WithAccountID(account.AccountID()).
+		WithAccountIdentification(account.AccountIdentification()).
+		WithPartyID(account.PartyID()).
+		WithBalance(balance).
+		WithAvailableBalance(availableBalance).
+		WithStatus(account.Status()).
+		WithFreezeReason(account.FreezeReason()).
+		WithStatusHistory(account.StatusHistory()).
+		WithOverdraftLimit(account.OverdraftLimit()).
+		WithOverdraftEnabled(account.OverdraftEnabled()).
+		WithOverdraftRate(account.OverdraftRate()).
+		WithVersion(account.Version()).
+		WithCreatedAt(account.CreatedAt()).
+		WithUpdatedAt(account.UpdatedAt()).
+		Build(), nil
+}
+
+// hydrateAccountWithPrefetchedBalance reconstructs account with a pre-fetched balance.
+// Use this inside transactions to avoid making external service calls while holding database locks.
+// The balanceCents parameter should be fetched from Position Keeping BEFORE entering the transaction.
+func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAccount, balanceCents int64) (domain.CurrentAccount, error) {
+	// Create balance Money object
+	balance, err := domain.NewMoney(string(account.Balance().Currency()), balanceCents)
+	if err != nil {
+		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
+	}
+
+	// For available balance, just use balance (no lien subtraction needed for ExecuteLien
+	// since the lien will be executed immediately - the reservation converts to actual debit)
+	availableBalance := balance
+	if account.OverdraftEnabled() {
+		overdraftLimitCents, _ := account.OverdraftLimit().ToMinorUnits()
+		if overdraftLimitCents > 0 {
 			availableWithOverdraft, err := availableBalance.Add(account.OverdraftLimit())
 			if err == nil {
 				availableBalance = availableWithOverdraft
