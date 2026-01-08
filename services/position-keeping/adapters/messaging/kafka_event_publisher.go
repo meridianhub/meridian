@@ -17,8 +17,9 @@ type protoPublisher interface {
 	// PublishWithTenant publishes a protobuf message with tenant context
 	// extracted from ctx and injected as a Kafka header (x-tenant-id).
 	PublishWithTenant(ctx context.Context, topic, key string, msg proto.Message) error
-	// Flush waits for outstanding messages to be delivered
-	Flush(timeoutMs int) int
+	// FlushWithTimeout waits for outstanding messages to be delivered with timeout.
+	// Returns number of messages still in flight (0 = all delivered).
+	FlushWithTimeout(timeoutMs int) int
 	// Close closes the producer
 	Close()
 }
@@ -172,8 +173,8 @@ func (p *KafkaEventPublisher) Close() {
 	p.producer.Close()
 }
 
-// Flush waits for all outstanding messages to be delivered.
+// FlushWithTimeout waits for all outstanding messages to be delivered.
 // Returns the number of messages still in flight after the timeout.
-func (p *KafkaEventPublisher) Flush(timeoutMs int) int {
-	return p.producer.Flush(timeoutMs)
+func (p *KafkaEventPublisher) FlushWithTimeout(timeoutMs int) int {
+	return p.producer.FlushWithTimeout(timeoutMs)
 }

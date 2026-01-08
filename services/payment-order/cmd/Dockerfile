@@ -1,15 +1,14 @@
 # Payment-Order Service - Multi-Stage Dockerfile
 # Optimized for security, size, and performance
-# Note: Requires CGO for confluent-kafka-go (librdkafka) - uses Debian for glibc
+# Uses distroless base image (~2MB) enabled by pure-Go franz-go Kafka client
 
-# Build stage - Debian for glibc compatibility with librdkafka
+# Build stage
 FROM golang:1.25-bookworm AS builder
 
-# Install build dependencies including librdkafka for Kafka support
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
-    librdkafka-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -22,13 +21,13 @@ RUN go mod download && go mod verify
 # Copy source code
 COPY . .
 
-# Build binary with CGO enabled for librdkafka
+# Build static binary (no CGO required - using franz-go pure Go Kafka client)
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 
 ARG TARGETARCH
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH:-arm64} go build \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -ldflags="-w -s -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
     -o payment-order \
     ./services/payment-order/cmd
@@ -36,23 +35,13 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH:-arm64} go build \
 # Verify the binary exists and is executable
 RUN test -x payment-order && echo "Binary built successfully"
 
-# Runtime stage - Debian slim for glibc + librdkafka
-FROM debian:bookworm-slim
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    librdkafka1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user for security
-RUN groupadd -g 65532 nonroot && \
-    useradd -u 65532 -g nonroot -s /bin/false nonroot
+# Runtime stage - distroless for minimal attack surface (~2MB base)
+FROM gcr.io/distroless/static-debian12
 
 # Copy binary from builder
 COPY --from=builder /build/payment-order /payment-order
 
-# Use non-root user
+# Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot
 
 # Expose gRPC port

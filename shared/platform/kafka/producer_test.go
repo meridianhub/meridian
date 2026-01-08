@@ -127,9 +127,9 @@ func TestProtoProducer_Flush(t *testing.T) {
 	defer producer.Close()
 
 	// Test flush with timeout
-	remaining := producer.Flush(1000)
+	remaining := producer.FlushWithTimeout(1000)
 	if remaining < 0 {
-		t.Errorf("Flush() returned negative value: %d", remaining)
+		t.Errorf("FlushWithTimeout() returned negative value: %d", remaining)
 	}
 }
 

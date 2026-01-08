@@ -7,15 +7,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 )
 
 var (
 	// ErrEmptyDLQTopic is returned when DLQ topic name is empty.
 	ErrEmptyDLQTopic = errors.New("DLQ topic cannot be empty")
-	// ErrNilDLQProducer is returned when DLQ producer is nil.
+	// ErrNilDLQProducer is returned when DLQ producer cannot be nil.
 	ErrNilDLQProducer = errors.New("DLQ producer cannot be nil")
+	// ErrNilRecord is returned when a nil record is passed to PublishFailedRecord.
+	ErrNilRecord = errors.New("record cannot be nil")
 )
 
 // DLQMetadata contains comprehensive metadata for messages sent to dead letter queue.
@@ -45,11 +47,11 @@ type DLQMetadata struct {
 	CausationID string
 }
 
-// ToKafkaHeaders converts DLQ metadata to Kafka message headers.
+// ToRecordHeaders converts DLQ metadata to Kafka record headers.
 // Headers use string encoding for compatibility and ease of debugging.
 // All timestamps are formatted as RFC3339 for standard parsing.
-func (m *DLQMetadata) ToKafkaHeaders() []kafka.Header {
-	headers := []kafka.Header{
+func (m *DLQMetadata) ToRecordHeaders() []kgo.RecordHeader {
+	headers := []kgo.RecordHeader{
 		{Key: "dlq.original_topic", Value: []byte(m.OriginalTopic)},
 		{Key: "dlq.original_partition", Value: []byte(fmt.Sprintf("%d", m.OriginalPartition))},
 		{Key: "dlq.original_offset", Value: []byte(fmt.Sprintf("%d", m.OriginalOffset))},
@@ -62,19 +64,19 @@ func (m *DLQMetadata) ToKafkaHeaders() []kafka.Header {
 
 	// Add optional fields if present
 	if m.ErrorStackTrace != "" {
-		headers = append(headers, kafka.Header{
+		headers = append(headers, kgo.RecordHeader{
 			Key:   "dlq.error_stack_trace",
 			Value: []byte(m.ErrorStackTrace),
 		})
 	}
 	if m.CorrelationID != "" {
-		headers = append(headers, kafka.Header{
+		headers = append(headers, kgo.RecordHeader{
 			Key:   "dlq.correlation_id",
 			Value: []byte(m.CorrelationID),
 		})
 	}
 	if m.CausationID != "" {
-		headers = append(headers, kafka.Header{
+		headers = append(headers, kgo.RecordHeader{
 			Key:   "dlq.causation_id",
 			Value: []byte(m.CausationID),
 		})
@@ -176,15 +178,15 @@ func NewDLQProducer(producer *ProtoProducer, config DLQConfig) (*DLQProducer, er
 	}, nil
 }
 
-// PublishFailedMessage sends a failed message to the dead letter queue with enriched metadata.
+// PublishFailedRecord sends a failed record to the dead letter queue with enriched metadata.
 // This method should be called after all retry attempts have been exhausted.
 //
-// The original message is preserved exactly as received, with metadata added as Kafka headers.
+// The original record is preserved exactly as received, with metadata added as Kafka headers.
 // This allows for debugging the original message and potential reprocessing.
 //
 // Parameters:
 // - ctx: Context for cancellation and timeout control
-// - originalMsg: The original Kafka message that failed processing
+// - originalRecord: The original Kafka record that failed processing
 // - err: The error that caused the failure
 // - retryCount: Number of times processing was attempted
 // - firstFailureTime: When the first processing attempt failed
@@ -193,22 +195,22 @@ func NewDLQProducer(producer *ProtoProducer, config DLQConfig) (*DLQProducer, er
 // - DLQ topic generation fails
 // - message publishing fails
 // - context is cancelled
-func (d *DLQProducer) PublishFailedMessage(
+func (d *DLQProducer) PublishFailedRecord(
 	ctx context.Context,
-	originalMsg *kafka.Message,
+	originalRecord *kgo.Record,
 	err error,
 	retryCount int32,
 	firstFailureTime time.Time,
 ) error {
-	if originalMsg == nil {
-		return ErrNilMessage
+	if originalRecord == nil {
+		return ErrNilRecord
 	}
-	if originalMsg.TopicPartition.Topic == nil {
+	if originalRecord.Topic == "" {
 		return ErrEmptyTopic
 	}
 
 	// Generate DLQ topic name
-	originalTopic := *originalMsg.TopicPartition.Topic
+	originalTopic := originalRecord.Topic
 	dlqTopic := d.config.DLQTopicName(originalTopic)
 
 	if dlqTopic == "" {
@@ -226,8 +228,8 @@ func (d *DLQProducer) PublishFailedMessage(
 	// Create comprehensive metadata
 	metadata := DLQMetadata{
 		OriginalTopic:     originalTopic,
-		OriginalPartition: originalMsg.TopicPartition.Partition,
-		OriginalOffset:    int64(originalMsg.TopicPartition.Offset),
+		OriginalPartition: originalRecord.Partition,
+		OriginalOffset:    originalRecord.Offset,
 		ErrorMessage:      errorMessage,
 		ErrorStackTrace:   errorStackTrace,
 		RetryCount:        retryCount,
@@ -236,8 +238,8 @@ func (d *DLQProducer) PublishFailedMessage(
 		ConsumerGroupID:   d.config.ConsumerGroupID,
 	}
 
-	// Extract correlation/causation IDs from original message headers if present
-	for _, header := range originalMsg.Headers {
+	// Extract correlation/causation IDs from original record headers if present
+	for _, header := range originalRecord.Headers {
 		switch header.Key {
 		case "correlation_id", "x-correlation-id":
 			metadata.CorrelationID = string(header.Value)
@@ -246,42 +248,24 @@ func (d *DLQProducer) PublishFailedMessage(
 		}
 	}
 
-	// Create Kafka message with enriched headers
-	dlqMsg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &dlqTopic, Partition: kafka.PartitionAny},
-		Key:            originalMsg.Key,
-		Value:          originalMsg.Value, // Preserve original message bytes exactly
-		Headers:        metadata.ToKafkaHeaders(),
-		Timestamp:      time.Now(),
+	// Create Kafka record with enriched headers
+	dlqRecord := &kgo.Record{
+		Topic:     dlqTopic,
+		Key:       originalRecord.Key,
+		Value:     originalRecord.Value, // Preserve original message bytes exactly
+		Headers:   metadata.ToRecordHeaders(),
+		Timestamp: time.Now(),
 	}
 
-	// Publish with delivery report channel
-	deliveryChan := make(chan kafka.Event, 1)
-	if err := d.producer.producer.Produce(dlqMsg, deliveryChan); err != nil {
-		return fmt.Errorf("failed to produce DLQ message: %w", err)
-	}
-
-	// Wait for delivery confirmation or context cancellation
-	select {
-	case e := <-deliveryChan:
-		m, ok := e.(*kafka.Message)
-		if !ok {
-			return fmt.Errorf("%w: %T", ErrUnexpectedEvent, e)
-		}
-		if m.TopicPartition.Error != nil {
-			return fmt.Errorf("DLQ delivery failed: %w", m.TopicPartition.Error)
-		}
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("DLQ publish cancelled: %w", ctx.Err())
-	}
+	// Publish synchronously and wait for confirmation
+	return d.producer.ProduceRecord(ctx, dlqRecord)
 }
 
 // PublishFailedProtoMessage sends a failed protobuf message to the dead letter queue.
 // This is a convenience method for cases where you have the deserialized proto message
 // and need to re-serialize it before sending to DLQ.
 //
-// Note: When possible, use PublishFailedMessage with the original Kafka message bytes
+// Note: When possible, use PublishFailedRecord with the original Kafka record bytes
 // to preserve the exact message that failed processing.
 //
 // Parameters:
@@ -316,18 +300,16 @@ func (d *DLQProducer) PublishFailedProtoMessage(
 		return fmt.Errorf("failed to marshal protobuf message for DLQ: %w", marshalErr)
 	}
 
-	// Create pseudo Kafka message for DLQ processing
-	originalMsg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic:     &originalTopic,
-			Partition: kafka.PartitionAny,
-			Offset:    kafka.OffsetInvalid,
-		},
-		Key:   []byte(key),
-		Value: data,
+	// Create pseudo Kafka record for DLQ processing
+	originalRecord := &kgo.Record{
+		Topic:     originalTopic,
+		Partition: -1, // Unknown partition
+		Offset:    -1, // Unknown offset
+		Key:       []byte(key),
+		Value:     data,
 	}
 
-	return d.PublishFailedMessage(ctx, originalMsg, err, retryCount, firstFailureTime)
+	return d.PublishFailedRecord(ctx, originalRecord, err, retryCount, firstFailureTime)
 }
 
 // Close closes the underlying producer.
@@ -336,8 +318,14 @@ func (d *DLQProducer) Close() {
 	d.producer.Close()
 }
 
-// Flush flushes the underlying producer.
+// Flush flushes the underlying producer using context with timeout.
 // This is a convenience method to ensure DLQ messages are delivered before shutdown.
-func (d *DLQProducer) Flush(timeoutMs int) int {
-	return d.producer.Flush(timeoutMs)
+func (d *DLQProducer) Flush(ctx context.Context) error {
+	return d.producer.Flush(ctx)
+}
+
+// FlushWithTimeout flushes the underlying producer with a timeout.
+// Returns the number of messages still in flight (0 = all delivered).
+func (d *DLQProducer) FlushWithTimeout(timeoutMs int) int {
+	return d.producer.FlushWithTimeout(timeoutMs)
 }

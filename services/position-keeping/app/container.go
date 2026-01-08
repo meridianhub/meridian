@@ -360,7 +360,7 @@ func (c *Container) Close(ctx context.Context) error {
 
 	// Close Kafka producer (flush outstanding messages first)
 	if c.kafkaProducer != nil {
-		remaining := c.kafkaProducer.Flush(5000) // 5 second timeout
+		remaining := c.kafkaProducer.FlushWithTimeout(5000) // 5 second timeout
 		if remaining > 0 {
 			c.Logger.Warn("kafka producer flush incomplete", "remaining_messages", remaining)
 		}

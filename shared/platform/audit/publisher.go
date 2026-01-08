@@ -123,7 +123,7 @@ func (p *Publisher) Close() error {
 	}
 
 	// Flush outstanding messages (wait up to 5 seconds)
-	remaining := p.producer.Flush(5000)
+	remaining := p.producer.FlushWithTimeout(5000)
 	p.producer.Close()
 
 	if remaining > 0 {

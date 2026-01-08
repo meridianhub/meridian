@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/google/uuid"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
@@ -27,6 +26,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
@@ -126,17 +126,15 @@ func run(logger *slog.Logger) error {
 	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
 
 	// Initialize Kafka producer for outbox worker (optional - depends on KAFKA_BOOTSTRAP_SERVERS)
-	var kafkaProducer *kafka.Producer
+	var kafkaProducer *kafka.ProtoProducer
 	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
 	if bootstrapServers != "" {
-		producer, err := kafka.NewProducer(&kafka.ConfigMap{
-			"bootstrap.servers": bootstrapServers,
-			"client.id":         "financial-accounting-outbox-worker",
-			"acks":              "all",
-			"retries":           3,
-			"compression.type":  "snappy",
-			"linger.ms":         10,
-			"batch.size":        16384,
+		producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
+			BootstrapServers: bootstrapServers,
+			ClientID:         "financial-accounting-outbox-worker",
+			Acks:             "all",
+			Retries:          3,
+			Compression:      "snappy",
 		})
 		if err != nil {
 			logger.Warn("failed to create Kafka producer for outbox worker",
@@ -401,10 +399,11 @@ func run(logger *slog.Logger) error {
 
 	// Close Kafka producer after outbox worker stops
 	if kafkaProducer != nil {
-		logger.Info("flushing Kafka producer...")
-		// Flush pending messages with 5 second timeout to ensure delivery
-		kafkaProducer.Flush(5000) // 5 seconds in milliseconds
-		logger.Info("closing Kafka producer...")
+		logger.Info("flushing and closing Kafka producer...")
+		// FlushWithTimeout ensures pending messages are delivered before closing
+		if remaining := kafkaProducer.FlushWithTimeout(5000); remaining > 0 {
+			logger.Warn("some messages not delivered before close", "remaining", remaining)
+		}
 		kafkaProducer.Close()
 		logger.Info("Kafka producer closed")
 	}

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -43,7 +43,7 @@ func skipIfKafkaUnavailable(t *testing.T) {
 	_ = conn.Close()
 }
 
-func TestDLQMetadata_ToKafkaHeaders(t *testing.T) {
+func TestDLQMetadata_ToRecordHeaders(t *testing.T) {
 	now := time.Now()
 	metadata := DLQMetadata{
 		OriginalTopic:     "test-topic",
@@ -59,7 +59,7 @@ func TestDLQMetadata_ToKafkaHeaders(t *testing.T) {
 		CausationID:       "cause-456",
 	}
 
-	headers := metadata.ToKafkaHeaders()
+	headers := metadata.ToRecordHeaders()
 
 	// Verify required headers are present
 	requiredHeaders := map[string]bool{
@@ -89,7 +89,7 @@ func TestDLQMetadata_ToKafkaHeaders(t *testing.T) {
 	}
 }
 
-func TestDLQMetadata_ToKafkaHeaders_OptionalFields(t *testing.T) {
+func TestDLQMetadata_ToRecordHeaders_OptionalFields(t *testing.T) {
 	now := time.Now()
 	metadata := DLQMetadata{
 		OriginalTopic:     "test-topic",
@@ -103,7 +103,7 @@ func TestDLQMetadata_ToKafkaHeaders_OptionalFields(t *testing.T) {
 		// Optional fields omitted
 	}
 
-	headers := metadata.ToKafkaHeaders()
+	headers := metadata.ToRecordHeaders()
 
 	// Verify optional headers are NOT present when empty
 	for _, header := range headers {
@@ -373,7 +373,7 @@ func TestNewDLQProducer(t *testing.T) {
 	defer dlqProducer.Close()
 }
 
-func TestDLQProducer_PublishFailedMessage_Validation(t *testing.T) {
+func TestDLQProducer_PublishFailedRecord_Validation(t *testing.T) {
 	// Skip Kafka connection tests in short mode (CI)
 	if testing.Short() {
 		t.Skip("Skipping Kafka integration test in short mode")
@@ -400,18 +400,18 @@ func TestDLQProducer_PublishFailedMessage_Validation(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		msg         *kafka.Message
+		record      *kgo.Record
 		expectedErr error
 	}{
 		{
-			name:        "nil message",
-			msg:         nil,
-			expectedErr: ErrNilMessage,
+			name:        "nil record",
+			record:      nil,
+			expectedErr: ErrNilRecord,
 		},
 		{
-			name: "nil topic",
-			msg: &kafka.Message{
-				TopicPartition: kafka.TopicPartition{Topic: nil},
+			name: "empty topic",
+			record: &kgo.Record{
+				Topic: "",
 			},
 			expectedErr: ErrEmptyTopic,
 		},
@@ -419,7 +419,7 @@ func TestDLQProducer_PublishFailedMessage_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := dlqProducer.PublishFailedMessage(ctx, tt.msg, errTestProcessing, 3, now)
+			err := dlqProducer.PublishFailedRecord(ctx, tt.record, errTestProcessing, 3, now)
 			if !errors.Is(err, tt.expectedErr) {
 				t.Errorf("Expected error %v, got %v", tt.expectedErr, err)
 			}
@@ -481,9 +481,9 @@ func TestDLQProducer_PublishFailedProtoMessage_Validation(t *testing.T) {
 	}
 }
 
-// TestDLQProducer_PublishFailedMessage_Integration tests actual DLQ message publishing.
+// TestDLQProducer_PublishFailedRecord_Integration tests actual DLQ record publishing.
 // This test requires a running Kafka broker.
-func TestDLQProducer_PublishFailedMessage_Integration(t *testing.T) {
+func TestDLQProducer_PublishFailedRecord_Integration(t *testing.T) {
 	skipIfKafkaUnavailable(t)
 
 	// Setup
@@ -503,17 +503,14 @@ func TestDLQProducer_PublishFailedMessage_Integration(t *testing.T) {
 	}
 	defer dlqProducer.Close()
 
-	// Create test message
-	topic := "test-original-topic"
-	originalMsg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic:     &topic,
-			Partition: 0,
-			Offset:    100,
-		},
-		Key:   []byte("test-key"),
-		Value: []byte("test-value"),
-		Headers: []kafka.Header{
+	// Create test record using franz-go types
+	originalRecord := &kgo.Record{
+		Topic:     "test-original-topic",
+		Partition: 0,
+		Offset:    100,
+		Key:       []byte("test-key"),
+		Value:     []byte("test-value"),
+		Headers: []kgo.RecordHeader{
 			{Key: "correlation_id", Value: []byte("corr-123")},
 			{Key: "causation_id", Value: []byte("cause-456")},
 		},
@@ -525,15 +522,16 @@ func TestDLQProducer_PublishFailedMessage_Integration(t *testing.T) {
 	defer cancel()
 
 	// Publish to DLQ
-	err = dlqProducer.PublishFailedMessage(ctx, originalMsg, errTestFailure, 3, firstFailureTime)
+	err = dlqProducer.PublishFailedRecord(ctx, originalRecord, errTestFailure, 3, firstFailureTime)
 	if err != nil {
 		t.Fatalf("Failed to publish to DLQ: %v", err)
 	}
 
-	// Flush to ensure message is delivered
-	remaining := dlqProducer.Flush(5000)
-	if remaining > 0 {
-		t.Errorf("Failed to flush all messages, %d remaining", remaining)
+	// Flush to ensure record is delivered
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer flushCancel()
+	if err := dlqProducer.Flush(flushCtx); err != nil {
+		t.Errorf("Failed to flush: %v", err)
 	}
 }
 
@@ -581,8 +579,9 @@ func TestDLQProducer_PublishFailedProtoMessage_Integration(t *testing.T) {
 	}
 
 	// Flush to ensure message is delivered
-	remaining := dlqProducer.Flush(5000)
-	if remaining > 0 {
-		t.Errorf("Failed to flush all messages, %d remaining", remaining)
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer flushCancel()
+	if err := dlqProducer.Flush(flushCtx); err != nil {
+		t.Errorf("Failed to flush: %v", err)
 	}
 }
