@@ -53,6 +53,8 @@ type TopicConfig struct {
 	TransactionCancelledTopic string
 	// BulkTransactionCapturedTopic is the topic for bulk transaction captured events
 	BulkTransactionCapturedTopic string
+	// OpeningBalanceRecordedTopic is the topic for opening balance recorded events
+	OpeningBalanceRecordedTopic string
 }
 
 // DefaultTopicConfig returns the default topic configuration for position keeping events.
@@ -66,6 +68,7 @@ func DefaultTopicConfig() TopicConfig {
 		TransactionFailedTopic:       "position-keeping.transaction-failed.v1",
 		TransactionCancelledTopic:    "position-keeping.transaction-cancelled.v1",
 		BulkTransactionCapturedTopic: "position-keeping.bulk-transaction-captured.v1",
+		OpeningBalanceRecordedTopic:  "position-keeping.opening-balance-recorded.v1",
 	}
 }
 
@@ -96,6 +99,7 @@ func NewKafkaEventPublisher(producer protoPublisher, topicConfig TopicConfig) (*
 		"position_keeping.transaction_failed.v1":        topicConfig.TransactionFailedTopic,
 		"position_keeping.transaction_cancelled.v1":     topicConfig.TransactionCancelledTopic,
 		"position_keeping.bulk_transaction_captured.v1": topicConfig.BulkTransactionCapturedTopic,
+		"position_keeping.opening_balance_recorded.v1":  topicConfig.OpeningBalanceRecordedTopic,
 	}
 
 	return &KafkaEventPublisher{
