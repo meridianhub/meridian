@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -308,5 +309,74 @@ func TestResilientClientAccessors(t *testing.T) {
 		if client.Logger() == nil {
 			t.Error("expected non-nil logger")
 		}
+	})
+}
+
+func TestResilientClientOnStateChangeCallback(t *testing.T) {
+	t.Run("OnStateChange callback is called on state transitions", func(t *testing.T) {
+		var stateChanges []string
+		var callbackInvoked int32
+
+		config := ResilientClientConfig{
+			CircuitBreakerName:     "callback-test",
+			CircuitBreakerTimeout:  100 * time.Millisecond, // Quick timeout for test
+			CircuitBreakerInterval: 60 * time.Second,
+			MaxRequests:            1,
+			FailureThreshold:       3, // Trip after 3 consecutive failures
+			MaxRetries:             0, // No retries to speed up test
+			InitialInterval:        1 * time.Millisecond,
+			OnStateChange: func(_ string, from, to gobreaker.State) {
+				atomic.AddInt32(&callbackInvoked, 1)
+				stateChanges = append(stateChanges, from.String()+"->"+to.String())
+			},
+		}
+		client := NewResilientClient(config)
+		ctx := context.Background()
+
+		// Cause failures to trip the circuit breaker
+		for i := 0; i < 5; i++ {
+			_, _ = ExecuteWithResilienceNoRetry(ctx, client, "fail-op", func() (string, error) {
+				return "", errTestFailure
+			})
+		}
+
+		// Verify callback was invoked (circuit should have transitioned to open)
+		if callbackInvoked == 0 {
+			t.Error("expected OnStateChange callback to be invoked")
+		}
+
+		// Verify the state change was recorded
+		found := false
+		for _, change := range stateChanges {
+			if change == "closed->open" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected closed->open transition, got changes: %v", stateChanges)
+		}
+	})
+
+	t.Run("nil OnStateChange callback is handled gracefully", func(_ *testing.T) {
+		config := ResilientClientConfig{
+			CircuitBreakerName:     "nil-callback-test",
+			CircuitBreakerTimeout:  100 * time.Millisecond,
+			CircuitBreakerInterval: 60 * time.Second,
+			MaxRequests:            1,
+			FailureThreshold:       3,
+			MaxRetries:             0,
+			OnStateChange:          nil, // No callback
+		}
+		client := NewResilientClient(config)
+		ctx := context.Background()
+
+		// This should not panic even with nil callback
+		for i := 0; i < 5; i++ {
+			_, _ = ExecuteWithResilienceNoRetry(ctx, client, "no-callback-op", func() (string, error) {
+				return "", errTestFailure
+			})
+		}
+		// Test passes if no panic occurs
 	})
 }

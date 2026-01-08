@@ -13,6 +13,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/config"
+	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/services/current-account/service"
 	finacctclient "github.com/meridianhub/meridian/services/financial-accounting/client"
 	partyclient "github.com/meridianhub/meridian/services/party/client"
@@ -24,6 +25,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
+	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -286,6 +288,10 @@ func createServiceWithClients(
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,
 			CircuitBreakerName: "position-keeping",
+			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+				caobservability.RecordCircuitBreakerState(name, gobreakerStateToMetricState(to))
+				caobservability.RecordCircuitBreakerStateChange(name, from.String(), to.String())
+			},
 		},
 	})
 	if err != nil {
@@ -303,6 +309,10 @@ func createServiceWithClients(
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,
 			CircuitBreakerName: "financial-accounting",
+			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+				caobservability.RecordCircuitBreakerState(name, gobreakerStateToMetricState(to))
+				caobservability.RecordCircuitBreakerStateChange(name, from.String(), to.String())
+			},
 		},
 	})
 	if err != nil {
@@ -325,6 +335,10 @@ func createServiceWithClients(
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,
 			CircuitBreakerName: "party",
+			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+				caobservability.RecordCircuitBreakerState(name, gobreakerStateToMetricState(to))
+				caobservability.RecordCircuitBreakerStateChange(name, from.String(), to.String())
+			},
 		},
 	})
 	if err != nil {
@@ -377,3 +391,18 @@ func createServiceWithClients(
 }
 
 // PartyClientWrapper is defined in party_wrapper.go
+
+// gobreakerStateToMetricState converts a gobreaker.State to the observability CircuitBreakerState
+// for Prometheus metrics recording.
+func gobreakerStateToMetricState(state gobreaker.State) caobservability.CircuitBreakerState {
+	switch state {
+	case gobreaker.StateClosed:
+		return caobservability.CircuitBreakerStateClosed
+	case gobreaker.StateHalfOpen:
+		return caobservability.CircuitBreakerStateHalfOpen
+	case gobreaker.StateOpen:
+		return caobservability.CircuitBreakerStateOpen
+	default:
+		return caobservability.CircuitBreakerStateClosed
+	}
+}

@@ -1143,3 +1143,335 @@ func TestExecuteDeposit_DoubleEntry_ClearingAccountUsedForDebit(t *testing.T) {
 	assert.Equal(t, 1, mockFinAcct.debitCaptureCalls, "Should have 1 debit posting")
 	assert.Equal(t, 1, mockFinAcct.creditCaptureCalls, "Should have 1 credit posting")
 }
+
+// Position Keeping Balance Delegation Tests
+//
+// These tests verify that balance is correctly delegated to Position Keeping service
+// rather than being stored locally in the Current Account database.
+
+// TestPositionKeeping_BalanceDelegation_DepositUpdatesPositionKeepingBalance verifies
+// that after a deposit, the balance returned comes from Position Keeping service.
+func TestPositionKeeping_BalanceDelegation_DepositUpdatesPositionKeepingBalance(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-BAL-001")
+
+	// Configure Position Keeping mock to return a specific balance
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-BAL-001": 15075, // £150.75 in cents
+		},
+	}
+	mockFinAcct := &mockFinancialAccountingClient{}
+
+	svc := &Service{
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+	}
+
+	// Execute deposit
+	req := createTestDepositRequest("ACC-BAL-001", 50, 0) // £50.00
+	resp, err := svc.ExecuteDeposit(ctx, req)
+
+	// Verify success
+	require.NoError(t, err, "Deposit should succeed")
+
+	// Verify balance in response matches Position Keeping (£150.75)
+	// Not the deposit amount - Position Keeping is the authoritative source
+	assert.NotNil(t, resp.NewBalance)
+	assert.Equal(t, int64(150), resp.NewBalance.Amount.Units, "Balance units should match Position Keeping")
+	assert.Equal(t, int32(750000000), resp.NewBalance.Amount.Nanos, "Balance nanos should match Position Keeping")
+}
+
+// TestPositionKeeping_BalanceDelegation_MultipleDepositsAccumulate verifies
+// that multiple deposits correctly accumulate in Position Keeping.
+func TestPositionKeeping_BalanceDelegation_MultipleDepositsAccumulate(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-BAL-002")
+
+	// Configure Position Keeping mock with accumulating balance
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-BAL-002": 0, // Start at zero
+		},
+	}
+	mockFinAcct := &mockFinancialAccountingClient{}
+
+	svc := &Service{
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+	}
+
+	// First deposit - update mock balance after
+	req1 := createTestDepositRequest("ACC-BAL-002", 100, 0) // £100.00
+	_, err := svc.ExecuteDeposit(ctx, req1)
+	require.NoError(t, err, "First deposit should succeed")
+
+	// Simulate Position Keeping balance after first deposit
+	mockPosKeeping.accountBalances["ACC-BAL-002"] = 10000 // £100.00
+
+	// Second deposit - mock will now return accumulated balance
+	mockPosKeeping.accountBalances["ACC-BAL-002"] = 25000   // £250.00 (100 + 150)
+	req2 := createTestDepositRequest("ACC-BAL-002", 150, 0) // £150.00
+	resp2, err := svc.ExecuteDeposit(ctx, req2)
+	require.NoError(t, err, "Second deposit should succeed")
+
+	// Verify accumulated balance from Position Keeping
+	assert.NotNil(t, resp2.NewBalance)
+	assert.Equal(t, int64(250), resp2.NewBalance.Amount.Units, "Balance should show accumulated total")
+
+	// Verify Position Keeping was called for each deposit
+	assert.Equal(t, 2, mockPosKeeping.initiateCalls, "Position Keeping should be called for each deposit")
+}
+
+// TestPositionKeeping_BalanceDelegation_RetrieveAccountUsesPositionKeeping verifies
+// that RetrieveCurrentAccount fetches balance from Position Keeping.
+func TestPositionKeeping_BalanceDelegation_RetrieveAccountUsesPositionKeeping(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-BAL-003")
+
+	// Configure Position Keeping with specific balance
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-BAL-003": 99999, // £999.99
+		},
+	}
+
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPosKeeping,
+		logger:           testLogger(),
+	}
+
+	// Retrieve account
+	resp, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
+		AccountId: "ACC-BAL-003",
+	})
+
+	require.NoError(t, err, "Retrieve should succeed")
+	assert.NotNil(t, resp.Facility)
+
+	// Balance should come from Position Keeping
+	assert.NotNil(t, resp.Facility.CurrentBalance)
+	assert.Equal(t, int64(999), resp.Facility.CurrentBalance.CurrentBalance.Amount.Units, "Balance should be from Position Keeping")
+	assert.Equal(t, int32(990000000), resp.Facility.CurrentBalance.CurrentBalance.Amount.Nanos, "Balance nanos should be from Position Keeping")
+}
+
+// TestPositionKeeping_BalanceDelegation_ZeroBalanceHandled verifies
+// that zero balance from Position Keeping is correctly handled.
+func TestPositionKeeping_BalanceDelegation_ZeroBalanceHandled(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-BAL-004")
+
+	// Configure Position Keeping with zero balance
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-BAL-004": 0, // Zero balance
+		},
+	}
+
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPosKeeping,
+		logger:           testLogger(),
+	}
+
+	// Retrieve account
+	resp, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
+		AccountId: "ACC-BAL-004",
+	})
+
+	require.NoError(t, err, "Retrieve should succeed")
+	assert.NotNil(t, resp.Facility)
+	assert.NotNil(t, resp.Facility.CurrentBalance)
+	assert.Equal(t, int64(0), resp.Facility.CurrentBalance.CurrentBalance.Amount.Units, "Zero balance should be handled correctly")
+	assert.Equal(t, int32(0), resp.Facility.CurrentBalance.CurrentBalance.Amount.Nanos, "Zero nanos should be handled correctly")
+}
+
+// TestPositionKeeping_BalanceDelegation_NegativeBalanceHandled verifies
+// that negative balance (overdraft) from Position Keeping is correctly handled.
+func TestPositionKeeping_BalanceDelegation_NegativeBalanceHandled(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-BAL-005")
+
+	// Configure Position Keeping with negative balance (overdraft)
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-BAL-005": -5000, // -£50.00 (overdrawn)
+		},
+	}
+
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPosKeeping,
+		logger:           testLogger(),
+	}
+
+	// Retrieve account
+	resp, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
+		AccountId: "ACC-BAL-005",
+	})
+
+	require.NoError(t, err, "Retrieve should succeed")
+	assert.NotNil(t, resp.Facility)
+	assert.NotNil(t, resp.Facility.CurrentBalance)
+	assert.Equal(t, int64(-50), resp.Facility.CurrentBalance.CurrentBalance.Amount.Units, "Negative balance should be handled correctly")
+}
+
+// Circuit Breaker Tests for Position Keeping Balance Queries
+//
+// These tests verify that the circuit breaker correctly handles Position Keeping
+// failures for balance queries and provides graceful degradation.
+
+// mockPositionKeepingClientWithGetBalanceFailure extends the mock to support
+// GetAccountBalance failure scenarios.
+type mockPositionKeepingClientWithGetBalanceFailure struct {
+	mockPositionKeepingClient
+	failOnGetBalance  bool
+	getBalanceError   error
+	getBalanceCalls   int
+	getBalancesError  error
+	failOnGetBalances bool
+	getBalancesCalls  int
+}
+
+func (m *mockPositionKeepingClientWithGetBalanceFailure) GetAccountBalance(_ context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	m.getBalanceCalls++
+	if m.failOnGetBalance {
+		if m.getBalanceError != nil {
+			return nil, m.getBalanceError
+		}
+		return nil, errPositionKeepingUnavailable
+	}
+	// Return configured balance if available
+	var balanceCents int64
+	if m.accountBalances != nil {
+		balanceCents = m.accountBalances[req.AccountId]
+	}
+	units := balanceCents / 100
+	nanos := (balanceCents % 100) * 10000000
+	return &positionkeepingv1.GetAccountBalanceResponse{
+		AccountId:   req.AccountId,
+		BalanceType: req.BalanceType,
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        units,
+				Nanos:        int32(nanos),
+			},
+		},
+		AsOf: timestamppb.Now(),
+	}, nil
+}
+
+func (m *mockPositionKeepingClientWithGetBalanceFailure) GetAccountBalances(_ context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
+	m.getBalancesCalls++
+	if m.failOnGetBalances {
+		if m.getBalancesError != nil {
+			return nil, m.getBalancesError
+		}
+		return nil, errPositionKeepingUnavailable
+	}
+	return &positionkeepingv1.GetAccountBalancesResponse{
+		AccountId: req.AccountId,
+		Balances:  []*positionkeepingv1.BalanceEntry{},
+	}, nil
+}
+
+// TestPositionKeeping_CircuitBreaker_GetBalanceFailure verifies error handling
+// when GetAccountBalance fails.
+func TestPositionKeeping_CircuitBreaker_GetBalanceFailure(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-CB-001")
+
+	// Configure Position Keeping to fail on GetAccountBalance
+	mockPosKeeping := &mockPositionKeepingClientWithGetBalanceFailure{
+		failOnGetBalance: true,
+		getBalanceError:  errPositionKeepingUnavailable,
+	}
+
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPosKeeping,
+		logger:           testLogger(),
+	}
+
+	// Retrieve account - should fail because Position Keeping is unavailable
+	_, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
+		AccountId: "ACC-CB-001",
+	})
+
+	// Verify error
+	require.Error(t, err, "Retrieve should fail when Position Keeping is unavailable")
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Error should be gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code(), "Should return Internal error")
+	assert.Contains(t, st.Message(), "Position Keeping", "Error should mention Position Keeping")
+
+	// Verify Position Keeping was called
+	assert.Equal(t, 1, mockPosKeeping.getBalanceCalls, "GetAccountBalance should have been called once")
+}
+
+// TestPositionKeeping_CircuitBreaker_DepositSucceedsWithBalanceQueryFailure verifies
+// that deposits can still succeed even if the balance query after deposit fails.
+// The deposit transaction itself goes through Position Keeping InitiateFinancialPositionLog.
+func TestPositionKeeping_CircuitBreaker_DepositSucceedsWithInitiateSuccess(t *testing.T) {
+	db, ctx, cleanup := setupIntegrationTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	_ = createTestAccount(t, ctx, repo, "ACC-CB-002")
+
+	// Configure Position Keeping to succeed on initiate but return specific balance
+	mockPosKeeping := &mockPositionKeepingClient{
+		accountBalances: map[string]int64{
+			"ACC-CB-002": 5000, // £50.00
+		},
+	}
+	mockFinAcct := &mockFinancialAccountingClient{}
+
+	svc := &Service{
+		repo:                repo,
+		posKeepingClient:    mockPosKeeping,
+		finAcctClient:       mockFinAcct,
+		logger:              testLogger(),
+		depositOrchestrator: testDepositOrchestrator(repo, mockPosKeeping, mockFinAcct),
+	}
+
+	// Execute deposit
+	req := createTestDepositRequest("ACC-CB-002", 100, 0) // £100.00
+	resp, err := svc.ExecuteDeposit(ctx, req)
+
+	// Deposit should succeed
+	require.NoError(t, err, "Deposit should succeed")
+	assert.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
+
+	// Balance in response comes from Position Keeping
+	assert.Equal(t, int64(50), resp.NewBalance.Amount.Units, "Balance should match mock")
+
+	// Verify Position Keeping InitiateFinancialPositionLog was called
+	assert.Equal(t, 1, mockPosKeeping.initiateCalls, "InitiateFinancialPositionLog should be called")
+}

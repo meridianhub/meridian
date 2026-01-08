@@ -32,6 +32,10 @@ type ResilientClientConfig struct {
 
 	// Observability
 	Logger *slog.Logger
+
+	// OnStateChange is called when the circuit breaker state changes.
+	// Useful for recording metrics or alerts on state transitions.
+	OnStateChange func(name string, from gobreaker.State, to gobreaker.State)
 }
 
 // DefaultResilientClientConfig returns a ResilientClientConfig with sensible defaults
@@ -113,6 +117,10 @@ func applyConfigDefaults(config *ResilientClientConfig) (CircuitBreakerConfig, R
 				"service", name,
 				"from", from.String(),
 				"to", to.String())
+			// Call user-provided callback if set
+			if config.OnStateChange != nil {
+				config.OnStateChange(name, from, to)
+			}
 		},
 	}
 
