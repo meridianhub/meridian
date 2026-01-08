@@ -178,6 +178,10 @@ func (s *PositionKeepingService) checkMigrationIdempotencyAndAcquireLock(
 
 	// Check if operation was already completed or in progress
 	result, err := s.idempotency.Check(ctx, key)
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		// Transient store error (Redis timeout, connection failure) - don't bypass idempotency
+		return nil, nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+	}
 	if err == nil {
 		switch result.Status {
 		case idempotency.StatusCompleted:
@@ -211,6 +215,7 @@ func (s *PositionKeepingService) checkMigrationIdempotencyAndAcquireLock(
 			// Previous attempt failed - allow retry by proceeding to MarkPending
 		}
 	}
+	// ErrResultNotFound means key doesn't exist - continue to mark pending
 
 	// Mark operation as pending to prevent concurrent execution
 	if err := s.idempotency.MarkPending(ctx, key, 5*time.Minute); err != nil {

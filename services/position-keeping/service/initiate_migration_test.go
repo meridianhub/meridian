@@ -477,3 +477,50 @@ func TestInitiateWithOpeningBalance_ZeroBalance(t *testing.T) {
 
 	mockRepo.AssertExpectations(t)
 }
+
+func TestInitiateWithOpeningBalance_IdempotencyCheckError(t *testing.T) {
+	// Arrange - Test that transient idempotency errors are not silently ignored
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
+
+	effectiveDate := time.Now().Add(-24 * time.Hour)
+	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
+		AccountId: "migrated-account-001",
+		OpeningBalance: &commonv1.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        1500,
+				Nanos:        0,
+			},
+		},
+		EffectiveDate: timestamppb.New(effectiveDate),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.NewString(),
+		},
+	}
+
+	// Mock idempotency check - transient error (e.g., Redis timeout)
+	transientErr := assert.AnError // Generic error (not ErrResultNotFound)
+	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
+		Return(nil, transientErr)
+
+	// Act
+	resp, err := svc.InitiateWithOpeningBalance(ctx, req)
+
+	// Assert - Should return Internal error, not proceed to MarkPending
+	require.Error(t, err, "Expected error when idempotency check fails")
+	assert.Nil(t, resp, "Expected nil response when idempotency check fails")
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "Expected gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code(), "Expected Internal error code")
+	assert.Contains(t, st.Message(), "failed to check idempotency")
+
+	// Verify that MarkPending was NOT called since we returned early
+	mockIdempotency.AssertNotCalled(t, "MarkPending")
+	mockRepo.AssertNotCalled(t, "Create")
+}
