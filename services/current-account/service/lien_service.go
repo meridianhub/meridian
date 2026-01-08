@@ -817,9 +817,18 @@ func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
 
-	// Create available balance (balance + overdraft - any holds)
-	// For simplicity, use balance as available balance (liens calculated separately)
-	availableBalance := balance
+	// Calculate available balance: balance + overdraft (if enabled) - active liens
+	availableBalance := s.calculateAvailableBalance(ctx, account.ID(), balance)
+	if account.OverdraftEnabled() {
+		overdraftLimitCents, _ := account.OverdraftLimit().ToMinorUnits()
+		if overdraftLimitCents > 0 {
+			// Add overdraft to available balance
+			availableWithOverdraft, err := availableBalance.Add(account.OverdraftLimit())
+			if err == nil {
+				availableBalance = availableWithOverdraft
+			}
+		}
+	}
 
 	// Use builder to reconstruct account with new balance
 	return domain.NewCurrentAccountBuilder().
@@ -879,6 +888,10 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string, 
 // Logs errors but returns best-effort values since primary operations already succeeded.
 // Context is required for organization scoping in multi-org mode.
 func (s *Service) calculateAvailableBalance(ctx context.Context, accountID uuid.UUID, currentBalance domain.Money) domain.Money {
+	if s.lienRepo == nil {
+		// Lien repository not configured - return balance without lien adjustment
+		return currentBalance
+	}
 	activeLiensTotal, err := s.lienRepo.SumActiveAmountByAccountID(ctx, accountID)
 	if err != nil {
 		s.logger.Error("failed to sum active liens for response", "error", err)
