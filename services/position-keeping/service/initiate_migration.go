@@ -13,6 +13,7 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
@@ -79,6 +80,13 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 		return nil, status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
 	}
 
+	// Extract correlation ID from context for end-to-end request tracing,
+	// falling back to log ID if not present in request metadata
+	correlationID := clients.ExtractCorrelationID(ctx)
+	if correlationID == "" {
+		correlationID = log.LogID.String()
+	}
+
 	// Publish OpeningBalanceRecorded event using fire-and-forget pattern
 	// (consistent with other endpoints in this service - Kafka producer configured with retries)
 	event := &domain.OpeningBalanceRecorded{
@@ -87,7 +95,7 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 		OpeningBalance:     openingBalance,
 		EffectiveDate:      effectiveDate,
 		MigrationReference: req.MigrationReference,
-		CorrelationID:      log.LogID.String(), // Use log ID as correlation ID for tracing
+		CorrelationID:      correlationID,
 		Timestamp:          time.Now().UTC(),
 		Version:            log.Version,
 	}
