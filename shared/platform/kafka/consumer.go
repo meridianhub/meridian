@@ -218,8 +218,11 @@ func splitString(s string, sep rune) []string {
 // - Poll for messages with configurable timeout
 // - Deserialize protobuf messages using the factory
 // - Call the handler with a 30s timeout
-// - Commit offsets after successful processing (if auto-commit disabled)
-// - Continue consuming even if handler returns error (errors are logged)
+// - Retry failed messages with exponential backoff (if DLQ configured)
+// - Send permanently failed messages to DLQ after exhausting retries
+// - Commit offsets only when ALL records in a batch are processed successfully
+// - Skip offset commit if any record fails (including DLQ publish failures) to ensure redelivery
+// - Continue consuming even after failures (failed messages will be redelivered)
 // - Exit gracefully when Stop() is called
 //
 // Parameters:
@@ -264,29 +267,37 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 				}
 			}
 
+			// Track whether any record processing failed (especially DLQ failures)
+			// If any record fails, we must not commit offsets to prevent message loss
+			var processingFailed bool
+
 			// Process each record
 			fetches.EachRecord(func(record *kgo.Record) {
 				// Process message with retry and DLQ support
 				if err := c.processMessageWithRetry(record); err != nil {
+					// Mark batch as failed to prevent offset commit
+					processingFailed = true
 					// Log error with full context for debugging and monitoring
 					log.Printf("ERROR: Failed to process message from topic=%s partition=%d offset=%d after all retries: %v",
 						record.Topic,
 						record.Partition,
 						record.Offset,
 						err)
-					// If DLQ is not configured, just continue consuming
-					// The error has been logged for monitoring/alerting
+					// Message will be redelivered on next poll since offset won't be committed
 				}
 			})
 
 			// Allow rebalance to proceed now that we're done processing
 			c.client.AllowRebalance()
 
-			// Commit offsets if we have records and auto-commit is disabled
-			if !fetches.Empty() {
+			// Commit offsets only if all records were processed successfully
+			// If any record failed (including DLQ failures), skip commit to ensure redelivery
+			if !fetches.Empty() && !processingFailed {
 				if err := c.client.CommitUncommittedOffsets(c.ctx); err != nil {
 					log.Printf("WARN: Failed to commit offsets: %v", err)
 				}
+			} else if processingFailed {
+				log.Printf("WARN: Skipping offset commit due to processing failures - messages will be redelivered")
 			}
 		}
 	}
