@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"gorm.io/gorm"
 )
 
@@ -24,59 +24,43 @@ var (
 
 // mockKafkaPublisher is a mock implementation of KafkaPublisher for testing.
 type mockKafkaPublisher struct {
-	mu              sync.Mutex
-	messages        []*kafka.Message
-	produceError    error
-	deliveryError   error
-	deliveryTimeout bool
-	closed          bool
+	mu           sync.Mutex
+	records      []*kgo.Record
+	produceError error
+	flushError   error
+	closed       bool
 }
 
 func newMockKafkaPublisher() *mockKafkaPublisher {
 	return &mockKafkaPublisher{
-		messages: make([]*kafka.Message, 0),
+		records: make([]*kgo.Record, 0),
 	}
 }
 
-func (m *mockKafkaPublisher) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
+func (m *mockKafkaPublisher) ProduceRecord(_ context.Context, record *kgo.Record) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if m.produceError != nil {
-		m.mu.Unlock()
 		return m.produceError
 	}
 
-	m.messages = append(m.messages, msg)
-
-	// Capture values under lock to avoid race conditions
-	deliveryTimeout := m.deliveryTimeout
-	deliveryError := m.deliveryError
-	m.mu.Unlock()
-
-	// Simulate async delivery
-	go func() {
-		if deliveryTimeout {
-			// Don't send anything - simulate timeout
-			return
-		}
-
-		deliveryMsg := &kafka.Message{
-			TopicPartition: msg.TopicPartition,
-			Key:            msg.Key,
-			Value:          msg.Value,
-		}
-
-		if deliveryError != nil {
-			deliveryMsg.TopicPartition.Error = deliveryError
-		}
-
-		deliveryChan <- deliveryMsg
-	}()
-
+	m.records = append(m.records, record)
 	return nil
 }
 
-func (m *mockKafkaPublisher) Flush(_ int) int {
+func (m *mockKafkaPublisher) Flush(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.flushError
+}
+
+func (m *mockKafkaPublisher) FlushWithTimeout(_ int) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.flushError != nil {
+		return 1
+	}
 	return 0
 }
 
@@ -86,11 +70,11 @@ func (m *mockKafkaPublisher) Close() {
 	m.closed = true
 }
 
-func (m *mockKafkaPublisher) getMessages() []*kafka.Message {
+func (m *mockKafkaPublisher) getRecords() []*kgo.Record {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	result := make([]*kafka.Message, len(m.messages))
-	copy(result, m.messages)
+	result := make([]*kgo.Record, len(m.records))
+	copy(result, m.records)
 	return result
 }
 
@@ -98,12 +82,6 @@ func (m *mockKafkaPublisher) setProduceError(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.produceError = err
-}
-
-func (m *mockKafkaPublisher) setDeliveryError(err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.deliveryError = err
 }
 
 // mockOutboxRepository is an in-memory implementation for testing.
@@ -304,9 +282,9 @@ func TestWorker_ProcessBatch_Success(t *testing.T) {
 	cancel()
 	worker.Stop()
 
-	// Verify messages were published
-	messages := publisher.getMessages()
-	assert.Len(t, messages, 2)
+	// Verify records were published
+	records := publisher.getRecords()
+	assert.Len(t, records, 2)
 }
 
 func TestWorker_ProcessBatch_RetryOnFailure(t *testing.T) {
@@ -324,8 +302,8 @@ func TestWorker_ProcessBatch_RetryOnFailure(t *testing.T) {
 	entry := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{}`), "test-topic", "test-service", "")
 	repo.addEntry(entry)
 
-	// Set delivery to fail initially
-	publisher.setDeliveryError(errDeliveryFailed)
+	// Set produce to fail initially
+	publisher.setProduceError(errDeliveryFailed)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
@@ -342,7 +320,7 @@ func TestWorker_ProcessBatch_RetryOnFailure(t *testing.T) {
 	require.NoError(t, err, "first retry should occur")
 
 	// Clear the error - next attempt should succeed
-	publisher.setDeliveryError(nil)
+	publisher.setProduceError(nil)
 
 	// Wait for success
 	err = await.New().
@@ -374,8 +352,8 @@ func TestWorker_ProcessBatch_DLQAfterMaxRetries(t *testing.T) {
 	entry := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{}`), "test-topic", "test-service", "")
 	repo.addEntry(entry)
 
-	// Make delivery always fail
-	publisher.setDeliveryError(errPermanentFailure)
+	// Make produce always fail
+	publisher.setProduceError(errPermanentFailure)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
@@ -505,12 +483,12 @@ func TestWorker_PublishWithHeaders(t *testing.T) {
 	worker.Stop()
 
 	// Verify headers were set correctly
-	messages := publisher.getMessages()
-	require.Len(t, messages, 1)
+	records := publisher.getRecords()
+	require.Len(t, records, 1)
 
-	msg := messages[0]
+	record := records[0]
 	headerMap := make(map[string]string)
-	for _, h := range msg.Headers {
+	for _, h := range record.Headers {
 		headerMap[h.Key] = string(h.Value)
 	}
 

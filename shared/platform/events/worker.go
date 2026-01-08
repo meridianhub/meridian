@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 // Worker errors.
@@ -23,9 +23,6 @@ var (
 
 	// ErrPublishFailed is returned when event publishing fails.
 	ErrPublishFailed = errors.New("event publish failed")
-
-	// ErrUnexpectedDeliveryEvent is returned when the delivery channel receives an unexpected event type.
-	ErrUnexpectedDeliveryEvent = errors.New("unexpected event type from delivery channel")
 
 	// ErrPublishTimeout is returned when publishing times out waiting for confirmation.
 	ErrPublishTimeout = errors.New("publish timeout")
@@ -40,13 +37,16 @@ const (
 	defaultPublishTimeoutMs = 5000
 )
 
-// KafkaPublisher defines the interface for publishing raw messages to Kafka.
+// KafkaPublisher defines the interface for publishing records to Kafka.
 // This allows the worker to be tested without a real Kafka connection.
 type KafkaPublisher interface {
-	// Produce sends a message to Kafka asynchronously with delivery report.
-	Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error
+	// ProduceRecord sends a record to Kafka synchronously with delivery confirmation.
+	ProduceRecord(ctx context.Context, record *kgo.Record) error
 	// Flush waits for all outstanding messages to be delivered.
-	Flush(timeoutMs int) int
+	Flush(ctx context.Context) error
+	// FlushWithTimeout waits for outstanding messages with a timeout.
+	// Returns the number of messages still in flight (0 = all delivered).
+	FlushWithTimeout(timeoutMs int) int
 	// Close closes the producer.
 	Close()
 }
@@ -191,7 +191,7 @@ func (w *Worker) Stop() {
 	w.wg.Wait()
 
 	// Flush any remaining messages to Kafka
-	if remaining := w.publisher.Flush(w.config.PublishTimeoutMs); remaining > 0 {
+	if remaining := w.publisher.FlushWithTimeout(w.config.PublishTimeoutMs); remaining > 0 {
 		w.logger.Warn("unflushed Kafka messages on shutdown", "count", remaining)
 	}
 
@@ -357,8 +357,8 @@ func (w *Worker) processEntry(ctx context.Context, entry *EventOutbox) error {
 
 // publishToKafka publishes an event to Kafka and waits for delivery confirmation.
 func (w *Worker) publishToKafka(ctx context.Context, entry *EventOutbox) error {
-	// Build Kafka headers
-	headers := []kafka.Header{
+	// Build Kafka record headers
+	headers := []kgo.RecordHeader{
 		{Key: "event_id", Value: []byte(entry.ID.String())},
 		{Key: "event_type", Value: []byte(entry.EventType)},
 		{Key: "aggregate_type", Value: []byte(entry.AggregateType)},
@@ -366,55 +366,39 @@ func (w *Worker) publishToKafka(ctx context.Context, entry *EventOutbox) error {
 	}
 
 	if entry.CorrelationID != "" {
-		headers = append(headers, kafka.Header{
+		headers = append(headers, kgo.RecordHeader{
 			Key:   "correlation_id",
 			Value: []byte(entry.CorrelationID),
 		})
 	}
 	if entry.CausationID != "" {
-		headers = append(headers, kafka.Header{
+		headers = append(headers, kgo.RecordHeader{
 			Key:   "causation_id",
 			Value: []byte(entry.CausationID),
 		})
 	}
 
-	// Create Kafka message
-	topic := entry.Topic
-	msg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic:     &topic,
-			Partition: kafka.PartitionAny,
-		},
+	// Create Kafka record
+	record := &kgo.Record{
+		Topic:     entry.Topic,
 		Key:       []byte(entry.PartitionKey),
 		Value:     entry.EventPayload,
 		Headers:   headers,
 		Timestamp: entry.CreatedAt,
 	}
 
-	// Publish with delivery confirmation
-	deliveryChan := make(chan kafka.Event, 1)
-	if err := w.publisher.Produce(msg, deliveryChan); err != nil {
+	// Create context with timeout for publishing
+	publishCtx, cancel := context.WithTimeout(ctx, time.Duration(w.config.PublishTimeoutMs)*time.Millisecond)
+	defer cancel()
+
+	// Publish synchronously with delivery confirmation
+	if err := w.publisher.ProduceRecord(publishCtx, record); err != nil {
 		RecordPublished(w.config.ServiceName, entry.EventType, "failure")
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("%w: after %dms", ErrPublishTimeout, w.config.PublishTimeoutMs)
+		}
 		return fmt.Errorf("failed to produce message: %w", err)
 	}
 
-	// Wait for delivery confirmation with timeout
-	select {
-	case e := <-deliveryChan:
-		m, ok := e.(*kafka.Message)
-		if !ok {
-			RecordPublished(w.config.ServiceName, entry.EventType, "failure")
-			return fmt.Errorf("%w: got %T", ErrUnexpectedDeliveryEvent, e)
-		}
-		if m.TopicPartition.Error != nil {
-			RecordPublished(w.config.ServiceName, entry.EventType, "failure")
-			return fmt.Errorf("delivery failed: %w", m.TopicPartition.Error)
-		}
-		return nil
-	case <-time.After(time.Duration(w.config.PublishTimeoutMs) * time.Millisecond):
-		RecordPublished(w.config.ServiceName, entry.EventType, "timeout")
-		return fmt.Errorf("%w: after %dms", ErrPublishTimeout, w.config.PublishTimeoutMs)
-	case <-ctx.Done():
-		return fmt.Errorf("context cancelled: %w", ctx.Err())
-	}
+	return nil
 }

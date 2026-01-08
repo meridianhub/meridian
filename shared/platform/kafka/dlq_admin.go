@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -19,8 +20,8 @@ var ErrNilInspector = errors.New("DLQ inspector cannot be nil")
 
 // DLQMessage represents a message in the dead letter queue with parsed metadata.
 type DLQMessage struct {
-	// Message is the original Kafka message from the DLQ topic
-	Message *kafka.Message
+	// Record is the original Kafka record from the DLQ topic
+	Record *kgo.Record
 	// Metadata contains parsed DLQ headers
 	Metadata DLQMetadata
 }
@@ -37,8 +38,9 @@ type DLQInspectorConfig struct {
 
 // DLQInspector provides utilities for examining and analyzing dead letter queue messages.
 type DLQInspector struct {
-	consumer *kafka.Consumer
-	config   DLQInspectorConfig
+	client *kgo.Client
+	admin  *kadm.Client
+	config DLQInspectorConfig
 }
 
 // NewDLQInspector creates a new DLQ inspector for examining failed messages.
@@ -55,29 +57,36 @@ func NewDLQInspector(config DLQInspectorConfig) (*DLQInspector, error) {
 		return nil, ErrEmptyTopics
 	}
 
-	// Create consumer with unique group ID for inspection (won't commit offsets)
-	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers":  config.BootstrapServers,
-		"group.id":           fmt.Sprintf("dlq-inspector-%d", time.Now().Unix()),
-		"client.id":          config.ClientID,
-		"auto.offset.reset":  "earliest",
-		"enable.auto.commit": false, // Inspector never commits offsets
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create DLQ inspector consumer: %w", err)
+	// Build franz-go options for inspection (read-only, no consumer group)
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(splitBrokers(config.BootstrapServers)...),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 	}
 
+	if config.ClientID != "" {
+		opts = append(opts, kgo.ClientID(config.ClientID))
+	}
+
+	client, err := kgo.NewClient(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create DLQ inspector client: %w", err)
+	}
+
+	// Create admin client for metadata operations
+	admin := kadm.NewClient(client)
+
 	return &DLQInspector{
-		consumer: consumer,
-		config:   config,
+		client: client,
+		admin:  admin,
+		config: config,
 	}, nil
 }
 
-// parseDLQMetadata extracts DLQ metadata from Kafka message headers.
-func parseDLQMetadata(msg *kafka.Message) DLQMetadata {
+// parseDLQMetadata extracts DLQ metadata from Kafka record headers.
+func parseDLQMetadata(record *kgo.Record) DLQMetadata {
 	metadata := DLQMetadata{}
 
-	for _, header := range msg.Headers {
+	for _, header := range record.Headers {
 		value := string(header.Value)
 
 		switch header.Key {
@@ -183,29 +192,27 @@ type InspectOptions struct {
 //
 // Returns a slice of DLQ messages that match the filter criteria.
 func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]DLQMessage, error) {
-	// Assign partitions manually for full control (no group coordination)
-	partitions := make([]kafka.TopicPartition, 0)
+	// Get partition metadata for all DLQ topics
+	topicDetails, err := i.admin.ListTopics(ctx, i.config.DLQTopics...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list topics: %w", err)
+	}
+
+	// Build partition assignments
+	partitions := make(map[string]map[int32]kgo.Offset)
 	for _, topic := range i.config.DLQTopics {
-		// Get partition metadata
-		metadata, err := i.consumer.GetMetadata(&topic, false, 5000)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get metadata for topic %s: %w", topic, err)
+		details, ok := topicDetails[topic]
+		if !ok {
+			continue
 		}
-
-		topicMetadata := metadata.Topics[topic]
-		for _, partition := range topicMetadata.Partitions {
-			partitions = append(partitions, kafka.TopicPartition{
-				Topic:     &topic,
-				Partition: partition.ID,
-				Offset:    kafka.OffsetBeginning,
-			})
+		partitions[topic] = make(map[int32]kgo.Offset)
+		for _, partition := range details.Partitions {
+			partitions[topic][partition.Partition] = kgo.NewOffset().AtStart()
 		}
 	}
 
-	// Assign partitions (seek to beginning)
-	if err := i.consumer.Assign(partitions); err != nil {
-		return nil, fmt.Errorf("failed to assign partitions: %w", err)
-	}
+	// Assign partitions directly (no consumer group)
+	i.client.AddConsumePartitions(partitions)
 
 	// Set default timeout if not specified
 	timeout := options.Timeout
@@ -218,8 +225,8 @@ func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]D
 	defer cancel()
 
 	results := make([]DLQMessage, 0)
-	consecutiveTimeouts := 0
-	maxConsecutiveTimeouts := 5 // Stop after 5 consecutive timeouts
+	consecutiveEmptyPolls := 0
+	maxConsecutiveEmptyPolls := 5 // Stop after 5 consecutive empty polls
 
 	for {
 		// Check for context cancellation
@@ -234,39 +241,56 @@ func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]D
 			return results, nil
 		}
 
-		// Poll for messages
-		msg, err := i.consumer.ReadMessage(100 * time.Millisecond)
-		if err != nil {
-			// Timeout is expected when no more messages
-			var kafkaErr kafka.Error
-			if errors.As(err, &kafkaErr) && kafkaErr.Code() == kafka.ErrTimedOut {
-				consecutiveTimeouts++
-				if consecutiveTimeouts >= maxConsecutiveTimeouts {
-					// No more messages available
-					return results, nil
+		// Poll for records with short timeout
+		pollCtx, pollCancel := context.WithTimeout(inspectCtx, 100*time.Millisecond)
+		fetches := i.client.PollFetches(pollCtx)
+		pollCancel()
+
+		// Check for errors
+		if errs := fetches.Errors(); len(errs) > 0 {
+			for _, err := range errs {
+				if errors.Is(err.Err, context.DeadlineExceeded) || errors.Is(err.Err, context.Canceled) {
+					continue
 				}
-				continue
+				return results, fmt.Errorf("error reading DLQ message: %w", err.Err)
 			}
-			return results, fmt.Errorf("error reading DLQ message: %w", err)
 		}
 
-		// Reset timeout counter on successful read
-		consecutiveTimeouts = 0
-
-		// Parse DLQ metadata
-		metadata := parseDLQMetadata(msg)
-
-		dlqMsg := DLQMessage{
-			Message:  msg,
-			Metadata: metadata,
-		}
-
-		// Apply filter if specified
-		if options.Filter != nil && !options.Filter(dlqMsg) {
+		// Track empty polls
+		if fetches.Empty() {
+			consecutiveEmptyPolls++
+			if consecutiveEmptyPolls >= maxConsecutiveEmptyPolls {
+				// No more messages available
+				return results, nil
+			}
 			continue
 		}
 
-		results = append(results, dlqMsg)
+		// Reset counter on successful fetch
+		consecutiveEmptyPolls = 0
+
+		// Process each record
+		fetches.EachRecord(func(record *kgo.Record) {
+			// Check limit
+			if options.MaxMessages > 0 && len(results) >= options.MaxMessages {
+				return
+			}
+
+			// Parse DLQ metadata
+			metadata := parseDLQMetadata(record)
+
+			dlqMsg := DLQMessage{
+				Record:   record,
+				Metadata: metadata,
+			}
+
+			// Apply filter if specified
+			if options.Filter != nil && !options.Filter(dlqMsg) {
+				return
+			}
+
+			results = append(results, dlqMsg)
+		})
 	}
 }
 
@@ -332,9 +356,7 @@ func (i *DLQInspector) GetStatistics(ctx context.Context, timeout time.Duration)
 
 // Close closes the inspector and releases resources.
 func (i *DLQInspector) Close() error {
-	if err := i.consumer.Close(); err != nil {
-		return fmt.Errorf("failed to close DLQ inspector: %w", err)
-	}
+	i.client.Close()
 	return nil
 }
 
@@ -383,50 +405,24 @@ func NewDLQReplay(config DLQReplayConfig) (*DLQReplay, error) {
 //
 // Returns an error if publishing fails.
 func (r *DLQReplay) ReplayMessage(ctx context.Context, dlqMsg DLQMessage) error {
-	// Create new message without DLQ headers
-	// Preserve original timestamp and timestamp type to maintain event-time semantics
-	// Preserve original partition to maintain ordering guarantees
-	originalTopic := dlqMsg.Metadata.OriginalTopic
-	partition := dlqMsg.Metadata.OriginalPartition
-	// Fall back to PartitionAny if recorded partition is invalid
-	if partition < 0 {
-		partition = kafka.PartitionAny
-	}
-	replayMsg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &originalTopic, Partition: partition},
-		Key:            dlqMsg.Message.Key,
-		Value:          dlqMsg.Message.Value,
-		Timestamp:      dlqMsg.Message.Timestamp,
-		TimestampType:  dlqMsg.Message.TimestampType,
+	// Create new record without DLQ headers
+	// Preserve original timestamp to maintain event-time semantics
+	replayRecord := &kgo.Record{
+		Topic:     dlqMsg.Metadata.OriginalTopic,
+		Key:       dlqMsg.Record.Key,
+		Value:     dlqMsg.Record.Value,
+		Timestamp: dlqMsg.Record.Timestamp,
 	}
 
 	// Preserve non-DLQ headers
-	for _, header := range dlqMsg.Message.Headers {
+	for _, header := range dlqMsg.Record.Headers {
 		if !strings.HasPrefix(header.Key, "dlq.") {
-			replayMsg.Headers = append(replayMsg.Headers, header)
+			replayRecord.Headers = append(replayRecord.Headers, header)
 		}
 	}
 
-	// Publish with delivery report channel
-	deliveryChan := make(chan kafka.Event, 1)
-	if err := r.producer.producer.Produce(replayMsg, deliveryChan); err != nil {
-		return fmt.Errorf("failed to produce replay message: %w", err)
-	}
-
-	// Wait for delivery confirmation or context cancellation
-	select {
-	case e := <-deliveryChan:
-		m, ok := e.(*kafka.Message)
-		if !ok {
-			return fmt.Errorf("%w: %T", ErrUnexpectedEvent, e)
-		}
-		if m.TopicPartition.Error != nil {
-			return fmt.Errorf("replay delivery failed: %w", m.TopicPartition.Error)
-		}
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("replay cancelled: %w", ctx.Err())
-	}
+	// Publish synchronously and wait for confirmation
+	return r.producer.ProduceRecord(ctx, replayRecord)
 }
 
 // ReplayMessages replays multiple DLQ messages back to their original topics.
@@ -474,7 +470,7 @@ func (r *DLQReplay) ReplayProtoMessage(
 ) (proto.Message, error) {
 	// Deserialize the message
 	protoMsg := msgFactory()
-	if err := proto.Unmarshal(dlqMsg.Message.Value, protoMsg); err != nil {
+	if err := proto.Unmarshal(dlqMsg.Record.Value, protoMsg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal DLQ message: %w", err)
 	}
 

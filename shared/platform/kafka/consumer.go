@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -31,8 +31,8 @@ type MessageHandler func(ctx context.Context, key []byte, msg proto.Message) err
 // It provides automatic deserialization, error recovery, and graceful shutdown.
 // The consumer runs in a blocking loop until Stop() is called or an unrecoverable error occurs.
 type ProtoConsumer struct {
-	// consumer is the underlying confluent-kafka-go consumer instance
-	consumer *kafka.Consumer
+	// client is the underlying franz-go client instance
+	client *kgo.Client
 	// msgFactory creates new instances of the protobuf message type for deserialization
 	msgFactory func() proto.Message
 	// handler processes each consumed message
@@ -41,8 +41,6 @@ type ProtoConsumer struct {
 	pollTimeout time.Duration
 	// handlerTimeout is the maximum duration for processing a single message
 	handlerTimeout time.Duration
-	// enableAutoCommit indicates whether Kafka handles commits automatically
-	enableAutoCommit bool
 	// dlqProducer handles failed messages (optional, may be nil)
 	dlqProducer *DLQProducer
 	// dlqConfig contains DLQ behavior configuration
@@ -137,13 +135,34 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 		config.HandlerTimeout = defaults.DefaultRPCTimeout
 	}
 
-	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers":  config.BootstrapServers,
-		"group.id":           config.GroupID,
-		"client.id":          config.ClientID,
-		"auto.offset.reset":  config.AutoOffsetReset,
-		"enable.auto.commit": config.EnableAutoCommit,
-	})
+	// Build franz-go options
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(splitBrokers(config.BootstrapServers)...),
+		kgo.ConsumerGroup(config.GroupID),
+		kgo.BlockRebalanceOnPoll(), // Predictable rebalance behavior
+	}
+
+	// Set client ID if provided
+	if config.ClientID != "" {
+		opts = append(opts, kgo.ClientID(config.ClientID))
+	}
+
+	// Set auto offset reset
+	switch config.AutoOffsetReset {
+	case "earliest":
+		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+	case "latest":
+		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()))
+	default:
+		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+	}
+
+	// Disable auto commit for manual control
+	if !config.EnableAutoCommit {
+		opts = append(opts, kgo.DisableAutoCommit())
+	}
+
+	client, err := kgo.NewClient(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kafka consumer: %w", err)
 	}
@@ -151,28 +170,59 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &ProtoConsumer{
-		consumer:         consumer,
-		msgFactory:       msgFactory,
-		handler:          handler,
-		pollTimeout:      config.PollTimeout,
-		handlerTimeout:   config.HandlerTimeout,
-		enableAutoCommit: config.EnableAutoCommit,
-		dlqProducer:      config.DLQProducer,
-		dlqConfig:        config.DLQConfig,
-		ctx:              ctx,
-		cancel:           cancel,
+		client:         client,
+		msgFactory:     msgFactory,
+		handler:        handler,
+		pollTimeout:    config.PollTimeout,
+		handlerTimeout: config.HandlerTimeout,
+		dlqProducer:    config.DLQProducer,
+		dlqConfig:      config.DLQConfig,
+		ctx:            ctx,
+		cancel:         cancel,
 	}, nil
+}
+
+// splitBrokers splits comma-separated broker addresses into a slice.
+func splitBrokers(brokers string) []string {
+	var result []string
+	for _, broker := range splitString(brokers, ',') {
+		if broker != "" {
+			result = append(result, broker)
+		}
+	}
+	return result
+}
+
+// splitString splits a string by the given separator.
+func splitString(s string, sep rune) []string {
+	var result []string
+	current := ""
+	for _, c := range s {
+		if c == sep {
+			result = append(result, current)
+			current = ""
+		} else {
+			current += string(c)
+		}
+	}
+	if current != "" {
+		result = append(result, current)
+	}
+	return result
 }
 
 // Subscribe starts consuming from the specified topics.
 // This method blocks until Stop() is called or an unrecoverable error occurs.
 // The consumer will:
 // - Join the consumer group
-// - Poll for messages with 100ms timeout
+// - Poll for messages with configurable timeout
 // - Deserialize protobuf messages using the factory
 // - Call the handler with a 30s timeout
-// - Commit offsets after successful processing (if auto-commit disabled)
-// - Continue consuming even if handler returns error (errors are logged)
+// - Retry failed messages with exponential backoff (if DLQ configured)
+// - Send permanently failed messages to DLQ after exhausting retries
+// - Commit offsets only when ALL records in a batch are processed successfully
+// - Skip offset commit if any record fails (including DLQ publish failures) to ensure redelivery
+// - Continue consuming even after failures (failed messages will be redelivered)
 // - Exit gracefully when Stop() is called
 //
 // Parameters:
@@ -187,10 +237,8 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 		return ErrEmptyTopics
 	}
 
-	err := c.consumer.SubscribeTopics(topics, nil)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to topics: %w", err)
-	}
+	// Add topics to consume
+	c.client.AddConsumeTopics(topics...)
 
 	// Track this goroutine for graceful shutdown
 	c.wg.Add(1)
@@ -202,59 +250,71 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 		case <-c.ctx.Done():
 			return nil
 		default:
-			msg, err := c.consumer.ReadMessage(c.pollTimeout)
-			if err != nil {
-				// Timeout is expected, continue polling
-				var kafkaErr kafka.Error
-				if errors.As(err, &kafkaErr) && kafkaErr.Code() == kafka.ErrTimedOut {
-					continue
+			// Poll for messages with timeout
+			pollCtx, pollCancel := context.WithTimeout(c.ctx, c.pollTimeout)
+			fetches := c.client.PollFetches(pollCtx)
+			pollCancel()
+
+			// Check for errors in fetches
+			if errs := fetches.Errors(); len(errs) > 0 {
+				for _, err := range errs {
+					// Context cancellation is expected during shutdown
+					if errors.Is(err.Err, context.Canceled) || errors.Is(err.Err, context.DeadlineExceeded) {
+						continue
+					}
+					log.Printf("WARN: Fetch error for topic=%s partition=%d: %v",
+						err.Topic, err.Partition, err.Err)
 				}
-				return fmt.Errorf("consumer error: %w", err)
 			}
 
-			// Process message with retry and DLQ support
-			if err := c.processMessageWithRetry(msg); err != nil {
-				// Log error with full context for debugging and monitoring
-				log.Printf("ERROR: Failed to process message from topic=%s partition=%d offset=%d after all retries: %v",
-					*msg.TopicPartition.Topic,
-					msg.TopicPartition.Partition,
-					msg.TopicPartition.Offset,
-					err)
-				// If DLQ is not configured, just continue consuming
-				// The error has been logged for monitoring/alerting
-				continue
-			}
+			// Track whether any record processing failed (especially DLQ failures)
+			// If any record fails, we must not commit offsets to prevent message loss
+			var processingFailed bool
 
-			// Commit offset manually if auto-commit is disabled
-			if !c.enableAutoCommit {
-				_, err = c.consumer.CommitMessage(msg)
-				if err != nil {
-					// Log commit failures - may indicate broker issues
-					log.Printf("WARN: Failed to commit offset for topic=%s partition=%d offset=%d: %v",
-						*msg.TopicPartition.Topic,
-						msg.TopicPartition.Partition,
-						msg.TopicPartition.Offset,
+			// Process each record
+			fetches.EachRecord(func(record *kgo.Record) {
+				// Process message with retry and DLQ support
+				if err := c.processMessageWithRetry(record); err != nil {
+					// Mark batch as failed to prevent offset commit
+					processingFailed = true
+					// Log error with full context for debugging and monitoring
+					log.Printf("ERROR: Failed to process message from topic=%s partition=%d offset=%d after all retries: %v",
+						record.Topic,
+						record.Partition,
+						record.Offset,
 						err)
-					// Continue consuming - offset will be reprocessed on restart
-					continue
+					// Message will be redelivered on next poll since offset won't be committed
 				}
+			})
+
+			// Allow rebalance to proceed now that we're done processing
+			c.client.AllowRebalance()
+
+			// Commit offsets only if all records were processed successfully
+			// If any record failed (including DLQ failures), skip commit to ensure redelivery
+			if !fetches.Empty() && !processingFailed {
+				if err := c.client.CommitUncommittedOffsets(c.ctx); err != nil {
+					log.Printf("WARN: Failed to commit offsets: %v", err)
+				}
+			} else if processingFailed {
+				log.Printf("WARN: Skipping offset commit due to processing failures - messages will be redelivered")
 			}
 		}
 	}
 }
 
-// ExtractTenantHeader extracts and validates the tenant ID from a Kafka message header.
+// ExtractTenantHeader extracts and validates the tenant ID from a Kafka record header.
 // It looks for the x-tenant-id header and validates the tenant ID format.
 //
 // Returns:
 // - The tenant ID if the header is present and valid
-// - ErrMissingTenantHeader if the message is nil or the header is not present
+// - ErrMissingTenantHeader if the record is nil or the header is not present
 // - tenant.ErrInvalidTenantID if the header value is invalid
-func ExtractTenantHeader(msg *kafka.Message) (tenant.TenantID, error) {
-	if msg == nil {
+func ExtractTenantHeader(record *kgo.Record) (tenant.TenantID, error) {
+	if record == nil {
 		return "", ErrMissingTenantHeader
 	}
-	for _, h := range msg.Headers {
+	for _, h := range record.Headers {
 		if h.Key == tenant.TenantIDKey {
 			return tenant.NewTenantID(string(h.Value))
 		}
@@ -262,7 +322,7 @@ func ExtractTenantHeader(msg *kafka.Message) (tenant.TenantID, error) {
 	return "", ErrMissingTenantHeader
 }
 
-// processMessage deserializes and handles a Kafka message.
+// processMessage deserializes and handles a Kafka record.
 // This is an internal method that:
 // 1. Extracts tenant ID from Kafka header
 // 2. Creates a new protobuf message instance using the factory
@@ -273,9 +333,9 @@ func ExtractTenantHeader(msg *kafka.Message) (tenant.TenantID, error) {
 // Note: Errors returned here bubble up through processMessageWithRetry, which handles
 // DLQ routing after exhausting retries. Messages with missing/invalid tenant
 // headers will eventually be sent to DLQ if configured.
-func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
+func (c *ProtoConsumer) processMessage(record *kgo.Record) error {
 	// Extract tenant header
-	orgID, err := ExtractTenantHeader(kafkaMsg)
+	orgID, err := ExtractTenantHeader(record)
 	if err != nil {
 		return fmt.Errorf("failed to extract tenant header: %w", err)
 	}
@@ -284,7 +344,7 @@ func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 	protoMsg := c.msgFactory()
 
 	// Deserialize from bytes
-	if err := proto.Unmarshal(kafkaMsg.Value, protoMsg); err != nil {
+	if err := proto.Unmarshal(record.Value, protoMsg); err != nil {
 		return fmt.Errorf("failed to unmarshal protobuf message: %w", err)
 	}
 
@@ -295,7 +355,7 @@ func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 	// Inject tenant context
 	ctx = tenant.WithTenant(ctx, orgID)
 
-	if err := c.handler(ctx, kafkaMsg.Key, protoMsg); err != nil {
+	if err := c.handler(ctx, record.Key, protoMsg); err != nil {
 		return fmt.Errorf("handler error: %w", err)
 	}
 
@@ -314,10 +374,10 @@ func (c *ProtoConsumer) processMessage(kafkaMsg *kafka.Message) error {
 // Returns an error only if:
 // - DLQ is not configured and processing fails
 // - DLQ publishing fails (rare - indicates infrastructure issue)
-func (c *ProtoConsumer) processMessageWithRetry(kafkaMsg *kafka.Message) error {
+func (c *ProtoConsumer) processMessageWithRetry(record *kgo.Record) error {
 	// If DLQ is not configured, use simple processing with no retry
 	if c.dlqProducer == nil || c.dlqConfig == nil {
-		return c.processMessage(kafkaMsg)
+		return c.processMessage(record)
 	}
 
 	var lastErr error
@@ -329,7 +389,7 @@ func (c *ProtoConsumer) processMessageWithRetry(kafkaMsg *kafka.Message) error {
 
 	// Attempt processing with retries
 	for attempt := int32(1); attempt <= maxRetries; attempt++ {
-		err := c.processMessage(kafkaMsg)
+		err := c.processMessage(record)
 		if err == nil {
 			// Success! Message processed
 			return nil
@@ -338,9 +398,9 @@ func (c *ProtoConsumer) processMessageWithRetry(kafkaMsg *kafka.Message) error {
 		lastErr = err
 		log.Printf("WARN: Message processing attempt %d/%d failed for topic=%s partition=%d offset=%d: %v",
 			attempt, maxRetries,
-			*kafkaMsg.TopicPartition.Topic,
-			kafkaMsg.TopicPartition.Partition,
-			kafkaMsg.TopicPartition.Offset,
+			record.Topic,
+			record.Partition,
+			record.Offset,
 			err)
 
 		// If this wasn't the last attempt, wait before retrying
@@ -362,9 +422,9 @@ func (c *ProtoConsumer) processMessageWithRetry(kafkaMsg *kafka.Message) error {
 	// All retries exhausted, send to DLQ
 	log.Printf("ERROR: All %d retry attempts exhausted for topic=%s partition=%d offset=%d, sending to DLQ",
 		maxRetries,
-		*kafkaMsg.TopicPartition.Topic,
-		kafkaMsg.TopicPartition.Partition,
-		kafkaMsg.TopicPartition.Offset)
+		record.Topic,
+		record.Partition,
+		record.Offset)
 
 	// Create context with timeout for DLQ publishing
 	// Derive from consumer context to respect shutdown signals
@@ -372,9 +432,9 @@ func (c *ProtoConsumer) processMessageWithRetry(kafkaMsg *kafka.Message) error {
 	defer cancel()
 
 	// Send to DLQ with full metadata
-	if err := c.dlqProducer.PublishFailedMessage(
+	if err := c.dlqProducer.PublishFailedRecord(
 		dlqCtx,
-		kafkaMsg,
+		record,
 		lastErr,
 		maxRetries,
 		firstFailureTime,
@@ -382,17 +442,17 @@ func (c *ProtoConsumer) processMessageWithRetry(kafkaMsg *kafka.Message) error {
 		// DLQ publishing failed - this is a critical error
 		// Log and return error to prevent offset commit
 		log.Printf("CRITICAL: Failed to publish message to DLQ for topic=%s partition=%d offset=%d: %v",
-			*kafkaMsg.TopicPartition.Topic,
-			kafkaMsg.TopicPartition.Partition,
-			kafkaMsg.TopicPartition.Offset,
+			record.Topic,
+			record.Partition,
+			record.Offset,
 			err)
 		return fmt.Errorf("DLQ publishing failed: %w", err)
 	}
 
 	log.Printf("INFO: Message successfully sent to DLQ for topic=%s partition=%d offset=%d",
-		*kafkaMsg.TopicPartition.Topic,
-		kafkaMsg.TopicPartition.Partition,
-		kafkaMsg.TopicPartition.Offset)
+		record.Topic,
+		record.Partition,
+		record.Offset)
 
 	// Message handled (sent to DLQ), return nil to allow offset commit
 	return nil
@@ -414,8 +474,6 @@ func (c *ProtoConsumer) Stop() {
 // Returns an error if the underlying consumer close fails.
 func (c *ProtoConsumer) Close() error {
 	c.Stop()
-	if err := c.consumer.Close(); err != nil {
-		return fmt.Errorf("failed to close consumer: %w", err)
-	}
+	c.client.Close()
 	return nil
 }

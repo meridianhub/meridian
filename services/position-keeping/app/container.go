@@ -348,6 +348,7 @@ func (c *Container) Close(ctx context.Context) error {
 
 	// Close audit publisher first (flush audit events before closing other resources)
 	if c.auditPublisher != nil {
+		//nolint:contextcheck // Publisher.Close uses FlushWithTimeout which manages its own timeout
 		if err := c.auditPublisher.Close(); err != nil {
 			c.Logger.Error("failed to close audit publisher", "error", err)
 			errs = append(errs, fmt.Errorf("audit publisher close: %w", err))
@@ -360,7 +361,8 @@ func (c *Container) Close(ctx context.Context) error {
 
 	// Close Kafka producer (flush outstanding messages first)
 	if c.kafkaProducer != nil {
-		remaining := c.kafkaProducer.Flush(5000) // 5 second timeout
+		//nolint:contextcheck // FlushWithTimeout creates its own timeout context from milliseconds
+		remaining := c.kafkaProducer.FlushWithTimeout(5000) // 5 second timeout
 		if remaining > 0 {
 			c.Logger.Warn("kafka producer flush incomplete", "remaining_messages", remaining)
 		}

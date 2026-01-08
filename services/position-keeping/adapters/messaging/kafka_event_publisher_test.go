@@ -38,7 +38,7 @@ func (m *mockProtoPublisher) PublishWithTenant(_ context.Context, topic, key str
 	return nil
 }
 
-func (m *mockProtoPublisher) Flush(_ int) int {
+func (m *mockProtoPublisher) FlushWithTimeout(_ int) int {
 	m.flushCount++
 	return 0
 }
@@ -162,7 +162,7 @@ func TestKafkaEventPublisher_Publish_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Flush to ensure delivery
-	remaining := publisher.Flush(5000)
+	remaining := publisher.FlushWithTimeout(5000)
 	assert.Equal(t, 0, remaining, "all messages should be delivered")
 }
 
@@ -217,7 +217,7 @@ func TestKafkaEventPublisher_PublishBatch_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Flush to ensure delivery
-	remaining := publisher.Flush(5000)
+	remaining := publisher.FlushWithTimeout(5000)
 	assert.Equal(t, 0, remaining, "all messages should be delivered")
 }
 
@@ -436,7 +436,7 @@ func TestKafkaEventPublisher_FlushAndClose(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test Flush
-	remaining := publisher.Flush(5000)
+	remaining := publisher.FlushWithTimeout(5000)
 	assert.Equal(t, 0, remaining)
 	assert.Equal(t, 1, mock.flushCount)
 

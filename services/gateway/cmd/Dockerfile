@@ -1,7 +1,8 @@
 # Gateway Service - Multi-Stage Dockerfile
 # Optimized for security, size, and performance
+# Uses distroless base image (~2MB) enabled by pure-Go franz-go Kafka client
 
-# Build stage - Debian for glibc compatibility
+# Build stage
 FROM golang:1.25-bookworm AS builder
 
 # Install build dependencies
@@ -20,7 +21,7 @@ RUN go mod download && go mod verify
 # Copy source code
 COPY . .
 
-# Build binary
+# Build static binary (no CGO required - using franz-go pure Go Kafka client)
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
@@ -34,23 +35,16 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
 # Verify the binary exists and is executable
 RUN test -x gateway && echo "Binary built successfully"
 
-# Runtime stage - Debian slim for consistency with other services
-FROM debian:bookworm-slim
+# Runtime stage - distroless for minimal attack surface (~2MB base)
+FROM gcr.io/distroless/static-debian12
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user for security
-RUN groupadd -g 65532 nonroot && \
-    useradd -u 65532 -g nonroot -s /bin/false nonroot
+# Copy timezone data from builder for time-sensitive operations
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
 # Copy binary from builder
 COPY --from=builder /build/gateway /gateway
 
-# Use non-root user
+# Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot
 
 # Expose HTTP port

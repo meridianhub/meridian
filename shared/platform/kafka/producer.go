@@ -5,10 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -17,8 +18,6 @@ var (
 	ErrEmptyTopic = errors.New("topic cannot be empty")
 	// ErrNilMessage is returned when message is nil.
 	ErrNilMessage = errors.New("message cannot be nil")
-	// ErrUnexpectedEvent is returned when delivery channel receives unexpected event type.
-	ErrUnexpectedEvent = errors.New("unexpected event type from delivery channel")
 )
 
 // ProtoProducer handles publishing Protocol Buffer messages to Kafka topics.
@@ -26,8 +25,8 @@ var (
 // message delivery to Kafka brokers. The producer uses configurable acks, retries,
 // and compression for production-grade performance and durability.
 type ProtoProducer struct {
-	// producer is the underlying confluent-kafka-go producer instance
-	producer *kafka.Producer
+	// client is the underlying franz-go client instance
+	client *kgo.Client
 }
 
 // ProducerConfig contains configuration for creating a Kafka producer.
@@ -72,20 +71,53 @@ func NewProtoProducer(config ProducerConfig) (*ProtoProducer, error) {
 		config.Compression = "snappy"
 	}
 
-	producer, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": config.BootstrapServers,
-		"client.id":         config.ClientID,
-		"acks":              config.Acks,
-		"retries":           config.Retries,
-		"compression.type":  config.Compression,
-		"linger.ms":         10, // Batch messages for 10ms to improve throughput
-		"batch.size":        16384,
-	})
+	// Build franz-go options
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(strings.Split(config.BootstrapServers, ",")...),
+		kgo.RecordRetries(config.Retries),
+		kgo.ProducerLinger(10 * time.Millisecond),
+		kgo.ProducerBatchMaxBytes(16384),
+	}
+
+	// Set client ID if provided
+	if config.ClientID != "" {
+		opts = append(opts, kgo.ClientID(config.ClientID))
+	}
+
+	// Set acks level
+	switch config.Acks {
+	case "all", "-1":
+		opts = append(opts, kgo.RequiredAcks(kgo.AllISRAcks()))
+	case "1":
+		opts = append(opts, kgo.RequiredAcks(kgo.LeaderAck()))
+	case "0":
+		opts = append(opts, kgo.RequiredAcks(kgo.NoAck()))
+	default:
+		opts = append(opts, kgo.RequiredAcks(kgo.AllISRAcks()))
+	}
+
+	// Set compression
+	switch config.Compression {
+	case "snappy":
+		opts = append(opts, kgo.ProducerBatchCompression(kgo.SnappyCompression()))
+	case "gzip":
+		opts = append(opts, kgo.ProducerBatchCompression(kgo.GzipCompression()))
+	case "lz4":
+		opts = append(opts, kgo.ProducerBatchCompression(kgo.Lz4Compression()))
+	case "zstd":
+		opts = append(opts, kgo.ProducerBatchCompression(kgo.ZstdCompression()))
+	case "none":
+		opts = append(opts, kgo.ProducerBatchCompression(kgo.NoCompression()))
+	default:
+		opts = append(opts, kgo.ProducerBatchCompression(kgo.SnappyCompression()))
+	}
+
+	client, err := kgo.NewClient(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kafka producer: %w", err)
 	}
 
-	return &ProtoProducer{producer: producer}, nil
+	return &ProtoProducer{client: client}, nil
 }
 
 // Publish sends a protobuf message to the specified Kafka topic.
@@ -119,47 +151,52 @@ func (p *ProtoProducer) Publish(ctx context.Context, topic string, key string, m
 		return fmt.Errorf("failed to marshal protobuf message: %w", err)
 	}
 
-	// Create Kafka message
-	kafkaMsg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-		Key:            []byte(key),
-		Value:          data,
-		Timestamp:      time.Now(),
+	// Create Kafka record
+	record := &kgo.Record{
+		Topic:     topic,
+		Key:       []byte(key),
+		Value:     data,
+		Timestamp: time.Now(),
 	}
 
-	// Publish with delivery report channel
-	deliveryChan := make(chan kafka.Event, 1)
-	err = p.producer.Produce(kafkaMsg, deliveryChan)
-	if err != nil {
-		return fmt.Errorf("failed to produce message: %w", err)
+	// Publish synchronously and wait for confirmation
+	results := p.client.ProduceSync(ctx, record)
+	if err := results.FirstErr(); err != nil {
+		return fmt.Errorf("delivery failed: %w", err)
 	}
 
-	// Wait for delivery confirmation or context cancellation
-	select {
-	case e := <-deliveryChan:
-		m, ok := e.(*kafka.Message)
-		if !ok {
-			return fmt.Errorf("%w: %T", ErrUnexpectedEvent, e)
-		}
-		if m.TopicPartition.Error != nil {
-			return fmt.Errorf("delivery failed: %w", m.TopicPartition.Error)
-		}
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("publish cancelled: %w", ctx.Err())
-	}
+	return nil
 }
 
-// Flush waits for all outstanding messages to be delivered.
+// Flush waits for all outstanding messages to be delivered using a context with timeout.
 // This should be called before shutting down the producer to ensure no messages are lost.
+//
+// Parameters:
+// - ctx: Context for cancellation and timeout control
+//
+// Returns an error if flushing fails or context is cancelled.
+func (p *ProtoProducer) Flush(ctx context.Context) error {
+	return p.client.Flush(ctx)
+}
+
+// FlushWithTimeout waits for all outstanding messages to be delivered.
+// This is a convenience method that creates a context with the specified timeout.
 //
 // Parameters:
 // - timeoutMs: Maximum time to wait in milliseconds
 //
 // Returns the number of messages still in flight after the timeout.
 // A return value of 0 indicates all messages were successfully delivered.
-func (p *ProtoProducer) Flush(timeoutMs int) int {
-	return p.producer.Flush(timeoutMs)
+func (p *ProtoProducer) FlushWithTimeout(timeoutMs int) int {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+
+	if err := p.client.Flush(ctx); err != nil {
+		// Return 1 to indicate flush didn't complete successfully
+		// This maintains backward compatibility with the old Flush(int) int signature
+		return 1
+	}
+	return 0
 }
 
 // Close closes the producer and releases resources.
@@ -167,22 +204,20 @@ func (p *ProtoProducer) Flush(timeoutMs int) int {
 // network connections and other system resources. It does not wait for outstanding
 // messages - call Flush() first if needed.
 func (p *ProtoProducer) Close() {
-	p.producer.Close()
+	p.client.Close()
 }
 
-// Produce sends a raw Kafka message asynchronously with delivery report.
-// This is a low-level method that exposes the underlying Kafka producer's Produce method,
-// allowing callers to receive delivery confirmations via the deliveryChan.
-// This method is used by the event outbox worker to publish pre-serialized event payloads.
+// ProduceRecord sends a raw Kafka record synchronously with delivery confirmation.
+// This is used by the event outbox worker to publish pre-serialized event payloads.
 //
 // Parameters:
-// - msg: Pre-built Kafka message with topic, key, value, and optional headers
-// - deliveryChan: Channel to receive delivery confirmation events
+// - ctx: Context for cancellation and timeout control
+// - record: Pre-built Kafka record with topic, key, value, and optional headers
 //
-// Returns an error if the message cannot be enqueued for delivery.
-// Note: A nil return does not guarantee delivery - check the deliveryChan for confirmation.
-func (p *ProtoProducer) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
-	return p.producer.Produce(msg, deliveryChan)
+// Returns an error if the message cannot be delivered.
+func (p *ProtoProducer) ProduceRecord(ctx context.Context, record *kgo.Record) error {
+	results := p.client.ProduceSync(ctx, record)
+	return results.FirstErr()
 }
 
 // PublishWithTenant sends a protobuf message with tenant context to the specified Kafka topic.
@@ -225,36 +260,22 @@ func (p *ProtoProducer) PublishWithTenant(ctx context.Context, topic string, key
 		return fmt.Errorf("failed to marshal protobuf message: %w", err)
 	}
 
-	// Create Kafka message with tenant header
-	kafkaMsg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-		Key:            []byte(key),
-		Value:          data,
-		Headers: []kafka.Header{
+	// Create Kafka record with tenant header
+	record := &kgo.Record{
+		Topic:     topic,
+		Key:       []byte(key),
+		Value:     data,
+		Timestamp: time.Now(),
+		Headers: []kgo.RecordHeader{
 			{Key: tenant.TenantIDKey, Value: []byte(orgID.String())},
 		},
-		Timestamp: time.Now(),
 	}
 
-	// Publish with delivery report channel
-	deliveryChan := make(chan kafka.Event, 1)
-	err = p.producer.Produce(kafkaMsg, deliveryChan)
-	if err != nil {
-		return fmt.Errorf("failed to produce message: %w", err)
+	// Publish synchronously and wait for confirmation
+	results := p.client.ProduceSync(ctx, record)
+	if err := results.FirstErr(); err != nil {
+		return fmt.Errorf("delivery failed: %w", err)
 	}
 
-	// Wait for delivery confirmation or context cancellation
-	select {
-	case e := <-deliveryChan:
-		m, ok := e.(*kafka.Message)
-		if !ok {
-			return fmt.Errorf("%w: %T", ErrUnexpectedEvent, e)
-		}
-		if m.TopicPartition.Error != nil {
-			return fmt.Errorf("delivery failed: %w", m.TopicPartition.Error)
-		}
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("publish cancelled: %w", ctx.Err())
-	}
+	return nil
 }

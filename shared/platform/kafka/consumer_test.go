@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -172,17 +172,15 @@ func TestProtoConsumer_StopAndClose(t *testing.T) {
 }
 
 func TestExtractTenantHeader(t *testing.T) {
-	topic := "test-topic"
-
 	t.Run("valid tenant header", func(t *testing.T) {
-		msg := &kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic},
-			Headers: []kafka.Header{
+		record := &kgo.Record{
+			Topic: "test-topic",
+			Headers: []kgo.RecordHeader{
 				{Key: tenant.TenantIDKey, Value: []byte("acme_bank")},
 			},
 		}
 
-		orgID, err := ExtractTenantHeader(msg)
+		orgID, err := ExtractTenantHeader(record)
 		if err != nil {
 			t.Errorf("ExtractTenantHeader() unexpected error: %v", err)
 		}
@@ -192,12 +190,12 @@ func TestExtractTenantHeader(t *testing.T) {
 	})
 
 	t.Run("missing tenant header", func(t *testing.T) {
-		msg := &kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic},
-			Headers:        []kafka.Header{},
+		record := &kgo.Record{
+			Topic:   "test-topic",
+			Headers: []kgo.RecordHeader{},
 		}
 
-		orgID, err := ExtractTenantHeader(msg)
+		orgID, err := ExtractTenantHeader(record)
 		if !errors.Is(err, ErrMissingTenantHeader) {
 			t.Errorf("ExtractTenantHeader() error = %v, want ErrMissingTenantHeader", err)
 		}
@@ -207,14 +205,14 @@ func TestExtractTenantHeader(t *testing.T) {
 	})
 
 	t.Run("invalid tenant header format", func(t *testing.T) {
-		msg := &kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic},
-			Headers: []kafka.Header{
+		record := &kgo.Record{
+			Topic: "test-topic",
+			Headers: []kgo.RecordHeader{
 				{Key: tenant.TenantIDKey, Value: []byte("invalid-org-id!")},
 			},
 		}
 
-		orgID, err := ExtractTenantHeader(msg)
+		orgID, err := ExtractTenantHeader(record)
 		if !errors.Is(err, tenant.ErrInvalidTenantID) {
 			t.Errorf("ExtractTenantHeader() error = %v, want ErrInvalidTenantID", err)
 		}
@@ -224,16 +222,16 @@ func TestExtractTenantHeader(t *testing.T) {
 	})
 
 	t.Run("tenant header with other headers", func(t *testing.T) {
-		msg := &kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic},
-			Headers: []kafka.Header{
+		record := &kgo.Record{
+			Topic: "test-topic",
+			Headers: []kgo.RecordHeader{
 				{Key: "correlation-id", Value: []byte("12345")},
 				{Key: tenant.TenantIDKey, Value: []byte("motive_financial")},
 				{Key: "trace-id", Value: []byte("abcdef")},
 			},
 		}
 
-		orgID, err := ExtractTenantHeader(msg)
+		orgID, err := ExtractTenantHeader(record)
 		if err != nil {
 			t.Errorf("ExtractTenantHeader() unexpected error: %v", err)
 		}
@@ -243,12 +241,12 @@ func TestExtractTenantHeader(t *testing.T) {
 	})
 
 	t.Run("nil headers", func(t *testing.T) {
-		msg := &kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic},
-			Headers:        nil,
+		record := &kgo.Record{
+			Topic:   "test-topic",
+			Headers: nil,
 		}
 
-		orgID, err := ExtractTenantHeader(msg)
+		orgID, err := ExtractTenantHeader(record)
 		if !errors.Is(err, ErrMissingTenantHeader) {
 			t.Errorf("ExtractTenantHeader() error = %v, want ErrMissingTenantHeader", err)
 		}
@@ -258,14 +256,14 @@ func TestExtractTenantHeader(t *testing.T) {
 	})
 
 	t.Run("empty tenant header value", func(t *testing.T) {
-		msg := &kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic},
-			Headers: []kafka.Header{
+		record := &kgo.Record{
+			Topic: "test-topic",
+			Headers: []kgo.RecordHeader{
 				{Key: tenant.TenantIDKey, Value: []byte("")},
 			},
 		}
 
-		orgID, err := ExtractTenantHeader(msg)
+		orgID, err := ExtractTenantHeader(record)
 		if !errors.Is(err, tenant.ErrInvalidTenantID) {
 			t.Errorf("ExtractTenantHeader() error = %v, want ErrInvalidTenantID", err)
 		}
@@ -274,7 +272,7 @@ func TestExtractTenantHeader(t *testing.T) {
 		}
 	})
 
-	t.Run("nil message", func(t *testing.T) {
+	t.Run("nil record", func(t *testing.T) {
 		orgID, err := ExtractTenantHeader(nil)
 		if !errors.Is(err, ErrMissingTenantHeader) {
 			t.Errorf("ExtractTenantHeader() error = %v, want ErrMissingTenantHeader", err)
