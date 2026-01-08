@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -53,7 +52,7 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 	}
 
 	// Convert opening balance from proto to domain Money
-	openingBalance, err := protoMoneyToDomain(req.OpeningBalance)
+	openingBalance, err := protoMoneyAmountToDomain(req.OpeningBalance)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid opening_balance: %v", err)
 	}
@@ -144,19 +143,13 @@ func validateMigrationRequest(req *positionkeepingv1.InitiateWithOpeningBalanceR
 	return nil
 }
 
-// protoMoneyToDomain converts a proto MoneyAmount to domain.Money.
-func protoMoneyToDomain(proto *commonv1.MoneyAmount) (domain.Money, error) {
+// protoMoneyAmountToDomain converts a proto MoneyAmount to domain.Money.
+// This is a thin wrapper around googleMoneyToDomain for the MoneyAmount proto type.
+func protoMoneyAmountToDomain(proto *commonv1.MoneyAmount) (domain.Money, error) {
 	if proto == nil || proto.Amount == nil {
 		return domain.Money{}, nil
 	}
-
-	// Convert google.type.Money to domain.Money
-	// Units is the whole amount, nanos is the fractional amount (billionths)
-	amount := decimal.NewFromInt(proto.Amount.Units)
-	nanos := decimal.NewFromInt(int64(proto.Amount.Nanos)).Div(decimal.NewFromInt(1_000_000_000))
-	totalAmount := amount.Add(nanos)
-
-	return domain.NewMoney(totalAmount, domain.Currency(proto.Amount.CurrencyCode))
+	return googleMoneyToDomain(proto.Amount)
 }
 
 // checkMigrationIdempotencyAndAcquireLock checks for completed operations and acquires a pending lock.
