@@ -67,14 +67,15 @@ jobs:
         go-version: '1.25.5'
         cache: true
 
-    # Set up buf for protobuf generation
+    # Set up buf for protobuf generation (pinned version for reproducibility)
     - name: Set up buf
       if: matrix.language == 'go'
-      uses: bufbuild/buf-setup-action@v1
+      uses: bufbuild/buf-setup-action@v1.50.0
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
 
     # Generate protobuf files before CodeQL analysis
+    # Failure here should fail the workflow - proto packages are required for complete analysis
     - name: Generate protobuf files
       if: matrix.language == 'go'
       run: buf generate
