@@ -106,6 +106,85 @@ func TestRecordExternalServiceError(t *testing.T) {
 	}
 }
 
+func TestRecordCircuitBreakerState(t *testing.T) {
+	// Reset metrics before test
+	circuitBreakerState.Reset()
+
+	tests := []struct {
+		name     string
+		service  string
+		state    CircuitBreakerState
+		expected float64
+	}{
+		{
+			name:     "closed state",
+			service:  "position-keeping",
+			state:    CircuitBreakerStateClosed,
+			expected: 0,
+		},
+		{
+			name:     "half-open state",
+			service:  "financial-accounting",
+			state:    CircuitBreakerStateHalfOpen,
+			expected: 1,
+		},
+		{
+			name:     "open state",
+			service:  "party",
+			state:    CircuitBreakerStateOpen,
+			expected: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			RecordCircuitBreakerState(tt.service, tt.state)
+
+			// Verify metric was recorded
+			count := testutil.CollectAndCount(circuitBreakerState)
+			if count == 0 {
+				t.Error("Expected circuit breaker state metric to be recorded")
+			}
+		})
+	}
+}
+
+func TestRecordCircuitBreakerStateChange(t *testing.T) {
+	// Reset metrics before test
+	circuitBreakerStateChanges.Reset()
+
+	// Record a state change
+	RecordCircuitBreakerStateChange("position-keeping", "closed", "open")
+
+	// Verify metric was recorded
+	count := testutil.CollectAndCount(circuitBreakerStateChanges)
+	if count == 0 {
+		t.Error("Expected circuit breaker state change metric to be recorded")
+	}
+
+	// Record another state change
+	RecordCircuitBreakerStateChange("position-keeping", "open", "half-open")
+
+	count = testutil.CollectAndCount(circuitBreakerStateChanges)
+	if count < 2 {
+		t.Errorf("Expected at least 2 circuit breaker state changes, got %d", count)
+	}
+}
+
+func TestCircuitBreakerStateConstants(t *testing.T) {
+	// Verify that state constants have expected values
+	// These values map to Prometheus gauge values
+	if CircuitBreakerStateClosed != 0 {
+		t.Errorf("CircuitBreakerStateClosed should be 0, got %d", CircuitBreakerStateClosed)
+	}
+	if CircuitBreakerStateHalfOpen != 1 {
+		t.Errorf("CircuitBreakerStateHalfOpen should be 1, got %d", CircuitBreakerStateHalfOpen)
+	}
+	if CircuitBreakerStateOpen != 2 {
+		t.Errorf("CircuitBreakerStateOpen should be 2, got %d", CircuitBreakerStateOpen)
+	}
+}
+
 func TestMetricsLabels(t *testing.T) {
 	tests := []struct {
 		name       string
