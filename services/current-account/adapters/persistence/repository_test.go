@@ -357,13 +357,12 @@ func TestOptimisticLocking(t *testing.T) {
 
 func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
 	// Test: Empty currency in database should return error, not silently create invalid Money
+	// Note: Balance fields removed - balance now computed by Position Keeping service
 	entity := &CurrentAccountEntity{
 		ID:                    uuid.New(),
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
 		PartyID:               uuid.New(),
-		Balance:               10000,
-		AvailableBalance:      10000,
 		Currency:              "", // Invalid: empty currency
 		Status:                "active",
 		OverdraftLimit:        0,
@@ -377,7 +376,6 @@ func TestToDomain_InvalidCurrency_ReturnsError(t *testing.T) {
 
 	assert.Error(t, err, "toDomain should fail with empty currency")
 	assert.Contains(t, err.Error(), "balance", "Error should indicate which field failed")
-	assert.Contains(t, err.Error(), "database", "Error should indicate DB corruption")
 }
 
 func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
@@ -394,13 +392,12 @@ func TestFindByID_CorruptedData_ReturnsError(t *testing.T) {
 	// ctx already provided by setupTestDB
 
 	// Manually insert corrupted data (empty currency) into database
+	// Note: Balance fields removed - balance now computed by Position Keeping service
 	entity := &CurrentAccountEntity{
 		ID:                    uuid.New(),
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
 		PartyID:               uuid.New(),
-		Balance:               10000,
-		AvailableBalance:      10000,
 		Currency:              "", // Corrupted: empty currency
 		Status:                "active",
 		OverdraftLimit:        0,
@@ -436,13 +433,12 @@ func TestFindByPartyID_PartialCorruption_ReturnsError(t *testing.T) {
 	partyID := uuid.New()
 
 	// Insert one valid account
+	// Note: Balance fields removed - balance now computed by Position Keeping service
 	validEntity := &CurrentAccountEntity{
 		ID:                    uuid.New(),
 		AccountIdentification: "GB82WEST12345698765432",
 		AccountType:           "current",
 		PartyID:               partyID,
-		Balance:               10000,
-		AvailableBalance:      10000,
 		Currency:              "GBP",
 		Status:                "active",
 		OverdraftLimit:        0,
@@ -459,9 +455,7 @@ func TestFindByPartyID_PartialCorruption_ReturnsError(t *testing.T) {
 		AccountIdentification: "GB82WEST99999999999999",
 		AccountType:           "current",
 		PartyID:               partyID, // Same party
-		Balance:               5000,
-		AvailableBalance:      5000,
-		Currency:              "", // Corrupted
+		Currency:              "",      // Corrupted
 		Status:                "active",
 		OverdraftLimit:        0,
 		CreatedAt:             time.Now(),
