@@ -310,6 +310,40 @@ message InitiateFinancialPositionLogBatchResponse {
   int32 failure_count = 5;
 }
 
+// InitiateWithOpeningBalanceRequest initiates a new financial position log with an opening balance.
+// This is used for migrating existing accounts from legacy systems where the full transaction
+// history is not available. The opening balance represents the account's balance at the
+// effective date.
+message InitiateWithOpeningBalanceRequest {
+  // account_id is the account for which to create the log with opening balance.
+  string account_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-zA-Z0-9_-]+$"
+    }
+  ];
+
+  // opening_balance is the initial balance amount. May be negative for overdrawn accounts.
+  meridian.common.v1.MoneyAmount opening_balance = 2 [(buf.validate.field).required = true];
+
+  // effective_date is when the opening balance becomes effective (cannot be in the future).
+  google.protobuf.Timestamp effective_date = 3 [(buf.validate.field).required = true];
+
+  // migration_reference is an optional reference identifying the migration source or batch.
+  string migration_reference = 4 [(buf.validate.field).string = {max_len: 255}];
+
+  // idempotency_key ensures exactly-once processing.
+  meridian.common.v1.IdempotencyKey idempotency_key = 5;
+}
+
+// InitiateWithOpeningBalanceResponse returns the created log with opening balance.
+message InitiateWithOpeningBalanceResponse {
+  // log is the created financial position log (always present on success).
+  FinancialPositionLog log = 1 [(buf.validate.field).required = true];
+}
+
 // UpdateFinancialPositionLogRequest updates an existing financial position log.
 message UpdateFinancialPositionLogRequest {
   // log_id is the identifier of the log to update.
@@ -592,6 +626,24 @@ service PositionKeepingService {
         key: "201"
         value: {
           description: "Financial position logs created successfully"
+        }
+      }
+    };
+  }
+
+  // InitiateWithOpeningBalance creates a new financial position log with an opening balance.
+  // This RPC is used for migrating existing accounts from legacy systems where the full
+  // transaction history is not available. The opening balance is immediately posted.
+  rpc InitiateWithOpeningBalance(InitiateWithOpeningBalanceRequest) returns (InitiateWithOpeningBalanceResponse) {
+    option (google.api.http) = {
+      post: "/v1/position-logs/migrate"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Financial position log with opening balance created successfully"
         }
       }
     };
