@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -128,12 +129,14 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 			id, created_at, created_by, updated_at, updated_by,
 			log_id, account_id, version,
 			current_status, previous_status, status_updated_at, status_reason, failure_reason,
-			reconciliation_status
+			reconciliation_status,
+			opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
 		) VALUES (
 			gen_random_uuid(), $1, $2, $3, $4,
 			$5, $6, $7,
 			$8, $9, $10, $11, $12,
-			$13
+			$13,
+			$14, $15, $16
 		) RETURNING id`
 
 	var dbID uuid.UUID
@@ -144,6 +147,7 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
 		nullStringValue(log.StatusTracking.FailureReason),
 		log.StatusTracking.ReconciliationStatus.String(),
+		log.OpeningBalance.Amount, openingBalanceCurrencyCode(log.OpeningBalance), nullTime(log.OpeningBalanceRecordedAt),
 	).Scan(&dbID)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -208,6 +212,7 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 			"log_id", "account_id", "version",
 			"current_status", "previous_status", "status_updated_at", "status_reason", "failure_reason",
 			"reconciliation_status",
+			"opening_balance_amount", "opening_balance_currency", "opening_balance_recorded_at",
 		},
 		pgx.CopyFromSlice(len(logs), func(i int) ([]any, error) {
 			log := logs[i]
@@ -219,6 +224,7 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 				log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
 				nullStringValue(log.StatusTracking.FailureReason),
 				log.StatusTracking.ReconciliationStatus.String(),
+				log.OpeningBalance.Amount, openingBalanceCurrencyCode(log.OpeningBalance), nullTime(log.OpeningBalanceRecordedAt),
 			}, nil
 		}),
 	)
@@ -280,7 +286,8 @@ func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*do
 		query := `
 			SELECT id, created_at, updated_at, log_id, account_id, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
-				reconciliation_status
+				reconciliation_status,
+				opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
 			FROM financial_position_log
 			WHERE log_id = $1 AND deleted_at IS NULL`
 
@@ -290,12 +297,16 @@ func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*do
 		var currentStatus, reconciliationStatus string
 		var previousStatus sql.NullString
 		var failureReason sql.NullString
+		var openingBalanceAmount decimal.Decimal
+		var openingBalanceCurrency string
+		var openingBalanceRecordedAt sql.NullTime
 
 		err := tx.QueryRow(ctx, query, logID).Scan(
 			&dbID, &log.CreatedAt, &log.UpdatedAt, &log.LogID, &log.AccountID, &log.Version,
 			&currentStatus, &previousStatus, &statusTracking.StatusUpdatedAt,
 			&statusTracking.StatusReason, &failureReason,
 			&reconciliationStatus,
+			&openingBalanceAmount, &openingBalanceCurrency, &openingBalanceRecordedAt,
 		)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -316,6 +327,18 @@ func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*do
 		statusTracking.ReconciliationStatus = domain.ParseReconciliationStatus(reconciliationStatus)
 
 		log.StatusTracking = &statusTracking
+
+		// Parse opening balance
+		// Trim spaces since PostgreSQL CHAR(3) may pad with spaces
+		openingBalanceCurrency = strings.TrimSpace(openingBalanceCurrency)
+		openingBalance, err := domain.NewMoney(openingBalanceAmount, domain.Currency(openingBalanceCurrency))
+		if err != nil {
+			return fmt.Errorf("failed to create opening balance Money: %w", err)
+		}
+		log.OpeningBalance = openingBalance
+		if openingBalanceRecordedAt.Valid {
+			log.OpeningBalanceRecordedAt = openingBalanceRecordedAt.Time
+		}
 
 		// Load related entities using the transaction
 		if err := r.loadTransactionLogEntriesTx(ctx, tx, dbID, &log); err != nil {
@@ -349,7 +372,8 @@ func (r *PostgresRepository) FindByAccountID(ctx context.Context, accountID stri
 		query := `
 			SELECT id, created_at, updated_at, log_id, account_id, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
-				reconciliation_status
+				reconciliation_status,
+				opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
 			FROM financial_position_log
 			WHERE account_id = $1 AND deleted_at IS NULL
 			ORDER BY created_at DESC`
@@ -491,7 +515,8 @@ func (r *PostgresRepository) List(ctx context.Context, filter domain.PositionLog
 		query := `
 			SELECT id, created_at, updated_at, log_id, account_id, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
-				reconciliation_status
+				reconciliation_status,
+				opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
 			FROM financial_position_log
 			WHERE deleted_at IS NULL`
 
@@ -559,7 +584,8 @@ func (r *PostgresRepository) FindPendingForReconciliation(ctx context.Context, l
 		query := `
 			SELECT id, created_at, updated_at, log_id, account_id, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
-				reconciliation_status
+				reconciliation_status,
+				opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
 			FROM financial_position_log
 			WHERE deleted_at IS NULL
 				AND current_status = 'PENDING'
@@ -1147,12 +1173,16 @@ func (r *PostgresRepository) scanLogsTx(ctx context.Context, tx pgx.Tx, rows pgx
 		var currentStatus, reconciliationStatus string
 		var previousStatus sql.NullString
 		var failureReason sql.NullString
+		var openingBalanceAmount decimal.Decimal
+		var openingBalanceCurrency string
+		var openingBalanceRecordedAt sql.NullTime
 
 		err := rows.Scan(
 			&dbID, &log.CreatedAt, &log.UpdatedAt, &log.LogID, &log.AccountID, &log.Version,
 			&currentStatus, &previousStatus, &statusTracking.StatusUpdatedAt,
 			&statusTracking.StatusReason, &failureReason,
 			&reconciliationStatus,
+			&openingBalanceAmount, &openingBalanceCurrency, &openingBalanceRecordedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan financial position log: %w", err)
@@ -1170,6 +1200,18 @@ func (r *PostgresRepository) scanLogsTx(ctx context.Context, tx pgx.Tx, rows pgx
 		statusTracking.ReconciliationStatus = domain.ParseReconciliationStatus(reconciliationStatus)
 
 		log.StatusTracking = &statusTracking
+
+		// Parse opening balance
+		// Trim spaces since PostgreSQL CHAR(3) may pad with spaces
+		openingBalanceCurrency = strings.TrimSpace(openingBalanceCurrency)
+		openingBalance, err := domain.NewMoney(openingBalanceAmount, domain.Currency(openingBalanceCurrency))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create opening balance Money: %w", err)
+		}
+		log.OpeningBalance = openingBalance
+		if openingBalanceRecordedAt.Valid {
+			log.OpeningBalanceRecordedAt = openingBalanceRecordedAt.Time
+		}
 
 		logs = append(logs, &log)
 		dbIDToLog[dbID] = &log
@@ -1256,6 +1298,24 @@ func nullStringValue(s string) sql.NullString {
 		return sql.NullString{Valid: false}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// nullTime converts a time.Time to sql.NullTime, treating zero time as NULL
+func nullTime(t time.Time) sql.NullTime {
+	if t.IsZero() {
+		return sql.NullTime{Valid: false}
+	}
+	return sql.NullTime{Time: t, Valid: true}
+}
+
+// openingBalanceCurrencyCode returns the currency code for an opening balance,
+// defaulting to GBP if the Money value is zero-valued (has no instrument code).
+// This ensures we always have a valid currency code in the database.
+func openingBalanceCurrencyCode(m domain.Money) string {
+	if m.Instrument.Code == "" {
+		return string(domain.CurrencyGBP) // Default to GBP for unset opening balance
+	}
+	return m.Instrument.Code
 }
 
 // decimalToCents converts a decimal amount to cents (int64) for database storage.

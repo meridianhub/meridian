@@ -250,6 +250,14 @@ jobs:
           atlas version
         timeout-minutes: 5
 
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
       - name: Run CockroachDB migration compatibility tests
         run: |
           echo "Testing migrations against CockroachDB..."
