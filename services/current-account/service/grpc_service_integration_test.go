@@ -147,6 +147,20 @@ func (m *mockPositionKeepingClient) ListFinancialPositionLogs(_ context.Context,
 	return &positionkeepingv1.ListFinancialPositionLogsResponse{}, nil
 }
 
+func (m *mockPositionKeepingClient) GetAccountBalance(_ context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	return &positionkeepingv1.GetAccountBalanceResponse{
+		AccountId:   req.AccountId,
+		BalanceType: req.BalanceType,
+	}, nil
+}
+
+func (m *mockPositionKeepingClient) GetAccountBalances(_ context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
+	return &positionkeepingv1.GetAccountBalancesResponse{
+		AccountId: req.AccountId,
+		Balances:  []*positionkeepingv1.BalanceEntry{},
+	}, nil
+}
+
 func (m *mockPositionKeepingClient) Close() error {
 	return nil
 }
