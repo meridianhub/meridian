@@ -341,7 +341,7 @@ func TestResilientClientOnStateChangeCallback(t *testing.T) {
 		}
 
 		// Verify callback was invoked (circuit should have transitioned to open)
-		if callbackInvoked == 0 {
+		if atomic.LoadInt32(&callbackInvoked) == 0 {
 			t.Error("expected OnStateChange callback to be invoked")
 		}
 

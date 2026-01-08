@@ -288,10 +288,7 @@ func createServiceWithClients(
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,
 			CircuitBreakerName: "position-keeping",
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				caobservability.RecordCircuitBreakerState(name, gobreakerStateToMetricState(to))
-				caobservability.RecordCircuitBreakerStateChange(name, from.String(), to.String())
-			},
+			OnStateChange:      makeCircuitBreakerCallback(),
 		},
 	})
 	if err != nil {
@@ -309,10 +306,7 @@ func createServiceWithClients(
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,
 			CircuitBreakerName: "financial-accounting",
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				caobservability.RecordCircuitBreakerState(name, gobreakerStateToMetricState(to))
-				caobservability.RecordCircuitBreakerStateChange(name, from.String(), to.String())
-			},
+			OnStateChange:      makeCircuitBreakerCallback(),
 		},
 	})
 	if err != nil {
@@ -335,10 +329,7 @@ func createServiceWithClients(
 		Resilience: &sharedclients.ResilientClientConfig{
 			Logger:             logger,
 			CircuitBreakerName: "party",
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				caobservability.RecordCircuitBreakerState(name, gobreakerStateToMetricState(to))
-				caobservability.RecordCircuitBreakerStateChange(name, from.String(), to.String())
-			},
+			OnStateChange:      makeCircuitBreakerCallback(),
 		},
 	})
 	if err != nil {
@@ -391,6 +382,15 @@ func createServiceWithClients(
 }
 
 // PartyClientWrapper is defined in party_wrapper.go
+
+// makeCircuitBreakerCallback creates a circuit breaker state change callback
+// that records metrics for the given service name.
+func makeCircuitBreakerCallback() func(string, gobreaker.State, gobreaker.State) {
+	return func(name string, from gobreaker.State, to gobreaker.State) {
+		caobservability.RecordCircuitBreakerState(name, gobreakerStateToMetricState(to))
+		caobservability.RecordCircuitBreakerStateChange(name, from.String(), to.String())
+	}
+}
 
 // gobreakerStateToMetricState converts a gobreaker.State to the observability CircuitBreakerState
 // for Prometheus metrics recording.
