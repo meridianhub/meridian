@@ -113,6 +113,13 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	// Prefetch account and balance from Position Keeping BEFORE entering transaction
 	// to avoid holding database locks during external service calls (deadlock prevention).
 	// We'll re-validate sufficient funds inside the transaction with fresh lien totals.
+	//
+	// RACE WINDOW NOTE: There's a small window between prefetch and transaction lock where
+	// the balance could change. However, this is acceptable because:
+	// 1. Position Keeping's ExecuteDebit operation will atomically verify and debit funds
+	// 2. Liens are reservations - actual fund movement happens only on ExecuteLien
+	// 3. The alternative (external calls inside transaction) risks deadlocks
+	// 4. False rejections are recoverable (retry), false acceptances fail at execution time
 	prefetchAccount, err := s.repo.FindByID(ctx, req.AccountId)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
@@ -720,18 +727,19 @@ func (s *Service) protoToMoney(amount *commonpb.MoneyAmount) (domain.Money, erro
 		return domain.Money{}, ErrAmountRequired
 	}
 
-	// Validate units won't overflow when multiplied by 100
-	if amount.Amount.Units > math.MaxInt64/100 || amount.Amount.Units < math.MinInt64/100 {
+	// Calculate nanosCents first to include in overflow check
+	// nanosCents is at most 100 (nanos range 0-999999999, (999999999+5000000)/10000000 = 100)
+	nanosCents := (amount.Amount.Nanos + 5000000) / 10000000
+
+	// Validate units won't overflow when multiplied by 100 and added to nanosCents
+	// Reserve space for nanosCents (max 100) to prevent overflow in final addition
+	if amount.Amount.Units > (math.MaxInt64-100)/100 || amount.Amount.Units < (math.MinInt64+100)/100 {
 		return domain.Money{}, ErrAmountOverflow
 	}
 
 	// Convert to cents
 	// unitsCents is safe due to overflow check above
 	unitsCents := amount.Amount.Units * 100
-
-	// nanosCents is at most 99 (nanos range 0-999999999, divided by 10000000)
-	// Adding to unitsCents is safe since we checked unitsCents won't overflow
-	nanosCents := (amount.Amount.Nanos + 5000000) / 10000000
 	totalCents := unitsCents + int64(nanosCents)
 
 	return domain.NewMoney(amount.Amount.CurrencyCode, totalCents)
@@ -952,18 +960,22 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string, 
 	units := resp.Amount.Amount.Units
 	nanos := resp.Amount.Amount.Nanos
 
-	// Validate units won't overflow when multiplied by 100
-	if units > math.MaxInt64/100 || units < math.MinInt64/100 {
+	// Calculate nanosCents first to include in overflow check
+	// Round nanos instead of truncating (add 5000000 before division for banker's rounding)
+	// Consistent with protoToMoney conversion logic
+	// nanosCents is at most 100 (nanos range 0-999999999, (999999999+5000000)/10000000 = 100)
+	nanosCents := (nanos + 5000000) / 10000000
+
+	// Validate units won't overflow when multiplied by 100 and added to nanosCents
+	// Reserve space for nanosCents (max 100) to prevent overflow in final addition
+	if units > (math.MaxInt64-100)/100 || units < (math.MinInt64+100)/100 {
 		return 0, ErrAmountOverflow
 	}
 
-	// Convert units.nanos to minor units (cents) with proper rounding
+	// Convert units.nanos to minor units (cents)
 	// Units are whole currency units, nanos are fractional parts (1 billionth)
 	// For GBP: 1.50 = 150 cents = (1 * 100) + rounded(500000000 / 10000000)
 	unitsCents := units * 100
-	// Round nanos instead of truncating (add 5000000 before division for rounding)
-	// Consistent with protoToMoney conversion logic
-	nanosCents := (nanos + 5000000) / 10000000
 	cents := unitsCents + int64(nanosCents)
 
 	return cents, nil
